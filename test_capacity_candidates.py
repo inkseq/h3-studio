@@ -97,17 +97,20 @@ class CandidateTests(LedgerCase):
                                          qualified_providers=('lium', 'targon'))
         self.publish('lium', [offer('smaller', ram_gib=35)])
         result = self.project()
-        self.assertEqual(len(result['candidates']), 1)
-        candidate = result['candidates'][0]
-        self.assertEqual(candidate['selection']['runtime_profile_id'], PROFILE_IDS[4])
-        self.assertFalse(candidate['deployment_qualified'])
-        self.assertEqual(candidate['qualification'], 'unqualified')
-        with self.assertRaisesRegex(OperatorError, 'operator_deployment_not_configured'):
-            self.resolve(candidate['selection'])
+        self.assertEqual(len(result['candidates']), 2)
+        self.assertEqual({row['selection']['runtime_profile_id'] for row in result['candidates']},
+                         {PROFILE_IDS[4], PROFILE_IDS[5]})
+        for candidate in result['candidates']:
+            with self.subTest(profile=candidate['selection']['runtime_profile_id']):
+                self.assertFalse(candidate['deployment_qualified'])
+                self.assertEqual(candidate['qualification'], 'unqualified')
+                with self.assertRaisesRegex(OperatorError, 'operator_deployment_not_configured'):
+                    self.resolve(candidate['selection'])
         floors = {row['runtime_profile_id']: row['hard_requirements']['min_ram_gib']
                   for row in result['filters']}
         self.assertEqual(floors[PROFILE_IDS[0]], 96)
         self.assertEqual(floors[PROFILE_IDS[4]], 29)
+        self.assertEqual(floors[PROFILE_IDS[5]], 29)
         self.assertTrue(any(row['runtime_profile_id'] == PROFILE_IDS[0] and
                             'inventory_ram_below_minimum' in row['blockers'] for row in result['excluded']))
         self.assertEqual(self.repo.list_instance_intents(), [])
