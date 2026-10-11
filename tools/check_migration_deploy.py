@@ -21,13 +21,15 @@ DSTACK_IMAGE = "dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc168
 HATCHET_IMAGE = "ghcr.io/hatchet-dev/hatchet/hatchet-lite:v0.110.5@sha256:cc81f078a5285d7d2051ec4a4fa459d033e1face4ca5983d82612b00da6e3fa3"
 CPU_SHARED = ("dstack", "hatchet", "dispatch", "controller")
 PROBE = """import json,pathlib,urllib.request,urllib.error
-def request(url,token=None):
+def request(url,token=None,*,parse_json=True):
     headers={'Authorization':'Bearer '+token} if token else {}
     method='POST' if url.endswith('/get_my_user') else 'GET'
     req=urllib.request.Request(url,headers=headers,data=b'{}' if method=='POST' else None,method=method)
     try:
         with urllib.request.urlopen(req,timeout=5) as response:
-            return response.status,json.loads(response.read(262145))
+            body=response.read(262145)
+            assert len(body)<=262144
+            return response.status,json.loads(body) if parse_json else None
     except urllib.error.HTTPError as error:
         return error.code,None
 try:
@@ -36,7 +38,7 @@ try:
     status,_=request('http://127.0.0.1:3000/api/users/get_my_user'); assert status in (401,403)
     status,user=request('http://127.0.0.1:3000/api/users/get_my_user',token)
     assert status==200 and user['username']=='admin'
-    assert request('http://127.0.0.1:8888/api/ready')[0]==200
+    assert request('http://127.0.0.1:8888/api/ready',parse_json=False)[0]==200
 except Exception:
     raise SystemExit('migration_private_probe_failed') from None
 print('migration_private_probe_passed')

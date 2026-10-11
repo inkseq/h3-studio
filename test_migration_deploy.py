@@ -13,8 +13,91 @@ import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+from urllib.error import HTTPError
 
-from tools.check_migration_deploy import ROOT, check, local_inputs, main, memory_mib, validate
+from tools.check_migration_deploy import PROBE, ROOT, check, local_inputs, main, memory_mib, validate
+
+
+class MigrationPrivateProbeTests(unittest.TestCase):
+    """Execute the shipped probe against bounded HTTP responses, with no network."""
+
+    def run_probe(self, *, health=(200, b'{"status":"running"}'), unauth=(401, b''),
+                  auth=(200, b'{"username":"admin"}'), ready=(200, b''), transport_error=None):
+        calls, reads = [], []
+        responses = iter((health, unauth, auth, ready))
+
+        class Response(io.BytesIO):
+            def __init__(self, status, body):
+                super().__init__(body)
+                self.status = status
+
+            def read(self, limit=-1):
+                reads.append(limit)
+                return super().read(limit)
+
+        def request(req, *, timeout):
+            calls.append((req.full_url, req.method, req.get_header("Authorization"), timeout))
+            if transport_error is not None:
+                raise transport_error
+            status, body = next(responses)
+            if status >= 400:
+                raise HTTPError(req.full_url, status, "PRIVATE-PROBE-SECRET", None, io.BytesIO(body))
+            return Response(status, body)
+
+        output, errors = io.StringIO(), io.StringIO()
+        exit_code = None
+        with patch("pathlib.Path.read_text", return_value="PRIVATE-PROBE-SECRET"), \
+                patch("urllib.request.urlopen", side_effect=request), \
+                contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            try:
+                exec(PROBE, {})
+            except SystemExit as error:
+                exit_code = str(error)
+        self.assertNotIn("PRIVATE-PROBE-SECRET", output.getvalue()+errors.getvalue()+str(exit_code))
+        return exit_code, output.getvalue(), errors.getvalue(), calls, reads
+
+    def assert_failed(self, **kwargs):
+        code, output, errors, _, _ = self.run_probe(**kwargs)
+        self.assertEqual(code, "migration_private_probe_failed")
+        self.assertEqual(output+errors, "")
+
+    def test_actual_probe_accepts_empty_hatchet_ready_and_checks_dstack_auth(self):
+        code, output, errors, calls, reads = self.run_probe()
+        self.assertIsNone(code)
+        self.assertEqual(output, "migration_private_probe_passed\n")
+        self.assertEqual(errors, "")
+        self.assertEqual([call[1] for call in calls], ["GET", "POST", "POST", "GET"])
+        self.assertEqual([call[2] is not None for call in calls], [False, False, True, False])
+        self.assertTrue(all(call[3] == 5 for call in calls))
+        self.assertEqual(reads, [262145, 262145, 262145])
+
+    def test_hatchet_readiness_is_status_only(self):
+        code, output, _, _, _ = self.run_probe(ready=(200, b'ready; not JSON'))
+        self.assertIsNone(code)
+        self.assertEqual(output, "migration_private_probe_passed\n")
+        self.assert_failed(ready=(503, b'PRIVATE-PROBE-SECRET'))
+
+    def test_dstack_json_remains_strict(self):
+        for field in ("health", "auth"):
+            with self.subTest(field=field):
+                self.assert_failed(**{field: (200, b'PRIVATE-PROBE-SECRET; malformed JSON')})
+
+    def test_dstack_auth_and_health_contracts_remain_required(self):
+        for change in ({"health": (200, b'{"status":"stopped"}')},
+                       {"unauth": (200, b'{"username":"admin"}')},
+                       {"auth": (403, b'PRIVATE-PROBE-SECRET')},
+                       {"auth": (200, b'{"username":"another-user"}')}):
+            with self.subTest(change=next(iter(change))):
+                self.assert_failed(**change)
+
+    def test_response_limit_applies_to_json_and_status_only_endpoints(self):
+        for field, body in (("health", b'{"status":"running"}'),
+                            ("auth", b'{"username":"admin"}'), ("ready", b'')):
+            with self.subTest(field=field):
+                self.assert_failed(**{field: (200, body+b' '*(262145-len(body)))})
+
+    def test_transport_exception_is_masked(self):
+        self.assert_failed(transport_error=OSError("PRIVATE-PROBE-SECRET"))
 
 
 def fixture_environment():
