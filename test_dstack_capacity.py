@@ -200,6 +200,33 @@ class DstackCapacityTests(unittest.TestCase):
         self.client.get_failed = True
         self.assertFalse(self.capacity.observe(INTENT)["ready"])
 
+    def test_native_preparing_retains_safe_progress_and_revokes_ready(self):
+        self.start()
+        self.client.running()
+        self.assertTrue(self.capacity.observe(INTENT)["ready"])
+        self.native.side_effect = DstackError("dstack_runtime_preparing")
+        value = self.capacity.observe(INTENT)
+        self.assertEqual(value["reason_code"], "dstack_runtime_preparing")
+        self.assertEqual(value["state"], "runtime_unconfirmed")
+        self.assertFalse(value["ready"])
+        self.assertFalse(self.store.value["ready"])
+        self.assertEqual(value["provider_instance_id"], "1234567")
+        self.assertEqual(self.client.apply_count, 1)
+
+    def test_native_errors_never_expose_arbitrary_callback_text(self):
+        self.start()
+        self.client.running()
+        for error in (RuntimeError("secret prompt and token"),
+                      DstackError("secret prompt and token"),
+                      DstackError("dstack_runtime_preparing", "secret prompt and token")):
+            with self.subTest(error_type=type(error).__name__, argument_count=len(error.args)):
+                self.native.side_effect = error
+                value = self.capacity.observe(INTENT)
+                self.assertEqual(value["reason_code"], "dstack_native_observation_failed")
+                self.assertEqual(value["state"], "runtime_unconfirmed")
+                self.assertFalse(value["ready"])
+                self.assertNotIn("secret", json.dumps(value))
+
     def test_changed_resource_configuration_is_rejected(self):
         self.start()
         self.client.run["run_spec"]["configuration"]["resources"]["gpu"]["count"] = 2

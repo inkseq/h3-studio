@@ -398,6 +398,14 @@ class DstackCapacity:
         binding = self.store.load(binding["intent_id"])
         try:
             native = self.readiness(copy.deepcopy(binding), copy.deepcopy(run))
+        except DstackError as error:
+            # Native setup reports normal cold-start progress through this
+            # exact static code. Do not expose arbitrary callback text, or
+            # infer readiness from the preparation observation.
+            value["reason_code"] = ("dstack_runtime_preparing"
+                if error.args == ("dstack_runtime_preparing",)
+                else "dstack_native_observation_failed")
+            return value
         except Exception:
             value["reason_code"] = "dstack_native_observation_failed"
             return value
