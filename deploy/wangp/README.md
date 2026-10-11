@@ -159,6 +159,19 @@ SDK or snapshot a repository. Each call names an exact manifest file and full
 repository revision, with the official Hub endpoint and literal `token=False`.
 Inherited Hub identity, endpoint and debug settings are removed for this child.
 
+Normal future boots of the existing `29gib-total-v3` pruned profile use an
+explicit content-preserving download locator in `wangp_download.py`. Its original
+FL and REF manifest digests and all eleven selected file identities are bound to
+the immutable transport revision `8d9093438ffb3e33d6a058cc20fa3b7ca31f5752`.
+Official immutable metadata matched every original size and LFS SHA256/Git blob
+SHA1 (response SHA256 `df25843addd3d71ebbc2041e0900b3a7185a4a9fb93a4a1c4c5f488d7d73041b`).
+The manifest still names original revision `adc81ccb71352192214d83d5fafb9487e860be39`;
+only the SDK download revision changes before transfer. No 404/latest fallback,
+model/profile substitution or verifier bypass is permitted. Other profiles retain
+their existing locators. The new source-package epoch is for future starts;
+already bound bootstrap inputs and journals must remain unchanged. Source checks
+and metadata equivalence do not certify a released cold start or video inference.
+
 At most two files transfer concurrently, with at most two SDK invocations per
 file. The SDK owns its partial files and transfer retries; this helper does not
 implement HTTP Range or replay bootstrap. Existing SDK partial files are retained

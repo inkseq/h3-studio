@@ -69,6 +69,69 @@ class DownloadTests(unittest.TestCase):
         self.assertEqual(sorted(p.relative_to(self.models).as_posix() for p in self.models.rglob("*") if p.is_file()),
                          sorted(self.payloads))
 
+    def test_v3_fl_ref_locator_keeps_original_manifest_and_complete_content(self):
+        from studio_platform.runtime_catalog import engine_manifest
+        digests = {
+            "fl": "e32a141d43774d2e1b61bb45432aea2a2bde3e66e36318c84dd8d4538e64d530",
+            "ref": "47e46d47404c198c667bcb5114b4680bab5ed0aac60c5f77c610a197d62d7367",
+        }
+        for mode in ("fl", "ref"):
+            with self.subTest(mode=mode):
+                manifest = engine_manifest("h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3", mode)
+                document = copy.deepcopy(manifest.document)
+                records = fetch.selected_files(document, manifest.digest)
+                self.assertEqual(manifest.digest, digests[mode])
+                self.assertEqual(len(records), 10)
+                self.assertEqual(fetch._content_preserving_revision(document, manifest.digest, records),
+                                 "8d9093438ffb3e33d6a058cc20fa3b7ca31f5752")
+                self.assertTrue(all(row[2] == "adc81ccb71352192214d83d5fafb9487e860be39" for row in records))
+                self.assertEqual(document, manifest.document)
+
+    def test_v3_changed_content_or_revision_refuses_before_sdk(self):
+        from studio_platform.runtime_catalog import engine_manifest
+        manifest = engine_manifest("h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3", "ref")
+        sdk = Mock()
+        for change in ("missing", "size", "sha256", "git_blob_sha1", "repository", "revision"):
+            document = copy.deepcopy(manifest.document)
+            transformer = document["components"]["transformer"]
+            files = document["components"]["text_encoder"]["files"]
+            if change == "missing": files.pop()
+            elif change == "size": transformer["files"][0]["size_bytes"] += 1
+            elif change == "sha256": transformer["files"][0]["sha256"] = "0" * 64
+            elif change == "git_blob_sha1": files[1]["git_blob_sha1"] = "0" * 40
+            elif change == "repository": transformer["repository"] = "other/repository"
+            else: transformer["revision"] = "b" * 40
+            digest = EngineManifest.from_dict(document).digest
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, "model_download_locator_invalid"):
+                fetch.fetch_files(document, digest, self.models, self.progress, downloader=sdk)
+        sdk.assert_not_called()
+
+    def test_v3_sdk_initial_and_retry_use_only_approved_revision(self):
+        from studio_platform.runtime_catalog import engine_manifest
+        for mode in ("fl", "ref"):
+            with self.subTest(mode=mode):
+                manifest = engine_manifest("h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3", mode)
+                original = copy.deepcopy(manifest.document)
+                calls = []
+                def unavailable(**kwargs):
+                    calls.append(kwargs)
+                    raise RuntimeError("HTTP404 https://signed.invalid/?token=PRIVATE")
+                with self.assertRaisesRegex(ValueError, "^model_download_failed$"):
+                    fetch.fetch_files(manifest.document, manifest.digest, self.models, self.progress,
+                                      downloader=unavailable, workers=1, sleep=lambda _: None)
+                self.assertEqual(len(calls), 2)
+                for call in calls:
+                    self.assertEqual(call, {
+                        "repo_id": "DeepBeepMeep/MiniMax-H3",
+                        "filename": fetch.selected_files(original, manifest.digest)[0][3],
+                        "revision": "8d9093438ffb3e33d6a058cc20fa3b7ca31f5752",
+                        "local_dir": str(self.models), "token": False, "endpoint": fetch.ENDPOINT,
+                        "force_download": False, "etag_timeout": 30,
+                    })
+                self.assertEqual(manifest.document, original)
+                self.assertEqual(json.loads(self.progress.read_text())["state"], "failed")
+                self.assertNotIn("PRIVATE", self.progress.read_text())
+
     def test_bad_allowlist_and_unpinned_revision_fail_before_sdk(self):
         sdk = Mock()
         changes = [lambda c: c.update(revision="main"), lambda c: c.update(repository="https://evil.invalid"),

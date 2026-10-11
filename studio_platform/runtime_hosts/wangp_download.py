@@ -32,7 +32,44 @@ MAX_TOTAL = 256 * 1024**3
 CACHE_LIMIT = 1024**3
 HEADROOM = 10 * 1024**3
 DOWNLOAD_TIMEOUT = 7200
+# Explicit transport identity, reviewed against all eleven original FL/REF files.
+# This is selected before transfer; HTTP failures never select another revision.
+# Official immutable metadata response SHA256:
+# df25843addd3d71ebbc2041e0900b3a7185a4a9fb93a4a1c4c5f488d7d73041b
+_LOCATOR_PROFILE = "h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3"
+_LOCATOR_REPOSITORY = "DeepBeepMeep/MiniMax-H3"
+_LOCATOR_ORIGINAL = "adc81ccb71352192214d83d5fafb9487e860be39"
+_LOCATOR_REVISION = "8d9093438ffb3e33d6a058cc20fa3b7ca31f5752"
+_LOCATOR_MANIFESTS = {
+    "fl": "e32a141d43774d2e1b61bb45432aea2a2bde3e66e36318c84dd8d4538e64d530",
+    "ref": "47e46d47404c198c667bcb5114b4680bab5ed0aac60c5f77c610a197d62d7367",
+}
+_LOCATOR_TRANSFORMERS = {
+    "fl": "MiniMax-H3-FL2VA-pruned_rank8_int8_convrot.safetensors",
+    "ref": "MiniMax-H3-Ref2VA-pruned_rank8_int8_convrot.safetensors",
+}
+# path, original byte size, original hash kind and original content hash.
+_LOCATOR_FILES = (
+    (_LOCATOR_TRANSFORMERS["fl"], 21057674787, "sha256",
+     "30ff400f974b11a1ef13d216c5d9f6439a9c10322a3988b0374a39672ce286f0"),
+    (_LOCATOR_TRANSFORMERS["ref"], 21057674788, "sha256",
+     "e09db861c48d13560222948b4e38082bc21b1b7d4ddcaed9c865bf9c3233898c"),
+    ("Qwen3-VL-32B-Instruct/Qwen3-VL-32B-Instruct-layer50_quanto_bf16_int8.safetensors", 26723791903, "sha256",
+     "4df8fc5237746b3b058745d6ec8fe1e54a9721bdc663d35d2d1806952672f301"),
+    ("Qwen3-VL-32B-Instruct/config.json", 1474, "git_blob_sha1", "29e925092dee9f14278c53e7e7d876cea8a997bc"),
+    ("Qwen3-VL-32B-Instruct/preprocessor_config.json", 390, "git_blob_sha1", "2ea84a437d448ff71b08df68fdd949d5cc4ebb64"),
+    ("Qwen3-VL-32B-Instruct/tokenizer.json", 7032403, "git_blob_sha1", "c6cc1014128b19d1fc46b1d30a23e3b1d35db421"),
+    ("Qwen3-VL-32B-Instruct/tokenizer_config.json", 11004, "git_blob_sha1", "5e463a18949779b8a38a03f0a6d9089094970eed"),
+    ("Qwen3-VL-32B-Instruct/vocab.json", 2776833, "git_blob_sha1", "4783fe10ac3adce15ac8f358ef5462739852c569"),
+    ("minimax_h3/minimax_h3_video_vae_int8_convrot.safetensors", 2811065184, "sha256",
+     "52a2c8c73583c86e4f41cdcce3a6ad0ea562987bc0bf3d60a0cef5f5c8e60c0e"),
+    ("MiniMax-H3-audio_vae_fp32.safetensors", 605429308, "sha256",
+     "37dddc2f3e6d5d5139d823d5ea283bbf304dadcb885b1ccda818aa13dade5ea2"),
+    ("minimax_h3/minimax_h3_latent_upscaler_3d_bf16.safetensors", 690592992, "sha256",
+     "4f57821f5837f32f7142b67d815606dbd7550f194e5c769f7d6c3f83b146a5e6"),
+)
 SAFE_ERRORS = frozenset({"model_download_manifest_invalid", "model_download_manifest_changed",
+    "model_download_locator_invalid",
     "model_download_path_invalid", "model_download_size_mismatch", "model_download_disk_headroom",
     "model_download_failed", "model_download_timeout", "model_download_cache_limit",
     "model_download_progress_invalid", "model_download_stop_unconfirmed", "model_download_state_exists",
@@ -121,6 +158,26 @@ def safe_error(error):
     return code if code in SAFE_ERRORS else "model_download_failed"
 
 
+def _content_preserving_revision(document, expected_digest, records):
+    """Use one approved locator without changing the immutable model contract."""
+    if document.get("deployment_profile_id") != _LOCATOR_PROFILE:
+        return None
+    mode = document.get("mode")
+    if (_LOCATOR_MANIFESTS.get(mode) != expected_digest
+            or any(repo != _LOCATOR_REPOSITORY or revision != _LOCATOR_ORIGINAL
+                   for _, repo, revision, _, _ in records)):
+        raise ValueError("model_download_locator_invalid")
+    files = []
+    for component in document["components"].values():
+        for item in component["files"]:
+            kind = "sha256" if "sha256" in item else "git_blob_sha1"
+            files.append((item["path"], item["size_bytes"], kind, item[kind]))
+    omitted = _LOCATOR_TRANSFORMERS["ref" if mode == "fl" else "fl"]
+    if sorted(files) != sorted(row for row in _LOCATOR_FILES if row[0] != omitted):
+        raise ValueError("model_download_locator_invalid")
+    return _LOCATOR_REVISION
+
+
 def write_progress(path, value):
     path = path_checked(path)
     temporary = path_checked(path.with_suffix(".tmp"))
@@ -186,6 +243,7 @@ def cache_size(root):
 def fetch_files(document, expected_digest, model_root, progress_path, *, workers=2,
                 downloader=None, sleep=time.sleep):
     records = selected_files(document, expected_digest)
+    locator_revision = _content_preserving_revision(document, expected_digest, records)
     if type(workers) is not int or not 1 <= workers <= 2:
         raise ValueError("model_download_manifest_invalid")
     root = path_checked(model_root)
@@ -227,7 +285,7 @@ def fetch_files(document, expected_digest, model_root, progress_path, *, workers
                 if failure is not None:
                     raise ValueError(failure)
             try:
-                returned = downloader(repo_id=repo, filename=filename, revision=revision,
+                returned = downloader(repo_id=repo, filename=filename, revision=locator_revision or revision,
                     local_dir=str(root), token=False, endpoint=ENDPOINT, force_download=False,
                     etag_timeout=30)
                 path = path_checked(returned)
