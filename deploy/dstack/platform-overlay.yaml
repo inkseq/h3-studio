@@ -10,6 +10,7 @@ x-business-environment: &business-environment
   SIXNINE_DATABASE_URL_FILE: /run/secrets/app_database_url
   SIXNINE_AUTH_MODE: password
   SIXNINE_EXECUTION_PROFILES_FILE: /run/secrets/execution_profiles
+  SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID: ${SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID:?Explicit default deployment profile required}
   SIXNINE_OPERATOR_CAPACITY_OWNERS: ${SIXNINE_OPERATOR_CAPACITY_OWNERS:?Existing authorized operator owners required}
   SIXNINE_TELEMETRY_CONFIG_FILE: /run/secrets/grafana_cloud
 

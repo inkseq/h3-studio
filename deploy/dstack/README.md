@@ -9,6 +9,25 @@ The integrated app accesses loopback port 3000 through the shared namespace
 described below; a container's own loopback cannot reach a standalone host port.
 Do not publish the administrator endpoint.
 
+Current #132 qualification explicitly uses central
+`vastai/vastai--sixnine-dstack-20261011` and
+`runpod/runpod--sixnine-dstack-20261011` with unchanged pinned-client protocols.
+Preserve old profiles. Authenticated stock checks are read-only for both; paid
+P2 is Vast only and RunPod remains read-only. Before production activation,
+qualify two independent single-GPU runs (one FL, one REF), warm successive jobs,
+business idle stop and keep-on within the original deadline.
+
+Bind both source selections and protected execution/capacity configuration to
+`h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3`, with new configuration
+identities and an explicit default. This additive revision has a 29 GiB
+allocation floor and a 29 GiB native total-capacity check, using the minimum
+of host MemTotal and all visible finite cgroup-v2 ancestor limits. Invalid
+constrained scope fails closed. #130 supports total allocation, not a 29 GiB
+available-headroom requirement. Record available/anonymous/cache/peak memory
+separately. Preserve the issued v2 headroom contract, original 96 GiB manifests and
+unpruned/PRO 6000 floors unchanged; model support is not a historical-case
+whitelist and this profile is unqualified until its own integration evidence.
+
 The integration owner supplies `DstackStore` over the existing ledger. Its
 `begin_apply` transaction commits the immutable run spec and original reservation
 once before `/runs/apply`. It returns false for any previously started operation.
@@ -17,6 +36,10 @@ is unknown and does not permit another apply. `force:false/current_resource:null
 also rejects a concurrent existing dstack resource. `record` retains immutable
 run/provider/incarnation identity. `begin_stop` locks and checks jobs, unsafe
 attempts, collection holds and retired workers before committing stop intent.
+Cold preparation with no worker history or native incarnation/first-ready latch
+may be stopped during model download after fresh exact-instance checks. A
+previously admitted runtime still needs native idle and original obligations
+resolved; disappearance is not final supplier-bill settlement.
 Do not provide a file-based substitute ledger in production or the operations CLI.
 
 Each new run requests exactly **one GPU**, explicit backend, image digest,

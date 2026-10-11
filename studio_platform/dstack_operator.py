@@ -47,6 +47,22 @@ def _finite(value):
     return type(value) in (int, float) and math.isfinite(value)
 
 
+def _cold_unadmitted_runtime(binding, workers, instance_id, now, fresh_seconds):
+    """No platform execution ever acquired this exact cold preparation.
+
+    Worker rows and the first-ready/incarnation latches are retained history,
+    not just current availability. Unknown previously admitted execution must
+    never use this exception. The caller still checks ownership and stop intent.
+    """
+    observed = binding.get("observed_at")
+    return (not workers and bool(instance_id)
+        and binding.get("provider_instance_id") == instance_id
+        and binding.get("state") in {"starting", "runtime_unconfirmed"}
+        and binding.get("runtime_incarnation") is None
+        and binding.get("first_runtime_ready_at") is None
+        and _finite(observed) and 0 <= now-observed <= fresh_seconds)
+
+
 def plan_offers(plan, request):
     """Project pinned 0.22.3 offers; no backend_data, SSH or user/job payload."""
     require(isinstance(plan,dict) and isinstance(plan.get("job_plans"),list)
@@ -297,10 +313,17 @@ class LedgerDstackStore:
                     (jobs.c.lease_worker_id.in_(worker_ids)) | (attempts.c.worker_id.in_(worker_ids)))).mappings():
                     if row["status"] not in TERMINAL_JOBS or row["submission_started_at"] is not None and row["upstream_stopped"] != 1:
                         return False
-            # Once bootstrap may have run, require exact fresh native idle proof,
-            # including after a worker row expires or is retired.
+            # An owned cold runtime which has never admitted a worker cannot
+            # have business inference to drain. Model download may already be
+            # running; waiting for ready/idle would make that preparation
+            # impossible to cancel. A previously qualified runtime still needs
+            # exact fresh native idle proof, even if its worker is retired.
             launch_started = binding.get("bootstrap_launch_started", binding.get("bootstrap_started"))
-            if not retry and (launch_started or workers or binding.get("runtime_incarnation")):
+            cold_unadmitted = _cold_unadmitted_runtime(binding, workers, intent.get("provider_instance_id"),
+                now, self.observation_fresh_seconds)
+            if not retry and not cold_unadmitted and (launch_started or workers
+                    or binding.get("runtime_incarnation") is not None
+                    or binding.get("first_runtime_ready_at") is not None):
                 observed = binding.get("observed_at")
                 if not (binding.get("state") == "ready" and binding.get("runtime_incarnation")
                         and _finite(observed) and 0 <= self.repo.clock() - observed <= self.observation_fresh_seconds):
@@ -430,7 +453,8 @@ class DstackOperator:
         except (KeyError, ValueError):
             raise OperatorError("dstack_native_profile_invalid", 422) from None
         floors = {"memory_gib": max(native.get("minimum_ram_bytes", 0),
-            native["runtime"].get("minimum_available_ram_bytes", 0)),
+            native["runtime"].get("minimum_available_ram_bytes", 0),
+            native["runtime"].get("minimum_total_ram_bytes", 0)),
             "disk_gib": native.get("minimum_disk_bytes", 0),
             "gpu_memory_gib": max(native.get("minimum_free_vram_bytes", 0),
                 native["runtime"].get("minimum_free_vram_bytes", 0),

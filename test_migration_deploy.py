@@ -30,6 +30,7 @@ def fixture_environment():
         environment[name] = "/never-opened-fixtures/"+name.lower()
     environment.update(SIXNINE_HATCHET_POSTGRES_VOLUME="existing-hatchet-postgres",
         SIXNINE_HATCHET_CONFIG_VOLUME="existing-hatchet-config", SIXNINE_OPERATOR_CAPACITY_OWNERS="superdan,supervan",
+        SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID="h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-lowram-v1",
         SIXNINE_MIGRATION_GENERATION_ENABLED="0", SIXNINE_MIGRATION_EXECUTION_BACKEND="disabled")
     return environment
 
@@ -92,6 +93,8 @@ class MigrationDeployTests(unittest.TestCase):
         self.assert_rejected(lambda d: d["services"]["controller"].update(volumes=[]), "migration_assets_split")
         self.assert_rejected(lambda d: d["services"]["controller"]["environment"].update(SIXNINE_TELEMETRY_CONFIG_FILE=""),
                              "migration_cloud_telemetry_missing")
+        self.assert_rejected(lambda d: d["services"]["dispatch"]["environment"].update(SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID="another-profile"),
+                             "migration_default_profile_missing_or_split")
 
     def test_checker_only_config_then_explicit_read_probe_no_secret_output(self):
         calls = []

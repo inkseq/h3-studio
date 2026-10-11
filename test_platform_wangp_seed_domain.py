@@ -22,7 +22,7 @@ from studio_platform.inference.wangp_contract import EngineManifest, canonical_j
 from studio_platform.inference.wangp_profile_compiler import H3ProfileCompiler, validate_prepared
 from studio_platform.quick_chat import DEFAULT_SETTINGS, EMPTY_INPUTS, QuickChatError, objects
 from studio_platform.repository import jobs
-from studio_platform.runtime_catalog import PROFILE_IDS, engine_manifest, get_profile
+from studio_platform.runtime_catalog import PROFILE_IDS, engine_manifest
 from studio_platform.runtime_hosts.wangp import WanGPHost
 from studio_platform.runtime_hosts.wangp_launcher import resolve_inputs
 from studio_platform.runtime_hosts.wangp_receipts import ReceiptJournal
@@ -30,6 +30,9 @@ from studio_platform.settings import Settings
 from test_platform_api import generation_request
 from test_platform_repository import LedgerCase
 from test_platform_wangp_profiles import job_for
+
+
+HISTORICAL_PRO6000_PROFILE = "h3-pruned-rank8-int8-pro6000-quanto-int8-vae-int8-sdpa-p4-lowram-v1"
 
 
 class QuickChatSeedDomainTests(LedgerCase):
@@ -63,7 +66,7 @@ class QuickChatSeedDomainTests(LedgerCase):
             self.assertEqual(conn.execute(select(jobs.c.id)).all(), [])
 
     def test_explicit_wangp_batch_wraps_at_uint32_boundary_without_changing_control(self):
-        for index, profile in enumerate((None, PROFILE_IDS[0], PROFILE_IDS[-1])):
+        for index, profile in enumerate((None, PROFILE_IDS[0], HISTORICAL_PRO6000_PROFILE)):
             body = self.body(seed=str(MAX_SEED), profile=profile, copies=3)
             saved = self.service.save_card(self.principal, self.sid, body, "batch-"+str(index))["revision"]
             self.assertEqual(saved["controls"]["seed"], str(MAX_SEED))
@@ -71,7 +74,7 @@ class QuickChatSeedDomainTests(LedgerCase):
 
     def test_explicit_out_of_domain_seed_rolls_back_card_and_projection(self):
         before = self.service.get_session(self.principal, self.sid)
-        for index, profile in enumerate((None, PROFILE_IDS[0], PROFILE_IDS[-1])):
+        for index, profile in enumerate((None, PROFILE_IDS[0], HISTORICAL_PRO6000_PROFILE)):
             with self.subTest(profile=profile), self.assertRaisesRegex(QuickChatError, "wangp_invalid_seed"):
                 self.service.save_card(self.principal, self.sid,
                     self.body(seed=str(MAX_SEED+1), profile=profile), "invalid-"+str(index))
@@ -147,8 +150,9 @@ class DirectAndRuntimeSeedDomainTests(unittest.TestCase):
                 self.assertEqual(body, before)
 
     def test_native_prepared_invalid_seed_never_enters_journal_or_dispatch(self):
+        # Seed validation depends on model support, not historical hardware cases.
+        case = {"mode": "fl", "height": 480, "steps": 20, "input_roles": []}
         for profile_id in PROFILE_IDS:
-            case = next(case for case in get_profile(profile_id)["verified_cases"] if case["mode"] == "fl")
             job, manifest = job_for(profile_id, case)
             prepared = H3ProfileCompiler(manifest, lambda item, *args, **kwargs: item)(
                 job, "attempt-1", NS(open=lambda _: io.BytesIO(b"data")), lambda: None)

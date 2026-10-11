@@ -59,13 +59,56 @@ def publish(commit, directory):
         "status": "published_pending_independent_host_approval"}))
 
 
-if __name__ == "__main__":
+def publish_migration(commit, directory, *, api=None):
+    """Immutable additive upload only; independent host approval is still needed."""
+    import importlib.util
+    root = Path(__file__).resolve().parents[1]
+    trusted = root / "deploy/platform"
+    previous = list(sys.path)
+    sys.path.insert(0, str(trusted))
+    try:
+        spec = importlib.util.spec_from_file_location("sixnine_reviewed_migration_publication", root / "deploy/dstack/maintenance.py")
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        directory = Path(directory)
+        manifest = module.manifest(directory, commit)
+        module.release.validate_image_archive(directory / "dispatch-image.tar.gz", {"commit": commit, **manifest["dispatch"]})
+        names = module.FILES | {module.MANIFEST}
+    finally:
+        sys.path[:] = previous
+    api = api or boto3.client("s3", region_name=REGION, endpoint_url="https://s3.ap-southeast-1.amazonaws.com",
+        config=Config(connect_timeout=15, read_timeout=300, retries={"mode": "standard", "max_attempts": 2}))
+    hashes = {name: checksum(directory / name) for name in names}
+    for name in sorted(names):
+        key = "releases/" + commit + "/migration/" + name
+        try:
+            with (directory / name).open("rb") as body:
+                api.put_object(Bucket=BUCKET, Key=key, Body=body, IfNoneMatch="*",
+                    ServerSideEncryption="AES256", Metadata={"sha256": hashes[name]})
+        except ClientError as error:
+            if error.response.get("ResponseMetadata", {}).get("HTTPStatusCode") != 412:
+                raise
+            existing = api.head_object(Bucket=BUCKET, Key=key)
+            if existing.get("Metadata", {}).get("sha256") != hashes[name] or existing["ContentLength"] != (directory / name).stat().st_size:
+                raise ValueError("Existing immutable migration artifact differs") from None
+    return {"commit": commit, "manifest_sha256": hashes[module.MANIFEST],
+        "status": "migration_published_pending_independent_host_approval"}
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("commit")
     parser.add_argument("directory", type=Path)
-    args = parser.parse_args()
+    parser.add_argument("--migration-directory", type=Path)
+    args = parser.parse_args(argv)
     try:
         publish(args.commit, args.directory)
+        if args.migration_directory is not None:
+            print(json.dumps(publish_migration(args.commit, args.migration_directory)))
+        return 0
     except Exception:
         print("Release publication failed; no host deployment was requested", file=sys.stderr)
-        raise SystemExit(1)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

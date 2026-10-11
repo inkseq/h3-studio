@@ -20,7 +20,7 @@ from sqlalchemy import select
 
 from .control import WorkerControl, worker_spec_payload
 from .dstack_capacity import idle_action
-from .dstack_operator import BACKEND_MARKER, _request
+from .dstack_operator import BACKEND_MARKER, _request, _cold_unadmitted_runtime
 from .operator_capacity import operator_nodes
 from .repository import attempts, instance_intents, jobs, registered_workers, scaler_actions
 from .worker import _slot_lock
@@ -132,8 +132,15 @@ class DstackController:
                     self.worker_process.stop(intent_id)
                 result = self.capacity.stop(intent_id)
                 return {"node_id": intent_id, "state": result["state"]}
-            # Bootstrap never began: the supplier can stop without native idle.
-            if not binding.get("bootstrap_launch_started", binding.get("bootstrap_started")) and not workers and not binding.get("runtime_incarnation"):
+            # Cold model preparation has never admitted execution. It need not
+            # finish downloading/loading merely to become eligible for stop.
+            # begin_stop rechecks the same evidence under the capacity lock.
+            cold_unadmitted = _cold_unadmitted_runtime(binding, workers,
+                intent.get("provider_instance_id"), now, self.service.policy["observation_fresh_seconds"])
+            if (not active and not unsafe and cold_unadmitted) or (
+                    not binding.get("bootstrap_launch_started", binding.get("bootstrap_started"))
+                    and not workers and binding.get("runtime_incarnation") is None
+                    and binding.get("first_runtime_ready_at") is None):
                 result = self.capacity.stop(intent_id)
                 return {"node_id": intent_id, "state": result["state"]}
             return {"node_id": intent_id, "state": "draining"}

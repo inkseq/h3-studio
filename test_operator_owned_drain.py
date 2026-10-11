@@ -127,7 +127,7 @@ class OwnedDrainTests(ledger_tests.LedgerCase):
         self.control = WorkerControl(self.repo)
 
     def _start(self, *, slots=1, provider='lium'):
-        profile = get_profile(PROFILE_IDS[2] if provider == 'lium' else PROFILE_IDS[-1])
+        profile = get_profile(PROFILE_IDS[2] if provider == 'lium' else PROFILE_IDS[3])
         manifest = engine_manifest(profile['id'], 'fl')
         sources = []
         for index in range(slots):

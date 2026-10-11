@@ -116,14 +116,14 @@ class CapacityRequest:
         # hash-bound bundle and starts the loopback launcher through SSH.
         configuration = {"type": "task", "name": self.run_name, "image": self.image,
             "commands": ["exec sleep infinity"], "backends": [self.backend],
-            "resources": {"cpu": {"arch": "x86", "count": self.cpu_count},
+            "resources": {"cpu": {"arch": "x86", "count": f"{self.cpu_count}.."},
                 "memory": f"{self.memory_gib}GB..", "disk": {"size": f"{self.disk_gib}GB.."},
                 "gpu": {"vendor": "nvidia", "name": list(self.gpu_names), "count": 1,
                     "memory": f"{self.gpu_memory_gib}GB.."}},
             "max_price": self.max_price_microusd / 1_000_000, "max_duration": self.max_duration_s,
             "retry": False, "spot_policy": "on-demand", "dstack": False,
             "env": {}, "ports": [], "stop_duration": 300,
-            "regions": list(self.regions), "tags": {"sixnine_owner": OWNER,
+            "regions": list(self.regions) if self.regions else None, "tags": {"sixnine_owner": OWNER,
                 "sixnine_intent": self.intent_id, "sixnine_profile": self.profile_id,
                 "sixnine_mode": self.mode, "sixnine_manifest": self.manifest_digest}}
         if self.backend == "vastai":
@@ -187,8 +187,18 @@ class DstackClient:
                 headers=self._headers, timeout=self.timeout)
             if absent and response.status_code == 404:
                 return None
-            _require(response.status_code < 300 and response.status_code >= 200, "dstack_api_rejected")
             _require(len(response.content) <= 8 * 1024**2, "dstack_response_limit")
+            # Pinned 0.22.3 returns its structured NotExistsError as HTTP 400.
+            # Only an exact optional read may interpret that sole error as
+            # absence; never treat other errors or a rejected mutation so.
+            if absent and response.status_code == 400:
+                document = response.json()
+                detail = document.get("detail") if isinstance(document, dict) else None
+                if (isinstance(detail, list) and len(detail) == 1
+                        and isinstance(detail[0], dict)
+                        and detail[0].get("code") == "resource_not_exists"):
+                    return None
+            _require(response.status_code < 300 and response.status_code >= 200, "dstack_api_rejected")
             if not response.content:
                 return {}
             return response.json()
@@ -208,8 +218,10 @@ class DstackClient:
             {"id": run_id} if run_id else {"run_name": run_name}, absent=True)
 
     def plan(self, spec):
+        # 0.22.3 ordinary planning selects an existing fleet. This endpoint is
+        # our advisory global stock query; it does not create a fleet or run.
         return self._post(f"/api/project/{self.project}/runs/get_plan",
-            {"run_spec": spec, "max_offers": 100})
+            {"run_spec": spec, "max_offers": 100, "for_offers_only": True})
 
     def apply(self, spec):
         # Null expected resource + force:false is dstack's create-only CAS.
@@ -237,12 +249,17 @@ def _owns(run, binding, project):
     _require(actual.get("env", {}) in ({}, None) and actual.get("ports", []) in ([], None)
         and actual.get("dstack", False) is False, "dstack_run_binding_mismatch")
     _require(spec.get("ssh_key_pub") == wanted["ssh_key_pub"], "dstack_run_binding_mismatch")
-    for key in ("privileged", "docker", "registry_auth", "entrypoint", "schedule", "groups", "nodes"):
+    for key in ("privileged", "docker", "registry_auth", "entrypoint", "schedule", "groups"):
         _require(actual.get(key) in (None, False), "dstack_run_binding_mismatch")
+    # 0.22.3 run preprocessing stores a homogeneous TaskConfiguration's
+    # omitted nodes as integer 1. Preserve the frozen spec while allowing only
+    # that single-node default, never multinode or grouped execution.
+    nodes = actual.get("nodes")
+    _require(nodes is None or type(nodes) is int and nodes == 1, "dstack_run_binding_mismatch")
     for key in ("files", "repos", "setup", "volumes"):
         _require(actual.get(key) in (None, []), "dstack_run_binding_mismatch")
     _require(actual.get("spot_policy") == expected["spot_policy"]
-        and actual.get("regions", []) == expected["regions"]
+        and actual.get("regions") == expected["regions"]
         and actual.get("stop_duration") == expected["stop_duration"], "dstack_run_binding_mismatch")
     _require(_resources(actual.get("resources")) == _resources(expected["resources"]),
         "dstack_run_binding_mismatch")
@@ -262,8 +279,10 @@ def _range(value):
         return value
     if type(value) in (int, float):
         return {"min": value, "max": value}
-    if isinstance(value, str) and re.fullmatch(r"[0-9]+GB\.\.", value):
-        return {"min": float(value[:-4]), "max": None}
+    if isinstance(value, str):
+        match = re.fullmatch(r"([0-9]+)(?:GB)?\.\.", value)
+        if match:
+            return {"min": float(match.group(1)), "max": None}
     raise DstackError("dstack_resource_response_invalid")
 
 
@@ -379,6 +398,14 @@ class DstackCapacity:
         binding = self.store.load(binding["intent_id"])
         try:
             native = self.readiness(copy.deepcopy(binding), copy.deepcopy(run))
+        except DstackError as error:
+            # Native setup reports normal cold-start progress through this
+            # exact static code. Do not expose arbitrary callback text, or
+            # infer readiness from the preparation observation.
+            value["reason_code"] = ("dstack_runtime_preparing"
+                if error.args == ("dstack_runtime_preparing",)
+                else "dstack_native_observation_failed")
+            return value
         except Exception:
             value["reason_code"] = "dstack_native_observation_failed"
             return value

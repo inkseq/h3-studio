@@ -1,20 +1,116 @@
 import json
+from contextlib import redirect_stdout
+import io
 from pathlib import Path
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from studio_platform.runtime_catalog import (PROFILE_IDS, engine_manifest, get_profile,
     public_catalog, runtime_config, timing_hint, validate_manifest)
 from studio_platform.inference.wangp_contract import EngineManifest
 from studio_platform.runtime_hosts.wangp_download import selected_files
+from studio_platform.runtime_hosts.wangp_session import _profile_memory_admission
 
 TARGON_EVIDENCE = 'https://github.com/apedintensor/h3-studio/issues/86#issuecomment-6083341543'
 
 
 class RuntimeCatalogTests(unittest.TestCase):
+    def test_total_capacity_revision_preserves_v2_and_older_contracts(self):
+        previous = get_profile(PROFILE_IDS[4])
+        revised = get_profile(PROFILE_IDS[5])
+        self.assertEqual(tuple(engine_manifest(PROFILE_IDS[4], mode).digest for mode in ('fl', 'ref')),
+            ('83398cb6215ff149f8059e0a7f2d22421a7763d185a52fda189471507b6ab520',
+             'd243360fd7cc08266860e58fa1b4c575bc42f83aed55b752819db770f09fd1e7'))
+        self.assertEqual(revised['components'], previous['components'])
+        self.assertEqual(revised['runtime']['config'], previous['runtime']['config'])
+        self.assertEqual(revised['minimum_ram_bytes'], 29 * 2**30)
+        self.assertNotIn('minimum_available_ram_bytes', revised['runtime'])
+        self.assertEqual(revised['runtime']['ram_admission_metric'], 'effective-total-v1')
+        self.assertEqual(revised['runtime']['minimum_total_ram_bytes'], 29 * 2**30)
+        self.assertEqual(revised['verified_cases'], [])
+        for mode in ('fl', 'ref'):
+            manifest = engine_manifest(PROFILE_IDS[5], mode)
+            self.assertEqual(validate_manifest(manifest)['id'], PROFILE_IDS[5])
+            self.assertNotEqual(manifest.digest, engine_manifest(PROFILE_IDS[4], mode).digest)
+            self.assertFalse(manifest.document['inference_qualified'])
+
+    def test_total_capacity_gate_records_headroom_without_inventing_a_threshold(self):
+        revised = get_profile(PROFILE_IDS[5])
+        torch = SimpleNamespace(cuda=SimpleNamespace(mem_get_info=lambda _: (32 * 2**30, 32 * 2**30)))
+        output = io.StringIO()
+        with patch('studio_platform.runtime_hosts.wangp_session._available_profile_ram', return_value=25 * 2**30), \
+                patch('studio_platform.runtime_hosts.wangp_session._effective_total_profile_ram', return_value=29 * 2**30), \
+                redirect_stdout(output):
+            _profile_memory_admission(torch, revised)
+        observation = json.loads(output.getvalue())
+        self.assertEqual(observation['effective_total_ram_bytes'], 29 * 2**30)
+        self.assertEqual(observation['available_ram_bytes'], 25 * 2**30)
+        with patch('studio_platform.runtime_hosts.wangp_session._available_profile_ram', return_value=96 * 2**30), \
+                patch('studio_platform.runtime_hosts.wangp_session._effective_total_profile_ram', return_value=29 * 2**30 - 1), \
+                redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(ValueError, 'memory_headroom_insufficient'):
+                _profile_memory_admission(torch, revised)
+        torch.cuda.mem_get_info = lambda _: (revised['minimum_free_vram_bytes'] - 1, 32 * 2**30)
+        with patch('studio_platform.runtime_hosts.wangp_session._available_profile_ram', return_value=25 * 2**30), \
+                patch('studio_platform.runtime_hosts.wangp_session._effective_total_profile_ram', return_value=29 * 2**30), \
+                redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(ValueError, 'memory_headroom_insufficient'):
+                _profile_memory_admission(torch, revised)
+        revised['runtime']['ram_admission_metric'] = 'unknown'
+        with patch('studio_platform.runtime_hosts.wangp_session._available_profile_ram', return_value=96 * 2**30):
+            with self.assertRaisesRegex(ValueError, 'memory_admission_metric_invalid'):
+                _profile_memory_admission(torch, revised)
+
+    def test_29gib_revision_preserves_existing_manifest_and_component_identities(self):
+        expected = (
+            ('5d1d1224b05991d8c3421da0df71b0c56c038a83b313a6714b9255238560c0e8',
+             'dfb3da521a2679f616bdac5ac662c44b1439cae985b21ffb176ba37e85f37da8'),
+            ('edd56bd3cdfc745fd5b91826ce8dc10bd56b339819803a49f373eaa801096d2a',
+             '556cf81fbedcf5cc415f344f46c8ac6fe317be2837b3af2c0e97621df577d71f'),
+            ('8994c58c03ac138cec7e65993c346b6e05121d5ded8c83cede5ee46838f4f11f',
+             '5a0ac0c4af433306c759cbfa2c1add17667d66f786eb5be9d0e0a5edc7e1431b'),
+            ('b73552b1015a6dbf7f5c4f0fe3d1c91caefc7c0706847e1bf476c4c3315af965',
+             '4eb14f285908ac15339e06a285bc7627609296eb8ba02ce70d7bfee9f9f4ac5f'),
+        )
+        for identity, digests in zip(PROFILE_IDS[:4], expected):
+            self.assertEqual(tuple(engine_manifest(identity, mode).digest for mode in ('fl', 'ref')), digests)
+        self.assertEqual([get_profile(identity)['minimum_ram_bytes'] // 2**30
+                          for identity in PROFILE_IDS[:4]], [96, 256, 256, 96])
+        original, revised = get_profile(PROFILE_IDS[0]), get_profile(PROFILE_IDS[4])
+        self.assertEqual(revised['minimum_ram_bytes'], 29 * 2**30)
+        self.assertEqual(revised['components'], original['components'])
+        old_runtime = original['runtime'].copy()
+        old_runtime['minimum_available_ram_bytes'] = 29 * 2**30
+        self.assertEqual(revised['runtime'], old_runtime)
+        for mode in ('fl', 'ref'):
+            manifest = engine_manifest(PROFILE_IDS[4], mode)
+            self.assertEqual(validate_manifest(manifest)['id'], PROFILE_IDS[4])
+            self.assertNotEqual(manifest.digest, engine_manifest(PROFILE_IDS[0], mode).digest)
+            self.assertEqual(manifest.document['runtime_profile']['minimum_available_ram_bytes'], 29 * 2**30)
+            self.assertFalse(manifest.document['inference_qualified'])
+        self.assertEqual(revised['verified_cases'], [])
+        self.assertTrue(all('measurements' not in case for case in revised['qualification_cases']))
+
+    def test_native_memory_gate_uses_revised_effective_headroom_without_relaxing_vram(self):
+        original, revised = get_profile(PROFILE_IDS[0]), get_profile(PROFILE_IDS[4])
+        torch = SimpleNamespace(cuda=SimpleNamespace(mem_get_info=lambda _: (32 * 2**30, 32 * 2**30)))
+        with patch('studio_platform.runtime_hosts.wangp_session._available_profile_ram', return_value=29 * 2**30):
+            _profile_memory_admission(torch, revised)
+            with self.assertRaisesRegex(ValueError, 'memory_headroom_insufficient'):
+                _profile_memory_admission(torch, original)
+        with patch('studio_platform.runtime_hosts.wangp_session._available_profile_ram', return_value=29 * 2**30 - 1):
+            with self.assertRaisesRegex(ValueError, 'memory_headroom_insufficient'):
+                _profile_memory_admission(torch, revised)
+        torch.cuda.mem_get_info = lambda _: (revised['minimum_free_vram_bytes'] - 1, 32 * 2**30)
+        with patch('studio_platform.runtime_hosts.wangp_session._available_profile_ram', return_value=96 * 2**30):
+            with self.assertRaisesRegex(ValueError, 'memory_headroom_insufficient'):
+                _profile_memory_admission(torch, revised)
+
     def test_catalog_is_detached_public_and_unqualified(self):
         catalog = public_catalog()
-        self.assertEqual(len(catalog['profiles']), 4)
+        self.assertEqual(len(catalog['profiles']), 6)
         for profile in catalog['profiles']:
             self.assertNotIn('runtime', profile)
             self.assertIs(profile['validation']['production_adapter_verified'], False)
@@ -47,7 +143,7 @@ class RuntimeCatalogTests(unittest.TestCase):
                         self.assertIn('/blob/ff2fa85678e77ba195380b148acc23a4c47ef347/', sample['evidence'])
 
     def test_failed_bf16_and_trimmed_reference_samples_are_excluded(self):
-        self.assertEqual([len(get_profile(p)['verified_cases']) for p in PROFILE_IDS], [8, 7, 7, 2])
+        self.assertEqual([len(get_profile(p)['verified_cases']) for p in PROFILE_IDS], [8, 7, 7, 2, 0, 0])
         self.assertEqual(get_profile(PROFILE_IDS[2])['runtime']['task_config'], 'bf16,bf16')
         self.assertTrue(get_profile(PROFILE_IDS[2])['runtime']['qkv_splitting'])
         self.assertEqual(get_profile(PROFILE_IDS[0])['model_id'], 'MiniMax-H3-Pruned-Rank8-INT8')

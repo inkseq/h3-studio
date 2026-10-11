@@ -166,6 +166,29 @@ class DstackOperatorTests(LedgerCase):
         with self.assertRaisesRegex(OperatorError, "operator_forbidden"):
             self.service.catalog(Principal("superdan", "api", machine=True))
 
+    def test_29gib_profile_admission_binds_each_mode_and_preserves_legacy_floor(self):
+        from studio_platform.runtime_catalog import engine_manifest, PROFILE_IDS
+        for revised in (PROFILE_IDS[4], PROFILE_IDS[5]):
+            for mode in ('fl', 'ref'):
+                config = copy.deepcopy(self.config)
+                profile = config['profiles'][0]
+                profile.update(runtime_profile_id=revised, mode=mode, memory_gib=29,
+                               configuration_id='test-native-29gib-' + mode)
+                service = DstackOperator(self.repo, self.settings, self.capacity, config)
+                request = service._capacity_request(service.profiles['5090-fl'], str(uuid.uuid4()), 1., 121., 120)
+                self.assertEqual(request.memory_gib, 29)
+                self.assertEqual(request.manifest_digest, engine_manifest(revised, mode).digest)
+                self.assertEqual(request.configuration_id, 'test-native-29gib-' + mode)
+                profile['memory_gib'] = 28
+                with self.assertRaisesRegex(OperatorError, 'resource_floor_invalid'):
+                    DstackOperator(self.repo, self.settings, self.capacity, config)
+        original = copy.deepcopy(self.config)
+        original['profiles'][0]['memory_gib'] = 29
+        with self.assertRaisesRegex(OperatorError, 'resource_floor_invalid'):
+            DstackOperator(self.repo, self.settings, self.capacity, original)
+        self.assertEqual(self.client.applied, [])
+        self.assertEqual(self.counts(), (0, 0, 0, 0))
+
     def test_lost_apply_and_missing_run_never_reapply_or_release_reservation(self):
         self.client.lost = True
         node = self.start()["node_id"]
@@ -282,6 +305,10 @@ class DstackOperatorTests(LedgerCase):
         self.assertTrue(self.store.begin_bootstrap(node, binding["run_id"], "gpu-123"))
         self.assertFalse(self.store.begin_bootstrap(node, binding["run_id"], "gpu-123"))
         self.assertTrue(self.store.begin_runtime_launch(node, binding["run_id"], "gpu-123"))
+        # A runtime incarnation proves this is no longer cold unadmitted
+        # preparation; missing native idle must continue to block shutdown.
+        self.store.record(node, {"state": "runtime_unconfirmed", "ready": False,
+            "runtime_incarnation": "c"*32, "observed_at": self.now})
         self.service.node_command(self.owner, node, {}, "stop-1")
         self.assertEqual(self.capacity.stop(node)["state"], "draining")
         self.assertEqual(self.client.stopped, [])

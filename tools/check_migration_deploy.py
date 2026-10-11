@@ -89,6 +89,10 @@ def validate(document, *, host_memory_mib=3840):
     for name in ("app", "dispatch", "controller"):
         service = services[name]
         env = service["environment"]
+        default = env.get("SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID")
+        require(type(default) is str and re.fullmatch(r"[A-Za-z0-9_.-]{1,200}", default)
+            and default == services["app"]["environment"].get("SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID"),
+            "migration_default_profile_missing_or_split")
         require(env.get("SIXNINE_DATABASE_URL_FILE") == "/run/secrets/app_database_url" and
             {"app_database_url", "execution_profiles", "grafana_cloud"} <= secret_names(service),
             "migration_business_authority_split")

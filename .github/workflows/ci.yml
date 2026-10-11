@@ -193,12 +193,12 @@ jobs:
         run: npm run build -- --base / --outDir ../yingxu-dist
         working-directory: yingxu
       - name: Package frontend candidate (publication waits for every required gate)
-        if: needs.changes.outputs.action == 'prepare-frontend'
+        if: needs.changes.outputs.action == 'prepare-frontend' || needs.changes.outputs.action == 'prepare-platform' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: |
           python tools/build_frontend_release.py "$GITHUB_SHA" yingxu-dist frontend-release
           python tools/check_frontend_bundle.py "$GITHUB_SHA" frontend-release
       - uses: actions/upload-artifact@v4
-        if: needs.changes.outputs.action == 'prepare-frontend'
+        if: needs.changes.outputs.action == 'prepare-frontend' || needs.changes.outputs.action == 'prepare-platform' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         with:
           name: sixnine-frontend-${{ github.sha }}
           path: frontend-release/
@@ -309,15 +309,27 @@ jobs:
             "sixnine-dispatch:$GITHUB_SHA" python -c \
             'import studio_platform.hatchet_dispatch, studio_platform.dstack_controller, studio_platform.dstack_factory, studio_platform.telemetry; import importlib.metadata as m; assert m.version("hatchet-sdk")=="1.42.1"; assert m.version("opentelemetry-sdk")=="1.45.0"'
       - name: Package platform candidate (publication waits for every required gate)
-        if: needs.changes.outputs.action == 'prepare-platform'
+        if: needs.changes.outputs.action == 'prepare-platform' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: |
-          python tools/build_platform_release.py "$GITHUB_SHA" platform-release
+          python tools/build_platform_release.py "$GITHUB_SHA" platform-release \
+            --migration-destination migration-release \
+            --migration-selection h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3:fl \
+            --migration-selection h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3:ref
           python tools/check_platform_bundle.py "$GITHUB_SHA" platform-release
       - uses: actions/upload-artifact@v4
-        if: needs.changes.outputs.action == 'prepare-platform'
+        if: needs.changes.outputs.action == 'prepare-platform' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         with:
           name: sixnine-platform-${{ github.sha }}
           path: platform-release/
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - name: Preserve matching migration candidate without deployment
+        uses: actions/upload-artifact@v4
+        if: needs.changes.outputs.action == 'prepare-platform' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        with:
+          name: sixnine-migration-${{ github.sha }}
+          path: migration-release/
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
@@ -379,6 +391,10 @@ jobs:
         with:
           name: sixnine-platform-${{ github.sha }}
           path: platform-release
+      - uses: actions/download-artifact@v4
+        with:
+          name: sixnine-migration-${{ github.sha }}
+          path: migration-release
       - name: Assume release-only identity with GitHub OIDC
         uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
         with:
@@ -391,7 +407,7 @@ jobs:
       - name: Publish validated platform bundle (host approval remains independent)
         env:
           RELEASE_COMMIT: ${{ github.sha }}
-        run: python tools/publish_aws_release.py "$RELEASE_COMMIT" platform-release
+        run: python tools/publish_aws_release.py "$RELEASE_COMMIT" platform-release --migration-directory migration-release
 
   publish-frontend-aws:
     if: ${{ !cancelled() && needs.test.result == 'success' && needs.changes.result == 'success' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && needs.changes.outputs.action == 'prepare-frontend' && vars.SIXNINE_AWS_PUBLISH_ROLE != '' }}

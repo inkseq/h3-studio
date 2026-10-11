@@ -23,6 +23,13 @@ BASE = "MiniMax-H3-Base-INT8"
 PRO = "RTX PRO 6000 Blackwell Workstation Edition"
 
 
+def historical_catalog():
+    """Keep original-allocation fixtures tied to their four immutable recipes."""
+    catalog = public_catalog()
+    catalog['profiles'] = [profile for profile in catalog['profiles'] if profile['id'] in PROFILE_IDS[:4]]
+    return catalog
+
+
 def offer(identity="executor-1", provider="lium", gpu="RTX 5090", **changes):
     return {"provider": provider, "offer_id": identity, "gpu_type": gpu, "gpu_count": 1,
             "available_count": 1, "ram_gib": 125, "disk_gib": 320, "download_mbps": 300,
@@ -34,7 +41,7 @@ def offer(identity="executor-1", provider="lium", gpu="RTX 5090", **changes):
 class CandidateTests(LedgerCase):
     def setUp(self):
         super().setUp()
-        self.registry = OperatorRegistry(catalog=public_catalog, qualified_providers=("lium", "targon"))
+        self.registry = OperatorRegistry(catalog=historical_catalog, qualified_providers=("lium", "targon"))
 
     def publish(self, provider, rows=(), status="ok", observed=None):
         publish_observation(self.repo, {"provider": provider, "status": status,
@@ -59,7 +66,7 @@ class CandidateTests(LedgerCase):
             min_ttl_seconds=120, enabled=True, filters={"min_ram_gib":96, "min_disk_gib":128})
         binding = replace(binding, **changes)
         existing = list(self.registry.bindings.values())
-        self.registry = OperatorRegistry(existing+[binding], catalog=public_catalog,
+        self.registry = OperatorRegistry(existing+[binding], catalog=historical_catalog,
                                          qualified_providers=("lium", "targon"))
         return binding
 
@@ -83,6 +90,30 @@ class CandidateTests(LedgerCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["selection"]["runtime_profile_id"], PROFILE_IDS[1])
         self.assertEqual(rows[0]["selection"]["gpu_count"], 2)
+
+    def test_29gib_discovery_does_not_requalify_historical_96gib_binding(self):
+        self.qualify()  # Existing 96 GiB deployment remains bound to its identity.
+        self.registry = OperatorRegistry(list(self.registry.bindings.values()), catalog=public_catalog,
+                                         qualified_providers=('lium', 'targon'))
+        self.publish('lium', [offer('smaller', ram_gib=35)])
+        result = self.project()
+        self.assertEqual(len(result['candidates']), 2)
+        self.assertEqual({row['selection']['runtime_profile_id'] for row in result['candidates']},
+                         {PROFILE_IDS[4], PROFILE_IDS[5]})
+        for candidate in result['candidates']:
+            with self.subTest(profile=candidate['selection']['runtime_profile_id']):
+                self.assertFalse(candidate['deployment_qualified'])
+                self.assertEqual(candidate['qualification'], 'unqualified')
+                with self.assertRaisesRegex(OperatorError, 'operator_deployment_not_configured'):
+                    self.resolve(candidate['selection'])
+        floors = {row['runtime_profile_id']: row['hard_requirements']['min_ram_gib']
+                  for row in result['filters']}
+        self.assertEqual(floors[PROFILE_IDS[0]], 96)
+        self.assertEqual(floors[PROFILE_IDS[4]], 29)
+        self.assertEqual(floors[PROFILE_IDS[5]], 29)
+        self.assertTrue(any(row['runtime_profile_id'] == PROFILE_IDS[0] and
+                            'inventory_ram_below_minimum' in row['blockers'] for row in result['excluded']))
+        self.assertEqual(self.repo.list_instance_intents(), [])
 
     def test_ram_disk_exclude_unknown_specs_remain_and_preferences_do_not_hide_stock(self):
         self.publish("lium", [offer("ram-low", ram_gib=64), offer("disk-low", disk_gib=100),
@@ -266,7 +297,7 @@ class CandidateTests(LedgerCase):
         for provider, profile_id, gpu, identity in (("lium", PROFILE_IDS[0], "RTX 5090", "executor-1"),
                 ("targon", PROFILE_IDS[3], "RTX PRO 6000 Blackwell", "rtx6000b-small")):
             with self.subTest(provider=provider):
-                self.registry = OperatorRegistry(catalog=public_catalog, qualified_providers=("lium", "targon"))
+                self.registry = OperatorRegistry(catalog=historical_catalog, qualified_providers=("lium", "targon"))
                 self.qualify(profile_id, gpu, provider,
                     launch=LaunchSpec(provider, "candidate", PRUNED, offer_id=identity))
                 self.publish("lium")

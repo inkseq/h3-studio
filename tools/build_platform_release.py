@@ -9,11 +9,15 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
-
-from release_contract import build_contracts
+import sys
+import tarfile
+import tempfile
 
 FILES = ("compose.yaml", "Caddyfile", "init_database.py", "check_config.py")
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from tools.release_contract import build_contracts
 
 
 def build(commit, destination):
@@ -46,10 +50,74 @@ def build(commit, destination):
     print("Reviewable release manifest SHA-256: "+hashlib.sha256((destination / "release-manifest.json").read_bytes()).hexdigest())
 
 
+def build_migration(commit, platform_directory, destination, selections):
+    """Separate additive artifact; contains public source/config templates only.
+
+    The root maintenance helper is included for review, never execution from an
+    incoming directory. The platform artifact and its approval remain unchanged.
+    """
+    if not re.fullmatch(r"[0-9a-f]{40}", commit) or not selections:
+        raise ValueError("Migration requires exact source and explicit profile/mode selections")
+    platform = Path(platform_directory) / "release-manifest.json"
+    value = json.loads(platform.read_text())
+    if type(value) is not dict or value.get("commit") != commit:
+        raise ValueError("Migration platform manifest source differs")
+    if str(ROOT) not in sys.path:
+        sys.path.insert(0, str(ROOT))
+    from tools.build_dstack_sources import build as build_sources
+    destination = Path(destination)
+    destination.mkdir(parents=False, exist_ok=False)
+    image = "sixnine-dispatch:" + commit
+    inspected = json.loads(subprocess.check_output(["docker", "image", "inspect", image], stderr=subprocess.DEVNULL))[0]
+    if (inspected.get("Config", {}).get("Labels", {}).get("org.opencontainers.image.revision") != commit
+            or inspected.get("Architecture") != "amd64" or inspected.get("Os") != "linux"):
+        raise ValueError("Migration dispatch image is not the exact reviewed Linux source")
+    paths = {"platform-overlay.yaml": "deploy/dstack/platform-overlay.yaml",
+        "hatchet-entrypoint.sh": "deploy/hatchet/entrypoint.sh", "migration-check.py": "tools/check_migration_deploy.py",
+        "maintenance.py": "deploy/dstack/maintenance.py", "runtime-config.example.json": "deploy/dstack/runtime-config.example.json",
+        "server-config.example.yml": "deploy/dstack/server-config.example.yml", "broker.example.json": "deploy/hatchet/broker.example.json"}
+    for name, source in paths.items():
+        shutil.copyfile(ROOT / source, destination / name)
+    with subprocess.Popen(["docker", "save", image], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as process:
+        with gzip.open(destination / "dispatch-image.tar.gz", "wb", compresslevel=1) as target:
+            shutil.copyfileobj(process.stdout, target, 1024 * 1024)
+        if process.wait() != 0:
+            raise RuntimeError("Could not export the reviewed CPU dispatch image")
+    with tempfile.TemporaryDirectory(prefix="sixnine-public-migration-sources-") as temporary:
+        sources = Path(temporary) / "sources"
+        build_sources(sources, selections)
+        with tarfile.open(destination / "source-set.tar.gz", "w:gz") as archive:
+            for path in sorted(sources.rglob("*")):
+                if path.is_file() and not path.is_symlink():
+                    archive.add(path, arcname=path.relative_to(sources).as_posix(), recursive=False)
+        index_digest = hashlib.sha256((sources / "index.json").read_bytes()).hexdigest()
+    names = {*paths, "dispatch-image.tar.gz", "source-set.tar.gz"}
+    checksums = {}
+    for name in names:
+        digest = hashlib.sha256()
+        with (destination / name).open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        checksums[name] = digest.hexdigest()
+    document = {"version": 1, "commit": commit,
+        "platform_manifest_sha256": hashlib.sha256(platform.read_bytes()).hexdigest(),
+        "dispatch": {"image": image, "image_id": inspected["Id"]},
+        "source_index_sha256": index_digest, "files": checksums}
+    (destination / "migration-manifest.json").write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    return document
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("commit")
     parser.add_argument("destination", type=Path)
+    parser.add_argument("--migration-destination", type=Path)
+    parser.add_argument("--migration-selection", action="append", metavar="PROFILE:MODE")
     args = parser.parse_args()
     build(args.commit, args.destination)
+    if args.migration_destination is not None:
+        build_migration(args.commit, args.destination, args.migration_destination,
+            [value.rsplit(":", 1) for value in args.migration_selection or []])
+    elif args.migration_selection:
+        parser.error("--migration-selection requires --migration-destination")
     print("CPU platform bundle created; no deployment or cloud changes performed")

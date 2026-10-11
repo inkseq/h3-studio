@@ -118,7 +118,7 @@ class OperatorBootTests(unittest.TestCase):
 
     def test_targon_profile_keeps_provider_uid_slot_hardware_and_idle_proof(self):
         from studio_platform.targon_provider import TargonIdleProof
-        profile = get_profile(PROFILE_IDS[-1])
+        profile = get_profile(PROFILE_IDS[3])
         binding = copy.deepcopy(self.binding)
         binding.runtime_profile_id = profile['id']
         binding.model_id = profile['model_id']

@@ -200,6 +200,33 @@ class DstackCapacityTests(unittest.TestCase):
         self.client.get_failed = True
         self.assertFalse(self.capacity.observe(INTENT)["ready"])
 
+    def test_native_preparing_retains_safe_progress_and_revokes_ready(self):
+        self.start()
+        self.client.running()
+        self.assertTrue(self.capacity.observe(INTENT)["ready"])
+        self.native.side_effect = DstackError("dstack_runtime_preparing")
+        value = self.capacity.observe(INTENT)
+        self.assertEqual(value["reason_code"], "dstack_runtime_preparing")
+        self.assertEqual(value["state"], "runtime_unconfirmed")
+        self.assertFalse(value["ready"])
+        self.assertFalse(self.store.value["ready"])
+        self.assertEqual(value["provider_instance_id"], "1234567")
+        self.assertEqual(self.client.apply_count, 1)
+
+    def test_native_errors_never_expose_arbitrary_callback_text(self):
+        self.start()
+        self.client.running()
+        for error in (RuntimeError("secret prompt and token"),
+                      DstackError("secret prompt and token"),
+                      DstackError("dstack_runtime_preparing", "secret prompt and token")):
+            with self.subTest(error_type=type(error).__name__, argument_count=len(error.args)):
+                self.native.side_effect = error
+                value = self.capacity.observe(INTENT)
+                self.assertEqual(value["reason_code"], "dstack_native_observation_failed")
+                self.assertEqual(value["state"], "runtime_unconfirmed")
+                self.assertFalse(value["ready"])
+                self.assertNotIn("secret", json.dumps(value))
+
     def test_changed_resource_configuration_is_rejected(self):
         self.start()
         self.client.run["run_spec"]["configuration"]["resources"]["gpu"]["count"] = 2
@@ -345,6 +372,41 @@ class DstackCapacityTests(unittest.TestCase):
         with self.assertRaisesRegex(DstackError, "dstack_backend_unsupported"):
             request(backend="lium")
 
+    def test_resource_floors_and_optional_regions_use_pinned_range_semantics(self):
+        config = request().run_spec(PUB)["configuration"]
+        self.assertEqual(config["resources"]["cpu"], {"arch": "x86", "count": "4.."})
+        self.assertIsNone(config["regions"], "An empty region whitelist excludes every offer")
+        self.assertEqual(request(regions=("us-ca",)).run_spec(PUB)["configuration"]["regions"], ["us-ca"])
+
+    def test_parsed_cpu_floor_preserves_ownership_and_rejects_changed_requirement(self):
+        self.start()
+        cpu = self.client.run["run_spec"]["configuration"]["resources"]["cpu"]
+        cpu["count"] = {"min": 4, "max": None}
+        self.assertEqual(self.capacity.observe(INTENT)["state"], "starting")
+        for changed in ({"min": 3, "max": None}, {"min": 4, "max": 4}):
+            with self.subTest(count=changed):
+                cpu["count"] = changed
+                self.assertEqual(self.capacity.observe(INTENT)["reason_code"], "dstack_run_binding_mismatch")
+
+    def test_server_added_region_restriction_cannot_be_adopted(self):
+        self.start()
+        self.client.run["run_spec"]["configuration"]["regions"] = []
+        self.assertEqual(self.capacity.observe(INTENT)["reason_code"], "dstack_run_binding_mismatch")
+
+    def test_pinned_homogeneous_single_node_default_preserves_binding(self):
+        self.start()
+        configuration = self.client.run["run_spec"]["configuration"]
+        configuration["nodes"] = 1
+        self.assertEqual(self.capacity.observe(INTENT)["state"], "starting")
+        self.assertNotIn("nodes", self.store.value["run_spec"]["configuration"])
+        for value in (0, 2, True, False, "1", {"min": 1, "max": 1}):
+            with self.subTest(nodes=value):
+                configuration["nodes"] = value
+                self.assertEqual(self.capacity.observe(INTENT)["reason_code"], "dstack_run_binding_mismatch")
+        configuration["nodes"] = 1
+        configuration["groups"] = [{"nodes": 1}]
+        self.assertEqual(self.capacity.observe(INTENT)["reason_code"], "dstack_run_binding_mismatch")
+
     def test_concurrent_start_commits_only_one_paid_apply(self):
         barrier = threading.Barrier(2)
         original_get = self.client.get
@@ -423,6 +485,34 @@ class DstackCapacityTests(unittest.TestCase):
 
 
 class DstackRESTTests(unittest.TestCase):
+    def test_exact_get_accepts_only_pinned_not_found_errors(self):
+        cases = [(404, {}, True),
+            (400, {"detail": [{"code": "resource_not_exists", "msg": "Run not found"}]}, True),
+            (400, {"detail": [{"code": "other_error"}]}, False),
+            (400, {"detail": [{"code": "resource_not_exists"}, {"code": "other_error"}]}, False),
+            (400, {"detail": []}, False), (400, [], False)]
+        for status, body, missing in cases:
+            with self.subTest(status=status, body=body):
+                session = httpx.Client(transport=httpx.MockTransport(
+                    lambda _, status=status, body=body: httpx.Response(status, json=body)))
+                client = DstackClient("http://127.0.0.1:3000", "secret-token-123456", "sixnine",
+                    session=session)
+                if missing:
+                    self.assertIsNone(client.get(run_id=RUN))
+                else:
+                    with self.assertRaisesRegex(DstackError, "^dstack_api_rejected$"):
+                        client.get(run_id=RUN)
+
+    def test_mutations_do_not_treat_not_found_as_success(self):
+        session = httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(400,
+            json={"detail": [{"code": "resource_not_exists", "msg": "Run not found"}]})))
+        client = DstackClient("http://127.0.0.1:3000", "secret-token-123456", "sixnine", session=session)
+        for method, argument in ((client.apply, request().run_spec(PUB)),
+                                 (client.stop, request().run_name)):
+            with self.subTest(method=method.__name__):
+                with self.assertRaisesRegex(DstackError, "^dstack_api_rejected$"):
+                    method(argument)
+
     def test_exact_paths_and_create_only_apply(self):
         seen = []
         def handler(req):
@@ -437,6 +527,8 @@ class DstackRESTTests(unittest.TestCase):
         self.assertEqual([row[0] for row in seen], ["/api/project/sixnine/runs/get_plan",
             "/api/project/sixnine/runs/apply", "/api/project/sixnine/runs/get", "/api/project/sixnine/runs/stop"])
         self.assertFalse(seen[1][1]["force"])
+        self.assertTrue(seen[0][1]["for_offers_only"])
+        self.assertNotIn("for_offers_only", seen[1][1])
         self.assertIsNone(seen[1][1]["plan"]["current_resource"])
         self.assertFalse(seen[3][1]["abort"])
 

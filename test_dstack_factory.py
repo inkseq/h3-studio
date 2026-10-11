@@ -19,7 +19,7 @@ from studio_platform.dstack_operator import DstackOperator, LedgerDstackStore
 from studio_platform.dstack_runtime import DstackNativeRuntime
 from studio_platform.inference.wangp_contract import HostReadiness
 from studio_platform.operator_capacity import operator_nodes
-from studio_platform.runtime_catalog import engine_manifest
+from studio_platform.runtime_catalog import engine_manifest, PROFILE_IDS
 from test_dstack_operator import Client, PROFILE, PUB
 from test_platform_repository import LedgerCase
 from tools.build_dstack_sources import build
@@ -91,6 +91,41 @@ class FactoryTests(LedgerCase):
         with self.assertRaises(ValueError):
             build(self.root / "invalid", [(PROFILE, "unsupported")])
         self.assertFalse((self.root / "invalid").exists())
+
+    def test_29gib_sources_package_and_bind_both_independent_modes(self):
+        revised = PROFILE_IDS[4]
+        directory = self.root / 'sources-29gib'
+        receipt = build(directory, [(revised, 'fl'), (revised, 'ref')])
+        self.assertEqual({entry['mode'] for entry in receipt['sources']}, {'fl', 'ref'})
+        for entry in receipt['sources']:
+            self.assertEqual(entry['runtime_profile_id'], revised)
+            source = directory / entry['directory']
+            manifest = json.loads((source / 'wangp-manifest.json').read_text())
+            self.assertEqual(manifest['runtime_profile']['minimum_available_ram_bytes'], 29 * 2**30)
+            self.assertEqual(entry['engine_manifest_digest'], engine_manifest(revised, entry['mode']).digest)
+            with tarfile.open(source / 'wangp-package.tar.gz') as archive:
+                packaged = json.load(archive.extractfile('deploy/wangp/profiles/' + revised + '.json'))
+                self.assertEqual(packaged['minimum_ram_bytes'], 29 * 2**30)
+        self.assertEqual(self.client.applied, [])
+
+    def test_total_capacity_sources_keep_new_manifest_and_both_mode_bindings(self):
+        revised = PROFILE_IDS[5]
+        directory = self.root / 'sources-29gib-total'
+        receipt = build(directory, [(revised, 'fl'), (revised, 'ref')])
+        self.assertEqual({entry['mode'] for entry in receipt['sources']}, {'fl', 'ref'})
+        for entry in receipt['sources']:
+            source = directory / entry['directory']
+            manifest = json.loads((source / 'wangp-manifest.json').read_text())
+            self.assertEqual(entry['runtime_profile_id'], revised)
+            self.assertEqual(entry['engine_manifest_digest'], engine_manifest(revised, entry['mode']).digest)
+            self.assertEqual(manifest['runtime_profile']['ram_admission_metric'], 'effective-total-v1')
+            self.assertNotIn('minimum_available_ram_bytes', manifest['runtime_profile'])
+            with tarfile.open(source / 'wangp-package.tar.gz') as archive:
+                packaged = json.load(archive.extractfile('deploy/wangp/profiles/' + revised + '.json'))
+                self.assertEqual(packaged['runtime']['minimum_total_ram_bytes'], 29 * 2**30)
+                session = archive.extractfile('studio_platform/runtime_hosts/wangp_session.py').read()
+                self.assertIn(b'def _effective_total_profile_ram(', session)
+        self.assertEqual(self.client.applied, [])
 
     def test_construction_reads_only_no_journal_secret_output_or_runtime_directory(self):
         binding, _ = self.allocation()
