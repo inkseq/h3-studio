@@ -55,7 +55,7 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     network_mode: service:app
-    mem_limit: 512m
+    mem_limit: 768m
     pids_limit: 128
     stop_grace_period: 60s
     depends_on:
@@ -158,7 +158,7 @@ services:
     restart: unless-stopped
     entrypoint: [/bin/sh, /sixnine/entrypoint.sh]
     network_mode: service:app
-    mem_limit: 640m
+    mem_limit: 384m
     pids_limit: 256
     stop_grace_period: 60s
     security_opt: [no-new-privileges:true]

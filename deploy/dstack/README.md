@@ -188,8 +188,12 @@ container paths in this section rather than the standalone host paths.
 
 The aggregate service memory **cap**, including the one-off existing db-init,
 is 3296 MiB, leaving 544 MiB on a 3840 MiB host. This is a configuration budget,
-not a measured resource guarantee. The controller's 640 MiB includes its native
-CPU worker children; qualify at most two concurrent slots initially and measure
+not a measured resource guarantee. dstack receives 768 MiB for server startup;
+the 512 MiB cap caused repeated kernel OOM kills even when Docker's latest
+`State.OOMKilled` was false after a restart. Hatchet receives 384 MiB within the
+same aggregate budget. Check kernel OOM records and restart history as well as
+current container state when qualifying these caps. The controller's 640 MiB
+includes its native CPU worker children; qualify at most two concurrent slots initially and measure
 actual RSS, swap/OOM and media collection before expanding. Existing services
 outside this Compose project also consume host memory and must be counted.
 The overlay does not enable generation by default. Explicit existing release
