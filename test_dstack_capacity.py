@@ -14,6 +14,7 @@ import httpx
 from studio_platform.dstack_capacity import (CapacityRequest, DstackCapacity,
     DstackClient, DstackError, idle_action, native_bootstrap_config, main)
 from studio_platform.inference.wangp_contract import HostReadiness
+from studio_platform.worker_admission import managed_window_reason
 
 INTENT = "a1111111-1111-4111-8111-111111111111"
 RUN = "b2222222-2222-4222-8222-222222222222"
@@ -192,6 +193,105 @@ class DstackCapacityTests(unittest.TestCase):
         self.client.running()
         self.native.return_value = HostReadiness("a" * 64, INTENT, "c" * 32, False)
         self.assertEqual(self.capacity.observe(INTENT)["state"], "busy")
+
+    def managed_reason(self):
+        binding = self.store.load(INTENT)
+        intent = {"state": "ready", "hard_deadline": request().hard_deadline,
+            "provider_instance_id": binding.get("provider_instance_id")}
+        node = {"desired_state": "running", "runtime_state": binding.get("state"), "payload": {
+            "capacity_backend": "dstack-v1", "observation_fresh_seconds": 30,
+            "selection": {"runtime_profile_id": request().profile_id}, "dstack": binding,
+            "dstack_observation": {"run_id": binding.get("run_id"),
+                "instance_id": binding.get("provider_instance_id"),
+                "status": binding.get("dstack_status"), "observed_at": binding.get("observed_at")}}}
+        return managed_window_reason(intent, node, self.now, deployment_profile_id=request().profile_id)
+
+    def test_cold_callback_still_journals_exact_instance_before_bootstrap(self):
+        self.start()
+        self.client.running()
+        def native(binding, run):
+            recorded = self.store.load(INTENT)
+            self.assertEqual(recorded["provider_instance_id"], "1234567")
+            self.assertEqual(recorded["run_id"], RUN)
+            self.assertEqual(recorded["state"], "runtime_unconfirmed")
+            self.assertFalse(recorded["ready"])
+            self.assertNotIn("runtime_incarnation", recorded)
+            self.assertEqual(self.managed_reason(), "managed_dstack_readiness_unconfirmed")
+            return HostReadiness("a" * 64, INTENT, "c" * 32, True)
+        self.native.side_effect = native
+        self.assertTrue(self.capacity.observe(INTENT)["ready"])
+        self.assertIsNone(self.managed_reason())
+
+    def test_warm_check_preserves_proof_but_does_not_extend_stale_freshness(self):
+        self.start()
+        self.client.running()
+        self.capacity.observe(INTENT)
+        prior = self.store.load(INTENT)
+        self.now = 25.
+        entered, release = threading.Event(), threading.Event()
+        results = []
+        def native(binding, run):
+            entered.set()
+            if not release.wait(timeout=5):
+                raise RuntimeError("test callback not released")
+            return HostReadiness("a" * 64, INTENT, "c" * 32, True)
+        self.native.side_effect = native
+        thread = threading.Thread(target=lambda: results.append(self.capacity.observe(INTENT)))
+        thread.start()
+        try:
+            self.assertTrue(entered.wait(timeout=5))
+            self.assertEqual(self.store.load(INTENT), prior)
+            self.assertIsNone(self.managed_reason())
+            self.now = 51.
+            self.assertEqual(self.managed_reason(), "managed_dstack_readiness_unconfirmed")
+            self.assertEqual(self.store.load(INTENT)["observed_at"], 20.)
+            self.now = 60.
+        finally:
+            release.set()
+            thread.join(timeout=5)
+        self.assertFalse(thread.is_alive())
+        self.assertTrue(results[0]["ready"])
+        self.assertEqual(results[0]["observed_at"], 25., "Native completion cannot renew an older provider read")
+        self.assertEqual(self.managed_reason(), "managed_dstack_readiness_unconfirmed")
+        self.native.side_effect = None
+        self.now = 61.
+        self.capacity.observe(INTENT)
+        self.assertIsNone(self.managed_reason())
+        self.assertEqual(self.store.load(INTENT)["runtime_incarnation"], prior["runtime_incarnation"])
+        self.assertEqual(self.client.apply_count, 1)
+
+    def test_pending_warm_busy_check_preserves_busy_then_actual_failure_revokes(self):
+        self.start()
+        self.client.running()
+        self.native.return_value = HostReadiness("a" * 64, INTENT, "c" * 32, False)
+        self.capacity.observe(INTENT)
+        prior = self.store.load(INTENT)
+        self.now = 25.
+        def native(binding, run):
+            self.assertEqual(self.store.load(INTENT), prior)
+            self.assertEqual(binding["state"], "busy")
+            self.assertIsNone(self.managed_reason())
+            raise DstackError("dstack_runtime_preparing")
+        self.native.side_effect = native
+        value = self.capacity.observe(INTENT)
+        self.assertFalse(value["ready"])
+        self.assertEqual(value["state"], "runtime_unconfirmed")
+        self.assertEqual(value["reason_code"], "dstack_runtime_preparing")
+        self.assertEqual(self.managed_reason(), "managed_dstack_readiness_unconfirmed")
+        self.assertEqual(self.store.load(INTENT)["runtime_incarnation"], prior["runtime_incarnation"])
+
+    def test_changed_warm_provider_is_revoked_before_native_callback(self):
+        self.start()
+        self.client.running()
+        self.capacity.observe(INTENT)
+        self.native.reset_mock()
+        self.client.run["latest_job_submission"]["job_provisioning_data"]["instance_id"] = "changed-instance"
+        value = self.capacity.observe(INTENT)
+        self.assertFalse(value["ready"])
+        self.assertEqual(value["reason_code"], "dstack_instance_identity_changed")
+        self.assertEqual(self.managed_reason(), "managed_dstack_readiness_unconfirmed")
+        self.native.assert_not_called()
+        self.assertEqual(self.store.load(INTENT)["provider_instance_id"], "1234567")
 
     def test_failed_observation_revokes_cached_ready(self):
         self.start()

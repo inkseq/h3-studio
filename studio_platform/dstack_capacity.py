@@ -392,10 +392,23 @@ class DstackCapacity:
         value["state"] = "runtime_unconfirmed"
         if self.readiness is None:
             return value
-        # Commit the exact provider identity before the CPU native callback can
-        # journal bootstrap. A timeout must reconcile this original instance.
-        self.store.record(binding["intent_id"], value)
-        binding = self.store.load(binding["intent_id"])
+        # Cold bootstrap needs the exact provider identity journaled first.
+        # A warm check must not transiently revoke its original qualified
+        # proof: concurrent admission may use it only until its existing
+        # timestamp expires. Neither a pending check nor its later success
+        # moves this provider-read timestamp forward.
+        incarnation = binding.get("runtime_incarnation")
+        observed = binding.get("observed_at")
+        warm = (binding.get("state") in {"ready", "busy"}
+            and binding.get("dstack_status") == "running"
+            and binding.get("run_id") == run["id"]
+            and binding.get("provider_instance_id") == instance
+            and isinstance(incarnation, str) and re.fullmatch(r"[0-9a-f]{32}", incarnation)
+            and type(observed) in (int, float) and math.isfinite(observed)
+            and 0 <= observed <= value["observed_at"])
+        if not warm:
+            self.store.record(binding["intent_id"], value)
+            binding = self.store.load(binding["intent_id"])
         try:
             native = self.readiness(copy.deepcopy(binding), copy.deepcopy(run))
         except DstackError as error:
