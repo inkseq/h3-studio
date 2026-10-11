@@ -26,6 +26,25 @@ No API tokens, business database credentials or Hatchet credentials go onto
 leased GPU hosts. Reuse the existing CPU-to-GPU authenticated SSH tunnel and
 private native runtime protocol.
 
+## Current provider identity and qualification scope
+
+Use the explicitly selected central profiles
+`vastai/vastai--sixnine-dstack-20261011` and
+`runpod/runpod--sixnine-dstack-20261011` with their original protocols/endpoints
+and the pinned dstack clients. Preserve the older `--rig-root` profiles; do not
+fallback to them, overwrite them, or copy secrets into this repository. Loading
+a profile is not authentication proof. Read-only authenticated account/stock
+checks cover both providers; the currently authorized paid P2 qualification
+uses **Vast only**. RunPod is read-only in this batch. Adapter support alone is
+not permission to rent, cache, or enable a provider in production.
+
+The immediate acceptance uses **two separate single-GPU Vast allocations**:
+one FL2VA and one Ref2VA. Complete isolated P2 warm successive jobs, truthful
+readiness, keep-on within the original deadline, and owned idle stop before any
+P3 production activation. CPU configuration/build/proof can proceed beforehand,
+but must not switch public admission or the production namespace as a substitute
+for P2. Record exact identities and outputs on #132; failures remain blockers.
+
 ## Admission and at-least-once execution
 
 Freeze `dispatch_backend` in the accepted execution plan: `legacy` (also the
@@ -105,11 +124,30 @@ permissions and budgets remain real constraints. Listed host memory and measured
 cgroup limits must be distinguished. The pruned INT8 short-video matrix is not
 proof for full weights, long clips or all hardware.
 
+For this qualification use the additive RTX 5090 profile
+`h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-v2` for both modes.
+Its allocation floor and separate native available-headroom gate are **29 GiB**,
+keeping the same pinned pruned INT8 weights, Qwen/VAEs, MMGP profile 4 and controls.
+#130 measured a 29.2 GiB total cgroup limit on standalone RTX 5090 for short
+20-step FL/REF clips at 480p and 768p, including mixed REF inputs, with the old
+RAM admission gate disabled. That is operating-floor evidence, not proof of
+29 GiB available headroom after torch/MMGP imports. A 29.2 GiB allocation may
+fail the retained headroom gate even though the historical standalone run worked.
+P2 must record actual total/cgroup limits and effective available headroom after
+imports before loading. Do not invent a lower threshold or claim a universal
+minimum or proof for 50 steps/15 seconds. Keep free-VRAM, disk, parameter, price
+and budget gates. The historical 96 GiB profile and its FL/REF manifest identities
+remain unchanged, as do the unpruned/PRO 6000 gates. Select the new ID explicitly
+in both source bundles, protected capacity profiles, execution bindings and the
+default profile; use new configuration identities. No historical accepted job
+is retargeted and no timing sample is fabricated for the new integration.
+
 Vast local persistent volumes are host-bound; dstack 0.22.3 does not expose them
 as reusable Vast volumes. RunPod network volumes can cache weights but constrain
 region/stock and incur storage cost. Measure complete preparation and per-delivered
 video cost before choosing a cache. Avoid claiming machine-RUNNING time is total
-cold-start time. Initial providers are Vast and RunPod; Lium/Targon original jobs,
+cold-start time. Target adapters include Vast and RunPod, subject to the current
+qualification scope above; Lium/Targon original jobs,
 leases and historical reconciliation remain supported on the legacy path. Custom
 provider plugins are deferred until measured value justifies their maintenance.
 
@@ -152,14 +190,18 @@ price excludes storage/download charges and is not a bill.
 2. P1: simulated long jobs, duplicate/concurrent dispatch, outbox crash recovery,
    dropped submit response, worker loss, collection/write interruption and cancel
    recovery. Prove no duplicate submission and no lost output before enabling.
-3. P2: isolated owned runs, warm successive jobs, both modes across independent
-   slots, honest readiness, idle/hold and stop observations. Reuse verified media
-   fixtures rather than rerunning the full unrelated qualification matrix.
-4. P3: independently reviewed CPU services, an explicit profile rollout, real
+3. P2: two isolated owned single-GPU Vast runs, one FL and one REF using the
+   explicit 29 GiB revision; warm successive jobs, independent slots, honest
+   readiness, idle/keep-on and stop observations. Reuse verified media fixtures
+   rather than rerunning the full unrelated qualification matrix. Both modes
+   and lifecycle evidence must pass before production activation.
+4. P3: only after P2 passes, independently reviewed CPU services and an explicit
+   qualified profile rollout; real
    Quick Chat/Agent accepted job through validated video and independent audio
    download. Verify compatibility and owned idle cleanup.
 5. P4: focused group/machine lists, details, start/stop/hold/extension, truthful
-   costs and capacity availability; verify RunPod cache only when provisioned.
+   costs and capacity availability. RunPod rental/cache is deferred; qualify it
+   only under separately authorized scope, never as an implicit P2 fallback.
 6. P5: remove replaced responsibilities only after >=14 stable days, legacy
    accepted work is finished and outstanding supplier obligations are handled.
    Archive provider notes and an exact pre-retirement Git tag first.

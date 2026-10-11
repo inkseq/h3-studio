@@ -39,6 +39,21 @@ class MigrationArtifacts(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        # Synthetic host artifacts belong to the unprivileged test runner.
+        # Inject host ownership only for this fixture, retaining the real
+        # regular-file/link/size checks and every production ownership guard.
+        regular = release.regular
+        def fixture_regular(path, *, root_owned=False, maximum=None):
+            if root_owned:
+                self.assertTrue(Path(path).is_relative_to(self.root))
+            return regular(path, maximum=maximum)
+        ownership = patch.object(release, "regular", side_effect=fixture_regular)
+        ownership.start(); self.addCleanup(ownership.stop)
+        directories = patch.object(maintenance, "protected_directory",
+            side_effect=lambda path: self.assertTrue(Path(path).is_relative_to(self.root) and Path(path).is_dir()))
+        directories.start(); self.addCleanup(directories.stop)
+        chown = patch.object(maintenance.os, "chown", create=True)
+        chown.start(); self.addCleanup(chown.stop)
         self.platform = self.root / "platform"; self.platform.mkdir()
         (self.platform / "release-manifest.json").write_text(json.dumps({"commit": COMMIT}))
         raw = json.dumps({"os": "linux", "architecture": "amd64", "config": {

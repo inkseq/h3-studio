@@ -9,6 +9,24 @@ The integrated app accesses loopback port 3000 through the shared namespace
 described below; a container's own loopback cannot reach a standalone host port.
 Do not publish the administrator endpoint.
 
+Current #132 qualification explicitly uses central
+`vastai/vastai--sixnine-dstack-20261011` and
+`runpod/runpod--sixnine-dstack-20261011` with unchanged pinned-client protocols.
+Preserve old profiles. Authenticated stock checks are read-only for both; paid
+P2 is Vast only and RunPod remains read-only. Before production activation,
+qualify two independent single-GPU runs (one FL, one REF), warm successive jobs,
+business idle stop and keep-on within the original deadline.
+
+Bind both source selections and protected execution/capacity configuration to
+`h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-v2`, with new configuration
+identities and an explicit default. This additive revision has a 29 GiB
+allocation floor and separate 29 GiB effective available-headroom check.
+#130's 29.2 GiB total-cgroup test disabled the old RAM gate; it does not prove
+that every 29.2 GiB host passes this gate after torch/MMGP imports. Record both
+quantities before model load in P2. Keep the original 96 GiB manifests and
+unpruned/PRO 6000 floors unchanged; model support is not a historical-case
+whitelist and this profile is unqualified until its own integration evidence.
+
 The integration owner supplies `DstackStore` over the existing ledger. Its
 `begin_apply` transaction commits the immutable run spec and original reservation
 once before `/runs/apply`. It returns false for any previously started operation.

@@ -33,6 +33,16 @@ resolution of original tasks and obligations. This direction supersedes building
 additional bespoke new-path provider schedulers; source, release and real-path
 acceptance remain separate. Detailed legacy observations below remain historical.
 
+Current qualification selects central `vastai--sixnine-dstack-20261011` and
+`runpod--sixnine-dstack-20261011` without changing older identities. Authenticate
+and read stock for both; paid P2 is Vast only. Two independent single-GPU runs,
+one FL and one REF, use the additive 29 GiB pruned INT8 profile. #130 supports
+the allocation floor, not proof of 29 GiB available headroom after imports.
+Preserve historical manifests and unpruned gates. Both warm successive generation
+and idle/keep-on lifecycle must pass before P3 production activation; CPU-only
+configuration/build evidence does not bypass that gate. RunPod rental/cache is
+deferred until separately authorized and qualified.
+
 ## 2. Facts, limitations, and targets
 
 The following is a source-code and historical-record baseline, not a fresh production inspection.

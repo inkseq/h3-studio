@@ -21,7 +21,7 @@ class OperatorSourceBuilderTests(unittest.TestCase):
             # subprocess, or GPU probe even when creating the full matrix.
             with patch('subprocess.run', side_effect=AssertionError('no subprocess')):
                 receipt = subject.build(output)
-            self.assertEqual(len(receipt['sources']), 12)
+            self.assertEqual(len(receipt['sources']), 14)
             self.assertFalse(receipt['production_adapter_verified'])
             self.assertEqual(json.loads((output/'index.json').read_text()), receipt)
             seen, archives, slots = set(), set(), {}
