@@ -186,6 +186,54 @@ configuration. Offline fake SDK and inert Linux process tests establish these
 guards; actual download throughput, interruption reuse and cold-start duration
 need a separately authorized future host measurement.
 
+#### Explicit original-download continuation
+
+`tools/resume_wangp_download.py` is a separately staged, Linux-root operation
+for a confirmed stopped `model_download_failed` or `model_download_timeout`.
+It supports only the bootstrap SHA pinned by `ORIGINAL_BOOTSTRAP_SHA` in the
+tool and Python **3.12.14**. It does not replace the original bootstrap or
+native bundle, rerun initial bootstrap, or run automatically from the controller.
+
+Before execution, independently approve a protected one-use authority with
+purpose `resume-original-model-download-v1`. Its `input_sha256` binds all nine
+original inputs: `config`, `token`, `package`, `manifest`, `bootstrap`, `identity`,
+`marker`, `status`, and `failure`. Bind the exact original slot, dstack run,
+provider instance, hard deadline and recovery-tool SHA. `parent_metadata` must
+exactly describe every original install/status directory ancestor, with root
+UID/GID and observed mode 0700, 0755 or 0775. This permits only those pinned
+existing parents; it does not relax unrelated paths or require chmod of originals.
+Stage the tool and authority in a new root-owned 0700 directory, with 0600 files.
+
+The authority expires within 300 seconds of issuance and within the original
+hard deadline. More than 900 seconds must remain for runtime verification/start;
+download and cache-lock waits are bounded to preserve that margin. Matching
+failure receipts must confirm the download child stopped. Complete, stable
+process visibility must show no bootstrap/download/launcher child, the original
+loopback port must refuse connections, and no runtime configuration, slot state
+or runtime-start marker may exist. Unknown process or startup outcomes refuse
+continuation.
+
+Use the original config and token file; `--receipt` names the approved authority,
+not an ordinary setup or verification receipt. Paths below are placeholders:
+
+```sh
+/venv/main/bin/python /protected/recovery/resume_wangp_download.py \
+  --config /original/slot/wangp-runtime.json \
+  --token-file /original/slot/private-runtime-token \
+  --receipt /protected/recovery/authority.json
+```
+
+The tool durably journals `continuation_started` before effects and saves the
+original failure/status evidence. It retains the original model directory and
+SDK `local_dir` bytes, while the new attempt uses an isolated `HF_HOME`; the old
+attempt/cache evidence is retained. This does not certify Xet-cache reuse or
+avoided network transfer. After download it uses the SHA-pinned original remaining
+setup, verification and launcher. A consumed intent or unknown result means
+reconcile the original journal/process; never replay the command or remove its
+marker to retry. Successful native readiness remains separate from actual video
+generation. There are no provider, job, ledger, budget or rental-extension
+operations in this tool.
+
 The normal launch receipt is `slot-state/runtime-verification.json`, written
 atomically with mode 0600 after full verification. It binds the manifest, slot,
 process ID and randomly generated host incarnation, and explicitly does not
