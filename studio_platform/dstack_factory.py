@@ -21,6 +21,7 @@ from sqlalchemy import select, update
 from .dstack_capacity import DstackError
 from .dstack_operator import BACKEND_MARKER, PROVIDERS
 from .dstack_runtime import DstackNativeRuntime, DstackRuntimeConfig, IDENTITY_FIELDS
+from .native_runtime_document import prepared_runtime_document
 from .operator_capacity import operator_nodes
 from .runtime_catalog import engine_manifest, get_profile
 from .wangp_bootstrap import SOURCE_NAMES, read_sources
@@ -178,9 +179,8 @@ class RuntimeFactory:
         _require({name: hashlib.sha256(data).hexdigest() for name, data in files.items()} == dict(config.source_sha256),
                  "dstack_runtime_source_changed")
         # No URL/env/secret/config injection into the prepared image bootstrap.
-        from tools.build_operator_sources import _runtime
         runtime = json.loads(files["wangp-runtime.json"])
-        _require(runtime == _runtime(profile, 0, 1, config.source_sha256["wangp-package.tar.gz"]),
+        _require(runtime == prepared_runtime_document(profile, 0, 1, config.source_sha256["wangp-package.tar.gz"]),
                  "dstack_runtime_prepared_source_required")
         self.sources[pair] = (directory, dict(config.source_sha256), manifest.digest)
 

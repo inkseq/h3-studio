@@ -19,11 +19,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from deploy.wangp.package_tool import small_bundle
+from studio_platform.native_runtime_document import (
+    MODEL_ROOT, PREPARED_ROOT, prepared_runtime_document as _runtime)
 from studio_platform.runtime_catalog import PROFILE_IDS, engine_manifest, get_profile
 
 SOURCE_NAMES = ("wangp-bootstrap.py", "wangp-manifest.json", "wangp-runtime.json", "wangp-package.tar.gz")
-PREPARED_ROOT = "/opt/workspace-internal/Wan2GP"
-MODEL_ROOT = "/root/sixnine-cache/models"
 
 
 def _write(path, data):
@@ -36,24 +36,6 @@ def _write(path, data):
 
 def _json(value):
     return (json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
-
-
-def _runtime(profile_id, index, count, bundle_hash):
-    remote = "/workspace/h3-studio/profile-slot-" + str(index)
-    install = "/root/sixnine-cache/operator/profile-slot-" + str(index)
-    return {
-        "version": 1, "deployment_profile_id": profile_id,
-        "profile_slot_index": index, "expected_host_gpus": count,
-        "install_root": install, "source_bundle_path": remote + "/wangp-package.tar.gz",
-        "source_bundle_sha256": bundle_hash,
-        "dependency_artifact_url": "", "dependency_artifact_path": "",
-        # Required schema field, unused with prepared_root; zero is deliberately
-        # not a claim that a dependency archive has been built or verified.
-        "dependency_artifact_sha256": "0" * 64,
-        "manifest_path": remote + "/wangp-manifest.json", "model_root": MODEL_ROOT,
-        "config_path": install + "/wgp_config.json", "status_path": remote + "/setup-status.json",
-        "port": 8199 + index, "prepared_root": PREPARED_ROOT,
-    }
 
 
 def build(output):
