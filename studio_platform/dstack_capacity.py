@@ -187,8 +187,18 @@ class DstackClient:
                 headers=self._headers, timeout=self.timeout)
             if absent and response.status_code == 404:
                 return None
-            _require(response.status_code < 300 and response.status_code >= 200, "dstack_api_rejected")
             _require(len(response.content) <= 8 * 1024**2, "dstack_response_limit")
+            # Pinned 0.22.3 returns its structured NotExistsError as HTTP 400.
+            # Only an exact optional read may interpret that sole error as
+            # absence; never treat other errors or a rejected mutation so.
+            if absent and response.status_code == 400:
+                document = response.json()
+                detail = document.get("detail") if isinstance(document, dict) else None
+                if (isinstance(detail, list) and len(detail) == 1
+                        and isinstance(detail[0], dict)
+                        and detail[0].get("code") == "resource_not_exists"):
+                    return None
+            _require(response.status_code < 300 and response.status_code >= 200, "dstack_api_rejected")
             if not response.content:
                 return {}
             return response.json()

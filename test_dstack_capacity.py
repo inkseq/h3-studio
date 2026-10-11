@@ -444,6 +444,34 @@ class DstackCapacityTests(unittest.TestCase):
 
 
 class DstackRESTTests(unittest.TestCase):
+    def test_exact_get_accepts_only_pinned_not_found_errors(self):
+        cases = [(404, {}, True),
+            (400, {"detail": [{"code": "resource_not_exists", "msg": "Run not found"}]}, True),
+            (400, {"detail": [{"code": "other_error"}]}, False),
+            (400, {"detail": [{"code": "resource_not_exists"}, {"code": "other_error"}]}, False),
+            (400, {"detail": []}, False), (400, [], False)]
+        for status, body, missing in cases:
+            with self.subTest(status=status, body=body):
+                session = httpx.Client(transport=httpx.MockTransport(
+                    lambda _, status=status, body=body: httpx.Response(status, json=body)))
+                client = DstackClient("http://127.0.0.1:3000", "secret-token-123456", "sixnine",
+                    session=session)
+                if missing:
+                    self.assertIsNone(client.get(run_id=RUN))
+                else:
+                    with self.assertRaisesRegex(DstackError, "^dstack_api_rejected$"):
+                        client.get(run_id=RUN)
+
+    def test_mutations_do_not_treat_not_found_as_success(self):
+        session = httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(400,
+            json={"detail": [{"code": "resource_not_exists", "msg": "Run not found"}]})))
+        client = DstackClient("http://127.0.0.1:3000", "secret-token-123456", "sixnine", session=session)
+        for method, argument in ((client.apply, request().run_spec(PUB)),
+                                 (client.stop, request().run_name)):
+            with self.subTest(method=method.__name__):
+                with self.assertRaisesRegex(DstackError, "^dstack_api_rejected$"):
+                    method(argument)
+
     def test_exact_paths_and_create_only_apply(self):
         seen = []
         def handler(req):
