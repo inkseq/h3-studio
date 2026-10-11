@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from tools.check_migration_deploy import ROOT, check, local_inputs, main, validate
+from tools.check_migration_deploy import ROOT, check, local_inputs, main, memory_mib, validate
 
 
 def fixture_environment():
@@ -59,6 +59,8 @@ class MigrationDeployTests(unittest.TestCase):
         self.assertGreaterEqual(self.receipt["host_reserve_mib"], 512)
         self.assertEqual(self.receipt["gpu_operations"], 0)
         services = self.document["services"]
+        self.assertEqual(memory_mib(services["dstack"]["mem_limit"]), 768)
+        self.assertEqual(memory_mib(services["hatchet"]["mem_limit"]), 384)
         self.assertEqual(services["dstack"]["entrypoint"], ["python", "-c"])
         self.assertEqual(services["hatchet-db"]["networks"], {"database": None})
         self.assertEqual(services["controller"]["command"], ["python", "-m", "studio_platform.dstack_controller"])
@@ -232,7 +234,7 @@ print(json.dumps(result))
                     self.assertTrue(properties["regular"] and properties["stripped"])
                     self.assertEqual(properties["links"], 1)
                 command = ["run", "--detach", "--name", names[0], "--label", label, "--pull=never",
-                           "--network", "container:" + names[2], "--memory", "512m", "--pids-limit", "128",
+                           "--network", "container:" + names[2], "--memory", str(service["mem_limit"]), "--pids-limit", "128",
                            "--read-only", "--cap-drop=ALL", "--security-opt", "no-new-privileges:true",
                            "--tmpfs", "/tmp:rw,size=67108864,mode=1777",
                            "--tmpfs", "/root/.cache:rw,size=1048576,mode=0700",
