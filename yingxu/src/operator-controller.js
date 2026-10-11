@@ -50,7 +50,7 @@ export function createOperatorController({client=createOperatorClient(),storage=
     start:preview=>command('start',[],{preview_id:preview.preview_id}),
     drain:node=>command('drain',[node.id],{expected_version:node.version}),
     stop:node=>command('stop',[node.id],{expected_version:node.version}),
-    hold:(node,seconds)=>command('hold',[node.id],{expected_version:node.version,hold_seconds:seconds}),
+    hold:(node,seconds)=>command('hold',[node.id],{...(pendingNamespace==='dstack'&&seconds&&typeof seconds==='object'?seconds:{hold_seconds:seconds}),expected_version:node.version}),
     manualReview:(node,attestation)=>command('manualReview',[node.id],{expected_version:node.version,provider_instance_id:node.provider_instance_id,...attestation}),
     extensionPreview:(node,additionalSeconds)=>act(()=>client.extensionPreview(node.id,{expected_version:node.version,additional_seconds:additionalSeconds})),
     extend:preview=>command('extend',[preview.node_id],{preview_id:preview.preview_id}),

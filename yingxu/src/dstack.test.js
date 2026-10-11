@@ -1,8 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import React from 'react';
+import {renderToStaticMarkup} from 'react-dom/server';
+import {build} from 'esbuild';
+import {readFile} from 'node:fs/promises';
+import {fileURLToPath} from 'node:url';
+import {Module} from 'node:module';
 import {createDstackClient} from './dstack-client.js';
 import {createOperatorController} from './operator-controller.js';
-import {dstackGroups,dstackNodeStatus,dstackPreviewCurrent} from './dstack-presentation.js';
+import {dstackGroups,dstackKeepOnSelection,dstackLifecycle,dstackLifetime,dstackNodeStatus,dstackPreviewCurrent} from './dstack-presentation.js';
 
 const memory=()=>{const values=new Map();return {getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)};};
 function client(overrides={}){let account;return {setAccount(value){account=value;},reset(){},state:async()=>({capacity_backend:'dstack-v1',enabled:true,operator:{account},nodes:[]}),catalog:async()=>({enabled:true,profiles:[]}),...overrides};}
@@ -124,4 +130,99 @@ test('expired or changed profile/mode selection cannot confirm another preview',
   assert.equal(dstackPreviewCurrent(preview,'ref-profile',900,1000000),false);
   assert.equal(dstackPreviewCurrent(preview,'fl-profile',1800,1000000),false);
   assert.equal(dstackPreviewCurrent(preview,'fl-profile',900,1100000),false);
+});
+
+const lifecycle=(changes={})=>({version:2,keep_on:'idle',hold_until:0,idle_shutdown_seconds:600,
+  reservation_seconds:3600,expected_runtime_s:1800,budget_account_ids:['owner-cap','global-cap'],...changes});
+const continuingPreview=(changes={})=>({capacity_backend:'dstack-v1',preview_id:'original-quote',
+  selection:{profile_id:'ref-profile',keep_on:'idle',hold_seconds:0},expires_at:1100,hard_deadline:null,
+  reservation_microusd:920834,hourly_cost_microusd:850000,price_basis:'approved_ceiling',can_start:true,
+  initial_reservation_seconds:3600,lifecycle:lifecycle(),...changes});
+
+test('explicit continuing preview accepts null deadline while retaining selection, expiry and funded quote guards',()=>{
+  const preview=continuingPreview(),policy=dstackKeepOnSelection('idle',10),now=1000000;
+  assert.equal(dstackPreviewCurrent(preview,'ref-profile',policy,now),true);
+  // A catalog refresh may change lifecycle versions: an old finite form must
+  // never consent to a continuing rental through the API's TTL compatibility.
+  assert.equal(dstackPreviewCurrent({...preview,selection:{profile_id:'ref-profile',ttl_seconds:900}},'ref-profile',900,now),false);
+  for(const [changed,profile,selection] of [
+    [preview,'fl-profile',policy],
+    [preview,'ref-profile',dstackKeepOnSelection('until_stopped',10)],
+    [{...preview,expires_at:1000},'ref-profile',policy],
+    [{...preview,expires_at:null},'ref-profile',policy],
+    [{...preview,lifecycle:undefined},'ref-profile',policy],
+    [{...preview,hard_deadline:undefined},'ref-profile',policy],
+    [{...preview,hard_deadline:1900},'ref-profile',policy],
+    [{...preview,lifecycle:lifecycle({version:1})},'ref-profile',policy],
+    [{...preview,lifecycle:lifecycle({keep_on:'always'})},'ref-profile',policy],
+    [{...preview,lifecycle:lifecycle({idle_shutdown_seconds:0})},'ref-profile',policy],
+    [{...preview,lifecycle:lifecycle({budget_account_ids:[]})},'ref-profile',policy],
+    [{...preview,initial_reservation_seconds:NaN},'ref-profile',policy],
+    [{...preview,price_basis:'observed'},'ref-profile',policy],
+    [{...preview,can_start:false},'ref-profile',policy],
+    [{...preview,hourly_cost_microusd:0},'ref-profile',policy],
+    [{...preview,reservation_microusd:-1},'ref-profile',policy],
+  ])assert.equal(dstackPreviewCurrent(changed,profile,selection,now),false);
+  const held=continuingPreview({selection:{profile_id:'ref-profile',keep_on:'until',hold_seconds:600},lifecycle:lifecycle({keep_on:'until',hold_until:1600})});
+  assert.equal(dstackPreviewCurrent(held,'ref-profile',dstackKeepOnSelection('until',10),now),true);
+  assert.equal(dstackPreviewCurrent(held,'ref-profile',dstackKeepOnSelection('until',11),now),false);
+  const idleChanged={...preview,selection:{...preview.selection,idle_shutdown_seconds:300}};
+  assert.equal(dstackPreviewCurrent(idleChanged,'ref-profile',policy,now),false);
+});
+
+test('continuing status uses the exact node policy without turning null deadlines into readiness',()=>{
+  const now=1000000,node={id:'n',state:'runtime_unconfirmed',ready:false,desired_state:'running',
+    observation_fresh:true,observed_at:1000,hard_deadline:null,hold_until:0,lifecycle:lifecycle()};
+  assert.equal(dstackNodeStatus(node,now).label,'等待运行接口验收');
+  assert.equal(dstackNodeStatus({...node,state:'ready',ready:true},now).label,'运行接口就绪');
+  assert.equal(dstackNodeStatus({...node,state:'ready',ready:false},now).label,'等待业务执行槽与准入');
+  assert.equal(dstackNodeStatus(node,now+31000).label,'状态待核对');
+  assert.equal(dstackNodeStatus({...node,lifecycle:undefined},now).group,'review');
+  assert.equal(dstackNodeStatus({...node,lifecycle:lifecycle({version:1})},now).group,'review');
+  assert.equal(dstackNodeStatus({...node,hold_until:123},now).group,'review');
+  assert.match(dstackLifetime(node),/空闲 10 分钟后关机/);
+  assert.match(dstackLifetime({...node,lifecycle:lifecycle({keep_on:'until_stopped'})}),/保留至手动关机.*原预算限制/);
+  assert.match(dstackLifetime({...node,hold_until:1600,lifecycle:lifecycle({keep_on:'until',hold_until:1600})}),/保留至.*之后空闲/);
+  assert.equal(dstackLifecycle({...node,lifecycle:lifecycle({budget_account_ids:['duplicate','duplicate']})}),null);
+  const finite={...node,lifecycle:undefined,hard_deadline:999};
+  assert.equal(dstackNodeStatus(finite,now).label,'期限已到 · 等待停止核对');
+});
+
+test('all continuing keep-on choices use the original versioned hold journal and replay identity',async()=>{
+  const calls=[],storage=memory();let fail=true;
+  const controller=createOperatorController({storage,pendingNamespace:'dstack',client:client({
+    hold:async(id,body,key)=>{calls.push({id,body,key});if(fail)throw Error('unknown hold');return {node_id:id};},
+  })});
+  await controller.setAccount('superdan');
+  assert.equal(dstackKeepOnSelection('until',0),null);
+  assert.equal(dstackKeepOnSelection('until',1441),null);
+  const original=dstackKeepOnSelection('until_stopped',10);
+  await assert.rejects(controller.hold({id:'original-node',version:1000},original));
+  assert.deepEqual(calls[0].body,{keep_on:'until_stopped',hold_seconds:0,expected_version:1000});
+  fail=false;await controller.recover();assert.deepEqual(calls[1],calls[0]);
+  await controller.hold({id:'original-node',version:1010},dstackKeepOnSelection('until',10));
+  assert.deepEqual(calls[2].body,{keep_on:'until',hold_seconds:600,expected_version:1010});
+  await controller.hold({id:'original-node',version:1020},dstackKeepOnSelection('idle',10));
+  assert.deepEqual(calls[3].body,{keep_on:'idle',hold_seconds:0,expected_version:1020});
+  controller.destroy();
+});
+
+test('actual start/detail forms use v2 policy controls while old finite machines retain their deadline bounds',async()=>{
+  const path=fileURLToPath(new URL('./DstackCapacity.jsx',import.meta.url));
+  const source=await readFile(path,'utf8');
+  const bundled=await build({stdin:{contents:source+'\nexport {Start,NodeDialog};',resolveDir:path.replace(/[/\\][^/\\]+$/,''),loader:'jsx'},bundle:true,write:false,platform:'node',format:'cjs',packages:'external',loader:{'.css':'empty'}});
+  const module=new Module(path);module.filename=path;module.paths=Module._nodeModulePaths(path.replace(/[/\\][^/\\]+$/,''));module._compile(bundled.outputFiles[0].text,path);
+  const prior=globalThis.document;globalThis.document={activeElement:null};
+  try{
+    const props={controller:{},busy:false,now:1000000,onClose:()=>{}},profile={id:'ref-profile',model_id:'pruned-int8',mode:'ref',backend:'vastai',gpu_names:['RTX5090'],memory_gib:29,disk_gib:200,gpu_memory_gib:32,max_ttl_seconds:3600};
+    const form=version=>renderToStaticMarkup(React.createElement(module.exports.Start,{...props,profiles:[profile],lifecycleVersion:version}));
+    assert.match(form(2),/直到我手动关机/);assert.match(form(2),/没有固定运行截止时间/);assert.doesNotMatch(form(2),/最多运行多久/);
+    assert.match(form(1),/最多运行多久/);assert.doesNotMatch(form(1),/直到我手动关机/);
+    const node={id:'n',provider:'vast',runtime_profile_id:'ref-profile',mode:'ref',state:'ready',ready:true,desired_state:'running',observation_fresh:true,observed_at:1000,hard_deadline:null,hold_until:0,hourly_cost_microusd:850000,lifecycle:lifecycle()};
+    const details=value=>renderToStaticMarkup(React.createElement(module.exports.NodeDialog,{...props,node:value}));
+    assert.match(details(node),/确认待机策略/);assert.doesNotMatch(details(node),/原停止上限内|尚未确认<\/dd>|<button disabled/);
+    assert.match(details({...node,lifecycle:lifecycle({keep_on:'until_stopped'})}),/保留至手动关机.*原预算限制/);
+    const old=details({...node,lifecycle:undefined,hard_deadline:1600});
+    assert.match(old,/原停止上限内/);assert.match(old,/max="10"/);assert.doesNotMatch(old,/直到我手动关机/);
+  }finally{if(prior===undefined)delete globalThis.document;else globalThis.document=prior;}
 });
