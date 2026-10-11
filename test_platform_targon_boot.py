@@ -83,7 +83,8 @@ class VMMemoryTests(unittest.TestCase):
         self.root = Path(temporary.name)
         self.proc, self.groups = self.root/'proc', self.root/'cgroups'
         (self.proc/'self').mkdir(parents=True); self.groups.mkdir()
-        (self.proc/'meminfo').write_text('MemAvailable: '+str(120*GIB//1024)+' kB\n')
+        (self.proc/'meminfo').write_text('MemTotal: '+str(512*GIB//1024)+' kB\n'
+            'MemAvailable: '+str(120*GIB//1024)+' kB\n')
         (self.proc/'self/cgroup').write_text('0::/\n')
         (self.groups/'cgroup.controllers').write_text('memory cpu\n')
 
@@ -95,6 +96,82 @@ class VMMemoryTests(unittest.TestCase):
 
     def test_vm_root_without_memory_max_uses_observed_available_ram(self):
         self.assertEqual(session._available_profile_ram(self.proc,self.groups), 120*GIB)
+        self.assertEqual(session._effective_total_profile_ram(self.proc,self.groups), 512*GIB)
+
+    def test_allocated_capacity_is_distinct_from_used_or_available_ram(self):
+        self.group(self.groups,limit=29*GIB,used=5*GIB,cache=2*GIB,dirty=GIB)
+        self.assertEqual(session._effective_total_profile_ram(self.proc,self.groups),29*GIB)
+        self.assertEqual(session._available_profile_ram(self.proc,self.groups),25*GIB)
+
+    def test_total_capacity_respects_host_total_and_tighter_ancestor(self):
+        (self.proc/'self/cgroup').write_text('0::/system.slice/wangp.service\n')
+        self.group(self.groups/'system.slice',limit=29*GIB,used=5*GIB)
+        self.group(self.groups/'system.slice/wangp.service',limit=40*GIB,used=GIB)
+        self.assertEqual(session._effective_total_profile_ram(self.proc,self.groups),29*GIB)
+        (self.proc/'meminfo').write_text('MemTotal: '+str(24*GIB//1024)+' kB\n'
+            'MemAvailable: '+str(20*GIB//1024)+' kB\n')
+        self.assertEqual(session._effective_total_profile_ram(self.proc,self.groups),24*GIB)
+
+    def test_total_capacity_does_not_hide_a_child_below_a_constrained_mount_root(self):
+        self.group(self.groups,limit=40*GIB,used=GIB)
+        self.group(self.groups/'runtime',limit=28*GIB,used=GIB)
+        (self.proc/'self/cgroup').write_text('0::/runtime\n')
+        self.assertEqual(session._effective_total_profile_ram(self.proc,self.groups),28*GIB)
+        # Preserve the previous profiles' container-root available contract.
+        self.assertEqual(session._available_profile_ram(self.proc,self.groups),39*GIB)
+
+    def test_unknown_total_or_invalid_limits_cannot_become_capacity_proof(self):
+        original=(self.proc/'meminfo').read_text()
+        for value in ('MemAvailable: 1024 kB\n','MemTotal: 0 kB\nMemAvailable: 1024 kB\n'):
+            (self.proc/'meminfo').write_text(value)
+            with self.subTest(value=value),self.assertRaisesRegex(ValueError,'total_ram_unconfirmed'):
+                session._effective_total_profile_ram(self.proc,self.groups)
+        (self.proc/'meminfo').write_text(original)
+        for limit in ('-1','0','invalid'):
+            (self.groups/'memory.max').write_text(limit)
+            with self.subTest(limit=limit),self.assertRaisesRegex(ValueError,'cgroup_invalid'):
+                session._effective_total_profile_ram(self.proc,self.groups)
+
+    def test_missing_nonroot_limits_cannot_be_treated_as_unlimited(self):
+        (self.proc/'self/cgroup').write_text('0::/system.slice/wangp.service\n')
+        ancestor=self.groups/'system.slice'; leaf=ancestor/'wangp.service'
+        self.group(ancestor,limit=29*GIB,used=GIB)
+        self.group(leaf,limit=40*GIB,used=GIB)
+        for path in (leaf/'memory.max',ancestor/'memory.max'):
+            value=path.read_text(); path.unlink()
+            with self.subTest(missing=path.parent.name),self.assertRaisesRegex(ValueError,'cgroup_invalid'):
+                session._effective_total_profile_ram(self.proc,self.groups)
+            path.write_text(value)
+
+    def test_unreadable_limit_never_becomes_a_capacity_proof(self):
+        self.group(self.groups,limit=29*GIB,used=GIB)
+        path=self.groups/'memory.max'; original=Path.read_text
+        def read(candidate,*args,**kwargs):
+            if candidate==path:
+                raise PermissionError('private inaccessible path')
+            return original(candidate,*args,**kwargs)
+        with patch.object(Path,'read_text',read),self.assertRaisesRegex(ValueError,'^wangp_profile_cgroup_invalid$'):
+            session._effective_total_profile_ram(self.proc,self.groups)
+
+    def test_root_limit_metadata_cannot_be_mistaken_for_legitimate_absence(self):
+        path=self.groups/'memory.max'; original=Path.lstat
+        # A dangling symlink does not satisfy is_file, but lstat still proves
+        # it exists. Use its metadata so this check works without OS privileges.
+        def link(candidate,*args,**kwargs):
+            if candidate==path:
+                return NS(st_mode=session.stat.S_IFLNK|0o777)
+            return original(candidate,*args,**kwargs)
+        with patch.object(Path,'lstat',link),self.assertRaisesRegex(ValueError,'^wangp_profile_cgroup_invalid$'):
+            session._effective_total_profile_ram(self.proc,self.groups)
+        def inaccessible(candidate,*args,**kwargs):
+            if candidate==path:
+                raise PermissionError('private inaccessible path')
+            return original(candidate,*args,**kwargs)
+        with patch.object(Path,'lstat',inaccessible),self.assertRaisesRegex(ValueError,'^wangp_profile_cgroup_invalid$'):
+            session._effective_total_profile_ram(self.proc,self.groups)
+        path.mkdir()
+        with self.assertRaisesRegex(ValueError,'^wangp_profile_cgroup_invalid$'):
+            session._effective_total_profile_ram(self.proc,self.groups)
 
     def test_container_limit_retains_clean_cache_and_excludes_dirty_bytes(self):
         self.group(self.groups,limit=110*GIB,used=80*GIB,cache=20*GIB,dirty=5*GIB)
@@ -114,6 +191,8 @@ class VMMemoryTests(unittest.TestCase):
             (self.proc/'self/cgroup').write_text(value)
             with self.subTest(value=value), self.assertRaisesRegex(ValueError,'cgroup_invalid'):
                 session._available_profile_ram(self.proc,self.groups)
+            with self.subTest(total_scope=value),self.assertRaisesRegex(ValueError,'cgroup_invalid'):
+                session._effective_total_profile_ram(self.proc,self.groups)
 
 
 class TargonTransportTests(unittest.TestCase):

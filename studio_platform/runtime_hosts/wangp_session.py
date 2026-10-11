@@ -11,6 +11,7 @@ import importlib
 import importlib.metadata
 import json
 import os
+import stat
 from pathlib import Path
 import re
 import subprocess
@@ -211,17 +212,15 @@ def _lock_profile_device(torch, profile):
     return stream
 
 
-def _available_profile_ram(proc_root=Path('/proc'), group_root=Path('/sys/fs/cgroup')):
-    """Respect cgroup-v2 limits in both a container namespace and a whole VM."""
-    info = {line.split(':',1)[0]: int(line.split()[1])*1024
-            for line in (proc_root/'meminfo').read_text().splitlines()}
-    available = info['MemAvailable']
-    if (group_root/'memory.max').is_file():
+def _profile_ram_groups(proc_root, group_root, *, resolve_membership=False):
+    """Resolve the complete visible v2 ancestry, never follow an escaping link."""
+    if (group_root/'memory.max').is_file() and not resolve_membership:
         # Existing container deployments expose their constrained group here.
         group = group_root
     else:
-        # A VM's root cgroup has no memory.max. Resolve this process's v2
-        # membership instead, including constrained ancestors (e.g. a slice).
+        # Capacity admission resolves the actual process even when the mount
+        # root is constrained: a visible child can impose a tighter limit.
+        # Older available-headroom admission retains its container-root path.
         from pathlib import PurePosixPath
         groups = [line[3:] for line in (proc_root/'self/cgroup').read_text().splitlines() if line.startswith('0::')]
         if len(groups) != 1 or not groups[0].startswith('/') or '..' in PurePosixPath(groups[0]).parts:
@@ -231,9 +230,65 @@ def _available_profile_ram(proc_root=Path('/proc'), group_root=Path('/sys/fs/cgr
         group = group_root / groups[0].lstrip('/')
         if not group.is_dir():
             raise ValueError('wangp_profile_cgroup_invalid')
+    result = []
     while True:
+        if group.is_symlink() or not group.is_dir():
+            raise ValueError('wangp_profile_cgroup_invalid')
+        result.append(group)
+        if group == group_root:
+            return result
+        group = group.parent
+
+
+def _profile_ram_limit(group):
+    path = group/'memory.max'
+    if path.is_symlink():
+        raise ValueError('wangp_profile_cgroup_invalid')
+    try:
+        value = path.read_text().strip()
+    except (OSError, UnicodeError):
+        raise ValueError('wangp_profile_cgroup_invalid') from None
+    if value == 'max':
+        return None
+    if not value.isdecimal() or int(value) <= 0:
+        raise ValueError('wangp_profile_cgroup_invalid')
+    return int(value)
+
+
+def _effective_total_profile_ram(proc_root=Path('/proc'), group_root=Path('/sys/fs/cgroup')):
+    """Allocated capacity: host total constrained by every finite ancestor."""
+    info = {line.split(':',1)[0]: int(line.split()[1])*1024
+            for line in (proc_root/'meminfo').read_text().splitlines()}
+    total = info.get('MemTotal')
+    if type(total) is not int or total <= 0:
+        raise ValueError('wangp_profile_total_ram_unconfirmed')
+    for group in _profile_ram_groups(proc_root, group_root, resolve_membership=True):
+        # A whole VM root can lack memory.max. A resolved non-root memory
+        # membership must expose its limit; missing observation is not max.
+        try:
+            limit_stat = (group/'memory.max').lstat()
+        except FileNotFoundError:
+            if group == group_root:
+                continue
+            raise ValueError('wangp_profile_cgroup_invalid')
+        except OSError:
+            raise ValueError('wangp_profile_cgroup_invalid') from None
+        if not stat.S_ISREG(limit_stat.st_mode):
+            raise ValueError('wangp_profile_cgroup_invalid')
+        limit = _profile_ram_limit(group)
+        if limit is not None:
+            total = min(total, limit)
+    return total
+
+
+def _available_profile_ram(proc_root=Path('/proc'), group_root=Path('/sys/fs/cgroup')):
+    """Headroom after imports; clean mapped file-cache pages are reclaimable."""
+    info = {line.split(':',1)[0]: int(line.split()[1])*1024
+            for line in (proc_root/'meminfo').read_text().splitlines()}
+    available = info['MemAvailable']
+    for group in _profile_ram_groups(proc_root, group_root):
         if (group/'memory.max').is_file():
-            limit_text = (group/'memory.max').read_text().strip()
+            limit = _profile_ram_limit(group)
             used = int((group/'memory.current').read_text())
             fields = dict((key,int(value)) for key,value in
                           (line.split() for line in (group/'memory.stat').read_text().splitlines()))
@@ -241,21 +296,31 @@ def _available_profile_ram(proc_root=Path('/proc'), group_root=Path('/sys/fs/cgr
             lru = max(0,fields.get('active_file',0)+fields.get('inactive_file',0))
             exclusions = sum(max(0,fields.get(k,0)) for k in ('file_dirty','file_writeback','unevictable'))
             reclaimable = max(0,min(file_bytes,lru)-exclusions)
-            if limit_text != 'max':
-                limit = int(limit_text)
+            if limit is not None:
                 available = min(available,limit,max(0,limit-used+reclaimable))
-        if group == group_root:
-            break
-        group = group.parent
     return available
 
 
 def _profile_memory_admission(torch, profile):
-    """Cold-start gate from the measured pilot; clean file cache is reclaimable."""
+    """Keep allocation evidence separate from an older headroom contract."""
     available = _available_profile_ram()
     free,_ = torch.cuda.mem_get_info(0)
-    if (available < profile['runtime']['minimum_available_ram_bytes']
-            or free < profile['minimum_free_vram_bytes']):
+    runtime = profile['runtime']
+    metric = runtime.get('ram_admission_metric', 'available-headroom-v1')
+    if metric == 'effective-total-v1':
+        capacity = _effective_total_profile_ram()
+        minimum = runtime['minimum_total_ram_bytes']
+        if type(minimum) is not int or minimum <= 0:
+            raise ValueError('wangp_profile_total_ram_unconfirmed')
+        print(json.dumps({'event': 'profile_memory_admission', 'ram_metric': metric,
+            'effective_total_ram_bytes': capacity, 'available_ram_bytes': available,
+            'minimum_total_ram_bytes': minimum, 'free_vram_bytes': free}), flush=True)
+        ram_insufficient = capacity < minimum
+    elif metric == 'available-headroom-v1':
+        ram_insufficient = available < runtime['minimum_available_ram_bytes']
+    else:
+        raise ValueError('wangp_profile_memory_admission_metric_invalid')
+    if ram_insufficient or free < profile['minimum_free_vram_bytes']:
         raise ValueError('wangp_profile_memory_headroom_insufficient')
 
 

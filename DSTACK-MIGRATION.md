@@ -125,22 +125,31 @@ cgroup limits must be distinguished. The pruned INT8 short-video matrix is not
 proof for full weights, long clips or all hardware.
 
 For this qualification use the additive RTX 5090 profile
-`h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-v2` for both modes.
-Its allocation floor and separate native available-headroom gate are **29 GiB**,
+`h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3` for both modes.
+Its provider allocation floor and native effective-total-capacity gate are **29 GiB**,
 keeping the same pinned pruned INT8 weights, Qwen/VAEs, MMGP profile 4 and controls.
 #130 measured a 29.2 GiB total cgroup limit on standalone RTX 5090 for short
 20-step FL/REF clips at 480p and 768p, including mixed REF inputs, with the old
-RAM admission gate disabled. That is operating-floor evidence, not proof of
-29 GiB available headroom after torch/MMGP imports. A 29.2 GiB allocation may
-fail the retained headroom gate even though the historical standalone run worked.
-P2 must record actual total/cgroup limits and effective available headroom after
-imports before loading. Do not invent a lower threshold or claim a universal
+RAM admission gate disabled. Effective total capacity is the minimum of host
+MemTotal and all visible finite cgroup-v2 ancestor limits; invalid constrained
+scope fails closed. Available headroom is a separate observation, not a second
+29 GiB gate. Preserve the issued v2 available-headroom contract and every older
+manifest rather than rewriting an existing attempt's identity.
+P2 must record actual total/cgroup limits and available/anonymous/cache/peak
+memory observations. Do not invent a lower headroom threshold or claim a universal
 minimum or proof for 50 steps/15 seconds. Keep free-VRAM, disk, parameter, price
 and budget gates. The historical 96 GiB profile and its FL/REF manifest identities
 remain unchanged, as do the unpruned/PRO 6000 gates. Select the new ID explicitly
 in both source bundles, protected capacity profiles, execution bindings and the
 default profile; use new configuration identities. No historical accepted job
 is retargeted and no timing sample is fabricated for the new integration.
+
+An explicitly stopped cold preparation may be terminated without finishing
+model loading only if the exact owned instance has fresh observations, no
+worker registration history, and no native incarnation/first-ready latch.
+Recheck this under the original capacity lock before journaling stop. Previously
+admitted or uncertain inference still requires the original drain/collection
+and native-idle proof; task termination does not settle supplier billing.
 
 Vast local persistent volumes are host-bound; dstack 0.22.3 does not expose them
 as reusable Vast volumes. RunPod network volumes can cache weights but constrain

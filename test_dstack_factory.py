@@ -108,6 +108,25 @@ class FactoryTests(LedgerCase):
                 self.assertEqual(packaged['minimum_ram_bytes'], 29 * 2**30)
         self.assertEqual(self.client.applied, [])
 
+    def test_total_capacity_sources_keep_new_manifest_and_both_mode_bindings(self):
+        revised = PROFILE_IDS[5]
+        directory = self.root / 'sources-29gib-total'
+        receipt = build(directory, [(revised, 'fl'), (revised, 'ref')])
+        self.assertEqual({entry['mode'] for entry in receipt['sources']}, {'fl', 'ref'})
+        for entry in receipt['sources']:
+            source = directory / entry['directory']
+            manifest = json.loads((source / 'wangp-manifest.json').read_text())
+            self.assertEqual(entry['runtime_profile_id'], revised)
+            self.assertEqual(entry['engine_manifest_digest'], engine_manifest(revised, entry['mode']).digest)
+            self.assertEqual(manifest['runtime_profile']['ram_admission_metric'], 'effective-total-v1')
+            self.assertNotIn('minimum_available_ram_bytes', manifest['runtime_profile'])
+            with tarfile.open(source / 'wangp-package.tar.gz') as archive:
+                packaged = json.load(archive.extractfile('deploy/wangp/profiles/' + revised + '.json'))
+                self.assertEqual(packaged['runtime']['minimum_total_ram_bytes'], 29 * 2**30)
+                session = archive.extractfile('studio_platform/runtime_hosts/wangp_session.py').read()
+                self.assertIn(b'def _effective_total_profile_ram(', session)
+        self.assertEqual(self.client.applied, [])
+
     def test_construction_reads_only_no_journal_secret_output_or_runtime_directory(self):
         binding, _ = self.allocation()
         before = self.store.load(binding["intent_id"])

@@ -18,12 +18,13 @@ qualify two independent single-GPU runs (one FL, one REF), warm successive jobs,
 business idle stop and keep-on within the original deadline.
 
 Bind both source selections and protected execution/capacity configuration to
-`h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-v2`, with new configuration
+`h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3`, with new configuration
 identities and an explicit default. This additive revision has a 29 GiB
-allocation floor and separate 29 GiB effective available-headroom check.
-#130's 29.2 GiB total-cgroup test disabled the old RAM gate; it does not prove
-that every 29.2 GiB host passes this gate after torch/MMGP imports. Record both
-quantities before model load in P2. Keep the original 96 GiB manifests and
+allocation floor and a 29 GiB native total-capacity check, using the minimum
+of host MemTotal and all visible finite cgroup-v2 ancestor limits. Invalid
+constrained scope fails closed. #130 supports total allocation, not a 29 GiB
+available-headroom requirement. Record available/anonymous/cache/peak memory
+separately. Preserve the issued v2 headroom contract, original 96 GiB manifests and
 unpruned/PRO 6000 floors unchanged; model support is not a historical-case
 whitelist and this profile is unqualified until its own integration evidence.
 
@@ -35,6 +36,10 @@ is unknown and does not permit another apply. `force:false/current_resource:null
 also rejects a concurrent existing dstack resource. `record` retains immutable
 run/provider/incarnation identity. `begin_stop` locks and checks jobs, unsafe
 attempts, collection holds and retired workers before committing stop intent.
+Cold preparation with no worker history or native incarnation/first-ready latch
+may be stopped during model download after fresh exact-instance checks. A
+previously admitted runtime still needs native idle and original obligations
+resolved; disappearance is not final supplier-bill settlement.
 Do not provide a file-based substitute ledger in production or the operations CLI.
 
 Each new run requests exactly **one GPU**, explicit backend, image digest,

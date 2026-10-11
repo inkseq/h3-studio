@@ -174,6 +174,47 @@ class DstackControllerTests(fixture.DstackOperatorTests):
         self.assertEqual(controller.tick()["nodes"][0]["state"],"ready")
         self.assertEqual(self.client.stopped,[])
 
+    def test_manual_stop_cancels_cold_download_without_waiting_for_ready(self):
+        node=self.start()["node_id"]
+        self.capacity.readiness=None
+        self.running(node)
+        binding=self.store.load(node)
+        self.assertTrue(self.store.begin_bootstrap(node,binding["run_id"],"gpu-123"))
+        self.assertTrue(self.store.begin_runtime_launch(node,binding["run_id"],"gpu-123"))
+        budget=self.repo.get_budget("owner-budget")
+        self.service.node_command(self.owner,node,{},"cold-stop-original")
+        controller=self.controller()
+        controller.runtime.readiness=lambda *args: None
+        self.assertEqual(controller.tick()["nodes"][0]["state"],"stopping")
+        self.assertEqual(len(self.client.stopped),1)
+        self.assertEqual(len(self.client.applied),1)
+        self.assertEqual(self.repo.get_budget("owner-budget"),budget)
+        self.assertTrue(self.store.load(node)["stop_started"])
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(list(connection.execute(select(registered_workers))),[])
+
+    def test_cold_stop_requires_fresh_exact_identity_and_no_first_ready_history(self):
+        node=self.start()["node_id"]
+        self.capacity.readiness=None
+        self.running(node)
+        binding=self.store.load(node)
+        self.store.begin_bootstrap(node,binding["run_id"],"gpu-123")
+        self.store.begin_runtime_launch(node,binding["run_id"],"gpu-123")
+        self.service.node_command(self.owner,node,{},"cold-stop-original")
+        with self.repo.engine.connect() as connection:
+            original=dict(connection.execute(select(operator_nodes).where(operator_nodes.c.intent_id==node)).mappings().one())["payload"]
+        import copy
+        for change in ({"observed_at":self.now-31}, {"provider_instance_id":"another-instance"},
+                {"first_runtime_ready_at":self.now-1}, {"runtime_incarnation":"c"*32}):
+            with self.subTest(change=change):
+                payload=copy.deepcopy(original)
+                payload["dstack"].update(change)
+                with self.repo.transaction() as connection:
+                    connection.execute(update(operator_nodes).where(operator_nodes.c.intent_id==node).values(payload=payload))
+                self.assertFalse(self.store.begin_stop(node,binding["run_id"]))
+                self.assertFalse(self.store.load(node).get("stop_started"))
+        self.assertEqual(self.client.stopped,[])
+
     def test_hold_preserves_original_deadline_and_expired_idle_stops(self):
         node,controller=self.ready()
         deadline=self.repo.list_instance_intents()[0]["hard_deadline"]
