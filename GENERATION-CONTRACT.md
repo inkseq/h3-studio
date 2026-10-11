@@ -14,6 +14,23 @@ Worker/timeouts/cancellation do not establish an idle GPU. See
 [DSTACK-MIGRATION.md](DSTACK-MIGRATION.md) and [#132](https://github.com/inkseq/h3-studio/issues/132).
 Cloud telemetry is best effort and cannot alter task or accounting outcomes.
 
+Explicit new dstack `lifecycle.version=2` capacity is projected from live owned
+dstack runs and provider observations, never legacy Lium/Targon or historical
+intent counts. A terminated run absent from its provider does not occupy the
+new-path machine/GPU/hourly capacity limit; its accounting history remains.
+New v2 requests have null fixed deadlines and `max_duration: off`, with
+configurable business idle stop and keep-on through a finite hold or until
+manually stopped. Matching accepted queued work, active execution, unknown
+outcomes and collection obligations pause idle stop.
+Original owner/global spend caps and hourly `max_price` still apply: rolling
+funding increases the same original reservations, never resets spent amounts
+or settles an invoice. Availability, claim and late submission check identical
+exact runtime/lifecycle proof and paid-start-based funded runway, including
+the accepted runtime estimate, 120-second collection margin and 300-second
+shutdown margin. Funding failure closes new admission and requests normal
+drain; recovery and collection retain the original attempt. Historical finite
+deadline contracts and guardian evidence are unchanged.
+
 ## Current authoring and admission refinements
 
 As clarified in [#126](https://github.com/inkseq/h3-studio/issues/126), historic measurements are not a parameter whitelist. The pinned adapter implements text-only, first-only, last-only and paired first/last FL inputs; REF inputs remain a separate mapped mode. Capability discovery describes implemented model/API support and explicit adapter gaps. Preflight separately checks ownership, valid parameters, configured resource ceilings and budget. A supported but unmeasured combination requires no extra confirmation; a historical timing hint is optional. Static diagnostic codes identify invalid/unmapped inputs without exposing raw exception text, credentials, prompts or media paths. Source support does not upgrade a running worker bundle or widen a protected policy implicitly.

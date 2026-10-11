@@ -158,7 +158,7 @@ class ShardTests(unittest.TestCase):
                           "test_platform_wangp_failure_diagnostics", "test_platform_wangp_seed_domain", "test_operator_owned_drain", "test_platform_quick_chat_titles",
                           "test_operator_extensions", "test_managed_worker_admission",
                           "test_dstack_operator", "test_dstack_controller", "test_dstack_runtime",
-                          "test_dstack_factory", "test_hatchet_dispatch", "test_hatchet_dispatch_telemetry",
+                          "test_dstack_factory", "test_dstack_budget_window", "test_hatchet_dispatch", "test_hatchet_dispatch_telemetry",
                           "test_hatchet_affinity"})
         self.assertEqual(len(ci.POSTGRES_MODULES), len(set(ci.POSTGRES_MODULES)))
 

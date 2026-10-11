@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 import httpx
 
 from studio_platform.dstack_capacity import (CapacityRequest, DstackCapacity,
-    DstackClient, DstackError, idle_action, native_bootstrap_config, main)
+    DstackClient, DstackError, idle_action, live_capacity_usage, native_bootstrap_config, main)
 from studio_platform.inference.wangp_contract import HostReadiness
 from studio_platform.worker_admission import managed_window_reason
 
@@ -543,6 +543,32 @@ class DstackCapacityTests(unittest.TestCase):
             self.capacity.start(request(hard_deadline=19), PUB)
         self.assertEqual(self.client.apply_count, 0)
 
+    def test_continuing_request_has_explicit_off_and_preserves_finite_binding(self):
+        finite = request().binding(PUB)
+        self.assertEqual(finite["run_spec"]["configuration"]["max_duration"], 3600)
+        self.assertNotIn("lifecycle_version", finite)
+        continuing = request(lifecycle_version=2, hard_deadline=None, max_duration_s=None)
+        binding = continuing.binding(PUB)
+        self.assertEqual(binding["lifecycle_version"], 2)
+        self.assertIsNone(binding["hard_deadline"])
+        self.assertEqual(binding["run_spec"]["configuration"]["max_duration"], "off")
+        self.capacity.start(continuing, PUB)
+        self.now = 100000.
+        self.capacity.start(continuing, PUB)
+        self.assertEqual(self.client.apply_count, 1)
+        self.now = 20.
+        with self.assertRaisesRegex(DstackError, "dstack_intent_binding_changed"):
+            self.capacity.start(request(), PUB)
+
+    def test_missing_deadline_requires_explicit_continuing_version(self):
+        for fields in ({"hard_deadline": None}, {"max_duration_s": None},
+                {"hard_deadline": None, "max_duration_s": None},
+                {"lifecycle_version": 2}, {"lifecycle_version": True},
+                {"lifecycle_version": 2, "hard_deadline": None},
+                {"lifecycle_version": 2, "max_duration_s": None}):
+            with self.subTest(fields=fields), self.assertRaises(DstackError):
+                request(**fields)
+
     def test_pinned_model_parsed_response_is_compatible(self):
         # Optional SDK check, also run explicitly with dstack==0.22.3 locally.
         try:
@@ -554,6 +580,18 @@ class DstackCapacityTests(unittest.TestCase):
         self.client.run["run_spec"]["configuration"] = TaskConfiguration.model_validate(config).model_dump(mode="json")
         self.assertEqual(self.capacity.observe(INTENT)["state"], "starting")
 
+    def test_pinned_model_preserves_explicit_continuing_off(self):
+        try:
+            from dstack._internal.core.models.configurations import TaskConfiguration
+        except ImportError:
+            self.skipTest("optional pinned dstack SDK absent")
+        continuing = request(lifecycle_version=2, hard_deadline=None, max_duration_s=None)
+        self.capacity.start(continuing, PUB)
+        config = self.client.run["run_spec"]["configuration"]
+        self.client.run["run_spec"]["configuration"] = TaskConfiguration.model_validate(config).model_dump(mode="json")
+        self.assertEqual(self.client.run["run_spec"]["configuration"]["max_duration"], "off")
+        self.assertEqual(self.capacity.observe(INTENT)["state"], "starting")
+
     def test_idle_policy_distinguishes_holds_and_unknown_obligations(self):
         policy = dict(now=1000, hard_deadline=2000, hold_until=0, last_business_activity=10,
             idle_seconds=600, active_jobs=0, unsafe_attempts=0, collection_holds=0, observations_fresh=True)
@@ -562,6 +600,28 @@ class DstackCapacityTests(unittest.TestCase):
         self.assertEqual(idle_action(**{**policy, "collection_holds": 1}), "retain")
         self.assertEqual(idle_action(**{**policy, "now": 2100, "unsafe_attempts": 1}), "drain")
         self.assertEqual(idle_action(**{**policy, "observations_fresh": False}), "reconcile")
+
+    def test_continuing_idle_and_keep_on_use_funding_not_a_fixed_deadline(self):
+        policy = dict(now=1000, hard_deadline=None, hold_until=0, last_business_activity=10,
+            idle_seconds=600, active_jobs=0, unsafe_attempts=0, collection_holds=0,
+            observations_fresh=True, lifecycle_version=2)
+        self.assertEqual(idle_action(**policy), "stop")
+        self.assertEqual(idle_action(**policy, keep_on="until_stopped"), "retain")
+        self.assertEqual(idle_action(**policy, keep_on="until_stopped", budget_available=False), "stop")
+        for obligation in ("active_jobs", "unsafe_attempts", "collection_holds"):
+            self.assertEqual(idle_action(**{**policy, obligation: 1}), "retain")
+            self.assertEqual(idle_action(**{**policy, obligation: 1}, budget_available=False), "drain")
+        self.assertEqual(idle_action(**{**policy, "observations_fresh": False},
+            keep_on="until_stopped"), "reconcile")
+
+    def test_continuing_hold_expiry_begins_a_full_idle_interval(self):
+        policy = dict(now=1000, hard_deadline=None, hold_until=1500, last_business_activity=10,
+            idle_seconds=600, active_jobs=0, unsafe_attempts=0, collection_holds=0,
+            observations_fresh=True, lifecycle_version=2, keep_on="until")
+        for now, expected in ((1000, "retain"), (1500, "retain"), (2099, "retain"), (2100, "stop")):
+            self.assertEqual(idle_action(**{**policy, "now": now}), expected)
+        with self.assertRaisesRegex(DstackError, "dstack_idle_policy_invalid"):
+            idle_action(**{**policy, "lifecycle_version": 1})
 
     @unittest.skipUnless(os.name == "posix", "GPU bootstrap validates Linux absolute paths")
     def test_native_bootstrap_keeps_original_one_slot_interface(self):
@@ -584,7 +644,260 @@ class DstackCapacityTests(unittest.TestCase):
             native_bootstrap_config(request(), source_bundle_sha256="d" * 64, model_root="/root/../private")
 
 
+class DstackLiveUsageTests(unittest.TestCase):
+    def setUp(self):
+        self.now = 20.
+        self.binding = {**request().binding(PUB), "apply_started": True,
+            "run_id": RUN, "provider_instance_id": "1234567"}
+        self.node = {"intent_id": INTENT, "desired_state": "stopped", "runtime_state": "stopped",
+            "payload": {"capacity_backend": "dstack-v1", "hourly_cost_microusd": 850000,
+                "dstack": self.binding, "historical_bill": {"actual_cost_microusd": None}}}
+        self.run = {"id": RUN, "project_name": "sixnine", "run_spec": request().run_spec(PUB),
+            "status": "terminated", "latest_job_submission": {"job_provisioning_data": {
+                "backend": "vastai", "instance_id": "1234567", "instance_type": {
+                    "resources": {"gpus": [{"name": "RTX5090"}]}}}}}
+        self.client = Mock(project="sixnine", get=Mock(side_effect=lambda **_: copy.deepcopy(self.run)))
+        self.inventory = Mock(return_value={"backend": "vastai", "complete": True,
+            "observed_at": 20., "instance_ids": []})
+
+    def usage(self, nodes=None):
+        return live_capacity_usage(self.client, [self.node] if nodes is None else nodes,
+            provider_inventory=self.inventory, clock=lambda: self.now)
+
+    def test_owned_terminal_and_fresh_provider_absence_free_capacity_not_billing(self):
+        original = copy.deepcopy(self.node)
+        legacy = {"intent_id": "old-lium", "payload": {"capacity_backend": "legacy", "provider": "lium"}}
+        result = self.usage([self.node, legacy])
+        self.assertEqual(result["instances"], 0)
+        self.assertEqual(result["physical_gpus"], 0)
+        self.assertEqual(result["hourly_cost_microusd"], 0)
+        self.assertEqual(result["active_instance_ids"], ())
+        self.assertEqual(result["observations"][0]["reason_code"], "dstack_terminal_provider_absent")
+        self.assertEqual(self.node, original)
+        self.client.get.assert_called_once_with(run_id=RUN)
+        self.inventory.assert_called_once_with("vastai")
+
+    def test_pending_new_intent_counts_before_any_apply_and_legacy_never_counts(self):
+        pending_id = "a3333333-3333-4333-8333-333333333333"
+        pending = {"intent_id": pending_id, "desired_state": "running", "payload": {
+            "capacity_backend": "dstack-v1", "hourly_cost_microusd": 850000,
+            "dstack": request(intent_id=pending_id).binding(PUB)}}
+        result = self.usage([self.node, pending,
+            {"payload": {"provider": "targon", "hourly_cost_microusd": 50000000}}])
+        self.assertEqual(result["active_instance_ids"], (pending_id,))
+        self.assertEqual(result["instances"], 1)
+        self.assertEqual(result["hourly_cost_microusd"], 850000)
+        self.client.get.assert_called_once_with(run_id=RUN)
+        self.assertNotIn("apply_started", pending["payload"]["dstack"])
+
+    def test_exact_terminal_requires_complete_same_backend_fresh_provider_absence(self):
+        good = self.inventory.return_value
+        for bad in (None, {**good, "backend": "runpod"}, {**good, "complete": False},
+                {**good, "observed_at": -1}, {**good, "observed_at": 20.1},
+                {**good, "observed_at": True}, {**good, "instance_ids": "1234567"},
+                {**good, "instance_ids": ["1234567", "1234567"]},
+                {**good, "instance_ids": ["1234567"]}):
+            with self.subTest(bad=bad):
+                self.inventory.return_value = bad
+                self.assertEqual(self.usage()["instances"], 1)
+        self.inventory.return_value = {**good, "observed_at": 1.}
+        self.now = 32.
+        self.assertEqual(self.usage()["instances"], 1)
+        self.inventory.side_effect = ValueError("secret supplier token")
+        self.assertEqual(self.usage()["observations"][0]["reason_code"],
+            "dstack_terminal_provider_unconfirmed")
+
+    def test_unknown_or_unowned_run_never_frees_reserved_capacity(self):
+        original = copy.deepcopy(self.run)
+        for bad in (None, {**original, "project_name": "another"},
+                {**original, "id": "b3333333-3333-4333-8333-333333333333"},
+                {**original, "status": "unexpected secret supplier token"},
+                {**original, "latest_job_submission": None}):
+            with self.subTest(bad=bad):
+                self.run = bad
+                self.inventory.reset_mock()
+                result = self.usage()
+                self.assertEqual(result["instances"], 1)
+                self.assertEqual(result["physical_gpus"], 1)
+                self.assertEqual(result["active_instance_ids"], (INTENT,))
+                self.assertNotIn("secret supplier token", json.dumps(result))
+                self.inventory.assert_not_called()
+        self.client.get.side_effect = DstackError("dstack_api_unavailable")
+        self.assertEqual(self.usage()["observations"][0]["reason_code"], "dstack_capacity_unconfirmed")
+
+    def test_later_slow_run_read_restores_capacity_when_original_absence_expires(self):
+        other_id = "a3333333-3333-4333-8333-333333333333"
+        other_run_id = "b3333333-3333-4333-8333-333333333333"
+        other = copy.deepcopy(self.node)
+        other["intent_id"] = other_id
+        other["payload"]["dstack"] = {**request(intent_id=other_id).binding(PUB),
+            "apply_started": True, "run_id": other_run_id, "provider_instance_id": "7654321"}
+        other_run = {**copy.deepcopy(self.run), "id": other_run_id, "status": "running",
+            "run_spec": request(intent_id=other_id).run_spec(PUB)}
+        other_run["latest_job_submission"]["job_provisioning_data"]["instance_id"] = "7654321"
+        original_nodes = copy.deepcopy([self.node, other])
+
+        def read_run(**kw):
+            if kw["run_id"] == RUN:
+                return copy.deepcopy(self.run)
+            self.now = 51.  # First account receipt was fresh before this read.
+            return copy.deepcopy(other_run)
+
+        self.client.get.side_effect = read_run
+        result = self.usage([self.node, other])
+        self.assertEqual(result["instances"], 2)
+        self.assertEqual(result["physical_gpus"], 2)
+        self.assertEqual(result["hourly_cost_microusd"], 1700000)
+        self.assertEqual(set(result["active_instance_ids"]), {INTENT, other_id})
+        self.assertEqual(result["observations"][0]["reason_code"],
+            "dstack_terminal_provider_unconfirmed")
+        self.assertEqual([self.node, other], original_nodes)
+        self.inventory.assert_called_once_with("vastai")
+        self.assertEqual(self.client.get.call_count, 2)
+
+    def test_active_run_counts_even_if_provider_snapshot_says_absent(self):
+        for state in ("running", "provisioning", "terminating"):
+            self.run["status"] = state
+            self.assertEqual(self.usage()["instances"], 1)
+        self.inventory.assert_not_called()
+
+    def test_physical_identity_deduplicates_and_counts_actual_gpu_allocation(self):
+        other_id = "a3333333-3333-4333-8333-333333333333"
+        other_run_id = "b3333333-3333-4333-8333-333333333333"
+        other = copy.deepcopy(self.node)
+        other["intent_id"] = other_id
+        other["payload"]["dstack"] = {**request(intent_id=other_id).binding(PUB),
+            "apply_started": True, "run_id": other_run_id, "provider_instance_id": "1234567"}
+        self.run["status"] = "running"
+        self.run["latest_job_submission"]["job_provisioning_data"]["instance_type"]["resources"]["gpus"] *= 2
+        other_run = {**copy.deepcopy(self.run), "id": other_run_id,
+            "run_spec": request(intent_id=other_id).run_spec(PUB)}
+        self.client.get.side_effect = lambda **kw: copy.deepcopy(
+            self.run if kw["run_id"] == RUN else other_run)
+        result = self.usage([self.node, other])
+        self.assertEqual(result["instances"], 1)
+        self.assertEqual(result["physical_gpus"], 2)
+        self.assertEqual(result["logical_slots"], 2)
+        self.assertEqual(set(result["active_instance_ids"]), {INTENT, other_id})
+
+    def test_only_confirmed_never_applied_cancel_frees_pending_capacity(self):
+        binding = request().binding(PUB)
+        self.node["payload"]["dstack"] = {**binding, "state": "stopped",
+            "reason_code": "dstack_never_applied", "billing_state": "no_charge_confirmed"}
+        self.assertEqual(self.usage()["instances"], 0)
+        self.client.get.assert_not_called()
+        self.node["payload"]["dstack"]["billing_state"] = "unsettled"
+        self.assertEqual(self.usage()["instances"], 1)
+
+    def test_invalid_current_cost_blocks_admission_without_erasing_history(self):
+        self.node["payload"]["hourly_cost_microusd"] = None
+        self.run["status"] = "running"
+        with self.assertRaisesRegex(DstackError, "dstack_active_cost_unconfirmed"):
+            self.usage()
+        self.run["status"] = "terminated"
+        self.assertEqual(self.usage()["instances"], 0)
+
+
 class DstackRESTTests(unittest.TestCase):
+    def provider_client(self, backend, handler, *, config_changes=None):
+        key = "provider-secret-token-123456"
+        config = {"type": backend, "creds": {"type": "api_key", "api_key": key}}
+        config.update(config_changes or {})
+        def dstack_read(req):
+            self.assertEqual(req.method, "POST")
+            self.assertEqual(req.url.path, f"/api/project/sixnine/backends/{backend}/config_info")
+            self.assertEqual(req.headers["Authorization"], "Bearer dstack-secret-token-123456")
+            self.assertEqual(json.loads(req.content), {})
+            return httpx.Response(200, json=config)
+        def provider_read(req):
+            self.assertEqual(req.headers["Authorization"], "Bearer " + key)
+            self.assertNotIn("dstack-secret", str(req.headers))
+            self.assertIsNone(req.url.params.get("api_key"))
+            return handler(req)
+        return DstackClient("http://127.0.0.1:3000", "dstack-secret-token-123456", "sixnine",
+            session=httpx.Client(transport=httpx.MockTransport(dstack_read)),
+            provider_session=httpx.Client(transport=httpx.MockTransport(provider_read), follow_redirects=True))
+
+    def test_provider_inventory_uses_same_backend_config_and_complete_vast_v1_pages(self):
+        seen = []
+        def provider(req):
+            seen.append(req)
+            self.assertEqual(req.method, "GET")
+            self.assertEqual(str(req.url).split("?")[0], "https://console.vast.ai/api/v1/instances/")
+            self.assertEqual(req.url.params["select_cols"], '["id"]')
+            self.assertEqual(req.url.params["limit"], "25")
+            if len(seen) == 1:
+                self.assertNotIn("after_token", req.url.params)
+                rows, cursor = [{"id": 123}, {"id": 456}], "next-page-token"
+            else:
+                self.assertEqual(req.url.params["after_token"], "next-page-token")
+                rows, cursor = [{"id": 789}], None
+            return httpx.Response(200, json={"success": True, "instances": rows,
+                "instances_found": len(rows), "total_instances": 3, "next_token": cursor})
+        result = self.provider_client("vastai", provider).provider_inventory("vastai", clock=lambda: 20.)
+        self.assertEqual(result, {"backend": "vastai", "complete": True, "observed_at": 20.,
+            "instance_ids": ["123", "456", "789"]})
+        self.assertNotIn("secret", json.dumps(result))
+        self.assertEqual(len(seen), 2)
+
+    def test_vast_v1_empty_is_complete_only_with_a_matching_terminal_tally(self):
+        good = {"success": True, "instances": [], "instances_found": 0, "total_instances": 0,
+            "next_token": None}
+        result = self.provider_client("vastai", lambda _: httpx.Response(200, json=good)).provider_inventory("vastai")
+        self.assertEqual(result["instance_ids"], [])
+        for bad in ({"instances": []}, {**good, "total_instances": 1}, {**good, "success": False},
+                {**good, "instances_found": True}, {**good, "has_more": True},
+                {**good, "next_token": "cursor"}):
+            with self.subTest(bad=bad), self.assertRaisesRegex(DstackError, "dstack_provider_inventory_unconfirmed"):
+                self.provider_client("vastai", lambda _, bad=bad: httpx.Response(200, json=bad)).provider_inventory("vastai")
+
+    def test_vast_duplicate_rows_or_repeated_cursor_never_imply_complete_absence(self):
+        for second in ({"instances": [{"id": 123}], "next_token": None},
+                {"instances": [{"id": 456}], "next_token": "cursor"}):
+            pages = iter([{"instances": [{"id": 123}], "next_token": "cursor"}, second])
+            def read(_):
+                page = next(pages)
+                return httpx.Response(200, json={"success": True, "instances_found": 1,
+                    "total_instances": 2, **page})
+            with self.subTest(second=second), self.assertRaisesRegex(DstackError, "dstack_provider_inventory_unconfirmed"):
+                self.provider_client("vastai", read).provider_inventory("vastai")
+
+    def test_runpod_unpaginated_account_query_projects_ids_only(self):
+        def read(req):
+            self.assertEqual(req.method, "POST")
+            self.assertEqual(str(req.url), "https://api.runpod.io/graphql")
+            self.assertEqual(json.loads(req.content), {"query": "query { myself { pods { id } } }"})
+            return httpx.Response(200, json={"data": {"myself": {"pods": [{"id": "pod-123"}]}}})
+        result = self.provider_client("runpod", read).provider_inventory("runpod")
+        self.assertEqual(result["instance_ids"], ["pod-123"])
+        for bad in ({"data": {"myself": {"pods": []}}, "errors": [{"message": "secret provider token"}]},
+                {"data": {"myself": {"pods": [], "pageInfo": {"hasNextPage": True}}}},
+                {"data": {"myself": {"pods": [{"id": "same"}, {"id": "same"}]}}}):
+            with self.subTest(bad=bad), self.assertRaisesRegex(DstackError, "^dstack_provider_inventory_unconfirmed$"):
+                self.provider_client("runpod", lambda _, bad=bad: httpx.Response(200, json=bad)).provider_inventory("runpod")
+
+    def test_provider_redirect_auth_error_invalid_json_and_duplicate_keys_are_closed(self):
+        for response, code in ((httpx.Response(302, headers={"Location": "https://other.example/"}), "rejected"),
+                (httpx.Response(403, text="secret provider token"), "rejected"),
+                (httpx.Response(200, text="secret provider token"), "unavailable"),
+                (httpx.Response(200, content=b'{"success":true,"instances":[],"instances":[]}'), "unconfirmed"),
+                (httpx.Response(200, content=b"x" * (4 * 1024**2 + 1)), "response_limit")):
+            seen = []
+            def read(req):
+                seen.append(req)
+                return response
+            with self.subTest(code=code), self.assertRaisesRegex(DstackError,
+                    "^dstack_provider_inventory_" + code + "$"):
+                self.provider_client("vastai", read).provider_inventory("vastai")
+            self.assertEqual(len(seen), 1)
+
+    def test_backend_mismatch_never_sends_credentials_to_a_provider(self):
+        read = Mock()
+        client = self.provider_client("vastai", read, config_changes={"type": "runpod"})
+        with self.assertRaisesRegex(DstackError, "dstack_provider_inventory_unconfirmed"):
+            client.provider_inventory("vastai")
+        read.assert_not_called()
+
     def test_exact_get_accepts_only_pinned_not_found_errors(self):
         cases = [(404, {}, True),
             (400, {"detail": [{"code": "resource_not_exists", "msg": "Run not found"}]}, True),

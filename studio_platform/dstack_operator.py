@@ -18,11 +18,11 @@ import uuid
 
 from sqlalchemy import insert, select, update
 
-from .dstack_capacity import CapacityRequest, DstackCapacity, DstackClient, DstackError
+from .dstack_capacity import CapacityRequest, DstackCapacity, DstackClient, DstackError, live_capacity_usage
 from .operator_capacity import (OperatorError, operator_commands, operator_nodes,
                                operator_previews, require, safe_id)
-from .repository import (Scope, attempts, budget_reservations, instance_intents,
-                         jobs, manually_reviewed_inactive, registered_workers, request_hash, scaler_actions,
+from .repository import (Scope, BudgetExceeded, attempts, budget_accounts, budget_reservations, instance_intents,
+                         jobs, manually_reviewed_inactive, registered_workers, registered_devices, request_hash, scaler_actions,
                          scaler_receipts)
 from .runtime_catalog import engine_manifest, get_profile
 
@@ -45,6 +45,14 @@ def _integer(value, minimum=1, maximum=9_000_000_000_000):
 
 def _finite(value):
     return type(value) in (int, float) and math.isfinite(value)
+
+
+def _window_open(intent, node, now):
+    deadline = intent.get("hard_deadline")
+    if deadline is not None:
+        return _finite(deadline) and now < deadline
+    from .worker_admission import dstack_policy_reason
+    return dstack_policy_reason(intent, node, now) is None
 
 
 def _cold_unadmitted_runtime(binding, workers, instance_id, now, fresh_seconds):
@@ -152,7 +160,7 @@ class LedgerDstackStore:
             if (stored.get("apply_started") or node["desired_state"] != "running"
                     or action is None or action["create_started_at"] is not None):
                 return False
-            require(intent["state"] == "reserved" and self.repo.clock() < intent["hard_deadline"],
+            require(intent["state"] == "reserved" and _window_open(intent, node, self.repo.clock()),
                 "dstack_start_window_expired")
             reservations = list(connection.execute(select(budget_reservations).where(
                 budget_reservations.c.reference_type == "instance",
@@ -235,7 +243,7 @@ class LedgerDstackStore:
             # A stale error, stop intent or expired window cannot leave a ready projection.
             value["ready"] = bool(value.get("ready") is True and value.get("state") == "ready"
                 and node["desired_state"] == "running"
-                and self.repo.clock() < intent["hard_deadline"])
+                and _window_open(intent, node, self.repo.clock()))
             if value.get("runtime_incarnation") and value.get("state") in {"ready", "busy"}:
                 binding.setdefault("first_runtime_ready_at", value["observed_at"])
             binding.update(value)
@@ -275,7 +283,7 @@ class LedgerDstackStore:
                 "dstack_broker_binding_changed")
             value=copy.deepcopy(observation)
             value["ready"]=bool(value.get("ready") is True and node["desired_state"]=="running"
-                and self.repo.clock()<intent["hard_deadline"])
+                and _window_open(intent, node, self.repo.clock()))
             binding["broker_observation"]=value
             self._save(connection,node,payload)
 
@@ -349,7 +357,7 @@ class LedgerDstackStore:
             require(binding.get("bootstrap_started") and binding.get("run_id") == run_id
                 and binding.get("provider_instance_id") == instance_id,
                 "dstack_bootstrap_identity_unconfirmed")
-            require(node["desired_state"] == "running" and self.repo.clock() < intent["hard_deadline"],
+            require(node["desired_state"] == "running" and _window_open(intent, node, self.repo.clock()),
                 "dstack_bootstrap_window_expired")
             return True
 
@@ -363,7 +371,7 @@ class LedgerDstackStore:
             require(binding.get("bootstrap_started") and binding.get("run_id") == run_id
                 and binding.get("provider_instance_id") == instance_id,
                 "dstack_bootstrap_identity_unconfirmed")
-            require(node["desired_state"] == "running" and self.repo.clock() < intent["hard_deadline"],
+            require(node["desired_state"] == "running" and _window_open(intent, node, self.repo.clock()),
                 "dstack_bootstrap_window_expired")
             if binding.get("bootstrap_launch_started", True):
                 return False
@@ -384,7 +392,7 @@ class LedgerDstackStore:
                 "dstack_bootstrap_identity_unconfirmed")
             if binding.get("bootstrap_started"):
                 return False
-            require(node["desired_state"] == "running" and self.repo.clock() < intent["hard_deadline"],
+            require(node["desired_state"] == "running" and _window_open(intent, node, self.repo.clock()),
                 "dstack_bootstrap_window_expired")
             binding.update(bootstrap_started=True, bootstrap_started_at=self.repo.clock(), bootstrap_launch_started=False)
             payload["dstack"] = binding
@@ -415,8 +423,9 @@ class LedgerDstackStore:
 
 class DstackOperator:
     """Small owner-scoped application service; mount alongside existing operator API."""
-    def __init__(self, repo, settings, capacity=None, profile_config=None):
+    def __init__(self, repo, settings, capacity=None, profile_config=None, *, provider_inventory=None):
         self.repo, self.settings, self.capacity = repo, settings, capacity
+        self.provider_inventory = provider_inventory or getattr(getattr(capacity, "client", None), "provider_inventory", None)
         self.config = copy.deepcopy(profile_config or {"version": 1, "policy": {"enabled": False}, "profiles": []})
         require(self.config.get("version") == 1, "dstack_config_version_invalid", 422)
         self.policy = self.config.get("policy", {})
@@ -428,6 +437,11 @@ class DstackOperator:
                     ("idle_shutdown_seconds", 86400), ("observation_fresh_seconds", 120)):
                 require(_integer(self.policy.get(name), maximum=maximum), "dstack_policy_limits_invalid", 422)
             require(_finite(self.policy.get("expires_at")), "dstack_policy_window_invalid", 422)
+            require(type(self.policy.get("lifecycle_version", 1)) is int and
+                self.policy.get("lifecycle_version", 1) in {1, 2}, "dstack_lifecycle_version_invalid", 422)
+            if self.policy.get("lifecycle_version") == 2:
+                require(_integer(self.policy.get("reservation_seconds"), 120, 86400),
+                    "dstack_reservation_window_invalid", 422)
         for value in self.config.get("profiles", []):
             profile = self._validate_profile(value)
             require(profile["id"] not in self.profiles, "dstack_profile_duplicate", 422)
@@ -484,20 +498,77 @@ class DstackOperator:
         require(self.policy.get("enabled") is True and self.capacity is not None, "dstack_capacity_disabled")
         require(self.repo.clock() < self.policy["expires_at"], "dstack_authority_expired")
 
-    def _capacity_request(self, profile, intent_id, created_at, deadline, duration):
+    def _capacity_request(self, profile, intent_id, created_at, deadline, duration, *, lifecycle_version=1):
         return CapacityRequest(intent_id=intent_id, backend=profile["backend"], profile_id=profile["runtime_profile_id"],
             mode=profile["mode"], model_id=profile["model_id"], configuration_id=profile["configuration_id"],
             manifest_digest=profile["manifest_digest"], image=profile["image"], gpu_names=tuple(profile["gpu_names"]),
             memory_gib=profile["memory_gib"], disk_gib=profile["disk_gib"], gpu_memory_gib=profile["gpu_memory_gib"],
             cpu_count=profile["cpu_count"], max_price_microusd=profile["max_price_microusd"],
             created_at=created_at, hard_deadline=deadline, max_duration_s=duration,
-            regions=tuple(profile.get("regions", [])), min_reliability=profile.get("min_reliability", .9))
+            regions=tuple(profile.get("regions", [])), min_reliability=profile.get("min_reliability", .9),
+            lifecycle_version=lifecycle_version)
+
+    def _expected_runtime(self, profile):
+        """Use the original protected execution quote, never an HTTP estimate."""
+        from .execution_profiles import selected_policy
+        from .execution_policy import reservation_for_duration
+        try:
+            policy = selected_policy(self.settings, profile_id=profile["runtime_profile_id"], recipe_id=profile["recipe_id"])
+            now = self.repo.clock()
+            require(policy and policy["enabled"] is True and policy["backend"] == "wangp-worker"
+                and policy.get("dispatch_backend") == "hatchet-v1"
+                and policy["pool"] == profile["pool"] and policy["configuration_id"] == profile["configuration_id"]
+                and policy["model_id"] == profile["model_id"]
+                and policy["engine_manifest_digest"] == profile["manifest_digest"]
+                and policy["qualification"]["status"] in {"accepted", "runtime_required"}
+                and policy["qualification"]["verified_at"] <= now
+                and now < min(policy["qualification"]["expires_at"], policy["reservation"]["expires_at"]),
+                "dstack_execution_policy_unconfirmed")
+            duration = reservation_for_duration(policy, policy["envelope"]["max_duration_seconds"])["expected_runtime_s"]
+            require(_finite(duration) and 0 < duration <= 86400, "dstack_execution_runtime_unconfirmed")
+            return duration
+        except (KeyError, TypeError, ValueError) as error:
+            if isinstance(error, OperatorError):
+                raise
+            raise OperatorError("dstack_execution_policy_unconfirmed") from None
+
+    def _lifecycle(self, body, now, expected_runtime):
+        keep = body.get("keep_on", "until" if body.get("hold_seconds", 0) else "idle")
+        hold = body.get("hold_seconds", 0)
+        idle = body.get("idle_shutdown_seconds", self.policy["idle_shutdown_seconds"])
+        require(isinstance(keep, str) and keep in {"idle", "until", "until_stopped"}
+            and _integer(hold, 0, 86400) and _integer(idle, 1, 86400)
+            and (keep == "until" and hold > 0 or keep != "until" and hold == 0),
+            "dstack_lifecycle_policy_invalid", 422)
+        return {"version": 2, "keep_on": keep, "hold_until": now + hold if hold else 0,
+            "idle_shutdown_seconds": idle, "reservation_seconds": self.policy["reservation_seconds"],
+            "expected_runtime_s": expected_runtime}
+
+    def fund_window(self, connection, intent, node, now):
+        """Fund preparation, elapsed paid time and a full safe execution runway."""
+        from .worker_admission import COMPLETION_MARGIN_SECONDS
+        payload, lifecycle = node["payload"], node["payload"]["lifecycle"]
+        require(_window_open(intent, node, now), "dstack_continuing_policy_unconfirmed")
+        started = connection.execute(select(scaler_actions.c.create_started_at).where(
+            scaler_actions.c.intent_id == intent["id"])).scalar_one_or_none()
+        started = intent["created_at"] if started is None else started
+        expected = lifecycle.get("expected_runtime_s")
+        hourly, extra = payload.get("hourly_cost_microusd"), payload.get("extra_reservation_microusd", 0)
+        require(_finite(started) and 0 <= now-started and _finite(expected) and 0 < expected <= 86400
+            and _integer(hourly) and _integer(extra, 0), "dstack_funding_basis_unconfirmed")
+        chunk = lifecycle["reservation_seconds"]
+        paid = now-started + expected + max(lifecycle["idle_shutdown_seconds"], COMPLETION_MARGIN_SECONDS)
+        # Admission requires strictly more funding than the complete runway.
+        seconds = math.ceil((paid + 1) / chunk) * chunk + 300
+        minimum = math.ceil(hourly * seconds / 3600) + extra
+        return self.repo.fund_instance_window(connection, intent["id"], minimum, lifecycle["budget_account_ids"])
 
     def catalog(self, principal):
         owner = self.authorize(principal)
         fields = ("id", "runtime_profile_id", "model_id", "mode", "pool", "backend", "gpu_names",
             "memory_gib", "disk_gib", "gpu_memory_gib", "cpu_count", "max_price_microusd", "max_ttl_seconds")
         return {"capacity_backend": BACKEND_MARKER, "enabled": self.policy.get("enabled") is True,
+            "lifecycle_version": self.policy.get("lifecycle_version", 1),
             "operator": {"account": owner},
             "profiles": [{key: copy.deepcopy(profile[key]) for key in fields}
                 for profile in self.profiles.values() if profile["owner_id"] == owner]}
@@ -505,32 +576,51 @@ class DstackOperator:
     def preview(self, principal, body):
         owner = self.authorize(principal)
         self._enabled()
-        require(isinstance(body, dict) and set(body) == {"profile_id", "ttl_seconds"}, "dstack_preview_invalid", 422)
+        continuing = self.policy.get("lifecycle_version") == 2
+        allowed = {"profile_id", "ttl_seconds", "keep_on", "hold_seconds", "idle_shutdown_seconds"} if continuing else {"profile_id", "ttl_seconds"}
+        require(isinstance(body, dict) and "profile_id" in body and not set(body)-allowed
+            and (continuing or set(body) == allowed), "dstack_preview_invalid", 422)
         require(safe_id(body["profile_id"]), "dstack_preview_invalid", 422)
         profile = self.profiles.get(body["profile_id"])
         require(profile is not None and profile["owner_id"] == owner, "dstack_profile_not_found", 404)
-        ttl = body["ttl_seconds"]
-        require(_integer(ttl, 120, min(profile["max_ttl_seconds"], self.policy["max_ttl_seconds"])),
+        ttl = body.get("ttl_seconds", self.policy.get("reservation_seconds"))
+        require(_integer(ttl, 120, 86400 if continuing else min(profile["max_ttl_seconds"], self.policy["max_ttl_seconds"])),
             "dstack_runtime_limit_invalid", 422)
         now = self.repo.clock()
-        require(now + ttl <= self.policy["expires_at"], "dstack_authority_window_exceeded")
+        if not continuing:
+            require(now + ttl <= self.policy["expires_at"], "dstack_authority_window_exceeded")
+        lifecycle = self._lifecycle(body, now, self._expected_runtime(profile)) if continuing else None
+        if continuing:
+            lifecycle["budget_account_ids"] = copy.deepcopy(profile["budget_account_ids"])
         preview_id = str(uuid.uuid4())
-        request = self._capacity_request(profile, preview_id, now, now + ttl, ttl)
+        request = self._capacity_request(profile, preview_id, now, None if continuing else now + ttl,
+            None if continuing else ttl, lifecycle_version=2 if continuing else 1)
         offers=plan_offers(self.capacity.plan(request, self.config["ssh_public_key"]),request)
         require(bool(offers),"dstack_no_compatible_offers")
-        # Reserve the full approved ceiling from the first paid request, plus
-        # the pinned 300s shutdown grace. Provisioning is inside the absolute TTL.
-        cost = math.ceil(profile["max_price_microusd"] * (ttl + 300) / 3600) + profile["extra_reservation_microusd"]
+        # Reserve preparation and a complete job from the first paid request,
+        # plus shutdown grace; continuing funding has no absolute lifetime.
+        initial_seconds = lifecycle["reservation_seconds"] if continuing else ttl
+        if continuing:
+            from .worker_admission import COMPLETION_MARGIN_SECONDS
+            initial_seconds = math.ceil((lifecycle["expected_runtime_s"] +
+                max(lifecycle["idle_shutdown_seconds"], COMPLETION_MARGIN_SECONDS) + 1) /
+                initial_seconds) * initial_seconds
+        cost = math.ceil(profile["max_price_microusd"] * (initial_seconds + 300) / 3600) + profile["extra_reservation_microusd"]
         payload = {"capacity_backend": BACKEND_MARKER, "tenant_id": self.settings.tenant_id, "owner_id": owner,
             "profile_id": profile["id"], "profile": profile, "config_fingerprint": self.fingerprint,
             "request": asdict(request), "reservation_microusd": cost}
+        if continuing:
+            payload["lifecycle"] = lifecycle
+        expires = min(now + 120, self.policy["expires_at"], request.hard_deadline or self.policy["expires_at"])
         with self.repo.transaction() as connection:
             connection.execute(insert(operator_previews).values(id=preview_id, actor=_actor(self.settings.tenant_id, owner),
-                payload=payload, created_at=now, expires_at=min(now + 120, request.hard_deadline)))
-        return {"preview_id": preview_id, "expires_at": min(now + 120, request.hard_deadline),
+                payload=payload, created_at=now, expires_at=expires))
+        return {"preview_id": preview_id, "expires_at": expires,
             "hard_deadline": request.hard_deadline, "reservation_microusd": cost,
             "hourly_cost_microusd": profile["max_price_microusd"], "price_basis": "approved_ceiling",
-            "offer_status": "advisory", "offers": offers, "can_start": True, "capacity_backend": BACKEND_MARKER}
+            "offer_status": "advisory", "offers": offers, "can_start": True, "capacity_backend": BACKEND_MARKER,
+            **({"lifecycle": copy.deepcopy(lifecycle), "initial_reservation_seconds": initial_seconds}
+               if continuing else {})}
 
     def _existing_command(self, connection, actor, key, digest):
         require(safe_id(key), "operator_idempotency_key_invalid", 422)
@@ -541,17 +631,16 @@ class DstackOperator:
         return dict(command) if command else None
 
     def _limits(self, connection, hourly):
-        usage = self.repo._global_usage(connection)
+        # Legacy invoices/intents remain in the ledger, but are not current
+        # dstack capacity. Only exact owned new-path allocations count here.
+        nodes = [dict(node) for node in connection.execute(select(operator_nodes)).mappings()
+            if node["payload"].get("capacity_backend") == BACKEND_MARKER]
+        usage = live_capacity_usage(self.capacity.client, nodes, provider_inventory=self.provider_inventory,
+            clock=self.repo.clock, fresh_seconds=self.policy["observation_fresh_seconds"])
         require(usage["instances"] + 1 <= self.policy["max_instances"] and
             usage["physical_gpus"] + 1 <= self.policy["max_physical_gpus"], "dstack_capacity_limit_exceeded")
-        total = 0
-        for intent in connection.execute(select(instance_intents).where(instance_intents.c.state != "destroyed")).mappings():
-            if manually_reviewed_inactive(connection, intent):
-                continue
-            node = connection.execute(select(operator_nodes.c.payload).where(operator_nodes.c.intent_id == intent["id"])).scalar_one_or_none()
-            require(node is not None and _integer(node.get("hourly_cost_microusd")), "dstack_active_cost_unconfirmed")
-            total += node["hourly_cost_microusd"]
-        require(total + hourly <= self.policy["max_hourly_cost_microusd"], "dstack_hourly_limit_exceeded")
+        require(usage["hourly_cost_microusd"] + hourly <= self.policy["max_hourly_cost_microusd"], "dstack_hourly_limit_exceeded")
+        return usage
 
     def start(self, principal, body, key):
         owner = self.authorize(principal)
@@ -577,15 +666,28 @@ class DstackOperator:
                 operator_commands.c.payload["preview_id"].as_string() == body["preview_id"])).first()
             require(previous is None, "dstack_preview_consumed")
             profile = value["profile"]
-            self._limits(connection, profile["max_price_microusd"])
+            usage = self._limits(connection, profile["max_price_microusd"])
             now = self.repo.clock()
             original = value["request"]
+            continuing = original.get("lifecycle_version", 1) == 2
+            if continuing:
+                # A tenant/global account alone cannot authorize unlimited
+                # keep-on for a person. Require their original scoped cap.
+                accounts = list(connection.execute(select(budget_accounts).where(
+                    budget_accounts.c.id.in_(profile["budget_account_ids"]))).mappings())
+                require(any(account["tenant_id"] == self.settings.tenant_id and account["owner_id"] == owner
+                    and account["project_id"] in (None, profile["project_id"]) for account in accounts),
+                    "dstack_owner_spend_limit_required")
+                require(self._expected_runtime(profile) == value["lifecycle"]["expected_runtime_s"],
+                    "dstack_execution_policy_changed")
             scope = Scope(self.settings.tenant_id, owner, profile["project_id"], principal.actor_id)
             intent = self.repo.reserve_instance_intent(scope, profile["pool"], "dstack:" + body["preview_id"],
                 physical_gpus=1, slots=1, reserved_cost_microusd=value["reservation_microusd"],
                 hard_deadline=original["hard_deadline"], budget_account_ids=profile["budget_account_ids"],
-                dry_run=False, provider=PROVIDERS[profile["backend"]], connection=connection)
-            request = self._capacity_request(profile, intent["id"], now, original["hard_deadline"], original["max_duration_s"])
+                dry_run=False, provider=PROVIDERS[profile["backend"]], connection=connection,
+                continuing=continuing, capacity_usage=usage, active_instance_ids=usage["active_instance_ids"])
+            request = self._capacity_request(profile, intent["id"], now, original["hard_deadline"], original["max_duration_s"],
+                lifecycle_version=original.get("lifecycle_version", 1))
             binding = request.binding(self.config["ssh_public_key"])
             command_id = str(uuid.uuid4())
             command_payload = {"preview_id": body["preview_id"], "node_id": intent["id"], "capacity_backend": BACKEND_MARKER}
@@ -601,6 +703,10 @@ class DstackOperator:
                     "gpu_type": profile["gpu_names"][0], "node_count": 1, "gpu_count": 1,
                     "ttl_seconds": original["max_duration_s"], "provider": PROVIDERS[profile["backend"]]},
                 "request": asdict(request), "dstack": binding}
+            if continuing:
+                payload["lifecycle"] = copy.deepcopy(value["lifecycle"])
+                payload["hold_until"] = payload["lifecycle"]["hold_until"]
+                payload["extra_reservation_microusd"] = profile["extra_reservation_microusd"]
             connection.execute(insert(operator_nodes).values(intent_id=intent["id"], command_id=command_id,
                 ordinal=0, binding_id=profile["id"], binding_hash=request_hash(binding), payload=payload,
                 desired_state="running", runtime_state="reserved", updated_at=now))
@@ -639,23 +745,24 @@ class DstackOperator:
                 binding = payload["dstack"]
                 observed = binding.get("observed_at")
                 fresh = _finite(observed) and 0 <= now - observed <= self.policy.get("observation_fresh_seconds", 30)
-                native_ready = bool(fresh and binding.get("ready") is True and node["desired_state"] == "running"
-                    and now < payload["hard_deadline"])
                 intent = connection.execute(select(instance_intents).where(instance_intents.c.id==node["intent_id"])).mappings().one()
+                native_ready = bool(fresh and binding.get("ready") is True and node["desired_state"] == "running"
+                    and _window_open(intent, node, now))
                 workers = list(connection.execute(select(registered_workers).where(
                     registered_workers.c.provider==intent["provider"],
                     registered_workers.c.instance_id==intent["provider_instance_id"])).mappings()) if intent["provider_instance_id"] else []
                 from .worker_admission import worker_window_reason
+                expected = payload.get("lifecycle", {}).get("expected_runtime_s")
                 eligible = [worker for worker in workers if worker["state"]=="ready" and not worker["drain_requested"]
                     and not worker["current_job_id"] and worker["expires_at"]>now
                     and worker_window_reason(connection,worker,now,
-                        deployment_profile_id=payload["selection"]["runtime_profile_id"]) is None]
+                        deployment_profile_id=payload["selection"]["runtime_profile_id"], expected_runtime_s=expected) is None]
                 ready = bool(native_ready and eligible)
                 dispatch_reason = None
                 if native_ready and not ready:
                     dispatch_reason = next((reason for worker in workers if
                         (reason := worker_window_reason(connection,worker,now,
-                            deployment_profile_id=payload["selection"]["runtime_profile_id"]))),
+                            deployment_profile_id=payload["selection"]["runtime_profile_id"], expected_runtime_s=expected))),
                         "matching_worker_unavailable")
                 result.append({"node_id": node["intent_id"], "provider": payload["provider"],
                     "runtime_profile_id": payload["selection"]["runtime_profile_id"], "mode": payload["selection"]["mode"],
@@ -663,8 +770,9 @@ class DstackOperator:
                     "native_ready": native_ready, "slots_ready": len(eligible) if native_ready else 0,
                     "observation_fresh": bool(fresh), "observed_at": observed, "hard_deadline": payload["hard_deadline"],
                     "hold_until": payload["hold_until"], "hourly_cost_microusd": payload["hourly_cost_microusd"],
+                    **({"lifecycle": copy.deepcopy(payload["lifecycle"])} if "lifecycle" in payload else {}),
                     "billing_state": binding.get("billing_state", "unsettled"),
-                    "reason_code": binding.get("reason_code") or dispatch_reason,
+                    "reason_code": payload.get("stop_reason_code") or binding.get("reason_code") or dispatch_reason,
                     "dispatch_reason_code": dispatch_reason, "version": node["updated_at"]})
         return {"capacity_backend": BACKEND_MARKER, "enabled": self.policy.get("enabled") is True,
             "operator": {"account": owner},
@@ -705,8 +813,9 @@ class DstackOperator:
         return {"command_id": command_id, "node_id": node_id, "state": "accepted"}
 
     def set_hold(self, principal, node_id, body, key):
-        require(isinstance(body, dict) and set(body) <= {"hold_seconds", "expected_version"} and
-            _integer(body.get("hold_seconds"), 0, 86400), "dstack_hold_invalid", 422)
+        require(isinstance(body, dict) and set(body) <= {"hold_seconds", "expected_version", "keep_on", "idle_shutdown_seconds"}
+            and any(field in body for field in ("hold_seconds", "keep_on", "idle_shutdown_seconds")),
+            "dstack_hold_invalid", 422)
         owner = self.authorize(principal)
         actor = _actor(self.settings.tenant_id, owner)
         digest = request_hash({"kind": "dstack_hold", "node_id": node_id, "body": body})
@@ -716,17 +825,40 @@ class DstackOperator:
             existing = self._existing_command(connection, actor, key, digest)
             if existing:
                 return copy.deepcopy(existing["payload"])
-            require(node["desired_state"] == "running" and self.repo.clock() < node["payload"]["hard_deadline"],
-                "dstack_hold_window_expired")
             require("expected_version" not in body or body["expected_version"] == node["updated_at"], "operator_node_version_conflict")
-            until = self.repo.clock() + body["hold_seconds"] if body["hold_seconds"] else 0
-            require(until <= node["payload"]["hard_deadline"], "dstack_hold_deadline_exceeded")
+            now = self.repo.clock()
             payload = copy.deepcopy(node["payload"])
-            payload["hold_until"] = until
-            connection.execute(update(operator_nodes).where(operator_nodes.c.intent_id == node_id)
-                .values(payload=payload, updated_at=self.repo.clock()))
-            result = {"node_id": node_id, "hold_until": until, "hard_deadline": payload["hard_deadline"],
-                "additional_reservation_microusd": 0, "scope": "idle_hold_within_original_deadline"}
+            intent = self.repo._locked(connection, select(instance_intents).where(instance_intents.c.id == node_id))
+            require(node["desired_state"] == "running" and _window_open(intent, node, now), "dstack_hold_window_expired")
+            if payload.get("lifecycle", {}).get("version") == 2:
+                original_policy = payload["lifecycle"]
+                options = {"idle_shutdown_seconds": original_policy["idle_shutdown_seconds"], **body}
+                # Alter only the shutdown preference; frozen accounts and the
+                # protected execution quote are not client-editable.
+                candidate = self._lifecycle(options, now, original_policy["expected_runtime_s"])
+                if "keep_on" not in body and "hold_seconds" not in body:
+                    candidate["keep_on"] = original_policy["keep_on"]
+                    candidate["hold_until"] = original_policy["hold_until"]
+                for field in ("reservation_seconds", "budget_account_ids"):
+                    candidate[field] = copy.deepcopy(original_policy[field])
+                payload.update(lifecycle=candidate, hold_until=candidate["hold_until"])
+                connection.execute(update(operator_nodes).where(operator_nodes.c.intent_id == node_id)
+                    .values(payload=payload, updated_at=now))
+                funded = self.fund_window(connection, intent, {**node, "payload": payload}, now)
+                result = {"node_id": node_id, "hold_until": candidate["hold_until"], "hard_deadline": None,
+                    "lifecycle": copy.deepcopy(candidate), "reserved_cost_microusd": funded,
+                    "additional_reservation_microusd": funded-intent["reserved_cost_microusd"],
+                    "scope": "continuing_idle_policy_with_original_spend_cap"}
+            else:
+                require(not set(body)-{"hold_seconds", "expected_version"} and
+                    _integer(body.get("hold_seconds"), 0, 86400), "dstack_hold_invalid", 422)
+                until = now + body["hold_seconds"] if body["hold_seconds"] else 0
+                require(until <= payload["hard_deadline"], "dstack_hold_deadline_exceeded")
+                payload["hold_until"] = until
+                connection.execute(update(operator_nodes).where(operator_nodes.c.intent_id == node_id)
+                    .values(payload=payload, updated_at=now))
+                result = {"node_id": node_id, "hold_until": until, "hard_deadline": payload["hard_deadline"],
+                    "additional_reservation_microusd": 0, "scope": "idle_hold_within_original_deadline"}
             connection.execute(insert(operator_commands).values(id=str(uuid.uuid4()), actor=actor, idempotency_key=key,
                 request_hash=digest, kind="dstack_hold", state="completed", payload=result,
                 created_at=self.repo.clock(), updated_at=self.repo.clock()))

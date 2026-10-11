@@ -69,6 +69,9 @@ class Client:
 class DstackOperatorTests(LedgerCase):
     def setUp(self):
         super().setUp()
+        self._setup_dstack()
+
+    def _setup_dstack(self):
         self.repo.configure_pool("dstack-test", max_instances=3, max_physical_gpus=3)
         self.settings = SimpleNamespace(tenant_id=self.scope.tenant_id,
             operator_capacity_owners=("superdan", "supervan"))
@@ -366,3 +369,286 @@ class DstackOperatorTests(LedgerCase):
             self.assertTrue(service.catalog(self.owner)["enabled"])
             self.assertNotIn("fake-private-token", json.dumps(service.config))
             service.capacity.client.close()
+
+
+class DstackLifetimeTests(LedgerCase):
+    """Continuing policy uses original money/identity authority, never a TTL."""
+    start = DstackOperatorTests.start
+    running = DstackOperatorTests.running
+    counts = DstackOperatorTests.counts
+
+    def setUp(self):
+        super().setUp()
+        DstackOperatorTests._setup_dstack(self)
+        self.config['policy'].update(lifecycle_version=2, reservation_seconds=3600)
+        self.service = DstackOperator(self.repo, self.settings, self.capacity, self.config)
+        profile = self.service.profiles['5090-fl']
+        self.execution_policy = dict(enabled=True, backend='wangp-worker', dispatch_backend='hatchet-v1',
+            pool=profile['pool'], configuration_id=profile['configuration_id'], model_id=profile['model_id'],
+            engine_manifest_digest=profile['manifest_digest'], qualification=dict(status='accepted',
+                verified_at=1., expires_at=20000.), reservation=dict(expected_runtime_s=1800,
+                expires_at=20000.), envelope=dict(max_duration_seconds=4.))
+        patched = patch('studio_platform.execution_profiles.selected_policy', return_value=self.execution_policy)
+        patched.start(); self.addCleanup(patched.stop)
+        with self.repo.transaction() as connection:
+            connection.execute(update(budget_accounts).values(limit_microusd=10_000_000))
+
+    def preview(self, **options):
+        return self.service.preview(self.owner, {'profile_id':'5090-fl', **options})
+
+    def controller(self):
+        from test_dstack_controller import DstackControllerTests
+        return DstackControllerTests.controller(self)
+
+    def test_v2_preview_initial_chunk_is_not_lifetime_and_start_freezes_original_authority(self):
+        preview = self.preview(ttl_seconds=900, keep_on='until_stopped')
+        self.assertIsNone(preview['hard_deadline'])
+        self.assertEqual(preview['initial_reservation_seconds'], 3600)
+        self.assertEqual(preview['reservation_microusd'], 812500)
+        result = self.start(preview=preview)
+        self.assertEqual(self.start(preview=preview), result)
+        node = result['node_id']
+        with self.repo.engine.connect() as connection:
+            intent = connection.execute(select(instance_intents)).mappings().one()
+            payload = connection.execute(select(operator_nodes.c.payload)).scalar_one()
+        self.assertIsNone(intent['hard_deadline'])
+        self.assertIsNone(payload['request']['max_duration_s'])
+        self.assertEqual(payload['request']['lifecycle_version'], 2)
+        self.assertEqual(payload['dstack']['run_spec']['configuration']['max_duration'], 'off')
+        self.assertEqual(payload['lifecycle']['budget_account_ids'], ['owner-budget'])
+        self.assertEqual(payload['lifecycle']['expected_runtime_s'], 1800)
+        self.assertEqual(payload['lifecycle']['keep_on'], 'until_stopped')
+        self.assertEqual(self.client.applied, [node])
+
+    def test_original_protected_execution_policy_and_owner_money_cap_required_before_apply(self):
+        preview = self.preview()
+        self.execution_policy['reservation']['expected_runtime_s'] = 2000
+        with self.assertRaisesRegex(OperatorError, 'execution_policy_changed'):
+            self.start(preview=preview)
+        self.execution_policy['reservation']['expected_runtime_s'] = 1800
+        with self.repo.transaction() as connection:
+            connection.execute(update(budget_accounts).values(owner_id=None))
+        with self.assertRaisesRegex(OperatorError, 'owner_spend_limit_required'):
+            self.start(preview=preview)
+        self.assertEqual(self.client.applied, [])
+        self.assertEqual(self.counts(), (0,0,0,0))
+        self.execution_policy['configuration_id'] = 'different'
+        with self.assertRaisesRegex(OperatorError, 'execution_policy_unconfirmed'):
+            self.preview()
+
+    def test_short_idle_funds_collection_margin_for_initial_and_rolling_windows(self):
+        from studio_platform.worker_admission import dstack_budget_reason
+        self.execution_policy['reservation']['expected_runtime_s'] = 1765
+        self.service.policy['reservation_seconds'] = 120
+        preview = self.preview(idle_shutdown_seconds=1)
+        self.assertEqual(preview['initial_reservation_seconds'], 1920)
+        self.assertEqual(preview['reservation_microusd'], 462500)
+        node_id = self.start(preview=preview)['node_id']
+        self.running(node_id)
+        with self.repo.transaction() as connection:
+            intent = dict(connection.execute(select(instance_intents)).mappings().one())
+            node = dict(connection.execute(select(operator_nodes)).mappings().one())
+            self.assertEqual(self.service.fund_window(connection,intent,node,self.now),462500)
+            self.assertIsNone(dstack_budget_reason(connection,intent,node,self.now,expected_runtime_s=1765))
+
+    def test_exact_chunk_boundary_funds_strictly_more_than_required_job_runway(self):
+        from studio_platform.worker_admission import dstack_budget_reason
+        self.service.policy['reservation_seconds'] = 120
+        preview = self.preview(idle_shutdown_seconds=1)
+        self.assertEqual(preview['initial_reservation_seconds'], 2040)
+        self.assertEqual(preview['reservation_microusd'], 487500)
+        node_id = self.start(preview=preview)['node_id']
+        self.running(node_id)
+        with self.repo.transaction() as connection:
+            intent = dict(connection.execute(select(instance_intents)).mappings().one())
+            node = dict(connection.execute(select(operator_nodes)).mappings().one())
+            self.assertEqual(self.service.fund_window(connection,intent,node,self.now),487500)
+            self.assertIsNone(dstack_budget_reason(connection,intent,node,self.now,expected_runtime_s=1800))
+
+    def test_hold_preferences_preserve_null_lifetime_original_identity_and_idempotency(self):
+        node = self.start()['node_id']
+        original = self.store.load(node)
+        self.now += 1
+        body = {'keep_on':'until_stopped', 'expected_version':self.service.state(self.owner)['nodes'][0]['version']}
+        result = self.service.set_hold(self.owner,node,body,'always-original')
+        self.assertEqual(self.service.set_hold(self.owner,node,body,'always-original'),result)
+        self.assertIsNone(result['hard_deadline'])
+        self.assertEqual(result['lifecycle']['keep_on'],'until_stopped')
+        self.service.set_hold(self.owner,node,{'idle_shutdown_seconds':900},'idle-adjust-only')
+        state = self.service.state(self.owner)['nodes'][0]
+        self.assertEqual(state['lifecycle']['keep_on'],'until_stopped')
+        self.assertEqual(state['lifecycle']['idle_shutdown_seconds'],900)
+        for field in ('run_id','run_name','spec_digest','created_at','hard_deadline','apply_started_at'):
+            self.assertEqual(self.store.load(node)[field],original[field])
+        with self.assertRaisesRegex(OperatorError,'node_not_found'):
+            self.service.set_hold(self.other_owner,node,{'keep_on':'idle'},'wrong-owner')
+        with self.assertRaisesRegex(OperatorError,'version_conflict'):
+            self.service.set_hold(self.owner,node,{'keep_on':'idle','expected_version':-1},'stale-version')
+
+    def test_cold_paid_elapsed_is_funded_before_native_callback_without_second_apply(self):
+        node = self.start()['node_id']
+        self.capacity.readiness = None
+        self.running(node)
+        self.now += 1400
+        controller = self.controller()
+        def readiness(binding, run):
+            with self.repo.engine.connect() as connection:
+                intent = connection.execute(select(instance_intents)).mappings().one()
+                self.assertGreater(intent['reserved_cost_microusd'],812500)
+            return HostReadiness(binding['manifest_digest'],binding['intent_id'],'c'*32,True)
+        controller.runtime.readiness = readiness
+        self.capacity.readiness = readiness
+        self.assertEqual(controller.tick()['nodes'][0]['state'],'ready')
+        self.assertEqual(self.client.applied,[node])
+        self.assertEqual(self.client.stopped,[])
+        self.assertEqual(self.repo.get_budget('owner-budget')['spent_microusd'],0)
+
+    def test_always_cannot_bypass_money_cap_cold_stop_keeps_reserved_unknown_bill(self):
+        node = self.start(preview=self.preview(keep_on='until_stopped'))['node_id']
+        self.capacity.readiness = None
+        self.running(node)
+        self.now += 1400
+        before = self.repo.get_budget('owner-budget')
+        with self.repo.transaction() as connection:
+            connection.execute(update(budget_accounts).values(limit_microusd=before['reserved_microusd']))
+        controller = self.controller()
+        self.capacity.readiness = None
+        result = controller.tick()['nodes'][0]
+        self.assertEqual(result['state'],'stopping')
+        self.assertEqual(len(self.client.stopped),1)
+        with self.repo.engine.connect() as connection:
+            intent = connection.execute(select(instance_intents)).mappings().one()
+            payload = connection.execute(select(operator_nodes.c.payload)).scalar_one()
+            reservation = connection.execute(select(budget_reservations)).mappings().one()
+        self.assertEqual(intent['reserved_cost_microusd'],before['reserved_microusd'])
+        self.assertEqual(reservation['state'],'reserved')
+        self.assertIsNone(reservation['actual_cost_microusd'])
+        self.assertEqual(payload['stop_reason_code'],'dstack_spend_limit_reached')
+
+    def test_legacy_obligation_does_not_count_new_path_and_terminal_absence_retains_old_money(self):
+        legacy = self.repo.reserve_instance_intent(self.scope,'dstack-test','legacy-original',
+            physical_gpus=1,slots=1,reserved_cost_microusd=100000,hard_deadline=self.now+9000,
+            budget_account_ids=['owner-budget'],provider='lium',dry_run=False)
+        self.repo.configure_capacity(max_instances=1,max_physical_gpus=1)
+        self.repo.configure_pool('dstack-test',max_instances=1,max_physical_gpus=1)
+        self.service.policy.update(max_instances=1,max_physical_gpus=1)
+        node = self.start()['node_id']
+        self.running(node)
+        run = self.client.runs[self.store.load(node)['run_name']]
+        run['status']='terminated'
+        self.service.provider_inventory=lambda backend:dict(backend=backend,complete=True,
+            observed_at=self.now,instance_ids=[])
+        old_budget=self.repo.get_budget('owner-budget')
+        with self.repo.transaction() as connection:
+            usage=self.service._limits(connection,750000)
+        self.assertEqual(usage['instances'],0)
+        self.assertEqual(usage['active_instance_ids'],())
+        self.assertEqual(self.repo.get_budget('owner-budget'),old_budget)
+        self.assertEqual(len(self.client.applied),1)
+        self.service.provider_inventory=lambda backend:dict(backend=backend,complete=True,
+            observed_at=self.now-31,instance_ids=[])
+        with self.repo.transaction() as connection:
+            with self.assertRaisesRegex(OperatorError,'capacity_limit_exceeded'):
+                self.service._limits(connection,750000)
+        with self.repo.engine.connect() as connection:
+            original=connection.execute(select(instance_intents).where(instance_intents.c.id==legacy['id'])).mappings().one()
+            self.assertEqual(original['state'],'reserved')
+            self.assertEqual(original['reserved_cost_microusd'],100000)
+
+    def test_budget_exhaustion_drains_active_original_attempt_without_provider_stop_or_settlement(self):
+        node=self.start(preview=self.preview(keep_on='until_stopped'))['node_id']
+        self.running(node)
+        controller=self.controller()
+        controller.tick()
+        job=self.job(status='queued')
+        with self.repo.transaction() as connection:
+            worker=connection.execute(select(registered_workers)).mappings().one()
+            connection.execute(update(jobs).where(jobs.c.id==job['id']).values(status='running',
+                pool='dstack-test',lease_worker_id=worker['id']))
+            connection.execute(update(registered_workers).where(registered_workers.c.id==worker['id']).values(
+                current_job_id=job['id'],state='busy'))
+            connection.execute(insert(attempts).values(id='original-running',job_id=job['id'],number=1,
+                status='running',fence=1,worker_id=worker['id'],created_at=self.now,updated_at=self.now,
+                submission_started_at=self.now,upstream_stopped=0))
+            connection.execute(update(budget_accounts).values(limit_microusd=budget_accounts.c.reserved_microusd))
+        self.now+=1400
+        self.assertEqual(controller.tick()['nodes'][0]['state'],'draining')
+        self.assertEqual(self.client.stopped,[])
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(connection.execute(select(jobs.c.status).where(jobs.c.id==job['id'])).scalar_one(),'running')
+            self.assertEqual(connection.execute(select(attempts.c.upstream_stopped)).scalar_one(),0)
+            self.assertEqual(connection.execute(select(budget_reservations.c.state).where(
+                budget_reservations.c.reference_type=='instance',budget_reservations.c.reference_id==node)).scalar_one(),'reserved')
+            self.assertEqual(connection.execute(select(registered_workers.c.state)).scalar_one(),'draining')
+
+    def test_failed_hold_funding_rolls_back_policy_and_preserves_original_reservation(self):
+        node=self.start()['node_id']
+        original=self.service.state(self.owner)['nodes'][0]['lifecycle']
+        before=self.repo.get_budget('owner-budget')
+        with self.repo.transaction() as connection:
+            connection.execute(update(budget_accounts).values(limit_microusd=budget_accounts.c.reserved_microusd))
+        with self.assertRaises(BudgetExceeded):
+            self.service.set_hold(self.owner,node,{'keep_on':'until_stopped','idle_shutdown_seconds':7200},'unfunded-hold')
+        self.assertEqual(self.service.state(self.owner)['nodes'][0]['lifecycle'],original)
+        after=self.repo.get_budget('owner-budget')
+        self.assertEqual(after['reserved_microusd'],before['reserved_microusd'])
+        self.assertEqual(after['spent_microusd'],before['spent_microusd'])
+
+    def accepted_queue(self, *, profile_id=None, configuration_id=None):
+        profile = self.service.profiles['5090-fl']
+        request = {'recipe_id':profile['recipe_id'], 'deployment_profile_id':profile_id or profile['runtime_profile_id'],
+            'request':{'model':profile['model_id'], 'mode':profile['mode']}}
+        execution = dict(pool=profile['pool'], backend='wangp-worker', enabled=True, dispatch_backend='hatchet-v1',
+            output_delivery='native-frames-v1', configuration_id=configuration_id or profile['configuration_id'],
+            engine_manifest_digest=profile['manifest_digest'], expected_runtime_s=1800,
+            deployment_profile_id=profile['runtime_profile_id'])
+        plan = self.repo.create_plan(self.scope,request,execution,expires_at=self.now+1000,estimated_cost_microusd=0)
+        return self.repo.create_job(self.scope,plan['id'],str(__import__('uuid').uuid4()))
+
+    def queue_controller(self):
+        from dataclasses import replace
+        controller = self.controller()
+        original_slot = controller.runtime.slot
+        def native_slot(intent_id):
+            slot = original_slot(intent_id)
+            return replace(slot,spec=replace(slot.spec,output_delivery='native-frames-v1'))
+        controller.runtime.slot = native_slot
+        return controller
+
+    def test_accepted_matching_queue_pauses_idle_but_other_configuration_does_not(self):
+        node = self.start()['node_id']
+        self.running(node)
+        controller = self.queue_controller()
+        controller.tick()
+        job = self.accepted_queue()
+        self.now += 601
+        self.assertEqual(controller.tick()['nodes'][0]['state'],'ready')
+        self.assertEqual(self.client.stopped,[])
+        with self.repo.transaction() as connection:
+            self.assertEqual(connection.execute(select(jobs.c.status).where(jobs.c.id==job['id'])).scalar_one(),'queued')
+            connection.execute(update(jobs).where(jobs.c.id==job['id']).values(status='cancelled',updated_at=self.now-601))
+        self.accepted_queue(configuration_id='another-original-config')
+        self.assertEqual(controller.tick()['nodes'][0]['state'],'stopping')
+        self.assertEqual(len(self.client.stopped),1)
+
+    def test_idle_request_rechecks_new_queue_before_drain_and_spend_stop_still_drains(self):
+        node_id = self.start()['node_id']
+        self.running(node_id)
+        controller = self.queue_controller()
+        controller.tick()
+        self.now += 601
+        original_request_stop = controller._request_stop
+        def accept_between_observation_and_stop(node, **options):
+            self.accepted_queue()
+            return original_request_stop(node,**options)
+        with patch.object(controller,'_request_stop',side_effect=accept_between_observation_and_stop):
+            self.assertEqual(controller.tick()['nodes'][0]['state'],'ready')
+        with self.repo.engine.connect() as connection:
+            node = dict(connection.execute(select(operator_nodes)).mappings().one())
+            worker = dict(connection.execute(select(registered_workers)).mappings().one())
+        self.assertEqual(node['desired_state'],'running')
+        self.assertEqual(worker['state'],'ready')
+        self.assertEqual(self.client.stopped,[])
+        self.assertTrue(controller._request_stop(node,reason_code='dstack_spend_limit_reached'))
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(connection.execute(select(operator_nodes.c.desired_state)).scalar_one(),'stopped')

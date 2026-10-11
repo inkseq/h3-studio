@@ -31,6 +31,8 @@ SHA256 = re.compile(r"[0-9a-f]{64}")
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.-]{1,200}")
 TERMINAL = frozenset({"done", "failed", "aborted", "terminated"})
 RUN_STATUSES = TERMINAL | frozenset({"pending", "submitted", "provisioning", "running", "terminating", "stopping"})
+VAST_INSTANCES_URL = "https://console.vast.ai/api/v1/instances/"
+RUNPOD_GRAPHQL_URL = "https://api.runpod.io/graphql"
 
 
 class DstackError(ValueError):
@@ -71,13 +73,14 @@ class CapacityRequest:
     disk_gib: int
     max_price_microusd: int
     created_at: float
-    hard_deadline: float
-    max_duration_s: int
+    hard_deadline: float | None
+    max_duration_s: int | None
     cpu_count: int = 4
     gpu_memory_gib: int = 30
     gpu_count: int = 1
     min_reliability: float = 0.90
     regions: tuple[str, ...] = ()
+    lifecycle_version: int = 1
 
     def __post_init__(self):
         _uuid(self.intent_id)
@@ -91,17 +94,27 @@ class CapacityRequest:
             r"[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}", self.image), "dstack_image_digest_required")
         _require(type(self.gpu_count) is int and self.gpu_count == 1, "dstack_single_gpu_required")
         for count in (self.memory_gib, self.disk_gib, self.max_price_microusd,
-                      self.max_duration_s, self.cpu_count, self.gpu_memory_gib):
+                      self.cpu_count, self.gpu_memory_gib):
             _require(type(count) is int and count > 0, "dstack_resource_limit_invalid")
-        _require(self.max_duration_s <= 86400, "dstack_duration_invalid")
+        _require(type(self.lifecycle_version) is int and self.lifecycle_version in {1, 2},
+            "dstack_lifecycle_invalid")
+        _require(type(self.created_at) in (int, float) and math.isfinite(self.created_at)
+            and self.created_at > 0, "dstack_deadline_invalid")
+        if self.lifecycle_version == 2:
+            # Only explicitly new continuing intents have no fixed deadline.
+            # Old requests remain finite and retain their frozen spec identity.
+            _require(self.hard_deadline is None and self.max_duration_s is None,
+                "dstack_lifecycle_invalid")
+        else:
+            _require(type(self.max_duration_s) is int and 0 < self.max_duration_s <= 86400,
+                "dstack_duration_invalid")
+            _require(type(self.hard_deadline) in (int, float) and math.isfinite(self.hard_deadline)
+                and self.created_at < self.hard_deadline, "dstack_deadline_invalid")
         _require(isinstance(self.gpu_names, tuple) and 1 <= len(self.gpu_names) <= 8
             and all(isinstance(n, str) and re.fullmatch(r"[A-Za-z0-9 _.-]{1,100}", n) for n in self.gpu_names),
             "dstack_gpu_selection_invalid")
         _require(isinstance(self.regions, tuple) and len(self.regions) <= 20 and
             all(isinstance(n, str) and IDENTIFIER.fullmatch(n) for n in self.regions), "dstack_region_invalid")
-        _require(all(type(t) in (int, float) and math.isfinite(t) and t > 0
-            for t in (self.created_at, self.hard_deadline)) and self.created_at < self.hard_deadline,
-            "dstack_deadline_invalid")
         _require(type(self.min_reliability) in (int, float) and math.isfinite(self.min_reliability)
             and 0.9 <= self.min_reliability <= 1, "dstack_reliability_invalid")
 
@@ -120,7 +133,10 @@ class CapacityRequest:
                 "memory": f"{self.memory_gib}GB..", "disk": {"size": f"{self.disk_gib}GB.."},
                 "gpu": {"vendor": "nvidia", "name": list(self.gpu_names), "count": 1,
                     "memory": f"{self.gpu_memory_gib}GB.."}},
-            "max_price": self.max_price_microusd / 1_000_000, "max_duration": self.max_duration_s,
+            # Pinned 0.22.3 null means inherit the profile; "off" explicitly
+            # disables only the new intent's fixed running-duration limit.
+            "max_price": self.max_price_microusd / 1_000_000,
+            "max_duration": "off" if self.lifecycle_version == 2 else self.max_duration_s,
             "retry": False, "spot_policy": "on-demand", "dstack": False,
             "env": {}, "ports": [], "stop_duration": 300,
             "regions": list(self.regions) if self.regions else None, "tags": {"sixnine_owner": OWNER,
@@ -135,11 +151,14 @@ class CapacityRequest:
 
     def binding(self, ssh_key_pub):
         spec = self.run_spec(ssh_key_pub)
-        return {"intent_id": self.intent_id, "run_name": self.run_name, "backend": self.backend,
+        value = {"intent_id": self.intent_id, "run_name": self.run_name, "backend": self.backend,
             "profile_id": self.profile_id, "mode": self.mode, "model_id": self.model_id,
             "configuration_id": self.configuration_id, "manifest_digest": self.manifest_digest,
             "created_at": self.created_at, "hard_deadline": self.hard_deadline,
             "spec_digest": _hash(spec), "run_spec": spec}
+        if self.lifecycle_version == 2:
+            value["lifecycle_version"] = 2
+        return value
 
 
 class DstackStore(Protocol):
@@ -161,7 +180,7 @@ class DstackStore(Protocol):
 
 class DstackClient:
     """Exact 0.22.3 REST requests, no automatic side-effect retry."""
-    def __init__(self, endpoint, token, project, *, session=None, timeout=30):
+    def __init__(self, endpoint, token, project, *, session=None, timeout=30, provider_session=None):
         parsed = urlsplit(endpoint)
         _require(parsed.scheme == "https" or parsed.scheme == "http" and
             parsed.hostname in {"127.0.0.1", "localhost", "::1"}, "dstack_endpoint_invalid")
@@ -176,10 +195,13 @@ class DstackClient:
         self._headers = {"Authorization": "Bearer " + token}
         self._session = session or httpx.Client(follow_redirects=False, trust_env=False)
         self._owns_session = session is None
+        self._provider_session, self._owns_provider_session = provider_session, provider_session is None
 
     def close(self):
         if self._owns_session:
             self._session.close()
+        if self._owns_provider_session and self._provider_session is not None:
+            self._provider_session.close()
 
     def _post(self, path, body, *, absent=False):
         try:
@@ -216,6 +238,119 @@ class DstackClient:
                 "dstack_run_name_invalid")
         return self._post(f"/api/project/{self.project}/runs/get",
             {"id": run_id} if run_id else {"run_name": run_name}, absent=True)
+
+    def _provider_document(self, method, url, key, *, timeout, body=None, params=None):
+        _require((method, url) in {("GET", VAST_INSTANCES_URL), ("POST", RUNPOD_GRAPHQL_URL)},
+            "dstack_provider_inventory_unconfirmed")
+        if self._provider_session is None:
+            self._provider_session = httpx.Client(follow_redirects=False, trust_env=False)
+        def unique_object(pairs):
+            value = {}
+            for name, item in pairs:
+                _require(name not in value, "dstack_provider_inventory_unconfirmed")
+                value[name] = item
+            return value
+        def invalid_constant(_):
+            raise DstackError("dstack_provider_inventory_unconfirmed")
+        try:
+            with self._provider_session.stream(method, url, headers={"Authorization": "Bearer " + key},
+                    json=body, params=params, timeout=timeout, follow_redirects=False) as response:
+                # Reject redirects and HTTP errors before reading untrusted bodies.
+                _require(response.status_code == 200, "dstack_provider_inventory_rejected")
+                content = bytearray()
+                for chunk in response.iter_bytes(chunk_size=65536):
+                    _require(len(content) + len(chunk) <= 4 * 1024**2,
+                        "dstack_provider_inventory_response_limit")
+                    content.extend(chunk)
+                return json.loads(content, object_pairs_hook=unique_object, parse_constant=invalid_constant)
+        except DstackError:
+            raise
+        except Exception:
+            raise DstackError("dstack_provider_inventory_unavailable") from None
+
+    def provider_inventory(self, backend, *, clock=None):
+        """Transient complete account read using the SAME configured backend key.
+
+        Pinned dstack's ProjectAdmin config_info read returns credentials only
+        into this call's memory. They are never returned, stored, logged or sent
+        to another origin. This is not stock, a rental command or reconciliation.
+        Vast v1 pagination follows the current official show-instances contract;
+        v0 list absence is deliberately unsupported. RunPod's public unpaginated
+        User.pods query is distinct from its paginated podsConnection field.
+        """
+        _require(isinstance(backend, str) and backend in BACKENDS, "dstack_backend_unsupported")
+        clock = clock or time.time
+        observed_at, started = clock(), time.monotonic()
+        _require(type(observed_at) in (int, float) and math.isfinite(observed_at) and observed_at > 0,
+            "dstack_capacity_clock_invalid")
+        try:
+            config = self._post(f"/api/project/{self.project}/backends/{backend}/config_info", {})
+            creds = config.get("creds") if isinstance(config, dict) else None
+            _require(isinstance(config, dict) and config.get("type") == backend and isinstance(creds, dict)
+                and creds.get("type") == "api_key", "dstack_provider_inventory_unconfirmed")
+            key = creds.get("api_key")
+            _require(isinstance(key, str) and 16 <= len(key) <= 4096
+                and not any(char.isspace() for char in key), "dstack_provider_inventory_unconfirmed")
+            def read(method, url, *, body=None, params=None):
+                remaining = 30 - (time.monotonic() - started)
+                _require(remaining > 0, "dstack_provider_inventory_unavailable")
+                return self._provider_document(method, url, key, body=body, params=params,
+                    timeout=min(15, self.timeout, remaining))
+            ids = []
+            if backend == "vastai":
+                params = {"limit": 25, "select_cols": '["id"]',
+                    "order_by": '[{"col":"id","dir":"asc"}]'}
+                cursors, total = set(), None
+                for _ in range(32):
+                    page = read("GET", VAST_INSTANCES_URL, params=params)
+                    _require(isinstance(page, dict) and page.get("success") is True
+                        and set(page) <= {"success", "instances", "instances_found", "total_instances",
+                            "next_token", "label_counts"},
+                        "dstack_provider_inventory_unconfirmed")
+                    rows, found, size = page.get("instances"), page.get("instances_found"), page.get("total_instances")
+                    _require(isinstance(rows, list) and type(found) is int and found == len(rows)
+                        and 0 <= found <= 25 and type(size) is int and 0 <= size <= 800
+                        and (total is None or total == size), "dstack_provider_inventory_unconfirmed")
+                    total = size
+                    for row in rows:
+                        _require(isinstance(row, dict) and type(row.get("id")) is int and row["id"] > 0,
+                            "dstack_provider_inventory_unconfirmed")
+                        ids.append(str(row["id"]))
+                    _require(len(set(ids)) == len(ids) and len(ids) <= total,
+                        "dstack_provider_inventory_unconfirmed")
+                    _require("next_token" in page, "dstack_provider_inventory_unconfirmed")
+                    cursor = page["next_token"]
+                    if cursor is None:
+                        _require(len(ids) == total, "dstack_provider_inventory_unconfirmed")
+                        break
+                    _require(found > 0 and isinstance(cursor, str)
+                        and re.fullmatch(r"[A-Za-z0-9+/=_-]{1,4096}", cursor) and cursor not in cursors,
+                        "dstack_provider_inventory_unconfirmed")
+                    cursors.add(cursor)
+                    params["after_token"] = cursor
+                else:
+                    raise DstackError("dstack_provider_inventory_unconfirmed")
+            else:
+                document = read("POST", RUNPOD_GRAPHQL_URL, body={"query": "query { myself { pods { id } } }"})
+                _require(isinstance(document, dict) and set(document) == {"data"},
+                    "dstack_provider_inventory_unconfirmed")
+                data = document["data"]
+                myself = data.get("myself") if isinstance(data, dict) else None
+                _require(isinstance(data, dict) and set(data) == {"myself"}
+                    and isinstance(myself, dict) and set(myself) == {"pods"}
+                    and isinstance(myself["pods"], list) and len(myself["pods"]) <= 4096,
+                    "dstack_provider_inventory_unconfirmed")
+                for row in myself["pods"]:
+                    _require(isinstance(row, dict) and set(row) == {"id"}
+                        and isinstance(row["id"], str) and IDENTIFIER.fullmatch(row["id"]),
+                        "dstack_provider_inventory_unconfirmed")
+                    ids.append(row["id"])
+                _require(len(set(ids)) == len(ids), "dstack_provider_inventory_unconfirmed")
+            return {"backend": backend, "complete": True, "observed_at": observed_at, "instance_ids": ids}
+        except DstackError:
+            raise
+        except Exception:
+            raise DstackError("dstack_provider_inventory_unavailable") from None
 
     def plan(self, spec):
         # 0.22.3 ordinary planning selects an existing fleet. This endpoint is
@@ -296,19 +431,142 @@ def _resources(value):
         "gpu_count": _range(gpu.get("count")), "gpu_memory": _range(gpu.get("memory"))}
 
 
+def live_capacity_usage(client, nodes, *, provider_inventory=None, clock=time.time,
+                        fresh_seconds=30):
+    """Read current owned dstack capacity without settling historical invoices.
+
+    Call with original operator-node rows while holding the existing capacity
+    reservation lock, and use the result for that same reservation transaction.
+    Legacy rental nodes are outside this path. An unsubmitted intent reserves
+    capacity immediately; absence, failed reads and identity drift keep it.
+
+    The injected read-only provider reader must authenticate to the SAME account
+    as the configured dstack backend. Its complete account list is projected as
+    ``{backend, complete: True, observed_at, instance_ids}``; a stock list or
+    partial/paginated response is not absence evidence. Read-start timestamps
+    bound freshness, and the clock is sampled after the reads. No input rows,
+    reservations, budgets, billing states or provider resources are modified.
+    """
+    _require(isinstance(nodes, (list, tuple)) and len(nodes) <= 4096,
+        "dstack_capacity_rows_invalid")
+    _require(type(fresh_seconds) in (int, float) and math.isfinite(fresh_seconds)
+        and 0 < fresh_seconds <= 120, "dstack_capacity_freshness_invalid")
+    inventories, counted, seen, resources, observations, projections = {}, [], set(), {}, [], []
+    hourly = 0
+
+    def provider_absent(backend, identity):
+        if backend not in inventories:
+            try:
+                document = provider_inventory(backend) if callable(provider_inventory) else None
+                _require(isinstance(document, dict) and document.get("backend") == backend
+                    and document.get("complete") is True, "dstack_provider_inventory_unconfirmed")
+                ids = document.get("instance_ids")
+                _require(isinstance(ids, (list, tuple)) and len(ids) <= 4096
+                    and all(isinstance(value, str) and IDENTIFIER.fullmatch(value) for value in ids)
+                    and len(set(ids)) == len(ids), "dstack_provider_inventory_unconfirmed")
+                observed = document.get("observed_at")
+                _require(type(observed) in (int, float) and math.isfinite(observed)
+                    and observed > 0, "dstack_provider_inventory_unconfirmed")
+                inventories[backend] = (observed, frozenset(ids))
+            except Exception:
+                inventories[backend] = None
+        inventory = inventories[backend]
+        now = clock()
+        _require(type(now) in (int, float) and math.isfinite(now) and now > 0,
+            "dstack_capacity_clock_invalid")
+        return bool(inventory and 0 <= now - inventory[0] <= fresh_seconds
+            and identity not in inventory[1])
+
+    for node in nodes:
+        _require(isinstance(node, dict) or hasattr(node, "keys"), "dstack_capacity_rows_invalid")
+        payload = node.get("payload")
+        if not isinstance(payload, dict) or payload.get("capacity_backend") != "dstack-v1":
+            continue
+        intent_id = _uuid(node.get("intent_id"))
+        _require(intent_id not in seen, "dstack_capacity_rows_invalid")
+        seen.add(intent_id)
+        cost = payload.get("hourly_cost_microusd")
+        binding = payload.get("dstack")
+        _require(isinstance(binding, dict) and binding.get("intent_id") == intent_id,
+            "dstack_intent_binding_invalid")
+        included, reason, status = True, "dstack_capacity_pending", None
+        resource_key = "intent:" + intent_id
+        physical_gpus = 1
+        if (node.get("desired_state") == "stopped" and binding.get("apply_started") is not True
+                and not binding.get("run_id") and not binding.get("provider_instance_id")
+                and binding.get("state") == "stopped"
+                and binding.get("reason_code") == "dstack_never_applied"
+                and binding.get("billing_state") == "no_charge_confirmed"):
+            included, reason = False, "dstack_never_applied"
+        elif binding.get("apply_started") is True:
+            try:
+                run = (client.get(run_id=binding["run_id"]) if binding.get("run_id")
+                    else client.get(run_name=binding["run_name"]))
+                _owns(run, binding, client.project)
+                observed_status = run.get("status")
+                _require(isinstance(observed_status, str) and observed_status in RUN_STATUSES,
+                    "dstack_run_status_invalid")
+                status = observed_status
+                reason = "dstack_capacity_active"
+                provisioning = (run.get("latest_job_submission") or {}).get("job_provisioning_data") or {}
+                identity = provisioning.get("instance_id")
+                backend = binding.get("backend")
+                _require(backend in BACKENDS and provisioning.get("backend") == backend
+                    and isinstance(identity, str) and IDENTIFIER.fullmatch(identity)
+                    and binding.get("provider_instance_id") in (None, identity),
+                    "dstack_instance_identity_unconfirmed")
+                resource_key = backend + ":" + identity
+                gpus = provisioning.get("instance_type", {}).get("resources", {}).get("gpus")
+                if isinstance(gpus, list) and 1 <= len(gpus) <= 128:
+                    physical_gpus = len(gpus)
+                if status in TERMINAL:
+                    if provider_absent(backend, identity):
+                        included, reason = False, "dstack_terminal_provider_absent"
+                    else:
+                        reason = "dstack_terminal_provider_unconfirmed"
+            except Exception:
+                reason = "dstack_capacity_unconfirmed"
+        projections.append((intent_id, cost, resource_key, physical_gpus, included,
+            reason, status, binding.get("backend")))
+    # Later run/account reads can outlive an earlier positive absence receipt.
+    # Revalidate every exclusion at the same final clock without another read.
+    now = clock()
+    _require(type(now) in (int, float) and math.isfinite(now) and now > 0,
+        "dstack_capacity_clock_invalid")
+    for intent_id, cost, resource_key, physical_gpus, included, reason, status, backend in projections:
+        if reason == "dstack_terminal_provider_absent":
+            inventory = inventories.get(backend)
+            if not inventory or not 0 <= now - inventory[0] <= fresh_seconds:
+                included, reason = True, "dstack_terminal_provider_unconfirmed"
+        if included:
+            _require(type(cost) is int and cost > 0, "dstack_active_cost_unconfirmed")
+            counted.append(intent_id)
+            # This adapter permits exactly one GPU per original run. Known
+            # shared physical identities count once globally; unknown intents
+            # retain independent conservative reservations.
+            resources[resource_key] = max(resources.get(resource_key, 0), physical_gpus)
+            hourly += cost
+        observations.append({"intent_id": intent_id, "counted": included,
+            "reason_code": reason, "dstack_status": status})
+    return {"instances": len(resources), "physical_gpus": sum(resources.values()),
+        "logical_slots": len(counted), "hourly_cost_microusd": hourly,
+        "active_instance_ids": tuple(counted), "resources": resources,
+        "observations": observations}
+
+
 class DstackCapacity:
     def __init__(self, client: DstackClient, store: DstackStore, *, clock=time.time, readiness=None):
         self.client, self.store, self.clock, self.readiness = client, store, clock, readiness
 
     def plan(self, request, ssh_key_pub):
-        _require(self.clock() < request.hard_deadline, "dstack_window_expired")
+        _require(request.hard_deadline is None or self.clock() < request.hard_deadline, "dstack_window_expired")
         value = self.client.plan(request.run_spec(ssh_key_pub))
         _require(isinstance(value, dict), "dstack_plan_invalid")
         # Offers are advisory, not allocation guarantees or permission to rent.
         return value
 
     def start(self, request, ssh_key_pub):
-        _require(self.clock() < request.hard_deadline, "dstack_window_expired")
+        _require(request.hard_deadline is None or self.clock() < request.hard_deadline, "dstack_window_expired")
         binding = request.binding(ssh_key_pub)
         prior = self.store.load(request.intent_id)
         _require(isinstance(prior, dict), "dstack_intent_missing")
@@ -493,19 +751,41 @@ class DstackCapacity:
 
 
 def idle_action(*, now, hard_deadline, hold_until, last_business_activity, idle_seconds,
-                active_jobs, unsafe_attempts, collection_holds, observations_fresh):
+                active_jobs, unsafe_attempts, collection_holds, observations_fresh,
+                lifecycle_version=1, keep_on="idle", budget_available=True):
     """Pure policy; stopping is still guarded transactionally by begin_stop.
 
-    A running sleep command is not business-idle. max_duration starts after
-    provisioning/image pull, so the controller also enforces absolute lifetime.
+    A running sleep command is not business-idle. Finite version-1 rentals
+    retain their original absolute lifetime. Explicit version 2 uses business
+    idle/hold policy and the original ledger's bounded funding authority.
     """
     _require(all(type(v) in (int, float) and math.isfinite(v) and v >= 0
-        for v in (now, hard_deadline, hold_until, last_business_activity, idle_seconds)), "dstack_idle_policy_invalid")
+        for v in (now, hold_until, last_business_activity, idle_seconds)), "dstack_idle_policy_invalid")
     _require(idle_seconds > 0 and all(type(n) is int and n >= 0
         for n in (active_jobs, unsafe_attempts, collection_holds)) and type(observations_fresh) is bool,
         "dstack_idle_policy_invalid")
+    _require(type(lifecycle_version) is int and lifecycle_version in {1, 2}
+        and type(budget_available) is bool and isinstance(keep_on, str)
+        and keep_on in {"idle", "until", "until_stopped"},
+        "dstack_idle_policy_invalid")
+    if lifecycle_version == 1:
+        _require(type(hard_deadline) in (int, float) and math.isfinite(hard_deadline)
+            and hard_deadline >= 0 and keep_on == "idle" and budget_available,
+            "dstack_idle_policy_invalid")
+    else:
+        _require(hard_deadline is None, "dstack_idle_policy_invalid")
     if not observations_fresh:
         return "reconcile"
+    if lifecycle_version == 2:
+        obligations = active_jobs or unsafe_attempts or collection_holds
+        if not budget_available:
+            return "drain" if obligations else "stop"
+        if obligations or keep_on == "until_stopped" or now < hold_until:
+            return "retain"
+        # Expiring a hold begins a full idle interval; it must not immediately
+        # stop a machine whose previous activity predates the hold.
+        last_activity = max(last_business_activity, hold_until)
+        return "stop" if now - last_activity >= idle_seconds else "retain"
     if active_jobs or unsafe_attempts or collection_holds:
         return "drain" if now >= hard_deadline else "retain"
     if now >= hard_deadline:

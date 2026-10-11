@@ -76,6 +76,18 @@ test('compact rows expose a detail action instead of full slot history',()=>{
   assert.match(html,/查看 Lium RTX 5090 old-node 详情/);assert.match(html,/原期限/);assert.doesNotMatch(html,/old-job|排空后关机|延长运行/);
   assert.equal(uniqueOperatorReasons(['a',{code:'a'},'b',{code:'b'},null]).length,2);
 });
+test('manual mark is available directly for server-eligible records without a prior platform stop',()=>{
+  for(const provider of ['lium','targon']){
+    const node={...active,provider,provider_instance_id:null,state:'creation_unknown',runtime_state:'creation_unknown',actions:{manual_review:{allowed:true}}};
+    const row=props=>renderToStaticMarkup(React.createElement(MachineRow,{node,profiles:[],now,onOpen:()=>{},onReview:()=>{},...props}));
+    assert.match(row(),/>标记已关机<\/button>/);assert.doesNotMatch(row(),/<button[^>]*disabled=/);
+    assert.match(row({disabled:true}),/<button[^>]*disabled=""[^>]*>.*标记已关机/);
+    assert.match(render(node),/>标记已关机<\/button>/);
+    const blocked={...node,actions:{manual_review:{allowed:false,blockers:['operator_manual_review_worker_active']}}};
+    assert.doesNotMatch(render(blocked),/>标记已关机<\/button>/);assert.match(render(blocked),/operator_manual_review_worker_active/);
+    assert.doesNotMatch(row({node:blocked}),/>标记已关机<\/button>/);
+  }
+});
 test('candidate rendering enables only usable fresh stock and preserves reasons on stale, sold-out or blocked offers',()=>{
   const candidate={provider:'lium',offer_id:'host-one',gpu_type:'RTX 5090',gpu_count:1,available_count:1,deployment_qualified:true,execution_slots:1,blockers:[],hourly_cost_microusd:700000};
   const renderCandidate=(row,current=true,busy=false)=>renderToStaticMarkup(React.createElement(CandidateCard,{row,index:0,current,busy,onStart:()=>{}}));

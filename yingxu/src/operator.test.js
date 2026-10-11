@@ -36,6 +36,16 @@ test('manual review binds exact UID and original version; uncertain replay retai
   await controller.poll();assert.equal(calls.length,1);fail=false;await controller.recover();
   assert.deepEqual(calls[1],calls[0]);assert.equal(controller.getState().pending,null);
 });
+test('unbound creation manual review preserves exact null identity across uncertain recovery',async()=>{
+  const storage=memory(),calls=[];let fail=true;
+  const client=fakeClient({manualReview:async(nodeId,body,key)=>{calls.push({nodeId,body,key});if(fail)throw Error('connection lost');return {operation:{id:'null-review'}};}});
+  const node={id:'original-unbound-node',provider_instance_id:null,version:'unbound-version'};
+  const controller=createOperatorController({client,storage});await controller.setAccount('owner');
+  await assert.rejects(controller.manualReview(node,{account_absent:true,no_continuing_charge:true}));
+  assert.deepEqual(calls[0].body,{expected_version:'unbound-version',provider_instance_id:null,account_absent:true,no_continuing_charge:true});
+  await controller.poll();assert.equal(calls.length,1);fail=false;await controller.recover();
+  assert.deepEqual(calls[1],calls[0]);assert.equal(controller.getState().pending,null);
+});
 test('manual review projection stops scheduling without labelling provider removal or settled money',()=>{
   const review={state:'manually_reviewed',requested_at:100,last_checked_at:200,next_check_at:null,
     manual_review:{actor:'supervan',observed_at:300},last_observation:{state:'unknown',observed_at:200}};
