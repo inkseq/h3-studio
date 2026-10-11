@@ -116,14 +116,14 @@ class CapacityRequest:
         # hash-bound bundle and starts the loopback launcher through SSH.
         configuration = {"type": "task", "name": self.run_name, "image": self.image,
             "commands": ["exec sleep infinity"], "backends": [self.backend],
-            "resources": {"cpu": {"arch": "x86", "count": self.cpu_count},
+            "resources": {"cpu": {"arch": "x86", "count": f"{self.cpu_count}.."},
                 "memory": f"{self.memory_gib}GB..", "disk": {"size": f"{self.disk_gib}GB.."},
                 "gpu": {"vendor": "nvidia", "name": list(self.gpu_names), "count": 1,
                     "memory": f"{self.gpu_memory_gib}GB.."}},
             "max_price": self.max_price_microusd / 1_000_000, "max_duration": self.max_duration_s,
             "retry": False, "spot_policy": "on-demand", "dstack": False,
             "env": {}, "ports": [], "stop_duration": 300,
-            "regions": list(self.regions), "tags": {"sixnine_owner": OWNER,
+            "regions": list(self.regions) if self.regions else None, "tags": {"sixnine_owner": OWNER,
                 "sixnine_intent": self.intent_id, "sixnine_profile": self.profile_id,
                 "sixnine_mode": self.mode, "sixnine_manifest": self.manifest_digest}}
         if self.backend == "vastai":
@@ -208,8 +208,10 @@ class DstackClient:
             {"id": run_id} if run_id else {"run_name": run_name}, absent=True)
 
     def plan(self, spec):
+        # 0.22.3 ordinary planning selects an existing fleet. This endpoint is
+        # our advisory global stock query; it does not create a fleet or run.
         return self._post(f"/api/project/{self.project}/runs/get_plan",
-            {"run_spec": spec, "max_offers": 100})
+            {"run_spec": spec, "max_offers": 100, "for_offers_only": True})
 
     def apply(self, spec):
         # Null expected resource + force:false is dstack's create-only CAS.
@@ -242,7 +244,7 @@ def _owns(run, binding, project):
     for key in ("files", "repos", "setup", "volumes"):
         _require(actual.get(key) in (None, []), "dstack_run_binding_mismatch")
     _require(actual.get("spot_policy") == expected["spot_policy"]
-        and actual.get("regions", []) == expected["regions"]
+        and actual.get("regions") == expected["regions"]
         and actual.get("stop_duration") == expected["stop_duration"], "dstack_run_binding_mismatch")
     _require(_resources(actual.get("resources")) == _resources(expected["resources"]),
         "dstack_run_binding_mismatch")
@@ -262,8 +264,10 @@ def _range(value):
         return value
     if type(value) in (int, float):
         return {"min": value, "max": value}
-    if isinstance(value, str) and re.fullmatch(r"[0-9]+GB\.\.", value):
-        return {"min": float(value[:-4]), "max": None}
+    if isinstance(value, str):
+        match = re.fullmatch(r"([0-9]+)(?:GB)?\.\.", value)
+        if match:
+            return {"min": float(match.group(1)), "max": None}
     raise DstackError("dstack_resource_response_invalid")
 
 

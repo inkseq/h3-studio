@@ -345,6 +345,27 @@ class DstackCapacityTests(unittest.TestCase):
         with self.assertRaisesRegex(DstackError, "dstack_backend_unsupported"):
             request(backend="lium")
 
+    def test_resource_floors_and_optional_regions_use_pinned_range_semantics(self):
+        config = request().run_spec(PUB)["configuration"]
+        self.assertEqual(config["resources"]["cpu"], {"arch": "x86", "count": "4.."})
+        self.assertIsNone(config["regions"], "An empty region whitelist excludes every offer")
+        self.assertEqual(request(regions=("us-ca",)).run_spec(PUB)["configuration"]["regions"], ["us-ca"])
+
+    def test_parsed_cpu_floor_preserves_ownership_and_rejects_changed_requirement(self):
+        self.start()
+        cpu = self.client.run["run_spec"]["configuration"]["resources"]["cpu"]
+        cpu["count"] = {"min": 4, "max": None}
+        self.assertEqual(self.capacity.observe(INTENT)["state"], "starting")
+        for changed in ({"min": 3, "max": None}, {"min": 4, "max": 4}):
+            with self.subTest(count=changed):
+                cpu["count"] = changed
+                self.assertEqual(self.capacity.observe(INTENT)["reason_code"], "dstack_run_binding_mismatch")
+
+    def test_server_added_region_restriction_cannot_be_adopted(self):
+        self.start()
+        self.client.run["run_spec"]["configuration"]["regions"] = []
+        self.assertEqual(self.capacity.observe(INTENT)["reason_code"], "dstack_run_binding_mismatch")
+
     def test_concurrent_start_commits_only_one_paid_apply(self):
         barrier = threading.Barrier(2)
         original_get = self.client.get
@@ -437,6 +458,8 @@ class DstackRESTTests(unittest.TestCase):
         self.assertEqual([row[0] for row in seen], ["/api/project/sixnine/runs/get_plan",
             "/api/project/sixnine/runs/apply", "/api/project/sixnine/runs/get", "/api/project/sixnine/runs/stop"])
         self.assertFalse(seen[1][1]["force"])
+        self.assertTrue(seen[0][1]["for_offers_only"])
+        self.assertNotIn("for_offers_only", seen[1][1])
         self.assertIsNone(seen[1][1]["plan"]["current_resource"])
         self.assertFalse(seen[3][1]["abort"])
 
