@@ -826,7 +826,35 @@ def wait_proxy_stable(directory, environment, *, observations=4):
             time.sleep(3)
 
 
+def migration_deployment_enabled(root):
+    """A reviewed root activation makes future ordinary deploys keep the overlay."""
+    path = root / "migration" / "active.json"
+    if not path.exists() and not path.is_symlink():
+        return False
+    regular(path, root_owned=True, maximum=16384)
+    value = json.loads(path.read_text())
+    require(type(value) is dict and type(value.get("version")) is int and value["version"] == 1 and type(value.get("active")) is bool,
+            "migration_activation_record_invalid")
+    # A disabled marker is not a rollback instruction. Retire separately after
+    # original accepted jobs/broker state and provider obligations are reviewed.
+    require(value["active"] is True, "migration_retirement_requires_explicit_maintenance")
+    return True
+
+
+def migration_helper():
+    """Load only the separately installed root trust path, never incoming code."""
+    import importlib.util
+    path = Path(__file__).with_name("migration_maintenance.py")
+    regular(path, root_owned=True, maximum=1024**2)
+    spec = importlib.util.spec_from_file_location("sixnine_installed_migration_release", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def apply_locked(root, commit):
+    if migration_deployment_enabled(root):
+        return migration_helper().apply_locked(root, commit)
     # Avoid filling root-owned releases with unapproved multi-gigabyte bundles.
     approved_manifest(root, root / "incoming" / commit, commit)
     directory = prepare_bundle(root, commit)

@@ -42,8 +42,12 @@ def deploy(commit, *, root=release.ROOT):
         release.require(state.get('pending') in (None, commit), 'another_release_requires_reconciliation')
         # Legacy/unknown lifecycles still block before downloading. A v2
         # execution pin is rechecked against the approved target in apply_locked.
-        release.gpu_deployment_context(root)
+        migration = release.migration_deployment_enabled(root)
+        if not migration:
+            release.gpu_deployment_context(root)
         fetch_release_s3.fetch(commit, root=root)
+        if migration:
+            release.migration_helper().fetch(root, commit)
         # Both download and apply stay under the same host lock. The root
         # approval file is checked again while copying the incoming bundle.
         release.apply_locked(root, commit)

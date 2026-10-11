@@ -422,3 +422,7 @@ inventory.json
 !deploy/dstack/platform-overlay.yaml
 !tools/check_migration_deploy.py
 !Dockerfile.dispatch
+!deploy/platform/migration_secrets_aws.py
+!deploy/platform/MIGRATION-SECRETS.md
+!deploy/dstack/maintenance.py
+!deploy/dstack/RELEASE.md
