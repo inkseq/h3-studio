@@ -1,10 +1,11 @@
 """Fresh worker rows cannot override managed provider or execution windows."""
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 
 from studio_platform.control import WorkerControl
 from studio_platform.generation_availability import _mode_result
-from studio_platform.operator_capacity import operator_nodes
-from studio_platform.repository import instance_intents, registered_workers, jobs, budget_reservations
+from studio_platform.operator_capacity import operator_nodes, operator_heartbeats
+from studio_platform.repository import (instance_intents, registered_workers, jobs,
+                                        budget_reservations, request_hash)
 from test_operator_capacity import OperatorCase
 
 
@@ -30,7 +31,9 @@ class ManagedAdmissionTests(OperatorCase):
         return self.control.pool_status(self.binding.pool, model_id=self.binding.model_id,
             configuration_id=self.binding.configuration_id, recipe_id=self.binding.recipe_ids[0],
             backend="wangp-worker", engine_manifest_digest=self.binding.engine_manifest_digest,
-            expected_runtime_s=self.duration, deployment_profile_id=self.profile)
+            expected_runtime_s=self.duration, deployment_profile_id=self.profile,
+            output_delivery=getattr(self, "output_delivery", ""),
+            dispatch_backend=getattr(self, "dispatch", "legacy"))
 
     def availability(self):
         from types import SimpleNamespace
@@ -38,7 +41,9 @@ class ManagedAdmissionTests(OperatorCase):
             "pool": self.binding.pool, "model_id": self.binding.model_id, "configuration_id": self.binding.configuration_id,
             "engine_manifest_digest": self.binding.engine_manifest_digest, "backend": "wangp-worker", "enabled": True,
             "qualification": {"status": "accepted", "verified_at": 0, "expires_at": 10000},
-            "reservation": {"expected_runtime_s": self.duration, "expires_at": 10000}}
+            "reservation": {"expected_runtime_s": self.duration, "expires_at": 10000},
+            "output_delivery": getattr(self, "output_delivery", ""),
+            "dispatch_backend": getattr(self, "dispatch", "legacy")}
         return _mode_result(SimpleNamespace(generation_enabled=True, execution_backend="wangp-worker"),
             self.repo, self.registry, policy, True, "fl", self.binding.recipe_ids[0], self.now)
 
@@ -122,3 +127,187 @@ class ManagedAdmissionTests(OperatorCase):
         self.assertIsNotNone(collection)
         self.assertEqual(collection.job["id"], self.job["id"])
         self.assertEqual(len(self.provider.creates), 1)
+
+    def prepare_dstack_lifetime(self, *, keep_on="idle", hold_until=0):
+        self.prepare(duration=1800)
+        with self.repo.transaction() as conn:
+            node = dict(conn.execute(select(operator_nodes)).mappings().one())
+            payload = {**node["payload"], "capacity_backend": "dstack-v1", "hard_deadline": None,
+                "tenant_id": self.scope.tenant_id, "owner_id": self.scope.owner_id,
+                "project_id": self.scope.project_id, "hourly_cost_microusd": 360000,
+                "extra_reservation_microusd": 0, "observation_fresh_seconds": 30,
+                "lifecycle": {"version": 2, "idle_shutdown_seconds": 600,
+                    "keep_on": keep_on, "hold_until": hold_until, "reservation_seconds": 3600,
+                    "budget_account_ids": ["owner-budget"]},
+                "request": {"profile_id": self.profile, "mode": "fl", "lifecycle_version": 2,
+                    "model_id": self.binding.model_id, "configuration_id": self.binding.configuration_id,
+                    "manifest_digest": self.binding.engine_manifest_digest},
+                "dstack": {"run_id": "original-run", "runtime_incarnation": "c"*32,
+                    "lifecycle_version": 2, "profile_id": self.profile, "mode": "fl",
+                    "manifest_digest": self.binding.engine_manifest_digest,
+                    "configuration_id": self.binding.configuration_id, "model_id": self.binding.model_id,
+                    "first_runtime_ready_at": self.now,
+                    "broker_observation": {"ready": True, "worker_id": self.worker["id"],
+                        "observed_at": self.now, "heartbeat_at": self.now}},
+                "dstack_observation": {"run_id": "original-run", "status": "running",
+                    "instance_id": self.intent["provider_instance_id"], "observed_at": self.now}}
+            conn.execute(update(operator_nodes).values(payload=payload))
+            conn.execute(update(instance_intents).values(hard_deadline=None))
+            spec = {**self.worker["spec"], "dispatch_backend": "hatchet-v1", "output_delivery": "native-frames-v1"}
+            conn.execute(update(registered_workers).values(spec=spec, spec_hash=request_hash(spec)))
+            plan = {**self.job["execution_plan"], "dispatch_backend": "hatchet-v1",
+                "output_delivery": "native-frames-v1", "deployment_profile_id": self.profile}
+            stored = {**self.job["request"], "request": {**self.job["request"]["request"], "mode": "fl"}}
+            conn.execute(update(jobs).where(jobs.c.id == self.job["id"]).values(execution_plan=plan, request=stored))
+            self.job = dict(conn.execute(select(jobs).where(jobs.c.id == self.job["id"])).mappings().one())
+        self.dispatch = "hatchet-v1"
+        self.output_delivery = "native-frames-v1"
+
+    def refresh_dstack(self):
+        with self.repo.transaction() as conn:
+            node = dict(conn.execute(select(operator_nodes)).mappings().one())
+            payload = node["payload"]
+            payload["dstack_observation"]["observed_at"] = self.now
+            payload["dstack"]["broker_observation"].update(observed_at=self.now, heartbeat_at=self.now)
+            conn.execute(update(operator_nodes).values(payload=payload))
+            conn.execute(update(registered_workers).values(updated_at=self.now, expires_at=self.now+90))
+
+    def test_idle_policy_allows_long_job_and_late_guard_while_original_claim_is_active(self):
+        self.prepare_dstack_lifetime()
+        self.assertEqual(self.counts()["ready"], 1)
+        self.assertTrue(self.availability()["available"])
+        claim = self.control.claim(self.worker["id"], self.binding.pool)
+        self.assertIsNotNone(claim)
+        self.now += 650
+        self.refresh_dstack()
+        self.assertTrue(self.control.submission_allowed(claim.job))
+        self.assertEqual(self.repo.get_job(self.scope, self.job["id"])["attempt_no"], 1)
+
+    def test_idle_expiry_and_finite_hold_use_same_advisory_and_claim_gate(self):
+        for keep_on, hold in (("idle", 0), ("until", self.now+100)):
+            with self.subTest(keep_on=keep_on):
+                # Each assertion uses an isolated fixture created by unittest.
+                if keep_on == "idle":
+                    self.prepare_dstack_lifetime()
+                    with self.repo.transaction() as conn:
+                        conn.execute(update(jobs).where(jobs.c.id == self.job["id"]).values(status="cancelled"))
+                    self.now += 600
+                else:
+                    with self.repo.transaction() as conn:
+                        node = dict(conn.execute(select(operator_nodes)).mappings().one())
+                        payload = node["payload"]
+                        payload["lifecycle"].update(keep_on=keep_on, hold_until=self.now+100)
+                        conn.execute(update(operator_nodes).values(payload=payload))
+                    self.now += 699
+                    self.refresh_dstack()
+                    self.assertTrue(self.availability()["available"])
+                    self.now += 1
+                self.refresh_dstack()
+                self.assertEqual(self.counts()["ready"], 0)
+                self.assertIn("worker_idle_expired", self.counts()["reason_counts"])
+                self.assertEqual(self.availability()["reason_code"], "worker_idle_expired")
+                self.assertIsNone(self.control.claim(self.worker["id"], self.binding.pool))
+
+    def test_matching_accepted_queue_pauses_idle_before_first_claim(self):
+        self.prepare_dstack_lifetime()
+        self.now += 650
+        self.refresh_dstack()
+        from studio_platform.worker_admission import matching_dstack_queued_jobs
+        for status in ("queued", "waiting_capacity"):
+            with self.repo.transaction() as conn:
+                conn.execute(update(jobs).where(jobs.c.id == self.job["id"]).values(status=status))
+                intent = dict(conn.execute(select(instance_intents)).mappings().one())
+                node = dict(conn.execute(select(operator_nodes)).mappings().one())
+                self.assertEqual([job["id"] for job in matching_dstack_queued_jobs(conn, intent, node)], [self.job["id"]])
+            self.assertEqual(self.counts()["ready"], 1)
+            self.assertTrue(self.availability()["available"])
+        with self.repo.transaction() as conn:
+            conn.execute(update(jobs).where(jobs.c.id == self.job["id"]).values(status="queued"))
+        self.assertIsNotNone(self.control.claim(self.worker["id"], self.binding.pool))
+
+    def test_unrelated_or_unaccepted_queue_does_not_keep_owned_run_on(self):
+        self.prepare_dstack_lifetime()
+        self.now += 650
+        self.refresh_dstack()
+        from studio_platform.worker_admission import matching_dstack_queued_jobs, _dstack_idle_reason
+        original = self.job
+        changes = ({"tenant_id": "another-tenant"}, {"owner_id": "another-owner"},
+            {"project_id": "another-project"}, {"pool": "another-pool"}, {"status": "planned"},
+            {"attempt_no": 1}, {"lease_expires_at": self.now+30},
+            {"request": {**original["request"], "deployment_profile_id": "another-profile"}},
+            {"request": {**original["request"], "recipe_id": "h3-base-ref2va-v1"}},
+            {"request": {**original["request"], "request": {**original["request"]["request"], "model": "another-model"}}},
+            {"request": {**original["request"], "request": {**original["request"]["request"], "mode": "ref"}}},
+            *({"execution_plan": {**original["execution_plan"], field: value}} for field, value in (
+                ("configuration_id", "another-config"), ("engine_manifest_digest", "f"*64),
+                ("dispatch_backend", "legacy"), ("deployment_profile_id", "another-profile"),
+                ("enabled", False), ("output_delivery", ""))))
+        for change in changes:
+            with self.subTest(change=change), self.repo.transaction() as conn:
+                saved = {field: original[field] for field in change}
+                conn.execute(update(jobs).where(jobs.c.id == original["id"]).values(**change))
+                intent = dict(conn.execute(select(instance_intents)).mappings().one())
+                node = dict(conn.execute(select(operator_nodes)).mappings().one())
+                self.assertEqual(matching_dstack_queued_jobs(conn, intent, node), ())
+                self.assertEqual(_dstack_idle_reason(conn, intent, node, self.now), "worker_idle_expired")
+                conn.execute(update(jobs).where(jobs.c.id == original["id"]).values(**saved))
+        with self.repo.engine.connect() as conn:
+            intent = dict(conn.execute(select(instance_intents)).mappings().one())
+            node = dict(conn.execute(select(operator_nodes)).mappings().one())
+            self.assertEqual(matching_dstack_queued_jobs(conn, intent, {**node, "desired_state": "stopped"}), ())
+
+    def test_until_manual_stop_is_limited_by_funds_not_elapsed_fixed_window(self):
+        self.prepare_dstack_lifetime(keep_on="until_stopped")
+        self.now += 5000
+        self.refresh_dstack()
+        self.assertTrue(self.availability()["available"])
+        self.assertIsNotNone(self.control.claim(self.worker["id"], self.binding.pool))
+        self.now += 3000
+        self.refresh_dstack()
+        with self.repo.engine.connect() as conn:
+            from studio_platform.worker_admission import worker_window_reason
+            worker = dict(conn.execute(select(registered_workers)).mappings().one())
+            self.assertEqual(worker_window_reason(conn, worker, self.now,
+                expected_runtime_s=1800, deployment_profile_id=self.profile), "job_exceeds_spend_runway")
+
+    def test_missing_v2_or_mismatched_reservation_fails_closed_without_new_attempt(self):
+        self.prepare_dstack_lifetime()
+        with self.repo.transaction() as conn:
+            node = dict(conn.execute(select(operator_nodes)).mappings().one())
+            original = node["payload"]
+            payload = {**original, "lifecycle": {**original["lifecycle"], "version": 1}}
+            conn.execute(update(operator_nodes).values(payload=payload))
+        self.assert_blocked("managed_dstack_lifecycle_unconfirmed")
+        with self.repo.transaction() as conn:
+            conn.execute(update(operator_nodes).values(payload=original))
+            conn.execute(update(budget_reservations).where(budget_reservations.c.reference_type == "instance")
+                .values(amount_microusd=self.intent["reserved_cost_microusd"]-1))
+        self.assert_blocked("managed_dstack_budget_unconfirmed")
+
+    def test_new_dstack_preparation_is_visible_without_a_legacy_registry_binding(self):
+        self.prepare_dstack_lifetime()
+        from studio_platform.operator_capacity import OperatorRegistry
+        self.registry = OperatorRegistry()
+        with self.repo.transaction() as conn:
+            conn.execute(delete(operator_heartbeats))
+            conn.execute(update(registered_workers).values(state="retired"))
+            conn.execute(update(operator_nodes).values(runtime_state="preparing"))
+        self.assertEqual(self.availability()["reason_code"], "matching_capacity_starting")
+        self.now += 31
+        self.assertEqual(self.availability()["reason_code"], "capacity_readiness_unconfirmed")
+        self.now -= 31
+        with self.repo.transaction() as conn:
+            node = dict(conn.execute(select(operator_nodes)).mappings().one())
+            payload = node["payload"]
+            payload["dstack"]["manifest_digest"] = "f"*64
+            conn.execute(update(operator_nodes).values(payload=payload))
+        self.assertEqual(self.availability()["reason_code"], "capacity_readiness_unconfirmed")
+
+    def test_malformed_new_lifecycle_has_safe_static_diagnosis(self):
+        self.prepare_dstack_lifetime()
+        with self.repo.transaction() as conn:
+            node = dict(conn.execute(select(operator_nodes)).mappings().one())
+            payload = node["payload"]
+            payload["lifecycle"]["keep_on"] = ["until_stopped"]
+            conn.execute(update(operator_nodes).values(payload=payload))
+        self.assert_blocked("managed_dstack_lifecycle_unconfirmed")

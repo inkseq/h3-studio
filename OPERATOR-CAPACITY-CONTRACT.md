@@ -4,7 +4,7 @@ Accepted direction: 2026-10-09. Delivery and acceptance: [E3 #71](https://github
 
 ## One authority
 
-The operator console manages manual capacity intents. A start is an explicit paid-capacity decision, independent of user generation demand. It does not create a synthetic video job. Durable operator operations link to the existing instance intents, reservations, scaler actions, provider receipts and worker identities. The existing global capacity gate and cumulative budget remain authoritative across manual and automatic capacity. Unknown creation remains a reconciliation obligation. HTTP handlers never rent synchronously.
+The operator console manages manual capacity intents. A start is an explicit paid-capacity decision, independent of user generation demand. It does not create a synthetic video job. Durable operator operations link to the existing instance intents, reservations, scaler actions, provider receipts and worker identities. The existing capacity lock and cumulative owner/global budget remain authoritative. Legacy capacity retains its original intent-based gates; new dstack capacity limits count live owned dstack runs and their provider observations only. A terminated run whose provider allocation is absent does not count, and legacy Lium/Targon or historical ledger rows never consume new-path capacity. Preserve unknown creation and billing evidence in the original ledger without a separate physical-removal reconciler. Stock/price observations are not rental reservations.
 
 Only explicitly configured operator browser identities can mutate capacity. Ordinary browser users and generation API keys cannot rent or stop machines. Existing authentication, same-origin checks and expected-account protection apply. Provider credentials, private runtime endpoints, SSH paths and environment values never enter public DTOs.
 
@@ -28,7 +28,7 @@ The console presents compact current and pending-review rows with per-node detai
 
 `POST /v1/operator/capacity/nodes/{id}/extension-previews` accepts `expected_version` and `additional_seconds` (60–14400). It returns current/new/provider deadlines, incremental cost based on the approved hourly ceiling, existing reservation coverage and specific blockers. Confirmation uses `POST .../extensions`, the preview ID and `Idempotency-Key`. The actor, node version, policy, provider proof, binding authority and existing funded reservation are rechecked atomically. A completed operation exposes `operation.extension.new_deadline`; the UI verifies refreshed `node.hard_deadline` before reporting success. Replay returns the original receipt. No extra budget, rental, provider call or automatic renewal occurs.
 
-This bounded API cannot re-arm a provider shutdown/watchdog. Current Lium/Targon managed proof is capped to the original stop window by the controller; their actual extension remains **unsupported**, reported as `operator_provider_extension_unsupported`. A local fixture with explicitly confirmed funded headroom tests the ledger transition, not a live provider-extension claim. [#125](https://github.com/inkseq/h3-studio/issues/125) remains open for a separately supported provider deadline contract and coordinated confirmation/rollback proof. This batch authorizes no actual lease extension.
+This historical finite-window API cannot re-arm a provider shutdown/watchdog. Current Lium/Targon managed proof is capped to the original stop window by the controller; their actual extension remains **unsupported**, reported as `operator_provider_extension_unsupported`. A local fixture with explicitly confirmed funded headroom tests the ledger transition, not a live provider-extension claim. [#125](https://github.com/inkseq/h3-studio/issues/125) remains open for a separately supported provider deadline contract and coordinated confirmation/rollback proof. That finite-provider slice authorized no actual lease extension; the separately explicit dstack v2 idle/keep-on contract below does not modify those old leases.
 
 ### Independent provider refresh
 
@@ -49,11 +49,11 @@ The version-1 response contains `observed_at`, `expires_at`, `poll_after_seconds
 | `disabled` | Block confirmation and ask an administrator to enable/configure the mode; renting alone may not resolve policy restrictions. |
 | `unknown` | Fail closed for new confirmation and refresh; stale or missing evidence is not proof of an offline or ready machine. |
 
-`available` is true only for `ready` or `busy`. Managed capacity must have fresh exact provider lifetime proof, permitted execution state, the exact selected profile and an open operating window. Availability uses the configured runtime estimate; request-specific preflight, claim and late submission use the accepted job estimate. New inference stops inside the final 300 seconds and must fit before the deadline with a 120-second collection margin. These are shared read-only gates, not additional historical parameter allowlists. A ready observation reserves no slot and does not validate prompt, inputs or budget. Existing attempts may still reconcile/collect when new admission closes. Do not combine FL readiness from one profile with REF readiness from another, silently change models/precision, or convert inputs to another mode. Original submissions and unknown outcomes retain their original idempotency identities. See [#120](https://github.com/inkseq/h3-studio/issues/120).
+`available` is true only for `ready` or `busy`. Managed capacity must have fresh exact provider/runtime proof, permitted execution state, the exact selected profile and an open operating policy. Availability uses the configured runtime estimate; request-specific preflight, claim and late submission use the accepted job estimate. Historical finite rentals stop new inference inside the final 300 seconds and require completion before the deadline with a 120-second collection margin. Explicit new dstack `lifecycle.version=2` instead has null fixed deadlines and `max_duration: off`: configurable business idle plus keep-on (`idle`, finite `until`, or `until_stopped`) governs shutdown. Idle duration is not a maximum generation duration; original active/unknown/collection obligations pause idle shutdown. Rolling funding uses the same original instance reservations and cumulative owner/global spend caps, measured from the original paid start. New admission requires funded runtime plus the 120-second collection and 300-second shutdown margins; exhausted funds request normal drain without discarding work. These shared read-only gates are not historical parameter allowlists. A ready observation reserves no slot and does not validate prompt, inputs or budget. Existing attempts may still reconcile/collect when new admission closes. Do not combine FL readiness from one profile with REF readiness from another, silently change models/precision, or convert inputs to another mode. Original submissions and unknown outcomes retain their original idempotency identities. See [#120](https://github.com/inkseq/h3-studio/issues/120) and [#132](https://github.com/inkseq/h3-studio/issues/132).
 
 Only explicitly authorized browser operators may follow the operator-console action to start capacity. The configured production browser allowlist includes `superdan` and `supervan` once its protected deployment is applied; ordinary creator/Agent availability access does not grant rental authority. Source configuration is not evidence of current deployed permissions.
 
-The operator API uses `/v1/operator/capacity`. Start follows selection -> bounded preview -> explicit confirmation with an idempotency key -> durable operation -> controller reconciliation. Identical replay returns the original operation. Conflicting reuse is rejected. Stock and quotes are observations with timestamps, not reservations. Selection accepts only allowlisted provider/profile/hardware/filter values from trusted deployment bindings, never a browser-supplied shell command, URL or manifest.
+The legacy operator API uses `/v1/operator/capacity`; explicit dstack routes are specified in [DSTACK-MIGRATION.md](DSTACK-MIGRATION.md). Start follows selection -> bounded preview -> explicit confirmation with an idempotency key -> durable operation -> controller observation. Identical replay returns the original operation. Conflicting reuse is rejected. Stock and quotes are observations with timestamps, not reservations. Selection accepts only allowlisted provider/profile/hardware/filter values from trusted deployment bindings, never a browser-supplied shell command, URL or manifest.
 
 Limits are versioned; concurrent edits require `expected_version`. Tightening limits prevents new starts without erasing existing nodes or reservations. Raising UI limits cannot raise a ledger budget, extend a deadline, or bypass the provider manifest. A start that no longer fits returns a concrete blocker. No automatic recharge.
 
@@ -247,10 +247,11 @@ observations. Overdue is an attention signal, not a lifecycle transition.
 Retained slots and rates on a removal card describe historical allocation;
 they do not establish current hardware activity or final billing.
 
-### Explicit manual Targon removal review
+### Explicit manual Lium/Targon account review
 
-For the beta VM API's stale exact-UID `Stopping` records, an authorized browser
-operator may acknowledge an already requested teardown using
+For an exact Lium/Targon machine stopped in the provider dashboard or through
+the platform, an authorized browser operator may acknowledge account absence
+and no continuing charge using
 `POST /v1/operator/capacity/nodes/{node_id}/manual-review` with the original
 `provider_instance_id`, current `expected_version`, both `account_absent: true`
 and `no_continuing_charge: true`, and `Idempotency-Key`. These fields are explicit
@@ -258,21 +259,24 @@ human account/billing attestations; list absence or unchanged credit alone does
 not trigger the action automatically. The browser first shows a review reminder
 and requires both checks. Ordinary users and Agent credentials cannot mark it.
 
-The existing global lock protects the audit and capacity exclusion. Only an
-exact Targon intent already `destroying`, with its existing stop operation,
-deletion-start receipt and stopped desired state, is eligible. Fresh bound
-workers, current jobs, unknown/orphan device ownership, unfinished/unsafe attempts and
-unconfirmed upstream stops reject the mark. Creation-unknown and active nodes
-cannot use this exception. Identical replay returns the same operation;
-conflicting replay rejects. Actor, time, exact instance, original intent,
-deadline and stop operation are durably bound in the existing command/scaler
-receipt authority, without a new schema or rental ledger.
-The mark also requires a fresh `operator-offers-v1-review-v1-` controller
-heartbeat. An earlier controller cannot accept the new command through an
-app-only rollout; activate the updated controller before enabling review.
+The existing global lock protects the audit and capacity exclusion. Exact
+Lium/Targon records in `creating`, `creation_unknown`, `starting`, `ready`,
+`busy`, `draining` or `destroying` may be reviewed after the human account checks;
+a platform stop operation, deletion-start receipt and legacy controller
+heartbeat are not prerequisites. A missing provider ID is permitted only for
+`creating`/`creation_unknown`, with an explicit null body identity matching the
+stored identity. In that case all workers in the original pool must already be
+retired with no current job, all device ownership released, pool jobs terminal
+and attempts safely stopped. Do not guess a physical ID or retire unknown
+actors. Fresh bound workers, current jobs, unknown/orphan device ownership,
+unfinished/unsafe attempts and unconfirmed upstream stops reject the mark.
+Identical replay returns the same operation; conflicting replay rejects. Actor,
+time, original intent state/provider and exact instance (including explicit
+null), deadline and optional prior stop operation are durably bound in the
+existing command/scaler receipt authority, without a new rental ledger.
 
-For the exact stopped node only, the same human-review transaction may retire
-an expired unbound worker and release its remaining local devices. This requires
+For an exact nonnull provider identity only, the same human-review transaction
+may retire an expired bound worker and release its remaining local devices. This requires
 the original protected deployment binding and worker-spec hash to match, all
 worker attempt/job history to be safely terminal, and exact device ownership
 to match the worker spec. Capacity, worker/device and job/attempt locks prevent
@@ -284,14 +288,18 @@ it does not assert physical provider removal or settle any reservation.
 
 The public removal observation becomes `manually_reviewed`, its next check is
 null, and the node no longer counts toward operating capacity/hourly estimates.
-Controller reconciliation skips the reviewed UID. The underlying instance
-remains `destroying`: manual review is neither `destroyed`, provider stop proof,
-nor a final bill. Original jobs, IDs, requests, deadlines and reservations remain.
+Application controller reconciliation skips the reviewed record. The underlying
+intent keeps its original state and provider identity: manual review is neither
+`destroyed`, provider stop proof, nor a final bill. Original jobs, IDs, requests,
+deadlines and reservations remain.
 Existing replacement/invoice gates requiring positive provider removal and
 settlement are not waived. The final provider API/billing defect remains #86 in
 backlog; no approximate charge is settled automatically.
 
-The independent root guardian consumes the same committed audit through an
+The independent root guardian's historical exact-UID/stop proof is a separate
+contract; broader application review is not evidence that a previously unbound
+or dashboard-stopped record satisfies that bridge. Its existing supported path
+consumes the same committed audit through an
 optional fixed read-only PostgreSQL bridge. Its service pins the verified full
 database container ID with `--manual-review-database-container`; Docker labels
 must still identify the Sixnine `db` service. Set the independently verified

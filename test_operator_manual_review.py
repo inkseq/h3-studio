@@ -9,12 +9,12 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from sqlalchemy import insert, select, text, update
+from sqlalchemy import delete, insert, select, text, update
 
 from studio_platform.auth import Principal
 from studio_platform.operator_capacity import (OperatorError, operator_commands, operator_nodes,
     operator_heartbeats,MANUAL_REVIEW_CONTROLLER_PREFIX)
-from studio_platform.repository import (instance_intents, scaler_actions, scaler_receipts,
+from studio_platform.repository import (instance_intents, scaler_actions, scaler_receipts, manually_reviewed_inactive,
     registered_workers, registered_devices, attempts, jobs)
 import test_operator_capacity as operator_fixtures
 import test_targon_cleanup as guardian_fixtures
@@ -132,30 +132,135 @@ class ManualReviewTests(operator_fixtures.OperatorTests):
             replay=client.post(path,json=self.body,headers={'Idempotency-Key':'api-once'})
             self.assertEqual(replay.json(),response.json())
 
-    def test_never_reviews_live_unknown_create_missing_stop_or_wrong_provider(self):
-        for values,code in (({'state':'ready'},'requires_requested_removal'),
-                            ({'state':'creation_unknown'},'requires_requested_removal'),
-                            ({'provider':'lium'},'targon_only')):
+    def test_review_requires_supported_exact_started_instance(self):
+        for values,code in (({'state':'reserved'},'instance_unconfirmed'),
+                            ({'provider_instance_id':None},'identity_mismatch'),
+                            ({'provider':'vastai'},'provider_unsupported')):
             with self.repo.transaction() as connection:
                 connection.execute(update(instance_intents).values(**values))
             with self.assertRaisesRegex(OperatorError,code):
                 self.service.manual_review(self.actor,self.node_id,self.body_now(),'invalid-state')
             with self.repo.transaction() as connection:
-                connection.execute(update(instance_intents).values(state='destroying',provider='targon'))
-        with self.repo.transaction() as connection:
-            connection.execute(update(scaler_actions).values(destroy_started_at=None))
-        with self.assertRaisesRegex(OperatorError,'requires_requested_removal'):
-            self.service.manual_review(self.actor,self.node_id,self.body_now(),'missing-stop')
+                connection.execute(update(instance_intents).values(state='destroying',provider='targon',provider_instance_id=self.uid))
 
-    def test_old_or_stale_controller_cannot_receive_manual_review(self):
-        for patch in ({'controller_id':'operator-offers-v1-old'}, {'observed_at':self.now-31}):
-            with self.repo.transaction() as connection:
-                connection.execute(update(operator_heartbeats).values(**patch))
-            with self.assertRaisesRegex(OperatorError,'controller_unavailable'):
-                self.service.manual_review(self.actor,self.node_id,self.body,'old-controller')
-            with self.repo.transaction() as connection:
-                connection.execute(update(operator_heartbeats).values(controller_id=self.controller.leader_id,
-                    observed_at=self.now))
+    def ambiguous_creation(self):
+        with self.repo.transaction() as connection:
+            connection.execute(delete(operator_heartbeats))
+            connection.execute(delete(operator_commands).where(operator_commands.c.kind=='stop'))
+            connection.execute(update(instance_intents).where(instance_intents.c.id==self.node_id).values(
+                provider='lium',state='creation_unknown',provider_instance_id=None))
+            connection.execute(update(operator_nodes).where(operator_nodes.c.intent_id==self.node_id).values(
+                desired_state='running',runtime_state='creation_unknown'))
+            connection.execute(update(scaler_actions).where(scaler_actions.c.intent_id==self.node_id).values(
+                destroy_started_at=None))
+        return {**self.body_now(),'provider_instance_id':None}
+
+    def test_unbound_creation_review_retains_null_identity_unknown_creation_and_budget(self):
+        body=self.ambiguous_creation()
+        before=self.repo.list_instance_intents()[0]
+        budget=self.repo.get_budget('owner-budget')
+        result=self.service.manual_review(self.actor,self.node_id,body,'ambiguous-human-review')
+        self.assertEqual(self.service.manual_review(self.actor,self.node_id,body,'ambiguous-human-review'),result)
+        after=self.repo.list_instance_intents()[0]
+        for field in ('state','provider_instance_id','hard_deadline','reserved_cost_microusd','billing_status'):
+            self.assertEqual(after[field],before[field])
+        self.assertEqual(after['state'],'creation_unknown')
+        self.assertIsNone(after['manual_review']['instance_id'])
+        self.assertEqual(after['manual_review']['removal_source'],'operator_attestation')
+        self.assertEqual(self.repo.get_budget('owner-budget'),budget)
+        self.assertEqual(self.service.state(self.actor)['summary']['nodes_active'],0)
+
+    def test_null_review_requires_exact_null_and_ambiguous_creation_state(self):
+        body=self.ambiguous_creation()
+        with self.assertRaisesRegex(OperatorError,'identity_mismatch'):
+            self.service.manual_review(self.actor,self.node_id,{**body,'provider_instance_id':'invented'},'not-null')
+        with self.repo.transaction() as connection:
+            connection.execute(update(instance_intents).values(state='ready'))
+        with self.assertRaisesRegex(OperatorError,'instance_unconfirmed'):
+            self.service.manual_review(self.actor,self.node_id,{**body,'expected_version':self.body_now()['expected_version']},'null-ready')
+
+    def test_null_review_rejects_original_pool_obligations_without_guessing_worker_identity(self):
+        body=self.ambiguous_creation()
+        job=self.job(status='queued')
+        with self.repo.transaction() as connection:
+            connection.execute(update(jobs).where(jobs.c.id==job['id']).values(pool=self.binding.pool))
+        with self.assertRaisesRegex(OperatorError,'worker_active'):
+            self.service.manual_review(self.actor,self.node_id,body,'queued-in-pool')
+        with self.repo.transaction() as connection:
+            connection.execute(update(jobs).where(jobs.c.id==job['id']).values(status='failed'))
+            connection.execute(insert(registered_workers).values(id='pool-actor',pool=self.binding.pool,
+                provider='lium',instance_id='unknown-other',spec={},spec_hash='a'*64,state='ready',
+                current_job_id=None,drain_requested=1,fence=1,expires_at=self.now-30,updated_at=self.now))
+        with self.assertRaisesRegex(OperatorError,'worker_active'):
+            self.service.manual_review(self.actor,self.node_id,body,'expired-unbound-actor')
+        with self.repo.transaction() as connection:
+            connection.execute(update(registered_workers).values(state='retired'))
+            connection.execute(insert(registered_devices).values(provider='lium',instance_id='unknown-other',
+                gpu_id='GPU-ambiguous',worker_id='pool-actor',state='owned'))
+        with self.assertRaisesRegex(OperatorError,'device_unreleased'):
+            self.service.manual_review(self.actor,self.node_id,body,'unbound-device')
+        with self.repo.transaction() as connection:
+            connection.execute(update(registered_devices).values(state='released'))
+            connection.execute(insert(attempts).values(id='unknown-pool-attempt',job_id=job['id'],number=1,
+                status='failed',fence=1,worker_id='pool-actor',created_at=self.now,updated_at=self.now,
+                submission_started_at=self.now-1,upstream_stopped=0))
+        with self.assertRaisesRegex(OperatorError,'attempt_unsafe'):
+            self.service.manual_review(self.actor,self.node_id,body,'unbound-attempt')
+        with self.repo.engine.connect() as connection:
+            self.assertIsNone(connection.execute(select(scaler_receipts.c.id).where(
+                scaler_receipts.c.operation=='manual_review')).scalar())
+
+    def assert_dashboard_review(self,provider,state):
+        with self.repo.transaction() as connection:
+            connection.execute(delete(operator_heartbeats))
+            connection.execute(delete(operator_commands).where(operator_commands.c.kind=='stop'))
+            connection.execute(update(instance_intents).where(instance_intents.c.id==self.node_id).values(
+                provider=provider,state=state))
+            connection.execute(update(operator_nodes).where(operator_nodes.c.intent_id==self.node_id).values(
+                desired_state='running',runtime_state=state))
+            connection.execute(update(scaler_actions).values(destroy_started_at=None))
+        before=self.repo.list_instance_intents()[0]
+        budget=self.repo.get_budget('owner-budget')
+        body=self.body_now()
+        result=self.service.manual_review(self.actor,self.node_id,body,'dashboard-review')
+        self.assertEqual(self.service.manual_review(self.actor,self.node_id,body,'dashboard-review'),result)
+        after=self.repo.list_instance_intents()[0]
+        for field in ('state','provider','provider_instance_id','hard_deadline','reserved_cost_microusd','billing_status','actual_cost_microusd'):
+            self.assertEqual(after[field],before[field])
+        self.assertEqual(self.repo.get_budget('owner-budget'),budget)
+        node=self.service.state(self.actor)['nodes'][0]
+        self.assertEqual((node['desired_state'],node['runtime_state'],node['record_group']),
+            ('stopped','manually_reviewed','history'))
+        review=node['removal_confirmation']['manual_review']
+        self.assertEqual((review['provider'],review['original_intent_state'],review['removal_source']),
+            (provider,state,'operator_attestation'))
+        self.assertIsNone(review['stop_operation_id'])
+        self.assertIsNone(node['removal_confirmation']['next_check_at'])
+        self.assertEqual(self.service.state(self.actor)['summary']['nodes_active'],0)
+        self.assertFalse(node['actions']['manual_review']['allowed'])
+        self.controller.provider_factory=Mock(side_effect=AssertionError('provider accessed'))
+        self.controller.tick()
+        self.controller.provider_factory.assert_not_called()
+
+    def test_lium_dashboard_stop_without_platform_stop_or_controller(self):
+        self.assert_dashboard_review('lium','ready')
+
+    def test_targon_dashboard_stop_without_platform_stop_or_controller(self):
+        self.assert_dashboard_review('targon','starting')
+
+    def test_review_receipt_cannot_follow_changed_provider_or_intent_state(self):
+        self.service.manual_review(self.actor,self.node_id,self.body,'exact-reviewed-binding')
+        with self.repo.transaction() as connection:
+            original=connection.execute(select(instance_intents).where(instance_intents.c.id==self.node_id)).mappings().one()
+            self.assertIsNotNone(manually_reviewed_inactive(connection,original))
+            self.assertIsNone(manually_reviewed_inactive(connection,{**original,'provider':'lium'}))
+            self.assertIsNone(manually_reviewed_inactive(connection,{**original,'state':'ready'}))
+            row=connection.execute(select(scaler_receipts).where(scaler_receipts.c.operation=='manual_review')).mappings().one()
+            legacy={key:value for key,value in row['facts'].items() if key not in {'provider','original_intent_state','removal_source'}}
+            connection.execute(update(scaler_receipts).where(scaler_receipts.c.id==row['id']).values(facts=legacy))
+            self.assertIsNotNone(manually_reviewed_inactive(connection,original))
+            self.assertIsNone(manually_reviewed_inactive(connection,{**original,'provider':'lium'}))
+            self.assertIsNone(manually_reviewed_inactive(connection,{**original,'state':'ready'}))
 
     def test_fresh_worker_or_unreleased_device_blocks_even_with_human_attestation(self):
         with self.repo.transaction() as connection:

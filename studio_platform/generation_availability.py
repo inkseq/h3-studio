@@ -22,7 +22,8 @@ def _preparing(repo, registry, policy, mode, now):
         return "unavailable"
     with repo.engine.connect() as connection:
         rows = list(connection.execute(select(operator_nodes, instance_intents.c.provider,
-            instance_intents.c.state.label("instance_state"), instance_intents.c.hard_deadline)
+            instance_intents.c.state.label("instance_state"), instance_intents.c.hard_deadline,
+            instance_intents.c.provider_instance_id.label("bound_instance_id"))
             .join(instance_intents, instance_intents.c.id == operator_nodes.c.intent_id)
             .where(instance_intents.c.pool == policy["pool"])).mappings())
         heartbeat = connection.execute(select(operator_heartbeats).where(
@@ -32,22 +33,51 @@ def _preparing(repo, registry, policy, mode, now):
         chosen = row["payload"].get("selection", {})
         if chosen.get("runtime_profile_id") != policy["deployment_profile_id"] or chosen.get("mode") != mode:
             continue
+        from .worker_admission import dstack_policy_reason
+        lifetime_v2 = row["payload"].get("capacity_backend") == "dstack-v1" and row["hard_deadline"] is None
         if (row["desired_state"] != "running" or row["instance_state"] in {"draining", "destroying", "destroyed"}
-                or row["hard_deadline"] <= now):
+                or not lifetime_v2 and (row["hard_deadline"] is None or row["hard_deadline"] <= now)):
+            continue
+        if lifetime_v2 and dstack_policy_reason(
+                {"hard_deadline": None, "state": row["instance_state"]}, row, now):
+            states.add("unknown")
             continue
         try:
-            binding = registry.get(row["binding_id"]) if registry is not None else None
-            exact = bool(binding and binding.fingerprint == row["binding_hash"]
-                and binding.runtime_profile_id == policy["deployment_profile_id"] and binding.mode == mode
-                and binding.pool == policy["pool"] and binding.configuration_id == policy["configuration_id"]
-                and binding.model_id == policy["model_id"] and binding.engine_manifest_digest == policy["engine_manifest_digest"]
-                and policy.get("output_delivery") == "native-frames-v1"
-                and binding.launch.provider == row["provider"])
-        except (OperatorError, ValueError):
+            if row["payload"].get("capacity_backend") == "dstack-v1":
+                original = row["payload"].get("dstack", {})
+                request = row["payload"].get("request", {})
+                exact = (policy.get("dispatch_backend") == "hatchet-v1"
+                    and original.get("configuration_id") == policy["configuration_id"]
+                    and original.get("model_id") == policy["model_id"]
+                    and original.get("manifest_digest") == policy["engine_manifest_digest"]
+                    and request.get("profile_id") == policy["deployment_profile_id"]
+                    and request.get("mode") == mode
+                    and policy.get("output_delivery") == "native-frames-v1")
+            else:
+                binding = registry.get(row["binding_id"]) if registry is not None else None
+                exact = bool(binding and binding.fingerprint == row["binding_hash"]
+                    and binding.runtime_profile_id == policy["deployment_profile_id"] and binding.mode == mode
+                    and binding.pool == policy["pool"] and binding.configuration_id == policy["configuration_id"]
+                    and binding.model_id == policy["model_id"] and binding.engine_manifest_digest == policy["engine_manifest_digest"]
+                    and policy.get("output_delivery") == "native-frames-v1"
+                    and binding.launch.provider == row["provider"])
+        except (OperatorError, ValueError, AttributeError, TypeError):
             exact = False
-        fresh = (heartbeat and heartbeat["state"] == "running"
-            and 0 <= now-heartbeat["observed_at"] <= CONTROLLER_FRESH_SECONDS
-            and 0 <= now-row["updated_at"] <= 60)
+        if row["payload"].get("capacity_backend") == "dstack-v1":
+            proof = row["payload"].get("dstack_observation", {})
+            original = row["payload"].get("dstack", {})
+            observed, freshness = proof.get("observed_at"), row["payload"].get("observation_fresh_seconds", 30)
+            fresh = (type(observed) in (int, float) and type(freshness) in (int, float)
+                and freshness > 0 and 0 <= now-observed <= freshness
+                and bool(original.get("run_id")) and proof.get("run_id") == original["run_id"]
+                and proof.get("instance_id") == row["bound_instance_id"]
+                and isinstance(proof.get("status"), str)
+                and proof["status"] in {"pending", "submitted", "provisioning", "running"}
+                and 0 <= now-row["updated_at"] <= 60)
+        else:
+            fresh = (heartbeat and heartbeat["state"] == "running"
+                and 0 <= now-heartbeat["observed_at"] <= CONTROLLER_FRESH_SECONDS
+                and 0 <= now-row["updated_at"] <= 60)
         if not exact or not fresh or row["instance_state"] == "creation_unknown":
             states.add("unknown")
         elif row["runtime_state"] in {"blocked", "failed", "bootstrap_unconfigured", "draining", "stopped", "removal_pending"}:

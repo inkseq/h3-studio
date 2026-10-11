@@ -20,9 +20,9 @@ from sqlalchemy import select
 
 from .control import WorkerControl, worker_spec_payload
 from .dstack_capacity import idle_action
-from .dstack_operator import BACKEND_MARKER, _request, _cold_unadmitted_runtime
+from .dstack_operator import BACKEND_MARKER, _request, _cold_unadmitted_runtime, _window_open
 from .operator_capacity import operator_nodes
-from .repository import attempts, instance_intents, jobs, registered_workers, scaler_actions
+from .repository import BudgetExceeded, attempts, instance_intents, jobs, registered_workers, scaler_actions
 from .worker import _slot_lock
 
 TERMINAL = {"succeeded", "failed", "cancelled"}
@@ -46,6 +46,7 @@ class DstackController:
                 and row["payload"].get("tenant_id") == self.service.settings.tenant_id]
 
     def _obligations(self, intent):
+        from .worker_admission import matching_dstack_queued_jobs
         with self.repo.engine.connect() as connection:
             workers = list(connection.execute(select(registered_workers).where(
                 registered_workers.c.provider == intent["provider"],
@@ -57,12 +58,16 @@ class DstackController:
             for attempt in related:
                 if attempt["job_id"] not in by_id:
                     by_id[attempt["job_id"]] = self.repo._job(connection, attempt["job_id"])
+            node = connection.execute(select(operator_nodes).where(
+                operator_nodes.c.intent_id == intent["id"])).mappings().one()
+            for job in matching_dstack_queued_jobs(connection,intent,node):
+                by_id.setdefault(job["id"],job)
         active = sum(job["status"] not in TERMINAL for job in by_id.values())
         unsafe = sum(attempt["submission_started_at"] is not None and attempt["upstream_stopped"] != 1 for attempt in related)
         last = max([intent["created_at"], *[job["updated_at"] for job in by_id.values()]])
         return workers, active, unsafe, last
 
-    def _request_stop(self, node):
+    def _request_stop(self, node, *, reason_code="dstack_idle_expired"):
         # Idle expiry is an internal original-ledger command, never an HTTP
         # principal impersonation. Preserve the original deadline/reservation.
         from sqlalchemy import update
@@ -70,13 +75,42 @@ class DstackController:
             self.repo._lock_capacity(connection)
             current = self.repo._locked(connection, select(operator_nodes).where(operator_nodes.c.intent_id == node["intent_id"]))
             if current["desired_state"] == "running":
+                if reason_code == "dstack_idle_expired":
+                    from .worker_admission import matching_dstack_queued_jobs
+                    intent = self.repo._locked(connection,select(instance_intents).where(
+                        instance_intents.c.id == node["intent_id"]))
+                    if matching_dstack_queued_jobs(connection,intent,current):
+                        return False
+                payload = dict(current["payload"])
+                payload["stop_reason_code"] = reason_code
                 connection.execute(update(operator_nodes).where(operator_nodes.c.intent_id == node["intent_id"])
-                    .values(desired_state="stopped", runtime_state="draining", updated_at=self.repo.clock()))
-                self.repo._emit(connection, "dstack.idle_drain_requested", node["intent_id"], {"intent_id": node["intent_id"]})
+                    .values(desired_state="stopped", runtime_state="draining", payload=payload, updated_at=self.repo.clock()))
+                self.repo._emit(connection, "dstack.idle_drain_requested", node["intent_id"],
+                    {"intent_id": node["intent_id"], "reason_code": reason_code})
+                return True
+            return current["desired_state"] == "stopped"
 
     def _tick_node(self, node):
         intent_id = node["intent_id"]
         binding = self.capacity.store.load(intent_id)
+        funded = True
+        if node["payload"].get("lifecycle", {}).get("version") == 2 and node["desired_state"] == "running":
+            try:
+                # Funding precedes native bootstrap as well as admission. Time
+                # spent downloading/holding/uncertain still consumes runway.
+                with self.repo.transaction() as connection:
+                    self.repo._lock_capacity(connection)
+                    current = self.repo._locked(connection, select(operator_nodes).where(operator_nodes.c.intent_id == intent_id))
+                    intent = self.repo._locked(connection, select(instance_intents).where(instance_intents.c.id == intent_id))
+                    if current["desired_state"] == "running":
+                        self.service.fund_window(connection, intent, current, self.repo.clock())
+            except BudgetExceeded:
+                # The failed transaction rolled back all funding mutations.
+                # Preserve any running task/result and request normal drain.
+                funded = False
+                self._request_stop(node, reason_code="dstack_spend_limit_reached")
+            with self.repo.engine.connect() as connection:
+                node = dict(connection.execute(select(operator_nodes).where(operator_nodes.c.intent_id == intent_id)).mappings().one())
         if not binding.get("apply_started"):
             with self.repo.engine.connect() as connection:
                 intent = connection.execute(select(instance_intents).where(instance_intents.c.id == intent_id)).mappings().one()
@@ -85,7 +119,7 @@ class DstackController:
             # begin_apply repeats these checks atomically before any mutation.
             if intent["state"] != "reserved" or action["create_started_at"] is not None:
                 return {"node_id": intent_id, "state": "reconciliation_required", "code": "dstack_apply_journal_mismatch"}
-            if node["desired_state"] == "stopped" or self.repo.clock() >= intent["hard_deadline"]:
+            if node["desired_state"] == "stopped" or not _window_open(intent, node, self.repo.clock()):
                 self._request_stop(node)
                 cancelled = self.capacity.store.cancel_unapplied(intent_id)
                 return {"node_id": intent_id, "state": "never_applied" if cancelled else "reconciliation_required"}
@@ -107,12 +141,15 @@ class DstackController:
         observed = binding.get("observed_at")
         fresh = type(observed) in (int, float) and 0 <= now-observed <= self.service.policy["observation_fresh_seconds"]
         last = max(last, binding.get("first_runtime_ready_at", now))
+        lifecycle = payload.get("lifecycle", {})
         action = idle_action(now=now, hard_deadline=payload["hard_deadline"], hold_until=payload["hold_until"],
-            last_business_activity=last, idle_seconds=self.service.policy["idle_shutdown_seconds"],
+            last_business_activity=last, idle_seconds=lifecycle.get("idle_shutdown_seconds", self.service.policy["idle_shutdown_seconds"]),
             active_jobs=active, unsafe_attempts=unsafe, collection_holds=int(binding.get("state") == "busy"),
-            observations_fresh=bool(fresh))
+            observations_fresh=bool(fresh), lifecycle_version=lifecycle.get("version", 1),
+            keep_on=lifecycle.get("keep_on", "idle"), budget_available=funded)
         if action in {"stop", "drain"}:
-            self._request_stop(current)
+            if not self._request_stop(current):
+                action = "retain"
         stopping = current["desired_state"] == "stopped" or action in {"stop", "drain"}
         if stopping:
             if (active or unsafe) and binding.get("state") in {"ready", "busy"} and fresh and self.worker_process:

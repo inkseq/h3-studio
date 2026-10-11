@@ -59,8 +59,9 @@ MANUAL_REVIEW_CONTROLLER_PREFIX = "operator-offers-v1-review-v1-"
 
 def removal_confirmation(intent, action, check_started, requested_at, now, review=None):
     """Read-only progress. A timeout or scheduling claim is never stop proof."""
-    if intent["state"] not in {"destroying", "destroyed"} or requested_at is None:
+    if not review and (intent["state"] not in {"destroying", "destroyed"} or requested_at is None):
         return None
+    action = action or {}
     confirmed = intent["state"] == "destroyed"
     state = "manually_reviewed" if review else "confirmed" if confirmed else "overdue" if now-requested_at >= REMOVAL_ATTENTION_SECONDS else "pending"
     observed = action.get("last_observed_at")
@@ -628,21 +629,43 @@ class OperatorCapacity(OperatorExtensions):
         return {"operation":{**command_public(command),"node_ids":[node_id]}}
 
     def _review_blocker(self, connection, intent, node, now, *, lock=False, local_releases=None):
-        if intent["provider"]!="targon": return "operator_manual_review_targon_only"
-        if (intent["state"]!="destroying" or not intent["provider_instance_id"]
-                or node["desired_state"]!="stopped"):
-            return "operator_manual_review_requires_requested_removal"
-        action=connection.execute(select(scaler_actions).where(scaler_actions.c.intent_id==intent["id"])).mappings().first()
-        if not action or action["destroy_started_at"] is None:
-            return "operator_manual_review_requires_requested_removal"
-        if not any(command["payload"].get("node_id")==intent["id"] for command in
-                connection.execute(select(operator_commands).where(operator_commands.c.kind=="stop")).mappings()):
-            return "operator_manual_review_requires_requested_removal"
-        heartbeat=connection.execute(select(operator_heartbeats).where(operator_heartbeats.c.id=="global")).mappings().first()
-        if (not heartbeat or not heartbeat["controller_id"].startswith(MANUAL_REVIEW_CONTROLLER_PREFIX)
-                or heartbeat["state"] not in {"running","degraded"}
-                or not 0<=now-heartbeat["observed_at"]<=CONTROLLER_FRESH_SECONDS):
-            return "operator_manual_review_controller_unavailable"
+        if intent["provider"] not in {"lium","targon"}: return "operator_manual_review_provider_unsupported"
+        if (intent["state"] not in {"creating","creation_unknown","starting","ready","busy","draining","destroying"}
+                or intent["provider_instance_id"] is None and intent["state"] not in {"creating","creation_unknown"}
+                or intent["provider_instance_id"] is not None and not safe_id(intent["provider_instance_id"])):
+            return "operator_manual_review_instance_unconfirmed"
+        if intent["provider_instance_id"] is None:
+            # Ambiguous creation has no physical identity to match. Do not
+            # invent one or retire actors by guessing: the entire original
+            # pool must have no execution/ownership obligations instead.
+            worker_query=select(registered_workers).where(registered_workers.c.pool==intent["pool"])
+            if lock: worker_query=worker_query.order_by(registered_workers.c.id).with_for_update()
+            workers=list(connection.execute(worker_query).mappings())
+            if any(w["state"]!="retired" or w["current_job_id"] for w in workers):
+                return "operator_manual_review_worker_active"
+            worker_ids=[w["id"] for w in workers]
+            device_query=select(registered_devices).where(or_(
+                registered_devices.c.worker_id.in_(worker_ids),
+                (registered_devices.c.provider==intent["provider"]) & registered_devices.c.instance_id.is_(None)))
+            if lock: device_query=device_query.order_by(registered_devices.c.gpu_id).with_for_update()
+            if any(d["state"]!="released" for d in connection.execute(device_query).mappings()):
+                return "operator_manual_review_device_unreleased"
+            job_query=select(jobs.c.id,jobs.c.status).where(jobs.c.pool==intent["pool"])
+            if lock: job_query=job_query.order_by(jobs.c.id).with_for_update()
+            job_rows=list(connection.execute(job_query).mappings())
+            if any(j["status"] not in {"succeeded","failed","cancelled"} for j in job_rows):
+                return "operator_manual_review_worker_active"
+            attempt_query=select(attempts).where(or_(attempts.c.job_id.in_([j["id"] for j in job_rows]),
+                attempts.c.worker_id.in_(worker_ids)))
+            if lock: attempt_query=attempt_query.order_by(attempts.c.id).with_for_update()
+            if any(h["status"] not in {"succeeded","failed","cancelled"}
+                    or (h["submission_started_at"] is not None or h["upstream_task_id"] is not None)
+                    and h["upstream_stopped"]!=1 for h in connection.execute(attempt_query).mappings()):
+                return "operator_manual_review_attempt_unsafe"
+            return None
+        # An operator can stop a machine in the provider dashboard. Exact human
+        # attestation does not depend on a live retired controller or an earlier
+        # platform stop request; local execution obligations still gate closure.
         worker_query=select(registered_workers).where(
             registered_workers.c.provider==intent["provider"],
             registered_workers.c.instance_id==intent["provider_instance_id"]).order_by(registered_workers.c.id)
@@ -726,7 +749,8 @@ class OperatorCapacity(OperatorExtensions):
         actor=self.authorize(principal)
         require(safe_id(node_id) and isinstance(body,dict) and set(body)=={
             "expected_version","provider_instance_id","account_absent","no_continuing_charge"}
-            and isinstance(body["expected_version"],str) and safe_id(body["provider_instance_id"])
+            and isinstance(body["expected_version"],str)
+            and (body["provider_instance_id"] is None or safe_id(body["provider_instance_id"]))
             and body["account_absent"] is True and body["no_continuing_charge"] is True,
             "operator_manual_review_attestation_required",422)
         hashed=request_hash({"kind":"manual_review","node_id":node_id,"body":body})
@@ -744,16 +768,18 @@ class OperatorCapacity(OperatorExtensions):
             local_releases=[]
             blocker=self._review_blocker(connection,intent,node,now,lock=True,local_releases=local_releases)
             require(blocker is None,blocker or "operator_manual_review_blocked")
-            stop=next(command for command in connection.execute(select(operator_commands).where(
+            stop=next((command for command in connection.execute(select(operator_commands).where(
                 operator_commands.c.kind=="stop").order_by(operator_commands.c.created_at.desc())).mappings()
-                if command["payload"].get("node_id")==node_id)
+                if command["payload"].get("node_id")==node_id),None)
             command=dict(id=str(uuid.uuid4()),actor=actor,idempotency_key=key,request_hash=hashed,
                 kind="manual_review",state="completed",payload={"node_id":node_id,**body},
                 reason_code="operator_removal_manually_reviewed",created_at=now,updated_at=now)
             review={"schema_version":1,"state":"manually_reviewed","intent_id":node_id,
                 "instance_id":intent["provider_instance_id"],"operation_id":command["id"],"actor":actor,
                 "account_absent":True,"no_continuing_charge":True,"deadline":intent["hard_deadline"],
-                "stop_operation_id":stop["id"]}
+                "provider":intent["provider"],"original_intent_state":intent["state"],
+                "removal_source":"platform_stop" if stop else "operator_attestation",
+                "stop_operation_id":stop["id"] if stop else None}
             if local_releases:
                 review["local_execution_release"]={"state":"local_ownership_released",
                     "provider_removal_confirmed":False,"billing_settled":False,"workers":local_releases}
@@ -772,7 +798,8 @@ class OperatorCapacity(OperatorExtensions):
             connection.execute(insert(scaler_receipts).values(id=str(uuid.uuid4()),intent_id=node_id,
                 operation="manual_review",observed_at=now,facts=canonical(review)))
             connection.execute(update(operator_nodes).where(operator_nodes.c.intent_id==node_id).values(
-                payload={**node["payload"],"manual_review":review},runtime_state="manually_reviewed",updated_at=now))
+                payload={**node["payload"],"manual_review":review},desired_state="stopped",
+                runtime_state="manually_reviewed",updated_at=now))
             # Existing stop intent is completed by human review, not provider proof.
             for stop in connection.execute(select(operator_commands).where(operator_commands.c.kind=="stop",
                     operator_commands.c.state.in_(ACTIVE_COMMANDS))).mappings():

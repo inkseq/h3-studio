@@ -17,7 +17,7 @@ creation, availability, history and download contracts.
 | Hatchet | Durable dispatch, worker assignment, dispatch concurrency, bounded step timeouts | Permission to regenerate an uncertain attempt |
 | CPU execution worker | Atomic claim, original-attempt reconciliation, SSH WanGP calls, artifact validation/collection | Rental authority, budget increases, changing models |
 | dstack 0.22.3 | Provider offers, long-lived GPU runs, machine observations and stop requests | Native model readiness or final provider billing |
-| Thin capacity policy | Owned run binding, resource floors, readiness, idle/hold and preparation deadlines | A parallel generation queue or account-wide cleanup |
+| Thin capacity policy | Owned run binding, resource floors, readiness, idle/keep-on and funded spend runway | A parallel generation queue or account-wide cleanup |
 | Grafana Cloud | OTLP metrics, logs and traces; operator dashboards | Business state, accepted work or cost settlement |
 
 Hatchet and business PostgreSQL may share a server but use separate databases,
@@ -40,7 +40,7 @@ not permission to rent, cache, or enable a provider in production.
 
 The immediate acceptance uses **two separate single-GPU Vast allocations**:
 one FL2VA and one Ref2VA. Complete isolated P2 warm successive jobs, truthful
-readiness, keep-on within the original deadline, and owned idle stop before any
+readiness, configurable keep-on, and owned idle stop before any
 P3 production activation. CPU configuration/build/proof can proceed beforehand,
 but must not switch public admission or the production namespace as a substitute
 for P2. Record exact identities and outputs on #132; failures remain blockers.
@@ -98,11 +98,37 @@ An account's other projects must never be included in cleanup.
 
 For Vast and RunPod container backends, keep the run alive for reuse. dstack VM
 `idle_duration` is not business-queue idle shutdown. The thin policy stops a run
-only after the configured idle interval, no active/unknown/collection obligation,
-and expiry of explicit manual holds. Finite preparation and absolute authorization
-deadlines also apply. `max_duration` starts at RUNNING and excludes provisioning
-and image pulling; it is not a rental cost cap. Estimate all billable phases and
-retain reservations until actual supplier evidence or explicit review settles them.
+only after the configured idle interval, no matching accepted queued work or active/unknown/collection obligation,
+and expiry of explicit manual holds. New lifecycle-v2 runs have no fixed hard
+deadline at start; render dstack `max_duration: off` explicitly. Keep-on supports
+idle policy, a chosen hold duration, or until the operator stops the machine.
+Matching queued, active, unknown and collection work prevents idle cleanup. Existing lifecycle-v1
+rentals retain their original finite deadline and immutable runtime specification.
+
+Cost safety is the hourly `max_price`, original cumulative budget accounts
+including an owner-scoped spend cap, and idle stop. Reserve a bounded initial
+money chunk plus shutdown margin; the controller funds further runway atomically
+in the same reservation rows and account counters before admitting more work.
+No additional rental or billing ledger is created. Insufficient funds drains new
+work, collects existing results and requests stop when safe. Keep-on does not
+bypass the spend cap. Charge estimates include provisioning/download and are not
+invoices; manual operational review never releases or settles unknown money.
+
+Under the existing capacity lock, new-path limits count original owned live or
+uncertain dstack runs and actual GPU allocations. Legacy Lium/Targon intents do
+not count toward this path. An exact owned terminal run with fresh authenticated
+complete absence from its configured provider account does not count, regardless
+of retained historical intent/bill state. This is a transient capacity projection;
+do not add a physical-removal reconciler or overwrite historical ledger rows.
+Unknown identities or incomplete provider reads remain counted. Provider account
+reads use fixed supported endpoints and the same dstack backend credential in
+memory; neither raw credentials nor provider configuration enters public state.
+
+An authorized operator can mark a legacy Lium/Targon record as already manually
+stopped after confirming account absence and no continuing charge. Preserve the
+exact nullable provider identity, original creation/stop uncertainty, task history
+and budgets. Active workers, unresolved attempts and collection block this action.
+The record moves to history; it is not a provider deletion or invoice receipt.
 
 RUNNING means a machine exists. Native endpoint readiness proves the exact
 manifest/profile/controls and a usable session; it does not prove transformer

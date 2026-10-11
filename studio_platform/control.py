@@ -388,7 +388,8 @@ class WorkerControl:
                 deadlines = list(connection.execute(select(instance_intents.c.hard_deadline).where(
                     instance_intents.c.provider == worker["provider"],
                     instance_intents.c.provider_instance_id == worker["instance_id"],
-                    instance_intents.c.state != "destroyed")).scalars())
+                    instance_intents.c.state != "destroyed",
+                    instance_intents.c.hard_deadline.is_not(None))).scalars())
                 if deadlines:
                     # A shorter job may fit even when a long queued job does
                     # not. Existing attempts still reconcile/collect past this

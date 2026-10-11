@@ -202,7 +202,7 @@ instance_intents = Table(
     Column("request_hash", String(64), nullable=False), Column("state", String(40), nullable=False),
     Column("physical_gpus", Integer, nullable=False), Column("slots", Integer, nullable=False),
     Column("reserved_cost_microusd", BigInteger, nullable=False),
-    Column("provider_instance_id", String(200)), Column("hard_deadline", Float, nullable=False),
+    Column("provider_instance_id", String(200)), Column("hard_deadline", Float),
     Column("provider", String(200), nullable=False, default="unknown", server_default="unknown"),
     Column("created_at", Float, nullable=False), Column("updated_at", Float, nullable=False),
     UniqueConstraint("pool", "intent_key"),
@@ -329,10 +329,16 @@ class Repository:
             from .artifact_writer import _schema as write_metadata
             for schema in (asset_metadata, asset_journal_metadata, multipart_metadata, write_metadata):
                 schema.create_all(connection)
-            known_columns = {column["name"] for column in inspect(connection).get_columns("platform_instance_intents")}
+            intent_columns = {column["name"]: column for column in inspect(connection).get_columns("platform_instance_intents")}
+            known_columns = set(intent_columns)
             if "provider" not in known_columns:
                 connection.exec_driver_sql(
                     "ALTER TABLE platform_instance_intents ADD COLUMN provider VARCHAR(200) NOT NULL DEFAULT 'unknown'")
+            if self.engine.dialect.name == "postgresql" and not intent_columns["hard_deadline"]["nullable"]:
+                # New continuing dstack runs have no absolute lifetime. This
+                # relaxes only the column constraint; historical values remain.
+                connection.exec_driver_sql(
+                    "ALTER TABLE platform_instance_intents ALTER COLUMN hard_deadline DROP NOT NULL")
             worker_columns = {column["name"] for column in inspect(connection).get_columns("platform_registered_workers")}
             if "drain_requested" not in worker_columns:
                 connection.exec_driver_sql(
@@ -576,6 +582,75 @@ class Repository:
                 spent_microusd=budget_accounts.c.spent_microusd + actual_cost))
             connection.execute(update(budget_reservations).where(budget_reservations.c.id == row["id"])
                 .values(state="released" if actual_cost == 0 else "settled", actual_cost_microusd=actual_cost))
+
+    def fund_instance_window(self, connection, intent_id, minimum_reserved_cost_microusd,
+                             budget_account_ids):
+        """Extend an explicit continuing machine's original money reservation.
+
+        This grants funded runway, not another rental, deadline or invoice. All
+        accounts and reservation rows are checked before any counter changes;
+        a caller catches BudgetExceeded only outside this transaction.
+        """
+        from .operator_capacity import operator_nodes
+        minimum = money(minimum_reserved_cost_microusd)
+        self._lock_capacity(connection)
+        intent = self._locked(connection, select(instance_intents).where(instance_intents.c.id == intent_id))
+        node = self._locked(connection, select(operator_nodes).where(operator_nodes.c.intent_id == intent_id))
+        if not intent or not node:
+            raise NotFound("instance_intent_not_found")
+        payload = node["payload"]
+        lifecycle = payload.get("lifecycle", {})
+        request, binding = payload.get("request", {}), payload.get("dstack", {})
+        if (payload.get("capacity_backend") != "dstack-v1" or lifecycle.get("version") != 2
+                or request.get("lifecycle_version") != 2 or binding.get("lifecycle_version") != 2
+                or intent["provider"] not in {"vast", "runpod"} or intent["hard_deadline"] is not None
+                or payload.get("hard_deadline") is not None or request.get("hard_deadline") is not None
+                or request.get("max_duration_s") is not None or node["desired_state"] != "running"
+                or intent["state"] not in {"reserved", "creating", "creation_unknown", "starting", "ready", "busy"}):
+            raise Conflict("instance_continuing_policy_unconfirmed")
+        ids = sorted(set(budget_account_ids))
+        if (not ids or len(ids) != len(budget_account_ids)
+                or ids != sorted(lifecycle.get("budget_account_ids", []))):
+            raise BudgetExceeded("instance_budget_binding_changed")
+        accounts = []
+        for account_id in ids:
+            account = self._locked(connection, select(budget_accounts).where(budget_accounts.c.id == account_id))
+            if (not account or account["tenant_id"] != payload.get("tenant_id")
+                    or account["owner_id"] is not None and account["owner_id"] != payload.get("owner_id")
+                    or account["project_id"] is not None and account["project_id"] != payload.get("project_id")):
+                raise BudgetExceeded("instance_budget_binding_changed")
+            accounts.append(account)
+        if not any(account["owner_id"] == payload.get("owner_id") and account["owner_id"] is not None
+                   for account in accounts):
+            raise BudgetExceeded("instance_owner_budget_required")
+        rows = list(connection.execute(select(budget_reservations).where(
+            budget_reservations.c.reference_type == "instance", budget_reservations.c.reference_id == intent_id)
+            .order_by(budget_reservations.c.account_id).with_for_update()).mappings())
+        current = intent["reserved_cost_microusd"]
+        if (len(rows) != len(ids) or [row["account_id"] for row in rows] != ids
+                or any(row["state"] != "reserved" or row["amount_microusd"] != current
+                       or row["actual_cost_microusd"] is not None for row in rows)):
+            raise BudgetExceeded("instance_reservation_unconfirmed")
+        total = max(minimum, current)
+        extra = total-current
+        if any(account["reserved_microusd"] < current
+               or account["spent_microusd"]+account["reserved_microusd"]+extra > account["limit_microusd"]
+               for account in accounts):
+            raise BudgetExceeded("instance_spend_limit_reached")
+        if not extra:
+            return current
+        for account_id in ids:
+            connection.execute(update(budget_accounts).where(budget_accounts.c.id == account_id)
+                .values(reserved_microusd=budget_accounts.c.reserved_microusd+extra))
+        for row in rows:
+            connection.execute(update(budget_reservations).where(budget_reservations.c.id == row["id"])
+                .values(amount_microusd=total))
+        connection.execute(update(instance_intents).where(instance_intents.c.id == intent_id)
+            .values(reserved_cost_microusd=total, updated_at=self.clock()))
+        self._emit(connection, "instance.reservation_extended", intent_id,
+            {"intent_id":intent_id, "previous_microusd":current, "reserved_microusd":total,
+             "additional_microusd":extra, "account_ids":ids})
+        return total
 
     def _require_pool_not_stopping(self, connection, pool, execution, compiled):
         """Close the preflight/shutdown race while holding the global gate.
@@ -1094,7 +1169,8 @@ class Repository:
 
     def reserve_instance_intent(self, scope, pool, intent_key, *, physical_gpus=1, slots=1,
                                 reserved_cost_microusd=0, hard_deadline, budget_account_ids=(), dry_run=True,
-                                provider="unknown", connection=None):
+                                provider="unknown", connection=None, continuing=False,
+                                capacity_usage=None, active_instance_ids=None):
         """Reserve an intent, NEVER create an instance. Default dry-run makes no writes."""
         identifier(pool)
         identifier(intent_key)
@@ -1102,9 +1178,12 @@ class Repository:
         cost = money(reserved_cost_microusd)
         if type(physical_gpus) is not int or type(slots) is not int or min(physical_gpus, slots) < 1:
             raise ValueError("invalid_instance_capacity")
-        if not isinstance(hard_deadline, (int, float)) or not math.isfinite(hard_deadline):
+        if type(continuing) is not bool or (continuing and (provider not in {"vast", "runpod"}
+                or hard_deadline is not None or capacity_usage is None)):
+            raise ValueError("invalid_continuing_capacity")
+        if not continuing and (not isinstance(hard_deadline, (int, float)) or not math.isfinite(hard_deadline)):
             raise ValueError("invalid_instance_deadline")
-        if hard_deadline <= self.clock():
+        if hard_deadline is not None and hard_deadline <= self.clock():
             raise Conflict("instance_deadline_expired")
         digest = request_hash(dict(physical_gpus=physical_gpus, slots=slots,
             reserved_cost_microusd=cost, hard_deadline=hard_deadline,
@@ -1126,19 +1205,24 @@ class Repository:
                     if existing["request_hash"] != digest:
                         raise Conflict("instance_intent_conflict")
                     return {**dict(existing), "created": False, "dry_run": False}
-                usage = self._global_usage(connection)
+                usage = self._global_usage(connection) if capacity_usage is None else capacity_usage
+                if any(type(usage.get(k)) is not int or usage[k] < 0 for k in ("instances", "physical_gpus")):
+                    raise ValueError("invalid_capacity_observation")
                 if (usage["instances"] + 1 > global_limits["max_instances"]
                     or usage["physical_gpus"] + physical_gpus > global_limits["max_physical_gpus"]):
                     raise BudgetExceeded("global_capacity_exceeded")
                 active = list(connection.execute(select(instance_intents).where(
                     instance_intents.c.pool == pool, instance_intents.c.state != "destroyed")).mappings())
                 active = [row for row in active if not manually_reviewed_inactive(connection, row)]
+                if active_instance_ids is not None:
+                    active = [row for row in active if row["id"] in active_instance_ids]
                 if len(active) + 1 > limits["max_instances"] or sum(r["physical_gpus"] for r in active) + physical_gpus > limits["max_physical_gpus"]:
                     raise BudgetExceeded("instance_capacity_exceeded")
                 row = dict(id=str(uuid.uuid4()), intent_key=intent_key, pool=pool, request_hash=digest,
                     state="reserved", physical_gpus=physical_gpus, slots=slots, reserved_cost_microusd=cost,
                     provider=provider,
-                    hard_deadline=float(hard_deadline), created_at=self.clock(), updated_at=self.clock())
+                    hard_deadline=float(hard_deadline) if hard_deadline is not None else None,
+                    created_at=self.clock(), updated_at=self.clock())
                 connection.execute(insert(instance_intents).values(**row))
                 self._reserve(connection, scope, budget_account_ids, "instance", row["id"], cost)
                 self._emit(connection, "instance.reserved", row["id"], {"intent_id": row["id"], "pool": pool})
@@ -1215,12 +1299,14 @@ class Repository:
 def manually_reviewed_inactive(connection, intent):
     """Explicit operator risk acceptance, never provider removal or settlement.
 
-    Only a previously requested exact Targon teardown can be reviewed. Keeping
-    the underlying destroying state prevents manual closure from being reused
-    as physical removal evidence by replacement, settlement or recovery code.
+    Exact Lium/Targon account absence can be attested after a dashboard stop.
+    Preserve the underlying intent state, so review cannot become physical
+    removal evidence for replacement, settlement or recovery code.
     """
-    if (intent["provider"] != "targon" or intent["state"] != "destroying"
-            or not intent["provider_instance_id"]):
+    if (intent["provider"] not in {"lium", "targon"}
+            or intent["state"] not in {"creating", "creation_unknown", "starting", "ready", "busy", "draining", "destroying"}
+            or intent["provider_instance_id"] is None and intent["state"] not in {"creating", "creation_unknown"}
+            or intent["provider_instance_id"] is not None and not intent["provider_instance_id"]):
         return None
     row = connection.execute(select(scaler_receipts).where(
         scaler_receipts.c.intent_id == intent["id"],
@@ -1230,11 +1316,19 @@ def manually_reviewed_inactive(connection, intent):
     if (not isinstance(facts, dict) or facts.get("schema_version") != 1
             or facts.get("state") != "manually_reviewed"
             or facts.get("intent_id") != intent["id"]
+            or "instance_id" not in facts
             or facts.get("instance_id") != intent["provider_instance_id"]
             or facts.get("account_absent") is not True
             or facts.get("no_continuing_charge") is not True
             or not isinstance(facts.get("actor"), str)
             or not isinstance(facts.get("operation_id"), str)):
+        return None
+    if "provider" in facts or "original_intent_state" in facts:
+        if facts.get("provider") != intent["provider"] or facts.get("original_intent_state") != intent["state"]:
+            return None
+    elif intent["provider"] != "targon" or intent["state"] != "destroying" or intent["provider_instance_id"] is None:
+        # Preserve the previously accepted Targon-only receipt format. It must
+        # not become new Lium or active-state authority by omission.
         return None
     return {**facts, "observed_at": row["observed_at"]}
 
