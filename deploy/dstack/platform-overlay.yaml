@@ -233,6 +233,9 @@ services:
     command: [python, -m, studio_platform.dstack_controller]
     environment:
       <<: *business-environment
+      # CPU slot children inherit these exact service settings from controller.
+      SIXNINE_GENERATION_ENABLED: ${SIXNINE_MIGRATION_GENERATION_ENABLED:-0}
+      SIXNINE_EXECUTION_BACKEND: ${SIXNINE_MIGRATION_EXECUTION_BACKEND:-disabled}
       DSTACK_OPERATOR_CONFIG: /run/secrets/dstack_operator_config
       DSTACK_RUNTIME_CONFIG: /run/secrets/dstack_runtime_config
     secrets: [app_database_url, execution_profiles, grafana_cloud, hatchet_broker, hatchet_api_token, dstack_operator_config, dstack_runtime_config, dstack_api_token, dstack_ssh_public_key, gpu_ssh_key]
