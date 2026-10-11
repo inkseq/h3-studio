@@ -249,8 +249,13 @@ def _owns(run, binding, project):
     _require(actual.get("env", {}) in ({}, None) and actual.get("ports", []) in ([], None)
         and actual.get("dstack", False) is False, "dstack_run_binding_mismatch")
     _require(spec.get("ssh_key_pub") == wanted["ssh_key_pub"], "dstack_run_binding_mismatch")
-    for key in ("privileged", "docker", "registry_auth", "entrypoint", "schedule", "groups", "nodes"):
+    for key in ("privileged", "docker", "registry_auth", "entrypoint", "schedule", "groups"):
         _require(actual.get(key) in (None, False), "dstack_run_binding_mismatch")
+    # 0.22.3 run preprocessing stores a homogeneous TaskConfiguration's
+    # omitted nodes as integer 1. Preserve the frozen spec while allowing only
+    # that single-node default, never multinode or grouped execution.
+    nodes = actual.get("nodes")
+    _require(nodes is None or type(nodes) is int and nodes == 1, "dstack_run_binding_mismatch")
     for key in ("files", "repos", "setup", "volumes"):
         _require(actual.get(key) in (None, []), "dstack_run_binding_mismatch")
     _require(actual.get("spot_policy") == expected["spot_policy"]

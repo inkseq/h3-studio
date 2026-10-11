@@ -366,6 +366,20 @@ class DstackCapacityTests(unittest.TestCase):
         self.client.run["run_spec"]["configuration"]["regions"] = []
         self.assertEqual(self.capacity.observe(INTENT)["reason_code"], "dstack_run_binding_mismatch")
 
+    def test_pinned_homogeneous_single_node_default_preserves_binding(self):
+        self.start()
+        configuration = self.client.run["run_spec"]["configuration"]
+        configuration["nodes"] = 1
+        self.assertEqual(self.capacity.observe(INTENT)["state"], "starting")
+        self.assertNotIn("nodes", self.store.value["run_spec"]["configuration"])
+        for value in (0, 2, True, False, "1", {"min": 1, "max": 1}):
+            with self.subTest(nodes=value):
+                configuration["nodes"] = value
+                self.assertEqual(self.capacity.observe(INTENT)["reason_code"], "dstack_run_binding_mismatch")
+        configuration["nodes"] = 1
+        configuration["groups"] = [{"nodes": 1}]
+        self.assertEqual(self.capacity.observe(INTENT)["reason_code"], "dstack_run_binding_mismatch")
+
     def test_concurrent_start_commits_only_one_paid_apply(self):
         barrier = threading.Barrier(2)
         original_get = self.client.get
