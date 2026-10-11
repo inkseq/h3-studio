@@ -419,6 +419,7 @@ inventory.json
 !deploy/hatchet/entrypoint.sh
 !deploy/hatchet/broker.example.json
 !studio_platform/dstack_factory.py
+!studio_platform/native_runtime_document.py
 !tools/build_dstack_sources.py
 !deploy/dstack/runtime-config.example.json
 !deploy/dstack/platform-overlay.yaml
