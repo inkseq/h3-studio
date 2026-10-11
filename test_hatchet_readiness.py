@@ -41,17 +41,20 @@ class BrokerReadinessTests(unittest.TestCase):
         self.client_file.chmod(0o600)
         self.slot = SlotConfig(self.spec, True, "http://127.0.0.1:8199", ("http://127.0.0.1:8199",),
             runtime_config_file=str(self.client_file))
-        self.row = self.worker()
+        # Pinned server list omits both fields; only detail includes workflows.
+        self.row = self.worker(registered_workflows=None)
         self.client = Mock()
         self.client.list.return_value = SimpleNamespace(rows=[self.row], pagination=None)
+        self.client.get.return_value = self.worker()
         self.factory = Mock(return_value=self.client)
         self.readiness = BrokerReadiness(self.config, lambda:self.now, self.factory)
 
     def worker(self, **changes):
         name, expected, workflow = _expectation(self.config, self.slot)
-        value = {"name":name,"type":"SELFHOSTED","status":"ACTIVE",
+        value = {"metadata":SimpleNamespace(id="22222222-2222-4222-8222-222222222222"),
+            "name":name,"type":"SELFHOSTED","status":"ACTIVE",
             "last_heartbeat_at":datetime.fromtimestamp(self.now-2,timezone.utc),
-            "last_listener_established":datetime.fromtimestamp(self.now-5,timezone.utc),
+            "last_listener_established":None,
             "dispatcher_id":"11111111-1111-4111-8111-111111111111",
             "labels":[SimpleNamespace(key=k,value=v) for k,v in expected.items()],
             "registered_workflows":[SimpleNamespace(name=workflow)],
@@ -67,6 +70,7 @@ class BrokerReadinessTests(unittest.TestCase):
         self.assertEqual(value["worker_id"],self.spec.worker_id)
         self.assertNotIn("private",json.dumps(value))
         self.assertEqual(self.client.list.call_count,1)
+        self.client.get.assert_called_once_with(self.row.metadata.id)
 
     def test_inactive_history_does_not_hide_single_live_consumer(self):
         self.client.list.return_value.rows += [self.worker(status="INACTIVE"),self.worker(status="PAUSED")]
@@ -109,23 +113,56 @@ class BrokerReadinessTests(unittest.TestCase):
                 self.client.list.return_value.rows=[self.worker(last_heartbeat_at=stamp)]
                 self.assertFalse(probe.probe(self.slot))
 
-    def test_active_heartbeat_without_listener_or_workflow_is_not_consumer_proof(self):
-        for changes in ({"last_listener_established":None},{"dispatcher_id":None},
+    def test_exact_detail_without_dispatcher_or_workflow_is_not_consumer_proof(self):
+        for changes in ({"dispatcher_id":None},{"dispatcher_id":"not-a-uuid"},
                 {"registered_workflows":[]},{"registered_workflows":[SimpleNamespace(name="other-workflow")]}):
             probe=BrokerReadiness(self.config,lambda:self.now,self.factory)
-            self.client.list.return_value.rows=[self.worker(**changes)]
+            self.client.get.return_value=self.worker(**changes)
             self.assertFalse(probe.probe(self.slot))
+
+    def test_missing_invalid_list_identity_cannot_issue_detail_read(self):
+        for identifier in (None,"not-a-uuid","00000000-0000-0000-0000-000000000000"):
+            probe=BrokerReadiness(self.config,lambda:self.now,self.factory)
+            self.client.list.return_value.rows=[self.worker(metadata=SimpleNamespace(id=identifier))]
+            self.assertEqual(probe.projection(self.slot)["reason_code"],"hatchet_consumer_identity_unconfirmed")
+        self.client.get.assert_not_called()
+
+    def test_detail_identity_eligibility_and_fresh_heartbeat_rechecked(self):
+        entries=self.worker().labels
+        cases=({"metadata":SimpleNamespace(id="33333333-3333-4333-8333-333333333333")},
+            {"name":"another-worker"},{"status":"PAUSED"},{"status":"INACTIVE"},{"type":"WEBHOOK"},
+            {"labels":entries[:-1]},
+            {"last_heartbeat_at":datetime.fromtimestamp(self.now-61,timezone.utc)})
+        for changes in cases:
+            with self.subTest(changes=list(changes)):
+                probe=BrokerReadiness(self.config,lambda:self.now,self.factory)
+                self.client.get.return_value=self.worker(**changes)
+                self.assertFalse(probe.probe(self.slot))
+
+    def test_detail_failure_invalidates_ready_and_does_not_repeat_read(self):
+        self.assertTrue(self.readiness.probe(self.slot))
+        self.now+=15
+        self.client.get.side_effect=TimeoutError("Bearer secret / private signed URL")
+        value=self.readiness.projection(self.slot)
+        self.assertFalse(value["ready"])
+        self.assertEqual(value["reason_code"],"hatchet_consumer_observation_failed")
+        self.assertNotIn("secret",json.dumps(value))
+        self.readiness.probe(self.slot)
+        self.assertEqual(self.client.list.call_count,2)
+        self.assertEqual(self.client.get.call_count,2)
 
     def test_refresh_and_concurrent_calls_share_15_second_budget(self):
         with ThreadPoolExecutor(max_workers=6) as executor:
             self.assertTrue(all(executor.map(lambda _:self.readiness.probe(self.slot),range(12))))
         self.assertEqual(self.client.list.call_count,1)
+        self.assertEqual(self.client.get.call_count,1)
         self.now+=14.9
         self.assertTrue(self.readiness.probe(self.slot))
         self.assertEqual(self.client.list.call_count,1)
         self.now+=0.1
         self.assertTrue(self.readiness.probe(self.slot))
         self.assertEqual(self.client.list.call_count,2)
+        self.assertEqual(self.client.get.call_count,2)
 
     def test_outage_invalidates_observation_and_has_no_immediate_retry(self):
         self.assertTrue(self.readiness.probe(self.slot))
@@ -180,10 +217,11 @@ class BrokerReadinessTests(unittest.TestCase):
         meta={"id":tenant,"createdAt":stamp,"updatedAt":stamp}
         name,expected,workflow=_expectation(self.config,self.slot)
         raw={"metadata":meta,"name":name,"type":"SELFHOSTED","status":"ACTIVE",
-            "lastHeartbeatAt":stamp,"lastListenerEstablished":stamp,"dispatcherId":tenant,
-            "labels":[{"metadata":meta,"key":k,"value":v} for k,v in expected.items()],
-            "registeredWorkflows":[{"id":tenant,"name":workflow}]}
+            "lastHeartbeatAt":stamp,"dispatcherId":tenant,
+            "labels":[{"metadata":meta,"key":k,"value":v} for k,v in expected.items()]}
+        detail={**raw,"registeredWorkflows":[{"id":tenant,"name":workflow}]}
         self.client.list.return_value=WorkerList(rows=[Worker.from_dict(raw)])
+        self.client.get.return_value=Worker.from_dict(detail)
         self.assertTrue(self.readiness.probe(self.slot))
         with patch("studio_platform.hatchet_readiness.create_client",return_value=SimpleNamespace(config=config)):
             client=_workers_client(self.config)
@@ -191,8 +229,9 @@ class BrokerReadinessTests(unittest.TestCase):
         captured=[]
         def request(*args,**kwargs):
             captured.append((args,kwargs))
-            return HTTPResponse(body=io.BytesIO(json.dumps({"rows":[raw], "pagination":{
-                "current_page":1,"num_pages":1,"next_page":1}}).encode()),status=200,
+            value=detail if args[1].endswith("/api/v1/workers/"+tenant) else {"rows":[raw], "pagination":{
+                "current_page":1,"num_pages":1,"next_page":1}}
+            return HTTPResponse(body=io.BytesIO(json.dumps(value).encode()),status=200,
                 headers={"Content-Type":"application/json"},preload_content=False)
         with patch("urllib3.PoolManager.request",side_effect=request):
             response=client.list()
@@ -202,6 +241,22 @@ class BrokerReadinessTests(unittest.TestCase):
         self.assertFalse(captured[0][1]["retries"])
         self.assertEqual(captured[0][1]["timeout"].total,3)
         self.assertEqual(captured[0][0][:2],("GET",self.config.server_url+"/api/v1/tenants/"+tenant+"/worker"))
+        with patch("urllib3.PoolManager.request",side_effect=request):
+            found=client.get(tenant)
+        self.assertEqual(found.metadata.id,tenant)
+        self.assertEqual(found.registered_workflows[0].name,workflow)
+        self.assertIsNone(found.last_listener_established)
+        self.assertEqual(captured[1][0][:2],("GET",self.config.server_url+"/api/v1/workers/"+tenant))
+        with patch("urllib3.PoolManager.request") as forbidden:
+            with self.assertRaises(ValueError):
+                client.get("not-a-uuid")
+            with client.client() as transport:
+                for method,url in (("POST",self.config.server_url+"/api/v1/tenants/"+tenant+"/worker"),
+                        ("GET",self.config.server_url+"/api/v1/workers/"+tenant),
+                        ("GET","https://another-origin.invalid/api/v1/tenants/"+tenant+"/worker")):
+                    with self.assertRaises(ValueError):
+                        transport.call_api(method,url)
+            forbidden.assert_not_called()
         with patch("urllib3.PoolManager.request",side_effect=request):
             probe=BrokerReadiness(self.config,lambda:self.now,lambda _:client)
             self.assertTrue(probe.probe(self.slot))
@@ -241,6 +296,29 @@ class BrokerReadinessTests(unittest.TestCase):
                     self.assertNotIn("private-redirect",json.dumps(projection))
                     self.assertEqual(probe.projection(self.slot),projection)
                     self.assertEqual(get.call_count,1)
+
+        for status,payload,reason in (
+                (307,b"PRIVATE-BODY-SECRET","hatchet_consumer_http_redirect_rejected"),
+                (401,b"PRIVATE-BODY-SECRET","hatchet_consumer_http_unauthorized"),
+                (403,b"PRIVATE-BODY-SECRET","hatchet_consumer_http_forbidden"),
+                (404,b"PRIVATE-BODY-SECRET","hatchet_consumer_http_not_found"),
+                (429,b"PRIVATE-BODY-SECRET","hatchet_consumer_http_rate_limited"),
+                (503,b"PRIVATE-BODY-SECRET","hatchet_consumer_http_unavailable"),
+                (200,b"x"*(1024*1024+1),"hatchet_consumer_response_too_large")):
+            with self.subTest(detail_status=status):
+                def rejected_detail(*args,**kwargs):
+                    if args[1].endswith("/worker"):
+                        return request(*args,**kwargs)
+                    return HTTPResponse(body=io.BytesIO(payload),status=status,
+                        headers={"Content-Type":"application/json"},preload_content=False)
+                probe=BrokerReadiness(self.config,lambda:self.now,lambda _:client)
+                with patch("urllib3.PoolManager.request",side_effect=rejected_detail) as get:
+                    projection=probe.projection(self.slot)
+                    self.assertFalse(projection["ready"])
+                    self.assertEqual(projection["reason_code"],reason)
+                    self.assertNotIn("PRIVATE-BODY-SECRET",json.dumps(projection))
+                    self.assertEqual(probe.projection(self.slot),projection)
+                    self.assertEqual(get.call_count,2)
 
     def test_returned_projection_mutation_cannot_change_cached_proof(self):
         value=self.readiness.projection(self.slot)

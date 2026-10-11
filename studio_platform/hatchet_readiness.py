@@ -1,7 +1,8 @@
 """Read-only broker-consumer proof, separate from native GPU readiness.
 
-Only the pinned SDK's public WorkersClient.list is used. A broker observation
+Only the pinned SDK's public WorkersClient.list/get are used. A broker observation
 does not claim a job, alter a lease, or prove an upstream inference stopped.
+It observes public eligibility, not a guarantee of future stream/job delivery.
 Imports/construction do not read credentials or contact the broker.
 """
 from __future__ import annotations
@@ -13,6 +14,7 @@ import re
 import threading
 import time
 from urllib.parse import urlsplit
+from uuid import UUID
 
 from .hatchet_dispatch import ROUTE, create_client, worker_labels
 from .inference.wangp_contract import EngineManifest
@@ -47,7 +49,7 @@ class _ObservationError(ValueError):
 
 
 def _workers_client(broker_config):
-    """Public list API with a bounded, read-only SDK transport extension.
+    """Public list/exact-detail APIs with a bounded read-only SDK transport.
 
     1.42.1 WorkersClient.list does not expose request timeout/redirect options.
     Its public ApiClient extension therefore supplies those explicitly, while
@@ -66,14 +68,18 @@ def _workers_client(broker_config):
     config = sdk.config.model_copy(deep=True)
     config.tenacity = TenacityConfig(_env_file=None, max_attempts=0)
     origin = urlsplit(config.server_url)
-    expected_path = "/api/v1/tenants/" + config.tenant_id + "/worker"
+    list_path = "/api/v1/tenants/" + config.tenant_id + "/worker"
 
     class ReadOnlyClient(ApiClient):
+        def __init__(self, configuration, expected_path):
+            super().__init__(configuration)
+            self.expected_path = expected_path
+
         def call_api(self, method, url, header_params=None, body=None,
                      post_params=None, _request_timeout=None):
             parts = urlsplit(url)
             if (method != "GET" or parts.scheme != origin.scheme or parts.netloc != origin.netloc
-                    or parts.path != expected_path or parts.fragment or body or post_params):
+                    or parts.path != self.expected_path or parts.fragment or body or post_params):
                 raise ValueError("hatchet_readiness_endpoint_forbidden")
             raw = self.rest_client.pool_manager.request("GET", url, headers=header_params,
                 timeout=urllib3.Timeout(total=3), retries=False, redirect=False, preload_content=False)
@@ -96,8 +102,22 @@ def _workers_client(broker_config):
                 raw.release_conn()
 
     class BoundedWorkersClient(WorkersClient):
+        def __init__(self, configuration, expected_path=list_path):
+            super().__init__(configuration)
+            self.expected_path = expected_path
+            self.api_config.retries = False
+
         def client(self):
-            return ReadOnlyClient(self.api_config)
+            return ReadOnlyClient(self.api_config, self.expected_path)
+
+        def get(self, worker_id):
+            identifier = _worker_uuid(worker_id)
+            if identifier is None:
+                raise ValueError("hatchet_readiness_worker_invalid")
+            # Bind this SDK get to one selected UUID. The transport cannot read
+            # another worker, a different origin, or any mutation endpoint.
+            detail = BoundedWorkersClient(self.client_config, "/api/v1/workers/" + identifier)
+            return WorkersClient.get(detail, identifier)
 
     result = BoundedWorkersClient(config)
     result.api_config.retries = False
@@ -162,6 +182,30 @@ def _heartbeat(value, now):
         return None
     stamp = value.timestamp()
     return stamp if math.isfinite(stamp) and 0 <= now-stamp <= HEARTBEAT_SECONDS else None
+
+
+def _worker_uuid(value):
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = UUID(value)
+    except (ValueError, AttributeError):
+        return None
+    return value if parsed.int != 0 and str(parsed) == value else None
+
+
+def _row_reason(row, name, expected, now):
+    if _field(row, "name") != name or _enum(_field(row, "status")) != "ACTIVE":
+        return "hatchet_consumer_unconfirmed"
+    if _enum(_field(row, "type")) != "SELFHOSTED":
+        return "hatchet_consumer_type_mismatch"
+    entries = _field(row, "labels")
+    actual = {_field(label, "key"): _field(label, "value") for label in entries} if isinstance(entries, list) else {}
+    if not isinstance(entries, list) or len(actual) != len(entries) or any(actual.get(k) != v for k,v in expected.items()):
+        return "hatchet_consumer_labels_mismatch"
+    if _heartbeat(_field(row, "last_heartbeat_at"), now) is None:
+        return "hatchet_consumer_heartbeat_stale"
+    return None
 
 
 class BrokerReadiness:
@@ -229,22 +273,35 @@ class BrokerReadiness:
                     result["reason_code"] = "hatchet_consumer_ambiguous"
                 elif len(active) == 1:
                     row = active[0]
-                    heartbeat = _heartbeat(_field(row, "last_heartbeat_at"), now)
-                    entries = _field(row, "labels")
-                    actual = {_field(label, "key"): _field(label, "value") for label in entries} if isinstance(entries, list) else {}
-                    workflows = _field(row, "registered_workflows")
-                    if _enum(_field(row, "type")) != "SELFHOSTED":
-                        result["reason_code"] = "hatchet_consumer_type_mismatch"
-                    elif not isinstance(entries, list) or len(actual) != len(entries) or any(actual.get(k) != v for k,v in expected.items()):
-                        result["reason_code"] = "hatchet_consumer_labels_mismatch"
-                    elif heartbeat is None:
-                        result["reason_code"] = "hatchet_consumer_heartbeat_stale"
-                    elif _field(row, "last_listener_established") is None or not _field(row, "dispatcher_id"):
-                        result["reason_code"] = "hatchet_consumer_listener_unconfirmed"
-                    elif not isinstance(workflows, list) or not any(_field(item, "name") == workflow for item in workflows):
-                        result["reason_code"] = "hatchet_consumer_workflow_unconfirmed"
+                    reason = _row_reason(row, name, expected, now)
+                    identifier = _worker_uuid(_field(_field(row, "metadata"), "id"))
+                    if reason is not None:
+                        result["reason_code"] = reason
+                    elif identifier is None:
+                        result["reason_code"] = "hatchet_consumer_identity_unconfirmed"
                     else:
-                        result.update(ready=True, heartbeat_at=heartbeat, reason_code="hatchet_consumer_ready")
+                        # Pinned 0.110.5 list omits registeredWorkflows; neither
+                        # REST transformer populates lastListenerEstablished.
+                        # Exact detail supplies the supported workflow proof.
+                        detail = self._client.get(identifier)
+                        observed = self.clock()
+                        if type(observed) not in (int, float) or not math.isfinite(observed) or observed < now:
+                            raise ValueError("invalid_observed_clock")
+                        now = observed
+                        result["observed_at"] = now
+                        reason = _row_reason(detail, name, expected, now)
+                        heartbeat = _heartbeat(_field(detail, "last_heartbeat_at"), now)
+                        workflows = _field(detail, "registered_workflows")
+                        if _worker_uuid(_field(_field(detail, "metadata"), "id")) != identifier:
+                            result["reason_code"] = "hatchet_consumer_identity_unconfirmed"
+                        elif reason is not None:
+                            result["reason_code"] = reason
+                        elif _worker_uuid(_field(detail, "dispatcher_id")) is None:
+                            result["reason_code"] = "hatchet_consumer_listener_unconfirmed"
+                        elif not isinstance(workflows, list) or not any(_field(item, "name") == workflow for item in workflows):
+                            result["reason_code"] = "hatchet_consumer_workflow_unconfirmed"
+                        else:
+                            result.update(ready=True, heartbeat_at=heartbeat, reason_code="hatchet_consumer_ready")
             except _ObservationError as error:
                 result.update(ready=False, heartbeat_at=None, reason_code=error.reason_code)
             except Exception:
