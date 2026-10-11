@@ -204,6 +204,18 @@ UID/GID and observed mode 0700, 0755 or 0775. This permits only those pinned
 existing parents; it does not relax unrelated paths or require chmod of originals.
 Stage the tool and authority in a new root-owned 0700 directory, with 0600 files.
 
+If the original immutable repository revision becomes unavailable, an explicit
+version 2 authority with purpose `resume-original-model-download-v2` may bind a
+content-preserving `download_alias`: exact repository, original and alternate
+immutable revisions, all selected original paths/sizes/SHA or Git-blob hashes,
+and the independently approved metadata-evidence SHA. Only the SDK revision
+locator changes; the original manifest, source and final full-byte verifier remain
+unchanged. There is no automatic fallback to a repository's current revision.
+`previous_intent_sha256` must pin the original journal's confirmed terminal
+download failure, the same slot/deadline and eight unchanged non-status input
+hashes. A freshly observed failed status may be rebound in one new intent; the
+prior journal and consumed intent remain retained and cannot be replayed.
+
 The authority expires within 300 seconds of issuance and within the original
 hard deadline. More than 900 seconds must remain for runtime verification/start;
 download and cache-lock waits are bounded to preserve that margin. Matching

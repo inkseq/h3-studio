@@ -198,10 +198,16 @@ def read_input(name, path, expected_parents=None):
 
 
 def validate(authority, config, paths, raw, *, now):
-    require(set(authority) == {"version", "purpose", "resume_id", "slot_key", "run_id", "instance_id",
+    keys = {"version", "purpose", "resume_id", "slot_key", "run_id", "instance_id",
             "hard_deadline", "issued_at", "expires_at", "input_sha256", "recovery_sha256", "parent_metadata"}
-            and authority["version"] == 1 and authority["purpose"] == "resume-original-model-download-v1",
+    version = authority.get("version")
+    require(type(version) is int and version in {1, 2}
+            and set(authority) == (keys if version == 1 else keys | {"previous_intent_sha256", "download_alias"})
+            and authority["purpose"] == "resume-original-model-download-v" + str(version),
             "authority_invalid")
+    if version == 2:
+        require(isinstance(authority["previous_intent_sha256"], str)
+                and re.fullmatch(r"[0-9a-f]{64}", authority["previous_intent_sha256"]), "authority_invalid")
     require(re.fullmatch(r"[0-9a-f]{32}", authority["resume_id"]) is not None
             and set(authority["input_sha256"]) == INPUTS, "authority_invalid")
     for value in (authority["hard_deadline"], authority["issued_at"], authority["expires_at"]):
@@ -243,8 +249,61 @@ def validate(authority, config, paths, raw, *, now):
     require(not any(path.exists() or path.is_symlink() for path in forbidden)
             and not list(base.glob("runtime-startup-*.json")), "runtime_already_started")
     source_matches(paths["package"], base / "platform", expected_parents=expected_parents)
+    if version == 2:
+        # A separately staged recovery executable has no checkout on sys.path.
+        # Resolve the pure manifest contract only from the original source whose
+        # archive and extracted bytes were verified above.
+        sys.path.insert(0, str(base / "platform"))
+        validate_alias(authority["download_alias"], json.loads(raw["manifest"]))
     process_idle(config["port"])
     return identity
+
+
+def validate_alias(alias, document):
+    """An explicit byte-preserving locator, never a different model manifest."""
+    from studio_platform.runtime_hosts.wangp_download import selected_files
+    from studio_platform.inference.wangp_contract import EngineManifest
+    require(type(alias) is dict and set(alias) == {"repository", "original_revision", "download_revision",
+            "files", "evidence_sha256"}, "download_alias_invalid")
+    require(all(isinstance(alias[key], str) and re.fullmatch(r"[0-9a-f]{40}", alias[key])
+                for key in ("original_revision", "download_revision"))
+            and alias["original_revision"] != alias["download_revision"]
+            and isinstance(alias["evidence_sha256"], str)
+            and re.fullmatch(r"[0-9a-f]{64}", alias["evidence_sha256"]), "download_alias_invalid")
+    manifest = EngineManifest.from_dict(document)
+    records = selected_files(document, manifest.digest)
+    require(all(row[1] == alias["repository"] and row[2] == alias["original_revision"] for row in records),
+            "download_alias_binding_changed")
+    original = [item for component in document["components"].values() for item in component["files"]]
+    require(type(alias["files"]) is list and len(alias["files"]) == len(original)
+            and all(type(item) is dict for item in alias["files"])
+            and sorted(alias["files"], key=lambda item: item.get("path", ""))
+                == sorted(original, key=lambda item: item["path"]), "download_alias_content_changed")
+    return alias
+
+
+def alias_arguments(arguments, alias):
+    require(arguments.get("repo_id") == alias["repository"]
+            and arguments.get("revision") == alias["original_revision"]
+            and arguments.get("filename") in {item["path"] for item in alias["files"]}
+            and arguments.get("token") is False and arguments.get("endpoint") == "https://huggingface.co",
+            "download_alias_binding_changed")
+    return {**arguments, "revision": alias["download_revision"]}
+
+
+def previous_failed_intent(raw, authority):
+    require(sha(raw) == authority.get("previous_intent_sha256"), "previous_intent_changed")
+    previous = json.loads(raw)
+    result = previous.get("result", {})
+    require(previous.get("status") == "observed_result" and type(result) is dict
+            and result.get("state") == "failed" and result.get("failure_phase") == "model_download"
+            and result.get("code") in {"model_download_failed", "model_download_timeout"}
+            and result.get("download_failure") == {"error_code": result.get("code"), "stop_status": "confirmed"}
+            and previous.get("slot_key") == authority["slot_key"]
+            and previous.get("hard_deadline") == authority["hard_deadline"]
+            and type(previous.get("input_sha256")) is dict
+            and all(previous["input_sha256"].get(name) == authority["input_sha256"].get(name)
+                    for name in INPUTS - {"status"}), "previous_intent_not_terminal")
 
 
 def original_tail(module, raw):
@@ -286,14 +345,21 @@ def classification(error):
 
 def download_child(argv):
     """Same pinned SDK/options; only a closed extra diagnosis in a new attempt."""
+    alias = None
+    if argv[:1] == ["--download-alias-file"]:
+        require(len(argv) >= 3, "download_alias_invalid")
+        alias = json.loads(read(Path(argv[1])))
+        argv = argv[2:]
     from studio_platform.runtime_hosts import wangp_download as old
     original = old.fetch_files
     lock = threading.Lock()
     def fetch(document, digest, root, progress, **kwargs):
+        if alias is not None:
+            validate_alias(alias, document)
         from huggingface_hub import hf_hub_download
         def downloader(**arguments):
             try:
-                return hf_hub_download(**arguments)
+                return hf_hub_download(**(alias_arguments(arguments, alias) if alias is not None else arguments))
             except Exception as error:
                 with lock:
                     path = Path(progress).parent / "sdk-failure.json"
@@ -320,6 +386,11 @@ def execute(config, paths, authority, attempt):
     manifest = EngineManifest.from_dict(json.loads(read_input("manifest", paths["manifest"], expected_parents)))
     require(manifest.digest == json.loads(read_input("identity", paths["identity"], expected_parents))["engine_manifest_digest"], "manifest_changed")
     runtime, python, environment = prepare(config, manifest, source, lambda *args, **kwargs: None)
+    alias_path = None
+    if authority["version"] == 2:
+        validate_alias(authority["download_alias"], manifest.document)
+        alias_path = Path(__file__).parent / ("download-alias-" + authority["resume_id"] + ".json")
+        save(alias_path, authority["download_alias"], exclusive=True)
     def download_once(status):
         lock = Path(config["model_root"]) / ".sixnine-profile-download.lock"
         require(not lock.is_symlink(), "cache_lock_invalid")
@@ -333,7 +404,9 @@ def execute(config, paths, authority, attempt):
             timeout = min(7200, authority["hard_deadline"] - time.time() - 900)
             require(timeout >= 1, "authority_expired")
             def popen(command, **kwargs):
-                return subprocess.Popen([command[0], str(Path(__file__).resolve()), "--download-child", *command[3:]], **kwargs)
+                alias_args = ["--download-alias-file", str(alias_path)] if alias_path is not None else []
+                return subprocess.Popen([command[0], str(Path(__file__).resolve()), "--download-child",
+                    *alias_args, *command[3:]], **kwargs)
             run_download(python, source, paths["manifest"], manifest.digest, config["model_root"],
                          attempt, environment, status, timeout=timeout, popen=popen)
         require(time.time() < authority["hard_deadline"] - 900, "authority_expired")
@@ -361,10 +434,16 @@ def resume(config_path, token_file, authority_path, *, effect=execute):
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         previous = list(base.glob("resume-original-download-*.json"))
         if previous:
+            require(len(previous) <= 2, "intent_requires_reconciliation")
+            prior_raw = [read(path, expected_parents=expected_parents) for path in previous]
+            if any(json.loads(value).get("authority_sha256") == sha(authority_raw) for value in prior_raw):
+                return {"state": "reconcile_required", "code": "download_resume_original_intent_exists"}
+            require(authority.get("version") == 2, "intent_changed")
             require(len(previous) == 1, "intent_requires_reconciliation")
-            journal = json.loads(read(previous[0], expected_parents=expected_parents))
-            require(journal.get("authority_sha256") == sha(authority_raw), "intent_changed")
-            return {"state": "reconcile_required", "code": "download_resume_original_intent_exists"}
+            require(previous[0].name != "resume-original-download-" + authority["resume_id"] + ".json", "intent_changed")
+            previous_failed_intent(prior_raw[0], authority)
+        else:
+            require(authority.get("version") != 2, "previous_intent_missing")
         raw = {name: read_input(name, path, expected_parents) for name, path in paths.items()}
         validate(authority, config, paths, raw, now=time.time())
         journal_path = base / ("resume-original-download-" + authority["resume_id"] + ".json")

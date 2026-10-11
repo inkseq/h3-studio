@@ -1,5 +1,6 @@
 """Offline continuation guards; no provider, SDK network, or native execution."""
 from contextlib import contextmanager
+import copy
 import errno
 import io
 import json
@@ -71,6 +72,31 @@ class Fixture:
         self.authority_path.write_text(json.dumps(self.authority))
         self.authority_path.chmod(0o600)
 
+    def bind_manifest(self):
+        from studio_platform.runtime_catalog import engine_manifest
+        manifest = engine_manifest("h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3", "ref")
+        self.raw["manifest"] = manifest.document_json.encode()
+        identity = json.loads(self.raw["identity"])
+        identity["engine_manifest_digest"] = manifest.digest
+        identity["sources"]["wangp-manifest.json"] = r.sha(self.raw["manifest"])
+        self.raw["identity"] = json.dumps(identity).encode()
+        for name in ("status", "failure"):
+            value = json.loads(self.raw[name]); value["manifest_digest"] = manifest.digest
+            self.raw[name] = json.dumps(value).encode()
+        for name in ("manifest", "identity", "status", "failure"):
+            self.paths[name].write_bytes(self.raw[name])
+            self.authority["input_sha256"][name] = r.sha(self.raw[name])
+        self.write_authority()
+        return manifest
+
+
+def alias_for(manifest):
+    return {"repository": "DeepBeepMeep/MiniMax-H3",
+        "original_revision": "adc81ccb71352192214d83d5fafb9487e860be39",
+        "download_revision": "8d9093438ffb3e33d6a058cc20fa3b7ca31f5752", "evidence_sha256": "e" * 64,
+        "files": [copy.deepcopy(item) for component in manifest.document["components"].values()
+                  for item in component["files"]]}
+
 
 @unittest.skipUnless(sys.platform == "linux" and os.getuid() == 0, "protected Linux/root isolated fixtures")
 class ContinuationTests(unittest.TestCase):
@@ -78,6 +104,8 @@ class ContinuationTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(dir="/root")
         self.addCleanup(self.temporary.cleanup)
         self.fixture = Fixture(Path(self.temporary.name))
+        original_path = list(sys.path)
+        self.addCleanup(lambda: sys.path.__setitem__(slice(None), original_path))
         self.clock = patch.object(r.time, "time", return_value=self.fixture.now)
         self.clock.start(); self.addCleanup(self.clock.stop)
         self.idle = patch.object(r, "process_idle")
@@ -115,6 +143,74 @@ class ContinuationTests(unittest.TestCase):
         self.fixture.write_authority()
         with self.assertRaisesRegex(ValueError, "intent_changed"):
             self.invoke(lambda *args: self.fail("must not replay"))
+
+    def failed_original_then_v2(self):
+        f = self.fixture
+        manifest = f.bind_manifest()
+        result = {"slot_key": "original-slot", "state": "failed", "failure_phase": "model_download",
+            "manifest_digest": manifest.digest,
+            "code": "model_download_failed", "download_failure": {
+                "error_code": "model_download_failed", "stop_status": "confirmed"}}
+        def failed(config, paths, authority, attempt):
+            paths["status"].write_text(json.dumps(result))
+            return result
+        self.invoke(failed)
+        prior_path = next(f.base.glob("resume-original-download-*.json"))
+        prior_raw = prior_path.read_bytes()
+        f.authority.update(version=2, purpose="resume-original-model-download-v2", resume_id="b" * 32,
+            previous_intent_sha256=r.sha(prior_raw), download_alias=alias_for(manifest))
+        f.authority["input_sha256"]["status"] = r.sha(f.paths["status"].read_bytes())
+        f.write_authority()
+        return prior_path, prior_raw
+
+    def test_v2_terminal_prior_allows_one_new_bound_intent_without_replaying(self):
+        f = self.fixture
+        prior_path, prior_raw = self.failed_original_then_v2()
+        called = []
+        def effect(config, paths, authority, attempt):
+            called.append(attempt)
+            self.assertEqual(prior_path.read_bytes(), prior_raw)
+            journals = list(f.base.glob("resume-original-download-*.json"))
+            self.assertEqual(len(journals), 2)
+            current = json.loads(next(path for path in journals if path != prior_path).read_bytes())
+            self.assertEqual(current["status"], "continuation_started")
+            self.assertEqual(authority["download_alias"]["download_revision"], "8d9093438ffb3e33d6a058cc20fa3b7ca31f5752")
+            return {"state": "ready"}
+        self.assertEqual(self.invoke(effect)["state"], "ready")
+        self.assertEqual(len(called), 1)
+        self.assertEqual(prior_path.read_bytes(), prior_raw)
+        self.assertEqual(self.invoke(lambda *args: self.fail("new intent must not replay"))["state"], "reconcile_required")
+
+    def test_v2_prior_hash_or_alias_mismatch_refuses_before_new_effect(self):
+        f = self.fixture
+        prior_path, prior_raw = self.failed_original_then_v2()
+        f.authority["previous_intent_sha256"] = "0" * 64; f.write_authority()
+        with self.assertRaisesRegex(ValueError, "previous_intent_changed"):
+            self.invoke(lambda *args: self.fail("effect"))
+        f.authority["previous_intent_sha256"] = r.sha(prior_raw)
+        f.authority["download_alias"]["files"][0]["size_bytes"] += 1; f.write_authority()
+        with self.assertRaisesRegex(ValueError, "download_alias_content_changed"):
+            self.invoke(lambda *args: self.fail("effect"))
+        self.assertEqual(prior_path.read_bytes(), prior_raw)
+        self.assertEqual(len(list(f.base.glob("resume-original-download-*.json"))), 1)
+
+    def test_v2_alias_import_follows_original_source_verification(self):
+        f = self.fixture
+        self.failed_original_then_v2()
+        validated = []
+        original = r.validate_alias
+        def alias(value, document):
+            self.assertEqual(sys.path[0], str(f.source))
+            validated.append(True)
+            return original(value, document)
+        with patch.object(r, "validate_alias", side_effect=alias) as check:
+            (f.source / "studio_platform/extra.py").write_text("raise AssertionError('unverified')")
+            with self.assertRaisesRegex(ValueError, "extracted_source_changed"):
+                self.invoke(lambda *args: self.fail("unverified source must not execute"))
+            check.assert_not_called()
+            (f.source / "studio_platform/extra.py").unlink()
+            self.assertEqual(self.invoke(lambda *args: {"state": "ready"})["state"], "ready")
+        self.assertEqual(validated, [True])
 
     def test_stop_identity_phase_and_hash_guards_precede_any_effect(self):
         f = self.fixture
@@ -225,6 +321,60 @@ class ContinuationTests(unittest.TestCase):
 
 
 class PureGuards(unittest.TestCase):
+    def test_alias_preserves_manifest_and_changes_only_exact_sdk_revision(self):
+        from studio_platform.runtime_catalog import engine_manifest
+        manifest = engine_manifest("h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3", "ref")
+        document = copy.deepcopy(manifest.document)
+        alias = alias_for(manifest)
+        r.validate_alias(alias, document)
+        arguments = {"repo_id": alias["repository"], "filename": alias["files"][0]["path"],
+            "revision": alias["original_revision"], "local_dir": "/original/models", "token": False,
+            "endpoint": "https://huggingface.co", "force_download": False, "etag_timeout": 30}
+        original = dict(arguments)
+        self.assertEqual(r.alias_arguments(arguments, alias), {**original, "revision": alias["download_revision"]})
+        self.assertEqual(arguments, original)
+        self.assertEqual(document, manifest.document)
+        for key, value in (("revision", "main"), ("repo_id", "other/repo"), ("filename", "other-file"),
+                           ("token", "implicit-identity"), ("endpoint", "https://other.invalid")):
+            with self.subTest(key=key), self.assertRaisesRegex(ValueError, "download_alias_binding_changed"):
+                r.alias_arguments({**arguments, key: value}, alias)
+
+    def test_alias_requires_complete_original_content_and_immutable_revision(self):
+        from studio_platform.runtime_catalog import engine_manifest
+        manifest = engine_manifest("h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3", "ref")
+        original = alias_for(manifest)
+        for mutation in ("missing", "size", "sha256", "git_blob", "revision", "repository"):
+            alias = copy.deepcopy(original)
+            if mutation == "missing": alias["files"].pop()
+            elif mutation == "size": alias["files"][0]["size_bytes"] += 1
+            elif mutation == "sha256": alias["files"][0]["sha256"] = "0" * 64
+            elif mutation == "git_blob": next(item for item in alias["files"] if "git_blob_sha1" in item)["git_blob_sha1"] = "0" * 40
+            elif mutation == "revision": alias["download_revision"] = "main"
+            else: alias["repository"] = "other/repo"
+            with self.subTest(mutation=mutation), self.assertRaises(ValueError):
+                r.validate_alias(alias, manifest.document)
+
+    def test_prior_requires_terminal_confirmed_download_and_original_binding(self):
+        inputs = {name: "a" * 64 for name in r.INPUTS}
+        original = {"status": "observed_result", "slot_key": "original", "hard_deadline": 5000.,
+            "input_sha256": inputs, "result": {"state": "failed", "failure_phase": "model_download",
+                "code": "model_download_failed", "download_failure": {
+                    "error_code": "model_download_failed", "stop_status": "confirmed"}}}
+        authority = {"slot_key": "original", "hard_deadline": 5000., "input_sha256": dict(inputs)}
+        raw = json.dumps(original).encode(); authority["previous_intent_sha256"] = r.sha(raw)
+        r.previous_failed_intent(raw, authority)
+        for mutation in ("pending", "unknown", "stop", "slot", "deadline", "input"):
+            prior = copy.deepcopy(original)
+            if mutation == "pending": prior["status"] = "continuation_started"
+            elif mutation == "unknown": prior["result"]["state"] = "unknown"
+            elif mutation == "stop": prior["result"]["download_failure"]["stop_status"] = "unconfirmed"
+            elif mutation == "slot": prior["slot_key"] = "other"
+            elif mutation == "deadline": prior["hard_deadline"] += 1
+            else: prior["input_sha256"]["manifest"] = "0" * 64
+            raw = json.dumps(prior).encode(); authority["previous_intent_sha256"] = r.sha(raw)
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(ValueError, "previous_intent_not_terminal"):
+                r.previous_failed_intent(raw, authority)
+
     def test_safe_classification_never_contains_signed_url_or_exception_text(self):
         failure_type = type("HTTPError", (Exception,), {})
         failure = failure_type("https://secret.invalid/?token=SECRET")
