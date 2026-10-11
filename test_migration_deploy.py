@@ -150,6 +150,61 @@ class MigrationDeployTests(unittest.TestCase):
         self.assertIn("app_database_url", {s["source"] for s in services["app"]["secrets"]})
         self.assertIn("google_titles", {s["source"] for s in services["app"]["secrets"]})
 
+    def test_rendered_controller_settings_reach_its_exact_cpu_slot_child(self):
+        from studio_platform.control import WorkerSpec
+        from studio_platform.dstack_controller import HatchetProcesses
+        from studio_platform.fleet import SlotConfig, read_config
+        from studio_platform.runtime_catalog import engine_manifest, PROFILE_IDS
+        from studio_platform.settings import Settings
+
+        flags = ("SIXNINE_GENERATION_ENABLED", "SIXNINE_EXECUTION_BACKEND")
+        for enabled, backend in ((None, None), ("0", "disabled"), ("1", "wangp-worker")):
+            with self.subTest(enabled=enabled), tempfile.TemporaryDirectory() as temporary:
+                environment = fixture_environment()
+                for name, value in (("SIXNINE_MIGRATION_GENERATION_ENABLED", enabled),
+                                    ("SIXNINE_MIGRATION_EXECUTION_BACKEND", backend)):
+                    environment.pop(name, None)
+                    if value is not None:
+                        environment[name] = value
+                rendered = {}
+                def render(command, **kwargs):
+                    result = subprocess.run(command, **kwargs)
+                    if result.returncode == 0:
+                        rendered.update(json.loads(result.stdout))
+                    return result
+                check(ROOT / "deploy/platform/compose.yaml", ROOT / "deploy/dstack/platform-overlay.yaml",
+                      environment=environment, runner=render)
+                selected = {name: {key: value for key, value in rendered["services"][name]["environment"].items()
+                    if key in flags} for name in ("app", "controller")}
+                with patch.dict(os.environ, selected["app"], clear=True):
+                    app_settings = Settings.from_environment()
+                self.assertEqual(app_settings.generation_enabled, enabled == "1")
+                self.assertEqual(app_settings.execution_backend, backend or "disabled")
+                self.assertEqual(selected["controller"], selected["app"])
+                manifest = engine_manifest(PROFILE_IDS[0], "fl")
+                spec = WorkerSpec("compose-child", "compose-pool", "vast", "original-instance", ("original-gpu",),
+                    (manifest.document["generation_recipe_id"],), manifest.document["model_id"],
+                    "compose-config", "wangp-worker", manifest.digest, dispatch_backend="hatchet-v1")
+                slot = SlotConfig(spec, True, "http://127.0.0.1:8199", ("http://127.0.0.1:8199",),
+                    runtime_config_file=str(Path(temporary)/"never-opened-native.json"))
+                children = []
+                def spawn(command, **kwargs):
+                    # Popen's inherited environment is the child's actual Settings
+                    # input. No real process, database, broker or GPU is started.
+                    self.assertNotIn("env", kwargs)
+                    child_settings = Settings.from_environment()
+                    self.assertEqual((child_settings.generation_enabled, child_settings.execution_backend),
+                        (app_settings.generation_enabled, app_settings.execution_backend))
+                    self.assertEqual(command[1:4], ["-m", "studio_platform.hatchet_dispatch", "worker"])
+                    fleet = read_config(command[command.index("--fleet-config")+1])
+                    self.assertEqual(fleet.slot(spec.worker_id).spec, spec)
+                    children.append(child_settings)
+                    return SimpleNamespace(poll=lambda:0, wait=lambda:0)
+                with patch.dict(os.environ, selected["controller"], clear=True), \
+                        HatchetProcesses(Path(temporary)/"supervisor", Path(temporary)/"broker.json", popen=spawn) as processes:
+                    processes.ensure("original-intent", slot)
+                self.assertEqual(len(children), 1)
+
     def test_loopback_split_or_public_management_ports_rejected(self):
         self.assert_rejected(lambda d: d["services"]["controller"].update(network_mode="bridge"), "migration_loopback_namespace_split")
         self.assert_rejected(lambda d: d["services"]["dstack"].update(ports=["3000:3000"]), "migration_private_port_published")
@@ -180,6 +235,10 @@ class MigrationDeployTests(unittest.TestCase):
                              "migration_cloud_telemetry_missing")
         self.assert_rejected(lambda d: d["services"]["dispatch"]["environment"].update(SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID="another-profile"),
                              "migration_default_profile_missing_or_split")
+        self.assert_rejected(lambda d: d["services"]["controller"]["environment"].pop("SIXNINE_GENERATION_ENABLED"),
+                             "migration_controller_execution_settings_split")
+        self.assert_rejected(lambda d: d["services"]["controller"]["environment"].update(SIXNINE_EXECUTION_BACKEND="wangp-worker"),
+                             "migration_controller_execution_settings_split")
 
     def test_checker_only_config_then_explicit_read_probe_no_secret_output(self):
         calls = []

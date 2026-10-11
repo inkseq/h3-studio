@@ -26,6 +26,24 @@ POLL_SECONDS = 15
 HEARTBEAT_SECONDS = BROKER_HEARTBEAT_SECONDS
 MAX_SLOTS = 128
 MAX_RESPONSE_BYTES = 1024 * 1024
+_HTTP_REASONS = {
+    401: "hatchet_consumer_http_unauthorized",
+    403: "hatchet_consumer_http_forbidden",
+    404: "hatchet_consumer_http_not_found",
+    429: "hatchet_consumer_http_rate_limited",
+}
+_SAFE_RESPONSE_REASONS = frozenset((*_HTTP_REASONS.values(),
+    "hatchet_consumer_http_unavailable", "hatchet_consumer_http_redirect_rejected",
+    "hatchet_consumer_http_rejected", "hatchet_consumer_response_too_large"))
+
+
+class _ObservationError(ValueError):
+    """Closed diagnostics only; never retain an HTTP body, URL or SDK error."""
+    def __init__(self, reason_code):
+        if reason_code not in _SAFE_RESPONSE_REASONS:
+            raise ValueError("invalid_hatchet_observation_code")
+        self.reason_code = reason_code
+        super().__init__(reason_code)
 
 
 def _workers_client(broker_config):
@@ -60,9 +78,16 @@ def _workers_client(broker_config):
             raw = self.rest_client.pool_manager.request("GET", url, headers=header_params,
                 timeout=urllib3.Timeout(total=3), retries=False, redirect=False, preload_content=False)
             try:
+                if raw.status != 200:
+                    reason = _HTTP_REASONS.get(raw.status, "hatchet_consumer_http_rejected")
+                    if type(raw.status) is int and 500 <= raw.status <= 599:
+                        reason = "hatchet_consumer_http_unavailable"
+                    elif type(raw.status) is int and 300 <= raw.status <= 399:
+                        reason = "hatchet_consumer_http_redirect_rejected"
+                    raise _ObservationError(reason)
                 data = raw.read(MAX_RESPONSE_BYTES + 1)
-                if len(data) > MAX_RESPONSE_BYTES or raw.status != 200:
-                    raise ValueError("hatchet_readiness_response_unconfirmed")
+                if len(data) > MAX_RESPONSE_BYTES:
+                    raise _ObservationError("hatchet_consumer_response_too_large")
                 response = RESTResponse(raw)
                 response.data = data
                 return response
@@ -115,6 +140,21 @@ def _field(value, key, default=None):
 
 def _enum(value):
     return getattr(value, "value", value)
+
+
+def _complete_page(rows, pagination):
+    if pagination is None:
+        return True
+    current, pages, next_page = (_field(pagination, key)
+        for key in ("current_page", "num_pages", "next_page"))
+    if type(current) is not int or current != 1 or type(pages) is not int:
+        return False
+    if next_page is not None and type(next_page) is not int:
+        return False
+    # Pinned 0.110.5 uses next_page=current_page on its final page, and
+    # reports (1, 0, 2) for an empty list. Neither is an unobserved next page.
+    return (pages == 1 and next_page in (None, 1)
+        or pages == 0 and not rows and next_page in (None, 2))
 
 
 def _heartbeat(value, now):
@@ -181,8 +221,7 @@ class BrokerReadiness:
                 rows = _field(response, "rows")
                 pagination = _field(response, "pagination")
                 if (not isinstance(rows, list) or len(rows) > 1024
-                        or pagination is not None and (_field(pagination, "next_page") is not None
-                            or (_field(pagination, "num_pages", 1) or 1) > 1)):
+                        or not _complete_page(rows, pagination)):
                     raise ValueError("ambiguous_list")
                 active = [row for row in rows if _field(row, "name") == name
                     and _enum(_field(row, "status")) == "ACTIVE"]
@@ -206,6 +245,8 @@ class BrokerReadiness:
                         result["reason_code"] = "hatchet_consumer_workflow_unconfirmed"
                     else:
                         result.update(ready=True, heartbeat_at=heartbeat, reason_code="hatchet_consumer_ready")
+            except _ObservationError as error:
+                result.update(ready=False, heartbeat_at=None, reason_code=error.reason_code)
             except Exception:
                 result.update(ready=False, heartbeat_at=None, reason_code="hatchet_consumer_observation_failed")
             self._cache[key] = dict(result)

@@ -41,6 +41,19 @@ terminal. The 2160-hour token needs a planned rotation before expiration.
 Provision ownership for the dedicated CPU dispatcher UID before its token mount;
 keep directory 0700 and token 0600 rather than relaxing group/world access.
 
+The pinned engine binds API tokens to its configured `SERVER_URL` claim. A token
+created by the standalone loopback deployment (`http://127.0.0.1:18888`) cannot
+be reused unchanged when the migration engine uses `http://127.0.0.1:8888`:
+overriding the SDK's endpoint does not change the signed token, and the engine
+can return HTTP 403 even when the tenant and expiration are correct. Before
+switching deployments, check the URL binding in memory against the actual
+engine configuration. An authorized rotation creates a new protected token with
+the same intended tenant/permissions and bounded expiry; preserve the old file
+and engine volumes until readback succeeds. Do not disable authentication,
+broaden privileges or print token claims/contents to diagnose the mismatch.
+Readiness now distinguishes safe HTTP rejection categories from an oversized
+response; all of these remain negative consumer proof.
+
 The default tenant UUID is `707d0855-80ab-4e1f-a156-f1c4546cbf52`. An operator can
 create a worker token with the bundled `/hatchet-admin token create --config
 /config --tenant-id ...` command, capturing stdout directly into a protected

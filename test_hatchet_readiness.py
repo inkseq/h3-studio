@@ -140,7 +140,11 @@ class BrokerReadinessTests(unittest.TestCase):
 
     def test_partial_list_and_missing_rows_are_ambiguous(self):
         for response in (SimpleNamespace(rows=None,pagination=None),
-                SimpleNamespace(rows=[self.row],pagination=SimpleNamespace(next_page=2,num_pages=2))):
+                SimpleNamespace(rows=[self.row],pagination=SimpleNamespace(current_page=1,next_page=2,num_pages=2)),
+                SimpleNamespace(rows=[self.row],pagination=SimpleNamespace(current_page=2,next_page=2,num_pages=2)),
+                SimpleNamespace(rows=[self.row],pagination=SimpleNamespace(current_page=1,next_page=2,num_pages=1)),
+                SimpleNamespace(rows=[self.row],pagination=SimpleNamespace(current_page=1,next_page=2,num_pages=0)),
+                SimpleNamespace(rows=[self.row],pagination=SimpleNamespace(current_page=1,next_page=None,num_pages=None))):
             probe=BrokerReadiness(self.config,lambda:self.now,self.factory)
             self.client.list.return_value=response
             self.assertFalse(probe.probe(self.slot))
@@ -187,7 +191,8 @@ class BrokerReadinessTests(unittest.TestCase):
         captured=[]
         def request(*args,**kwargs):
             captured.append((args,kwargs))
-            return HTTPResponse(body=io.BytesIO(json.dumps({"rows":[raw]}).encode()),status=200,
+            return HTTPResponse(body=io.BytesIO(json.dumps({"rows":[raw], "pagination":{
+                "current_page":1,"num_pages":1,"next_page":1}}).encode()),status=200,
                 headers={"Content-Type":"application/json"},preload_content=False)
         with patch("urllib3.PoolManager.request",side_effect=request):
             response=client.list()
@@ -196,16 +201,45 @@ class BrokerReadinessTests(unittest.TestCase):
         self.assertFalse(captured[0][1]["redirect"])
         self.assertFalse(captured[0][1]["retries"])
         self.assertEqual(captured[0][1]["timeout"].total,3)
-        self.assertTrue(captured[0][0][1].endswith("/worker"))
-        for status,payload in ((307,b"private redirect"),(503,b"private backend failure"),
-                (200,b"x"*(1024*1024+1))):
+        self.assertEqual(captured[0][0][:2],("GET",self.config.server_url+"/api/v1/tenants/"+tenant+"/worker"))
+        with patch("urllib3.PoolManager.request",side_effect=request):
+            probe=BrokerReadiness(self.config,lambda:self.now,lambda _:client)
+            self.assertTrue(probe.probe(self.slot))
+        for rows, pages, reason in (
+                ([], {"current_page":1,"num_pages":0,"next_page":2}, "hatchet_consumer_unconfirmed"),
+                ([raw], {"current_page":1,"num_pages":2,"next_page":2}, "hatchet_consumer_observation_failed")):
+            with self.subTest(pages=pages):
+                def page(*args,**kwargs):
+                    return HTTPResponse(body=io.BytesIO(json.dumps({"rows":rows,"pagination":pages}).encode()),
+                        status=200, headers={"Content-Type":"application/json"},preload_content=False)
+                probe=BrokerReadiness(self.config,lambda:self.now,lambda _:client)
+                with patch("urllib3.PoolManager.request",side_effect=page) as get:
+                    self.assertEqual(probe.projection(self.slot)["reason_code"],reason)
+                    self.assertEqual(get.call_count,1)
+        for status,payload,reason in (
+                (307,b"PRIVATE-BODY-SECRET","hatchet_consumer_http_redirect_rejected"),
+                (401,b"PRIVATE-BODY-SECRET","hatchet_consumer_http_unauthorized"),
+                (403,b"PRIVATE-BODY-SECRET","hatchet_consumer_http_forbidden"),
+                (404,b"PRIVATE-BODY-SECRET","hatchet_consumer_http_not_found"),
+                (429,b"PRIVATE-BODY-SECRET","hatchet_consumer_http_rate_limited"),
+                (503,b"PRIVATE-BODY-SECRET","hatchet_consumer_http_unavailable"),
+                (400,b"PRIVATE-BODY-SECRET","hatchet_consumer_http_rejected"),
+                (200,b"x"*(1024*1024+1),"hatchet_consumer_response_too_large"),
+                (200,b"PRIVATE-BODY-SECRET","hatchet_consumer_observation_failed")):
             with self.subTest(status=status):
                 def rejected(*args,**kwargs):
                     return HTTPResponse(body=io.BytesIO(payload),status=status,
-                        headers={"Location":"https://private-redirect.invalid"},preload_content=False)
+                        headers={"Location":"https://private-redirect.invalid", "Content-Type":"application/json"},
+                        preload_content=False)
+                probe=BrokerReadiness(self.config,lambda:self.now,lambda _:client)
                 with patch("urllib3.PoolManager.request",side_effect=rejected) as get:
-                    with self.assertRaisesRegex(ValueError,"hatchet_readiness_response_unconfirmed"):
-                        client.list()
+                    projection=probe.projection(self.slot)
+                    self.assertFalse(projection["ready"])
+                    self.assertEqual(projection["reason_code"],reason)
+                    self.assertIsNone(projection["heartbeat_at"])
+                    self.assertNotIn("PRIVATE-BODY-SECRET",json.dumps(projection))
+                    self.assertNotIn("private-redirect",json.dumps(projection))
+                    self.assertEqual(probe.projection(self.slot),projection)
                     self.assertEqual(get.call_count,1)
 
     def test_returned_projection_mutation_cannot_change_cached_proof(self):

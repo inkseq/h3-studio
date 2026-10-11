@@ -126,6 +126,9 @@ def validate(document, *, host_memory_mib=3840):
     app_env = services["app"]["environment"]
     require((app_env.get("SIXNINE_GENERATION_ENABLED"), app_env.get("SIXNINE_EXECUTION_BACKEND"))
         in {("0", "disabled"), ("1", "wangp-worker")}, "migration_admission_switch_invalid")
+    require(all(controller["environment"].get(key) == app_env.get(key)
+        for key in ("SIXNINE_GENERATION_ENABLED", "SIXNINE_EXECUTION_BACKEND")),
+        "migration_controller_execution_settings_split")
     total = sum(memory_mib(service.get("mem_limit")) for service in services.values())
     require(type(host_memory_mib) is int and host_memory_mib >= 1024 and total <= host_memory_mib-512,
             "migration_host_memory_overcommitted")
