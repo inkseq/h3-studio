@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from fractions import Fraction
 import hashlib
 import json
+import logging
 import math
 import os
 from pathlib import Path
@@ -241,6 +242,19 @@ class WorkerRunner:
         self._observe_interval("end_to_end", result, lease, job.get("created_at"))
         return self._summary(result)
 
+    def _cleanup_collection(self, writer, job, lease, tag):
+        try:
+            writer.cleanup_settled(job, lease.attempt_id, tag)
+        except Exception:
+            # Acceptance already committed. Retained scratch is a cleanup
+            # obligation, never a reason to resubmit or fail the original job.
+            logging.getLogger(__name__).warning("r2_artifact_scratch_cleanup_pending")
+
+    def _complete_collection(self, writer, job, lease, tag, specs, cost, receipt):
+        result = self._commit_result(job, lease, specs, cost, writer.settlement(receipt))
+        self._cleanup_collection(writer, job, lease, tag)
+        return result
+
     def drain(self):
         self._drain.set()
 
@@ -447,10 +461,16 @@ class WorkerRunner:
         from .artifact_writer import ArtifactWriter
         writer = ArtifactWriter(self.repo.engine, self.store, self.work_dir, tenant=job["tenant_id"])
         receipt = writer.get(job, lease.attempt_id, tag)
+        if receipt is not None and receipt["phase"] == "settled":
+            current = self.repo.get_job(self._scope(job), job["id"])
+            if current["status"] != "succeeded":
+                raise BackendError("artifact_settlement_job_mismatch")
+            self._cleanup_collection(writer, current, lease, tag)
+            return self._summary(current)
         if receipt is not None and receipt["phase"] != "staging":
             with _lease_keepalive(heartbeat), self._stage("upload", job, lease):
                 specs = writer.write(receipt, heartbeat)
-            return self._commit_result(job, lease, specs, self._cost(job, task_id), writer.settlement(receipt))
+            return self._complete_collection(writer, job, lease, tag, specs, self._cost(job, task_id), receipt)
         width, height, duration, audio = _shape(job)
         delivery = delivery_spec(job)
         if delivery is not None:
@@ -520,10 +540,10 @@ class WorkerRunner:
                 files.append(("audio", output, "audio/flac", {"duration_s": actual_audio_duration, "has_audio": True,
                     **({"delivery_spec": delivery} if delivery is not None else {})}))
             with _lease_keepalive(heartbeat):
-                receipt = writer.prepare(job, lease.attempt_id, tag, files)
+                receipt = writer.prepare(job, lease.attempt_id, tag, files, raw_paths=paths.values())
         with _lease_keepalive(heartbeat), self._stage("upload", job, lease):
             specs = writer.write(receipt, heartbeat)
-        return self._commit_result(job, lease, specs, self._cost(job, task_id), writer.settlement(receipt))
+        return self._complete_collection(writer, job, lease, tag, specs, self._cost(job, task_id), receipt)
 
     def run_forever(self, worker_id, pool, *, poll_interval_s=1):
         """Explicit CLI lifecycle; SIGTERM drains without globally interrupting Comfy."""

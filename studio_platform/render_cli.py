@@ -14,7 +14,7 @@ from .render_plans import CONFIGURATIONS, MODEL, POOL, RECIPE
 from .repository import Repository
 from .settings import Settings
 from .storage import LocalObjectStore, S3ObjectStore
-from .storage_config import R2_CREDENTIAL_FIELDS, S3StorageConfig, load_storage_credentials
+from .storage_config import S3StorageConfig, load_configured_storage_credentials
 from .worker import WorkerRunner
 
 
@@ -56,7 +56,7 @@ def main(argv=None):
         elif settings.storage_provider == "r2":
             cfg = S3StorageConfig("r2", settings.storage_endpoint, settings.storage_region,
                 settings.storage_bucket, "cloudflare-r2", settings.storage_profile, enabled=True)
-            credentials = load_storage_credentials(cfg, fields=R2_CREDENTIAL_FIELDS,
+            credentials = load_configured_storage_credentials(cfg, credentials_file=settings.storage_credential_file,
                 registry_root=os.environ.get("AI_REGISTRY_ROOT"))
             store = S3ObjectStore(cfg, credentials)
         else:

@@ -14,6 +14,11 @@ x-business-environment: &business-environment
   SIXNINE_OPERATOR_CAPACITY_OWNERS: ${SIXNINE_OPERATOR_CAPACITY_OWNERS:?Existing authorized operator owners required}
   SIXNINE_OPERATOR_ADMIN_OWNERS: ${SIXNINE_OPERATOR_ADMIN_OWNERS:-}
   SIXNINE_TELEMETRY_CONFIG_FILE: /run/secrets/grafana_cloud
+  SIXNINE_STORAGE_PROVIDER: ${SIXNINE_STORAGE_PROVIDER:-local}
+  SIXNINE_STORAGE_ENDPOINT: ${SIXNINE_STORAGE_ENDPOINT:-}
+  SIXNINE_STORAGE_REGION: ${SIXNINE_STORAGE_REGION:-}
+  SIXNINE_STORAGE_BUCKET: ${SIXNINE_STORAGE_BUCKET:-}
+  SIXNINE_STORAGE_PROFILE: ${SIXNINE_STORAGE_PROFILE:-}
 
 x-cpu-service: &cpu-service
   image: ${SIXNINE_DISPATCH_IMAGE:?Exact tested CPU dispatch image digest required}
@@ -44,7 +49,8 @@ services:
       SIXNINE_EXECUTION_BACKEND: ${SIXNINE_MIGRATION_EXECUTION_BACKEND:-disabled}
       # Optional, separately scoped read credential. Empty disables queries.
       SIXNINE_STAGE_QUERY_CONFIG_FILE: ${SIXNINE_STAGE_QUERY_CONFIG_FILE:+/run/secrets/stage_query}
-    secrets: [execution_profiles, grafana_cloud, stage_query, dstack_operator_config, dstack_api_token, dstack_ssh_public_key]
+      SIXNINE_STORAGE_CREDENTIAL_FILE: ${SIXNINE_STORAGE_CREDENTIAL_FILE:+/run/secrets/r2_storage}
+    secrets: [execution_profiles, grafana_cloud, stage_query, r2_storage, dstack_operator_config, dstack_api_token, dstack_ssh_public_key]
     healthcheck:
       test: [CMD, python, -c, "import json,urllib.request; h=json.load(urllib.request.urlopen('http://127.0.0.1:8845/healthz',timeout=5)); assert h['auth_ready'] and not h['render_enabled'] and not h['cloud_creation_enabled']"]
 
@@ -241,7 +247,8 @@ services:
       SIXNINE_EXECUTION_BACKEND: ${SIXNINE_MIGRATION_EXECUTION_BACKEND:-disabled}
       DSTACK_OPERATOR_CONFIG: /run/secrets/dstack_operator_config
       DSTACK_RUNTIME_CONFIG: /run/secrets/dstack_runtime_config
-    secrets: [app_database_url, execution_profiles, grafana_cloud, hatchet_broker, hatchet_api_token, dstack_operator_config, dstack_runtime_config, dstack_api_token, dstack_ssh_public_key, gpu_ssh_key]
+      SIXNINE_STORAGE_CREDENTIAL_FILE: ${SIXNINE_STORAGE_CREDENTIAL_FILE:+/run/secrets/r2_storage}
+    secrets: [app_database_url, execution_profiles, grafana_cloud, r2_storage, hatchet_broker, hatchet_api_token, dstack_operator_config, dstack_runtime_config, dstack_api_token, dstack_ssh_public_key, gpu_ssh_key]
     volumes:
       - type: bind
         source: /srv/sixnine/platform-data
@@ -271,6 +278,11 @@ secrets:
     # Preserve compatibility when read queries are disabled: the existing file
     # is mounted but never loaded by the disabled stage reader.
     file: ${SIXNINE_STAGE_QUERY_CONFIG_FILE:-${SIXNINE_GRAFANA_CONFIG_FILE}}
+  r2_storage:
+    # Compose mounts are static. Local mode reuses its already-mounted file as
+    # an unused alias (credential-file env stays empty); no placeholder/key env.
+    # R2 opt-in requires its exact separately hydrated file before activation.
+    file: ${SIXNINE_STORAGE_CREDENTIAL_FILE:-${SIXNINE_GRAFANA_CONFIG_FILE}}
   dstack_operator_config:
     file: ${SIXNINE_DSTACK_OPERATOR_CONFIG_FILE:?Protected dstack operator config required}
   dstack_runtime_config:

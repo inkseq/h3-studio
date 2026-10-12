@@ -36,8 +36,10 @@ PATH_FIELDS = frozenset({"SIXNINE_EXECUTION_PROFILES_SECRET_FILE", "SIXNINE_GRAF
 OTHER_FIELDS = frozenset({"SIXNINE_OPERATOR_CAPACITY_OWNERS", "SIXNINE_HATCHET_POSTGRES_VOLUME",
     "SIXNINE_HATCHET_CONFIG_VOLUME", "SIXNINE_MIGRATION_GENERATION_ENABLED",
     "SIXNINE_MIGRATION_EXECUTION_BACKEND", "SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID"})
-OPTIONAL_PATH_FIELDS = frozenset({"SIXNINE_STAGE_QUERY_CONFIG_FILE"})
-OPTIONAL_FIELDS = frozenset({"SIXNINE_OPERATOR_ADMIN_OWNERS"}) | OPTIONAL_PATH_FIELDS
+OPTIONAL_PATH_FIELDS = frozenset({"SIXNINE_STAGE_QUERY_CONFIG_FILE", "SIXNINE_STORAGE_CREDENTIAL_FILE"})
+STORAGE_FIELDS = frozenset({"SIXNINE_STORAGE_PROVIDER", "SIXNINE_STORAGE_ENDPOINT", "SIXNINE_STORAGE_REGION",
+    "SIXNINE_STORAGE_BUCKET", "SIXNINE_STORAGE_PROFILE", "SIXNINE_STORAGE_CREDENTIAL_FILE"})
+OPTIONAL_FIELDS = frozenset({"SIXNINE_OPERATOR_ADMIN_OWNERS"}) | OPTIONAL_PATH_FIELDS | STORAGE_FIELDS
 LEGACY_MARKERS = ("operator-capacity/active.json", "gpu-acceptance/active.json", "gpu-scaler/active.json")
 
 
@@ -275,6 +277,7 @@ def settings(root):
         elif key.endswith("_VOLUME"):
             release.require(re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", text), "migration_volume_reference_invalid")
     env = value["environment"]
+    storage_settings(env)
     release.require((env["SIXNINE_MIGRATION_GENERATION_ENABLED"], env["SIXNINE_MIGRATION_EXECUTION_BACKEND"])
         in {("0", "disabled"), ("1", "wangp-worker")}, "migration_admission_reference_invalid")
     release.require(re.fullmatch(r"[A-Za-z0-9_.-]+(?:,[A-Za-z0-9_.-]+)*", env["SIXNINE_OPERATOR_CAPACITY_OWNERS"]),
@@ -286,6 +289,24 @@ def settings(root):
     release.require(re.fullmatch(r"[A-Za-z0-9_.-]{1,200}", env["SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID"]),
                     "migration_default_profile_invalid")
     return value, release.checksum(directory / "paths.json")
+
+
+def storage_settings(environment):
+    """Closed nonsecret opt-in; existing local configurations need no changes."""
+    provider = environment.get("SIXNINE_STORAGE_PROVIDER", "local") or "local"
+    if provider == "local":
+        release.require(not any(environment.get(key) for key in STORAGE_FIELDS - {"SIXNINE_STORAGE_PROVIDER"}),
+            "migration_storage_local_configuration_invalid")
+        return
+    release.require(provider == "r2" and STORAGE_FIELDS <= set(environment)
+        and all(environment.get(key) for key in STORAGE_FIELDS)
+        and environment["SIXNINE_STORAGE_PROFILE"] == "cloudflare-r2--rig-root"
+        and environment["SIXNINE_STORAGE_REGION"] == "auto"
+        and re.fullmatch(r"https://[0-9a-f]{32}(?:\.(?:eu|us|fedramp))?\.r2\.cloudflarestorage\.com",
+            environment["SIXNINE_STORAGE_ENDPOINT"])
+        and re.fullmatch(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]", environment["SIXNINE_STORAGE_BUCKET"])
+        and environment["SIXNINE_STORAGE_CREDENTIAL_FILE"] == "/run/sixnine-secrets/r2_storage",
+        "migration_storage_r2_configuration_invalid")
 
 
 def default_profile(directory, environment):

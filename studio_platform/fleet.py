@@ -344,10 +344,10 @@ def create_store(settings):
         return LocalObjectStore(settings.data_dir / "objects")
     if settings.storage_provider != "r2":
         raise ValueError("fleet_storage_requires_reviewed_runtime_adapter")
-    from .storage_config import S3StorageConfig, R2_CREDENTIAL_FIELDS, load_storage_credentials
+    from .storage_config import S3StorageConfig, load_configured_storage_credentials
     config = S3StorageConfig("r2", settings.storage_endpoint, settings.storage_region,
         settings.storage_bucket, "cloudflare-r2", settings.storage_profile, enabled=True)
-    credentials = load_storage_credentials(config, fields=R2_CREDENTIAL_FIELDS,
+    credentials = load_configured_storage_credentials(config, credentials_file=settings.storage_credential_file,
         registry_root=os.environ.get("AI_REGISTRY_ROOT"))
     return S3ObjectStore(config, credentials)
 

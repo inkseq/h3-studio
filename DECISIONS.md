@@ -95,10 +95,11 @@ Keep IDs stable. A material reversal receives a new decision ID and a `supersede
 
 ## DEC-009 — Protect existing storage first; evaluate migration with recovery proof
 
-- **Status / scope:** Accepted near-term boundary; final object-storage provider remains open.
+- **Status / scope:** Updated by explicit user direction on 2026-10-12: migrate production media to a dedicated private Cloudflare R2 bucket after provider and end-to-end verification; retain all existing local copies until the user confirms removal.
 - **Decision:** Initially retain the existing EC2 CPU hosting, PostgreSQL and protected local media storage boundary. Preserve independent backups, retrievable assets and rollback before migrating. Evaluate S3 with verified backup/restore; R2 and Hippius are **Proposed conditional alternatives**, requiring their own storage-semantics evidence. A provider change is not a prerequisite for the first generation proof; GPU scratch cannot be the only deliverable copy.
+- **R2 cutover:** Use the existing R2 adapter and explicit `cloudflare-r2--rig-root` identity, protected Linux credential mounts and unchanged immutable object keys. Copy and fully hash-check existing objects before coordinating API and execution writers; do not rewrite historical database rows, rotate unrelated secrets, or silently rebind unfinished receipts. New R2 scratch may be removed only after remote integrity and committed completion. Copy evidence alone does not prove public-path acceptance. Keep current/previous releases and old local copies; old local-only binaries do not guarantee access to newer R2-only objects during rollback. The existing local-media backup does not cover newer R2-only objects; track its compatibility explicitly before local originals are removed.
 - **Why:** The plan prioritizes preservation/recovery of existing assets and makes storage migration a separately tested change.
-- **Alternatives:** S3 evaluation and conditional R2/Hippius evaluation are documented; no final cost/region/provider winner or migration authorization is established.
+- **Alternatives:** S3 and Hippius remain alternatives. R2 is the authorized production media target for this batch; database storage and host sizing stay unchanged.
 - **Revisit when:** Backup/restore evidence, storage semantics and measured scale/cost requirements support a reviewed provider decision.
 - **Evidence / current contract:** [Pinned hosting/storage direction][P-storage], [pinned F sequencing][P-pool]; [F #6](https://github.com/apedintensor/h3-studio/issues/6), [current plan](PROJECT-PLAN.md#7-engine-and-deployment-decisions).
 

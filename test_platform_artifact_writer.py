@@ -2,6 +2,7 @@
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import socket
 import uuid
@@ -19,6 +20,133 @@ from studio_platform.storage_multipart import MultipartConflict, MultipartOutcom
 from test_platform_repository import LedgerCase
 from test_platform_storage import config
 from test_platform_storage_multipart import FakeMultipartS3, ProcessStopped
+
+
+class R2ArtifactScratchTests(LedgerCase):
+    def setUp(self):
+        super().setUp()
+        patch = mock.patch.object(socket.socket, "connect", side_effect=AssertionError("No network allowed"))
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.work = Path(self.temp.name) / "work"
+        selected = config()
+        self.fake = FakeMultipartS3(selected)
+        self.store = S3ObjectStore(selected, client=self.fake)
+        self.writer = ArtifactWriter(self.repo.engine, self.store, self.work, tenant=self.scope.tenant_id)
+
+    def prepared(self, *, audio=False):
+        self.job(cost=0)
+        queue = TaskQueue(self.repo)
+        lease = queue.claim("worker", "test-pool").lease
+        queue.begin_submission(lease)
+        queue.record_submitted(lease, "task")
+        job = queue.begin_collection(lease)
+        tag = "attempt-" + uuid.uuid4().hex
+        directory = self.work / tag
+        directory.mkdir(parents=True)
+        files, raw_paths = [], []
+        for kind, suffix in (("video", "mp4"), ("audio", "flac")) if audio else (("video", "mp4"),):
+            path = directory / ("verified." + suffix)
+            path.write_bytes(("verified " + kind).encode())
+            raw = directory / ("native-" + uuid.uuid4().hex + "." + suffix)
+            raw.write_bytes(("native " + kind).encode())
+            files.append((kind, path, "video/mp4" if kind == "video" else "audio/flac", {}))
+            raw_paths.append(raw)
+        external = self.work / "independent-cache.mp4"
+        external.write_bytes(b"keep external cache")
+        self.writer.begin_staging(job, lease.attempt_id, tag, kinds=("video", "audio") if audio else ("video",))
+        record = self.writer.prepare(job, lease.attempt_id, tag, files, raw_paths=[*raw_paths, external])
+        specs = self.writer.write(record)
+        return queue, job, lease, tag, record, specs
+
+    def settle(self, *, audio=False):
+        values = self.prepared(audio=audio)
+        queue, job, lease, tag, record, specs = values
+        queue.complete(lease, specs, actual_cost_microusd=0, settlement=self.writer.settlement(record))
+        return values
+
+    def test_video_audio_and_wangp_raw_paths_are_accounted_then_cleaned_after_commit(self):
+        queue, job, lease, tag, record, specs = self.settle(audio=True)
+        remote_bytes = sum(spec["size_bytes"] for spec in specs)
+        self.assertEqual(self.writer.quota.usage(self.scope.owner_id)["accounted_bytes"],
+                         remote_bytes + record["scratch_cleanup"]["bytes"])
+        self.writer.cleanup_settled(job, lease.attempt_id, tag)
+        self.writer.cleanup_settled(job, lease.attempt_id, tag)
+        self.assertFalse((self.work / tag).exists())
+        self.assertEqual(self.writer.quota.usage(self.scope.owner_id)["accounted_bytes"], remote_bytes)
+        self.assertEqual((self.work / "independent-cache.mp4").read_bytes(), b"keep external cache")
+        self.assertEqual(len(self.fake.objects), 2)
+        current = self.writer.get(job, lease.attempt_id, tag)
+        self.assertEqual((current["phase"], current["scratch_cleanup"]["phase"]), ("settled", "complete"))
+        with mock.patch.object(self.store, "put", side_effect=AssertionError("Never republish")):
+            self.assertEqual(self.writer.write(current), specs)
+
+    def test_failed_result_transaction_keeps_all_scratch_and_reservation(self):
+        queue, job, lease, tag, record, specs = self.prepared()
+        before = self.writer.quota.usage(self.scope.owner_id)["accounted_bytes"]
+        settlement = self.writer.settlement(record)
+        def rollback(conn, values):
+            settlement(conn, values)
+            raise RuntimeError("rollback fixture")
+        with self.assertRaises(RuntimeError):
+            queue.complete(lease, specs, actual_cost_microusd=0, settlement=rollback)
+        self.writer.cleanup_settled(job, lease.attempt_id, tag)
+        self.assertTrue((self.work / tag / "verified.mp4").exists())
+        self.assertEqual(self.writer.quota.usage(self.scope.owner_id)["accounted_bytes"], before)
+        self.assertEqual(self.writer.get(job, lease.attempt_id, tag)["phase"], "reserved")
+
+    def test_crash_after_deletion_replays_only_quota_once_and_worker_returns_original_success(self):
+        queue, job, lease, tag, record, specs = self.settle()
+        before = self.writer.quota.usage(self.scope.owner_id)["accounted_bytes"]
+        with mock.patch.object(self.writer, "_save", side_effect=ProcessStopped()):
+            with self.assertRaises(ProcessStopped):
+                self.writer.cleanup_settled(job, lease.attempt_id, tag)
+        self.assertEqual(list((self.work / tag).iterdir()), [])
+        self.assertEqual(self.writer.quota.usage(self.scope.owner_id)["accounted_bytes"], before)
+        from studio_platform.worker import WorkerRunner
+        backend = mock.Mock(kind="wangp", enabled=True)
+        runner = WorkerRunner(self.repo, self.store, self.work, backend=backend)
+        with mock.patch.object(runner.queue, "complete", side_effect=AssertionError("Do not recommit")):
+            result = runner._collect(job, lease, tag, "task", lambda: None)
+        backend.fetch.assert_not_called()
+        self.assertEqual(result["state"], "succeeded")
+        self.writer.cleanup_settled(job, lease.attempt_id, tag)
+        self.assertEqual(self.writer.quota.usage(self.scope.owner_id)["accounted_bytes"], sum(s["size_bytes"] for s in specs))
+
+    def test_legacy_corrupt_remote_changed_or_unexpected_scratch_does_not_delete(self):
+        for reason in ("legacy", "remote", "changed", "extra"):
+            with self.subTest(reason=reason):
+                queue, job, lease, tag, record, specs = self.settle()
+                current = self.writer.get(job, lease.attempt_id, tag)
+                directory = self.work / tag
+                before = self.writer.quota.usage(self.scope.owner_id)["accounted_bytes"]
+                if reason == "legacy":
+                    current.pop("scratch_policy")
+                    self.writer._save(current)
+                elif reason == "remote":
+                    self.fake.objects[specs[0]["object_key"]]["body"] = b"bad"
+                elif reason == "changed":
+                    (directory / "verified.mp4").write_bytes(b"changed")
+                else:
+                    (directory / "unrelated.bin").write_bytes(b"preserve")
+                if reason == "legacy":
+                    self.writer.cleanup_settled(job, lease.attempt_id, tag)
+                else:
+                    with self.assertRaises(IntegrityError):
+                        self.writer.cleanup_settled(job, lease.attempt_id, tag)
+                self.assertTrue((directory / "verified.mp4").exists())
+                self.assertEqual(self.writer.quota.usage(self.scope.owner_id)["accounted_bytes"], before)
+
+    def test_hard_linked_scratch_is_not_removed(self):
+        queue, job, lease, tag, record, specs = self.settle()
+        source = self.work / tag / "verified.mp4"
+        linked = self.work / "linked-media.mp4"
+        os.link(source, linked)
+        before = self.writer.quota.usage(self.scope.owner_id)["accounted_bytes"]
+        with self.assertRaises(IntegrityError):
+            self.writer.cleanup_settled(job, lease.attempt_id, tag)
+        self.assertEqual(source.read_bytes(), linked.read_bytes())
+        self.assertEqual(self.writer.quota.usage(self.scope.owner_id)["accounted_bytes"], before)
 
 
 class ArtifactWriterTests(LedgerCase):

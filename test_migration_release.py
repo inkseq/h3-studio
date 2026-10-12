@@ -122,6 +122,40 @@ class MigrationArtifacts(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "admin_reference_invalid"):
             maintenance.settings(self.root)
 
+    def test_r2_host_settings_require_complete_exact_opt_in_without_secret_values(self):
+        local = {}
+        maintenance.storage_settings(local)
+        maintenance.storage_settings({"SIXNINE_STORAGE_PROVIDER": "local"})
+        environment = {"SIXNINE_STORAGE_PROVIDER": "r2",
+            "SIXNINE_STORAGE_ENDPOINT": "https://"+"a"*32+".r2.cloudflarestorage.com",
+            "SIXNINE_STORAGE_REGION": "auto", "SIXNINE_STORAGE_BUCKET": "sixnine-synthetic-media",
+            "SIXNINE_STORAGE_PROFILE": "cloudflare-r2--rig-root",
+            "SIXNINE_STORAGE_CREDENTIAL_FILE": "/run/sixnine-secrets/r2_storage"}
+        maintenance.storage_settings(environment)
+        for key in environment:
+            with self.subTest(missing=key), self.assertRaises(release.ReleaseError):
+                maintenance.storage_settings({name: value for name, value in environment.items() if name != key})
+        for change in ({"SIXNINE_STORAGE_PROVIDER": "local"}, {"SIXNINE_STORAGE_PROFILE": "cloudflare-r2--other"},
+                {"SIXNINE_STORAGE_ENDPOINT": "https://outside.example"},
+                {"SIXNINE_STORAGE_CREDENTIAL_FILE": "/run/sixnine-secrets/grafana_cloud"}):
+            with self.subTest(changed=next(iter(change))), self.assertRaises(release.ReleaseError):
+                maintenance.storage_settings(dict(environment, **change))
+        directory = self.root / "migration"; directory.mkdir()
+        base = {key: str(self.root / "protected" / key.lower()) for key in maintenance.PATH_FIELDS}
+        base.update(SIXNINE_OPERATOR_CAPACITY_OWNERS="superdan,supervan",
+            SIXNINE_HATCHET_POSTGRES_VOLUME="existing-postgres", SIXNINE_HATCHET_CONFIG_VOLUME="existing-config",
+            SIXNINE_MIGRATION_GENERATION_ENABLED="0", SIXNINE_MIGRATION_EXECUTION_BACKEND="disabled",
+            SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID=PROFILE)
+        def write(value):
+            (directory / "paths.json").write_text(json.dumps({"version":1, "environment":value,
+                "host_memory_mib":3840}))
+        write(dict(base, **environment))
+        if os.name == "posix":
+            maintenance.settings(self.root)  # Exact /run binding is a Linux host contract.
+        write(dict(base, **environment, R2_SECRET_ACCESS_KEY="SYNTHETIC_FORBIDDEN"))
+        with self.assertRaisesRegex(release.ReleaseError, "migration_paths_invalid"):
+            maintenance.settings(self.root)
+
     def test_tamper_wrong_platform_extra_file_and_hardlink_rejected(self):
         with self.assertRaisesRegex(release.ReleaseError, "platform_binding_changed"):
             maintenance.manifest(self.artifact, COMMIT, platform_manifest_sha256="b" * 64)

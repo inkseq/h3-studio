@@ -436,3 +436,7 @@ inventory.json
 !deploy/platform/MIGRATION-SECRETS.md
 !deploy/dstack/maintenance.py
 !deploy/dstack/RELEASE.md
+!studio_platform/storage_migration.py
+!studio_platform/storage_migration_cli.py
+!studio_platform/scratch_retention.py
+!STORAGE-MIGRATION.md

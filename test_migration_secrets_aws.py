@@ -34,6 +34,13 @@ def initialized():
     return value
 
 
+def r2_storage():
+    return {"schema_version": 1, "service": "cloudflare-r2", "profile": "cloudflare-r2--rig-root",
+        "endpoint_url": "https://"+"a"*32+".r2.cloudflarestorage.com", "region": "auto",
+        "bucket": "sixnine-synthetic-media", "access_key_id": "SYNTHETIC_R2_ACCESS",
+        "secret_access_key": "SYNTHETIC_R2_SECRET"}
+
+
 class FakeAPI:
     class exceptions:
         class ResourceNotFoundException(Exception):
@@ -87,6 +94,31 @@ class ManagedSecretTests(unittest.TestCase):
 
     def load(self, api, **options):
         return target.load(api, intent_store=self.store, **options)
+
+    def test_r2_opt_in_is_additive_closed_and_never_rotates_existing_secret(self):
+        value = initialized(); before = target.outputs(value)
+        value["r2_storage"] = r2_storage()
+        api = FakeAPI(value)
+        self.assertEqual(self.load(api), value)
+        self.assertEqual(api.puts, [])
+        output = target.outputs(value)
+        self.assertEqual({key: output[key] for key in before}, before)
+        content, uid, gid, mode = output["r2_storage"]
+        self.assertEqual((uid, gid, mode), (0, 10001, 0o440))
+        self.assertEqual(json.loads(content), value["r2_storage"])
+        self.assertNotIn("r2_storage", before)
+        # Validate optional credentials even before infrastructure initialization.
+        uninitialized = seed(); uninitialized["r2_storage"] = value["r2_storage"]
+        target.validate(uninitialized, allow_uninitialized=True)
+        for change in ({"profile": "cloudflare-r2--another-account"}, {"service": "aws-s3"},
+                {"endpoint_url": "https://outside.example"}, {"region": "us-east-1"},
+                {"bucket": "BadBucket"}, {"schema_version": True}, {"session_token": None},
+                {"secret_access_key": "private\nvalue"}, {"extra": "not-allowed"},
+                {"access_key_id": "x"*8192, "secret_access_key": "y"*8192}):
+            with self.subTest(field=next(iter(change))):
+                changed = copy.deepcopy(value); changed["r2_storage"].update(change)
+                with self.assertRaisesRegex(ValueError, "r2_storage_configuration_invalid"):
+                    target.validate(changed)
 
     def test_optional_stage_read_mount_preserves_every_existing_identity(self):
         from studio_platform.stage_metrics import read_config
@@ -365,6 +397,25 @@ class ProtectedHostTests(unittest.TestCase):
             self.assertEqual(path.read_text(), content); inodes[name] = info.st_ino
         target.write_outputs(files)
         self.assertEqual({name: (self.mounts / name).stat().st_ino for name in files}, inodes)
+
+    def test_additive_r2_file_is_readable_by_runtime_and_old_inodes_are_preserved(self):
+        from studio_platform.storage_config import S3StorageConfig, load_runtime_storage_credentials
+        original = target.outputs(initialized()); target.write_outputs(original)
+        inodes = {name: (self.mounts / name).stat().st_ino for name in original}
+        value = initialized(); value["r2_storage"] = r2_storage()
+        target.write_outputs(target.outputs(value))
+        self.assertEqual({name: (self.mounts / name).stat().st_ino for name in original}, inodes)
+        path = self.mounts / "r2_storage"; info = path.stat()
+        self.assertEqual((info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)), (0, 10001, 0o440))
+        selected = value["r2_storage"]
+        config = S3StorageConfig("r2", selected["endpoint_url"], "auto", selected["bucket"],
+            "cloudflare-r2", selected["profile"], enabled=True)
+        self.assertIn("redacted", repr(load_runtime_storage_credentials(config, path)))
+        changed = copy.deepcopy(value); changed["r2_storage"]["bucket"] = "different-bucket"
+        with self.assertRaisesRegex(RuntimeError, "rotation_requires"):
+            target.write_outputs(target.outputs(changed))
+        self.assertEqual(path.stat().st_ino, info.st_ino)
+        self.assertEqual(json.loads(path.read_text()), selected)
 
     def test_rotation_preflight_writes_nothing_new(self):
         files = target.outputs(initialized()); target.write_outputs(files)

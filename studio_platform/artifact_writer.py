@@ -22,6 +22,7 @@ from .storage import (IntegrityError, LocalObjectStore, S3ObjectStore, ObjectAlr
 from .storage_asset_journal import (AssetConflict, AssetUploadJournal, artifact_accounting, artifact_identity)
 from .storage_multipart import MultipartJournal, MultipartUploadManager
 from .storage_schema import create_storage_schema
+from . import scratch_retention
 
 MIB = 1024*1024
 _schema = MetaData()
@@ -136,6 +137,8 @@ class ArtifactWriter:
         record = dict(id=ident, owner=job["owner_id"], tag=tag, fingerprint=fingerprint,
             binding=self.binding, staging_root=str(self.work_dir), phase="staging", roles={},
             expected_roles=list(kinds), reserved_bytes=3*self.max_bytes*len(kinds))
+        if isinstance(self.store, S3ObjectStore) and self.store.config.provider == "r2":
+            record["scratch_policy"] = scratch_retention.POLICY
         self.quota._ensure(record["owner"])
         try:
             with self.engine.begin() as conn:
@@ -146,7 +149,7 @@ class ArtifactWriter:
             return self.get(job, attempt_id, tag)
         return dict(record, version=0)
 
-    def prepare(self, job, attempt_id, tag, files):
+    def prepare(self, job, attempt_id, tag, files, *, raw_paths=()):
         existing = self.get(job, attempt_id, tag)
         if existing is not None and existing["phase"] != "staging":
             return existing
@@ -155,6 +158,11 @@ class ArtifactWriter:
             binding=self.binding, staging_root=str(self.work_dir), phase="reserved", roles={}, reserved_bytes=0)
         if existing is not None:
             record["expected_roles"] = existing["expected_roles"]
+        policy = (existing.get("scratch_policy") if existing is not None else
+                  scratch_retention.POLICY if isinstance(self.store, S3ObjectStore)
+                  and self.store.config.provider == "r2" else None)
+        if policy is not None:
+            record["scratch_policy"] = policy
         for kind, path, mime, evidence in files:
             if kind not in ("video", "audio") or kind in record["roles"]:
                 raise IntegrityError("artifact_roles_invalid")
@@ -193,6 +201,22 @@ class ArtifactWriter:
                 if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > self.max_bytes:
                     raise IntegrityError("artifact_raw_staging_invalid")
                 record["raw_staging_bytes"] += info.st_size
+        if policy == scratch_retention.POLICY:
+            directory = self.work_dir / tag
+            # WanGP returns opaque task/hash filenames, not Comfy's raw.mp4.
+            # Track only this attempt directory; e.g. CPU mock cache is separate.
+            paths = {directory / role["filename"] for role in record["roles"].values()}
+            paths.update(Path(path) for path in raw_paths if Path(path).parent == directory)
+            paths.update(directory / name for name in ("raw.mp4", "raw.flac") if (directory / name).exists())
+            manifest = scratch_retention.manifest(directory, sorted(paths), self.max_bytes)
+            if any((manifest[role["filename"]]["size_bytes"], manifest[role["filename"]]["sha256"])
+                   != (role["size_bytes"], role["sha256"]) for role in record["roles"].values()):
+                raise IntegrityError("r2_artifact_scratch_hash_mismatch")
+            verified_names = {role["filename"] for role in record["roles"].values()}
+            record["raw_staging_bytes"] = sum(value["size_bytes"] for name, value in manifest.items()
+                                               if name not in verified_names)
+            record["scratch_cleanup"] = dict(phase="pending", files=manifest,
+                bytes=sum(value["size_bytes"] for value in manifest.values()))
         record["reserved_bytes"] += record["raw_staging_bytes"]
         self.quota._ensure(record["owner"])
         if existing is not None:
@@ -213,10 +237,12 @@ class ArtifactWriter:
             return self.get(job, attempt_id, tag)
         return dict(record, version=0)
 
-    def _save(self, record):
+    def _save(self, record, *, byte_delta=0):
         value = {k: v for k, v in record.items() if k != "version"}
         value["updated_at"] = time.time()
         with self.engine.begin() as conn:
+            if byte_delta:
+                self.quota._change(conn, record["owner"], byte_delta, 0)
             result = conn.execute(update(write_receipts).where(write_receipts.c.id == record["id"],
                 write_receipts.c.version == record["version"]).values(record=json.dumps(value), version=record["version"]+1))
             if result.rowcount != 1:
@@ -244,6 +270,14 @@ class ArtifactWriter:
         Never derive this flag from a client request or lease expiry. Without it,
         crashed in-flight MPU intents stay reserved for manual reconciliation.
         """
+        if record["phase"] == "settled" and record["roles"]:
+            # A post-commit replay needs original remote bytes, not scratch that
+            # was successfully removed. It never publishes/settles again.
+            if any(role["status"] != "verified" for role in record["roles"].values()):
+                raise ArtifactWritePending("artifact_settlement_evidence_missing")
+            for role in record["roles"].values():
+                self._verify_remote(role, heartbeat)
+            return self._specs(record)
         if record["phase"] != "reserved" or not record["roles"]:
             raise ArtifactWritePending("artifact_not_ready_for_storage")
         for kind, role in record["roles"].items():
@@ -294,9 +328,42 @@ class ArtifactWriter:
                 self._verify_remote(role, heartbeat)
             role["status"] = "verified"
             self._save(record)
+        return self._specs(record)
+
+    @staticmethod
+    def _specs(record):
         return [{"kind": kind, "object_key": role["key"], "size_bytes": role["size_bytes"],
                  "sha256": role["sha256"], "validated": True, "content_type": role["content_type"], **role["evidence"]}
                 for kind, role in record["roles"].items()]
+
+    def cleanup_settled(self, job, attempt_id, tag):
+        """After complete commits, under the original slot lock, never on unknown.
+
+        Missing manifest files after a crash are still accounted until this CAS
+        commits; repeat calls cannot release their bytes a second time.
+        """
+        record = self.get(job, attempt_id, tag)
+        if (not isinstance(self.store, S3ObjectStore) or self.store.config.provider != "r2"
+                or record is None or record.get("scratch_policy") != scratch_retention.POLICY
+                or record["phase"] != "settled"):
+            return
+        cleanup = record.get("scratch_cleanup")
+        if cleanup is None or cleanup["phase"] == "complete":
+            return
+        if any(role["status"] != "verified" for role in record["roles"].values()):
+            raise IntegrityError("r2_artifact_scratch_evidence_missing")
+        for role in record["roles"].values():
+            self._verify_remote(role, lambda: None)
+        remote_bytes = sum(role["size_bytes"] for role in record["roles"].values())
+        if record["reserved_bytes"] != remote_bytes + cleanup["bytes"]:
+            raise IntegrityError("r2_artifact_scratch_accounting_mismatch")
+        directory = self.work_dir / _part(tag)
+        scratch_retention.remove_manifest(directory, cleanup["files"], self.max_bytes)
+        record["reserved_bytes"] = remote_bytes
+        cleanup.update(phase="complete", completed_at=time.time())
+        self._save(record, byte_delta=-cleanup["bytes"])
+        if directory.exists():
+            directory.rmdir()
 
     def settlement(self, record):
         """Callback for queue.complete's existing DB transaction (no storage IO)."""

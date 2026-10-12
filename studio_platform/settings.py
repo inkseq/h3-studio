@@ -57,6 +57,7 @@ class Settings:
     storage_profile: str = ""
     storage_endpoint: str = ""
     storage_region: str = ""
+    storage_credential_file: Path | None = None
     frontend_dir: Path | None = None
     frontend_release_dir: Path | None = None
     execution_policy_file: Path | None = None
@@ -76,6 +77,11 @@ class Settings:
             object.__setattr__(self, "frontend_dir", Path(self.frontend_dir).resolve())
         if self.stage_query_config_file is not None and not Path(self.stage_query_config_file).is_absolute():
             raise ValueError("Stage query credential path must be absolute")
+        if self.storage_credential_file is not None:
+            path = Path(self.storage_credential_file)
+            if not path.is_absolute() or ".." in path.parts or self.storage_provider != "r2":
+                raise ValueError("Storage credential file requires R2 and an absolute protected path")
+            object.__setattr__(self, "storage_credential_file", path)
         if self.title_config_file is not None and not Path(self.title_config_file).is_absolute():
             raise ValueError("Title credential path must be absolute")
         if type(self.title_use_central) is not bool or (self.title_config_file is not None and self.title_use_central):
@@ -153,6 +159,7 @@ class Settings:
             storage_profile=os.environ.get("SIXNINE_STORAGE_PROFILE", ""),
             storage_endpoint=os.environ.get("SIXNINE_STORAGE_ENDPOINT", ""),
             storage_region=os.environ.get("SIXNINE_STORAGE_REGION", ""),
+            storage_credential_file=Path(os.environ["SIXNINE_STORAGE_CREDENTIAL_FILE"]) if os.environ.get("SIXNINE_STORAGE_CREDENTIAL_FILE") else None,
             frontend_dir=Path(os.environ["SIXNINE_FRONTEND_DIR"]) if os.environ.get("SIXNINE_FRONTEND_DIR") else None,
             frontend_release_dir=Path(os.environ["SIXNINE_FRONTEND_RELEASE_DIR"]) if os.environ.get("SIXNINE_FRONTEND_RELEASE_DIR") else None,
             execution_policy_file=Path(os.environ["SIXNINE_EXECUTION_POLICY_FILE"]) if os.environ.get("SIXNINE_EXECUTION_POLICY_FILE") else None,
