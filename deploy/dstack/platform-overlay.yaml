@@ -12,6 +12,7 @@ x-business-environment: &business-environment
   SIXNINE_EXECUTION_PROFILES_FILE: /run/secrets/execution_profiles
   SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID: ${SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID:?Explicit default deployment profile required}
   SIXNINE_OPERATOR_CAPACITY_OWNERS: ${SIXNINE_OPERATOR_CAPACITY_OWNERS:?Existing authorized operator owners required}
+  SIXNINE_OPERATOR_ADMIN_OWNERS: ${SIXNINE_OPERATOR_ADMIN_OWNERS:-}
   SIXNINE_TELEMETRY_CONFIG_FILE: /run/secrets/grafana_cloud
 
 x-cpu-service: &cpu-service
@@ -41,7 +42,9 @@ services:
       DSTACK_OPERATOR_CONFIG: /run/secrets/dstack_operator_config
       SIXNINE_GENERATION_ENABLED: ${SIXNINE_MIGRATION_GENERATION_ENABLED:-0}
       SIXNINE_EXECUTION_BACKEND: ${SIXNINE_MIGRATION_EXECUTION_BACKEND:-disabled}
-    secrets: [execution_profiles, grafana_cloud, dstack_operator_config, dstack_api_token, dstack_ssh_public_key]
+      # Optional, separately scoped read credential. Empty disables queries.
+      SIXNINE_STAGE_QUERY_CONFIG_FILE: ${SIXNINE_STAGE_QUERY_CONFIG_FILE:+/run/secrets/stage_query}
+    secrets: [execution_profiles, grafana_cloud, stage_query, dstack_operator_config, dstack_api_token, dstack_ssh_public_key]
     healthcheck:
       test: [CMD, python, -c, "import json,urllib.request; h=json.load(urllib.request.urlopen('http://127.0.0.1:8845/healthz',timeout=5)); assert h['auth_ready'] and not h['render_enabled'] and not h['cloud_creation_enabled']"]
 
@@ -264,6 +267,10 @@ secrets:
     file: ${SIXNINE_EXECUTION_PROFILES_SECRET_FILE:?Protected original admission profiles required}
   grafana_cloud:
     file: ${SIXNINE_GRAFANA_CONFIG_FILE:?Protected existing Grafana Cloud config required}
+  stage_query:
+    # Preserve compatibility when read queries are disabled: the existing file
+    # is mounted but never loaded by the disabled stage reader.
+    file: ${SIXNINE_STAGE_QUERY_CONFIG_FILE:-${SIXNINE_GRAFANA_CONFIG_FILE}}
   dstack_operator_config:
     file: ${SIXNINE_DSTACK_OPERATOR_CONFIG_FILE:?Protected dstack operator config required}
   dstack_runtime_config:

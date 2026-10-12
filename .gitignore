@@ -397,6 +397,10 @@ inventory.json
 !studio_platform/dstack_capacity.py
 !studio_platform/dstack_operator.py
 !studio_platform/dstack_routes.py
+!studio_platform/dstack_workspace.py
+!studio_platform/dstack_workspace_routes.py
+!studio_platform/dstack_metrics.py
+!studio_platform/stage_metrics.py
 !studio_platform/dstack_controller.py
 !studio_platform/hatchet_readiness.py
 !studio_platform/dstack_runtime.py

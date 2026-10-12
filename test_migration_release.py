@@ -93,6 +93,35 @@ class MigrationArtifacts(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "source_set_changed"):
             maintenance.verify_sources(target, value["source_index_sha256"])
 
+    def test_optional_admin_and_stage_query_config_preserve_old_host_contract(self):
+        directory = self.root / "migration"
+        directory.mkdir()
+        environment = {key: str(self.root / "protected" / key.lower()) for key in maintenance.PATH_FIELDS}
+        environment.update(SIXNINE_OPERATOR_CAPACITY_OWNERS="superdan,supervan",
+            SIXNINE_HATCHET_POSTGRES_VOLUME="existing-postgres", SIXNINE_HATCHET_CONFIG_VOLUME="existing-config",
+            SIXNINE_MIGRATION_GENERATION_ENABLED="0", SIXNINE_MIGRATION_EXECUTION_BACKEND="disabled",
+            SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID=PROFILE)
+        def write():
+            (directory / "paths.json").write_text(json.dumps({"version":1, "environment":environment,
+                "host_memory_mib":3840}))
+        write()
+        maintenance.settings(self.root)
+        environment.update(SIXNINE_OPERATOR_ADMIN_OWNERS="superdan", SIXNINE_STAGE_QUERY_CONFIG_FILE="")
+        write()
+        maintenance.settings(self.root)
+        environment["SIXNINE_STAGE_QUERY_CONFIG_FILE"]=str(self.root / "protected" / "stage-query.json")
+        write()
+        maintenance.settings(self.root)
+        environment["SIXNINE_STAGE_QUERY_CONFIG_FILE"]="relative.json"
+        write()
+        with self.assertRaisesRegex(release.ReleaseError, "path_reference_invalid"):
+            maintenance.settings(self.root)
+        environment["SIXNINE_STAGE_QUERY_CONFIG_FILE"]=""
+        environment["SIXNINE_OPERATOR_ADMIN_OWNERS"]="other"
+        write()
+        with self.assertRaisesRegex(release.ReleaseError, "admin_reference_invalid"):
+            maintenance.settings(self.root)
+
     def test_tamper_wrong_platform_extra_file_and_hardlink_rejected(self):
         with self.assertRaisesRegex(release.ReleaseError, "platform_binding_changed"):
             maintenance.manifest(self.artifact, COMMIT, platform_manifest_sha256="b" * 64)

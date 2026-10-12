@@ -4,7 +4,7 @@ import React,{useState,useEffect,useRef,useSyncExternalStore} from 'react';
 import {Plus,LayoutGrid,Workflow,ChevronRight,ChevronLeft,Search,Undo2,Redo2,Download,Upload,X,Check,ArrowUp,ArrowDown,Copy,Trash2,Link2,FolderOpen,BookOpen,Users,MapPin,Image,Clapperboard,Settings2,HelpCircle,PanelRightClose,Bot,Activity} from 'lucide-react';
 const Canvas=React.lazy(()=>import('./Canvas.jsx'));
 import Freestyle from './Freestyle.jsx';
-const OperatorConsole=React.lazy(()=>import('./OperatorConsole.jsx'));
+const OperatorConsole=React.lazy(()=>import('./P4OperatorConsole.jsx'));
 const QuickChatWorkspace=React.lazy(()=>import('./QuickChatWorkspace.jsx'));
 import {navigateWorkspace} from './workspace-navigation.js';
 import {CloudButton,CloudProjects,CloudWorkspaceBar,CloudShotPanel,CloudProduction,useCloud} from './CloudStudio.jsx';

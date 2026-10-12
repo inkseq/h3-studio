@@ -63,6 +63,8 @@ class Settings:
     execution_profiles_file: Path | None = None
     default_deployment_profile_id: str | None = None
     operator_capacity_owners: tuple[str, ...] = ()
+    operator_admin_owners: tuple[str, ...] = ()
+    stage_query_config_file: Path | None = None
     render_enabled: bool = False
     recovery_backends: tuple[str, ...] = ()
     title_config_file: Path | None = None
@@ -72,6 +74,8 @@ class Settings:
         object.__setattr__(self, "data_dir", Path(self.data_dir).resolve())
         if self.frontend_dir is not None:
             object.__setattr__(self, "frontend_dir", Path(self.frontend_dir).resolve())
+        if self.stage_query_config_file is not None and not Path(self.stage_query_config_file).is_absolute():
+            raise ValueError("Stage query credential path must be absolute")
         if self.title_config_file is not None and not Path(self.title_config_file).is_absolute():
             raise ValueError("Title credential path must be absolute")
         if type(self.title_use_central) is not bool or (self.title_config_file is not None and self.title_use_central):
@@ -92,6 +96,11 @@ class Settings:
                 or len(set(self.operator_capacity_owners)) != len(self.operator_capacity_owners)
                 or any(not isinstance(v, str) or v not in {"superdan", "supervan"} for v in self.operator_capacity_owners)):
             raise ValueError("Operator capacity identities must be explicit existing accounts")
+        if (not isinstance(self.operator_admin_owners, tuple)
+                or len(set(self.operator_admin_owners)) != len(self.operator_admin_owners)
+                or any(not isinstance(v, str) or v not in self.operator_capacity_owners
+                       for v in self.operator_admin_owners)):
+            raise ValueError("Operator administrators must be an explicit subset of capacity accounts")
         if not self.database_url:
             object.__setattr__(self, "database_url", "sqlite:///" + (self.data_dir / "platform.sqlite3").as_posix())
         if self.auth_mode not in {"password", "local-test"}:
@@ -150,6 +159,8 @@ class Settings:
             execution_profiles_file=Path(os.environ["SIXNINE_EXECUTION_PROFILES_FILE"]) if os.environ.get("SIXNINE_EXECUTION_PROFILES_FILE") else None,
             default_deployment_profile_id=os.environ.get("SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID") or None,
             operator_capacity_owners=tuple(x.strip() for x in os.environ.get("SIXNINE_OPERATOR_CAPACITY_OWNERS", "").split(",") if x.strip()),
+            operator_admin_owners=tuple(x.strip() for x in os.environ.get("SIXNINE_OPERATOR_ADMIN_OWNERS", "").split(",") if x.strip()),
+            stage_query_config_file=Path(os.environ["SIXNINE_STAGE_QUERY_CONFIG_FILE"]) if os.environ.get("SIXNINE_STAGE_QUERY_CONFIG_FILE") else None,
             render_enabled=os.environ.get("SIXNINE_RENDER_ENABLED", "0") == "1",
             recovery_backends=tuple(x.strip() for x in os.environ.get("SIXNINE_RECOVERY_BACKENDS", "").split(",") if x.strip()),
             title_config_file=Path(os.environ["SIXNINE_TITLE_CONFIG_FILE"]) if os.environ.get("SIXNINE_TITLE_CONFIG_FILE") else None,

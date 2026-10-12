@@ -36,6 +36,8 @@ PATH_FIELDS = frozenset({"SIXNINE_EXECUTION_PROFILES_SECRET_FILE", "SIXNINE_GRAF
 OTHER_FIELDS = frozenset({"SIXNINE_OPERATOR_CAPACITY_OWNERS", "SIXNINE_HATCHET_POSTGRES_VOLUME",
     "SIXNINE_HATCHET_CONFIG_VOLUME", "SIXNINE_MIGRATION_GENERATION_ENABLED",
     "SIXNINE_MIGRATION_EXECUTION_BACKEND", "SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID"})
+OPTIONAL_PATH_FIELDS = frozenset({"SIXNINE_STAGE_QUERY_CONFIG_FILE"})
+OPTIONAL_FIELDS = frozenset({"SIXNINE_OPERATOR_ADMIN_OWNERS"}) | OPTIONAL_PATH_FIELDS
 LEGACY_MARKERS = ("operator-capacity/active.json", "gpu-acceptance/active.json", "gpu-scaler/active.json")
 
 
@@ -258,13 +260,15 @@ def settings(root):
     value = json.loads(path.read_text())
     release.require(type(value) is dict and set(value) == {"version", "environment", "host_memory_mib"}
         and type(value["version"]) is int and value["version"] == 1 and type(value["environment"]) is dict
-        and set(value["environment"]) == PATH_FIELDS | OTHER_FIELDS
+        and PATH_FIELDS | OTHER_FIELDS <= set(value["environment"]) <= PATH_FIELDS | OTHER_FIELDS | OPTIONAL_FIELDS
         and type(value["host_memory_mib"]) is int and value["host_memory_mib"] >= 1024,
         "migration_paths_invalid")
     for key, text in value["environment"].items():
+        if key in OPTIONAL_FIELDS and text == "":
+            continue
         release.require(type(text) is str and text and text == text.strip() and not any(c in text for c in "\n\r\x00"),
                         "migration_path_reference_invalid")
-        if key in PATH_FIELDS:
+        if key in PATH_FIELDS | OPTIONAL_PATH_FIELDS:
             path = Path(text)
             release.require(path.is_absolute() and ".." not in path.parts and not path.is_symlink(),
                             "migration_path_reference_invalid")
@@ -275,6 +279,10 @@ def settings(root):
         in {("0", "disabled"), ("1", "wangp-worker")}, "migration_admission_reference_invalid")
     release.require(re.fullmatch(r"[A-Za-z0-9_.-]+(?:,[A-Za-z0-9_.-]+)*", env["SIXNINE_OPERATOR_CAPACITY_OWNERS"]),
                     "migration_owner_reference_invalid")
+    admins = env.get("SIXNINE_OPERATOR_ADMIN_OWNERS", "")
+    release.require(not admins or re.fullmatch(r"[A-Za-z0-9_.-]+(?:,[A-Za-z0-9_.-]+)*", admins)
+        and set(admins.split(",")) <= set(env["SIXNINE_OPERATOR_CAPACITY_OWNERS"].split(",")),
+        "migration_admin_reference_invalid")
     release.require(re.fullmatch(r"[A-Za-z0-9_.-]{1,200}", env["SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID"]),
                     "migration_default_profile_invalid")
     return value, release.checksum(directory / "paths.json")

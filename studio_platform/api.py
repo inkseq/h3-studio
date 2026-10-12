@@ -37,6 +37,7 @@ from .generation_admission import GenerationAdmission, reject_managed
 from .generation_services import GenerationAccess, GenerationPlanning, GenerationRead
 from .operator_capacity import OperatorRegistry  # Register additive tables before create_schema.
 from . import capacity_market  # Read-only market cache; never authorizes capacity.
+from . import dstack_workspace  # Account-owned presentation metadata before schema creation.
 
 COOKIE = "sixnine_session"
 TERMINAL = {"succeeded", "failed", "cancelled"}
@@ -253,7 +254,8 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
         return {"username": principal.owner, "actor_id": principal.actor_id, "machine": principal.machine,
                 "authentication": settings.auth_mode, "scopes": list(principal.scopes),
                 "operator_capacity": {name: not principal.machine and principal.owner in settings.operator_capacity_owners
-                    for name in ("view", "start", "drain", "stop", "update_policy")},
+                    for name in ("view", "start", "drain", "stop", "update_policy")} | {
+                    "admin": not principal.machine and principal.owner in settings.operator_admin_owners},
                 "all_projects": principal.all_projects, "project_ids": list(principal.project_ids)}
 
     @app.post("/api/auth/logout")
