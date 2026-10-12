@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 from typing import Any, Iterable, Mapping, Protocol
@@ -220,6 +221,21 @@ class HostReadiness:
     incarnation: str
     idle: bool
     reason: str = ""
+    preparation: dict | None = field(default=None, repr=False)
+
+
+def safe_model_progress(value):
+    """An optional native observation never changes execution eligibility."""
+    if (not isinstance(value, dict) or type(value.get("state")) is not str or value["state"] not in
+            {"not_loaded", "loading", "loaded", "not_observed"}):
+        return None
+    result = {"state": value["state"]}
+    for key in ("updated_at", "phase_started_at"):
+        item = value.get(key)
+        result[key] = item if type(item) in (int, float) and math.isfinite(item) and 0 <= item <= 4_102_444_800 else None
+    if type(value.get("reason_code")) is str and value["reason_code"] in {"wangp_model_load_failed", "wangp_model_load_unobserved"}:
+        result["reason_code"] = value["reason_code"]
+    return result
 
 
 @dataclass(frozen=True)

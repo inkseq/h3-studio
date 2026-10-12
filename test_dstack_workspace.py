@@ -28,6 +28,28 @@ class WorkspaceTests(LedgerCase):
         preview = self.service.preview(self.owner, {"profile_id": "5090-fl", "ttl_seconds": 900})
         return self.service.start(self.owner, {"preview_id": preview["preview_id"]}, key or uuid.uuid4().hex)["node_id"]
 
+    def test_preparation_projection_reuses_original_receipt_and_is_read_only(self):
+        node = self.start_node()
+        self.store.record(node, {"observed_at": self.now, "state": "starting", "ready": False,
+            "bootstrap_phase": "model_download", "preparation": {"phase": "model_download",
+                "updated_at": self.now, "phase_started_at": self.now-5,
+                "download": {"bytes_complete": 50, "bytes_total": 100, "files_complete": 1, "files_total": 2},
+                "reason_code": "model_download_timeout", "secret_url": "SECRET"}})
+        with self.repo.engine.connect() as connection:
+            before = dict(connection.execute(select(operator_nodes).where(operator_nodes.c.intent_id == node)).mappings().one())
+        self.now += 2
+        state = self.workspace.state(self.owner)
+        row = next(item for item in state["nodes"] if item["node_id"] == node)
+        self.assertEqual(row["preparation"]["phase"], "downloading_weights")
+        self.assertEqual(row["preparation"]["phase_elapsed_seconds"], 7)
+        self.assertEqual(row["preparation"]["download"]["percent"], 50)
+        self.assertNotIn("SECRET", json.dumps(state))
+        self.assertFalse(row["ready"])
+        self.assertFalse(self.workspace.state(self.other_owner)["nodes"])
+        with self.repo.engine.connect() as connection:
+            after = dict(connection.execute(select(operator_nodes).where(operator_nodes.c.intent_id == node)).mappings().one())
+        self.assertEqual(before, after)
+
     def waiting_job(self, key=None, *, owner=None, profile_id="5090-fl", scope=None):
         profile = self.service.profiles[profile_id]
         request = {"recipe_id": "h3-base-fl2va-v1", "deployment_profile_id": profile["runtime_profile_id"],

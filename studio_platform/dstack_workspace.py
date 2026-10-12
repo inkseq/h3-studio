@@ -256,6 +256,7 @@ class DstackWorkspace:
 
     def state(self, principal, *, admin=False):
         from .dstack_metrics import machine_metrics
+        from .dstack_preparation import preparation_view
         owner = self._authorize(principal, admin=admin)
         owners = set(self.settings.operator_capacity_owners) if admin else {owner}
         now = self.repo.clock()
@@ -298,6 +299,8 @@ class DstackWorkspace:
                         and current["owner_id"] == payload["owner_id"]
                         and current["status"] not in {"succeeded", "failed", "cancelled"} else None))
                 value["lifecycle_phase"] = _phase(original, value)
+                value["preparation"] = preparation_view(original, intents[identity], value, now,
+                    fresh_seconds=payload.get("observation_fresh_seconds", 30))
                 value.update(machine_metrics(connection, original, intents[identity], workers, now))
                 result.append(value)
             for group in all_groups:

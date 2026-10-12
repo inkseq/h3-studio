@@ -17,6 +17,7 @@ import re
 import subprocess
 import sys
 import threading
+import time
 
 from ..inference.protocol import BackendError, NotReady
 from ..inference.wangp_contract import (EngineManifest, RuntimeObservation,
@@ -485,10 +486,86 @@ class _SessionHandle:
             return self._observation
 
 
+class ModelLoadProgress:
+    """Observe pinned upstream progress callbacks, never trigger a model load.
+
+    Payloads may contain private prompts/status. Inspect only their enum phase;
+    retain no event object, text, paths, task IDs or user settings.
+    """
+    LOADED_PHASES = frozenset({"encoding_text", "inference", "inference_stage_1",
+        "inference_stage_2", "inference_stage_3", "decoding", "downloading_output"})
+
+    def __init__(self, load_probe, *, clock=time.time):
+        self.load_probe, self.clock = load_probe, clock
+        self._lock = threading.Lock()
+        now = clock()
+        initial = self._probe()
+        self._value = {"state": initial, "phase_started_at": now, "updated_at": now}
+
+    def _probe(self):
+        try:
+            result = self.load_probe()
+            return result if type(result) is str and result in {"not_loaded", "loaded"} else "not_observed"
+        except Exception:
+            return "not_observed"
+
+    def _set(self, state, reason=None):
+        now = max(self.clock(), self._value["updated_at"])
+        if state != self._value["state"]:
+            self._value["phase_started_at"] = now
+        self._value.update(state=state, updated_at=now)
+        self._value.pop("reason_code", None)
+        if reason:
+            self._value["reason_code"] = reason
+
+    def on_progress(self, event):
+        # Callback observation must never disrupt an accepted generation.
+        try:
+            phase = getattr(event, "phase", None)
+            with self._lock:
+                if phase == "loading_model":
+                    self._set("loading")
+                elif type(phase) is str and phase in self.LOADED_PHASES and self._probe() == "loaded":
+                    self._set("loaded")
+        except Exception:
+            pass
+
+    def on_status(self, value):
+        # Pinned wgp.py emits this before load_models(), before its first
+        # block/phase progress callback. The model-name suffix is never retained.
+        try:
+            if type(value) is str and value[:13].lower() == "loading model":
+                with self._lock:
+                    self._set("loading")
+        except Exception:
+            pass
+
+    def on_error(self, _event):
+        try:
+            with self._lock:
+                if self._value["state"] == "loading":
+                    self._set(self._probe(), "wangp_model_load_failed")
+        except Exception:
+            pass
+
+    def on_complete(self, _event):
+        try:
+            with self._lock:
+                state = self._probe()
+                if state == "loaded":
+                    self._set(state)
+        except Exception:
+            pass
+
+    def snapshot(self):
+        with self._lock:
+            return dict(self._value)
+
+
 class PinnedWanGPSession:
     def __init__(self, session, output_root, *, quiesce,
                  audio_writer=_write_float_wav, worker_alive=_upstream_worker_alive,
-                 manifest=None, before_submit=None, result_audit=None, device_lock=None):
+                 manifest=None, before_submit=None, result_audit=None, device_lock=None, model_progress=None):
         if not callable(quiesce) or not callable(worker_alive):
             raise ValueError("wangp_runtime_stop_probe_required")
         self.session = session
@@ -497,6 +574,7 @@ class PinnedWanGPSession:
         self.worker_alive, self.quiesce = worker_alive, quiesce
         self.manifest, self.before_submit, self.result_audit = manifest, before_submit, result_audit
         self.device_lock = device_lock
+        self._model_progress = model_progress
         if manifest is not None:
             from ..runtime_catalog import validate_manifest
             validate_manifest(manifest)
@@ -505,6 +583,9 @@ class PinnedWanGPSession:
 
     def is_idle(self):
         return not self._closed and self.session.active_job is None and self.worker_alive() is False
+
+    def preparation(self):
+        return {"model": self._model_progress.snapshot()} if self._model_progress is not None else None
 
     def submit_task(self, settings):
         with self._lifecycle_lock:
@@ -523,7 +604,8 @@ class PinnedWanGPSession:
                 self.before_submit()
             values = self.session.get_default_settings(model)
             values.update(copy.deepcopy(dict(settings)))
-            job = self.session.submit_task(values)
+            job = (self.session.submit_task(values, callbacks=self._model_progress)
+                if self._model_progress is not None else self.session.submit_task(values))
             return _SessionHandle(job, self.output_root, self.audio_writer, self.worker_alive, self.quiesce, self.result_audit)
 
     def close_when_idle(self):
@@ -568,9 +650,22 @@ def create_session(runtime_root, config_path, output_dir, *, manifest=None):
         cli_args=profile['runtime']['cli_args'] if profile else ["--attention", "sdpa", "--profile", "4"], console_output=False,
         console_isatty=False, webui_state=None)
     torch = importlib.import_module("torch")
+    def loaded_probe():
+        native = session._ensure_runtime().module
+        if getattr(native, "wan_model", None) is None:
+            return "not_loaded"
+        if profile and (native.transformer_type != model_for(profile['id'], manifest.document['mode'])['model_type']
+                or native.loaded_profile != profile['runtime']['memory_profile']
+                or native.loaded_config != profile['runtime']['task_config']):
+            return "not_observed"
+        return "loaded"
+    if profile:
+        from ..runtime_catalog import model_for
+    model_progress = ModelLoadProgress(loaded_probe)
     if profile:
         audit = lambda loaded=False: _audit_profile_runtime(session, manifest, config, loaded=loaded)
         audit()
         return PinnedWanGPSession(session, output, quiesce=torch.cuda.synchronize, manifest=manifest,
-            before_submit=audit, result_audit=lambda: audit(loaded=True), device_lock=device_lock)
-    return PinnedWanGPSession(session, output, quiesce=torch.cuda.synchronize)
+            before_submit=audit, result_audit=lambda: audit(loaded=True), device_lock=device_lock,
+            model_progress=model_progress)
+    return PinnedWanGPSession(session, output, quiesce=torch.cuda.synchronize, model_progress=model_progress)

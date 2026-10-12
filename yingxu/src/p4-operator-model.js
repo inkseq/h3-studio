@@ -21,6 +21,54 @@ export function phase(node){
   const id=node?.lifecycle_phase;
   return {id:id||'preparing',label:({renting:'申请机器中',downloading_weights:'下载权重中',loading_model:'加载模型中',preparing:'准备中',starting:'准备中',runtime_unconfirmed:'准备中',ready:'准备中'}[id]||'准备中'),tone:'warm'};
 }
+const preparationLabels={renting:'申请机器中',pulling_image:'拉取镜像中',downloading_weights:'下载权重中',starting_runtime:'启动推理服务',verifying_runtime:'检查运行接口',loading_model:'加载模型中',awaiting_first_job:'等待首个任务加载模型',ready:'就绪',running_job:'正在生成',stopping:'停止中',stopped:'已停止',preparing:'等待准备观测'};
+const nonnegative=value=>finite(value)&&value>=0;
+const diagnosticCode=value=>typeof value==='string'&&/^[a-zA-Z0-9_.:-]{1,160}$/.test(value)?value:null;
+export function bytes(value){
+  if(!nonnegative(value))return '—';
+  const units=['B','KiB','MiB','GiB','TiB'];let amount=value,index=0;
+  while(amount>=1024&&index<units.length-1){amount/=1024;index++;}
+  return (index===0?Math.round(amount):amount.toFixed(amount>=100?0:amount>=10?1:2))+' '+units[index];
+}
+export function transferProgress(value){
+  if(!value||typeof value!=='object')return {label:'下载量尚未上报',percent:null};
+  const complete=nonnegative(value.bytes_complete)?value.bytes_complete:null,total=nonnegative(value.bytes_total)&&value.bytes_total>0?value.bytes_total:null;
+  const files=Number.isSafeInteger(value.files_complete)&&value.files_complete>=0?value.files_complete:null,fileTotal=Number.isSafeInteger(value.files_total)&&value.files_total>0?value.files_total:null;
+  const prefix=value.basis==='download_and_extract'?'拉取＋解压 ':value.basis==='completed_files'?'已完成文件 ':'';
+  const amount=complete!==null?(total!==null&&complete<=total?prefix+bytes(complete)+' / '+bytes(total):(prefix||'已下载 ')+bytes(complete)):'下载字节数尚未上报';
+  const fileAmount=files===null?'':fileTotal!==null&&files<=fileTotal?files+' / '+fileTotal+' 个文件':files+' 个文件';
+  // A progress bar is only shown for a reported percentage backed by a valid
+  // known total. File/byte counters are not converted into an invented rate.
+  const percent=finite(value.percent)&&value.percent>=0&&value.percent<=100&&complete!==null&&total!==null&&complete<=total?value.percent:null;
+  const downloaded=nonnegative(value.downloaded_bytes)?' · 已下载 '+bytes(value.downloaded_bytes):'',extraction=nonnegative(value.extracted_bytes)?' · 已解压 '+bytes(value.extracted_bytes):'';
+  return {label:amount+(fileAmount?' · '+fileAmount:'')+downloaded+extraction,percent};
+}
+export function preparationView(node){
+  const source=node?.preparation&&typeof node.preparation==='object'?node.preparation:null,authority=phase(node);
+  let id=source&&Object.hasOwn(preparationLabels,source.phase)?source.phase:authority.id;
+  if(terminal(node))id='stopped';else if(stopping(node))id='stopping';
+  else if(node?.current_job)id=source?.model?.state==='loading'&&source?.stale!==true?'loading_model':'running_job';
+  else if(authority.id==='ready')id=source?.model?.state==='loading'&&source?.stale!==true?'loading_model':'ready';
+  const status={id,label:preparationLabels[id]||authority.label,tone:['ready','running_job','running'].includes(id)?'good':['stopping','stopped'].includes(id)?'muted':'warm'};
+  if(id==='ready'&&authority.id!=='ready'&&authority.id!=='running')status.label='运行接口已启动，等待执行槽';
+  const elapsedSeconds=nonnegative(source?.elapsed_seconds)?source.elapsed_seconds:null,phaseElapsed=nonnegative(source?.phase_elapsed_seconds)?source.phase_elapsed_seconds:null;
+  const download=transferProgress(source?.download),image=transferProgress(source?.image);
+  const modelState=['not_loaded','loading','loaded','not_observed'].includes(source?.model?.state)?source.model.state:'not_observed';
+  const modelLabel=modelState==='not_loaded'&&terminal(node)?'本次未加载模型':({not_loaded:'模型尚未加载，将在首个任务加载',loading:'正在加载模型到 GPU',loaded:'模型已加载',not_observed:'模型加载状态尚未上报'})[modelState];
+  const reasonCode=diagnosticCode(source?.reason_code??node?.reason_code),reasonText=typeof source?.reason_text==='string'&&source.reason_text.trim()?source.reason_text.trim().slice(0,600):null;
+  const stale=source?.stale===true,stalled=source?.stalled===true;
+  const observationAge=nonnegative(source?.observation_age_seconds)?source.observation_age_seconds:null;
+  return {source,status,download,image,modelState,modelLabel,elapsedSeconds,phaseElapsed,reasonCode,reasonText,stale,stalled,observationAge};
+}
+export function preparationSteps(view){
+  const steps=[['renting','申请机器'],['pulling_image','拉取镜像'],['downloading_weights','下载权重'],['starting_runtime','启动服务'],['loading_model','加载模型'],['ready','可接任务']];
+  const current=({verifying_runtime:'starting_runtime',awaiting_first_job:'loading_model',running_job:'ready',running:'ready'})[view.status.id]||view.status.id;
+  const result=steps.map(([id,label])=>({id,label,current:id===current,pending:id==='loading_model'&&view.status.id==='awaiting_first_job'}));
+  if(view.status.id==='ready'&&view.status.label!=='就绪')result[result.length-1].label='等待执行槽';
+  if(['running','running_job'].includes(view.status.id))result[result.length-1].label='执行任务';
+  if(['stopping','stopped'].includes(current))result.push({id:current,label:preparationLabels[current],current:true,pending:false});
+  return result;
+}
 export function keepText(node){
   const policy=dstackLifecycle(node);
   if(!policy)return finite(node?.hard_deadline)?'至 '+time(node.hard_deadline):'运行策略待更新';

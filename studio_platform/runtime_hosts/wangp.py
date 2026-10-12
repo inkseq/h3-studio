@@ -17,6 +17,7 @@ from ..inference.protocol import BackendError, NotReady, safe_failure_code
 from ..inference.wangp_contract import (
     ArtifactDescriptor, EngineManifest, HostReadiness, PreparedRequest,
     RuntimeObservation, RuntimeOutput, TERMINAL, canonical_json, _object,
+    safe_model_progress,
 )
 from .wangp_receipts import ReceiptJournal, checked_directory, checked_reader, sync_directory
 
@@ -79,8 +80,17 @@ class WanGPHost:
                 idle = not pending and self.session.is_idle() is True
             except Exception:
                 idle, pending = False, True
+            preparation = None
+            try:
+                probe = getattr(self.session, "preparation", None)
+                source = probe() if callable(probe) else None
+                model = safe_model_progress(source.get("model")) if type(source) is dict else None
+                if model is not None:
+                    preparation = {"model": model}
+            except Exception:
+                pass  # Optional telemetry cannot alter slot/obligation checks.
             return HostReadiness(self.manifest.digest, self.journal.slot_key, self.incarnation,
-                                 idle, "" if idle else "wangp_slot_obligation_or_runtime_busy")
+                                 idle, "" if idle else "wangp_slot_obligation_or_runtime_busy", preparation)
 
     def submit(self, prepared: PreparedRequest):
         if not isinstance(prepared, PreparedRequest):
