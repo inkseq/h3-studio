@@ -7,6 +7,7 @@ from dataclasses import asdict
 from contextlib import contextmanager
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -15,7 +16,8 @@ import stat
 import threading
 import time
 
-from .lium_bootstrap import BootError, SSHHost, REMOTE_ROOT, safe_bootstrap_diagnosis
+from .lium_bootstrap import (BootError, SSHHost, REMOTE_ROOT, safe_bootstrap_diagnosis,
+                             BOOT_PHASES)
 from .control import WorkerSpec
 from .fleet import SlotConfig
 from .inference.wangp_contract import EngineManifest, HostReadiness
@@ -29,6 +31,35 @@ MAX_DEPENDENCY_BYTES = 32*1024**3
 DEPENDENCY_TRANSFER_SECONDS = 1800
 SFTP_OPEN_SECONDS = 30
 SFTP_IO_SECONDS = 60
+
+
+def safe_preparation_report(report):
+    """Static phases and numeric source evidence only, including older receipts.
+
+    Completed-file bytes are not an in-flight network counter: Xet can preallocate
+    incomplete files, so stat sizes must never manufacture transfer progress.
+    """
+    if not isinstance(report, dict):
+        return None
+    phase = report.get("phase")
+    value = {"phase": phase if type(phase) is str and phase in BOOT_PHASES else "unknown"}
+    for source, target in (("started_unix", "started_at"),
+                           ("phase_started_unix", "phase_started_at"),
+                           ("updated_unix", "updated_at")):
+        item = report.get(source)
+        value[target] = item if type(item) in (int, float) and math.isfinite(item) and 0 <= item <= 4_102_444_800 else None
+    counters = {key: report.get(key) for key in ("bytes_complete", "bytes_total", "files_complete", "files_total")}
+    if (all(type(item) is int for item in counters.values())
+            and 0 <= counters["bytes_complete"] <= counters["bytes_total"] <= 256 * 1024**3
+            and 0 <= counters["files_complete"] <= counters["files_total"] <= 64):
+        value["download"] = {**counters, "basis": "completed_files"}
+    else:
+        value["download"] = None
+    diagnosis = safe_bootstrap_diagnosis(report)
+    if type(report.get("state")) is str and report["state"] in {"failed", "unknown", "reconcile_required"}:
+        value["reason_code"] = diagnosis["error_code"]
+        value["failure_phase"] = diagnosis["failure_phase"]
+    return value
 
 
 def _transfer_remaining(deadline, maximum):
@@ -462,7 +493,7 @@ def read(name):
  if p.is_symlink() or p.stat().st_size>4194304: raise ValueError('untrusted_report')
  return json.loads(p.read_text())
 s=read('setup-status.json')
-out={k:s.get(k) for k in ('state','phase','error_code','error_type','runtime_verified','engine_manifest_digest','source_revision','runtime','system_package_diagnostics','download_failure')}
+out={k:s.get(k) for k in ('state','phase','error_code','error_type','runtime_verified','engine_manifest_digest','source_revision','runtime','system_package_diagnostics','download_failure','started_unix','phase_started_unix','updated_unix','bytes_complete','bytes_total','files_complete','files_total')}
 out['selected_gpus']=s.get('gpus')
 out['error_code']=s.get('error_code',s.get('code'))
 out['failure_phase']=s.get('failure_phase',s.get('failed_phase',s.get('phase')))
@@ -472,6 +503,10 @@ if out['state']=='ready':
  out['gpus']=[{'uuid':x.split(',')[0].strip(),'memory_mib':int(x.split(',')[1].strip()),'name':','.join(x.split(',')[2:]).strip()} for x in rows]
 print(json.dumps(out))
 ''')
+        preparation = safe_preparation_report(report)
+        for key in ('started_unix', 'phase_started_unix', 'updated_unix',
+                    'bytes_complete', 'bytes_total', 'files_complete', 'files_total'):
+            report.pop(key, None)  # Only sanitized numeric copies leave this seam.
         if report.get('state') in {'failed', 'unknown', 'reconcile_required'} or report.get('phase') == 'runtime_start_unknown':
             diagnosis = safe_bootstrap_diagnosis(report)
             report = {'identity':report.get('identity'), 'state':report.get('state'), **diagnosis}
@@ -493,6 +528,7 @@ print(json.dumps(out))
                 raise BootError('bootstrap_gpu_identity_or_memory_mismatch')
             report['gpus'] = [g for g in gpus if g['uuid'] == selected[0]['uuid']]
         report.pop('selected_gpus', None)
+        report['preparation'] = preparation
         return report
 
     def preparation_idle_report(self, *, expected_prestart_identity=None):

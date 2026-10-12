@@ -9,7 +9,7 @@ Provider endpoint extraction and worker lifecycle stay with the controller.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import hashlib
 import json
 import os
@@ -25,13 +25,13 @@ from .control import WorkerSpec
 from .dstack_capacity import DstackError
 from .operator_capacity import OperatorError
 from .fleet import SlotConfig
-from .inference.wangp_contract import HostReadiness
+from .inference.wangp_contract import HostReadiness, safe_model_progress
 from .inference.wangp_factory import create_backend, read_document
 from .inference.wangp_http import HTTPWanGPTransport
 from .runtime_catalog import engine_manifest, get_profile
 from .runtime_hosts.wangp_http import private_token_file
 from .wangp_bootstrap import (SOURCE_NAMES, BootError, WanGPSSHHost, _write_immutable,
-                             read_sources, validate_report)
+                             read_sources, validate_report, safe_preparation_report)
 from .worker import _slot_lock
 
 GPU_UUID = re.compile(r"GPU-[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}\Z")
@@ -368,9 +368,27 @@ class DstackNativeRuntime:
                 report = host.report()
                 _require(type(report) is dict and report.get("identity") == identity,
                     "dstack_runtime_remote_identity_unconfirmed")
-                _require(report.get("state") != "failed", "dstack_runtime_bootstrap_failed")
-                _require(report.get("state") not in {"unknown", "reconcile_required"}
-                    and report.get("phase") != "runtime_start_unknown", "dstack_runtime_bootstrap_reconciliation_required")
+                preparation = safe_preparation_report(report)
+                # The SSH report has already discarded its raw receipt fields.
+                # Accept only the same numeric allowlist from that protected seam.
+                if type(report.get("preparation")) is dict:
+                    supplied = report["preparation"]
+                    preparation = safe_preparation_report({"phase": supplied.get("phase"),
+                        "started_unix": supplied.get("started_at"),
+                        "phase_started_unix": supplied.get("phase_started_at"),
+                        "updated_unix": supplied.get("updated_at"),
+                        **(supplied.get("download") if type(supplied.get("download")) is dict else {}),
+                        "state": report.get("state"), "error_code": report.get("error_code"),
+                        "failure_phase": report.get("failure_phase")})
+                def progress_error(code):
+                    error = DstackError(code)
+                    error.preparation = preparation
+                    return error
+                if report.get("state") == "failed":
+                    raise progress_error("dstack_runtime_bootstrap_failed")
+                if (report.get("state") in {"unknown", "reconcile_required"}
+                        or report.get("phase") == "runtime_start_unknown"):
+                    raise progress_error("dstack_runtime_bootstrap_reconciliation_required")
                 if report.get("state") != "ready":
                     # Only these fixed progress codes leave the private host;
                     # preserve real download/start progress without exposing
@@ -378,7 +396,7 @@ class DstackNativeRuntime:
                     phases = {"model_download": "dstack_runtime_downloading_weights",
                               "runtime_start": "dstack_runtime_starting_runtime",
                               "model_load": "dstack_runtime_loading_model"}
-                    raise DstackError(phases.get(report.get("phase"), "dstack_runtime_preparing"))
+                    raise progress_error(phases.get(report.get("phase"), "dstack_runtime_preparing"))
                 validate_report(config, report, manifest)
                 gpu = report["gpus"][0]["uuid"]
                 _require(GPU_UUID.fullmatch(gpu), "dstack_runtime_physical_gpu_invalid")
@@ -416,7 +434,8 @@ class DstackNativeRuntime:
                 state.update(phase="runtime_ready", physical_gpu_uuid=gpu, runtime_incarnation=native.incarnation)
                 self._save(receipt, state)
                 self._slots[intent_id] = slot
-                return native
+                model = safe_model_progress(native.preparation.get("model")) if type(native.preparation) is dict else None
+                return replace(native, preparation={**preparation, "model": model})
         except DstackError:
             raise
         except OperatorError as error:

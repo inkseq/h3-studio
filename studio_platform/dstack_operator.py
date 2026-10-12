@@ -31,7 +31,7 @@ PROVIDERS = {"vastai": "vast", "runpod": "runpod"}
 TERMINAL_JOBS = {"succeeded", "failed", "cancelled"}
 OBSERVATION_KEYS = {"run_id", "run_name", "state", "ready", "reason_code", "observed_at",
     "provider_instance_id", "runtime_incarnation", "dstack_status", "model_load_state",
-    "billing_state", "estimated_cost_microusd", "bootstrap_phase"}
+    "billing_state", "estimated_cost_microusd", "bootstrap_phase", "preparation"}
 IDENTITY_KEYS = {"run_id", "provider_instance_id", "runtime_incarnation"}
 
 
@@ -253,6 +253,10 @@ class LedgerDstackStore:
                 # Preserve the first terminal observation in the original row;
                 # later polls must not extend ended runtime/cost estimates.
                 binding.setdefault("first_stopped_at", value["observed_at"])
+            if "preparation" in value:
+                from .dstack_preparation import record_preparation
+                record_preparation(binding, value.pop("preparation"), value["observed_at"],
+                    validation_at=self.repo.clock())
             binding.update(value)
             payload["dstack"] = binding
             payload["dstack_observation"] = {"run_id": binding.get("run_id"),

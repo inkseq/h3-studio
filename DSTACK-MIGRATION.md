@@ -262,6 +262,24 @@ Both website availability and atomic claim use the same original-ledger gate.
 
 ### Approved P4 workspace
 
+Startup progress is an additive `preparation` object on each owned workspace
+node, derived from the existing dstack observation and native setup receipt.
+List and detail share the same phase, elapsed/stage seconds, last observation
+age, bounded download/image counters and static diagnostics. Weight bytes count
+completed files, not an invented in-flight transfer rate; image percentages
+use downloaded plus extracted work against dstack's explicitly final total,
+with downloaded/extracted bytes shown separately. Missing totals and old-host telemetry remain null.
+Two minutes without a native receipt update is described as no new progress,
+not proof of a failed download. Provider observation freshness is unchanged.
+
+Native model state is separate from service readiness. The pinned upstream
+Session's existing progress callback reports actual `loading_model`; only an
+observed matching native model reports loaded. A ready HTTP process can still
+wait for its first job to load weights. These presentation fields do not grant
+worker admission, reset policy/cost counters, retry setup or create a second
+reconciliation loop. New native source bundles carry the instrumentation;
+existing hosts lacking it explicitly show model progress not observed.
+
 The cookie API adds `GET /v1/operator/dstack/workspace` for owned groups, nodes,
 waiting FL/REF jobs and usage. Groups are account-owned presentation metadata in
 the same database; they do not schedule jobs or duplicate rental authority.

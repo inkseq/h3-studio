@@ -152,14 +152,26 @@ def install(config, slot_key, token_file, *, launch=True):
     started = False
     manifest_digest = None
     last_phase = "checking_package"
+    phase_started_unix = time.time()
+    started_unix = phase_started_unix
+    last_updated_unix = started_unix
+    download_progress = {}
     failure_diagnostics = {}
 
     def status(phase, **fields):
-        nonlocal last_phase
+        nonlocal last_phase, phase_started_unix, last_updated_unix
+        now = max(time.time(), last_updated_unix)
+        last_updated_unix = now
+        if phase != last_phase:
+            phase_started_unix = now
         last_phase = phase
-        value = {"phase": phase, "updated_unix": time.time(), "slot_key": slot_key,
+        for name in ("bytes_complete", "bytes_total", "files_complete", "files_total"):
+            if name in fields:
+                download_progress[name] = fields[name]
+        value = {"phase": phase, "updated_unix": now, "phase_started_unix": phase_started_unix,
+                 "started_unix": started_unix, "slot_key": slot_key,
                  "manifest_digest": manifest_digest, "engine_manifest_digest": manifest_digest,
-                 "state": "booting", "inference_verified": False, **fields}
+                 "state": "booting", "inference_verified": False, **download_progress, **fields}
         temporary = status_path.with_suffix(status_path.suffix + ".tmp")
         with temporary.open("w", encoding="utf-8") as target:
             temporary.chmod(0o600)

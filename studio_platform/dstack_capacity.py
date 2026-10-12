@@ -22,7 +22,7 @@ from uuid import UUID
 
 import httpx
 
-from .inference.wangp_contract import HostReadiness
+from .inference.wangp_contract import HostReadiness, safe_model_progress
 
 DSTACK_VERSION = "0.22.3"
 BACKENDS = frozenset({"vastai", "runpod"})
@@ -33,6 +33,52 @@ TERMINAL = frozenset({"done", "failed", "aborted", "terminated"})
 RUN_STATUSES = TERMINAL | frozenset({"pending", "submitted", "provisioning", "running", "terminating", "stopping"})
 VAST_INSTANCES_URL = "https://console.vast.ai/api/v1/instances/"
 RUNPOD_GRAPHQL_URL = "https://api.runpod.io/graphql"
+NATIVE_REASON_CODES = frozenset({
+    "wangp_model_load_failed", "wangp_model_load_unobserved",
+    "dstack_runtime_preparing", "dstack_runtime_downloading_weights", "dstack_runtime_starting_runtime",
+    "dstack_runtime_loading_model", "dstack_runtime_bootstrap_failed", "dstack_runtime_bootstrap_reconciliation_required",
+    "dstack_runtime_identity_invalid", "dstack_runtime_path_invalid", "dstack_runtime_link_forbidden",
+    "dstack_runtime_binding_invalid", "dstack_runtime_binding_changed", "dstack_runtime_run_not_running",
+    "dstack_runtime_allocation_mismatch", "dstack_runtime_configuration_mismatch", "dstack_runtime_image_unpinned",
+    "dstack_runtime_source_changed", "dstack_runtime_prepared_source_required", "dstack_runtime_ssh_coordinates_invalid",
+    "dstack_runtime_ssh_coordinates_unavailable", "dstack_runtime_observation_busy", "dstack_runtime_receipt_changed",
+    "dstack_runtime_receipt_phase_invalid", "dstack_runtime_existing_receipt_requires_reconciliation",
+    "dstack_runtime_host_limit_reached", "dstack_runtime_ssh_unavailable_or_host_key_untrusted",
+    "dstack_runtime_host_identity_changed", "dstack_runtime_recovery_material_missing",
+    "dstack_runtime_upload_reconciliation_required", "dstack_runtime_upload_unconfirmed",
+    "dstack_runtime_launch_requires_reconciliation", "dstack_runtime_bootstrap_response_unknown",
+    "dstack_runtime_remote_identity_unconfirmed", "dstack_runtime_physical_gpu_invalid",
+    "dstack_runtime_physical_gpu_changed", "dstack_runtime_private_endpoint_mismatch",
+    "dstack_runtime_incarnation_changed", "dstack_native_runtime_unconfirmed"})
+
+
+def native_preparation(value):
+    """Revalidate the progress seam even when an injected callback is untrusted."""
+    if not isinstance(value, dict):
+        return None
+    from .wangp_bootstrap import safe_preparation_report
+    from .lium_bootstrap import BOOT_FAILURE_CODES
+    source = {"phase": value.get("phase"), "started_unix": value.get("started_at"),
+        "phase_started_unix": value.get("phase_started_at"), "updated_unix": value.get("updated_at")}
+    download = value.get("download")
+    if isinstance(download, dict):
+        source.update({key: download.get(key) for key in ("bytes_complete", "bytes_total", "files_complete", "files_total")})
+    result = safe_preparation_report(source)
+    result["model"] = safe_model_progress(value.get("model"))
+    if type(value.get("reason_code")) is str and value["reason_code"] in BOOT_FAILURE_CODES:
+        result["reason_code"] = value["reason_code"]
+        result["failure_phase"] = safe_preparation_report({"phase": value.get("failure_phase")})["phase"]
+    return result
+
+
+def image_preparation(submission):
+    """Pinned dstack 0.22.3 ImagePullProgress; no Docker text or image URLs."""
+    raw = submission.get("image_pull_progress") if isinstance(submission, dict) else None
+    keys = ("downloaded_bytes", "extracted_bytes", "total_bytes")
+    if (not isinstance(raw, dict) or type(raw.get("is_total_bytes_final")) is not bool
+            or any(type(raw.get(key)) is not int or not 0 <= raw[key] <= 1024**4 for key in keys)):
+        return None
+    return {key: raw[key] for key in (*keys, "is_total_bytes_final")}
 
 
 class DstackError(ValueError):
@@ -614,22 +660,29 @@ class DstackCapacity:
             "state": "starting", "ready": False, "model_load_state": "not_observed",
             "billing_state": "unsettled", "observed_at": self.clock(),
             "reason_code": "dstack_runtime_not_observed"}
+        submission = run.get("latest_job_submission") or {}
+        _require(isinstance(submission, dict), "dstack_response_invalid")
+        image = image_preparation(submission)
+        preparation_phase = "image_pull" if submission.get("status") == "pulling" else "provisioning"
+        value["preparation"] = {"phase": preparation_phase, "phase_started_at": None,
+            "updated_at": value["observed_at"], "download": None, "image": image, "model": None}
         # The library's modeled cost is an estimate, not a supplier invoice.
         cost = run.get("cost")
         if type(cost) in (int, float) and math.isfinite(cost) and cost >= 0:
             value["estimated_cost_microusd"] = round(cost * 1_000_000)
         if status in TERMINAL:
             value.update(state="stopped", reason_code="dstack_run_terminal_billing_pending")
+            value["preparation"]["phase"] = "stopped"
             return value
         if status in {"terminating", "stopping"}:
             value.update(state="stopping", reason_code="dstack_stop_pending")
+            value["preparation"]["phase"] = "stopping"
             return value
         if status != "running":
             if binding.get("stop_started"):
                 value.update(state="stopping", reason_code="dstack_stop_pending")
+                value["preparation"]["phase"] = "stopping"
             return value
-        submission = run.get("latest_job_submission") or {}
-        _require(isinstance(submission, dict), "dstack_response_invalid")
         provisioning = submission.get("job_provisioning_data") or {}
         _require(isinstance(provisioning, dict), "dstack_response_invalid")
         _require(provisioning.get("backend") == binding["backend"], "dstack_backend_binding_mismatch")
@@ -646,6 +699,7 @@ class DstackCapacity:
             # The original stop already fenced/retired inference. Keep fresh
             # provider identity evidence without bootstrapping/reopening it.
             value.update(state="stopping", reason_code=self._stop_retry_reason(binding))
+            value["preparation"]["phase"] = "stopping"
             return value
         value["state"] = "runtime_unconfirmed"
         if self.readiness is None:
@@ -665,7 +719,11 @@ class DstackCapacity:
             and type(observed) in (int, float) and math.isfinite(observed)
             and 0 <= observed <= value["observed_at"])
         if not warm:
-            self.store.record(binding["intent_id"], value)
+            provider_observation = copy.deepcopy(value)
+            # This identity journal precedes the native read, not a fresh native
+            # phase transition. Do not reset an already observed download timer.
+            provider_observation.pop("preparation", None)
+            self.store.record(binding["intent_id"], provider_observation)
             binding = self.store.load(binding["intent_id"])
         try:
             native = self.readiness(copy.deepcopy(binding), copy.deepcopy(run))
@@ -678,7 +736,14 @@ class DstackCapacity:
                 "dstack_runtime_starting_runtime": "runtime_start",
                 "dstack_runtime_loading_model": "model_load"}
             code = error.args[0] if len(error.args) == 1 and isinstance(error.args[0], str) else None
-            value["reason_code"] = code if code in phases else "dstack_native_observation_failed"
+            value["reason_code"] = code if code in NATIVE_REASON_CODES else "dstack_native_observation_failed"
+            preparation = native_preparation(getattr(error, "preparation", None))
+            if preparation is None:
+                preparation = native_preparation(binding.get("preparation"))
+            if preparation is not None:
+                value["preparation"] = {**preparation, "image": image}
+                if preparation.get("reason_code"):
+                    value["reason_code"] = preparation["reason_code"]
             if code in phases:
                 value["bootstrap_phase"] = phases[code]
             return value
@@ -696,6 +761,23 @@ class DstackCapacity:
             runtime_incarnation=native.incarnation,
             bootstrap_phase="runtime_ready",
             reason_code="dstack_runtime_ready_model_load_unobserved" if native.idle else "dstack_runtime_busy")
+        preparation = native_preparation(native.preparation)
+        if preparation is None:
+            preparation = {"phase": "runtime_ready", "phase_started_at": None,
+                "updated_at": value["observed_at"], "download": None, "model": None}
+        model = preparation.get("model")
+        if model is not None:
+            value["model_load_state"] = model["state"]
+            if model["state"] == "loading":
+                preparation["phase"] = "model_load"
+                preparation["phase_started_at"] = model.get("phase_started_at")
+                preparation["updated_at"] = model.get("updated_at")
+            elif model["state"] == "loaded" and native.idle:
+                value["reason_code"] = "dstack_runtime_ready"
+            if model.get("reason_code"):
+                preparation["reason_code"] = model["reason_code"]
+                value["reason_code"] = model["reason_code"]
+        value["preparation"] = {**preparation, "image": image}
         return value
 
     def _stop_retry_reason(self, binding):

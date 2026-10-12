@@ -8,7 +8,7 @@ import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {createP4OperatorClient} from './p4-operator-client.js';
 import {createP4OperatorController} from './p4-operator-controller.js';
-import {batchRows,costLabel,groupedNodes,initialRows,lifetimeBody,phase,previewCurrent,queueLabel,rate,todayMetrics,workspaceStale} from './p4-operator-model.js';
+import {batchRows,costLabel,groupedNodes,initialRows,lifetimeBody,phase,preparationSteps,preparationView,transferProgress,previewCurrent,queueLabel,rate,todayMetrics,workspaceStale} from './p4-operator-model.js';
 
 const memory=()=>{const values=new Map();return {getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)};};
 function client(overrides={}){let account;return {setAccount:value=>{account=value;},reset(){},state:async()=>({capacity_backend:'dstack-v1',operator:{account,admin:false},nodes:[],groups:[],queue:[]}),catalog:async()=>({profiles:[]}),...overrides};}
@@ -143,4 +143,73 @@ test('actual detail and rows expose measured-only stats and never hide keep poli
   const ended=renderToStaticMarkup(React.createElement(module.exports.MachineRow,{node:{...node,state:'stopped',lifecycle_phase:'stopped'},profiles:[],onDetail:()=>{}}));assert.match(ended,/已结束/);assert.doesNotMatch(ended,/等待准备完成/);
   const details=renderToStaticMarkup(React.createElement(module.exports.MachineDetail,{node,profiles:[],groups:[],onClose:()=>{}}));assert.match(details,/平均生成耗时/);assert.match(details,/暂无样本/);assert.match(details,/平均提交至交付 210 秒/);assert.match(details,/今日总费用.*上限估算/);assert.match(details,/今日已生成视频/);assert.doesNotMatch(details,/热机.*相同设置/);
   const css=await readFile(new URL('./p4-operator.css',import.meta.url),'utf8');assert.doesNotMatch(css,/\.p4-keep\s*\{[^}]*display\s*:\s*none/);
+});
+
+const base={id:'original',owner_id:'supervan',provider:'vastai',mode:'fl',runtime_profile_id:'pruned',state:'starting',desired_state:'running',ready:false,observation_fresh:true,lifecycle_phase:'preparing'};
+const progress=changes=>({phase:'downloading_weights',started_at:1000,phase_started_at:1300,updated_at:1600,elapsed_seconds:600,phase_elapsed_seconds:300,observation_age_seconds:5,stale:false,stalled:false,reason_code:null,reason_text:null,download:{bytes_complete:1024**3,bytes_total:2*1024**3,files_complete:1,files_total:3,percent:50},image:null,model:{state:'not_loaded',updated_at:1500},...changes});
+
+test('observed model-load phase does not create ready capacity or alter the original job identity',()=>{
+  const node={...base,current_job:{job_id:'first-original-job'},preparation:progress({phase:'loading_model',model:{state:'loading'}})};
+  assert.equal(preparationView(node).status.label,'加载模型中');
+  assert.equal(phase(node).id,'running','the original busy slot remains the scheduling authority');
+  assert.equal(node.ready,false);assert.equal(node.current_job.job_id,'first-original-job');
+  const lazy=preparationView({...base,preparation:progress({phase:'awaiting_first_job'})});
+  assert.match(lazy.modelLabel,/将在首个任务加载/);
+  assert.equal(preparationSteps(lazy).find(step=>step.id==='loading_model').pending,true);
+  const premature=preparationView({...base,preparation:progress({phase:'ready',model:{state:'loaded'}})});
+  assert.match(premature.status.label,/等待执行槽/,'runtime observation alone cannot grant a business worker');
+  for(const oldPhase of ['ready','awaiting_first_job','downloading_weights'])assert.equal(preparationView({...node,preparation:progress({phase:oldPhase,model:{state:'loaded'}})}).status.id,'running_job','an old preparation phase cannot hide the current business job');
+  assert.equal(preparationView({...base,ready:true,preparation:progress({phase:'downloading_weights',stale:true})}).status.id,'ready','a fresh ready worker dominates old preparation observations');
+  assert.equal(preparationView({...node,preparation:progress({phase:'loading_model',stale:true,model:{state:'loading'}})}).status.id,'running_job','a stale model observation cannot replace the live job stage');
+});
+
+test('download counters preserve partial and zero values without inventing percentages or totals',()=>{
+  assert.deepEqual(transferProgress(null),{label:'下载量尚未上报',percent:null});
+  assert.equal(transferProgress({bytes_complete:1024**3}).label,'已下载 1.00 GiB');
+  assert.equal(transferProgress({bytes_complete:0,bytes_total:2048}).label,'0 B / 2.00 KiB');
+  assert.equal(transferProgress({bytes_complete:1024,bytes_total:2048}).percent,null,'no percentage was actually reported');
+  assert.equal(transferProgress({bytes_complete:1024,percent:50}).percent,null,'unknown total cannot support a percent bar');
+  assert.equal(transferProgress({bytes_complete:4096,bytes_total:2048,percent:100}).percent,null,'inconsistent total is not a completion proof');
+  assert.equal(transferProgress({bytes_complete:-1,bytes_total:NaN,files_complete:-3,percent:50}).percent,null);
+  assert.equal(transferProgress(progress().download).percent,50);
+  assert.equal(transferProgress({...progress().download,basis:'completed_files'}).label,'已完成文件 1.00 GiB / 2.00 GiB · 1 / 3 个文件');
+  assert.match(transferProgress({bytes_complete:1024,extracted_bytes:2048}).label,/已解压 2.00 KiB/);
+  assert.equal(transferProgress({bytes_complete:3*1024**3,bytes_total:6*1024**3,downloaded_bytes:2*1024**3,extracted_bytes:1024**3,percent:50,basis:'download_and_extract'}).label,'拉取＋解压 3.00 GiB / 6.00 GiB · 已下载 2.00 GiB · 已解压 1.00 GiB');
+});
+
+test('stale and stalled progress remain observations rather than fabricated machine failures',()=>{
+  const node={...base,preparation:progress({stale:true,stalled:true,reason_code:'weight_download_not_advancing',reason_text:'权重下载尚未继续'})};
+  const view=preparationView(node);
+  assert.equal(view.status.id,'downloading_weights');assert.equal(view.stale,true);assert.equal(view.stalled,true);
+  assert.equal(view.elapsedSeconds,600);assert.equal(view.phaseElapsed,300);
+  assert.equal(node.state,'starting');assert.equal(view.reasonCode,'weight_download_not_advancing');
+  const ended=preparationView({...node,state:'stopped'});
+  assert.equal(ended.status.id,'stopped');assert.equal(ended.elapsedSeconds,600);
+  assert.equal(preparationSteps(ended).at(-1).id,'stopped');
+  const older=preparationView(base);
+  assert.equal(older.source,null);assert.equal(older.elapsedSeconds,null);assert.equal(older.download.percent,null);
+  assert.equal(preparationView({...base,reason_code:'<script>invalid</script>'}).reasonCode,null);
+});
+
+test('machine rows and detail share live amounts, elapsed, safe causes and distinct model loading',async()=>{
+  const path=fileURLToPath(new URL('./P4OperatorConsole.jsx',import.meta.url)),contents=await readFile(path,'utf8');
+  const bundled=await build({stdin:{contents,resolveDir:path.replace(/[/\\][^/\\]+$/,''),loader:'jsx'},bundle:true,write:false,platform:'node',format:'cjs',packages:'external',loader:{'.css':'empty'}});
+  const module=new Module(path);module.filename=path;module.paths=Module._nodeModulePaths(path.replace(/[/\\][^/\\]+$/,''));module._compile(bundled.outputFiles[0].text,path);
+  const node={...base,preparation:progress({stalled:true,stale:true,reason_code:'weight_download_not_advancing',reason_text:'下载源暂未继续传输'})};
+  const row=renderToStaticMarkup(React.createElement(module.exports.MachineRow,{node,profiles:[],onDetail:()=>{}}));
+  assert.match(row,/下载权重中/);assert.match(row,/1.00 GiB \/ 2.00 GiB/);assert.match(row,/1 \/ 3 个文件/);
+  assert.match(row,/启动至今 10 分钟.*本阶段 5 分钟/);assert.match(row,/下载源暂未继续传输/);assert.match(row,/状态观测已过期/);
+  assert.doesNotMatch(row,/等待准备完成|机器失败/);assert.match(row,/p4-keep/);
+  const detail=renderToStaticMarkup(React.createElement(module.exports.MachineDetail,{node,profiles:[],groups:[],onClose:()=>{}}));
+  assert.match(detail,/准备进度/);assert.match(detail,/当前阶段耗时/);assert.match(detail,/weight_download_not_advancing/);
+  assert.match(detail,/将在首个任务加载/);assert.match(detail,/progress aria-label="权重下载进度" max="100" value="50"/);
+  const loading={...base,current_job:{job_id:'first-original-job'},preparation:progress({phase:'loading_model',model:{state:'loading'}})};
+  const loadingRow=renderToStaticMarkup(React.createElement(module.exports.MachineRow,{node:loading,profiles:[],onDetail:()=>{}}));
+  assert.match(loadingRow,/加载模型中/);assert.match(loadingRow,/正在加载模型到 GPU/);assert.match(loadingRow,/#first-or/);
+  const missing=renderToStaticMarkup(React.createElement(module.exports.MachinePreparation,{node:base,detail:true}));
+  assert.match(missing,/下载量尚未上报/);assert.match(missing,/尚未收到详细准备观测/);assert.doesNotMatch(missing,/<progress/);
+  const ended=renderToStaticMarkup(React.createElement(module.exports.MachinePreparation,{node:{...node,state:'stopped'},detail:true}));
+  assert.match(ended,/本次启动历时/);assert.doesNotMatch(ended,/累计运行|启动至今/);
+  const escaped=renderToStaticMarkup(React.createElement(module.exports.MachinePreparation,{node:{...base,preparation:progress({reason_text:'<script>unsafe</script>'})},detail:true}));
+  assert.doesNotMatch(escaped,/<script>/);assert.match(escaped,/&lt;script&gt;/);
 });

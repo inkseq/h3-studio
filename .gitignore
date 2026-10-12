@@ -439,4 +439,6 @@ inventory.json
 !studio_platform/storage_migration.py
 !studio_platform/storage_migration_cli.py
 !studio_platform/scratch_retention.py
+!studio_platform/dstack_preparation.py
+!test_dstack_preparation.py
 !STORAGE-MIGRATION.md
