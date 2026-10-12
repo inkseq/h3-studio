@@ -51,6 +51,7 @@ def deploy(commit, *, root=release.ROOT):
         # Both download and apply stay under the same host lock. The root
         # approval file is checked again while copying the incoming bundle.
         release.apply_locked(root, commit)
+        release.post_release_retention(root)
 
 
 def main(argv=None):

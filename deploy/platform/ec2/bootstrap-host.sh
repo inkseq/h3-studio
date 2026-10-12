@@ -27,6 +27,15 @@ cat > /etc/docker/daemon.json <<'EOF'
 EOF
 systemctl enable --now docker
 systemctl restart docker
+install -d -o root -g root -m 0755 /etc/systemd/journald.conf.d
+cat > /etc/systemd/journald.conf.d/sixnine-retention.conf <<'EOF'
+[Journal]
+MaxRetentionSec=7day
+MaxFileSec=1day
+SystemMaxUse=128M
+RuntimeMaxUse=64M
+EOF
+systemctl restart systemd-journald
 getent group deploy >/dev/null || groupadd --system deploy
 id deploy >/dev/null 2>&1 || useradd --system --gid deploy --no-create-home --shell /usr/sbin/nologin deploy
 # Deliberately do not grant Docker group or arbitrary sudo to deployment user.
