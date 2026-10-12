@@ -14,16 +14,131 @@ import sys
 import threading
 from unittest import mock
 
-from sqlalchemy import event
+from sqlalchemy import event, insert
 
 from studio_platform import media
 from studio_platform.asset_recovery import list_receipts, main, recover_asset
-from studio_platform.assets import AssetConflict, AssetNotFound, AssetService
+from studio_platform.assets import AssetConflict, AssetNotFound, AssetService, asset_table
 from studio_platform.settings import Settings
-from studio_platform.storage import IntegrityError, LocalObjectStore, ObjectNotFound, StorageWriteUncertain
+from studio_platform.storage import IntegrityError, LocalObjectStore, ObjectNotFound, S3ObjectStore, StorageWriteUncertain
 from test_platform_assets import FaultStore, png
 from test_platform_repository import LedgerCase
-from test_platform_storage_multipart import ProcessStopped
+from test_platform_storage import config
+from test_platform_storage_multipart import FakeMultipartS3, ProcessStopped
+
+
+class R2AssetScratchTests(LedgerCase):
+    def setUp(self):
+        super().setUp()
+        self.root = Path(self.temp.name)
+        selected = config()
+        self.fake = FakeMultipartS3(selected)
+        self.store = S3ObjectStore(selected, client=self.fake)
+        self.service = AssetService(self.repo.engine, self.store, self.root,
+            tenant=self.scope.tenant_id, max_bytes=2*1024*1024)
+
+    def upload(self):
+        return self.service.upload(self.scope.owner_id, self.scope.project_id,
+                                   io.BytesIO(png()), "reference.png")
+
+    def pending(self):
+        with mock.patch.object(self.service, "_cleanup_after_release"):
+            asset = self.upload()
+        return self.service.journal.get(self.scope.owner_id, asset["id"])
+
+    def test_ready_r2_upload_removes_only_its_verified_scratch_and_keeps_objects(self):
+        # Existing local media is an independent retained rollback copy.
+        retained = self.root / "existing-local-media"
+        retained.write_bytes(b"must retain")
+        asset = self.upload()
+        receipt = self.service.journal.get(self.scope.owner_id, asset["id"])
+        remote_bytes = sum(value["size_bytes"] for value in receipt["objects"].values())
+        self.assertEqual((asset["status"], receipt["busy"]), ("ready", False))
+        self.assertFalse(self.service._stage(receipt).exists())
+        self.assertEqual(receipt["scratch_cleanup"]["phase"], "complete")
+        self.assertEqual(self.service.usage(self.scope.owner_id)["accounted_bytes"], remote_bytes)
+        self.assertEqual(len(self.fake.objects), 2)
+        self.assertEqual(retained.read_bytes(), b"must retain")
+        self.assertEqual(self.service.resume(self.scope.owner_id, asset["id"])["status"], "ready")
+        self.assertEqual(self.service.usage(self.scope.owner_id)["accounted_bytes"], remote_bytes)
+
+    def test_crash_after_unlink_before_quota_commit_recovers_once_without_reupload(self):
+        receipt = self.pending()
+        before = self.service.usage(self.scope.owner_id)["accounted_bytes"]
+        save = self.service.journal.save
+        def interrupted(value, **kwargs):
+            if value.get("scratch_cleanup", {}).get("phase") == "complete":
+                raise ProcessStopped()
+            return save(value, **kwargs)
+        with mock.patch.object(self.service.journal, "save", side_effect=interrupted):
+            with self.assertRaises(ProcessStopped):
+                self.service._cleanup_ready(receipt)
+        self.assertEqual(self.service.usage(self.scope.owner_id)["accounted_bytes"], before)
+        self.assertEqual(list(self.service._stage(receipt).iterdir()), [])
+        with mock.patch.object(self.store, "put", side_effect=AssertionError("Never reupload")):
+            self.service.resume(self.scope.owner_id, receipt["id"])
+            self.service.resume(self.scope.owner_id, receipt["id"])
+        remote_bytes = sum(value["size_bytes"] for value in receipt["objects"].values())
+        self.assertEqual(self.service.usage(self.scope.owner_id)["accounted_bytes"], remote_bytes)
+
+    def test_busy_legacy_corrupt_remote_and_unexpected_files_do_not_delete(self):
+        for reason in ("busy", "legacy", "remote", "changed", "extra"):
+            with self.subTest(reason=reason):
+                receipt = self.pending()
+                source = self.service._file(receipt, "source.png")
+                before = self.service.usage(self.scope.owner_id)["accounted_bytes"]
+                if reason == "busy":
+                    receipt["busy"] = True
+                elif reason == "legacy":
+                    receipt.pop("scratch_policy")
+                elif reason == "remote":
+                    self.fake.objects[receipt["objects"]["original"]["key"]]["body"] = b"bad"
+                elif reason == "changed":
+                    source.write_bytes(png("red"))
+                else:
+                    (source.parent / "unrelated.bin").write_bytes(b"preserve")
+                if reason in ("remote", "changed", "extra"):
+                    with self.assertRaises(IntegrityError):
+                        self.service._cleanup_ready(receipt)
+                else:
+                    self.service._cleanup_ready(receipt)
+                self.assertEqual(source.read_bytes(), png("red") if reason == "changed" else png())
+                self.assertEqual(self.service.usage(self.scope.owner_id)["accounted_bytes"], before)
+
+    def test_unknown_put_keeps_staging_and_original_fixed_key(self):
+        original = self.store.put
+        def lost(key, *args, **kwargs):
+            original(key, *args, **kwargs)
+            raise StorageWriteUncertain(key)
+        with mock.patch.object(self.store, "put", side_effect=lost):
+            with self.assertRaises(StorageWriteUncertain):
+                self.upload()
+        asset = self.service.list(self.scope.owner_id, self.scope.project_id)[0]
+        receipt = self.service.journal.get(self.scope.owner_id, asset["id"])
+        key = receipt["objects"]["original"]["key"]
+        self.assertEqual(receipt["asset"]["status"], "storage_unknown")
+        self.assertTrue(self.service._file(receipt, "source.png").exists())
+        self.assertNotIn("scratch_cleanup", receipt)
+        self.service.resume(self.scope.owner_id, receipt["id"])
+        latest = self.service.journal.get(self.scope.owner_id, receipt["id"])
+        self.assertEqual(latest["objects"]["original"]["key"], key)
+        self.assertEqual(latest["scratch_cleanup"]["phase"], "complete")
+
+    def test_ready_legacy_asset_without_upload_receipt_keeps_prior_fast_path(self):
+        import uuid
+        ident = uuid.uuid4().hex
+        asset = dict(id=ident, asset_id=ident, status="ready", project_id=self.scope.project_id,
+                     created_at=1, file_name="old.png")
+        with self.repo.engine.begin() as conn:
+            conn.execute(insert(asset_table).values(id=ident, tenant=self.scope.tenant_id,
+                owner=self.scope.owner_id, project_id=self.scope.project_id, status="ready",
+                created=1, record=json.dumps(asset)))
+        directory = self.service.staging_dir / ident
+        directory.mkdir()
+        path = directory / "source.png"
+        path.write_bytes(png())
+        self.assertEqual(self.service.resume(self.scope.owner_id, ident)["status"], "ready")
+        self.assertEqual(path.read_bytes(), png())
 
 
 class AssetRecoveryTests(LedgerCase):

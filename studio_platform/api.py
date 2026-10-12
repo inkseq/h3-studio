@@ -25,7 +25,7 @@ from .project_validation import validate_project
 from .repository import Repository, NotFound, Conflict, BudgetExceeded, artifacts, jobs
 from .settings import Settings
 from .storage import LocalObjectStore, StorageError, S3ObjectStore
-from .storage_config import S3StorageConfig, R2_CREDENTIAL_FIELDS, load_storage_credentials
+from .storage_config import S3StorageConfig, load_configured_storage_credentials
 from .http_limits import (ADMISSION_SCOPE_KEY, BodyLimitMiddleware, UploadAdmission,
                          RequestAdmission, RequestAdmissionMiddleware, admission_rejected, is_asset_upload, body_limit)
 from .execution_policy import ExecutionPolicies
@@ -56,7 +56,7 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
             import os
             cfg = S3StorageConfig("r2", settings.storage_endpoint, settings.storage_region,
                 settings.storage_bucket, "cloudflare-r2", settings.storage_profile, enabled=True)
-            credentials = load_storage_credentials(cfg, fields=R2_CREDENTIAL_FIELDS,
+            credentials = load_configured_storage_credentials(cfg, credentials_file=settings.storage_credential_file,
                 registry_root=os.environ.get("AI_REGISTRY_ROOT"))
             storage = S3ObjectStore(cfg, credentials)
         else:

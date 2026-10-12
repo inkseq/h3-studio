@@ -165,8 +165,7 @@ User decision, 2026-10-08 ([DEC-011](DECISIONS.md#dec-011--use-rtx-5090-and-int8
 An execution slot may use one or several GPUs. Two single-GPU replicas are different from one tensor-parallel two-GPU slot.
 A first/last-frame-only node and a reference-only node do not provide redundancy for either individual capability.
 
-Initially keep EC2 CPU hosting, independently supervised API/worker/controller processes, PostgreSQL, and protected local media storage.
-Evaluate S3 migration with verified backup/restore; R2 or Hippius require their own storage-semantics evidence.
+Keep EC2 CPU hosting, independently supervised API/worker/controller processes and PostgreSQL. The 2026-10-12 user direction selects a dedicated private R2 bucket for production media, using the existing adapter and central profile; no database/object-key rewrite or host resize. Follow [the bounded storage cutover procedure](STORAGE-MIGRATION.md), verify upload/reference/video/audio/browser/Agent paths, and retain all pre-migration local copies until user confirmation. New scratch cleanup requires verified remote bytes and committed completion. Preserve current/previous rollback releases and explicitly record old local binary/new R2 object and backup compatibility limits (DEC-009).
 Managed CPU/container/database services are later options when availability and scale requirements justify migration.
 Runtime secrets come through the existing central/runtime loaders; no new plaintext credential copies.
 

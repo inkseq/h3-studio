@@ -5,6 +5,7 @@ from dataclasses import asdict
 from contextlib import contextmanager
 import hashlib
 import json
+import logging
 import math
 import os
 from pathlib import Path
@@ -21,6 +22,7 @@ from .storage_asset_journal import AssetUploadJournal, AssetConflict, AssetQuota
 from .storage_multipart import MultipartJournal, MultipartOutcomeUnknown, MultipartUploadManager
 from .storage_schema import create_storage_schema
 from .asset_operation import asset_operation_lock
+from . import scratch_retention
 
 MIB = 1024 * 1024
 metadata = MetaData()
@@ -52,7 +54,8 @@ class _PartReader:
 
 class AssetService:
     # Suggested application caps, not supplier limits. Reservations include
-    # original/model plus durable staging copies; bytes are not auto-deleted.
+    # original/model plus durable staging until verified publication commits.
+    # Local and pre-cutover receipts keep their existing copies untouched.
     def __init__(self, engine, store, data_dir, *, tenant="sixnine", max_bytes=512*MIB,
                  owner_quota_bytes=10*1024*MIB, tenant_quota_bytes=40*1024*MIB,
                  max_active_per_owner=2, max_active_total=4):
@@ -126,6 +129,66 @@ class AssetService:
                     retained += info.st_size
             retained += sum(receipt["asset"].get(role, {}).get("size_bytes", 0) for role in ("original", "model"))
         self.journal.release(receipt, retained)
+        self._cleanup_after_release(receipt)
+
+    def _cleanup_after_release(self, receipt):
+        try:
+            self._cleanup_ready(receipt)
+        except Exception:
+            # Cleanup is after acceptance: never report a ready upload as failed
+            # or invite a duplicate submission because retained scratch remains.
+            logging.getLogger(__name__).warning("r2_asset_scratch_cleanup_pending")
+
+    def _cleanup_committed_asset(self, owner, asset_id):
+        if not isinstance(self.store, S3ObjectStore) or self.store.config.provider != "r2":
+            return
+        try:
+            receipt = self.journal.get(owner, asset_id)
+        except AssetConflict:
+            # Historical published assets may have no upload receipt at all.
+            return
+        self._cleanup_after_release(receipt)
+
+    def _cleanup_ready(self, receipt):
+        if (not isinstance(self.store, S3ObjectStore) or self.store.config.provider != "r2"
+                or receipt.get("scratch_policy") != scratch_retention.POLICY
+                or receipt.get("storage_binding") != self.storage_binding
+                or receipt["busy"] or receipt["asset"]["status"] != "ready"):
+            return
+        cleanup = receipt.get("scratch_cleanup")
+        if cleanup and cleanup["phase"] == "complete":
+            return
+        if not receipt.get("prepared") or "original" not in receipt["objects"]:
+            raise IntegrityError("r2_asset_scratch_evidence_missing")
+        for role, spec in receipt["objects"].items():
+            actual = receipt["asset"].get(role, {})
+            if (role not in {"original", "model"} or spec.get("phase") != "verified"
+                    or any(actual.get(k) != spec.get(k) for k in ("key", "size_bytes", "sha256", "content_type"))):
+                raise IntegrityError("r2_asset_scratch_evidence_mismatch")
+            self._verify_stored(spec)
+        directory = self._stage(receipt)
+        remote_bytes = sum(spec["size_bytes"] for spec in receipt["objects"].values())
+        if cleanup is None:
+            paths = [self._file(receipt, spec["filename"]) for spec in receipt["objects"].values()]
+            files = scratch_retention.manifest(directory, paths, self.max_bytes)
+            if any((files[spec["filename"]]["size_bytes"], files[spec["filename"]]["sha256"])
+                   != (spec["size_bytes"], spec["sha256"]) for spec in receipt["objects"].values()):
+                raise IntegrityError("r2_asset_scratch_hash_mismatch")
+            if {path.name for path in directory.iterdir()} != set(files):
+                raise IntegrityError("r2_asset_scratch_unexpected_file")
+            stage_bytes = sum(spec["size_bytes"] for spec in files.values())
+            if receipt["reserved"] != remote_bytes + stage_bytes:
+                raise IntegrityError("r2_asset_scratch_accounting_mismatch")
+            cleanup = receipt["scratch_cleanup"] = dict(phase="pending", files=files, bytes=stage_bytes)
+            self.journal.save(receipt)  # Exact deletion intent before filesystem IO.
+        if receipt["reserved"] != remote_bytes + cleanup["bytes"]:
+            raise IntegrityError("r2_asset_scratch_accounting_mismatch")
+        scratch_retention.remove_manifest(directory, cleanup["files"], self.max_bytes)
+        receipt["reserved"] = remote_bytes
+        cleanup.update(phase="complete", completed_at=time.time())
+        self.journal.save(receipt, byte_delta=-cleanup["bytes"])
+        if directory.exists():
+            directory.rmdir()
 
     def upload(self, owner, project_id, source, filename, *, client_asset_id=None, parent_id=None, selection=None):
         ident = uuid.uuid4().hex
@@ -155,6 +218,8 @@ class AssetService:
         receipt = self.journal.create(owner, asset)
         receipt["suffix"] = suffix
         receipt["storage_binding"] = self.storage_binding
+        if isinstance(self.store, S3ObjectStore) and self.store.config.provider == "r2":
+            receipt["scratch_policy"] = scratch_retention.POLICY
         try:
             # A kill during receiving must still identify the exact original
             # storage/staging contract; an old unbound receipt is never guessed.
@@ -328,6 +393,8 @@ class AssetService:
         # An operator assertion never overrides a still-running local operation.
         asset = self.get(owner, asset_id)
         if asset["status"] == "ready" and not interrupted and expected_version is None:
+            with self._operation(asset_id):
+                self._cleanup_committed_asset(owner, asset_id)
             return self.public(asset)
         with self._operation(asset_id):
             return self._reconcile_locked(owner, asset_id, interrupted=interrupted,
@@ -336,6 +403,7 @@ class AssetService:
     def _reconcile_locked(self, owner, asset_id, *, interrupted=False, expected_version=None):
         asset = self.get(owner, asset_id)
         if asset["status"] == "ready" and not interrupted and expected_version is None:
+            self._cleanup_committed_asset(owner, asset_id)
             return self.public(asset)
         receipt = self.journal.get(owner, asset_id)
         if expected_version is not None and (type(expected_version) is not int or expected_version < 0
@@ -360,6 +428,8 @@ class AssetService:
                 # Ready was saved before the independent quota-release commit.
                 # Reconcile bytes and release once; never generate or write keys.
                 self._release(receipt)
+            else:
+                self._cleanup_after_release(receipt)
             return self.public(asset)
         self.journal.claim(receipt, interrupted=interrupted)
         return self._run_locked(receipt, interrupted=interrupted)
@@ -441,6 +511,8 @@ class AssetService:
         receipt.update(suffix=suffix, storage_binding=self.storage_binding, accepted_input=True,
             derivation={"input_name": "derivation-input"+Path(parent["file_name"]).suffix.lower(),
                         "original": dict(parent["original"]), "metadata": dict(info), "phase": "planned"})
+        if isinstance(self.store, S3ObjectStore) and self.store.config.provider == "r2":
+            receipt["scratch_policy"] = scratch_retention.POLICY
         self.journal.save(receipt)
         return self._run_locked(receipt)
 

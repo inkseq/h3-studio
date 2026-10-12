@@ -60,7 +60,7 @@ def _opaque(value, minimum=32, maximum=4096):
 def validate(payload, *, allow_uninitialized=False):
     """Closed schema, exact endpoints and existing safe Cloud exporter contract."""
     if (type(payload) is not dict or not {"schema_version", "providers", "grafana_cloud"} <= set(payload)
-            or set(payload) - {"schema_version", "providers", "grafana_cloud", "grafana_stage_query", "infrastructure", "hatchet_api_token"}
+            or set(payload) - {"schema_version", "providers", "grafana_cloud", "grafana_stage_query", "r2_storage", "infrastructure", "hatchet_api_token"}
             or type(payload["schema_version"]) is not int or payload["schema_version"] != 1):
         raise ValueError("migration_secret_structure_invalid")
     providers = payload["providers"]
@@ -99,6 +99,8 @@ def validate(payload, *, allow_uninitialized=False):
             raise ValueError("migration_cloud_configuration_invalid")
     if "grafana_stage_query" in payload:
         _validate_stage_query(payload["grafana_stage_query"])
+    if "r2_storage" in payload:
+        _validate_r2_storage(payload["r2_storage"])
     if "infrastructure" not in payload:
         if not allow_uninitialized or "hatchet_api_token" in payload:
             raise ValueError("migration_infrastructure_recovery_required")
@@ -135,6 +137,29 @@ def _validate_stage_query(value):
         valid = False
     if not valid:
         raise ValueError("migration_stage_query_configuration_invalid")
+
+
+def _validate_r2_storage(value):
+    # Standalone host helper: mirror the protected runtime reader's closed
+    # identity. Secrets stay in the managed payload/file, never Compose/env.
+    required = {"schema_version", "service", "profile", "endpoint_url", "region",
+        "bucket", "access_key_id", "secret_access_key"}
+    if (type(value) is not dict or not required <= set(value)
+            or set(value) - required - {"session_token"}
+            or type(value["schema_version"]) is not int or value["schema_version"] != 1
+            or value["service"] != "cloudflare-r2" or value["profile"] != "cloudflare-r2--rig-root"
+            or value["region"] != "auto"
+            or not isinstance(value["endpoint_url"], str)
+            or not re.fullmatch(r"https://[0-9a-f]{32}(?:\.(?:eu|us|fedramp))?\.r2\.cloudflarestorage\.com", value["endpoint_url"])
+            or not isinstance(value["bucket"], str)
+            or not re.fullmatch(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]", value["bucket"])):
+        raise ValueError("migration_r2_storage_configuration_invalid")
+    for field in ("access_key_id", "secret_access_key", "session_token"):
+        if field in value and (not isinstance(value[field], str) or not 1 <= len(value[field]) <= 8192
+                or any(ord(c) < 33 or ord(c) == 127 for c in value[field])):
+            raise ValueError("migration_r2_storage_configuration_invalid")
+    if len((json.dumps(value, separators=(",", ":"), sort_keys=True)+"\n").encode("utf-8")) > 16384:
+        raise ValueError("migration_r2_storage_configuration_invalid")
 
 
 def _validate_infrastructure(infrastructure):
@@ -395,6 +420,8 @@ def outputs(payload):
         result["hatchet_api_token"] = (payload["hatchet_api_token"]+"\n", 10001, 10001, 0o600)
     if "grafana_stage_query" in payload:
         result["grafana_stage_query"] = (serialized(payload["grafana_stage_query"]), 10001, 10001, 0o600)
+    if "r2_storage" in payload:
+        result["r2_storage"] = (serialized(payload["r2_storage"]), 0, 10001, 0o440)
     return result
 
 
@@ -410,7 +437,7 @@ def _verify_file(fd, content, uid, gid, mode):
 def write_outputs(files):
     """Check the complete set first; never replace already-bound inodes."""
     if set(files) - {"dstack-server-config.yml", "grafana_cloud", "grafana_stage_query", "dstack_api_token",
-            "dstack_database_url", "hatchet/database-password", "hatchet/administrator-password", "hatchet_api_token"}:
+            "dstack_database_url", "hatchet/database-password", "hatchet/administrator-password", "hatchet_api_token", "r2_storage"}:
         raise ValueError("migration_unexpected_runtime_file")
     root_present = _directory(ROOT)
     if root_present:

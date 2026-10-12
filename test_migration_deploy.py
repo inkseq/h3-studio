@@ -137,6 +137,100 @@ class MigrationDeployTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "^"+code+"$"):
             validate(value)
 
+    def render_r2(self):
+        environment = fixture_environment()
+        environment.update(SIXNINE_STORAGE_PROVIDER="r2",
+            SIXNINE_STORAGE_ENDPOINT="https://"+"a"*32+".r2.cloudflarestorage.com",
+            SIXNINE_STORAGE_REGION="auto", SIXNINE_STORAGE_BUCKET="sixnine-synthetic-media",
+            SIXNINE_STORAGE_PROFILE="cloudflare-r2--rig-root",
+            SIXNINE_STORAGE_CREDENTIAL_FILE="/run/sixnine-secrets/r2_storage")
+        rendered = {}
+        def render(command, **kwargs):
+            result = subprocess.run(command, **kwargs)
+            if result.returncode == 0:
+                rendered.update(json.loads(result.stdout))
+            return result
+        check(ROOT / "deploy/platform/compose.yaml", ROOT / "deploy/dstack/platform-overlay.yaml",
+            environment=environment, runner=render)
+        return rendered
+
+    def test_local_static_credential_alias_is_unused_and_reads_no_secret(self):
+        from studio_platform.settings import Settings
+        from studio_platform.fleet import create_store
+        from studio_platform.storage import LocalObjectStore
+        services = self.document["services"]
+        self.assertEqual(self.document["secrets"]["r2_storage"]["file"],
+            self.document["secrets"]["grafana_cloud"]["file"])
+        with tempfile.TemporaryDirectory() as directory:
+            for name in ("app", "controller"):
+                env = {key: value for key, value in services[name]["environment"].items()
+                    if key.startswith("SIXNINE_STORAGE_")}
+                env["SIXNINE_DATA"] = directory
+                with patch.dict(os.environ, env, clear=True), patch(
+                        "studio_platform.storage_config.load_configured_storage_credentials",
+                        side_effect=AssertionError("Local mode must never read alias or registry")):
+                    settings = Settings.from_environment()
+                    self.assertIsNone(settings.storage_credential_file)
+                    self.assertIsInstance(create_store(settings), LocalObjectStore)
+
+    def test_r2_identity_and_protected_file_reach_controller_worker_without_dispatch_keys(self):
+        from studio_platform.settings import Settings
+        from studio_platform.fleet import create_store
+        from studio_platform.storage_config import S3Credentials
+        document = self.render_r2()
+        self.assertEqual(document["secrets"]["r2_storage"]["file"], "/run/sixnine-secrets/r2_storage")
+        app, controller, dispatch = (document["services"][name]["environment"]
+            for name in ("app", "controller", "dispatch"))
+        fields = ("SIXNINE_STORAGE_PROVIDER", "SIXNINE_STORAGE_ENDPOINT", "SIXNINE_STORAGE_REGION",
+            "SIXNINE_STORAGE_BUCKET", "SIXNINE_STORAGE_PROFILE")
+        self.assertEqual({key: app[key] for key in fields}, {key: controller[key] for key in fields})
+        self.assertEqual({key: app[key] for key in fields}, {key: dispatch[key] for key in fields})
+        self.assertNotIn("SIXNINE_STORAGE_CREDENTIAL_FILE", dispatch)
+        selected = {key: value for key, value in controller.items() if key.startswith("SIXNINE_STORAGE_")}
+        self.assertEqual(selected["SIXNINE_STORAGE_CREDENTIAL_FILE"], "/run/secrets/r2_storage")
+        if os.name == "nt":
+            # The rendered contract targets Linux. Use a native absolute path
+            # only for this Windows store-factory fixture (no file is opened).
+            selected["SIXNINE_STORAGE_CREDENTIAL_FILE"] = str(ROOT / "never-opened-r2-runtime-fixture")
+        # Slot children inherit controller's environment; their existing store
+        # factory must select the mounted file, not a workstation loader.
+        with patch.dict(os.environ, selected, clear=True), patch(
+                "studio_platform.storage_config.load_configured_storage_credentials",
+                return_value=S3Credentials("synthetic", "synthetic")) as credentials, patch(
+                "studio_platform.storage.S3ObjectStore") as store:
+            settings = Settings.from_environment()
+            self.assertEqual(settings.storage_credential_file, Path(selected["SIXNINE_STORAGE_CREDENTIAL_FILE"]))
+            create_store(settings)
+            config = credentials.call_args.args[0]
+            self.assertEqual((config.provider, config.profile, config.bucket),
+                ("r2", "cloudflare-r2--rig-root", "sixnine-synthetic-media"))
+            self.assertEqual(credentials.call_args.kwargs["credentials_file"], settings.storage_credential_file)
+            self.assertIsNone(credentials.call_args.kwargs["registry_root"])
+            store.assert_called_once()
+
+    def test_r2_split_missing_opt_in_fallback_and_environment_keys_are_rejected(self):
+        baseline = self.render_r2()
+        for mutate, code in (
+                (lambda d: d["services"]["controller"]["environment"].update(SIXNINE_STORAGE_BUCKET="another-bucket"),
+                    "migration_storage_identity_split"),
+                (lambda d: d["services"]["app"]["environment"].update(SIXNINE_STORAGE_CREDENTIAL_FILE=""),
+                    "migration_storage_r2_configuration_invalid"),
+                (lambda d: d["secrets"]["r2_storage"].update(file=d["secrets"]["grafana_cloud"]["file"]),
+                    "migration_storage_r2_configuration_invalid"),
+                (lambda d: d["services"]["dispatch"]["environment"].update(SIXNINE_STORAGE_CREDENTIAL_FILE="/run/secrets/r2_storage"),
+                    "migration_storage_dispatch_credential"),
+                (lambda d: d["services"]["controller"]["environment"].update(R2_SECRET_ACCESS_KEY="SYNTHETIC_PRIVATE"),
+                    "migration_secret_value_in_compose"),
+                (lambda d: d["services"]["app"]["environment"].update(R2_TOKEN="SYNTHETIC_PRIVATE"),
+                    "migration_secret_value_in_compose"),
+                (lambda d: d["services"]["app"]["environment"].update(SIXNINE_STORAGE_SECRET="SYNTHETIC_PRIVATE"),
+                    "migration_storage_unexpected_environment")):
+            value = copy.deepcopy(baseline); mutate(value)
+            with self.subTest(code=code), self.assertRaisesRegex(ValueError, "^"+code+"$"):
+                validate(value)
+        self.assert_rejected(lambda d: d["secrets"]["r2_storage"].update(file="/run/sixnine-secrets/r2_storage"),
+            "migration_storage_local_configuration_invalid")
+
     def test_real_compose_merge_shared_namespace_pins_and_memory(self):
         self.assertEqual(self.receipt["service_memory_cap_mib"], 3296)
         self.assertGreaterEqual(self.receipt["host_reserve_mib"], 512)

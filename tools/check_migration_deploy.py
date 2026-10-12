@@ -63,6 +63,47 @@ def secret_names(service):
     return {item if isinstance(item, str) else item["source"] for item in service.get("secrets", [])}
 
 
+def validate_storage(document):
+    """One provider identity for API/worker; credentials never enter env/queue."""
+    fields = {"SIXNINE_STORAGE_PROVIDER", "SIXNINE_STORAGE_ENDPOINT", "SIXNINE_STORAGE_REGION",
+        "SIXNINE_STORAGE_BUCKET", "SIXNINE_STORAGE_PROFILE"}
+    services = document["services"]
+    selected = {key: services["app"]["environment"].get(key, "") for key in fields}
+    selected["SIXNINE_STORAGE_PROVIDER"] = selected["SIXNINE_STORAGE_PROVIDER"] or "local"
+    for name in ("app", "controller", "dispatch"):
+        env = services[name]["environment"]
+        require(not {key for key in env if key.startswith("SIXNINE_STORAGE_")} - fields - {"SIXNINE_STORAGE_CREDENTIAL_FILE"},
+            "migration_storage_unexpected_environment")
+        require(all((env.get(key, "") or ("local" if key.endswith("_PROVIDER") else "")) == value
+            for key, value in selected.items()), "migration_storage_identity_split")
+    require(not services["dispatch"]["environment"].get("SIXNINE_STORAGE_CREDENTIAL_FILE")
+        and "r2_storage" not in secret_names(services["dispatch"]), "migration_storage_dispatch_credential")
+    secrets = document.get("secrets", {})
+    require("r2_storage" in secrets and "grafana_cloud" in secrets, "migration_storage_mount_missing")
+    for name in ("app", "controller"):
+        require(any((item == "r2_storage" or isinstance(item, dict) and item.get("source") == "r2_storage"
+                and item.get("target", "r2_storage") in {"r2_storage", "/run/secrets/r2_storage"})
+            for item in services[name].get("secrets", [])),
+            "migration_storage_mount_missing")
+    if selected["SIXNINE_STORAGE_PROVIDER"] == "local":
+        require(not any(value for key, value in selected.items() if key != "SIXNINE_STORAGE_PROVIDER")
+            and all(not services[name]["environment"].get("SIXNINE_STORAGE_CREDENTIAL_FILE")
+                for name in ("app", "controller"))
+            and secrets["r2_storage"].get("file") == secrets["grafana_cloud"].get("file"),
+            "migration_storage_local_configuration_invalid")
+        return
+    require(selected["SIXNINE_STORAGE_PROVIDER"] == "r2"
+        and selected["SIXNINE_STORAGE_PROFILE"] == "cloudflare-r2--rig-root"
+        and selected["SIXNINE_STORAGE_REGION"] == "auto"
+        and re.fullmatch(r"https://[0-9a-f]{32}(?:\.(?:eu|us|fedramp))?\.r2\.cloudflarestorage\.com",
+            selected["SIXNINE_STORAGE_ENDPOINT"])
+        and re.fullmatch(r"[a-z0-9][a-z0-9-]{1,61}[a-z0-9]", selected["SIXNINE_STORAGE_BUCKET"])
+        and all(services[name]["environment"].get("SIXNINE_STORAGE_CREDENTIAL_FILE") == "/run/secrets/r2_storage"
+            for name in ("app", "controller"))
+        and secrets["r2_storage"].get("file") == "/run/sixnine-secrets/r2_storage",
+        "migration_storage_r2_configuration_invalid")
+
+
 def validate(document, *, host_memory_mib=3840):
     require(type(document) is dict and type(document.get("services")) is dict, "migration_compose_invalid")
     services = document["services"]
@@ -78,7 +119,9 @@ def validate(document, *, host_memory_mib=3840):
         require(not any(key.startswith("DSTACK_OTEL_") and key.endswith("_ENABLED") for key in environment),
                 "migration_raw_dstack_telemetry_enabled")
         require(not any(key in environment for key in ("DSTACK_SERVER_ADMIN_TOKEN", "DSTACK_DATABASE_URL",
-            "DATABASE_URL", "POSTGRES_PASSWORD", "ADMIN_PASSWORD", "SIXNINE_DATABASE_URL")),
+            "DATABASE_URL", "POSTGRES_PASSWORD", "ADMIN_PASSWORD", "SIXNINE_DATABASE_URL",
+            "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_SESSION_TOKEN", "R2TOKEN", "R2_TOKEN",
+            "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")),
                 "migration_secret_value_in_compose")
         if name != "caddy":
             require(not service.get("ports"), "migration_private_port_published")
@@ -101,6 +144,7 @@ def validate(document, *, host_memory_mib=3840):
         require(any(volume.get("source") == "/srv/sixnine/platform-data" and volume.get("target") == "/data"
             and not volume.get("read_only") for volume in service.get("volumes", [])), "migration_assets_split")
         require(env.get("SIXNINE_TELEMETRY_CONFIG_FILE") == "/run/secrets/grafana_cloud", "migration_cloud_telemetry_missing")
+    validate_storage(document)
     controller = services["controller"]
     targets = {volume["target"] for volume in controller.get("volumes", [])}
     require({"/dstack-runtime", "/dstack-sources"} <= targets and
@@ -144,6 +188,10 @@ def local_inputs(document):
         info = path.stat()
         require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and
             (os.name == "nt" or not info.st_mode & 0o027), "migration_secret_permissions_invalid")
+    if document["services"]["app"]["environment"].get("SIXNINE_STORAGE_PROVIDER") == "r2":
+        info = Path(document["secrets"]["r2_storage"]["file"]).stat()
+        require(os.name == "nt" or (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) == (0, 10001, 0o440),
+            "migration_storage_runtime_permissions_invalid")
     for service in document["services"].values():
         for volume in service.get("volumes", []):
             if volume.get("type") == "bind":
