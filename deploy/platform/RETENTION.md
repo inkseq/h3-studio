@@ -53,6 +53,13 @@ removal and never uses `image prune -a`, `system prune`, volume prune or stopped
 container removal. Unused build cache older than 72 hours is pruned; current
 images and their rollback dependencies stay referenced and usable.
 
+Containerd-loaded images may have local `sixnine-platform@sha256:...` or
+`sixnine-dispatch@sha256:...` aliases. Such aliases are eligible only when their
+repository matches the verified bundle kind and the digest equals the actual
+inspected image ID, which must be in that approved archive's identity closure. Commit tags must match the same
+bundle. Foreign repository aliases, unrelated digests and kept image IDs remain
+protected; an arbitrary Sixnine-looking tag does not establish ownership.
+
 ## Regular release integration and logs
 
 After a successful app or frontend install, the reviewed helpers optionally

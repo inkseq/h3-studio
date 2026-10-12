@@ -179,6 +179,39 @@ class RetentionTests(unittest.TestCase):
         self.assertNotIn(self.old, value['kept_commits'])
         self.assertEqual(value['image_candidates'], [])
 
+    def test_oci_local_sixnine_digest_is_eligible_only_with_approved_archive_closure(self):
+        image = self.image_details[2]
+        image['RepoDigests'] = ['sixnine-platform@' + image['Id']]
+        value = self.plan()
+        self.assertEqual(value['image_candidates'], [image['Id']])
+        self.s3[f'releases/{self.old}/image.tar.gz']['Metadata']['sha256'] = '0' * 64
+        self.assertEqual(self.plan()['image_candidates'], [])
+
+    def test_foreign_repo_digest_unproven_digest_or_mismatched_tag_is_retained(self):
+        image = self.image_details[2]
+        for digests, tags in ((['foreign@' + image['Id']], ['sixnine-platform:' + self.old]),
+                (['sixnine-platform@sha256:' + '0' * 64], ['sixnine-platform:' + self.old]),
+                (['sixnine-dispatch@' + image['Id']], ['sixnine-platform:' + self.old]),
+                (['sixnine-platform@' + image['Id']], ['sixnine-platform:' + 'e' * 40]),
+                (['sixnine-platform@' + image['Id']], ['sixnine-dispatch:' + self.old])):
+            with self.subTest(digests=digests, tags=tags):
+                image['RepoDigests'], image['RepoTags'] = digests, tags
+                self.assertEqual(self.plan()['image_candidates'], [])
+        alternate = 'sha256:' + '1' * 64
+        image['RepoTags'], image['RepoDigests'] = ['sixnine-platform:' + self.old], ['sixnine-platform@' + alternate]
+        # Even another approved archive identity is not this inspected image's
+        # local digest alias. Preserve it rather than broaden the live policy.
+        candidates = [{'kind': 'platform', 'commit': self.old, 'image_ids': [image['Id'], alternate]}]
+        self.assertEqual(retention.eligible_image_ids([image], candidates, set()), [])
+
+    def test_kept_current_oci_digest_remains_protected_even_with_removable_staging(self):
+        image = self.image_details[0]
+        image['RepoDigests'] = ['sixnine-platform@' + image['Id']]
+        shutil.copytree(self.root / 'releases' / self.current, self.root / 'incoming' / self.current)
+        value = self.plan()
+        self.assertIn('incoming/' + self.current, [item['relative'] for item in value['candidates']])
+        self.assertNotIn(image['Id'], value['image_candidates'])
+
     def test_migration_current_is_protected_independently_and_pending_stops_cleanup(self):
         (self.root / 'migration').mkdir()
         path = self.root / 'migration/active.json'
