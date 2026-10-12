@@ -111,7 +111,11 @@ def _hourly_cost(payload, binding, intent):
 
 
 def _videos(connection, payload, intent, workers, now, day_start, day_end):
-    scope = (payload.get("tenant_id"), payload.get("owner_id"), payload.get("project_id"))
+    # The machine's project is its rental/funding scope. An original attempt
+    # already attributed to this exact worker can belong to another Quick Chat
+    # project of the same owner; WorkerControl does not bind claims to projects.
+    # Keep tenant/owner isolation and the immutable allocation identity below.
+    scope = (payload.get("tenant_id"), payload.get("owner_id"))
     if not all(isinstance(value, str) and value for value in scope):
         return None, None, [], None, []
     expected_worker_id = "dstack-" + intent["id"].replace("-", "")
@@ -135,7 +139,7 @@ def _videos(connection, payload, intent, workers, now, day_start, day_end):
         attempts.c.submission_started_at).select_from(jobs.join(attempts,
             (attempts.c.id == jobs.c.current_attempt_id) & (attempts.c.job_id == jobs.c.id))
             .join(artifacts, (artifacts.c.job_id == jobs.c.id) & (artifacts.c.attempt_id == attempts.c.id))).where(
-        jobs.c.tenant_id == scope[0], jobs.c.owner_id == scope[1], jobs.c.project_id == scope[2],
+        jobs.c.tenant_id == scope[0], jobs.c.owner_id == scope[1],
         jobs.c.status == "succeeded", attempts.c.status == "succeeded",
         attempts.c.worker_id.in_(worker_ids), artifacts.c.metadata["kind"].as_string() == "video",
         artifacts.c.metadata["validated"].as_boolean().is_(True)).distinct()

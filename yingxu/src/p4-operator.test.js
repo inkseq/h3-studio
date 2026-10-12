@@ -8,7 +8,7 @@ import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {createP4OperatorClient} from './p4-operator-client.js';
 import {createP4OperatorController} from './p4-operator-controller.js';
-import {batchRows,costLabel,groupedNodes,initialRows,lifetimeBody,phase,previewCurrent,queueLabel,rate,todayMetrics} from './p4-operator-model.js';
+import {batchRows,costLabel,groupedNodes,initialRows,lifetimeBody,phase,previewCurrent,queueLabel,rate,todayMetrics,workspaceStale} from './p4-operator-model.js';
 
 const memory=()=>{const values=new Map();return {getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)};};
 function client(overrides={}){let account;return {setAccount:value=>{account=value;},reset(){},state:async()=>({capacity_backend:'dstack-v1',operator:{account,admin:false},nodes:[],groups:[],queue:[]}),catalog:async()=>({profiles:[]}),...overrides};}
@@ -18,6 +18,25 @@ test('live workspace reads require identity and arrays instead of dummy zero mac
   const responses=[{nodes:[],groups:[],queue:[]},{capacity_backend:'dstack-v1',nodes:[],groups:[]},{capacity_backend:'dstack-v1',nodes:[{node_id:'original'}],groups:[],queue:[]}];
   const api=createP4OperatorClient({fetcher:async()=>new Response(JSON.stringify(responses.shift()),{headers:{'Content-Type':'application/json'}})});
   await assert.rejects(api.state(),/尚未确认/);await assert.rejects(api.state(),/尚未确认/);assert.equal((await api.state()).nodes[0].id,'original');
+});
+
+test('workspace freshness uses the response readback clock while preserving aged and future guards',async context=>{
+  let clock=1000000,resolve;
+  context.mock.method(Date,'now',()=>clock);
+  const controller=createP4OperatorController({storage:memory(),client:client({state:()=>new Promise(done=>{resolve=done;})})});
+  const tick=Date.now(),initial=controller.setAccount('superdan');
+  clock+=250;
+  resolve({operator:{account:'superdan'},observed_at:(tick+100)/1000,nodes:[],groups:[],queue:[]});
+  await initial;
+  const snapshot=controller.getState().snapshot;
+  assert.equal(workspaceStale(snapshot,tick),true,'the request-start timer predates the valid observation');
+  assert.equal(workspaceStale(snapshot),false,'the returned state is fresh at rendering time');
+  clock=snapshot.observed_at*1000+30001;
+  assert.equal(workspaceStale(snapshot),true,'an old readback does not stay actionable');
+  assert.equal(workspaceStale({...snapshot,observed_at:(clock+1)/1000}),true,'future observations remain rejected');
+  assert.equal(workspaceStale({...snapshot,observed_at:null}),true);
+  assert.equal(workspaceStale(null),false);
+  controller.destroy();
 });
 
 test('group/admin commands preserve cookie actor, body, and ordinary idempotency keys',async()=>{
@@ -121,6 +140,7 @@ test('actual detail and rows expose measured-only stats and never hide keep poli
   const bundled=await build({stdin:{contents,resolveDir:path.replace(/[/\\][^/\\]+$/,''),loader:'jsx'},bundle:true,write:false,platform:'node',format:'cjs',packages:'external',loader:{'.css':'empty'}});const module=new Module(path);module.filename=path;module.paths=Module._nodeModulePaths(path.replace(/[/\\][^/\\]+$/,''));module._compile(bundled.outputFiles[0].text,path);
   const node={id:'original',runtime_profile_id:'runtime',provider:'vast',mode:'ref',state:'ready',ready:true,observation_fresh:true,hard_deadline:null,hold_until:0,lifecycle:lifecycle({keep_on:'until_stopped'}),usage:{today_cost_microusd:250000,today_cost_basis:'approved_ceiling_estimate',today_video_count:2,timezone:'Australia/Sydney'},metrics:{average_generate_seconds:null,average_generation_cost_microusd:null,average_completion_seconds:210,samples:2,basis:'ledger_submit_to_validated_result'}};
   const row=renderToStaticMarkup(React.createElement(module.exports.MachineRow,{node,profiles:[],onDetail:()=>{}}));assert.match(row,/直到我手动停止/);assert.match(row,/p4-keep/);
+  const ended=renderToStaticMarkup(React.createElement(module.exports.MachineRow,{node:{...node,state:'stopped',lifecycle_phase:'stopped'},profiles:[],onDetail:()=>{}}));assert.match(ended,/已结束/);assert.doesNotMatch(ended,/等待准备完成/);
   const details=renderToStaticMarkup(React.createElement(module.exports.MachineDetail,{node,profiles:[],groups:[],onClose:()=>{}}));assert.match(details,/平均生成耗时/);assert.match(details,/暂无样本/);assert.match(details,/平均提交至交付 210 秒/);assert.match(details,/今日总费用.*上限估算/);assert.match(details,/今日已生成视频/);assert.doesNotMatch(details,/热机.*相同设置/);
   const css=await readFile(new URL('./p4-operator.css',import.meta.url),'utf8');assert.doesNotMatch(css,/\.p4-keep\s*\{[^}]*display\s*:\s*none/);
 });

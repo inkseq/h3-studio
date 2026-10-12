@@ -3,6 +3,11 @@ import {dstackProvider,dstackMode,dstackLifecycle} from './dstack-presentation.j
 export {dstackProvider};
 export const modeLabel=mode=>mode==='both'?'FL / REF · 可切换':dstackMode(mode);
 export const finite=value=>typeof value==='number'&&Number.isFinite(value);
+// Readback renders can occur after the timer tick which began the request.
+// Compare observations with the current clock, retaining age/future guards.
+export function workspaceStale(snapshot,now=Date.now()){
+  return !!snapshot&&(!finite(snapshot.observed_at)||!finite(now)||now-snapshot.observed_at*1000>30000||now<snapshot.observed_at*1000);
+}
 export const money=value=>finite(value)?'$'+(value/1e6).toFixed(value<100000?3:2):'—';
 export const time=value=>finite(value)?new Date(value*1000).toLocaleString('zh-CN'):'—';
 export const elapsed=value=>!finite(value)?'—':value<60?Math.round(value)+' 秒':value<3600?Math.round(value/60)+' 分钟':(value/3600).toFixed(1)+' 小时';

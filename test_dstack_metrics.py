@@ -5,8 +5,10 @@ import uuid
 from sqlalchemy import event, insert, update
 
 from studio_platform.dstack_metrics import machine_metrics
+from studio_platform.control import WorkerControl
+from studio_platform.queue import TaskQueue
 from studio_platform.repository import (artifacts, attempts, budget_reservations,
-    instance_intents, jobs, outbox, registered_workers, scaler_actions, scaler_receipts)
+    instance_intents, jobs, outbox, registered_workers, scaler_actions, scaler_receipts, Scope)
 from test_platform_repository import LedgerCase
 
 
@@ -213,6 +215,58 @@ class DstackMetricsTests(LedgerCase):
         self.assertEqual(result["usage"]["video_count"], 1)
         self.assertEqual(result["metrics"]["stage_query_status"], "query_unavailable")
         self.assertEqual(result["metrics"]["average_completion_seconds"], 200)
+
+    def test_original_cross_project_completion_counts_without_cross_owner_or_tenant(self):
+        profile = "h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3"
+        self.binding.update(profile_id=profile, mode="fl")
+        creation_scope = Scope(self.scope.tenant_id, self.scope.owner_id, "chat-workspace-other-project")
+        self.assertNotEqual(creation_scope.project_id, self.node["payload"]["project_id"])
+        observed_now = self.now
+        self.now -= 300
+        request = {"recipe_id": "h3-base-fl2va-v1", "deployment_profile_id": profile,
+            "request": {"model": "test-model", "mode": "fl"}}
+        execution = {"pool": self.intent["pool"], "backend": "wangp-worker", "enabled": True,
+            "dispatch_backend": "hatchet-v1", "configuration_id": "test-configuration",
+            "engine_manifest_digest": "a"*64}
+        plan = self.repo.create_plan(creation_scope, request, execution,
+            expires_at=self.now+1000, estimated_cost_microusd=0)
+        original = self.repo.create_job(creation_scope, plan["id"], "cross-project-original")
+        spec = {"pool": self.intent["pool"], "backend": "wangp-worker", "provider": "vast",
+            "dispatch_backend": "hatchet-v1", "recipe_ids": ["h3-base-fl2va-v1"],
+            "model_id": "test-model", "configuration_id": "test-configuration",
+            "engine_manifest_digest": "a"*64}
+        self.assertTrue(WorkerControl.matches({**self.worker, "spec": spec}, original))
+        queue = TaskQueue(self.repo)
+        claim = queue.claim(self.worker["id"], self.intent["pool"], dispatch_backend="hatchet-v1", lease_seconds=600)
+        self.assertEqual(claim.job["id"], original["id"])
+        self.now += 10
+        queue.begin_submission(claim.lease)
+        submitted = self.now
+        queue.record_submitted(claim.lease, "original-native-task")
+        self.now += 200
+        queue.begin_collection(claim.lease)
+        completed = self.now
+        queue.complete(claim.lease, [{"kind": "video", "object_key": "owners/superdan/assets/original/result.mp4",
+            "size_bytes": 10, "sha256": "a"*64, "validated": True}], actual_cost_microusd=0)
+        self.now = observed_now
+        self.success(scope=self.other)
+        self.success(scope=Scope("another-tenant", self.scope.owner_id, creation_scope.project_id))
+        self.success(scope=creation_scope, worker_id="another-worker")
+        calls = []
+        class Reader:
+            def generate(self, **kwargs):
+                calls.append(kwargs)
+                return {"average_generate_seconds": 160.3293335, "generate_samples": 1,
+                    "generation_basis": "grafana_loki_submit_to_upstream_terminal", "stage_query_status": "ok"}
+        with self.repo.engine.connect() as connection:
+            value = machine_metrics(connection, self.node, self.intent, [self.worker], self.now,
+                stage_reader=Reader())
+        self.assertEqual(value["usage"]["video_count"], 1)
+        self.assertEqual(value["usage"]["today_video_count"], 1)
+        self.assertEqual(value["metrics"]["average_completion_seconds"], 200)
+        self.assertEqual(value["metrics"]["average_generate_seconds"], 160.3293335)
+        self.assertEqual(calls[0]["attempts"], [{"job_id": original["id"], "attempt_id": claim.lease.attempt_id,
+            "submission_started_at": submitted, "completed_at": completed}])
 
     def test_no_retained_worker_for_qualified_allocation_is_unknown(self):
         usage = self.projection(workers=[])["usage"]

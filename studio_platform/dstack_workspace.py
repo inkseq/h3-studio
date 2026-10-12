@@ -105,8 +105,10 @@ def _mode(job):
 
 def _matches(node, intent, job):
     payload, binding = node["payload"], node["payload"].get("dstack", {})
+    # Rental funding belongs to one project; the owner's creation projects can
+    # use the same compatible worker. Match the actual claim contract without
+    # dropping tenant/owner isolation or the exact profile/engine checks.
     if (job["tenant_id"] != payload.get("tenant_id") or job["owner_id"] != payload.get("owner_id")
-            or job["project_id"] != payload.get("project_id")
             or job["request"].get("deployment_profile_id") != binding.get("profile_id")):
         return False
     spec = {"pool": intent["pool"], "backend": "wangp-worker", "dispatch_backend": "hatchet-v1",

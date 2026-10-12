@@ -10,9 +10,9 @@ from sqlalchemy import insert, select, update
 
 from studio_platform.auth import Principal
 from studio_platform.dstack_operator import DstackOperator
-from studio_platform.dstack_workspace import CapacityLoss, DstackWorkspace, operator_groups, stop_impact
+from studio_platform.dstack_workspace import CapacityLoss, DstackWorkspace, operator_groups, stop_impact, _matches
 from studio_platform.operator_capacity import OperatorError, operator_commands, operator_nodes
-from studio_platform.repository import attempts, budget_reservations, instance_intents, jobs, registered_workers
+from studio_platform.repository import attempts, budget_reservations, instance_intents, jobs, registered_workers, Scope
 from test_platform_repository import LedgerCase
 import test_dstack_operator as fixtures
 
@@ -28,7 +28,7 @@ class WorkspaceTests(LedgerCase):
         preview = self.service.preview(self.owner, {"profile_id": "5090-fl", "ttl_seconds": 900})
         return self.service.start(self.owner, {"preview_id": preview["preview_id"]}, key or uuid.uuid4().hex)["node_id"]
 
-    def waiting_job(self, key=None, *, owner=None, profile_id="5090-fl"):
+    def waiting_job(self, key=None, *, owner=None, profile_id="5090-fl", scope=None):
         profile = self.service.profiles[profile_id]
         request = {"recipe_id": "h3-base-fl2va-v1", "deployment_profile_id": profile["runtime_profile_id"],
             "request": {"model": profile["model_id"], "mode": "fl", "prompt": "PRIVATE-CREATIVE-TEXT"}}
@@ -36,7 +36,7 @@ class WorkspaceTests(LedgerCase):
             "dispatch_backend": "hatchet-v1", "output_delivery": "native-frames-v1",
             "deployment_profile_id": profile["runtime_profile_id"], "configuration_id": profile["configuration_id"],
             "engine_manifest_digest": profile["manifest_digest"], "expected_runtime_s": 60}
-        scope = self.scope if owner is None else self.other
+        scope = scope or (self.scope if owner is None else self.other)
         plan = self.repo.create_plan(scope, request, execution, expires_at=self.now+1000, estimated_cost_microusd=0)
         return self.repo.create_job(scope, plan["id"], key or uuid.uuid4().hex)
 
@@ -228,6 +228,35 @@ class WorkspaceTests(LedgerCase):
         self.assertEqual(mode["rough_wait_seconds"], 60)
         self.assertEqual(mode["rough_complete_seconds"], 120)
         self.assertEqual(mode["estimate_basis"], "compatible_fifo_last_start_runtime_quotes")
+
+    def test_same_owner_creation_project_uses_capacity_and_warns_before_last_stop(self):
+        node_id = self.start_node()
+        self.ready_worker(node_id)
+        creation_scope = Scope(self.scope.tenant_id, self.scope.owner_id, "chat-workspace-other-project")
+        original = self.waiting_job(scope=creation_scope)
+        foreign_owner = self.waiting_job(owner="supervan")
+        foreign_tenant = self.waiting_job(scope=Scope("another-tenant", self.scope.owner_id,
+            creation_scope.project_id))
+        state = self.workspace.state(self.owner)
+        mode = next(item for item in state["queue"] if item["mode"] == "fl")
+        self.assertEqual(mode["waiting"], 1)
+        self.assertEqual(mode["ready"], 1)
+        self.assertEqual(mode["unserved_waiting"], 0)
+        self.assertEqual(mode["rough_wait_seconds"], 0)
+        with self.repo.engine.connect() as connection:
+            node = dict(connection.execute(select(operator_nodes).where(
+                operator_nodes.c.intent_id == node_id)).mappings().one())
+            intent = dict(connection.execute(select(instance_intents).where(
+                instance_intents.c.id == node_id)).mappings().one())
+            self.assertNotEqual(original["project_id"], node["payload"]["project_id"])
+            self.assertTrue(_matches(node, intent, original))
+            self.assertFalse(_matches(node, intent, foreign_owner))
+            self.assertFalse(_matches(node, intent, foreign_tenant))
+            impact = stop_impact(connection, self.settings, [node_id], self.now)
+        self.assertEqual(impact["warnings"][0]["waiting_jobs"], 1)
+        self.assertEqual(impact["warnings"][0]["waiting_job_ids"], [original["id"]])
+        self.assertNotIn("PRIVATE-CREATIVE-TEXT", json.dumps(state))
+        self.assertNotIn("PRIVATE-CREATIVE-TEXT", json.dumps(impact))
 
     def test_workspace_poll_defers_new_node_that_races_with_read_projection(self):
         first = self.start_node()
