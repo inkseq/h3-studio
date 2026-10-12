@@ -245,7 +245,7 @@ def plan_locked(root=release.ROOT, *, api, command=release.command):
     root = Path(root)
     containers, images = docker_snapshot(command)
     kept, observed = closure(root, containers)
-    candidates, retained, removable_image_ids, image_cache = [], [], set(), {}
+    candidates, retained, image_cache = [], [], {}
     locations = (('releases', 'platform', True), ('incoming', 'platform', False),
         ('migration/releases', 'migration', True), ('incoming-migrations', 'migration', False),
         ('frontend/releases', 'frontend', True))
@@ -275,7 +275,6 @@ def plan_locked(root=release.ROOT, *, api, command=release.command):
                     release.require(release.checksum(installed_artifact / manifest_name) ==
                         release.checksum(directory / manifest_name), 'retention_kept_staging_differs')
                 candidates.append(item)
-                removable_image_ids.update(item['image_ids'])
             except Exception:
                 # No arbitrary provider/error text (or credential) in receipts.
                 retained.append({'relative': directory.relative_to(root).as_posix(), 'reason': 'unproven_or_partial_artifact'})
@@ -309,20 +308,44 @@ def plan_locked(root=release.ROOT, *, api, command=release.command):
             protected_images.update(release.validate_image_archive(directory / 'dispatch-image.tar.gz',
                 {'commit': commit, **value['dispatch']}))
             protected_images.add(value['dispatch']['image_id'])
-    image_candidates = []
-    for image in images:
-        image_id = image.get('Id')
-        release.require(type(image_id) is str and IMAGE.fullmatch(image_id), 'retention_image_identity_invalid')
-        tags, digests = image.get('RepoTags') or [], image.get('RepoDigests') or []
-        owned = image_id in removable_image_ids and not digests and all(
-            re.fullmatch(r'sixnine-(platform|dispatch):[0-9a-f]{40}', tag) for tag in tags)
-        dangling = not tags and not digests
-        if image_id not in protected_images and (owned or dangling):
-            image_candidates.append(image_id)
+    image_candidates = eligible_image_ids(images, candidates, protected_images)
     return {'version': 1, 'state': 'retention_plan', 'kept_commits': sorted(kept), 'pointers': observed,
         'candidates': candidates, 'retained': retained, 'image_candidates': sorted(image_candidates),
         'protected_images': sorted(value for value in protected_images if value),
         'reclaimable_file_bytes': sum(item['bytes'] for item in candidates)}
+
+
+def eligible_image_ids(images, candidates, protected_images):
+    """Pure selection from verified bundle closure and actual Docker aliases.
+
+    Containerd imports can attach local Sixnine RepoDigests without a registry
+    pull. Accept only that bundle's exact repository/kind and inspected Id;
+    foreign repositories, unrelated digests and mismatched commit tags stay.
+    """
+    aliases = {}
+    for candidate in candidates:
+        repository = {'platform': 'sixnine-platform', 'migration': 'sixnine-dispatch'}.get(candidate['kind'])
+        if repository is None:
+            continue
+        commit = commit_value(candidate['commit'])
+        identities = set(candidate['image_ids'])
+        release.require(all(type(value) is str and IMAGE.fullmatch(value) for value in identities),
+                        'retention_image_identity_invalid')
+        for image_id in identities:
+            allowed = aliases.setdefault(image_id, {'tags': set(), 'digests': set()})
+            allowed['tags'].add(repository + ':' + commit)
+            allowed['digests'].add(repository + '@' + image_id)
+    result = []
+    for image in images:
+        image_id = image.get('Id')
+        release.require(type(image_id) is str and IMAGE.fullmatch(image_id), 'retention_image_identity_invalid')
+        tags, digests = image.get('RepoTags') or [], image.get('RepoDigests') or []
+        allowed = aliases.get(image_id)
+        owned = allowed is not None and set(tags).issubset(allowed['tags']) and set(digests).issubset(allowed['digests'])
+        dangling = not tags and not digests
+        if image_id not in protected_images and (owned or dangling):
+            result.append(image_id)
+    return sorted(result)
 
 
 def delete_tree(root, snapshot):
