@@ -271,6 +271,10 @@ class DstackWorkspace:
             # half-built row or a KeyError while dependent groups are rendered.
             originals = [node for node in _nodes(connection, self.settings, owners)
                 if node["intent_id"] in projected]
+            # Readiness may have observed a newer heartbeat while this request
+            # was in progress. Timestamp the captured rows after reading them;
+            # do not reject a fresh observation as being in this request's future.
+            now = self.repo.clock()
             intents = {row["id"]: dict(row) for row in connection.execute(select(instance_intents)).mappings()}
             all_groups = [dict(row) for row in connection.execute(select(operator_groups).where(
                 operator_groups.c.tenant_id == self.settings.tenant_id,
@@ -305,14 +309,19 @@ class DstackWorkspace:
             for mode in ("fl", "ref"):
                 items = [job for job in waiting if _mode(job) == mode]
                 ready, busy, preparing, available_at = set(), set(), set(), {}
-                unserved = sum(not any(_compatible(connection, node, intents[node["intent_id"]], job, now)
-                    for node in originals) for job in items)
+                # Heartbeats can change between READ COMMITTED statements.
+                # Freeze each advisory eligibility result for this projection;
+                # counting and lane estimation must use the same observations.
+                eligibility = {job["id"]: {node["intent_id"] for node in originals
+                    if _compatible(connection, node, intents[node["intent_id"]], job, now)}
+                    for job in items}
+                unserved = sum(not eligibility[job["id"]] for job in items)
                 for node in originals:
                     identity = node["intent_id"]
                     if not any(_matches(node, intents[identity], job) for job in items):
                         continue
                     value = next(item for item in result if item["node_id"] == identity)
-                    if any(_compatible(connection, node, intents[identity], job, now) for job in items):
+                    if any(identity in eligibility[job["id"]] for job in items):
                         (busy if value["current_job"] else ready).add(identity)
                         available_at[identity] = 0.
                         if value["current_job"]:
@@ -330,9 +339,8 @@ class DstackWorkspace:
                     # Advisory FIFO projection, never another scheduler or
                     # claim. Each task uses only its actual compatible lane.
                     for job in items:
-                        lanes = [(available_at[node["intent_id"]], node["intent_id"]) for node in originals
-                            if node["intent_id"] in available_at and _compatible(connection, node,
-                                intents[node["intent_id"]], job, now)]
+                        lanes = [(available_at[identity], identity) for identity in eligibility[job["id"]]
+                            if identity in available_at]
                         available, lane = min(lanes)
                         start = max(available, max(0., job["not_before"]-now))
                         available_at[lane] = start+job["expected_runtime_s"]

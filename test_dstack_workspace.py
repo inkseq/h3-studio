@@ -118,6 +118,35 @@ class WorkspaceTests(LedgerCase):
         self.assertGreater(self.workspace.state(self.owner)["groups"][0]["version"], after_start)
         self.assertEqual(self.client.stopped, [])
 
+    def test_queue_projection_freezes_eligibility_during_heartbeat_change(self):
+        node = self.start_node()
+        self.ready_worker(node)
+        self.waiting_job()
+        with patch("studio_platform.dstack_workspace._compatible", side_effect=[True, False, False]) as eligible:
+            state = self.workspace.state(self.owner)
+        queue = next(item for item in state["queue"] if item["mode"] == "fl")
+        self.assertEqual(queue["ready"], 1)
+        self.assertEqual(queue["rough_wait_seconds"], 0)
+        self.assertEqual(queue["unserved_waiting"], 0)
+        self.assertEqual(eligible.call_count, 1)
+
+    def test_queue_read_time_follows_newer_observation_during_owner_projection(self):
+        node = self.start_node()
+        self.ready_worker(node)
+        self.waiting_job()
+        original_state = self.service.state
+        def newer_observation(actor):
+            result = original_state(actor)
+            self.now += 1
+            self.capacity.observe(node)
+            return result
+        with patch.object(self.service, "state", side_effect=newer_observation):
+            state = self.workspace.state(self.owner)
+        queue = next(item for item in state["queue"] if item["mode"] == "fl")
+        self.assertEqual(queue["ready"], 1)
+        self.assertEqual(queue["unserved_waiting"], 0)
+        self.assertEqual(state["observed_at"], self.now)
+
     def test_wrong_profile_other_owner_and_uncertain_attempt_are_not_new_queue(self):
         node = self.start_node()
         self.ready_worker(node)
