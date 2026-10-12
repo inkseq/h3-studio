@@ -371,7 +371,14 @@ class DstackNativeRuntime:
                 _require(report.get("state") != "failed", "dstack_runtime_bootstrap_failed")
                 _require(report.get("state") not in {"unknown", "reconcile_required"}
                     and report.get("phase") != "runtime_start_unknown", "dstack_runtime_bootstrap_reconciliation_required")
-                _require(report.get("state") == "ready", "dstack_runtime_preparing")
+                if report.get("state") != "ready":
+                    # Only these fixed progress codes leave the private host;
+                    # preserve real download/start progress without exposing
+                    # report text or pretending process startup loaded weights.
+                    phases = {"model_download": "dstack_runtime_downloading_weights",
+                              "runtime_start": "dstack_runtime_starting_runtime",
+                              "model_load": "dstack_runtime_loading_model"}
+                    raise DstackError(phases.get(report.get("phase"), "dstack_runtime_preparing"))
                 validate_report(config, report, manifest)
                 gpu = report["gpus"][0]["uuid"]
                 _require(GPU_UUID.fullmatch(gpu), "dstack_runtime_physical_gpu_invalid")

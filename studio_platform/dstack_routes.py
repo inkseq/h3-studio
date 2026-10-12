@@ -31,3 +31,5 @@ def register_routes(app, *, service=None):
     @app.post(PREFIX+"/nodes/{node_id}/hold")
     def hold(node_id:str,request:Request,body:dict,key:str=Header(...,alias="Idempotency-Key")):
         return response(service.set_hold(principal(request),node_id,body,key))
+    from .dstack_workspace_routes import register_routes as register_workspace
+    register_workspace(app, service=service)

@@ -41,6 +41,20 @@ class SettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "only one"):
             database_url_from_environment()
 
+    def test_admin_is_explicit_and_does_not_follow_rental_privilege(self):
+        os.environ["SIXNINE_OPERATOR_CAPACITY_OWNERS"] = "superdan,supervan"
+        self.assertEqual(Settings.from_environment().operator_admin_owners, ())
+        os.environ["SIXNINE_OPERATOR_ADMIN_OWNERS"] = "superdan"
+        self.assertEqual(Settings.from_environment().operator_admin_owners, ("superdan",))
+        for value in ("unknown", "superdan,superdan"):
+            os.environ["SIXNINE_OPERATOR_ADMIN_OWNERS"] = value
+            with self.assertRaisesRegex(ValueError, "explicit subset"):
+                Settings.from_environment()
+        os.environ["SIXNINE_OPERATOR_CAPACITY_OWNERS"] = "supervan"
+        os.environ["SIXNINE_OPERATOR_ADMIN_OWNERS"] = "superdan"
+        with self.assertRaisesRegex(ValueError, "explicit subset"):
+            Settings.from_environment()
+
     def test_invalid_files_reject_without_content_in_error(self):
         for raw in (b"", b"x"*16385, b"postgresql://fake:synthetic-secret@host/db\nother", b"\xff", b" sqlite:///fake", b"sqlite:///fake\x00"):
             with self.subTest(size=len(raw)):
@@ -54,6 +68,14 @@ class SettingsTests(unittest.TestCase):
         os.environ["SIXNINE_DATABASE_URL_FILE"] = str(self.path.parent / "missing")
         with self.assertRaisesRegex(ValueError, "unavailable"):
             database_url_from_environment()
+
+    def test_stage_queries_are_disabled_without_explicit_absolute_config(self):
+        self.assertIsNone(Settings.from_environment().stage_query_config_file)
+        os.environ["SIXNINE_STAGE_QUERY_CONFIG_FILE"] = "relative.json"
+        with self.assertRaisesRegex(ValueError, "absolute"):
+            Settings.from_environment()
+        os.environ["SIXNINE_STAGE_QUERY_CONFIG_FILE"] = str(self.path)
+        self.assertEqual(Settings.from_environment().stage_query_config_file, self.path)
 
     @unittest.skipIf(os.name == "nt", "POSIX mode bits; verified in Linux container")
     def test_posix_permissions(self):

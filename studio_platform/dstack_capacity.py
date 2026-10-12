@@ -673,9 +673,14 @@ class DstackCapacity:
             # Native setup reports normal cold-start progress through this
             # exact static code. Do not expose arbitrary callback text, or
             # infer readiness from the preparation observation.
-            value["reason_code"] = ("dstack_runtime_preparing"
-                if error.args == ("dstack_runtime_preparing",)
-                else "dstack_native_observation_failed")
+            phases = {"dstack_runtime_preparing": "provisioning",
+                "dstack_runtime_downloading_weights": "model_download",
+                "dstack_runtime_starting_runtime": "runtime_start",
+                "dstack_runtime_loading_model": "model_load"}
+            code = error.args[0] if len(error.args) == 1 and isinstance(error.args[0], str) else None
+            value["reason_code"] = code if code in phases else "dstack_native_observation_failed"
+            if code in phases:
+                value["bootstrap_phase"] = phases[code]
             return value
         except Exception:
             value["reason_code"] = "dstack_native_observation_failed"
@@ -689,6 +694,7 @@ class DstackCapacity:
             _require(native.incarnation == binding["runtime_incarnation"], "dstack_native_incarnation_changed")
         value.update(state="ready" if native.idle else "busy", ready=native.idle,
             runtime_incarnation=native.incarnation,
+            bootstrap_phase="runtime_ready",
             reason_code="dstack_runtime_ready_model_load_unobserved" if native.idle else "dstack_runtime_busy")
         return value
 

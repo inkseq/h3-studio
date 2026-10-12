@@ -88,6 +88,38 @@ class ManagedSecretTests(unittest.TestCase):
     def load(self, api, **options):
         return target.load(api, intent_store=self.store, **options)
 
+    def test_optional_stage_read_mount_preserves_every_existing_identity(self):
+        from studio_platform.stage_metrics import read_config
+        value = initialized()
+        before = target.outputs(value)
+        stage = {"schema_version": 1, "enabled": True,
+            "endpoint": "https://logs-prod-synthetic.grafana.net",
+            "authorization": "Basic "+base64.b64encode(b"123:SYNTHETIC_READ_ONLY").decode(),
+            "scope": "logs:read"}
+        value["grafana_stage_query"] = stage
+        api = FakeAPI(value)
+        self.assertEqual(self.load(api), value)
+        self.assertEqual(api.puts, [])
+        output = target.outputs(value)
+        self.assertEqual({key: output[key] for key in before}, before)
+        content, uid, gid, mode = output["grafana_stage_query"]
+        self.assertEqual((uid, gid, mode), (10001, 10001, 0o600))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/"reader.json"
+            path.write_text(content, encoding="utf-8")
+            path.chmod(mode)
+            config = read_config(path)
+            self.assertEqual(config.scope, "logs:read")
+            self.assertEqual(config.endpoint, stage["endpoint"])
+        for key, bad in (("scope", "logs:write"), ("endpoint", "https://outside.example"),
+                ("endpoint", "https://logs-prod-synthetic.grafana.net/private"),
+                ("authorization", "Basic invalid"), ("schema_version", True)):
+            with self.subTest(key=key, bad=bad):
+                changed = copy.deepcopy(value)
+                changed["grafana_stage_query"][key] = bad
+                with self.assertRaisesRegex(ValueError, "stage_query_configuration_invalid"):
+                    target.validate(changed)
+
     def test_inert_import_and_existing_identity_never_rotates(self):
         api = FakeAPI(initialized())
         with patch.object(target, "client", side_effect=AssertionError("network prohibited")):

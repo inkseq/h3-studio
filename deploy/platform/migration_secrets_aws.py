@@ -60,7 +60,7 @@ def _opaque(value, minimum=32, maximum=4096):
 def validate(payload, *, allow_uninitialized=False):
     """Closed schema, exact endpoints and existing safe Cloud exporter contract."""
     if (type(payload) is not dict or not {"schema_version", "providers", "grafana_cloud"} <= set(payload)
-            or set(payload) - {"schema_version", "providers", "grafana_cloud", "infrastructure", "hatchet_api_token"}
+            or set(payload) - {"schema_version", "providers", "grafana_cloud", "grafana_stage_query", "infrastructure", "hatchet_api_token"}
             or type(payload["schema_version"]) is not int or payload["schema_version"] != 1):
         raise ValueError("migration_secret_structure_invalid")
     providers = payload["providers"]
@@ -97,6 +97,8 @@ def validate(payload, *, allow_uninitialized=False):
             valid = False
         if not valid:
             raise ValueError("migration_cloud_configuration_invalid")
+    if "grafana_stage_query" in payload:
+        _validate_stage_query(payload["grafana_stage_query"])
     if "infrastructure" not in payload:
         if not allow_uninitialized or "hatchet_api_token" in payload:
             raise ValueError("migration_infrastructure_recovery_required")
@@ -107,6 +109,32 @@ def validate(payload, *, allow_uninitialized=False):
         token = payload["hatchet_api_token"]
         if not _opaque(token, 32, 8192) or not re.fullmatch(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", token):
             raise ValueError("migration_hatchet_token_invalid")
+
+
+def _validate_stage_query(value):
+    # Standalone host helper; parity is checked against the detail reader.
+    if (type(value) is not dict
+            or set(value) != {"schema_version", "enabled", "endpoint", "authorization", "scope"}
+            or type(value["schema_version"]) is not int or value["schema_version"] != 1
+            or type(value["enabled"]) is not bool):
+        raise ValueError("migration_stage_query_configuration_invalid")
+    if not value["enabled"]:
+        return
+    try:
+        endpoint = urlsplit(value["endpoint"])
+        auth = value["authorization"]
+        valid = (endpoint.scheme == "https" and endpoint.port in (None, 443)
+            and endpoint.hostname is not None
+            and re.fullmatch(r"logs-prod-[a-z0-9-]+\.grafana\.net", endpoint.hostname)
+            and endpoint.path in ("", "/") and not endpoint.username and not endpoint.password
+            and not endpoint.query and not endpoint.fragment and value["scope"] == "logs:read"
+            and isinstance(auth, str) and auth.startswith("Basic ") and len(auth) <= 8192
+            and not any(c in auth for c in "\r\n\x00")
+            and re.fullmatch(rb"[0-9]+:[!-~]+", base64.b64decode(auth[6:], validate=True)))
+    except (TypeError, ValueError):
+        valid = False
+    if not valid:
+        raise ValueError("migration_stage_query_configuration_invalid")
 
 
 def _validate_infrastructure(infrastructure):
@@ -365,6 +393,8 @@ def outputs(payload):
     }
     if "hatchet_api_token" in payload:
         result["hatchet_api_token"] = (payload["hatchet_api_token"]+"\n", 10001, 10001, 0o600)
+    if "grafana_stage_query" in payload:
+        result["grafana_stage_query"] = (serialized(payload["grafana_stage_query"]), 10001, 10001, 0o600)
     return result
 
 
@@ -379,7 +409,7 @@ def _verify_file(fd, content, uid, gid, mode):
 
 def write_outputs(files):
     """Check the complete set first; never replace already-bound inodes."""
-    if set(files) - {"dstack-server-config.yml", "grafana_cloud", "dstack_api_token",
+    if set(files) - {"dstack-server-config.yml", "grafana_cloud", "grafana_stage_query", "dstack_api_token",
             "dstack_database_url", "hatchet/database-password", "hatchet/administrator-password", "hatchet_api_token"}:
         raise ValueError("migration_unexpected_runtime_file")
     root_present = _directory(ROOT)

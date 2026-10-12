@@ -327,6 +327,19 @@ class DstackCapacityTests(unittest.TestCase):
                 self.assertFalse(value["ready"])
                 self.assertNotIn("secret", json.dumps(value))
 
+    def test_native_progress_is_allowlisted_and_never_admits_capacity(self):
+        self.start()
+        self.client.running()
+        for code, phase in (("downloading_weights", "model_download"),
+                            ("starting_runtime", "runtime_start"),
+                            ("loading_model", "model_load")):
+            self.native.side_effect = DstackError("dstack_runtime_"+code)
+            value = self.capacity.observe(INTENT)
+            self.assertEqual(value["bootstrap_phase"], phase)
+            self.assertFalse(value["ready"])
+            self.assertEqual(value["model_load_state"], "not_observed")
+        self.assertEqual(self.client.apply_count, 1)
+
     def test_changed_resource_configuration_is_rejected(self):
         self.start()
         self.client.run["run_spec"]["configuration"]["resources"]["gpu"]["count"] = 2

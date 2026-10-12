@@ -253,11 +253,71 @@ schema additions and receipt evidence are never destructively rolled back.
 The existing cookie-authenticated operator API adds `/v1/operator/dstack/state`,
 `catalog`, `previews`, `starts` and `nodes/{id}/stop` or `hold`. Start/stop/hold
 commands retain the original idempotency key through response loss. An idle hold
-does not extend a rental: it stays inside the original absolute deadline and
-adds no reservation. Extending paid lifetime is not implemented by this hold.
+on a lifecycle-v1 rental stays inside its original absolute deadline. On a v2
+run, keep-on is idle, until a chosen time, or until manually stopped, with funding
+through the original reservation and owner spend cap. It creates no fixed deadline.
 Native-ready and admission-ready are separate fields. Admission also requires
 the exact authenticated Hatchet consumer, labels, workflow and fresh heartbeat.
 Both website availability and atomic claim use the same original-ledger gate.
+
+### Approved P4 workspace
+
+The cookie API adds `GET /v1/operator/dstack/workspace` for owned groups, nodes,
+waiting FL/REF jobs and usage. Groups are account-owned presentation metadata in
+the same database; they do not schedule jobs or duplicate rental authority.
+`POST /groups` creates a named group, and `POST /nodes/{id}/group` moves a node
+with `group_id: null` meaning Ungrouped. Preview binds the optional group before
+start; starts from Find/Queue are Ungrouped by default. Group Add defaults to one
+machine; a typical FL/REF pair remains an explicit batch choice.
+
+Every batch child obtains a fresh single-use preview and independent original
+start/idempotency journal. dstack plans and allocates each run. Public offers are
+advisory resource quotes without a pinnable physical offer identity or guaranteed
+quantity; displaying one quote does not assign it repeatedly to several machines.
+Partial results are shown per machine; an unknown response stops subsequent batch
+children until the original command is recovered. No new allocation reconciler
+or browser-controlled provider request is introduced.
+
+Node and group `GET .../stop-impact` compute capacity loss using the frozen job
+profile, original owner/project and real worker eligibility. Stop rechecks under
+the existing capacity lock and returns `capacity_loss_confirmation_required`
+with warnings/fingerprint unless the caller acknowledges that exact impact.
+Queued tasks stay intact. Qualified busy machines count as future compatible
+capacity; unready/stale machines do not. Group stop/hold reports each ordinary
+child command rather than promising atomic provider side effects.
+
+The list retains renting, observed weight download, observed model load,
+ready/running and stopping/stopped. Process startup is not model-load evidence;
+lazy-loaded weights remain explicitly unobserved until proven. Stop intent does
+not remove a row or zero its hourly estimate. The first terminal observation is
+latched in the original dstack row so ended runtime does not grow on later polls.
+Keep-on remains visible at intermediate widths. Ended/detail projections derive
+runtime, cost and validated successful-video counts from original receipts.
+Today uses an explicit Sydney day boundary; modeled/ceiling estimates are labeled
+separately from settled charges. Missing evidence is null, not zero. Exact average
+generation stage/cost requires Cloud query evidence; the available ledger fallback
+is labeled average submission-to-validated-result, including collection/upload.
+
+`GET /nodes/{id}/metrics` authorizes the owned node (or an explicit administrator)
+before reading optional Grafana Cloud logs. `SIXNINE_STAGE_QUERY_CONFIG_FILE`
+selects a separate `logs:read` mount, never the OTLP write credential. The existing
+managed migration secret accepts optional `grafana_stage_query`; ordinary hydration
+creates only its missing `10001:10001`, `0600` mount and preserves all existing
+secret bytes and identities. Hosts without this field remain compatible.
+The reader checks exact original successful video/job/attempt/node/profile/mode,
+reads at most seven days/32 attempts/256 rows, times out after one second and
+caches for 60 seconds. Missing, conflicting or inaccessible measurements stay
+unavailable. The mean includes remote submission/terminal polling, not only GPU
+kernels. Generation cost uses the original machine quote or clearly labeled
+approved ceiling; it excludes startup, idle, storage and transfer. Credential
+expiry/renewal is an operator obligation, not a reason to fabricate samples.
+
+`GET /admin/workspace` and stopping another account's machine require explicit
+`SIXNINE_OPERATOR_ADMIN_OWNERS`, an empty-by-default subset of the existing
+capacity accounts. Rental privilege does not grant cross-account visibility.
+The authenticated administrator remains the command actor; machine ownership,
+accepted tasks and budget obligations are retained. Creator views stay concise;
+historical reconciliation and billing remain in the administrator area.
 
 The CPU controller has an exclusive local supervisor lock and owns only its
 child consumers. Closing it reaps CPU processes/tunnels; it never translates

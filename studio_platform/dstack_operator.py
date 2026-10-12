@@ -31,7 +31,7 @@ PROVIDERS = {"vastai": "vast", "runpod": "runpod"}
 TERMINAL_JOBS = {"succeeded", "failed", "cancelled"}
 OBSERVATION_KEYS = {"run_id", "run_name", "state", "ready", "reason_code", "observed_at",
     "provider_instance_id", "runtime_incarnation", "dstack_status", "model_load_state",
-    "billing_state", "estimated_cost_microusd"}
+    "billing_state", "estimated_cost_microusd", "bootstrap_phase"}
 IDENTITY_KEYS = {"run_id", "provider_instance_id", "runtime_incarnation"}
 
 
@@ -227,6 +227,9 @@ class LedgerDstackStore:
             "dstack_observation_invalid", 422)
         require(_finite(observation.get("observed_at")) and
             0 <= observation["observed_at"] <= self.repo.clock(), "dstack_observation_time_invalid", 422)
+        require("bootstrap_phase" not in observation or observation["bootstrap_phase"] in {
+            "provisioning", "model_download", "runtime_start", "model_load", "runtime_ready"},
+            "dstack_observation_phase_invalid", 422)
         with self.repo.transaction() as connection:
             self.repo._lock_capacity(connection)
             node, intent = self._node(connection, intent_id)
@@ -246,6 +249,10 @@ class LedgerDstackStore:
                 and _window_open(intent, node, self.repo.clock()))
             if value.get("runtime_incarnation") and value.get("state") in {"ready", "busy"}:
                 binding.setdefault("first_runtime_ready_at", value["observed_at"])
+            if value.get("state") == "stopped":
+                # Preserve the first terminal observation in the original row;
+                # later polls must not extend ended runtime/cost estimates.
+                binding.setdefault("first_stopped_at", value["observed_at"])
             binding.update(value)
             payload["dstack"] = binding
             payload["dstack_observation"] = {"run_id": binding.get("run_id"),
@@ -494,6 +501,12 @@ class DstackOperator:
             "operator_forbidden", 403)
         return principal.owner
 
+    def authorize_admin(self, principal):
+        owner = self.authorize(principal)
+        require(owner in getattr(self.settings, "operator_admin_owners", ()),
+            "operator_admin_forbidden", 403)
+        return owner
+
     def _enabled(self):
         require(self.policy.get("enabled") is True and self.capacity is not None, "dstack_capacity_disabled")
         require(self.repo.clock() < self.policy["expires_at"], "dstack_authority_expired")
@@ -577,9 +590,9 @@ class DstackOperator:
         owner = self.authorize(principal)
         self._enabled()
         continuing = self.policy.get("lifecycle_version") == 2
-        allowed = {"profile_id", "ttl_seconds", "keep_on", "hold_seconds", "idle_shutdown_seconds"} if continuing else {"profile_id", "ttl_seconds"}
+        allowed = {"profile_id", "ttl_seconds", "keep_on", "hold_seconds", "idle_shutdown_seconds", "group_id"} if continuing else {"profile_id", "ttl_seconds", "group_id"}
         require(isinstance(body, dict) and "profile_id" in body and not set(body)-allowed
-            and (continuing or set(body) == allowed), "dstack_preview_invalid", 422)
+            and (continuing or {"profile_id", "ttl_seconds"} <= set(body)), "dstack_preview_invalid", 422)
         require(safe_id(body["profile_id"]), "dstack_preview_invalid", 422)
         profile = self.profiles.get(body["profile_id"])
         require(profile is not None and profile["owner_id"] == owner, "dstack_profile_not_found", 404)
@@ -613,6 +626,11 @@ class DstackOperator:
             payload["lifecycle"] = lifecycle
         expires = min(now + 120, self.policy["expires_at"], request.hard_deadline or self.policy["expires_at"])
         with self.repo.transaction() as connection:
+            from .dstack_workspace import owned_group
+            group_id = body.get("group_id")
+            if group_id is not None:
+                owned_group(connection, self.settings, owner, group_id)
+            payload["group_id"] = group_id
             connection.execute(insert(operator_previews).values(id=preview_id, actor=_actor(self.settings.tenant_id, owner),
                 payload=payload, created_at=now, expires_at=expires))
         return {"preview_id": preview_id, "expires_at": expires,
@@ -666,6 +684,9 @@ class DstackOperator:
                 operator_commands.c.payload["preview_id"].as_string() == body["preview_id"])).first()
             require(previous is None, "dstack_preview_consumed")
             profile = value["profile"]
+            if value.get("group_id") is not None:
+                from .dstack_workspace import owned_group
+                owned_group(connection, self.settings, owner, value["group_id"])
             usage = self._limits(connection, profile["max_price_microusd"])
             now = self.repo.clock()
             original = value["request"]
@@ -697,6 +718,7 @@ class DstackOperator:
             payload = {"capacity_backend": BACKEND_MARKER, "tenant_id": self.settings.tenant_id, "owner_id": owner,
                 "project_id": profile["project_id"], "provider": PROVIDERS[profile["backend"]],
                 "configuration_id": profile["configuration_id"], "hard_deadline": request.hard_deadline,
+                "group_id": value.get("group_id"),
                 "observation_fresh_seconds": self.policy["observation_fresh_seconds"],
                 "hourly_cost_microusd": profile["max_price_microusd"], "hold_until": 0,
                 "selection": {"runtime_profile_id": profile["runtime_profile_id"], "mode": profile["mode"],
@@ -710,6 +732,9 @@ class DstackOperator:
             connection.execute(insert(operator_nodes).values(intent_id=intent["id"], command_id=command_id,
                 ordinal=0, binding_id=profile["id"], binding_hash=request_hash(binding), payload=payload,
                 desired_state="running", runtime_state="reserved", updated_at=now))
+            if value.get("group_id") is not None:
+                from .dstack_workspace import advance_group_version
+                advance_group_version(connection, self.settings, owner, value["group_id"], now)
             connection.execute(insert(scaler_actions).values(intent_id=intent["id"], pool=profile["pool"],
                 launch_spec={"capacity_backend": BACKEND_MARKER, "request": asdict(request)}))
             self.repo._emit(connection, "dstack.start_requested", intent["id"], {"intent_id": intent["id"], "command_id": command_id})
@@ -725,11 +750,13 @@ class DstackOperator:
                 .values(state=state, updated_at=self.repo.clock()))
         return {"command_id": command_id, "node_id": intent["id"], "state": state}
 
-    def _owned_node(self, connection, principal, node_id):
+    def _owned_node(self, connection, principal, node_id, *, allow_admin=False):
         owner = self.authorize(principal)
         node = self.repo._locked(connection, select(operator_nodes).where(operator_nodes.c.intent_id == node_id))
         require(node is not None and node["payload"].get("capacity_backend") == BACKEND_MARKER and
-            node["payload"].get("tenant_id") == self.settings.tenant_id and node["payload"].get("owner_id") == owner,
+            node["payload"].get("tenant_id") == self.settings.tenant_id and
+            (node["payload"].get("owner_id") == owner or allow_admin and
+                owner in getattr(self.settings, "operator_admin_owners", ())),
             "dstack_node_not_found", 404)
         return dict(node)
 
@@ -781,19 +808,24 @@ class DstackOperator:
                 "unknown": sum("unknown" in node["state"] or not node["observation_fresh"] for node in result)}}
 
     def node_command(self, principal, node_id, body, key, kind="stop"):
-        require(kind == "stop" and isinstance(body, dict) and not set(body) - {"expected_version"},
+        require(kind == "stop" and isinstance(body, dict) and not set(body) - {"expected_version", "acknowledge_capacity_loss"}
+            and ("acknowledge_capacity_loss" not in body or isinstance(body["acknowledge_capacity_loss"], str)),
             "dstack_node_command_invalid", 422)
         owner = self.authorize(principal)
         actor = _actor(self.settings.tenant_id, owner)
         digest = request_hash({"kind": "dstack_stop", "node_id": node_id, "body": body})
         with self.repo.transaction() as connection:
             self.repo._lock_capacity(connection)
-            node = self._owned_node(connection, principal, node_id)
+            node = self._owned_node(connection, principal, node_id, allow_admin=True)
             existing = self._existing_command(connection, actor, key, digest)
             if existing:
                 return {"command_id": existing["id"], "node_id": node_id, "state": existing["state"]}
             require("expected_version" not in body or body["expected_version"] == node["updated_at"], "operator_node_version_conflict")
             now = self.repo.clock()
+            from .dstack_workspace import CapacityLoss, stop_impact
+            impact = stop_impact(connection, self.settings, [node_id], now)
+            if impact["warnings"] and body.get("acknowledge_capacity_loss") != impact["fingerprint"]:
+                raise CapacityLoss(impact)
             payload = copy.deepcopy(node["payload"])
             payload.update(stop_requested_at=now, hold_until=0)
             if payload.get("dstack_observation"):

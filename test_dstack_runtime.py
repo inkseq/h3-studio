@@ -128,6 +128,9 @@ class NativeRuntimeTests(LedgerCase):
                     if remote.get("lose_start"):
                         raise RuntimeError("SECRET upstream SSH response")
                 def report(self):
+                    if remote.get("report_phase"):
+                        return {"identity": remote["identity"], "state": "preparing",
+                            "phase": remote["report_phase"], "private_text": "SECRET diagnostics"}
                     return {"identity": remote["identity"], "state": "ready", "runtime_verified": True,
                         "engine_manifest_digest": config.engine_manifest_digest,
                         "source_revision": engine_manifest(PROFILE, config.mode).document["source_revision"],
@@ -331,6 +334,21 @@ class NativeRuntimeTests(LedgerCase):
         with self.assertRaisesRegex(DstackError, "allocation_mismatch"):
             self.bridge().readiness(ref, ref_run)
         self.assertFalse(self.store.load(ref["intent_id"]).get("bootstrap_started"))
+
+    def test_preparation_reports_exact_phase_without_relaunching_bootstrap(self):
+        binding, run = self.allocation()
+        bridge = self.bridge()
+        self.remotes["fl"] = {"starts": 0, "uploads": 0, "incarnation": "c"*32,
+            "gpu": GPU, "idle": True, "identity": None, "report_phase": "model_download"}
+        for phase, code in (("model_download", "downloading_weights"),
+                            ("runtime_start", "starting_runtime"),
+                            ("model_load", "loading_model"),
+                            ("SECRET diagnostics", "preparing")):
+            self.remotes["fl"]["report_phase"] = phase
+            with self.subTest(phase=phase), self.assertRaisesRegex(DstackError, "^dstack_runtime_"+code+"$"):
+                bridge.readiness(self.store.load(binding["intent_id"]), run)
+        self.assertEqual(self.remotes["fl"]["starts"], 1)
+        self.assertEqual(self.remotes["fl"]["uploads"], 1)
 
     def test_ref_mode_and_busy_native_runtime_are_explicit_and_close_only_closes_local_tunnel(self):
         binding, run = self.allocation("ref")
