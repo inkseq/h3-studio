@@ -163,6 +163,9 @@ inventory.json
 !deploy/platform/init_database.py
 !deploy/platform/check_config.py
 !deploy/platform/release.py
+!deploy/platform/release_retention.py
+!deploy/platform/RETENTION.md
+!deploy/platform/ec2/journald-sixnine.conf
 !deploy/platform/targon_market.py
 !deploy/platform/bootstrap.py
 !deploy/platform/preflight_host.py

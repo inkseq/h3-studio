@@ -960,6 +960,33 @@ def apply(commit):
         except BlockingIOError:
             raise ReleaseError("another_release_is_in_progress") from None
         apply_locked(ROOT, commit)
+        post_release_retention(ROOT)
+
+
+def post_release_retention(root):
+    """Optional independently installed GC; healthy deployment stays healthy.
+
+    Caller holds release.lock. An operator installs/enables the reviewed helper
+    separately; no incoming bundle supplies executable cleanup code or policy.
+    """
+    policy = root / 'retention-policy.json'
+    if not policy.exists() and not policy.is_symlink():
+        return None
+    try:
+        value = _protected_json(policy, maximum=1024)
+        require(value == {'version': 1, 'enabled': True}, 'retention_policy_requires_review')
+        import importlib.util
+        helper = Path(__file__).with_name('release_retention.py')
+        regular(helper, root_owned=True, maximum=1024**2)
+        spec = importlib.util.spec_from_file_location('sixnine_installed_release_retention', helper)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module.maintain_locked(root, apply=True)
+    except Exception:
+        # Exact healthy receipt remains valid; do not retry a successful deploy
+        # or rewrite its state because an optional cache cleanup could not run.
+        print('retention_skipped_preserving_healthy_release; run reviewed retention plan to inspect', file=sys.stderr)
+        return {'state': 'retention_skipped_preserving_healthy_release'}
 
 
 def main():

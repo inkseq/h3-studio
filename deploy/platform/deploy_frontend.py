@@ -39,7 +39,9 @@ def deploy(commit, *, root=release.ROOT, api=None):
     import fcntl
     with (root / 'release.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return fetch(commit, root, api=api)
+        result = fetch(commit, root, api=api)
+        release.post_release_retention(root)
+        return result
 
 
 def main(argv=None):
