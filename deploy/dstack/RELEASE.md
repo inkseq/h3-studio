@@ -99,6 +99,15 @@ Hatchet bootstrap before activation. Use generation `1`/`wangp-worker` only for
 an explicitly authorized acceptance deployment with its exact existing profiles.
 The activation marker freezes the complete path/configuration document hash;
 later configuration changes require reviewed maintenance, not an app release.
+The optional nonsecret `SIXNINE_STORYBOARD_OWNERS` field in that same environment
+document selects the new storyboard UI for explicit existing browser accounts.
+Omit it, or set it to an empty string, to keep the UI disabled. It is passed only
+to `app`, not to dispatcher, controller, dstack or Hatchet; it grants no operator,
+asset, job or budget permissions. Allowed nonempty values contain unique account
+IDs from `superdan` and `supervan`. Do not inherit this flag from a shell or
+project `.env`, and do not edit an active frozen configuration during a source
+release. Enablement remains a separately reviewed maintenance change after the
+exact source release and acceptance gates in [#161](https://github.com/inkseq/h3-studio/issues/161).
 The derived source-directory path is set by the helper for the exact artifact.
 For first initialization, a temporary private CPU bootstrap project may use
 these same explicitly named Hatchet volumes and persisted infrastructure

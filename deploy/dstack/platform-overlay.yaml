@@ -47,6 +47,8 @@ services:
       DSTACK_OPERATOR_CONFIG: /run/secrets/dstack_operator_config
       SIXNINE_GENERATION_ENABLED: ${SIXNINE_MIGRATION_GENERATION_ENABLED:-0}
       SIXNINE_EXECUTION_BACKEND: ${SIXNINE_MIGRATION_EXECUTION_BACKEND:-disabled}
+      # Creator UI rollout only; absent/empty remains disabled. Not inherited by workers.
+      SIXNINE_STORYBOARD_OWNERS: ${SIXNINE_STORYBOARD_OWNERS:-}
       # Optional, separately scoped read credential. Empty disables queries.
       SIXNINE_STAGE_QUERY_CONFIG_FILE: ${SIXNINE_STAGE_QUERY_CONFIG_FILE:+/run/secrets/stage_query}
       SIXNINE_STORAGE_CREDENTIAL_FILE: ${SIXNINE_STORAGE_CREDENTIAL_FILE:+/run/secrets/r2_storage}

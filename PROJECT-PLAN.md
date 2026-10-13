@@ -223,6 +223,8 @@ Follow-up scopes from that integration: D3 #27 resolves last-frame/delivered-dur
 
 G1 #20 tracks Quick Chat API integration and its separate approved frontend publication; G2 #21 tracks the selectively integrated Agent Connect contract and pending live onboarding. The preserved source remains available for comparison; B1 must coordinate the existing admission extraction rather than rebuilding it. Canonical frontend/mock are versioned in public `inkseq/sixnine-design`; their local paths and generated-release relationship are unchanged.
 
+The owner-approved storyboard workspace is the bounded G scenario in [#156](https://github.com/inkseq/h3-studio/issues/156): [the layout-A and additive entity/compiler contract](docs/STORYBOARD-WORKSPACE.md) replaces the guided workspace's main view while retaining the seven-step guide and canvas. It reuses existing projects, assets, shot preflight/jobs/artifacts and authorized P4 capacity projections. Owner-flag release and live acceptance remain [#161](https://github.com/inkseq/h3-studio/issues/161); approval of the prototype or source merge does not establish release or generation acceptance.
+
 ## 10. Documentation, issue, and status authority
 
 [DECISIONS.md](DECISIONS.md) records durable choices, rationale and supersession; this plan holds their architectural direction. Active contracts specify required behavior; issue acceptance criteria specify the bounded delivery proof. Update corresponding current text when a decision changes instead of accumulating contradictory override paragraphs.

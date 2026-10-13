@@ -156,6 +156,26 @@ class MigrationArtifacts(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "migration_paths_invalid"):
             maintenance.settings(self.root)
 
+    def test_optional_storyboard_flag_is_default_off_and_closed_to_explicit_accounts(self):
+        directory = self.root / "migration"; directory.mkdir()
+        environment = {key: str(self.root / "protected" / key.lower()) for key in maintenance.PATH_FIELDS}
+        environment.update(SIXNINE_OPERATOR_CAPACITY_OWNERS="superdan,supervan",
+            SIXNINE_HATCHET_POSTGRES_VOLUME="existing-postgres", SIXNINE_HATCHET_CONFIG_VOLUME="existing-config",
+            SIXNINE_MIGRATION_GENERATION_ENABLED="0", SIXNINE_MIGRATION_EXECUTION_BACKEND="disabled",
+            SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID=PROFILE)
+        def read():
+            (directory / "paths.json").write_text(json.dumps({"version": 1, "environment": environment,
+                "host_memory_mib": 3840}))
+            return maintenance.settings(self.root)[0]["environment"]
+        self.assertNotIn("SIXNINE_STORYBOARD_OWNERS", read())
+        for value in ("", "superdan", "supervan", "superdan,supervan"):
+            environment["SIXNINE_STORYBOARD_OWNERS"] = value
+            self.assertEqual(read()["SIXNINE_STORYBOARD_OWNERS"], value)
+        for value in ("other", "superdan,superdan", "superdan,", "superdan, supervan", True):
+            environment["SIXNINE_STORYBOARD_OWNERS"] = value
+            with self.subTest(value=value), self.assertRaises(release.ReleaseError):
+                read()
+
     def test_tamper_wrong_platform_extra_file_and_hardlink_rejected(self):
         with self.assertRaisesRegex(release.ReleaseError, "platform_binding_changed"):
             maintenance.manifest(self.artifact, COMMIT, platform_manifest_sha256="b" * 64)

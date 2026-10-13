@@ -358,6 +358,7 @@ inventory.json
 !studio_platform/quick_chat_titles.py
 !docs/
 !docs/quick-chat-history-titles.md
+!docs/STORYBOARD-WORKSPACE.md
 !studio_platform/generation_availability.py
 !studio_platform/google_chat.py
 !studio_platform/google_titles.py
