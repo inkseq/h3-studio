@@ -68,8 +68,9 @@ events = Table("platform_quick_chat_events", metadata,
 
 
 class QuickChatError(Exception):
-    def __init__(self, code, message, status=409, *, retryable=False):
+    def __init__(self, code, message, status=409, *, retryable=False, field_errors=None):
         self.code, self.message, self.status, self.retryable = code, message, status, retryable
+        self.field_errors = field_errors
         super().__init__(code)
 
 
@@ -541,8 +542,8 @@ class QuickChatService(QuickChatTitleMixin):
         return revision
 
     def save_card(self, principal, session_id, body, key, *, card_id=None):
-        allowed = {"title", "prompt", "recipe_id", "controls", "inputs", "copies", "turn_id", "source_revision_id", "expected_card_version", "deployment_profile_id"}
-        fields(body, allowed, {"prompt", "recipe_id", "controls", "inputs", "copies"})
+        from .quick_chat_schema import validate_card_request
+        validate_card_request(body, revising=card_id is not None)
         session = self._access(principal, session_id, "projects:read", "projects:write")
         namespace = "card:"+(card_id or session_id)
         # Authorize before replay. A replay need not re-resolve changed references.
@@ -564,7 +565,9 @@ class QuickChatService(QuickChatTitleMixin):
                     self._get(conn, principal, body["source_revision_id"], session_id, "revision")
                 if card_id:
                     card = self._get(conn, principal, card_id, session_id, "card", lock=True)
-                    self._version(card, body.get("expected_card_version"))
+                    if body["expected_card_version"] != card["version"]:
+                        raise QuickChatError("version_conflict", "内容已被修改；请保留本地草稿并读取当前版本。",
+                            field_errors=[{"path": ["body", "expected_card_version"], "reason": "stale_version"}])
                 else:
                     card = self._new(conn, principal, session_id, "card", {"title": snapshot["title"],
                         "turn_id": body.get("turn_id"), "current_revision_id": None})

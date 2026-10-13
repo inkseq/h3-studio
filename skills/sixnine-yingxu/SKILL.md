@@ -72,6 +72,61 @@ Use the public guide's `quick_chat` examples and authenticated `/v1/quick-chat/s
 
 Quick Chat frontend publication is separate. Returned `/quick-chat?...` links do not prove that the current deployment renders that UI; report session/card/submission/job IDs and verified outputs without claiming the chat page is released. Use the existing website workflow only when its actual release supports it. Do not submit the hidden compatibility project through legacy generation endpoints.
 
+### Revise the same card without generating
+
+When the user authorizes editing an existing card, keep its session/card IDs. A revision is a **complete new immutable snapshot**, not a partial patch; it preserves prior revisions, submissions and jobs. Saving a revision does not preflight, submit generation or start a GPU. Do not continue into preflight/submission unless generation is explicitly authorized.
+
+1. `GET /v1/quick-chat/sessions/{session_id}/cards/{card_id}`. Save the current **card** `version` and `current_revision_id`.
+2. `GET /v1/quick-chat/sessions/{session_id}/revisions/{current_revision_id}`. Copy its explicit `deployment_profile_id`, `recipe_id`, `controls`, `inputs` and `copies`; change only the requested fields.
+3. `POST /v1/quick-chat/sessions/{session_id}/cards/{card_id}/revisions` with those complete fields, new `prompt`, and required **integer `expected_card_version` from `card.version`**. The session's `expected_version` is invalid here. Do not substitute the session version, blindly increment a stale version or assume a revision number is the current card version.
+
+Optional `source_revision_id` is provenance pointing to an authorized revision in the same session; it does not select/copy the current snapshot or replace `expected_card_version`. Omission is allowed. Optional `title` defaults to `我的视频` when omitted; include the old title explicitly to preserve it. Direct revisions do not inherit the session's profile or settings. Explicit `deployment_profile_id:null` preserves intentional legacy routing; never drop a selected profile to bypass a blocker.
+
+The following read/save example uses the existing helper. Replace IDs with actual returned IDs; `CURRENT_REVISION_ID` comes from the first GET:
+
+```sh
+python scripts/sixnine.py --base-url https://www.sixnine.art --connection CONNECTION_ID request GET /v1/quick-chat/sessions/SESSION_ID/cards/CARD_ID --output card-current.json
+python scripts/sixnine.py --base-url https://www.sixnine.art --connection CONNECTION_ID request GET /v1/quick-chat/sessions/SESSION_ID/revisions/CURRENT_REVISION_ID --output revision-current.json
+```
+
+Build `revision-request.json` from those responses, preserving the values' actual JSON types:
+
+```python
+from copy import deepcopy
+import json
+from pathlib import Path
+
+card = json.loads(Path("card-current.json").read_text(encoding="utf-8"))
+revision = json.loads(Path("revision-current.json").read_text(encoding="utf-8"))
+if revision["id"] != card["current_revision_id"]:
+    raise ValueError("Read the card and its current revision again before editing")
+body = {
+    "expected_card_version": card["version"],
+    "deployment_profile_id": revision.get("deployment_profile_id"),
+    "recipe_id": revision["recipe_id"],
+    "controls": deepcopy(revision["controls"]),
+    "inputs": deepcopy(revision["inputs"]),
+    "copies": revision["copies"],
+    "prompt": "A blue cup on a table.",
+    "title": revision["title"],
+    "source_revision_id": revision["id"],
+}
+with Path("revision-request.json").open("x", encoding="utf-8") as target:
+    json.dump(body, target, ensure_ascii=False, indent=2)
+```
+
+Persist one unique logical-write key with that body, then save the revision:
+
+```sh
+python scripts/sixnine.py --base-url https://www.sixnine.art --connection CONNECTION_ID request POST /v1/quick-chat/sessions/SESSION_ID/cards/CARD_ID/revisions --json-file revision-request.json --idempotency-key UNIQUE-CARD-REVISION-001 --output revision-saved.json
+```
+
+HTTP 201 returns `card` and `revision`; inspect the saved card's `version`/`current_revision_id` and revision's `id`/`input_hash`. This remains draft-only. Earlier accepted work stays on its original revision.
+
+- Known HTTP 422 field/type failures are rejected requests. Inspect `field_errors`, for example `{"path":["body","expected_card_version"],"reason":"missing_field"}`. Reasons are `missing_field`, `type_mismatch`, `unknown_field` or `invalid_value`; diagnostics do not echo input values. Repair the JSON and persist a **new body with a new key**. The wrong field name is not a concurrent edit.
+- HTTP 409 `version_conflict` requires rereading the card and its current revision, preserving your intended change while reconciling unrelated edits. Use the fresh card version and a new logical-write key for that updated body. HTTP 409 `idempotency_conflict` instead means one key was used for different content; recover its original request first.
+- A timeout/lost response is unknown, not rejection. Recover the original receipt/card or replay the **same saved body with the same key**; never create a replacement revision or a video as a recovery probe. Use a new local output filename for each read; changing an output filename does not change the write's identity.
+
 ## Legacy quick creation: one editable clip
 
 The machine-readable guide's `quick_creation` and `examples` contain exact request bodies and placeholder rules. Use fresh stable logical request keys per new operation; keep them and request JSON until the operation is resolved.

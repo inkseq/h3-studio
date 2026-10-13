@@ -255,6 +255,8 @@ When separately enabled at session creation, the short-title service calls exact
 
 Alternatively POST the session's cards with explicit deployment_profile_id, recipe_id, prompt, controls, inputs and copies. Copy profile and controls from session next_settings for a new direct card, or from the current revision when revising. An omitted/null deployment_profile_id uses legacy routing, not the session's selected profile. Never remove it or choose a different profile to bypass a blocked preflight. An explicit session change uses PATCH with expected_version and complete next_settings; existing cards remain unchanged. Ordinary generation API keys do not grant GPU rental access.
 
+To revise the same card, GET /v1/quick-chat/sessions/{session_id}/cards/{card_id}, then GET its current_revision_id at /v1/quick-chat/sessions/{session_id}/revisions/{revision_id}. POST /v1/quick-chat/sessions/{session_id}/cards/{card_id}/revisions with required integer expected_card_version from the card's version, the new prompt and an explicit copy of deployment_profile_id, recipe_id, controls, inputs and copies from that revision. Session expected_version is not the card version field. Optional source_revision_id records same-session lineage only; it neither selects a revision nor replaces expected_card_version. Optional title defaults to 我的视频 when omitted; include the prior title to preserve it. The downloadable Markdown guide and Skill contain the complete example. Revising saves an immutable draft and preserves prior revisions/submissions; it does not preflight or generate. A genuine 409 version_conflict requires fresh card/revision reads and reconciliation, not guessing the next version. Repair known 422 field errors with a new body/key; an uncertain write keeps its exact original body/key.
+
 Upload media through same-origin multipart POST /v1/quick-chat/sessions/{session_id}/assets with file and a stable client_asset_id; use ready asset_id values in explicit card inputs or selected session materials. Upload alone does not select a reference. The helper's upload/resume-upload commands accept --session SESSION_ID (or legacy --project, never both); never address the session's hidden project. Read the current revision and preflight it; only confirm a ready preflight within the user's authorization. The submission exposes items[].job_id for the existing shared job and its authenticated artifacts. Preserve write bodies and Idempotency-Key values when recovering uncertain responses.
 
 This is an API workflow. Quick Chat frontend publication is a separate gate; a returned /quick-chat URL does not prove that this deployment serves that UI. Return session/card/submission/job IDs and verified download results without promising a working chat page. Direct cards do not require Google credentials or an AI Registry installation.
@@ -278,10 +280,70 @@ Adopt successful artifacts into the target shot and verify the saved document. R
 """
 
 
+def card_revision_markdown():
+    """Draft-only revision example with typed values copied from read receipts."""
+    return r"""
+## Revise an existing Quick Chat card
+
+When the user authorizes editing an existing card, keep the same session/card IDs. A revision is a complete new immutable snapshot, not a partial patch. It does not modify an earlier revision or submission, start a GPU, preflight or generate a video. Do not continue into preflight or submission unless generation is explicitly authorized.
+
+1. Authenticated `GET /v1/quick-chat/sessions/{session_id}/cards/{card_id}` returns `version` and `current_revision_id`. Save this card response.
+2. Authenticated `GET /v1/quick-chat/sessions/{session_id}/revisions/{current_revision_id}` returns the snapshot to preserve. Save this revision response. If the card changes while you work, reconcile against a fresh card and its current revision instead of guessing a version.
+3. Copy `deployment_profile_id`, `recipe_id`, `controls`, `inputs` and `copies` explicitly. Change only the fields the user requested. POST to the same card's `/revisions` with required **integer `expected_card_version` equal to the card's `version`**, not the session version or an assumed revision number. The session's `expected_version` field is invalid on this endpoint.
+
+Optional `source_revision_id` names an authorized revision in this same session as provenance; it does not select the card's current revision, copy its settings or replace the version check. It may be omitted. Optional `title` defaults to `我的视频` when omitted; explicitly copy the prior title to keep that name. Explicit `deployment_profile_id:null` preserves intentional legacy routing, not the session's selected profile; never drop a selected profile to bypass a blocker.
+
+Example using the downloaded helper (replace IDs with returned IDs; `CURRENT_REVISION_ID` comes from the first GET). These commands only read and save the revised draft:
+
+```sh
+python scripts/sixnine.py --base-url https://www.sixnine.art --connection CONNECTION_ID request GET /v1/quick-chat/sessions/SESSION_ID/cards/CARD_ID --output card-current.json
+python scripts/sixnine.py --base-url https://www.sixnine.art --connection CONNECTION_ID request GET /v1/quick-chat/sessions/SESSION_ID/revisions/CURRENT_REVISION_ID --output revision-current.json
+```
+
+Build the complete request from those two responses; the JSON values remain their actual object/integer types, not strings containing JSON:
+
+```python
+from copy import deepcopy
+import json
+from pathlib import Path
+
+card = json.loads(Path("card-current.json").read_text(encoding="utf-8"))
+revision = json.loads(Path("revision-current.json").read_text(encoding="utf-8"))
+if revision["id"] != card["current_revision_id"]:
+    raise ValueError("Read the card and its current revision again before editing")
+body = {
+    "expected_card_version": card["version"],
+    "deployment_profile_id": revision.get("deployment_profile_id"),
+    "recipe_id": revision["recipe_id"],
+    "controls": deepcopy(revision["controls"]),
+    "inputs": deepcopy(revision["inputs"]),
+    "copies": revision["copies"],
+    "prompt": "A blue cup on a table.",
+    "title": revision["title"],
+    "source_revision_id": revision["id"],
+}
+with Path("revision-request.json").open("x", encoding="utf-8") as target:
+    json.dump(body, target, ensure_ascii=False, indent=2)
+```
+
+Persist one unique logical-write key with that exact body before sending it:
+
+```sh
+python scripts/sixnine.py --base-url https://www.sixnine.art --connection CONNECTION_ID request POST /v1/quick-chat/sessions/SESSION_ID/cards/CARD_ID/revisions --json-file revision-request.json --idempotency-key UNIQUE-CARD-REVISION-001 --output revision-saved.json
+```
+
+HTTP 201 returns `card` and `revision`; read the saved card's `version`/`current_revision_id` and the new revision's `id`/`input_hash`. Existing snapshots, submissions and jobs remain attached to their original revision. Session `expected_version` is used only by its own session/turn operations; card `expected_card_version` is used here.
+
+- A known HTTP 422 field/type failure is a rejected request, not a concurrent edit. Inspect `field_errors` entries such as `{"path":["body","expected_card_version"],"reason":"missing_field"}`. Reasons are `missing_field`, `type_mismatch`, `unknown_field` or `invalid_value`; diagnostics do not echo input values. Repair the JSON and persist a **new body with a new key**. Do not copy a session `expected_version` into the revision body.
+- HTTP 409 `version_conflict` means the valid expected card version is stale. Preserve your intended edit; reread the current card and its current revision, reconcile unrelated changes and use a new logical-write key for the updated request. Do not blindly increment versions. A 409 `idempotency_conflict` instead means the saved key was reused with different content; recover the original request before choosing a new operation.
+- A timeout/lost response does not establish rejection. Recover through the original receipt/card, or replay the **exact saved body with its original key**. Do not generate a replacement revision or submit a video to discover whether the write succeeded. A later read uses a new local output filename; changing a filename does not require changing the logical-write key.
+"""
+
+
 def guide_markdown():
     """One offline-readable document generated from the current public contract."""
     guide = public_guide()
-    return llms_text() + """
+    return llms_text() + card_revision_markdown() + """
 ## Using the downloaded package
 
 Start with this guide (`README.md` in the ZIP), then read the adjacent `SKILL.md` in that package. `scripts/connect.py` is the connection helper and `scripts/sixnine.py` is the API/media helper. Downloading the guide or ZIP does not install software, authorize a connection, call a model, start a GPU or submit generation.
@@ -314,6 +376,7 @@ def landing_html():
 <h2>可直接发给 Agent 的任务示例</h2><p>“阅读这个网站的 /for-agents 使用指南。用我已配置的凭据，为这个广告想法创建一个快速视频草稿，把我的图片、动作视频和音频放到对应位置，返回网页让我继续修改。生成前核对可用能力、阻塞原因和费用；只有在我已经授权的范围内才提交。结果先放候选，不覆盖我已选择的版本。”</p><p>如果你在做短剧，可以要求 Agent 建立章节、角色和分镜；同一份故事也能在快速创作中单独调整某个镜头。</p>
 <h2>Agent 的调用顺序</h2><ol>''' + steps + '''</ol>
 <h2>用对话和任务卡创作</h2><p>机器指南的 <code>quick_chat</code> 和认证后的 <code>/v1/quick-chat/schema</code> 提供完整示例：创建会话 → 上传素材 → 创建任务卡 → 预检 → 明确确认 → 查询原任务和下载结果。外部 Agent 可直接提交完整提示词，使用 <code>assistant_mode=none</code>、<code>create_card=true</code>，继承会话素材及 <code>next_settings</code>；网站聊天助手默认关闭，不影响直接创建卡片，也不会因此自动生成。</p><p>直接创建或修改卡片时，明确携带已选 <code>deployment_profile_id</code>、生成方式和参数；新卡片读取会话设置，修改已有卡片读取原版本。省略配方不会继承会话选择，而是走旧路由。先查配方专属能力与限制，不为绕过阻塞而换模型。普通生成 Key 不具有租 GPU 权限。</p><p>会话素材须通过同源 <code>/v1/quick-chat/sessions/{session_id}/assets</code> 上传，不操作隐藏项目。辅助脚本的 upload/resume-upload 支持 --session，会话与原有 --project 参数互斥。Quick Chat 网页有独立发布步骤，返回的 <code>/quick-chat</code> 地址不保证当前部署已能打开；先返回会话、卡片、任务 ID 和经核验的下载结果。用户不需要安装我们的 AI Registry。</p>
+<p>修改同一张卡片时，先读取当前卡片，再读取它的 <code>current_revision_id</code>。向 <code>/v1/quick-chat/sessions/{session_id}/cards/{card_id}/revisions</code> 提交完整的新版本，使用卡片的整数 <code>version</code> 作为 <code>expected_card_version</code>；会话的 <code>expected_version</code> 不能用于这里。明确复制模型配方、参数、素材和份数，再改用户指定的内容。<code>source_revision_id</code> 只是可选的同会话来源记录；要保留原名称则显式复制 <code>title</code>。保存版本不会生成视频。完整请求与错误修正示例见<a href="/for-agents/guide.md">公开 Markdown 指南</a>和 Skill。</p>
 <p>启用自动命名后，新建时未指定标题的创作会用 <code>gemma-4-31b-it</code> 从第一段文字或任务卡提示词生成一次短标题，只用于创作记录；不会发送素材或完整对话。明确指定的名称和手动改名会保留，失败也不影响创作和视频生成，不会自动重试收费调用。旧记录不会批量改名，浏览记录也不会调用命名模型。这个功能与聊天助手、生成视频分别配置；直接创建卡片也可能触发命名。</p>
 <h2>原有快速草稿与故事接口</h2><p>使用本人全部项目范围和 projects:create 权限。为每次新建保存唯一的幂等键；重试原请求沿用原键。返回的 project.journey.reviewShotId 是单镜头 ID。随后用 shot.configure_generation 保存生成设置；创建草稿不会启动 GPU。</p><pre>''' + example + '''</pre><p>完整的纯文字、参考素材、预检、提交和候选采用示例见<a href="/for-agents/guide.json">机器可读指南</a>。</p>
 <h2>真实边界</h2><p>网站公开说明与已授权 API 文档分开。认证后的 <code>/v1/agent-guide</code>、<code>/v1/guided-schema</code>、<code>/v1/capabilities</code> 和 <code>/openapi.json</code> 是调用依据。若生成计划返回阻塞，保留草稿并说明原因；不要把演示素材当成生成成功。</p>
