@@ -27,6 +27,8 @@ import time
 import uuid
 
 ORIGINAL_BOOTSTRAP_SHA = "2620c95b0ea33b83e2e1d52949d6f2ba68965b9429b5620d56502d39323fafa6"
+SUPPORTED_BOOTSTRAP_SHAS = frozenset((ORIGINAL_BOOTSTRAP_SHA,
+    "b464770312f6f569e68a204cddb54666c094d87c0290f22c819ab73b6fb75942"))
 INPUTS = {"config", "token", "package", "manifest", "bootstrap", "identity", "marker", "status", "failure"}
 SAFE_TYPES = {"HfHubHTTPError", "EntryNotFoundError", "RevisionNotFoundError", "RepositoryNotFoundError",
               "GatedRepoError", "LocalEntryNotFoundError", "HTTPError", "ConnectionError", "ReadTimeout",
@@ -170,7 +172,7 @@ def source_matches(package, source, *, expected_parents=None):
 
 
 def original_module(raw):
-    require(sha(raw) == ORIGINAL_BOOTSTRAP_SHA, "bootstrap_version_unsupported")
+    require(sha(raw) in SUPPORTED_BOOTSTRAP_SHAS, "bootstrap_version_unsupported")
     # Executing a bounded, approved source byte string does not write pyc or
     # import a different local bootstrap via incidental module search paths.
     import types
@@ -201,8 +203,9 @@ def validate(authority, config, paths, raw, *, now):
     keys = {"version", "purpose", "resume_id", "slot_key", "run_id", "instance_id",
             "hard_deadline", "issued_at", "expires_at", "input_sha256", "recovery_sha256", "parent_metadata"}
     version = authority.get("version")
-    require(type(version) is int and version in {1, 2}
-            and set(authority) == (keys if version == 1 else keys | {"previous_intent_sha256", "download_alias"})
+    additions = {1: set(), 2: {"previous_intent_sha256", "download_alias"}, 3: {"completed_download"}}
+    require(type(version) is int and version in additions
+            and set(authority) == keys | additions[version]
             and authority["purpose"] == "resume-original-model-download-v" + str(version),
             "authority_invalid")
     if version == 2:
@@ -216,7 +219,7 @@ def validate(authority, config, paths, raw, *, now):
             <= authority["hard_deadline"] and authority["hard_deadline"] - now > 900, "authority_expired")
     require(authority["recovery_sha256"] == sha(read(Path(__file__), 65536)), "recovery_changed")
     require(all(sha(raw[name]) == authority["input_sha256"][name] for name in INPUTS), "input_changed")
-    require(sha(raw["bootstrap"]) == ORIGINAL_BOOTSTRAP_SHA, "bootstrap_version_unsupported")
+    require(sha(raw["bootstrap"]) in SUPPORTED_BOOTSTRAP_SHAS, "bootstrap_version_unsupported")
     original_module(raw["bootstrap"]).validate_config(config)
     expected_parents = approved_parents(authority)
     bases = (Path(config["install_root"]), Path(config["status_path"]).parent)
@@ -255,8 +258,46 @@ def validate(authority, config, paths, raw, *, now):
         # archive and extracted bytes were verified above.
         sys.path.insert(0, str(base / "platform"))
         validate_alias(authority["download_alias"], json.loads(raw["manifest"]))
+    if version == 3:
+        sys.path.insert(0, str(base / "platform"))
+        completed_download(authority, config, json.loads(raw["manifest"]), manifest, expected_parents)
     process_idle(config["port"])
     return identity
+
+
+def completed_download(authority, config, document, manifest_digest, expected_parents):
+    """Recheck an explicitly bound completed receipt; never fetch or qualify bytes."""
+    from studio_platform.inference.wangp_contract import EngineManifest
+    from studio_platform.runtime_hosts.wangp_download import selected_files, path_checked
+    evidence = authority.get("completed_download")
+    counts = ("files_complete", "files_total", "bytes_complete", "bytes_total")
+    require(type(evidence) is dict and set(evidence) == {*counts, "files", "progress_sha256", "keep_until"}
+            and isinstance(evidence["progress_sha256"], str)
+            and re.fullmatch(r"[0-9a-f]{64}", evidence["progress_sha256"])
+            and all(type(evidence[name]) is int for name in counts)
+            and type(evidence["keep_until"]) in (int,float) and math.isfinite(evidence["keep_until"])
+            and evidence["keep_until"] == authority["hard_deadline"], "completed_authority_invalid")
+    manifest = EngineManifest.from_dict(document)
+    require(manifest.digest == manifest_digest, "manifest_changed")
+    records = selected_files(document, manifest_digest)
+    files = [item for component in document["components"].values() for item in component["files"]]
+    require(type(evidence["files"]) is list and evidence["files"] == sorted(files,key=lambda item:item["path"]),
+            "completed_files_changed")
+    expected = {"state": "downloaded_unverified", "manifest_digest": manifest_digest,
+        "files_complete": len(records), "files_total": len(records), "bytes_complete": sum(row[4] for row in records),
+        "bytes_total": sum(row[4] for row in records), "inference_verified": False}
+    raw = read(Path(config["install_root"])/"model-download/progress.json",8192,expected_parents=expected_parents)
+    require(sha(raw) == evidence["progress_sha256"], "completed_progress_changed")
+    value = json.loads(raw)
+    require(type(value) is dict and value == expected and value.get("inference_verified") is False
+            and all(type(value[name]) is int and evidence[name] == expected[name] for name in counts),
+            "completed_progress_invalid")
+    root = path_checked(config["model_root"])
+    for _,_,_,name,size in records:
+        info = path_checked(root/name).lstat()
+        require(stat.S_ISREG(info.st_mode) and (info.st_uid,info.st_gid,info.st_nlink)==(0,0,1)
+                and not info.st_mode & 0o022 and info.st_size == size, "completed_file_changed")
+    return value
 
 
 def validate_alias(alias, document):
@@ -308,7 +349,7 @@ def previous_failed_intent(raw, authority):
 
 def original_tail(module, raw):
     """Reuse the SHA-pinned original status/launcher/verifier, not a forked runtime."""
-    require(sha(raw) == ORIGINAL_BOOTSTRAP_SHA, "bootstrap_version_unsupported")
+    require(sha(raw) in SUPPORTED_BOOTSTRAP_SHAS, "bootstrap_version_unsupported")
     tree = ast.parse(raw)
     install = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "install")
     status_node = next(node for node in install.body if isinstance(node, ast.FunctionDef) and node.name == "status")
@@ -319,7 +360,12 @@ def original_tail(module, raw):
     arguments = "config,slot_key,token_file,base,source,runtime,manifest,manifest_digest,python,environment,download_once"
     wrapper = ast.parse("def continue_original(" + arguments + "):\n"
                         " started=False\n last_phase='model_download'\n failure_diagnostics={}\n launch=True\n"
-                        " status_path=Path(config['status_path'])\n model_root=Path(config['model_root'])\n pass\n").body[0]
+                        " status_path=Path(config['status_path'])\n model_root=Path(config['model_root'])\n"
+                        " saved_status=json.loads(status_path.read_text(encoding='utf-8'))\n"
+                        " phase_started_unix=time.time()\n started_unix=saved_status.get('started_unix',phase_started_unix)\n"
+                        " last_updated_unix=max(phase_started_unix,saved_status.get('updated_unix',phase_started_unix))\n"
+                        " download_progress={name:saved_status[name] for name in ('bytes_complete','bytes_total','files_complete','files_total') if name in saved_status}\n"
+                        " pass\n").body[0]
     download = ast.parse("try:\n download_once(status)\nexcept DownloadFailure as error:\n"
                          " failure_diagnostics['download_failure']=safe_download_failure(error.diagnosis)\n"
                          " raise ValueError(str(error)) from None\n").body[0]
@@ -407,8 +453,13 @@ def execute(config, paths, authority, attempt):
                 alias_args = ["--download-alias-file", str(alias_path)] if alias_path is not None else []
                 return subprocess.Popen([command[0], str(Path(__file__).resolve()), "--download-child",
                     *alias_args, *command[3:]], **kwargs)
-            run_download(python, source, paths["manifest"], manifest.digest, config["model_root"],
-                         attempt, environment, status, timeout=timeout, popen=popen)
+            if authority["version"] == 3:
+                value = completed_download(authority,config,manifest.document,manifest.digest,expected_parents)
+                status("model_download", **{name:value[name] for name in
+                    ("files_complete","files_total","bytes_complete","bytes_total")})
+            else:
+                run_download(python, source, paths["manifest"], manifest.digest, config["model_root"],
+                             attempt, environment, status, timeout=timeout, popen=popen)
         require(time.time() < authority["hard_deadline"] - 900, "authority_expired")
     return original_tail(module, read_input("bootstrap", paths["bootstrap"], expected_parents))(config, authority["slot_key"], paths["token"],
         Path(config["install_root"]), source, runtime, manifest, manifest.digest, python, environment, download_once)
