@@ -13,6 +13,11 @@ export function storyboardProfile(capabilities,quality,inputMode,explicitId){
   const preferred=profiles.find(p=>p.id===capabilities?.default_deployment_profile_id&&matches(p)&&enabled(p));
   return preferred||profiles.find(p=>matches(p)&&enabled(p))||null;
 }
+export function storyboardGenerationProfile(capabilities,shot,{quality,sourceRequest}={}){
+  const targetQuality=quality||shot.quality,inputMode=sourceRequest?.mode||shot.mode.toLowerCase();
+  const changedContext=targetQuality!==shot.quality||inputMode!==shot.mode.toLowerCase();
+  return storyboardProfile(capabilities,targetQuality,inputMode,changedContext?undefined:shot.entity?.data.h3?.deploymentProfileId);
+}
 export function storyboardView(project,{chapterId,capabilities,jobs=[],queue=null,busy=false,error=''}={}){
   const chapter=find(project,chapterId)||children(project,null).find(e=>e.type==='chapter');
   const assets=project.entities.filter(e=>['image','video','audio'].includes(e.type)).map(e=>({id:e.id,kind:e.type,name:e.title,fileId:e.data.fileId,entity:e,seconds:e.data.metadata?.source_duration??e.data.metadata?.duration,inbox:e.data.storyboardInbox!==false&&!project.entities.some(profile=>[...list(profile.data.imageIds),...list(profile.data.referenceAssetIds),...list(profile.data.looks).flatMap(v=>list(v.imageIds??Object.values(v.gallery||{}))),...list(profile.data.versions).flatMap(v=>list(v.imageIds)),...list(profile.data.voices).map(v=>v.assetId),profile.data.ambient?.assetId].includes(e.id)),source:e.data.source||'upload'}));
@@ -99,6 +104,10 @@ export function storyboardDrop(shot,item,slot,state){
 }
 export function storyboardSnapshot(project,shotId){const shot=find(project,shotId),chap=ancestors(project,shotId).find(e=>e.type==='chapter'),shots=chap?chapterShots(project,chap.id):[],at=shots.findIndex(s=>s.id===shotId);return {shot,style:project.journey?.storyboard?.style||'',profiles:project.entities.filter(e=>['character','location','prop'].includes(e.type)),assets:project.entities.filter(e=>['image','video','audio'].includes(e.type)),previous:shot?.data.storyboard?.continuePrevious?shots[at-1]?.data.selectedAssetId:null};}
 export function patchStoryboardShot(project,id,patch){const shot=find(project,id);if(!shot)throw Error('镜头不存在。');const b={version:1,mode:mode(shot),quality:'draft',place:null,propIds:[],firstFrameId:'',lastFrameId:'',continuePrevious:false,extraRefs:[],...shot.data.storyboard};
+  // A deliberate mode/quality edit selects a new model context. A same-context
+  // edit must retain its exact deployment profile instead of reverting it.
+  const changedContext=Object.hasOwn(patch,'mode')&&patch.mode.toLowerCase()!==b.mode||Object.hasOwn(patch,'quality')&&patch.quality!==b.quality;
+  if(changedContext&&shot.data.h3)shot.data.h3={...shot.data.h3,deploymentProfileId:''};
   if(Object.hasOwn(patch,'title'))shot.title=patch.title;if(Object.hasOwn(patch,'script'))shot.data.script=patch.script;if(Object.hasOwn(patch,'prompt'))shot.data.prompt=patch.prompt;
   if(Object.hasOwn(patch,'duration')){shot.data.seconds=patch.duration;shot.data.h3={...shot.data.h3,controls:{...shot.data.h3?.controls,duration:patch.duration}};}
   for(const [from,to] of Object.entries({mode:'mode',quality:'quality',start:'firstFrameId',end:'lastFrameId',continuePrev:'continuePrevious',props:'propIds'}))if(Object.hasOwn(patch,from))b[to]=from==='mode'?patch[from].toLowerCase():patch[from];

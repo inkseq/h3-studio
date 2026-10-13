@@ -89,6 +89,24 @@ class Fixture:
         self.write_authority()
         return manifest
 
+    def bind_completed(self):
+        manifest=self.bind_manifest()
+        root=Path(self.config['model_root']);root.mkdir()
+        files=sorted([copy.deepcopy(item) for component in manifest.document['components'].values()
+                      for item in component['files']],key=lambda item:item['path'])
+        for item in files:
+            target=root/item['path'];target.parent.mkdir(parents=True,exist_ok=True)
+            with target.open('wb') as stream:stream.truncate(item['size_bytes'])  # sparse metadata-only fixtures
+        total=sum(item['size_bytes'] for item in files)
+        value={'state':'downloaded_unverified','manifest_digest':manifest.digest,'files_complete':len(files),
+               'files_total':len(files),'bytes_complete':total,'bytes_total':total,'inference_verified':False}
+        progress=self.base/'model-download/progress.json';progress.write_text(json.dumps(value));progress.chmod(0o600)
+        self.authority.update(version=3,purpose='resume-original-model-download-v3',completed_download={
+            'progress_sha256':r.sha(progress.read_bytes()),'files':files,'keep_until':self.authority['hard_deadline'],
+            **{name:value[name] for name in ('files_complete','files_total','bytes_complete','bytes_total')}})
+        self.write_authority()
+        return manifest,progress
+
 
 def alias_for(manifest):
     return {"repository": "DeepBeepMeep/MiniMax-H3",
@@ -143,6 +161,58 @@ class ContinuationTests(unittest.TestCase):
         self.fixture.write_authority()
         with self.assertRaisesRegex(ValueError, "intent_changed"):
             self.invoke(lambda *args: self.fail("must not replay"))
+
+    def test_completed_original_reuses_once_and_keeps_all_originals(self):
+        f=self.fixture;_,progress=f.bind_completed();before=progress.read_bytes()
+        called=[]
+        self.assertEqual(self.invoke(lambda *args:called.append(True) or {'state':'ready'})['state'],'ready')
+        self.assertEqual(called,[True]);self.assertEqual(progress.read_bytes(),before)
+        for name in r.INPUTS:self.assertEqual(f.paths[name].read_bytes(),f.raw[name])
+        self.assertEqual(self.invoke(lambda *args:self.fail('must not replay'))['state'],'reconcile_required')
+
+    def test_completed_progress_file_and_finite_policy_guards_precede_effects(self):
+        for case in ('hash','count','bytes','files','keep_until','unfinished','foreign','size','symlink'):
+            with self.subTest(case=case),tempfile.TemporaryDirectory(dir='/root') as directory:
+                f=Fixture(Path(directory));_,progress=f.bind_completed()
+                evidence=f.authority['completed_download']
+                if case=='hash':evidence['progress_sha256']='0'*64
+                elif case=='count':evidence['files_complete']-=1
+                elif case=='bytes':evidence['bytes_complete']-=1
+                elif case=='files':evidence['files'].pop()
+                elif case=='keep_until':evidence['keep_until']+=1
+                elif case in ('unfinished','foreign'):
+                    value=json.loads(progress.read_bytes())
+                    if case=='unfinished':value['state']='downloading'
+                    else:value['manifest_digest']='0'*64
+                    progress.write_text(json.dumps(value));evidence['progress_sha256']=r.sha(progress.read_bytes())
+                else:
+                    target=Path(f.config['model_root'])/evidence['files'][0]['path']
+                    if case=='size':
+                        with target.open('r+b') as stream:stream.truncate(1)
+                    else:
+                        target.unlink();target.symlink_to(progress)
+                f.write_authority()
+                with self.assertRaises(ValueError):
+                    r.resume(f.paths['config'],f.paths['token'],f.authority_path,
+                             effect=lambda *args:self.fail('unsafe effect'))
+                self.assertFalse(list(f.base.glob('resume-original-download-*.json')))
+
+    def test_completed_execution_rechecks_under_owned_cache_lock_without_sdk(self):
+        f=self.fixture;manifest,progress=f.bind_completed();events=[]
+        source=f.source;expected=r.approved_parents(f.authority)
+        def tail(*args):
+            download_once=args[-1];download_once(lambda phase,**fields:events.append((phase,fields)))
+            return {'state':'ready'}
+        def check(*args):
+            events.append(('rechecked',{}))
+            return original_check(*args)
+        original_check=r.completed_download
+        from studio_platform.runtime_hosts import wangp_profile_bootstrap,wangp_download
+        with patch.object(wangp_profile_bootstrap,'prepare',return_value=(f.root/'prepared',sys.executable,{})),              patch.object(wangp_profile_bootstrap,'_acquire_cache_lock') as locked,              patch.object(wangp_download,'run_download',side_effect=AssertionError('No SDK or new child')),              patch.object(r,'completed_download',side_effect=check),patch.object(r,'original_tail',return_value=tail):
+            self.assertEqual(r.execute(f.config,f.paths,f.authority,f.base/'new-attempt')['state'],'ready')
+        locked.assert_called_once();self.assertEqual([event[0] for event in events],['rechecked','model_download'])
+        self.assertFalse((f.base/'new-attempt').exists())
+        self.assertEqual(f.paths['package'].read_bytes(),f.raw['package'])
 
     def failed_original_then_v2(self):
         f = self.fixture

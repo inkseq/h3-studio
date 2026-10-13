@@ -7,6 +7,7 @@ import {KIND_LABEL, TYPE_LABEL, VARIANT_LABEL} from './storyboard-ui-model.js';
 import {StoryboardDownloads,StoryboardAssetImage,StoryboardVideo,StoryboardPlayButton} from './StoryboardMedia.jsx';
 import {chosenVersion,coverOf,expand,fmt,MODE_LABEL,modeOf,QUALITY_LABEL,planDrop,segments,shotProfiles,shotStatus,startFrame,totalDuration,variantOf,queuePositions} from './storyboard-ui-model.js';
 import {useStoryboardUI as useStore} from './storyboard-ui-context.jsx';
+import {StoryboardNameDialog,StoryboardDeleteDialog} from './StoryboardDialog.jsx';
 
 /* ---------- thumbs & draggable tiles ---------- */
 
@@ -104,7 +105,7 @@ const LIB_TABS = [['character', '人物'], ['location', '场景'], ['prop', '道
 
 export function AssetLibrary({onPick, selectedShot, compact}) {
   const {state, dispatch, db} = useStore();
-  const [tab,setTab]=useState('character'),[q,setQ]=useState(''),[wide,setWide]=useState(false),[zoom,setZoom]=useState(null);
+  const [tab,setTab]=useState('character'),[q,setQ]=useState(''),[wide,setWide]=useState(false),[zoom,setZoom]=useState(null),[newProfileType,setNewProfileType]=useState(null);
   const uploadInput=useRef();
   const inbox = state.assets.filter(a => a.inbox);
   const count = k => k === 'inbox' ? inbox.length : ['character', 'location', 'prop'].includes(k) ? state.profiles.filter(p => p.type === k).length
@@ -130,7 +131,7 @@ export function AssetLibrary({onPick, selectedShot, compact}) {
         <div className="plist">{state.profiles.filter(p => p.type === tab && match(p.name + p.desc)).map(p => (
           <ProfileCard key={p.id} p={p} used={usedP.has(p.id)} onOpen={() => dispatch({type: 'openProfile', id: p.id})}
             onAdd={selectedShot ? () => onPick({profile: p.id}) : null} />))}</div>
-        <button className="small add-profile" onClick={() => { const name = prompt(`新建${TYPE_LABEL[tab]}的名字`); if (name) dispatch({type: 'newProfile', ptype: tab, name}); }}>
+        <button className="small add-profile" disabled={state.busy} onClick={() => setNewProfileType(tab)}>
           ＋ 新建{TYPE_LABEL[tab]}</button>
         <div className="lib-tip">{tab === 'character' ? '人物档案 = 描述 + 多套造型照片 + 声音。拖到镜头上，自动带上照片、声音和描述。'
           : tab === 'location' ? '场景档案 = 布局描述 + 白天/夜晚等版本的图 + 环境声。' : '道具档案 = 描述 + 几张图。'}
@@ -147,6 +148,7 @@ export function AssetLibrary({onPick, selectedShot, compact}) {
         {inbox.map(a => <InboxRow key={a.id} a={a} />)}
       </div>}
       {zoom&&<div className="zoom" role="dialog" aria-label="素材预览" onClick={()=>setZoom(null)}>{zoom.kind==='video'?<StoryboardVideo asset={zoom} controls/>:<StoryboardAssetImage asset={zoom}/>}<b>{zoom.name}</b><small>点击关闭</small></div>}
+      {newProfileType&&<StoryboardNameDialog title={`新建${TYPE_LABEL[newProfileType]}`} label={`${TYPE_LABEL[newProfileType]}名称`} onSubmit={name=>dispatch({type:'newProfile',ptype:newProfileType,name})} onClose={()=>setNewProfileType(null)}/>}
     </aside>
   );
 }
@@ -220,8 +222,8 @@ function VoiceSection({p}) {
 export function ProfileEditor() {
   const {state, dispatch, db} = useStore();
   const p = state.openProfile && db.profile(state.openProfile);
-  const [vid,setVid]=useState(null),[choose,setChoose]=useState(false),[ambientChoose,setAmbientChoose]=useState(false);
-  useEffect(() => { setVid(null); setChoose(false); }, [state.openProfile]);
+  const [vid,setVid]=useState(null),[choose,setChoose]=useState(false),[ambientChoose,setAmbientChoose]=useState(false),[newVariant,setNewVariant]=useState(false);
+  useEffect(() => { setVid(null); setChoose(false); setAmbientChoose(false); setNewVariant(false); }, [state.openProfile]);
   if(!p)return null;
   const v=variantOf(p,vid||p.def);
   if(!v)return <div className="profile-overlay"><section className="profile"><h3>{p.name}</h3><p>先添加{VARIANT_LABEL[p.type]}，再放照片。</p><button onClick={()=>dispatch({type:'addVariant',pid:p.id,name:'默认'})}>＋ 添加{VARIANT_LABEL[p.type]}</button><button onClick={()=>dispatch({type:'openProfile',id:null})}>关闭</button></section></div>;
@@ -241,7 +243,7 @@ export function ProfileEditor() {
 
         {p.type !== 'prop' && <div className="vtabs">{p.variants.map(x => (
           <button key={x.id} className={x.id === v.id ? 'on' : ''} onClick={() => setVid(x.id)}>{x.name}{x.id === p.def && <em>默认</em>}<small>{x.images.length}</small></button>))}
-          <button className="ghost" onClick={() => { const name = prompt(`新${VARIANT_LABEL[p.type]}的名字（如：红裙、长发、雨衣）`); if (name) dispatch({type: 'addVariant', pid: p.id, name}); }}>＋ {VARIANT_LABEL[p.type]}</button>
+          <button className="ghost" disabled={state.busy} onClick={() => setNewVariant(true)}>＋ {VARIANT_LABEL[p.type]}</button>
         </div>}
 
         <div className="variant">
@@ -282,6 +284,7 @@ export function ProfileEditor() {
         {ambientChoose&&<ChooseFiles kind="audio" title={`给${p.name}添加环境声`} exclude={new Set()} onPick={asset=>{dispatch({type:'profile',id:p.id,patch:{ambient:asset}});setAmbientChoose(false);}} onFiles={files=>dispatch({type:'uploadFiles',files,target:{kind:'ambient',pid:p.id}})} onClose={()=>setAmbientChoose(false)}/>}
         {choose && <ChooseFiles kind="image" title={`给「${p.name} · ${v.name}」添加照片`} exclude={new Set(v.images)}
           onPick={id => dispatch({type: 'fileImage', asset: id, pid: p.id, vid: v.id})} onFiles={upload} onClose={() => setChoose(false)} />}
+        {newVariant&&<StoryboardNameDialog key={p.id} title={`新建${VARIANT_LABEL[p.type]}`} label={`${VARIANT_LABEL[p.type]}名称`} onSubmit={name=>dispatch({type:'addVariant',pid:p.id,name})} onClose={()=>setNewVariant(false)}/>}
       </section>
     </div>
   );
@@ -447,8 +450,8 @@ function SaveFrame({shot,version,onDone}){
 export function ShotEditor({shotId, onClose, inline}) {
   const {state, dispatch, db} = useStore();
   const shot = state.shots.find(s => s.id === shotId);
-  const [preview, setPreview] = useState(null), [picker, setPicker] = useState(null), [saving, setSaving] = useState(false), [msg, setMsg] = useState('');
-  useEffect(() => { setPreview(null); setPicker(null); setSaving(false); setMsg(''); }, [shotId]);
+  const [preview, setPreview] = useState(null), [picker, setPicker] = useState(null), [saving, setSaving] = useState(false), [msg, setMsg] = useState(''),[deleting,setDeleting]=useState(false);
+  useEffect(() => { setPreview(null); setPicker(null); setSaving(false); setMsg(''); setDeleting(false); }, [shotId]);
   if (!shot) return null;
   const index = state.shots.indexOf(shot);
   const info = expand(shot, db);
@@ -561,9 +564,10 @@ export function ShotEditor({shotId, onClose, inline}) {
         <button className="primary" disabled={busy} onClick={()=>dispatch({type:'generate',ids:[shot.id]})}>
           {shot.versions.length?'预检并重新生成':'预检并生成'} · {qualityLabel}</button>
         {chosen&&chosen.quality==='draft'&&<button disabled={busy} onClick={() => dispatch({type:'generate',ids:[shot.id],quality:'final',sourceVersion:chosen.id})}>用精修重做选定版本</button>}
-        <button className="ghost danger" onClick={() => { if(confirm('删除这个镜头的编辑卡片？原任务、成片和费用记录会保留。')){dispatch({type:'remove',id:shot.id});onClose?.();} }}>删除镜头</button>
+        <button className="ghost danger" onClick={() => setDeleting(true)}>删除镜头</button>
       </div>
       {picker && <AssetPicker shotId={shot.id} {...picker} onClose={() => setPicker(null)} />}
+      {deleting&&<StoryboardDeleteDialog onConfirm={async()=>{const receipt=await dispatch({type:'remove',id:shot.id});if(receipt?.ok!==false)onClose?.();return receipt;}} onClose={()=>setDeleting(false)}/>}
     </section>
   );
 }

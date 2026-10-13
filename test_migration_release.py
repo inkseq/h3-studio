@@ -93,6 +93,28 @@ class MigrationArtifacts(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "source_set_changed"):
             maintenance.verify_sources(target, value["source_index_sha256"])
 
+    def test_native_source_commit_map_is_optional_bounded_and_covers_exact_packages(self):
+        value = maintenance.manifest(self.artifact, COMMIT)
+        target = self.root/'mapped-sources'
+        maintenance.extract_sources(self.artifact/'source-set.tar.gz',target,value['source_index_sha256'],
+            source_commits=value['native_source_commits'])
+        maintenance.verify_sources(target,value['source_index_sha256'],source_commits=value['native_source_commits'])
+        self.assertEqual(set(value['native_source_commits'].values()),{COMMIT})
+        for origins in ({}, {'f'*64:COMMIT}, dict(value['native_source_commits'], **{'f'*64:COMMIT}),
+                {next(iter(value['native_source_commits'])):'not-a-commit'}):
+            with self.subTest(origins=origins),self.assertRaisesRegex(release.ReleaseError,'source_commits_changed'):
+                maintenance.verify_sources(target,value['source_index_sha256'],source_commits=origins)
+        path = self.artifact/maintenance.MANIFEST
+        original = path.read_bytes()
+        for origins in ({}, [], {'f'*64:True}, {'f'*64:'not-a-commit'}, {'bad':COMMIT}):
+            path.write_text(json.dumps(dict(value,native_source_commits=origins)))
+            with self.subTest(origins=origins),self.assertRaisesRegex(release.ReleaseError,'source_commits_invalid'):
+                maintenance.manifest(self.artifact,COMMIT)
+        path.write_bytes(original)
+        legacy = dict(value);legacy.pop('native_source_commits')
+        path.write_text(json.dumps(legacy))
+        self.assertEqual(maintenance.manifest(self.artifact,COMMIT),legacy)
+
     def test_optional_admin_and_stage_query_config_preserve_old_host_contract(self):
         directory = self.root / "migration"
         directory.mkdir()

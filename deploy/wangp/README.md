@@ -203,8 +203,9 @@ need a separately authorized future host measurement.
 
 `tools/resume_wangp_download.py` is a separately staged, Linux-root operation
 for a confirmed stopped `model_download_failed` or `model_download_timeout`.
-It supports only the bootstrap SHA pinned by `ORIGINAL_BOOTSTRAP_SHA` in the
-tool and Python **3.12.14**. It does not replace the original bootstrap or
+It supports only the two exact bootstrap SHAs in `SUPPORTED_BOOTSTRAP_SHAS`
+(the retained `2620c95b...` and preparation-progress `b4647703...`) and Python
+**3.12.14**. It does not replace the original bootstrap or
 native bundle, rerun initial bootstrap, or run automatically from the controller.
 
 Before execution, independently approve a protected one-use authority with
@@ -229,8 +230,29 @@ download failure, the same slot/deadline and eight unchanged non-status input
 hashes. A freshly observed failed status may be rebound in one new intent; the
 prior journal and consumed intent remain retained and cannot be replayed.
 
-The authority expires within 300 seconds of issuance and within the original
-hard deadline. More than 900 seconds must remain for runtime verification/start;
+For an original download that already has a terminal `downloaded_unverified`
+receipt, version 3 (`resume-original-model-download-v3`) adds `completed_download`
+to the same nine-input authority. It pins the exact original progress-file SHA,
+all original manifest file records sorted by path, and the four complete file/byte
+counts. `completed_download.keep_until` must equal the authority `hard_deadline`.
+For the new dstack path, independently obtain that finite value from the currently
+accepted machine keep-until policy; do not infer a fixed deadline from historical
+ledger intent or rewrite the original config. An indefinite policy or unknown
+current lifetime does not authorize this bounded continuation route.
+
+Version 3 requires no earlier continuation journal. Under the original owned
+cache lock it rechecks the unchanged original receipt, exact manifest identity,
+counts and safe exact-size file metadata. It skips SDK/download-child execution
+and preserves the original downloaded bytes and failure receipts. The original
+remaining setup and launcher still perform mandatory full content verification
+before loading the model or reporting ready; completed receipt/size metadata is
+never evidence of inference qualification. Both approved bootstrap versions reuse
+their exact original status callback; the progress version receives its required
+closure state and retains the original overall start timestamp.
+
+The authority expires within 300 seconds of issuance and within its independently
+approved finite lifetime bound (the original hard deadline for older paths, or
+the current finite keep-until policy for the new path). More than 900 seconds must remain for runtime verification/start;
 download and cache-lock waits are bounded to preserve that margin. Matching
 failure receipts must confirm the download child stopped. Complete, stable
 process visibility must show no bootstrap/download/launcher child, the original

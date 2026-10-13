@@ -17,6 +17,23 @@ TARGON_EVIDENCE = 'https://github.com/apedintensor/h3-studio/issues/86#issuecomm
 
 
 class RuntimeCatalogTests(unittest.TestCase):
+    def test_cgroup_revision_changes_identity_without_changing_model_or_limits(self):
+        previous, revised = get_profile(PROFILE_IDS[5]), get_profile(PROFILE_IDS[6])
+        for value in (previous,revised):
+            for key in ('id','label','warnings'):
+                value.pop(key)
+        self.assertEqual(revised,previous)
+        expected = ('a92ae3dddb83ab73e4ac292aa7b33f9ea158ac638523d0b0c1e2e771cb0e7517',
+                    'a096e69c6b91d6b7200d414e72db870c0198ea02ebcc7ea16bf787091f66d84c')
+        for mode,digest in zip(('fl','ref'),expected):
+            manifest = engine_manifest(PROFILE_IDS[6],mode)
+            self.assertEqual(manifest.digest,digest)
+            self.assertEqual(validate_manifest(manifest)['id'],PROFILE_IDS[6])
+            self.assertFalse(manifest.document['inference_qualified'])
+        self.assertEqual(tuple(engine_manifest(PROFILE_IDS[5],mode).digest for mode in ('fl','ref')),
+            ('e32a141d43774d2e1b61bb45432aea2a2bde3e66e36318c84dd8d4538e64d530',
+             '47e46d47404c198c667bcb5114b4680bab5ed0aac60c5f77c610a197d62d7367'))
+
     def test_total_capacity_revision_preserves_v2_and_older_contracts(self):
         previous = get_profile(PROFILE_IDS[4])
         revised = get_profile(PROFILE_IDS[5])
@@ -110,7 +127,7 @@ class RuntimeCatalogTests(unittest.TestCase):
 
     def test_catalog_is_detached_public_and_unqualified(self):
         catalog = public_catalog()
-        self.assertEqual(len(catalog['profiles']), 6)
+        self.assertEqual(len(catalog['profiles']), 7)
         for profile in catalog['profiles']:
             self.assertNotIn('runtime', profile)
             self.assertIs(profile['validation']['production_adapter_verified'], False)
@@ -143,7 +160,7 @@ class RuntimeCatalogTests(unittest.TestCase):
                         self.assertIn('/blob/ff2fa85678e77ba195380b148acc23a4c47ef347/', sample['evidence'])
 
     def test_failed_bf16_and_trimmed_reference_samples_are_excluded(self):
-        self.assertEqual([len(get_profile(p)['verified_cases']) for p in PROFILE_IDS], [8, 7, 7, 2, 0, 0])
+        self.assertEqual([len(get_profile(p)['verified_cases']) for p in PROFILE_IDS], [8, 7, 7, 2, 0, 0, 0])
         self.assertEqual(get_profile(PROFILE_IDS[2])['runtime']['task_config'], 'bf16,bf16')
         self.assertTrue(get_profile(PROFILE_IDS[2])['runtime']['qkv_splitting'])
         self.assertEqual(get_profile(PROFILE_IDS[0])['model_id'], 'MiniMax-H3-Pruned-Rank8-INT8')

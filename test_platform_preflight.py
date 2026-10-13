@@ -3,6 +3,7 @@ import copy
 import importlib.util
 from pathlib import Path, PurePosixPath
 import stat
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -27,7 +28,7 @@ def valid_host():
         dirs[name] = info(mode=0o700)
     dirs["postgres"] = info(70, 70, 0o700)
     return {"platform": "posix", "euid": 0, "parents": [info(), info()], "directories": dirs,
-            "docker_config_empty": True,
+            "docker_config_entries": {},
             "secrets": {"db_admin_password": info(mode=0o400, regular=True),
                         "app_database_url": info(gid=10001, mode=0o440, regular=True)},
             "secret_filesystems": dict.fromkeys(("secret-root", "db_admin_password", "app_database_url"), "tmpfs"),
@@ -80,7 +81,7 @@ class PreflightTests(unittest.TestCase):
                  lambda s: s["docker"].update(memory_bytes=3584*1024**2-1),
                  lambda s: s["docker"].update(os="windows"),
                  lambda s: s["secret_filesystems"].update(app_database_url="ext4"),
-                 lambda s: s.update(docker_config_empty=False)]
+                 lambda s: s.update(docker_config_entries={"config.json": info(regular=True)})]
         for change in cases:
             value = valid_host()
             change(value)
@@ -102,6 +103,90 @@ class PreflightTests(unittest.TestCase):
         self.assertEqual(preflight.filesystem_for(PurePosixPath("/runaway/secret"), mounts), "ext4")
         with self.assertRaises(preflight.PreflightError):
             preflight.filesystem_for(PurePosixPath("/run/secret"), "malformed")
+
+    def test_empty_official_buildx_scaffold_allows_next_release_without_content_reads(self):
+        entries = {name: info(mode=0o700) for name in
+                   ("buildx", "buildx/activity", "buildx/defaults", "buildx/instances")}
+        entries["buildx/.lock"] = info(mode=0o600, regular=True)
+        entries["buildx/.lock"]["bytes"] = 0
+        for value in ({}, {"buildx": entries["buildx"]}, entries):
+            snapshot = valid_host()
+            snapshot["docker_config_entries"] = value
+            with self.subTest(entries=set(value)), \
+                 patch.object(preflight.subprocess, "run", side_effect=AssertionError("No daemon")), \
+                 patch("builtins.open", side_effect=AssertionError("No credential content read")):
+                self.assertEqual(preflight.validate_snapshot(snapshot)["state"], "host_metadata_ready")
+
+    def test_cli_credentials_context_plugins_and_nonempty_buildx_state_remain_rejected(self):
+        for name in ("config.json", "contexts", "cli-plugins", "buildx/config.toml",
+                     "buildx/current", "buildx/instances/default", "buildx/activity/default"):
+            entries = {"buildx": info(mode=0o700), name: info(mode=0o600, regular=True)}
+            with self.subTest(name=name), self.assertRaises(preflight.PreflightError):
+                preflight.validate_docker_config(entries)
+        for name in ("buildx", "buildx/activity", "buildx/defaults", "buildx/instances", "buildx/.lock"):
+            for change in (lambda i: i.update(uid=10001), lambda i: i.update(gid=10001),
+                           lambda i: i.update(mode=stat.S_IFLNK | 0o700),
+                           lambda i: i.update(mode=stat.S_IFDIR | 0o770)):
+                entries = {"buildx": info(mode=0o700)}
+                entry = info(mode=0o600, regular=True) if name.endswith(".lock") else info(mode=0o700)
+                entry["bytes"] = 0
+                entries[name] = entry
+                change(entry)
+                with self.subTest(name=name, change=change), self.assertRaises(preflight.PreflightError):
+                    preflight.validate_docker_config(entries)
+        for change in (lambda i: i.update(bytes=1), lambda i: i.update(links=2),
+                       lambda i: i.update(mode=stat.S_IFREG | 0o644)):
+            entries = {"buildx": info(mode=0o700), "buildx/.lock": info(mode=0o600, regular=True)}
+            entries["buildx/.lock"]["bytes"] = 0
+            change(entries["buildx/.lock"])
+            with self.subTest(change=change), self.assertRaises(preflight.PreflightError):
+                preflight.validate_docker_config(entries)
+
+    def test_collector_rejects_nonempty_scaffold_without_reading_unknown_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            buildx = root / "buildx"
+            buildx.mkdir()
+            for name in ("activity", "defaults", "instances"):
+                (buildx / name).mkdir()
+            (buildx / ".lock").write_bytes(b"")
+
+            def fixture_metadata(path):
+                value = path.lstat()
+                result = info(mode=0o600 if stat.S_ISREG(value.st_mode) else 0o700,
+                              regular=stat.S_ISREG(value.st_mode))
+                result["bytes"] = value.st_size
+                return result
+
+            with patch.object(preflight, "metadata", side_effect=fixture_metadata), \
+                 patch.object(Path, "open", side_effect=AssertionError("No file content read")):
+                self.assertEqual(set(preflight.docker_config_metadata(root)), {
+                    "buildx", "buildx/activity", "buildx/defaults", "buildx/instances", "buildx/.lock"})
+            for path in (root / "config.json", buildx / "instances" / "default"):
+                path.write_bytes(b"unapproved state is never read")
+                with self.subTest(path=path.relative_to(root)), \
+                     patch.object(preflight, "metadata", side_effect=fixture_metadata), \
+                     patch.object(Path, "open", side_effect=AssertionError("No file content read")), \
+                     self.assertRaises(preflight.PreflightError):
+                    preflight.docker_config_metadata(root)
+                path.unlink()
+
+    def test_collector_refuses_link_metadata_before_scanning_below_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "buildx").mkdir()
+            original_scandir = preflight.os.scandir
+
+            def root_only(path):
+                self.assertEqual(Path(path), root, "A rejected Buildx link was traversed")
+                return original_scandir(path)
+
+            linked = info(mode=0o700)
+            linked["mode"] = stat.S_IFLNK | 0o700
+            with patch.object(preflight, "metadata", return_value=linked), \
+                 patch.object(preflight.os, "scandir", side_effect=root_only), \
+                 self.assertRaises(preflight.PreflightError):
+                preflight.docker_config_metadata(root)
 
 
 if __name__ == "__main__":

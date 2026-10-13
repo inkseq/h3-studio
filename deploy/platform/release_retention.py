@@ -203,7 +203,8 @@ def bundle(root, directory, kind, api, *, installed=False, image_cache=None):
         if installed:
             release.require({p.name for p in directory.iterdir()} == {'artifact', 'sources', 'overlay.yaml'},
                             'retention_migration_extra_files')
-            helper.verify_sources(directory / 'sources', value['source_index_sha256'])
+            helper.verify_sources(directory / 'sources', value['source_index_sha256'],
+                source_commits=value.get('native_source_commits'))
             release.regular(directory / 'overlay.yaml', root_owned=True, maximum=1024**2)
             expected = (artifact / 'platform-overlay.yaml').read_text().replace(
                 'source: ../hatchet/entrypoint.sh', 'source: ' + json.dumps(str(directory / 'artifact/hatchet-entrypoint.sh')))

@@ -378,5 +378,11 @@ body.sb-resizing video, body.sb-resizing-y video { pointer-events: none; }
 .sb-workspace .choose-overlay .row {flex-wrap:wrap;}
 .sb-workspace .voice .row {flex-wrap:wrap;}
 .sb-workspace :focus-visible,.sb-portal :focus-visible {outline:2px solid var(--fl);outline-offset:2px;}
+.sb-portal.sb-dialog {width:min(440px,calc(100vw - 32px));max-height:calc(100dvh - 32px);padding:18px;border:1px solid var(--line);border-radius:14px;background:var(--panel);box-shadow:0 20px 60px rgba(0,0,0,.3);}
+.sb-portal.sb-dialog::backdrop {background:rgba(29,42,36,.35);}
+.sb-portal.sb-dialog h2 {font-size:16px;margin:0;}
+.sb-portal .sb-name-form {display:flex;flex-direction:column;gap:10px;margin-top:14px;}
+.sb-portal .sb-name-form label {display:flex;flex-direction:column;gap:6px;}
+.sb-portal .sb-dialog-actions {justify-content:flex-end;margin-top:10px;}
 @media(max-width:1100px){.sb-workspace .chapter-head .hint{display:none}.sb-workspace .dock{grid-template-columns:150px minmax(0,1fr)}.sb-workspace .dock .screen{width:150px;height:auto;align-self:center}.sb-workspace .lib-head{flex-wrap:wrap}}
 @media(max-width:760px){.sb-workspace{height:calc(100dvh - 156px);min-height:430px}.sb-workspace .layout{grid-template-columns:140px 8px minmax(0,1fr)!important}.sb-workspace .library{padding:6px}.sb-workspace .pcard{grid-template-columns:34px 1fr;gap:4px}.sb-workspace .pcard>.athumb{width:34px!important;height:34px!important}.sb-workspace .pcard-open{grid-column:1/-1}.sb-workspace .lib-head small{display:none}.sb-workspace .main{padding:10px}.sb-workspace .wall{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}.sb-workspace .dock{grid-template-columns:110px minmax(0,1fr);gap:6px;padding:8px}.sb-workspace .dock .screen{display:block;width:110px;height:auto;align-self:center}.sb-workspace .drawer{width:calc(100% - 12px)!important;max-width:calc(100% - 12px)}.sb-workspace .profile-overlay{left:0;padding:8px}.sb-workspace .profile{padding:12px}.sb-workspace .ed-head .ed-title{min-width:0}.sb-workspace .library.wide{width:calc(100% - 12px)}.sb-workspace .sb-toolbar{padding:8px}.sb-workspace .ed-actions button{flex:1 1 150px}.sb-workspace .sent-items{grid-template-columns:1fr}.sb-portal .choose{max-height:90dvh}.sb-workspace .slots{grid-template-columns:1fr}.sb-workspace .slots .slot{grid-column:1}}

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {chapterShots,storyboardView,expandStoryboard,storyboardDrop,storyboardProfile,patchStoryboardShot} from './storyboard-domain.js';
+import {chapterShots,storyboardView,expandStoryboard,storyboardDrop,storyboardProfile,storyboardGenerationProfile,patchStoryboardShot} from './storyboard-domain.js';
 import {shotSnapshot,digest,mergeJobCandidate} from './cloud-model.js';
 import {applyStoryboardAction} from './storyboard-actions.js';
 
@@ -26,6 +26,33 @@ test('quality chooses its advertised model and explicit retired profiles never f
   const cap=capabilities();assert.equal(storyboardProfile(cap,'draft','ref').id,'draft');assert.equal(storyboardProfile(cap,'final','fl').id,'final');assert.equal(storyboardProfile(cap,'draft','ref','retired'),null);
   assert.equal(storyboardProfile(cap,'final','ref','draft').id,'final');assert.equal(storyboardProfile(cap,'draft','ref','final').id,'draft');cap.deployment_profiles[0].generation_support.ref.enabled=false;
   assert.equal(storyboardProfile(cap,'draft','ref','draft'),null);assert.equal(storyboardProfile(cap,'draft','ref'),null);
+});
+
+test('generation preserves a qualified exact profile even when another profile becomes default',()=>{
+  const p=fixture(),cap=capabilities(),old=structuredClone(cap.deployment_profiles[0]);old.id='qualified-v3';
+  cap.deployment_profiles.push(old);shotOf(p).data.h3={deploymentProfileId:old.id};
+  const shot=view(p,cap).shots[0];
+  assert.equal(storyboardGenerationProfile(cap,shot).id,old.id);
+  assert.equal(expandStoryboard(shot,view(p,cap)).machine,old.label);
+  shot.entity.data.h3.deploymentProfileId='';assert.equal(storyboardGenerationProfile(cap,shot).id,'draft');
+  shot.entity.data.h3.deploymentProfileId='retired';assert.equal(storyboardGenerationProfile(cap,shot),null);
+  shot.entity.data.h3.deploymentProfileId=old.id;old.generation_support.ref.enabled=false;
+  assert.equal(storyboardGenerationProfile(cap,shot),null);
+  assert.equal(storyboardGenerationProfile(cap,shot,{quality:'final'}).id,'final');
+});
+
+test('intentional mode/quality edits unset obsolete draft selection without changing accepted history or controls',()=>{
+  const p=fixture(),shot=shotOf(p),cap=capabilities();
+  cap.deployment_profiles[0].generation_support.fl.enabled=false;
+  shot.data.h3={deploymentProfileId:'draft',controls:{steps:50,resolution:'480P'}};
+  p.jobs=[{id:'accepted',effective_request:{deployment_profile_id:'draft',mode:'ref'}}];const jobs=structuredClone(p.jobs);
+  patchStoryboardShot(p,'shot',{mode:'REF'});assert.equal(shot.data.h3.deploymentProfileId,'draft');
+  const incompatible={...view(p,cap).shots[0],mode:'FL'};
+  assert.equal(storyboardGenerationProfile(cap,incompatible),null);
+  patchStoryboardShot(p,'shot',{mode:'FL'});assert.equal(shot.data.h3.deploymentProfileId,'');
+  shot.data.h3.deploymentProfileId='draft';patchStoryboardShot(p,'shot',{quality:'final'});
+  assert.equal(shot.data.h3.deploymentProfileId,'');assert.equal(storyboardGenerationProfile(cap,view(p,cap).shots[0]).id,'final');
+  assert.deepEqual(shot.data.h3.controls,{steps:50,resolution:'480P'});assert.deepEqual(p.jobs,jobs);
 });
 test('mode changes preserve both inactive frame choices and reference clip metadata',()=>{
   const p=fixture();p.entities.push(image('first'),image('last'),audio('voice'));const s=shotOf(p);s.data.storyboard={...s.data.storyboard,firstFrameId:'first',lastFrameId:'last',extraRefs:[{entityId:'voice',clipStart:2}]};

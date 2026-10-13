@@ -14,6 +14,15 @@ from tools.build_dstack_sources import build
 from tools.release_contract import FIXED
 
 ROOT = Path(__file__).resolve().parent
+EXPECTED_PROFILE_IDS = (
+    'h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-lowram-v1',
+    'h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-lowram-v1',
+    'h3-unpruned33b-bf16-qwenbf16-vaefp16-sdpa-p3-splitqkv-v2',
+    'h3-pruned-rank8-int8-pro6000-quanto-int8-vae-int8-sdpa-p4-lowram-v1',
+    'h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-v2',
+    'h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3',
+    'h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-cgroups-v4',
+)
 
 
 class RuntimeImagePackagingTests(unittest.TestCase):
@@ -43,7 +52,8 @@ class RuntimeImagePackagingTests(unittest.TestCase):
             shutil.copyfile(ROOT/'comfy_workflow.py', image/'comfy_workflow.py')
             # Source construction is an offline build operation outside the
             # staged image; the image receives only its protected four inputs.
-            build(root/'sources', [(PROFILE_IDS[5], 'fl'), (PROFILE_IDS[5], 'ref')])
+            profile_id = EXPECTED_PROFILE_IDS[-1]
+            build(root/'sources', [(profile_id, 'fl'), (profile_id, 'ref')])
             for name, content in (('ssh-key', 'private test fixture'),
                                   ('broker.json', '{"token":"test fixture"}')):
                 path = root/name
@@ -70,17 +80,19 @@ class NoBuildTools:
 sys.meta_path.insert(0,NoBuildTools())
 from studio_platform.dstack_factory import RuntimeFactory
 factory=RuntimeFactory(None,None,sys.argv[2])
+assert {profile for profile,_ in factory.sources}=={sys.argv[3]}
 assert {mode for _,mode in factory.sources}=={'fl','ref'}
 assert not factory.work_dir.exists()
 print(json.dumps({'sources':len(factory.sources),'modes':sorted(mode for _,mode in factory.sources)}))
 """
-            result = subprocess.run([sys.executable, '-I', '-c', script, str(image), str(config_path)],
+            result = subprocess.run([sys.executable, '-I', '-c', script, str(image), str(config_path), profile_id],
                                     capture_output=True, text=True, check=True, timeout=30, cwd=image)
             self.assertEqual(json.loads(result.stdout), {'sources': 2, 'modes': ['fl', 'ref']})
 
     def test_profile_metadata_is_explicit_image_input_and_runtime_fingerprint(self):
         dockerfile = (ROOT/'Dockerfile.platform').read_text()
         patterns = (ROOT/'.dockerignore').read_text().splitlines()
+        self.assertEqual(PROFILE_IDS, EXPECTED_PROFILE_IDS)
         self.assertIn('COPY deploy/wangp/profiles/ ./deploy/wangp/profiles/', dockerfile)
         names = {'deploy/wangp/profiles/'+profile+'.json' for profile in PROFILE_IDS}
         for folder in ('deploy/', 'deploy/wangp/', 'deploy/wangp/profiles/'):
@@ -105,7 +117,9 @@ print(json.dumps({'sources':len(factory.sources),'modes':sorted(mode for _,mode 
 sys.path.insert(0,sys.argv[1])
 from studio_platform.runtime_catalog import PROFILE_IDS,public_catalog,engine_manifest
 catalog=public_catalog()
-assert len(catalog['profiles'])==6
+expected_profile_ids=tuple(json.loads(sys.argv[2]))
+assert PROFILE_IDS==expected_profile_ids
+assert tuple(profile['id'] for profile in catalog['profiles'])==expected_profile_ids
 for profile in catalog['profiles']:
     assert profile['validation']['production_adapter_verified'] is False
     if not profile['verified_cases']:
@@ -122,9 +136,9 @@ for profile in catalog['profiles']:
         assert engine_manifest(profile['id'],mode).document['production_adapter_verified'] is False
 print(json.dumps({'profiles':len(catalog['profiles']),'manifests':len(PROFILE_IDS)*2}))
 """
-            result = subprocess.run([sys.executable,'-I','-S','-c',script,str(image)],
+            result = subprocess.run([sys.executable,'-I','-S','-c',script,str(image),json.dumps(EXPECTED_PROFILE_IDS)],
                                     capture_output=True,text=True,check=True,timeout=20,cwd=image)
-            self.assertEqual(json.loads(result.stdout), {'profiles':6, 'manifests':12})
+            self.assertEqual(json.loads(result.stdout), {'profiles':7, 'manifests':14})
 
 
 if __name__ == '__main__':

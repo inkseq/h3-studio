@@ -87,6 +87,24 @@ class DownloadTests(unittest.TestCase):
                 self.assertTrue(all(row[2] == "adc81ccb71352192214d83d5fafb9487e860be39" for row in records))
                 self.assertEqual(document, manifest.document)
 
+    def test_v4_same_content_locator_accepts_only_exact_new_manifest(self):
+        from studio_platform.runtime_catalog import engine_manifest
+        for mode in ('fl','ref'):
+            manifest = engine_manifest('h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-cgroups-v4',mode)
+            records = fetch.selected_files(manifest.document,manifest.digest)
+            self.assertEqual(fetch._content_preserving_revision(manifest.document,manifest.digest,records),
+                             '8d9093438ffb3e33d6a058cc20fa3b7ca31f5752')
+            self.assertEqual(len(records),10)
+            original=copy.deepcopy(manifest.document)
+            document=copy.deepcopy(original)
+            document['components']['transformer']['files'][0]['sha256']='0'*64
+            changed=EngineManifest.from_dict(document).digest
+            sdk=Mock()
+            with self.assertRaisesRegex(ValueError,'model_download_locator_invalid'):
+                fetch.fetch_files(document,changed,self.models,self.progress,downloader=sdk)
+            sdk.assert_not_called()
+            self.assertEqual(manifest.document,original)
+
     def test_v3_changed_content_or_revision_refuses_before_sdk(self):
         from studio_platform.runtime_catalog import engine_manifest
         manifest = engine_manifest("h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3", "ref")
@@ -319,6 +337,57 @@ class DownloadTests(unittest.TestCase):
         self.assertEqual(seen[0]["stderr"], subprocess.DEVNULL)
         self.assertTrue(seen[0]["start_new_session"])
         self.assertEqual(seen[0]["env"]["HF_HUB_OFFLINE"], "0")
+
+    def test_final_receipt_arriving_between_observation_and_exit_is_reread(self):
+        def launch(command, **kwargs):
+            progress=Path(command[command.index('--progress')+1])
+            earlier=self.receipt(); earlier['state']='downloading'
+            fetch.write_progress(progress,earlier)
+            def exited():
+                fetch.write_progress(progress,self.receipt())
+                return 0
+            return NS(poll=exited,wait=lambda **_:0)
+        value=self.run_child(launch)
+        self.assertEqual(value,self.receipt())
+        self.assertFalse((self.root/'download-state/failure.json').exists())
+
+    def test_post_exit_receipt_is_still_fully_validated(self):
+        def launch(command, **kwargs):
+            progress=Path(command[command.index('--progress')+1])
+            earlier=self.receipt(); earlier['state']='downloading'
+            fetch.write_progress(progress,earlier)
+            def exited():
+                changed=self.receipt(); changed['manifest_digest']='0'*64
+                fetch.write_progress(progress,changed)
+                return 0
+            return NS(poll=exited,wait=lambda **_:0)
+        stop=Mock()
+        with self.assertRaisesRegex(ValueError,'model_download_progress_invalid'):
+            self.run_child(launch,stop=stop)
+        stop.assert_called_once()
+        failure=json.loads((self.root/'download-state/failure.json').read_text())
+        self.assertEqual(failure['download_failure']['stop_status'],'confirmed')
+
+    def test_final_incomplete_receipts_and_nonzero_exit_cannot_pass(self):
+        for case in ('nonzero','files','bytes','unfinished'):
+            with self.subTest(case=case):
+                def launch(command, **kwargs):
+                    path=Path(command[command.index('--progress')+1])
+                    earlier=self.receipt(); earlier['state']='downloading'
+                    fetch.write_progress(path,earlier)
+                    def exited():
+                        changed=self.receipt()
+                        if case=='files':changed['files_complete']-=1
+                        elif case=='bytes':changed['bytes_complete']-=1
+                        elif case=='unfinished':changed['state']='downloading'
+                        fetch.write_progress(path,changed)
+                        return 1 if case=='nonzero' else 0
+                    return NS(poll=exited,wait=lambda **_:0)
+                stop=Mock()
+                with self.assertRaisesRegex(ValueError,'^model_download_failed$'):
+                    fetch.run_download(sys.executable,self.root,self.path,self.digest,self.models,
+                        self.root/('download-state-'+case),{},Mock(),popen=launch,stop=stop)
+                stop.assert_called_once()
 
     def test_deadline_stops_and_reaps_exact_child_with_no_relaunch(self):
         child = NS(poll=lambda: None)

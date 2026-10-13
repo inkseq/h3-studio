@@ -45,6 +45,7 @@ PRIVATE_FILES = (
     "deploy/wangp/profiles/h3-pruned-rank8-int8-pro6000-quanto-int8-vae-int8-sdpa-p4-lowram-v1.json",
     "deploy/wangp/profiles/h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-v2.json",
     "deploy/wangp/profiles/h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3.json",
+    "deploy/wangp/profiles/h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-cgroups-v4.json",
     "deploy/wangp/targon_prepare.py",
     "deploy/wangp/probe_gpu.py",
 )
