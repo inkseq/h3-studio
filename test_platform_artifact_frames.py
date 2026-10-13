@@ -15,7 +15,7 @@ from sqlalchemy import insert, select, update, func
 
 from studio_platform import media
 from studio_platform.artifact_frames import extract, selection
-from studio_platform.assets import asset_table
+from studio_platform.assets import AssetService, AssetConflict, asset_table
 from studio_platform.repository import artifacts, attempts, budget_reservations, jobs, plans
 from studio_platform.api import create_app
 from studio_platform.storage import S3ObjectStore, StorageWriteUncertain, make_object_key
@@ -242,6 +242,31 @@ class ArtifactFrameTests(unittest.TestCase):
             response = self.save()
         self.assertEqual(response.status_code, 409)
         self.assertEqual(self.counts()[-2:], (1, 1))
+
+    def test_unknown_frame_cannot_resume_against_a_changed_storage_binding(self):
+        _, original = self.fixture()
+        store = self.app.state.storage
+        real_put = store.put
+        def uncertain_put(key, source, **options):
+            real_put(key, source, **options)
+            raise StorageWriteUncertain(key)
+        with mock.patch.object(store, "put", side_effect=uncertain_put):
+            self.assertEqual(self.save().status_code, 503)
+        old = self.app.state.assets
+        frame = old.list("superdan", "story-one")[0]
+        receipt = old.journal.get("superdan", frame["id"])
+        usage = old.usage("superdan")
+        selected = storage_fixtures.config(bucket="different-bucket")
+        fake = multipart_fixtures.FakeMultipartS3(selected)
+        changed = AssetService(self.app.state.repository.engine, S3ObjectStore(selected, client=fake),
+            self.settings.data_dir, tenant=self.settings.tenant_id, max_bytes=self.settings.max_upload_bytes)
+        with self.assertRaisesRegex(AssetConflict, "存储身份"):
+            changed.artifact_frame("superdan", "story-one", self.client.get("/api/auth/me").json()["actor_id"], "artifact-video",
+                receipt["asset"]["selection"]["job_id"], original,
+                {"position": "last"}, "frame-one")
+        self.assertEqual(old.journal.get("superdan", frame["id"]), receipt)
+        self.assertEqual(old.usage("superdan"), usage)
+        self.assertEqual(fake.calls, [])
 
     def test_decoder_failure_keeps_safe_diagnostic_no_private_paths(self):
         self.fixture()

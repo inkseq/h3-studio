@@ -517,6 +517,8 @@ class AssetService:
                 if current.get("frame_request_hash") != request_hash:
                     raise AssetConflict("frame_idempotency_conflict")
                 receipt = self.journal.get(owner, ident)
+                if receipt.get("storage_binding") != self.storage_binding:
+                    raise AssetConflict("素材收据没有匹配的存储身份；请核对原存储配置")
                 if current["status"] == "ready":
                     self._cleanup_committed_asset(owner, ident)
                     return self.public(current)
