@@ -190,6 +190,7 @@ def examples():
 
 
 def contract():
+    from .storyboard import contract as storyboard_contract
     return {"schema_revision": 3, "operation_schemas": operation_schemas(),
         "request": {"method": "POST", "path": "/v1/projects/{project_id}/actions", "content_type": "application/json",
             "required": ["expected_version", "actions"], "expected_version": {"type": "integer", "minimum": 1},
@@ -203,4 +204,5 @@ def contract():
         "recovery": {"422": "Correct missing/unsupported fields using operation_schemas; nothing in the action batch was committed.",
             "404": "Check the selected story, entity/receipt ID, ownership and required key scopes; do not guess another owner's IDs.",
             "409": "Fetch the latest project and reconcile changes. For an unknown write outcome, first replay the identical request with its original idempotency key; do not change expected_version during that replay."},
+        "storyboard": storyboard_contract(),
         "validation_note": "These schemas describe supported editing inputs and stricter execution prerequisites separately. Final project validation remains authoritative. Draft acceptance is not generation/render readiness."}

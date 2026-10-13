@@ -111,6 +111,7 @@ inventory.json
 !studio_platform/render_cli.py
 !studio_platform/caption_server.py
 !studio_platform/artifact_writer.py
+!studio_platform/artifact_frames.py
 !studio_platform/diagnostics.py
 !studio_platform/storage_schema.py
 !studio_platform/backup.py
@@ -357,6 +358,7 @@ inventory.json
 !studio_platform/quick_chat_titles.py
 !docs/
 !docs/quick-chat-history-titles.md
+!docs/STORYBOARD-WORKSPACE.md
 !studio_platform/generation_availability.py
 !studio_platform/google_chat.py
 !studio_platform/google_titles.py
@@ -432,6 +434,8 @@ inventory.json
 !studio_platform/native_runtime_document.py
 !tools/build_dstack_sources.py
 !deploy/dstack/runtime-config.example.json
+!deploy/dstack/base-fl.operator-profiles.example.json
+!deploy/dstack/base-fl.execution-policy.example.json
 !deploy/dstack/platform-overlay.yaml
 !tools/check_migration_deploy.py
 !Dockerfile.dispatch

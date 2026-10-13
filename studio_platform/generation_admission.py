@@ -50,7 +50,8 @@ class GenerationAdmission:
             raise Conflict("document_version_conflict")
         if source_snapshot(project, shot_id) != source_snapshot(record["payload"], shot_id):
             raise Conflict("shot_version_conflict")
-        draft, _ = read_draft(project, shot_id)
+        current_capabilities = self.capabilities_provider()
+        draft, _ = read_draft(project, shot_id, capabilities=current_capabilities)
         if any(draft["inputs"].values()):
             self.access.project(principal, project_id, "assets:read")
 
@@ -62,7 +63,19 @@ class GenerationAdmission:
                 raise Conflict("asset_not_ready")
             return receipt["asset_id"]
 
-        body = plan_body(project, shot_id, self.capabilities_provider(), derive)
+        def validate_frame(asset_id, artifact_id):
+            # Editable document provenance is a preview only. Admission checks
+            # the owner/project-scoped immutable receipt before using the image.
+            self.access.project(principal, project_id, "assets:read")
+            asset = self.assets.get(principal.owner, asset_id, project_id)
+            selection = asset.get("selection", {})
+            if (asset.get("status") != "ready" or asset.get("kind") != "image"
+                    or selection.get("kind") != "artifact_frame"
+                    or selection.get("position") != "last"
+                    or selection.get("artifact_id") != artifact_id):
+                raise ValueError("上一镜末帧来源未通过素材收据核对")
+
+        body = plan_body(project, shot_id, current_capabilities, derive, validate_frame=validate_frame)
         latest = self.access.project(principal, project_id, "jobs:write")
         if expected_version is not None and latest["version"] != expected_version:
             raise Conflict("document_version_conflict")

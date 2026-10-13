@@ -253,6 +253,7 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
         principal = request.state.principal
         return {"username": principal.owner, "actor_id": principal.actor_id, "machine": principal.machine,
                 "authentication": settings.auth_mode, "scopes": list(principal.scopes),
+                "features": {"storyboard_workspace": not principal.machine and principal.owner in settings.storyboard_owners},
                 "operator_capacity": {name: not principal.machine and principal.owner in settings.operator_capacity_owners
                     for name in ("view", "start", "drain", "stop", "update_policy")} | {
                     "admin": not principal.machine and principal.owner in settings.operator_admin_owners},
@@ -441,7 +442,7 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
         from .generation_draft import read_draft, shot_entity
         record = authorized_project(request.state.principal, project_id)
         project = record["payload"]
-        draft, issues = read_draft(project, shot_id)
+        draft, issues = read_draft(project, shot_id, capabilities=capabilities(settings))
         view = "/freestyle" if project.get("journey", {}).get("workspace") == "freestyle" else "/"
         return {"project_id": project_id, "shot_id": shot_id, "project_version": record["version"],
             "shot_version": shot_entity(project, shot_id)["version"], "draft": draft, "issues": issues,
@@ -565,6 +566,20 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
     def job_artifacts(job_id: str, request: Request):
         job = owned_job(request.state.principal, job_id)
         return {"artifacts": public_job(job)["artifacts"]}
+
+    @app.post("/v1/projects/{project_id}/artifacts/{artifact_id}/frames", status_code=201)
+    def artifact_frame(project_id: str, artifact_id: str, request: Request, body: dict,
+                       idempotency_key: str = Header(..., alias="Idempotency-Key")):
+        principal = request.state.principal
+        authorized_project(principal, project_id, "assets:write")
+        row = generation_access.artifact(principal, artifact_id)
+        job = owned_job(principal, row["job_id"])
+        if job["project_id"] != project_id:
+            raise NotFound("artifact_not_found")
+        if job["status"] != "succeeded":
+            raise Conflict("artifact_not_ready")
+        return asset_service.artifact_frame(principal.owner, project_id, principal.actor_id,
+            artifact_id, job["id"], row["metadata"], body, idempotency_key)
 
     @app.api_route("/v1/artifacts/{artifact_id}/content", methods=["GET", "HEAD"])
     def artifact_content(artifact_id: str, request: Request, download: bool = False):

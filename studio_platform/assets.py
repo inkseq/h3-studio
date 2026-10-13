@@ -102,6 +102,8 @@ class AssetService:
         names = {"source"+receipt["suffix"], "normalized.png", "normalized.wav", "normalized.mp4", "receiving"}
         if receipt.get("derivation"):
             names.update({receipt["derivation"]["input_name"], "trimmed.mp4", "trimmed.wav"})
+        if receipt.get("frame_extraction"):
+            names.update({"artifact-input.mp4", "extracted.png"})
         if name not in names:
             raise IntegrityError("素材暂存文件名无效")
         path = self._stage(receipt) / name
@@ -278,6 +280,8 @@ class AssetService:
                                   content_type=media.MIMES[path.suffix], phase="planned")
         _sync_directory(self._stage(receipt))
         info.update(bytes=size, sha256=checksum, mime=receipt["asset"]["mime"])
+        if receipt.get("frame_extraction"):
+            info["artifact_frame"] = dict(receipt["asset"]["selection"])
         receipt.update(objects=specs, prepared=True)
         receipt["asset"]["metadata"] = info
         self.journal.save(receipt)
@@ -355,9 +359,11 @@ class AssetService:
             receipt["asset"].pop("error", None)
             self.journal.save(receipt)
             if not receipt.get("prepared"):
-                with media.PROCESSING_ADMISSION.acquire(receipt["asset"]["kind"]):
+                with media.PROCESSING_ADMISSION.acquire("video" if receipt.get("frame_extraction") else receipt["asset"]["kind"]):
                     if receipt.get("derivation"):
                         self._prepare_derivation(receipt)
+                    if receipt.get("frame_extraction"):
+                        self._prepare_artifact_frame(receipt)
                     self._prepare(receipt)
             for role in ("original", "model"):
                 if role in receipt["objects"]:
@@ -411,7 +417,7 @@ class AssetService:
             raise AssetConflict("素材收据版本已变化；请重新只读核对")
         if receipt.get("storage_binding") != self.storage_binding:
             raise AssetConflict("素材上传属于另一存储位置或身份，未自动切换供应商")
-        if not receipt.get("accepted_input") or not (receipt.get("size_bytes") or receipt.get("derivation")):
+        if not receipt.get("accepted_input") or not (receipt.get("size_bytes") or receipt.get("derivation") or receipt.get("frame_extraction")):
             raise AssetConflict("文件未完整接收，需要重新选择文件上传")
         if asset["status"] == "ready":
             if receipt["busy"]:
@@ -487,6 +493,106 @@ class AssetService:
         ident = uuid.uuid4().hex
         with self._operation(ident):
             return self._derive(ident, owner, asset_id, start, end)
+
+    def artifact_frame(self, owner, project_id, actor_id, artifact_id, job_id, metadata, body, key):
+        """One existing image-asset receipt per explicit extraction decision.
+
+        The HTTP service has already checked project/artifact ownership. Stable
+        identity is bound before downloading/decoding, so response loss resumes
+        the same receipt and uncertain PUTs only reconcile their original keys.
+        """
+        from .artifact_frames import fingerprint, selection, source_spec
+        from .repository import identifier
+        requested = selection(body)
+        identifier(key)
+        source = source_spec(metadata, owner, self.max_bytes)
+        ident = fingerprint(["artifact-frame-v1", self.tenant, owner, project_id, actor_id, key])[:32]
+        request_hash = fingerprint([artifact_id, job_id, source, requested])
+        with self._operation(ident):
+            try:
+                current = self.get(owner, ident, project_id)
+            except AssetNotFound:
+                current = None
+            if current is not None:
+                if current.get("frame_request_hash") != request_hash:
+                    raise AssetConflict("frame_idempotency_conflict")
+                receipt = self.journal.get(owner, ident)
+                if receipt.get("storage_binding") != self.storage_binding:
+                    raise AssetConflict("素材收据没有匹配的存储身份；请核对原存储配置")
+                if current["status"] == "ready":
+                    self._cleanup_committed_asset(owner, ident)
+                    return self.public(current)
+                # A stopped API can leave a live receipt. Never infer takeover
+                # from an expired timer; the existing admin recovery fences it.
+                if receipt["busy"]:
+                    raise AssetConflict("截帧仍在处理或等待原操作恢复；请核对同一素材记录")
+                self.journal.claim(receipt)
+            else:
+                provenance = {"kind": "artifact_frame", "artifact_id": artifact_id,
+                    "job_id": job_id, "source_sha256": source["sha256"], **requested}
+                asset = {"id": ident, "asset_id": ident, "client_asset_id": "frame:"+ident,
+                    "project_id": project_id, "file_name": f"frame-{artifact_id[:8]}-{requested['position']}.png",
+                    "kind": "image", "mime": "image/png", "content_type": "image/png",
+                    "created_at": time.time(), "parent_id": None, "selection": provenance,
+                    "frame_request_hash": request_hash, "status": "validating"}
+                receipt = self.journal.create(owner, asset)
+            receipt.update(suffix=".png", storage_binding=self.storage_binding, accepted_input=True)
+            receipt.setdefault("frame_extraction", {"original": source, "phase": "planned"})
+            if isinstance(self.store, S3ObjectStore) and self.store.config.provider == "r2":
+                receipt["scratch_policy"] = scratch_retention.POLICY
+            self.journal.save(receipt)
+            return self._run_locked(receipt)
+
+    def _prepare_artifact_frame(self, receipt):
+        from .artifact_frames import extract
+        spec = receipt["frame_extraction"]
+        directory = self._stage(receipt)
+        directory.mkdir(mode=0o700, exist_ok=True)
+        if spec["phase"] != "ready":
+            source_path = directory / "artifact-input.mp4"
+            original = spec["original"]
+            if source_path.exists():
+                source_path = self._file(receipt, source_path.name)
+                count, checksum = self._digest(source_path)
+                if (count, checksum) != (original["size_bytes"], original["sha256"]):
+                    raise IntegrityError("截帧源文件副本校验失败；原视频保持不变")
+            else:
+                receiving = directory / "receiving"
+                if receiving.exists():
+                    self._file(receipt, "receiving").unlink()
+                actual = self.store.stat(original["key"])
+                if (actual.size_bytes, actual.content_type) != (original["size_bytes"], original["content_type"]):
+                    raise IntegrityError("截帧源对象与核验记录不符；原视频保持不变")
+                with self.store.open(original["key"]) as source, receiving.open("xb") as target:
+                    count, _ = _copy(source, target, self.max_bytes, original["sha256"])
+                    target.flush()
+                    os.fsync(target.fileno())
+                if count != original["size_bytes"]:
+                    raise IntegrityError("截帧源文件副本不完整")
+                receiving.rename(source_path)
+                _sync_directory(directory)
+            if (directory / "extracted.png").exists():
+                self._file(receipt, "extracted.png")
+            target, measured = extract(source_path, directory, receipt["asset"]["selection"],
+                max_output_bytes=self.max_bytes)
+            target = self._file(receipt, target.name)
+            count, checksum = self._digest(target)
+            with target.open("r+b") as stream:
+                os.fsync(stream.fileno())
+            destination = directory / "source.png"
+            if destination.exists():
+                self._file(receipt, destination.name)
+            target.replace(destination)
+            _sync_directory(directory)
+            receipt["asset"]["selection"].update(measured)
+            receipt.update(size_bytes=count, sha256=checksum)
+            spec["phase"] = "ready"
+            self.journal.save(receipt)
+        # Only the verified borrowed copy is removed, never the source artifact.
+        input_path = directory / "artifact-input.mp4"
+        if input_path.exists():
+            self._file(receipt, input_path.name).unlink()
+            _sync_directory(directory)
 
     def _derive(self, ident, owner, asset_id, start, end):
         parent = self.get(owner, asset_id)

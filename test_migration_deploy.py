@@ -102,6 +102,7 @@ class MigrationPrivateProbeTests(unittest.TestCase):
 
 def fixture_environment():
     environment = dict(os.environ)
+    environment.pop("SIXNINE_STORYBOARD_OWNERS", None)
     names = ("SIXNINE_POSTGRES_IMAGE", "SIXNINE_CADDY_IMAGE", "SIXNINE_IMAGE", "SIXNINE_DISPATCH_IMAGE")
     environment.update({name: "test/never-pulled@sha256:"+"a"*64 for name in names})
     for name in ("SIXNINE_DB_ADMIN_SECRET_FILE", "SIXNINE_APP_DSN_SECRET_FILE",
@@ -243,6 +244,31 @@ class MigrationDeployTests(unittest.TestCase):
         self.assertEqual(services["controller"]["command"], ["python", "-m", "studio_platform.dstack_controller"])
         self.assertIn("app_database_url", {s["source"] for s in services["app"]["secrets"]})
         self.assertIn("google_titles", {s["source"] for s in services["app"]["secrets"]})
+
+    def test_storyboard_rollout_reaches_only_app_and_preserves_disabled_default(self):
+        self.assertEqual(self.document["services"]["app"]["environment"]["SIXNINE_STORYBOARD_OWNERS"], "")
+        for name in ("dstack", "hatchet", "controller", "dispatch"):
+            self.assertNotIn("SIXNINE_STORYBOARD_OWNERS", self.document["services"][name]["environment"])
+        environment = fixture_environment()
+        environment["SIXNINE_STORYBOARD_OWNERS"] = "superdan,supervan"
+        rendered = {}
+        def render(command, **kwargs):
+            result = subprocess.run(command, **kwargs)
+            if result.returncode == 0:
+                rendered.update(json.loads(result.stdout))
+            return result
+        check(ROOT / "deploy/platform/compose.yaml", ROOT / "deploy/dstack/platform-overlay.yaml",
+            environment=environment, runner=render)
+        self.assertEqual(rendered["services"]["app"]["environment"]["SIXNINE_STORYBOARD_OWNERS"], "superdan,supervan")
+        for value in ("other", "superdan,superdan", None):
+            invalid = copy.deepcopy(rendered)
+            invalid["services"]["app"]["environment"]["SIXNINE_STORYBOARD_OWNERS"] = value
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, "migration_storyboard_reference_invalid"):
+                validate(invalid)
+        invalid = copy.deepcopy(rendered)
+        invalid["services"]["controller"]["environment"]["SIXNINE_STORYBOARD_OWNERS"] = "superdan"
+        with self.assertRaisesRegex(ValueError, "migration_storyboard_worker_environment"):
+            validate(invalid)
 
     def test_rendered_controller_settings_reach_its_exact_cpu_slot_child(self):
         from studio_platform.control import WorkerSpec

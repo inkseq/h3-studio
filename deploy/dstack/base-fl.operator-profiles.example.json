@@ -1,0 +1,54 @@
+[
+  {
+    "backend": "vastai",
+    "budget_account_ids": [
+      "demand-gpu-remaining-20261004",
+      "demand-job-owner-superdan-20261004"
+    ],
+    "configuration_id": "sixnine-h3-base-int8-fl-20261014",
+    "cpu_count": 12,
+    "disk_gib": 350,
+    "extra_reservation_microusd": 0,
+    "gpu_memory_gib": 90,
+    "gpu_names": [
+      "RTXPRO6000S",
+      "RTXPRO6000WS"
+    ],
+    "id": "vast-base-int8-fl",
+    "image": "public.ecr.aws/z9c3p9w6/sixnine/wangp@sha256:5985c4f46c342cb552dae39925f656684c87eb755c39f9393aec8d7f05503c4f",
+    "max_price_microusd": 2000000,
+    "max_ttl_seconds": 7200,
+    "memory_gib": 256,
+    "mode": "fl",
+    "owner_id": "superdan",
+    "pool": "sixnine-dstack-base-fl-20261014",
+    "project_id": "production-h3-acceptance-20261004",
+    "runtime_profile_id": "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-lowram-v1"
+  },
+  {
+    "backend": "vastai",
+    "budget_account_ids": [
+      "demand-gpu-remaining-20261004",
+      "demand-job-owner-supervan-20261004"
+    ],
+    "configuration_id": "sixnine-h3-base-int8-fl-20261014",
+    "cpu_count": 12,
+    "disk_gib": 350,
+    "extra_reservation_microusd": 0,
+    "gpu_memory_gib": 90,
+    "gpu_names": [
+      "RTXPRO6000S",
+      "RTXPRO6000WS"
+    ],
+    "id": "vast-base-int8-fl-supervan",
+    "image": "public.ecr.aws/z9c3p9w6/sixnine/wangp@sha256:5985c4f46c342cb552dae39925f656684c87eb755c39f9393aec8d7f05503c4f",
+    "max_price_microusd": 2000000,
+    "max_ttl_seconds": 7200,
+    "memory_gib": 256,
+    "mode": "fl",
+    "owner_id": "supervan",
+    "pool": "sixnine-dstack-base-fl-20261014",
+    "project_id": "project-39ee4572c09d5a97834cbf983e828c38",
+    "runtime_profile_id": "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-lowram-v1"
+  }
+]

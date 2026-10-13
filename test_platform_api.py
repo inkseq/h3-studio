@@ -1,5 +1,6 @@
 """HTTP contract/isolation tests. Temporary DB and CPU media only; no provider calls."""
 import copy
+from dataclasses import replace
 import io
 import os
 from pathlib import Path
@@ -82,6 +83,26 @@ class ApiTests(unittest.TestCase):
         r = self.client.post("/v1/generation-plans", json=generation_request(**changes))
         self.assertEqual(r.status_code, 201, r.text)
         return r.json()
+
+    def test_storyboard_owner_flag_default_off_and_never_grants_operator_permissions(self):
+        self.login()
+        before = self.client.get("/api/auth/me").json()
+        self.assertEqual(before["features"], {"storyboard_workspace": False})
+        app = create_app(replace(self.settings, storyboard_owners=("superdan",)),
+            repository=self.app.state.repository, storage=self.app.state.storage)
+        with TestClient(app) as client:
+            client.post("/api/auth/login", json={"username": "superdan"}).raise_for_status()
+            enabled = client.get("/api/auth/me").json()
+            self.assertEqual(enabled["features"], {"storyboard_workspace": True})
+            self.assertEqual(enabled["operator_capacity"], before["operator_capacity"])
+            client.post("/api/auth/login", json={"username": "supervan"}).raise_for_status()
+            self.assertEqual(client.get("/api/auth/me").json()["features"], {"storyboard_workspace": False})
+            token = secrets.token_urlsafe(32)
+            app.state.auth.register_client("flag-test", token, "superdan", ["story-one"], ["projects:read"])
+            client.cookies.clear()
+            machine = client.get("/api/auth/me", headers={"Authorization": "Bearer "+token}).json()
+            self.assertTrue(machine["machine"])
+            self.assertEqual(machine["features"], {"storyboard_workspace": False})
 
     def test_activity_summary_counts_only_authorized_owner_project(self):
         self.setup_project()

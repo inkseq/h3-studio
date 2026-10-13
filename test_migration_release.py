@@ -156,6 +156,26 @@ class MigrationArtifacts(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "migration_paths_invalid"):
             maintenance.settings(self.root)
 
+    def test_optional_storyboard_flag_is_default_off_and_closed_to_explicit_accounts(self):
+        directory = self.root / "migration"; directory.mkdir()
+        environment = {key: str(self.root / "protected" / key.lower()) for key in maintenance.PATH_FIELDS}
+        environment.update(SIXNINE_OPERATOR_CAPACITY_OWNERS="superdan,supervan",
+            SIXNINE_HATCHET_POSTGRES_VOLUME="existing-postgres", SIXNINE_HATCHET_CONFIG_VOLUME="existing-config",
+            SIXNINE_MIGRATION_GENERATION_ENABLED="0", SIXNINE_MIGRATION_EXECUTION_BACKEND="disabled",
+            SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID=PROFILE)
+        def read():
+            (directory / "paths.json").write_text(json.dumps({"version": 1, "environment": environment,
+                "host_memory_mib": 3840}))
+            return maintenance.settings(self.root)[0]["environment"]
+        self.assertNotIn("SIXNINE_STORYBOARD_OWNERS", read())
+        for value in ("", "superdan", "supervan", "superdan,supervan"):
+            environment["SIXNINE_STORYBOARD_OWNERS"] = value
+            self.assertEqual(read()["SIXNINE_STORYBOARD_OWNERS"], value)
+        for value in ("other", "superdan,superdan", "superdan,", "superdan, supervan", True):
+            environment["SIXNINE_STORYBOARD_OWNERS"] = value
+            with self.subTest(value=value), self.assertRaises(release.ReleaseError):
+                read()
+
     def test_tamper_wrong_platform_extra_file_and_hardlink_rejected(self):
         with self.assertRaisesRegex(release.ReleaseError, "platform_binding_changed"):
             maintenance.manifest(self.artifact, COMMIT, platform_manifest_sha256="b" * 64)
@@ -444,6 +464,204 @@ class MigrationGuardAndDeployment(unittest.TestCase):
             values[ids["hatchet-db"]]["Mounts"][0]["Name"] = "unrelated-blank-postgres"
             with self.assertRaisesRegex(release.ReleaseError, "broker_volume_changed"):
                 maintenance.verify_services(self.root, self.root, environment, app, dispatch)
+
+
+class StoryboardMaintenance(unittest.TestCase):
+    """Protected flag updates with fake CPU services; no network/provider clients."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        directory = self.root / "migration"; directory.mkdir()
+        environment = {key: str(self.root / "protected" / key.lower()) for key in maintenance.PATH_FIELDS}
+        environment.update(SIXNINE_OPERATOR_CAPACITY_OWNERS="superdan,supervan",
+            SIXNINE_HATCHET_POSTGRES_VOLUME="original-postgres", SIXNINE_HATCHET_CONFIG_VOLUME="original-config",
+            SIXNINE_MIGRATION_GENERATION_ENABLED="1", SIXNINE_MIGRATION_EXECUTION_BACKEND="wangp-worker",
+            SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID=PROFILE)
+        self.config = {"version": 1, "host_memory_mib": 3840, "environment": environment}
+        self.paths = directory / "paths.json"; self.paths.write_text(json.dumps(self.config))
+        self.active = directory / "active.json"
+        self.active.write_text(json.dumps({"version": 1, "active": True, "current": COMMIT, "pending": None,
+            "paths_sha256": release.checksum(self.paths), "legacy_cpu_handoff_sha256": "3" * 64}))
+        self.release_state = self.root / "release-state.json"
+        self.release_state.write_text(json.dumps({"current": COMMIT, "previous": "b" * 40,
+            "pending": None, "status": "app_ready", "dependencies": {"db": "original"}}))
+        self.before = {name: path.read_bytes() for name, path in (
+            ("paths", self.paths), ("active", self.active), ("release", self.release_state))}
+        self.runtime = {name: {"image_id": "sha256:" + "1" * 64,
+            "environment_sha256": "2" * 64, "mounts_sha256": "3" * 64} for name in maintenance.STORYBOARD_SERVICES}
+        regular = release.regular
+        def fixture_regular(path, *, root_owned=False, maximum=None):
+            if root_owned: self.assertTrue(Path(path).is_relative_to(self.root))
+            return regular(path, maximum=maximum)
+        self.stack = ExitStack(); self.addCleanup(self.stack.close)
+        self.stack.enter_context(patch.object(release, "regular", side_effect=fixture_regular))
+        self.stack.enter_context(patch.object(maintenance, "protected_directory",
+            side_effect=lambda path: self.assertTrue(Path(path).is_relative_to(self.root) and Path(path).is_dir())))
+        # Windows CPU runners have no fchmod; production retains Linux ownership checks.
+        if not hasattr(os, "fchmod"):
+            self.stack.enter_context(patch.object(os, "fchmod", create=True))
+        self.stack.enter_context(patch.object(maintenance, "guard_legacy"))
+        self.checker = Mock()
+        def context(root, commit, config):
+            env = {**config["environment"], "SIXNINE_IMAGE": "original-app", "SIXNINE_DISPATCH_IMAGE": "original-dispatch"}
+            return self.root / "releases" / COMMIT, self.root / "migration/releases" / COMMIT, env, {}, {}, self.checker
+        self.original_context = maintenance._storyboard_context
+        self.context = self.stack.enter_context(patch.object(maintenance, "_storyboard_context", side_effect=context))
+        self.stack.enter_context(patch.object(maintenance, "verify_services"))
+        self.original_runtime = maintenance._storyboard_runtime
+        self.runtime_mock = self.stack.enter_context(patch.object(maintenance, "_storyboard_runtime", return_value=self.runtime))
+        self.stack.enter_context(patch.object(release, "wait_ready"))
+        self.stack.enter_context(patch.object(release, "wait_proxy_stable"))
+        self.stack.enter_context(patch.object(publisher.boto3, "client", side_effect=AssertionError("No AWS client in flag maintenance")))
+        self.calls = []
+        self.stack.enter_context(patch.object(maintenance, "compose",
+            side_effect=lambda b, d, e, *a, **k: self.calls.append((a, dict(e))) or b""))
+
+    def update(self, owners="superdan,supervan"):
+        return maintenance.storyboard_owners_locked(self.root, COMMIT, owners,
+            release.checksum(self.paths), release.checksum(self.active))
+
+    def receipt(self):
+        return maintenance.storyboard_receipt(self.root)
+
+    def restore(self):
+        return maintenance.restore_storyboard_owners_locked(self.root, COMMIT,
+            release.checksum(self.root / "migration" / maintenance.STORYBOARD_RECEIPT))
+
+    def test_flag_update_preserves_original_bytes_pins_and_reconnects_only_cpu_namespace(self):
+        result = self.update()
+        self.assertEqual(result["state"], "approved_storyboard_owners_updated")
+        self.assertEqual(maintenance.settings(self.root)[0]["environment"][maintenance.STORYBOARD_FLAG], "superdan,supervan")
+        self.assertEqual(json.loads(self.active.read_text())["paths_sha256"], release.checksum(self.paths))
+        self.assertEqual(self.release_state.read_bytes(), self.before["release"])
+        self.assertEqual(self.calls[0][0], ("stop", *maintenance.SHARED))
+        self.assertEqual(self.calls[1][0], ("up", "-d", "--no-deps", "--force-recreate", "app", *maintenance.SHARED))
+        self.assertEqual(len(self.calls), 2)
+        self.assertTrue(all(env["SIXNINE_HATCHET_POSTGRES_VOLUME"] == "original-postgres"
+            and env["SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID"] == PROFILE for _, env in self.calls))
+        receipt = self.receipt(); self.assertEqual(receipt["status"], "completed")
+        saved, old, new = maintenance._storyboard_backup(self.root, receipt)
+        self.assertEqual(saved["before", "paths"], self.before["paths"])
+        self.assertEqual(saved["before", "active"], self.before["active"])
+        new["environment"].pop(maintenance.STORYBOARD_FLAG)
+        self.assertEqual(new, old)
+        maintenance.storyboard_maintenance_fence(self.root)
+        self.calls.clear()
+        self.assertEqual(self.update()["state"], "approved_storyboard_owners_unchanged")
+        self.assertFalse(self.calls)
+        self.update("")
+        self.assertEqual(maintenance.settings(self.root)[0]["environment"][maintenance.STORYBOARD_FLAG], "")
+        self.assertEqual(self.release_state.read_bytes(), self.before["release"])
+
+    def test_invalid_accounts_and_stale_original_hash_reject_before_runtime_or_intent(self):
+        for owners in ("other", "superdan,superdan", "superdan,", "superdan, supervan", True):
+            with self.subTest(owners=owners), self.assertRaisesRegex(release.ReleaseError, "arguments_invalid"):
+                self.update(owners)
+        with self.assertRaisesRegex(release.ReleaseError, "original_binding_changed"):
+            maintenance.storyboard_owners_locked(self.root, COMMIT, "superdan", "f" * 64, release.checksum(self.active))
+        self.context.assert_not_called(); self.assertFalse(self.calls)
+        self.assertFalse((self.root / "migration" / maintenance.STORYBOARD_RECEIPT).exists())
+
+    def test_current_release_and_independent_approval_are_required_before_cpu_mutation(self):
+        actual_context = self.context.side_effect
+        self.context.side_effect = self.original_context
+        changed = json.loads(self.release_state.read_text()); changed["pending"] = "b" * 40
+        self.release_state.write_text(json.dumps(changed))
+        with self.assertRaisesRegex(release.ReleaseError, "current_release_required"):
+            self.update()
+        self.release_state.write_bytes(self.before["release"])
+        for path in (self.root / "releases" / COMMIT, self.root / "migration/releases" / COMMIT / "artifact"):
+            path.mkdir(parents=True)
+        with patch.object(release, "approved_manifest", side_effect=release.ReleaseError("independent_release_approval_missing")):
+            with self.assertRaisesRegex(release.ReleaseError, "independent_release_approval_missing"):
+                self.update()
+        self.assertFalse(self.calls)
+        self.context.side_effect = actual_context
+
+    def test_runtime_failure_keeps_old_config_and_blocks_blind_deploy_or_replay(self):
+        with patch.object(maintenance, "_storyboard_refresh", side_effect=release.ReleaseError("synthetic_runtime_failure")):
+            with self.assertRaisesRegex(release.ReleaseError, "synthetic_runtime_failure"):
+                self.update()
+        self.assertEqual(self.receipt()["status"], "failed")
+        self.assertEqual(self.paths.read_bytes(), self.before["paths"])
+        self.assertEqual(self.active.read_bytes(), self.before["active"])
+        with self.assertRaisesRegex(release.ReleaseError, "pending_restore_required"):
+            maintenance.apply_locked(self.root, COMMIT)
+        with self.assertRaisesRegex(release.ReleaseError, "pending_restore_required"):
+            self.update()
+        self.assertEqual(self.restore()["state"], "approved_storyboard_owners_restored")
+        self.assertEqual(self.receipt()["status"], "restored")
+        maintenance.storyboard_maintenance_fence(self.root)
+
+    def test_interrupted_two_file_commit_restores_exact_original_bytes(self):
+        writer = maintenance._storyboard_bytes
+        def interrupt(path, data):
+            if path == self.active: raise OSError("synthetic interrupted marker write")
+            writer(path, data)
+        with patch.object(maintenance, "_storyboard_bytes", side_effect=interrupt):
+            with self.assertRaisesRegex(OSError, "interrupted marker"):
+                self.update()
+        self.assertNotEqual(self.paths.read_bytes(), self.before["paths"])
+        self.assertEqual(self.active.read_bytes(), self.before["active"])
+        self.restore()
+        for name, path in (("paths", self.paths), ("active", self.active), ("release", self.release_state)):
+            self.assertEqual(path.read_bytes(), self.before[name])
+        self.assertEqual(self.receipt()["status"], "restored")
+
+    def test_restore_requires_exact_receipt_and_never_overwrites_unrelated_configuration(self):
+        with patch.object(maintenance, "_storyboard_refresh", side_effect=OSError("synthetic failure")):
+            with self.assertRaises(OSError): self.update()
+        with self.assertRaisesRegex(release.ReleaseError, "restore_binding_changed"):
+            maintenance.restore_storyboard_owners_locked(self.root, COMMIT, "0" * 64)
+        changed = json.loads(self.paths.read_text()); changed["host_memory_mib"] += 1
+        self.paths.write_text(json.dumps(changed)); unrelated = self.paths.read_bytes()
+        with self.assertRaisesRegex(release.ReleaseError, "restore_unrelated_change"):
+            self.restore()
+        self.assertEqual(self.paths.read_bytes(), unrelated)
+        self.assertFalse(self.calls)
+
+    def test_changed_worker_settings_or_mounts_fail_verification_and_preserve_binding(self):
+        changed = {name: dict(item) for name, item in self.runtime.items()}
+        changed["controller"]["environment_sha256"] = "4" * 64
+        self.runtime_mock.side_effect = [self.runtime, changed]
+        with patch.object(maintenance.time, "monotonic", side_effect=[0, 181]):
+            with self.assertRaisesRegex(release.ReleaseError, "runtime_or_mounts_changed"):
+                self.update()
+        self.assertEqual(self.paths.read_bytes(), self.before["paths"])
+        self.assertEqual(self.active.read_bytes(), self.before["active"])
+        self.assertEqual(self.receipt()["status"], "failed")
+
+    def test_runtime_observation_redacts_environment_and_rejects_flag_on_workers(self):
+        values = {name: {"Image": "sha256:" + "1" * 64, "State": {"Running": True}, "Mounts": [],
+            "Config": {"Labels": {"com.docker.compose.project": "sixnine-platform", "com.docker.compose.service": name},
+                "Env": ["PRIVATE_VALUE=fixture-should-not-be-in-receipt"] +
+                    ([maintenance.STORYBOARD_FLAG + "=superdan"] if name == "app" else [])}}
+            for name in maintenance.STORYBOARD_SERVICES}
+        self.runtime_mock.side_effect = self.original_runtime
+        identifiers = {name: str(index) * 64 for index, name in enumerate(maintenance.STORYBOARD_SERVICES, 1)}
+        by_id = {identifiers[name]: value for name, value in values.items()}
+        with patch.object(maintenance, "compose", side_effect=lambda b, d, e, *a, **k: identifiers[a[-1]].encode()), \
+                patch.object(release, "command", side_effect=lambda args, **k: json.dumps([by_id[args[1]]]).encode()):
+            result = maintenance._storyboard_runtime(self.root, self.root, {maintenance.STORYBOARD_FLAG: "superdan"})
+            self.assertNotIn("PRIVATE_VALUE", json.dumps(result)); self.assertNotIn("fixture-should", json.dumps(result))
+            values["controller"]["Config"]["Env"].append(maintenance.STORYBOARD_FLAG + "=superdan")
+            with self.assertRaisesRegex(release.ReleaseError, "storyboard_worker_environment"):
+                maintenance._storyboard_runtime(self.root, self.root, {maintenance.STORYBOARD_FLAG: "superdan"})
+
+    def test_public_maintenance_wrapper_holds_existing_nonblocking_release_lock(self):
+        locked = Mock()
+        fcntl = types.SimpleNamespace(LOCK_EX=1, LOCK_NB=4, flock=locked)
+        def action(*args):
+            locked.assert_called_once(); self.assertEqual(locked.call_args.args[1], 5)
+            self.assertFalse(locked.call_args.args[0].closed)
+            return {"state": "synthetic-lock-held"}
+        with patch.dict(sys.modules, {"fcntl": fcntl}), patch.object(release, "check_host") as host, \
+                patch.object(maintenance, "storyboard_owners_locked", side_effect=action):
+            result = maintenance.storyboard_maintenance(self.root, COMMIT, owners="superdan",
+                paths_sha256="a" * 64, active_sha256="b" * 64)
+        host.assert_called_once_with(self.root)
+        self.assertEqual(result["state"], "synthetic-lock-held")
+        self.assertTrue(locked.call_args.args[0].closed)
 
 
 if __name__ == "__main__":

@@ -20,6 +20,46 @@ bundle. Use its `--migration-destination MIGRATION_DIRECTORY` and repeated
 `build_migration(COMMIT, PLATFORM_DIRECTORY, MIGRATION_DIRECTORY, selections)`
 when an already tested ordinary artifact has the same exact commit.
 
+The platform preparation workflow includes Pruned FL, Pruned REF, and the
+existing `h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-lowram-v1:fl` selection
+for storyboard Final. Each dstack source entry contains one GPU and slot zero;
+this does not change the original native profile's independent-process model
+or its resource admission. With an explicit prior preparation run/commit/index
+binding, adding a catalog selection preserves the old selections in their
+original order and every old four-file byte/hash. The new selection uses the
+verified retained package whose members still equal current native source,
+plus its current canonical manifest/runtime. The resulting archive and index
+are new artifacts; the existing GPU bootstrap receipts still match their old
+entries. Dropping/reordering old choices, changed native source, tampered
+archives, or missing provenance fails the preparation. No native runtime is
+restarted or re-uploaded by this build step.
+
+The nonsecret `base-fl.operator-profiles.example.json` and
+`base-fl.execution-policy.example.json` are reviewed configuration fragments,
+not automatically activated release inputs. They bind Base FL to the existing
+native image digest, the explicit `sixnine-dstack-base-fl-20261014` pool and
+`sixnine-h3-base-int8-fl-20261014` configuration. The operator fragments keep
+owner/project/budget isolation and request one physical GPU, 256 GiB total RAM,
+350 GiB disk and 90 GiB GPU memory, with a US$2.00/hour maximum. These stricter
+host requirements preserve the catalog's original 256 GiB host evidence and
+128 GiB available-headroom check; no 29 GiB Pruned bound is applied to Base.
+Only pinned scheduler names `RTXPRO6000S` and `RTXPRO6000WS` map to the native
+Server/Workstation identities. Max-Q and generic PRO6000 names are excluded;
+CUDA still independently verifies the actual full physical name, capability
+12.0 and 90–100 GiB VRAM.
+
+Install the two owner-scoped operator fragments through the existing protected
+configuration process, without changing global capacity, lifecycle or budget
+limits. Replace the one existing Base FL execution-profile record with its
+new explicit `hatchet-v1` route after review; do not append a duplicate
+profile/recipe. Preserve the old Base REF record and every accepted job's
+frozen execution route. The example execution policy is disabled and marked
+pending acceptance; refreshing its evidence/authority and enabling it requires
+the authorized release owner's bounded real acceptance. The runtime configuration
+keeps the existing source-index path; the new approved index supplies Base FL.
+Neither these examples nor preparation of an archive rents a GPU or certifies
+Final generation success.
+
 `tools/publish_aws_release.py COMMIT PLATFORM_DIRECTORY --migration-directory
 MIGRATION_DIRECTORY` performs conditional immutable uploads under
 `releases/COMMIT/` and `releases/COMMIT/migration/`. Publication never approves
@@ -99,6 +139,58 @@ Hatchet bootstrap before activation. Use generation `1`/`wangp-worker` only for
 an explicitly authorized acceptance deployment with its exact existing profiles.
 The activation marker freezes the complete path/configuration document hash;
 later configuration changes require reviewed maintenance, not an app release.
+The optional nonsecret `SIXNINE_STORYBOARD_OWNERS` field in that same environment
+document selects the new storyboard UI for explicit existing browser accounts.
+Omit it, or set it to an empty string, to keep the UI disabled. It is passed only
+to `app`, not to dispatcher, controller, dstack or Hatchet; it grants no operator,
+asset, job or budget permissions. Allowed nonempty values contain unique account
+IDs from `superdan` and `supervan`. Do not inherit this flag from a shell or
+project `.env`, and do not edit an active frozen configuration during a source
+release. Enablement remains a separately reviewed maintenance change after the
+exact source release and acceptance gates in [#161](https://github.com/inkseq/h3-studio/issues/161).
+Independently review/install the matching exact maintenance helper and checker
+before the approved source deployment. Invoke flag maintenance only after that
+current source release is healthy. Read the current
+full commit and SHA256 of `paths.json` and `active.json`, then use only:
+
+```text
+/usr/bin/python3 /opt/sixnine-release/migration_maintenance.py storyboard-owners CURRENT_COMMIT superdan,supervan EXPECTED_PATHS_SHA256 EXPECTED_ACTIVE_SHA256
+```
+
+Use `superdan` or `supervan` for one account, or `-` to disable both. This is not
+a general configuration override. The command takes the existing nonblocking
+`release.lock`, requires the exact healthy current approved platform/migration
+artifacts and installed helper hashes, and rejects stale original bindings.
+It saves the exact old/candidate configuration and marker bytes in the protected
+`migration/storyboard-maintenance/OPERATION_ID/` directory before any mutation.
+The durable `migration/storyboard-maintenance.json` records the pending intent.
+
+The app reads this environment flag at startup. Because dstack, Hatchet,
+dispatcher and controller share its container network namespace, updating it
+reconnects **app and those four CPU members** using their current approved images.
+It does not load images, initialize/restart either database, change the frontend
+pointer, alter lifecycle policies, rent/stop a provider GPU, or write jobs and
+budgets. Original runtime environment and persistent mount signatures are
+checked; only the app's storyboard flag may differ. Once CPU health, namespace,
+broker mounts, authenticated probes and the live app flag pass, the command
+atomically replaces each configuration/marker file and updates their frozen
+binding. The current/previous source release records remain unchanged.
+
+If interrupted or failed, keep the receipt and backups. Ordinary migration
+deploy/activation and another flag update are fenced; do not repeat activation.
+Read the exact current SHA256 of `storyboard-maintenance.json` and explicitly
+restore that same intent:
+
+```text
+/usr/bin/python3 /opt/sixnine-release/migration_maintenance.py restore-storyboard-owners CURRENT_COMMIT EXPECTED_RECEIPT_SHA256
+```
+
+Restore verifies unchanged approved source, backup hashes, the flag-only diff,
+and that current configuration/marker are one of that intent's before/after
+states; unrelated changes are never overwritten. It reconnects the original
+CPU configuration and restores both original files byte-for-byte. Backups stay
+as evidence. A lost success response is checked through the completed receipt,
+current hashes and live flag; it is not permission for a blind replay.
 The derived source-directory path is set by the helper for the exact artifact.
 For first initialization, a temporary private CPU bootstrap project may use
 these same explicitly named Hatchet volumes and persisted infrastructure

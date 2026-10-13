@@ -28,6 +28,12 @@ from .runtime_catalog import engine_manifest, get_profile
 
 BACKEND_MARKER = "dstack-v1"
 PROVIDERS = {"vastai": "vast", "runpod": "runpod"}
+# Pinned dstack/gpuhunt scheduler labels, not native CUDA device identities.
+# The native worker still checks the full physical name, capability and VRAM.
+SCHEDULER_GPU_ALIASES = {
+    "RTXPRO6000S": "RTX PRO 6000 Blackwell Server Edition",
+    "RTXPRO6000WS": "RTX PRO 6000 Blackwell Workstation Edition",
+}
 TERMINAL_JOBS = {"succeeded", "failed", "cancelled"}
 OBSERVATION_KEYS = {"run_id", "run_name", "state", "ready", "reason_code", "observed_at",
     "provider_instance_id", "runtime_incarnation", "dstack_status", "model_load_state",
@@ -519,7 +525,8 @@ class DstackOperator:
         normalize = lambda name: "".join(char.lower() for char in name if char.isalnum())
         allowed = {normalize(name) for name in native.get("hardware_admission", {}).get("gpu_models", native["gpu_models"])}
         require(isinstance(profile["gpu_names"], list) and profile["gpu_names"] and
-            all(isinstance(name, str) and normalize(name) in allowed for name in profile["gpu_names"]),
+            all(isinstance(name, str) and normalize(SCHEDULER_GPU_ALIASES.get(name, name)) in allowed
+                for name in profile["gpu_names"]),
             "dstack_native_gpu_binding_invalid", 422)
         require(_integer(profile["extra_reservation_microusd"], 0) and
             _integer(profile["max_ttl_seconds"], 120, 86400), "dstack_profile_limits_invalid", 422)

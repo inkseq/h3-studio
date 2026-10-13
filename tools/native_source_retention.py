@@ -160,6 +160,95 @@ def retain(directory, commit, index_sha256, selections, *, root):
     return raw
 
 
+def retain_or_extend(directory, commit, index_sha256, selections, *, root):
+    """Append exact catalog selections without changing an existing GPU receipt.
+
+    The original index/order and every old four-file byte remain mandatory.
+    New selections use the fully verified old package, whose members must equal
+    current native source, plus current canonical manifest/runtime documents.
+    This builds public archive bytes only; it never extracts or executes code.
+    """
+    from studio_platform.runtime_catalog import engine_manifest
+    from tools.build_operator_sources import SOURCE_NAMES, _json as canonical, _runtime
+    from tools.build_dstack_sources import PURPOSE
+    pairs = list(selections)
+    if (not 1 <= len(pairs) <= 128 or any(type(item) not in (tuple, list) or len(item) != 2
+            or not all(isinstance(value, str) for value in item) for item in pairs)):
+        raise ValueError("native_retention_selection_invalid")
+    pairs = [tuple(item) for item in pairs]
+    if len(set(pairs)) != len(pairs):
+        raise ValueError("native_retention_selection_invalid")
+    for profile, mode in pairs:
+        engine_manifest(profile, mode)
+    if not SHA.fullmatch(commit or "") or not DIGEST.fullmatch(index_sha256 or ""):
+        raise ValueError("native_retention_binding_invalid")
+    manifest = _json(_regular(Path(directory) / "migration-manifest.json", 1024 * 1024))
+    raw = _regular(Path(directory) / "source-set.tar.gz", MAX_ARCHIVE)
+    if (type(manifest) is not dict or manifest.get("version") != 1 or manifest.get("commit") != commit
+            or manifest.get("source_index_sha256") != index_sha256
+            or (manifest.get("files") or {}).get("source-set.tar.gz") != hashlib.sha256(raw).hexdigest()):
+        raise ValueError("native_retention_manifest_binding_changed")
+    # Read one bounded index only to discover the original selections. retain()
+    # below then independently checks every member and the complete old index.
+    with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as archive:
+        indexes, total = [], 0
+        for count, member in enumerate(archive, 1):
+            total += member.size
+            if (count > 513 or not member.isfile() or len(member.name) > 512
+                    or not 0 <= member.size <= 16 * 1024 * 1024 or total > MAX_ARCHIVE):
+                raise ValueError("native_retention_archive_member_invalid")
+            if member.name == "index.json":
+                indexes.append(member)
+        if (len(indexes) != 1 or not indexes[0].isfile()
+                or not 0 < indexes[0].size <= 1024 * 1024):
+            raise ValueError("native_retention_index_contract_changed")
+        index_raw = archive.extractfile(indexes[0]).read(indexes[0].size + 1)
+    if hashlib.sha256(index_raw).hexdigest() != index_sha256:
+        raise ValueError("native_retention_index_changed")
+    index = _json(index_raw)
+    if (type(index) is not dict or set(index) != {"schema_version", "purpose", "production_adapter_verified", "sources"}
+            or type(index.get("sources")) is not list or not 1 <= len(index["sources"]) <= 128
+            or any(type(entry) is not dict for entry in index["sources"])):
+        raise ValueError("native_retention_index_contract_changed")
+    original = [(entry.get("runtime_profile_id"), entry.get("mode")) for entry in index["sources"]]
+    if original != pairs[:len(original)]:
+        raise ValueError("native_retention_additive_selection_required")
+    verified = retain(directory, commit, index_sha256, original, root=root)
+    if pairs == original:
+        return verified, index_sha256
+    expected = {"index.json": 1024 * 1024}
+    for profile, mode in original:
+        expected.update({f"{profile}/{mode}/gpu-0/{name}": 16 * 1024 * 1024 for name in SOURCE_NAMES})
+    contents = _archive(verified, expected)
+    package = contents[index["sources"][0]["directory"] + "/wangp-package.tar.gz"]
+    package_sha = hashlib.sha256(package).hexdigest()
+    bootstrap = _regular(Path(root) / "deploy/wangp/bootstrap.py", 1024 * 1024)
+    entries = list(index["sources"])
+    for profile, mode in pairs[len(original):]:
+        native = engine_manifest(profile, mode)
+        relative = f"{profile}/{mode}/gpu-0"
+        sources = {"wangp-bootstrap.py": bootstrap, "wangp-package.tar.gz": package,
+            "wangp-manifest.json": canonical(native.document),
+            "wangp-runtime.json": canonical(_runtime(profile, 0, 1, package_sha))}
+        contents.update({relative + "/" + name: data for name, data in sources.items()})
+        entries.append({"runtime_profile_id": profile, "mode": mode, "gpu_count": 1,
+            "profile_slot_index": 0, "directory": relative, "engine_manifest_digest": native.digest,
+            "source_sha256": {name: hashlib.sha256(data).hexdigest() for name, data in sources.items()}})
+    contents["index.json"] = canonical({"schema_version": 1, "purpose": PURPOSE,
+        "production_adapter_verified": False, "sources": entries})
+    if sum(len(data) for data in contents.values()) > MAX_ARCHIVE:
+        raise ValueError("native_retention_archive_limit")
+    target = io.BytesIO()
+    with tarfile.open(fileobj=target, mode="w:gz") as archive:
+        for name, data in sorted(contents.items()):
+            member = tarfile.TarInfo(name); member.size = len(data); member.mode = 0o600
+            archive.addfile(member, io.BytesIO(data))
+    result = target.getvalue()
+    if len(result) > MAX_ARCHIVE:
+        raise ValueError("native_retention_archive_limit")
+    return result, hashlib.sha256(contents["index.json"]).hexdigest()
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-json", type=Path, required=True)

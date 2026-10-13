@@ -73,8 +73,8 @@ def build_migration(commit, platform_directory, destination, selections, *,
     if any(value is not None for value in retained):
         if not all(value is not None for value in retained):
             raise ValueError("Native retention requires an explicit directory, source commit and index digest")
-        from tools.native_source_retention import retain
-        retained_bytes = retain(*retained, selections, root=ROOT)
+        from tools.native_source_retention import retain_or_extend
+        retained_bytes, retained_index_digest = retain_or_extend(*retained, selections, root=ROOT)
     destination = Path(destination)
     destination.mkdir(parents=False, exist_ok=False)
     image = "sixnine-dispatch:" + commit
@@ -94,10 +94,10 @@ def build_migration(commit, platform_directory, destination, selections, *,
         if process.wait() != 0:
             raise RuntimeError("Could not export the reviewed CPU dispatch image")
     if retained_bytes is not None:
-        # Preserve all four native hashes and the original index for existing
-        # GPU receipts. The CPU source/dispatch identity above remains new.
+        # Preserve every existing four-file byte/hash for GPU receipts. An
+        # additive selection gets a new index; old entries stay exact.
         (destination / "source-set.tar.gz").write_bytes(retained_bytes)
-        index_digest = retain_native_sources_index_sha256
+        index_digest = retained_index_digest
     else:
         with tempfile.TemporaryDirectory(prefix="sixnine-public-migration-sources-") as temporary:
             sources = Path(temporary) / "sources"

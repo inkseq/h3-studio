@@ -168,6 +168,13 @@ def validate(document, *, host_memory_mib=3840):
     for name in ("hatchet-config", "hatchet-postgres"):
         require(document.get("volumes", {}).get(name, {}).get("external") is True, "migration_blank_broker_volume")
     app_env = services["app"]["environment"]
+    storyboard = app_env.get("SIXNINE_STORYBOARD_OWNERS", "")
+    require(type(storyboard) is str and (not storyboard or
+        len(storyboard.split(",")) == len(set(storyboard.split(",")))
+        and set(storyboard.split(",")) <= {"superdan", "supervan"}),
+        "migration_storyboard_reference_invalid")
+    require(all("SIXNINE_STORYBOARD_OWNERS" not in services[name]["environment"]
+        for name in CPU_SHARED), "migration_storyboard_worker_environment")
     require((app_env.get("SIXNINE_GENERATION_ENABLED"), app_env.get("SIXNINE_EXECUTION_BACKEND"))
         in {("0", "disabled"), ("1", "wangp-worker")}, "migration_admission_switch_invalid")
     require(all(controller["environment"].get(key) == app_env.get(key)

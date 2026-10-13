@@ -192,6 +192,45 @@ class DstackOperatorTests(LedgerCase):
         self.assertEqual(self.client.applied, [])
         self.assertEqual(self.counts(), (0, 0, 0, 0))
 
+    def test_base_fl_examples_bind_only_qualified_scheduler_aliases_and_original_floors(self):
+        from studio_platform.dstack_operator import plan_offers
+        from studio_platform.execution_policy import validate_policy
+        from studio_platform.runtime_catalog import engine_manifest
+        root = Path(__file__).resolve().parent/'deploy/dstack'
+        examples = json.loads((root/'base-fl.operator-profiles.example.json').read_text())
+        policy = validate_policy(json.loads((root/'base-fl.execution-policy.example.json').read_text()))
+        self.assertFalse(policy['enabled'])
+        config = copy.deepcopy(self.config); config['profiles'] = examples
+        service = DstackOperator(self.repo,self.settings,self.capacity,config)
+        for owner,principal in (('superdan',self.owner),('supervan',self.other_owner)):
+            profile = next(item for item in service.profiles.values() if item['owner_id']==owner)
+            self.assertEqual((profile['memory_gib'],profile['disk_gib'],profile['gpu_memory_gib']),(256,350,90))
+            self.assertEqual(profile['manifest_digest'],engine_manifest(profile['runtime_profile_id'],'fl').digest)
+            for field in ('pool','configuration_id','model_id'):
+                self.assertEqual(profile[field],policy[field])
+            self.assertEqual(policy['engine_manifest_digest'],profile['manifest_digest'])
+            request=service._capacity_request(profile,str(uuid.uuid4()),1.,121.,120)
+            self.assertEqual(request.gpu_count,1)
+            self.assertEqual(request.gpu_names,('RTXPRO6000S','RTXPRO6000WS'))
+            self.assertEqual(request.max_price_microusd,2000000)
+            spec=request.run_spec(PUB)
+            self.assertEqual(spec['configuration']['resources']['gpu']['count'],1)
+            offered={'backend':'vastai','region':'us-wisconsin','price':1.51722,'availability':'available',
+                'instance':{'resources':{'cpus':128,'memory_mib':527974,'disk':{'size_mib':350*1024},
+                    'gpus':[{'name':'RTXPRO6000S','memory_mib':98304}]}}}
+            self.assertEqual(len(plan_offers({'job_plans':[{'offers':[offered]}]},request)),1)
+            offered['instance']['resources']['gpus'][0]['name']='RTXPRO6000Max-Q'
+            self.assertEqual(plan_offers({'job_plans':[{'offers':[offered]}]},request),[])
+            # Catalog remains owner-scoped even when both templates are installed.
+            self.assertEqual([item['id'] for item in service.catalog(principal)['profiles']],[profile['id']])
+        for field,value in (('memory_gib',255),('disk_gib',349),('gpu_memory_gib',87),
+                ('gpu_names',['RTXPRO6000Max-Q']),('gpu_names',['RTXPRO6000']),('gpu_names',['RTX5090'])):
+            bad=copy.deepcopy(config);bad['profiles'][0][field]=value
+            with self.subTest(field=field,value=value),self.assertRaises(OperatorError):
+                DstackOperator(self.repo,self.settings,self.capacity,bad)
+        self.assertEqual(self.client.applied,[])
+        self.assertEqual(self.counts(),(0,0,0,0))
+
     def test_lost_apply_and_missing_run_never_reapply_or_release_reservation(self):
         self.client.lost = True
         node = self.start()["node_id"]

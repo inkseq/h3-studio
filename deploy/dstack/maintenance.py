@@ -39,8 +39,11 @@ OTHER_FIELDS = frozenset({"SIXNINE_OPERATOR_CAPACITY_OWNERS", "SIXNINE_HATCHET_P
 OPTIONAL_PATH_FIELDS = frozenset({"SIXNINE_STAGE_QUERY_CONFIG_FILE", "SIXNINE_STORAGE_CREDENTIAL_FILE"})
 STORAGE_FIELDS = frozenset({"SIXNINE_STORAGE_PROVIDER", "SIXNINE_STORAGE_ENDPOINT", "SIXNINE_STORAGE_REGION",
     "SIXNINE_STORAGE_BUCKET", "SIXNINE_STORAGE_PROFILE", "SIXNINE_STORAGE_CREDENTIAL_FILE"})
-OPTIONAL_FIELDS = frozenset({"SIXNINE_OPERATOR_ADMIN_OWNERS"}) | OPTIONAL_PATH_FIELDS | STORAGE_FIELDS
+OPTIONAL_FIELDS = frozenset({"SIXNINE_OPERATOR_ADMIN_OWNERS", "SIXNINE_STORYBOARD_OWNERS"}) | OPTIONAL_PATH_FIELDS | STORAGE_FIELDS
 LEGACY_MARKERS = ("operator-capacity/active.json", "gpu-acceptance/active.json", "gpu-scaler/active.json")
+STORYBOARD_FLAG = "SIXNINE_STORYBOARD_OWNERS"
+STORYBOARD_RECEIPT = "storyboard-maintenance.json"
+STORYBOARD_SERVICES = ("app", *SHARED, "hatchet-db", "db")
 
 
 def atomic(path, document):
@@ -260,6 +263,11 @@ def settings(root):
     path = directory / "paths.json"
     release.regular(path, root_owned=True, maximum=32768)
     value = json.loads(path.read_text())
+    return settings_document(value), release.checksum(directory / "paths.json")
+
+
+def settings_document(value):
+    """Validate a protected configuration or a flag-only candidate in memory."""
     release.require(type(value) is dict and set(value) == {"version", "environment", "host_memory_mib"}
         and type(value["version"]) is int and value["version"] == 1 and type(value["environment"]) is dict
         and PATH_FIELDS | OTHER_FIELDS <= set(value["environment"]) <= PATH_FIELDS | OTHER_FIELDS | OPTIONAL_FIELDS
@@ -286,9 +294,13 @@ def settings(root):
     release.require(not admins or re.fullmatch(r"[A-Za-z0-9_.-]+(?:,[A-Za-z0-9_.-]+)*", admins)
         and set(admins.split(",")) <= set(env["SIXNINE_OPERATOR_CAPACITY_OWNERS"].split(",")),
         "migration_admin_reference_invalid")
+    storyboard = env.get("SIXNINE_STORYBOARD_OWNERS", "")
+    release.require(not storyboard or len(storyboard.split(",")) == len(set(storyboard.split(",")))
+        and set(storyboard.split(",")) <= {"superdan", "supervan"},
+        "migration_storyboard_reference_invalid")
     release.require(re.fullmatch(r"[A-Za-z0-9_.-]{1,200}", env["SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID"]),
                     "migration_default_profile_invalid")
-    return value, release.checksum(directory / "paths.json")
+    return value
 
 
 def storage_settings(environment):
@@ -489,6 +501,7 @@ def guard_legacy(root, *, commit=None, active=None):
 
 def apply_locked(root, commit):
     """Caller holds existing release lock. Reconnect every shared CPU member."""
+    storyboard_maintenance_fence(root)
     config, config_digest = settings(root)
     active_path = root / "migration" / "active.json"
     release.regular(active_path, root_owned=True, maximum=16384)
@@ -561,6 +574,7 @@ def activate(root, commit):
     import fcntl
     with (root / "release.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        storyboard_maintenance_fence(root)
         _, digest = settings(root)
         path = root / "migration" / "active.json"
         if path.exists() or path.is_symlink():
@@ -578,14 +592,283 @@ def activate(root, commit):
         apply_locked(root, commit)
 
 
+def storyboard_receipt(root):
+    path = root / "migration" / STORYBOARD_RECEIPT
+    if not path.exists() and not path.is_symlink():
+        return None
+    release.regular(path, root_owned=True, maximum=32768)
+    value = json.loads(path.read_text())
+    release.require(type(value) is dict and set(value) == {"version", "purpose", "commit", "operation_id",
+        "status", "before", "after", "runtime_before"} and type(value["version"]) is int and value["version"] == 1
+        and value["purpose"] == "storyboard-owner-flag-only" and type(value.get("commit")) is str
+        and release.SHA.fullmatch(value["commit"]) and type(value.get("operation_id")) is str
+        and release.DIGEST.fullmatch(value["operation_id"])
+        and value["status"] in {"pending", "failed", "completed", "restored"}
+        and all(type(value[key]) is dict and set(value[key]) == {"paths", "active"}
+            and all(type(digest) is str and release.DIGEST.fullmatch(digest) for digest in value[key].values())
+            for key in ("before", "after")) and type(value["runtime_before"]) is dict
+        and set(value["runtime_before"]) == set(STORYBOARD_SERVICES), "migration_storyboard_receipt_invalid")
+    for item in value["runtime_before"].values():
+        release.require(type(item) is dict and set(item) == {"image_id", "environment_sha256", "mounts_sha256"}
+            and type(item["image_id"]) is str and re.fullmatch(r"sha256:[0-9a-f]{64}", item["image_id"])
+            and all(type(item[key]) is str and release.DIGEST.fullmatch(item[key])
+                for key in ("environment_sha256", "mounts_sha256")), "migration_storyboard_receipt_invalid")
+    return value
+
+
+def storyboard_maintenance_fence(root):
+    value = storyboard_receipt(root)
+    release.require(not value or value["status"] not in {"pending", "failed"},
+        "migration_storyboard_maintenance_pending_restore_required")
+
+
+def _storyboard_context(root, commit, config):
+    """Use the installed, independently approved current images without loading or fetching."""
+    state = release._protected_json(root / "release-state.json", maximum=16384)
+    release.require(state.get("current") == commit and state.get("pending") is None
+        and state.get("status") == "app_ready", "migration_storyboard_current_release_required")
+    base = root / "releases" / commit
+    directory = root / "migration" / "releases" / commit
+    for path in (base.parent, base, directory.parent, directory, directory / "artifact"):
+        protected_directory(path)
+    release.approved_manifest(root, base, commit)
+    app = release.manifest(base, commit)
+    migration = manifest(directory / "artifact", commit,
+        platform_manifest_sha256=release.checksum(base / "release-manifest.json"))
+    approved(root, directory / "artifact", commit)
+    verify_sources(directory / "sources", migration["source_index_sha256"])
+    overlay = directory / "overlay.yaml"
+    release.regular(overlay, root_owned=True, maximum=1024**2)
+    expected_overlay = (directory / "artifact" / "platform-overlay.yaml").read_text().replace(
+        "source: ../hatchet/entrypoint.sh", "source: " + json.dumps(str(directory / "artifact" / "hatchet-entrypoint.sh")))
+    release.require(overlay.read_text() == expected_overlay, "migration_derived_overlay_changed")
+    checker = installed_checker(directory / "artifact")
+    environment = release.deployment_environment(root / "site.env", commit)
+    release.require(state.get("dependencies") == release.pinned_dependencies(environment),
+        "dependency_change_requires_separate_maintenance")
+    app = {**app, "archive_image_ids": release.validate_image_archive(base / "image.tar.gz", app)}
+    dispatch = {"commit": commit, **migration["dispatch"]}
+    dispatch["archive_image_ids"] = release.validate_image_archive(directory / "artifact" / "dispatch-image.tar.gz", dispatch)
+    environment.update(config["environment"], SIXNINE_IMAGE=pinned_loaded_image(app, environment),
+        SIXNINE_DISPATCH_IMAGE=pinned_loaded_image(dispatch, environment), SIXNINE_DSTACK_SOURCE_DIR=str(directory / "sources"))
+    default_profile(directory, environment)
+    checker.check(base / "compose.yaml", overlay, environment=environment,
+        host_memory_mib=config["host_memory_mib"], check_inputs=True)
+    return base, directory, environment, app, dispatch, checker
+
+
+def _storyboard_runtime(base, directory, environment):
+    """Nonsecret signatures; compare unchanged runtime settings and persistent mounts."""
+    result = {}
+    for name in STORYBOARD_SERVICES:
+        identity = compose(base, directory, environment, "ps", "--all", "--quiet", name, timeout=20).decode().strip()
+        release.require(re.fullmatch(r"[0-9a-f]{12,64}", identity), "migration_cpu_service_not_unique")
+        values = json.loads(release.command(["inspect", identity], environment=environment, timeout=20))
+        release.require(type(values) is list and len(values) == 1, "migration_cpu_service_not_unique")
+        value = values[0]
+        labels = value.get("Config", {}).get("Labels", {})
+        release.require(labels.get("com.docker.compose.project") == "sixnine-platform"
+            and labels.get("com.docker.compose.service") == name and value.get("State", {}).get("Running") is True
+            and type(value.get("Image")) is str and re.fullmatch(r"sha256:[0-9a-f]{64}", value["Image"]),
+            "migration_storyboard_runtime_identity_invalid")
+        entries = value.get("Config", {}).get("Env", [])
+        release.require(type(entries) is list and all(type(item) is str and "=" in item for item in entries),
+            "migration_storyboard_runtime_environment_invalid")
+        actual = dict(item.split("=", 1) for item in entries)
+        release.require(len(actual) == len(entries), "migration_storyboard_runtime_environment_invalid")
+        if name == "app":
+            release.require(actual.pop(STORYBOARD_FLAG, "") == environment.get(STORYBOARD_FLAG, ""),
+                "migration_storyboard_runtime_flag_mismatch")
+        else:
+            release.require(STORYBOARD_FLAG not in actual, "migration_storyboard_worker_environment")
+        mounts = [{key: item.get(key) for key in ("Type", "Source", "Destination", "Name", "RW")}
+            for item in value.get("Mounts", [])]
+        result[name] = {"image_id": value.get("Image"),
+            "environment_sha256": hashlib.sha256(json.dumps(actual, sort_keys=True).encode()).hexdigest(),
+            "mounts_sha256": hashlib.sha256(json.dumps(sorted(mounts, key=lambda x: x["Destination"]), sort_keys=True).encode()).hexdigest()}
+    return result
+
+
+def _storyboard_refresh(context, config, runtime_before):
+    base, directory, environment, app, dispatch, checker = context
+    # These members share app's container network namespace. App-only recreate
+    # would orphan them; reconnect current approved CPU images, never provider runs.
+    compose(base, directory, environment, "stop", *SHARED, timeout=240)
+    compose(base, directory, environment, "up", "-d", "--no-deps", "--force-recreate", "app", *SHARED, timeout=300)
+    release.wait_ready(base, environment)
+    deadline = time.monotonic() + 180
+    while True:
+        try:
+            verify_services(base, directory, environment, app, dispatch)
+            release.require(_storyboard_runtime(base, directory, environment) == runtime_before,
+                "migration_storyboard_runtime_or_mounts_changed")
+            checker.check(base / "compose.yaml", directory / "overlay.yaml", environment=environment,
+                host_memory_mib=config["host_memory_mib"], check_inputs=True, probe=True)
+            release.wait_proxy_stable(base, environment)
+            return
+        except (release.ReleaseError, ValueError):
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(3)
+
+
+def _storyboard_bytes(path, data):
+    """Atomic protected metadata replacement with exact saved bytes."""
+    release.regular(path, root_owned=True, maximum=32768)
+    fd, temporary = tempfile.mkstemp(prefix=".storyboard-", dir=path.parent)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as output:
+            output.write(data); output.flush(); os.fsync(output.fileno())
+        os.replace(temporary, path); release.sync_directory(path.parent)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+def _storyboard_backup(root, receipt):
+    directory = root / "migration" / "storyboard-maintenance" / receipt["operation_id"]
+    protected_directory(directory.parent); protected_directory(directory)
+    saved = {}
+    for phase in ("before", "after"):
+        for name in ("paths", "active"):
+            path = directory / (name + "." + phase + ".json")
+            release.regular(path, root_owned=True, maximum=32768)
+            raw = path.read_bytes()
+            release.require(hashlib.sha256(raw).hexdigest() == receipt[phase][name], "migration_storyboard_backup_changed")
+            saved[phase, name] = raw
+    old = settings_document(json.loads(saved["before", "paths"]))
+    new = settings_document(json.loads(saved["after", "paths"]))
+    old_active, new_active = (json.loads(saved[phase, "active"]) for phase in ("before", "after"))
+    expected = {**old, "environment": {**old["environment"], STORYBOARD_FLAG: new["environment"].get(STORYBOARD_FLAG, "")}}
+    release.require(new == expected and old_active.get("active") is True and old_active.get("version") == 1
+        and old_active.get("current") == receipt["commit"] and old_active.get("pending") is None
+        and old_active.get("paths_sha256") == receipt["before"]["paths"]
+        and new_active == {**old_active, "paths_sha256": receipt["after"]["paths"]},
+        "migration_storyboard_backup_not_flag_only")
+    return saved, old, new
+
+
+def storyboard_owners_locked(root, commit, owners, paths_sha256, active_sha256):
+    """Caller holds release.lock; explicit source/hash-bound, flag-only maintenance."""
+    release.require(type(commit) is str and release.SHA.fullmatch(commit)
+        and all(type(value) is str and release.DIGEST.fullmatch(value) for value in (paths_sha256, active_sha256))
+        and type(owners) is str and (not owners or len(owners.split(",")) == len(set(owners.split(",")))
+            and set(owners.split(",")) <= {"superdan", "supervan"}), "migration_storyboard_arguments_invalid")
+    storyboard_maintenance_fence(root)
+    config, digest = settings(root)
+    active_path = root / "migration" / "active.json"
+    active = release._protected_json(active_path, maximum=16384)
+    release.require(digest == paths_sha256 and release.checksum(active_path) == active_sha256
+        and active.get("active") is True and active.get("version") == 1 and active.get("current") == commit
+        and active.get("pending") is None and active.get("paths_sha256") == digest,
+        "migration_storyboard_original_binding_changed")
+    guard_legacy(root, commit=commit, active=active)
+    context = _storyboard_context(root, commit, config)
+    verify_services(*context[:3], context[3], context[4])
+    runtime = _storyboard_runtime(*context[:3])
+    if config["environment"].get(STORYBOARD_FLAG, "") == owners:
+        return {"state": "approved_storyboard_owners_unchanged", "commit": commit, "owners": owners.split(",") if owners else []}
+    candidate = settings_document({**config, "environment": {**config["environment"], STORYBOARD_FLAG: owners}})
+    candidate_environment = {**context[2], STORYBOARD_FLAG: owners}
+    context[5].check(context[0] / "compose.yaml", context[1] / "overlay.yaml", environment=candidate_environment,
+        host_memory_mib=candidate["host_memory_mib"], check_inputs=True)
+    directory = root / "migration" / "storyboard-maintenance"
+    if not directory.exists():
+        directory.mkdir(mode=0o700); release.sync_directory(directory.parent)
+    protected_directory(directory)
+    operation = hashlib.sha256((commit + paths_sha256 + active_sha256 + owners + str(time.time_ns())).encode()).hexdigest()
+    backup = directory / operation; backup.mkdir(mode=0o700)
+    paths = root / "migration" / "paths.json"
+    after_paths = json.dumps(candidate, sort_keys=True).encode()
+    after_digest = hashlib.sha256(after_paths).hexdigest()
+    saved = {("before", "paths"): paths.read_bytes(), ("before", "active"): active_path.read_bytes(),
+        ("after", "paths"): after_paths,
+        ("after", "active"): json.dumps({**active, "paths_sha256": after_digest}, sort_keys=True).encode()}
+    receipt = {"version": 1, "purpose": "storyboard-owner-flag-only", "commit": commit, "operation_id": operation,
+        "status": "pending", "runtime_before": runtime,
+        **{phase: {name: hashlib.sha256(saved[phase, name]).hexdigest() for name in ("paths", "active")}
+            for phase in ("before", "after")}}
+    release.require(receipt["before"] == {"paths": paths_sha256, "active": active_sha256},
+        "migration_storyboard_original_binding_changed")
+    for (phase, name), data in saved.items():
+        with (backup / (name + "." + phase + ".json")).open("xb") as output:
+            os.fchmod(output.fileno(), 0o600); output.write(data); output.flush(); os.fsync(output.fileno())
+    release.sync_directory(backup); release.sync_directory(directory)
+    receipt_path = root / "migration" / STORYBOARD_RECEIPT
+    atomic(receipt_path, receipt)  # Durable intent precedes every runtime/config mutation.
+    try:
+        _storyboard_refresh((*context[:2], candidate_environment, *context[3:]), candidate, runtime)
+        release.require(release.checksum(paths) == paths_sha256 and release.checksum(active_path) == active_sha256,
+            "migration_storyboard_original_binding_changed")
+        _storyboard_bytes(paths, saved["after", "paths"])
+        _storyboard_bytes(active_path, saved["after", "active"])
+        release.require(settings(root)[1] == after_digest and release.checksum(active_path) == receipt["after"]["active"],
+            "migration_storyboard_commit_readback_failed")
+        atomic(receipt_path, {**receipt, "status": "completed"})
+    except Exception:
+        atomic(receipt_path, {**receipt, "status": "failed"})
+        raise
+    return {"state": "approved_storyboard_owners_updated", "commit": commit,
+        "owners": owners.split(",") if owners else [], "paths_sha256": after_digest,
+        "receipt_sha256": release.checksum(receipt_path)}
+
+
+def restore_storyboard_owners_locked(root, commit, receipt_sha256):
+    """Restore one interrupted intent; never replay activation or overwrite unrelated changes."""
+    path = root / "migration" / STORYBOARD_RECEIPT
+    release.require(type(commit) is str and release.SHA.fullmatch(commit) and type(receipt_sha256) is str
+        and release.DIGEST.fullmatch(receipt_sha256), "migration_storyboard_arguments_invalid")
+    receipt = storyboard_receipt(root)
+    release.require(receipt and receipt["commit"] == commit and receipt["status"] in {"pending", "failed"}
+        and release.checksum(path) == receipt_sha256, "migration_storyboard_restore_binding_changed")
+    saved, old, _ = _storyboard_backup(root, receipt)
+    current_hashes = {name: release.checksum(root / "migration" / (name + ".json")) for name in ("paths", "active")}
+    release.require(all(current_hashes[name] in {receipt["before"][name], receipt["after"][name]}
+        for name in current_hashes), "migration_storyboard_restore_unrelated_change")
+    active = json.loads(saved["before", "active"])
+    guard_legacy(root, commit=commit, active=active)
+    context = _storyboard_context(root, commit, old)
+    try:
+        _storyboard_refresh(context, old, receipt["runtime_before"])
+        release.require(all(release.checksum(root / "migration" / (name + ".json")) == current_hashes[name]
+            for name in current_hashes), "migration_storyboard_restore_unrelated_change")
+        for name in ("paths", "active"):
+            _storyboard_bytes(root / "migration" / (name + ".json"), saved["before", name])
+        release.require(settings(root)[1] == receipt["before"]["paths"] and
+            release.checksum(root / "migration" / "active.json") == receipt["before"]["active"],
+            "migration_storyboard_restore_readback_failed")
+        atomic(path, {**receipt, "status": "restored"})
+    except Exception:
+        atomic(path, {**receipt, "status": "failed"})
+        raise
+    return {"state": "approved_storyboard_owners_restored", "commit": commit, "receipt_sha256": release.checksum(path)}
+
+
+def storyboard_maintenance(root, commit, *, owners=None, paths_sha256=None, active_sha256=None, receipt_sha256=None):
+    release.check_host(root)
+    import fcntl
+    with (root / "release.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if receipt_sha256 is not None:
+            return restore_storyboard_owners_locked(root, commit, receipt_sha256)
+        return storyboard_owners_locked(root, commit, owners, paths_sha256, active_sha256)
+
+
 def main(argv=None):
     import sys
     argv = sys.argv[1:] if argv is None else argv
     try:
-        release.require(len(argv) == 2 and argv[0] == "activate" and release.SHA.fullmatch(argv[1]),
-                        "migration_activate_commit_required")
-        activate(release.ROOT, argv[1])
-        print(json.dumps({"state": "approved_migration_release_healthy", "commit": argv[1]}))
+        if len(argv) == 2 and argv[0] == "activate" and release.SHA.fullmatch(argv[1]):
+            activate(release.ROOT, argv[1])
+            result = {"state": "approved_migration_release_healthy", "commit": argv[1]}
+        elif len(argv) == 5 and argv[0] == "storyboard-owners":
+            result = storyboard_maintenance(release.ROOT, argv[1], owners="" if argv[2] == "-" else argv[2],
+                paths_sha256=argv[3], active_sha256=argv[4])
+        elif len(argv) == 3 and argv[0] == "restore-storyboard-owners":
+            result = storyboard_maintenance(release.ROOT, argv[1], receipt_sha256=argv[2])
+        else:
+            raise release.ReleaseError("migration_maintenance_arguments_invalid")
+        print(json.dumps(result))
         return 0
     except Exception:
         print("Migration maintenance incomplete; preserve state and reconcile the same commit", file=sys.stderr)

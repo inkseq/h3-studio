@@ -1,0 +1,72 @@
+{
+  "backend": "wangp-worker",
+  "budget_accounts": [
+    "demand-job-total-20261004",
+    "demand-job-owner-{owner_id}-20261004"
+  ],
+  "configuration_id": "sixnine-h3-base-int8-fl-20261014",
+  "deployment_profile_id": "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-lowram-v1",
+  "enabled": false,
+  "engine_manifest_digest": "edd56bd3cdfc745fd5b91826ce8dc10bd56b339819803a49f373eaa801096d2a",
+  "envelope": {
+    "allow_audio": true,
+    "allow_first_last": true,
+    "controls": {
+      "audio_decode": [
+        "normal"
+      ],
+      "encoder_device": [
+        "default"
+      ],
+      "sampler_name": [
+        "euler"
+      ],
+      "scheduler": [
+        "auto"
+      ],
+      "video_decode": [
+        "tiled"
+      ]
+    },
+    "input_limits": {
+      "allow_video_audio": false,
+      "guide_kinds": [],
+      "guide_recipe_ids": [],
+      "max_audio_duration_seconds": 5.2,
+      "max_audios": 0,
+      "max_guide_time_seconds": 5,
+      "max_image_pixels": 4194304,
+      "max_images": 0,
+      "max_video_duration_seconds": 2.3333333333333335,
+      "max_video_pixels": 399360,
+      "max_videos": 0
+    },
+    "max_duration_seconds": 5.166666666666667,
+    "max_guides": 0,
+    "max_pixels": 1032192,
+    "max_reference_files": 2,
+    "max_steps": 50
+  },
+  "id": "self-hosted-default",
+  "model_id": "MiniMax-H3-Base-INT8",
+  "output_delivery": "native-frames-v1",
+  "pool": "sixnine-dstack-base-fl-20261014",
+  "qualification": {
+    "evidence_id": "storyboard-base-fl-pending-20261014",
+    "expires_at": 1792410296,
+    "profile": "queued-task-first-v1",
+    "status": "runtime_required",
+    "verified_at": 1791391730
+  },
+  "recipe_ids": [
+    "h3-base-fl2va-v1"
+  ],
+  "reservation": {
+    "cost_microusd": 800000,
+    "expected_runtime_s": 1800,
+    "expires_at": 1792410296,
+    "source_id": "storyboard-base-fl-pending-20261014"
+  },
+  "revision": "storyboard-base-fl-20261014",
+  "dispatch_backend": "hatchet-v1"
+}
