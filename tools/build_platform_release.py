@@ -52,7 +52,7 @@ def build(commit, destination):
 
 def build_migration(commit, platform_directory, destination, selections, *,
         retain_native_sources_directory=None, retain_native_sources_commit=None,
-        retain_native_sources_index_sha256=None):
+        retain_native_sources_index_sha256=None, retain_native_sources_from_git=False):
     """Separate additive artifact; contains public source/config templates only.
 
     The root maintenance helper is included for review, never execution from an
@@ -69,12 +69,19 @@ def build_migration(commit, platform_directory, destination, selections, *,
     from tools.build_dstack_sources import build as build_sources
     retained = (retain_native_sources_directory, retain_native_sources_commit,
         retain_native_sources_index_sha256)
-    retained_bytes = None
+    retained_bytes, source_commits = None, None
     if any(value is not None for value in retained):
         if not all(value is not None for value in retained):
             raise ValueError("Native retention requires an explicit directory, source commit and index digest")
-        from tools.native_source_retention import retain_or_extend
-        retained_bytes, retained_index_digest = retain_or_extend(*retained, selections, root=ROOT)
+        if retain_native_sources_from_git:
+            from tools.native_source_retention import retain_from_git_or_extend
+            retained_bytes, retained_index_digest, source_commits = retain_from_git_or_extend(
+                *retained, selections, root=ROOT, current_commit=commit)
+        else:
+            from tools.native_source_retention import retain_or_extend
+            retained_bytes, retained_index_digest = retain_or_extend(*retained, selections, root=ROOT)
+    elif retain_native_sources_from_git:
+        raise ValueError("Historical native sources require a complete explicit retention binding")
     destination = Path(destination)
     destination.mkdir(parents=False, exist_ok=False)
     image = "sixnine-dispatch:" + commit
@@ -101,7 +108,9 @@ def build_migration(commit, platform_directory, destination, selections, *,
     else:
         with tempfile.TemporaryDirectory(prefix="sixnine-public-migration-sources-") as temporary:
             sources = Path(temporary) / "sources"
-            build_sources(sources, selections)
+            source_index = build_sources(sources, selections)
+            source_commits = {entry["source_sha256"]["wangp-package.tar.gz"]: commit
+                for entry in source_index["sources"]}
             with tarfile.open(destination / "source-set.tar.gz", "w:gz") as archive:
                 for path in sorted(sources.rglob("*")):
                     if path.is_file() and not path.is_symlink():
@@ -119,6 +128,8 @@ def build_migration(commit, platform_directory, destination, selections, *,
         "platform_manifest_sha256": hashlib.sha256(platform.read_bytes()).hexdigest(),
         "dispatch": {"image": image, "image_id": inspected["Id"]},
         "source_index_sha256": index_digest, "files": checksums}
+    if source_commits is not None:
+        document["native_source_commits"] = source_commits
     (destination / "migration-manifest.json").write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
     return document
 
@@ -132,6 +143,7 @@ if __name__ == "__main__":
     parser.add_argument("--retain-native-sources-directory", type=Path)
     parser.add_argument("--retain-native-sources-commit")
     parser.add_argument("--retain-native-sources-index-sha256")
+    parser.add_argument("--retain-native-sources-from-git", action="store_true")
     args = parser.parse_args()
     build(args.commit, args.destination)
     if args.migration_destination is not None:
@@ -139,9 +151,10 @@ if __name__ == "__main__":
             [value.rsplit(":", 1) for value in args.migration_selection or []],
             retain_native_sources_directory=args.retain_native_sources_directory,
             retain_native_sources_commit=args.retain_native_sources_commit,
-            retain_native_sources_index_sha256=args.retain_native_sources_index_sha256)
+            retain_native_sources_index_sha256=args.retain_native_sources_index_sha256,
+            retain_native_sources_from_git=args.retain_native_sources_from_git)
     elif args.migration_selection or any(value is not None for value in (
             args.retain_native_sources_directory, args.retain_native_sources_commit,
-            args.retain_native_sources_index_sha256)):
+            args.retain_native_sources_index_sha256)) or args.retain_native_sources_from_git:
         parser.error("Migration selections and native retention require --migration-destination")
     print("CPU platform bundle created; no deployment or cloud changes performed")

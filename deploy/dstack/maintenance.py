@@ -87,11 +87,18 @@ def manifest(directory, commit, *, platform_manifest_sha256=None):
     release.require({p.name for p in directory.iterdir()} == FILES | {MANIFEST}, "migration_artifact_files_invalid")
     release.regular(directory / MANIFEST, maximum=32768)
     value = json.loads((directory / MANIFEST).read_text(encoding="utf-8"))
-    release.require(type(value) is dict and set(value) == {"version", "commit", "platform_manifest_sha256",
-        "dispatch", "source_index_sha256", "files"} and type(value["version"]) is int and value["version"] == 1 and value["commit"] == commit
+    fields = {"version", "commit", "platform_manifest_sha256", "dispatch", "source_index_sha256", "files"}
+    release.require(type(value) is dict and set(value) in (fields, fields | {"native_source_commits"})
+        and type(value["version"]) is int and value["version"] == 1 and value["commit"] == commit
         and type(value.get("platform_manifest_sha256")) is str and release.DIGEST.fullmatch(value["platform_manifest_sha256"])
         and type(value.get("source_index_sha256")) is str and release.DIGEST.fullmatch(value["source_index_sha256"])
         and type(value["files"]) is dict and set(value["files"]) == FILES, "migration_manifest_invalid")
+    if "native_source_commits" in value:
+        source_commits = value["native_source_commits"]
+        release.require(type(source_commits) is dict and 1 <= len(source_commits) <= 128
+            and all(type(digest) is str and release.DIGEST.fullmatch(digest)
+                and type(source) is str and release.SHA.fullmatch(source)
+                for digest, source in source_commits.items()), "migration_source_commits_invalid")
     if platform_manifest_sha256 is not None:
         release.require(value["platform_manifest_sha256"] == platform_manifest_sha256,
                         "migration_platform_binding_changed")
@@ -142,7 +149,7 @@ def fetch(root, commit, *, api=None):
             staging.rmdir()
 
 
-def extract_sources(archive_path, target, index_digest):
+def extract_sources(archive_path, target, index_digest, *, source_commits=None):
     """Extract only the small public four-file source sets; no tar links/devices."""
     target = Path(target)
     release.require(not target.exists() and not target.is_symlink(), "migration_sources_already_exist")
@@ -163,7 +170,7 @@ def extract_sources(archive_path, target, index_digest):
                 shutil.copyfileobj(archive.extractfile(member), output, 1024 * 1024)
                 output.flush(); os.fsync(output.fileno())
             destination.chmod(0o600)
-    verify_sources(target, index_digest, seen=seen)
+    verify_sources(target, index_digest, seen=seen, source_commits=source_commits)
     if os.name == "posix":
         for path in (target, *target.rglob("*")):
             os.chown(path, 10001, 10001)
@@ -172,7 +179,7 @@ def extract_sources(archive_path, target, index_digest):
     release.sync_directory(target)
 
 
-def verify_sources(target, index_digest, *, seen=None):
+def verify_sources(target, index_digest, *, seen=None, source_commits=None):
     target = Path(target)
     release.require(target.is_dir() and not target.is_symlink(), "migration_source_directory_invalid")
     actual = set()
@@ -204,6 +211,11 @@ def verify_sources(target, index_digest, *, seen=None):
                 and release.checksum(target / relative) == digest, "migration_source_set_changed")
             expected.add(relative)
     release.require(seen == expected, "migration_source_set_extra_files")
+    if source_commits is not None:
+        packages = {item["source_sha256"]["wangp-package.tar.gz"] for item in index["sources"]}
+        release.require(type(source_commits) is dict and set(source_commits) == packages
+            and all(type(source) is str and release.SHA.fullmatch(source) for source in source_commits.values()),
+            "migration_source_commits_changed")
 
 
 def prepare(root, commit, platform_directory):
@@ -217,7 +229,7 @@ def prepare(root, commit, platform_directory):
         protected_directory(target)
         release.require(manifest(target / "artifact", commit) == value, "migration_existing_release_differs")
         approved(root, target / "artifact", commit)
-        verify_sources(target / "sources", value["source_index_sha256"])
+        verify_sources(target / "sources", value["source_index_sha256"], source_commits=value.get("native_source_commits"))
         expected_overlay = (target / "artifact" / "platform-overlay.yaml").read_text().replace(
             "source: ../hatchet/entrypoint.sh", "source: " + json.dumps(str(target / "artifact" / "hatchet-entrypoint.sh")))
         release.regular(target / "overlay.yaml", root_owned=True, maximum=1024**2)
@@ -241,7 +253,8 @@ def prepare(root, commit, platform_directory):
             (artifact / name).chmod(0o600)
         release.require(manifest(artifact, commit) == value, "migration_copied_release_differs")
         approved(root, artifact, commit)
-        extract_sources(artifact / "source-set.tar.gz", staging / "sources", value["source_index_sha256"])
+        extract_sources(artifact / "source-set.tar.gz", staging / "sources", value["source_index_sha256"],
+            source_commits=value.get("native_source_commits"))
         overlay = (artifact / "platform-overlay.yaml").read_text()
         needle = "source: ../hatchet/entrypoint.sh"
         release.require(overlay.count(needle) == 1, "migration_entrypoint_binding_invalid")
@@ -636,7 +649,7 @@ def _storyboard_context(root, commit, config):
     migration = manifest(directory / "artifact", commit,
         platform_manifest_sha256=release.checksum(base / "release-manifest.json"))
     approved(root, directory / "artifact", commit)
-    verify_sources(directory / "sources", migration["source_index_sha256"])
+    verify_sources(directory / "sources", migration["source_index_sha256"], source_commits=migration.get("native_source_commits"))
     overlay = directory / "overlay.yaml"
     release.regular(overlay, root_owned=True, maximum=1024**2)
     expected_overlay = (directory / "artifact" / "platform-overlay.yaml").read_text().replace(

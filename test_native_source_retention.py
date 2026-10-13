@@ -5,6 +5,7 @@ import io
 import json
 from pathlib import Path
 import shutil
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -17,6 +18,7 @@ ROOT = Path(__file__).resolve().parent
 OLD, NEW, INDEX = "a" * 40, "b" * 40, "c" * 64
 PROFILE = "h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3"
 BASE = "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-lowram-v1"
+V4 = "h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-cgroups-v4"
 SELECTIONS = [(PROFILE, "fl"), (PROFILE, "ref")]
 INPUTS = dict(zip(retention.INPUTS, ("42", OLD, INDEX)))
 
@@ -229,6 +231,149 @@ class NativeBytes(unittest.TestCase):
         self.assertEqual(manifest['source_index_sha256'],hashlib.sha256(raw).hexdigest())
         self.assertNotEqual(manifest['source_index_sha256'],self.index_sha)
         self.assertEqual(len(json.loads(raw)['sources']),3)
+
+    def git_fixture(self):
+        # A real local object database exercises pinned blob reads without
+        # network, checking out history or importing its package tool.
+        self.sources = self.temp / 'git-sources'
+        self.original = SELECTIONS + [(BASE, 'fl')]
+        from deploy.wangp import package_tool
+        new_member = 'deploy/wangp/profiles/'+V4+'.json'
+        with patch.object(package_tool,'PRIVATE_FILES',tuple(name for name in PRIVATE_FILES if name!=new_member)):
+            build_dstack_sources.build(self.sources, self.original)
+        self.index_sha = hashlib.sha256((self.sources/'index.json').read_bytes()).hexdigest()
+        target = self.root/'deploy/wangp/package_tool.py'
+        current_tool = (ROOT/'deploy/wangp/package_tool.py').read_bytes()
+        target.write_bytes(current_tool.replace(('    "'+new_member+'",').encode(),b''))
+        def git(*args):
+            return subprocess.check_output(['git','-C',str(self.root),*args],stderr=subprocess.DEVNULL).decode().strip()
+        self.git = git
+        git('init','-q')
+        git('config','core.autocrlf','false')
+        git('config','user.email','offline@example.test'); git('config','user.name','Offline fixture')
+        git('add','.'); git('commit','-qm','Original exact native sources')
+        self.old_commit = git('rev-parse','HEAD')
+        self.repackage()
+        manifest = json.loads((self.artifact/'migration-manifest.json').read_text())
+        manifest['commit'] = self.old_commit
+        (self.artifact/'migration-manifest.json').write_text(json.dumps(manifest))
+        source = self.root/'studio_platform/runtime_hosts/wangp_session.py'
+        source.write_bytes(source.read_bytes()+b'\n# New immutable profile source fixture\n')
+        target.write_bytes(current_tool)
+        git('add','.'); git('commit','-qm','Fresh native source')
+        self.new_commit = git('rev-parse','HEAD')
+
+    def git_extended(self, **changes):
+        from deploy.wangp import package_tool
+        values = dict(directory=self.artifact,commit=self.old_commit,index_sha256=self.index_sha,
+            selections=self.original+[(V4,'fl'),(V4,'ref')],root=self.root,current_commit=self.new_commit)
+        values.update(changes)
+        with patch.object(package_tool,'ROOT',self.root), \
+                patch.object(tarfile.TarFile,'extractall',side_effect=AssertionError('No history extraction')):
+            return retention.retain_from_git_or_extend(**values)
+
+    def test_git_retention_preserves_v3_base_and_appends_fresh_v4_with_durable_origins(self):
+        self.git_fixture()
+        raw,index,origins = self.git_extended()
+        def files(value):
+            with tarfile.open(fileobj=io.BytesIO(value),mode='r:gz') as archive:
+                return {member.name:archive.extractfile(member).read() for member in archive}
+        before,after = files(self.raw),files(raw)
+        old_index,new_index = json.loads(before['index.json']),json.loads(after['index.json'])
+        self.assertEqual(new_index['sources'][:3],old_index['sources'])
+        for name,value in before.items():
+            if name!='index.json': self.assertEqual(after[name],value,name)
+        self.assertEqual(index,hashlib.sha256(after['index.json']).hexdigest())
+        old_digest = old_index['sources'][0]['source_sha256']['wangp-package.tar.gz']
+        new_digest = new_index['sources'][3]['source_sha256']['wangp-package.tar.gz']
+        self.assertNotEqual(old_digest,new_digest)
+        self.assertEqual(origins,{old_digest:self.old_commit,new_digest:self.new_commit})
+        self.assertEqual(new_index['sources'][4]['source_sha256']['wangp-package.tar.gz'],new_digest)
+        # The next CPU preparation can retain the mixed set without rewriting
+        # either native generation, even though its manifest commit is newer.
+        later = self.temp/'mixed'; later.mkdir()
+        (later/'source-set.tar.gz').write_bytes(raw)
+        (later/'migration-manifest.json').write_text(json.dumps({'version':1,'commit':self.new_commit,
+            'source_index_sha256':index,'files':{'source-set.tar.gz':hashlib.sha256(raw).hexdigest()},
+            'native_source_commits':origins}))
+        again = self.git_extended(directory=later,commit=self.new_commit,index_sha256=index)
+        self.assertEqual(again,(raw,index,origins))
+
+    def test_git_retention_requires_exact_blob_origin_and_complete_valid_map(self):
+        self.git_fixture()
+        with self.assertRaisesRegex(ValueError,'source_commit_bytes_changed|archive_member_invalid'):
+            self.git_extended(current_commit=self.old_commit)
+        with self.assertRaisesRegex(ValueError,'source_commit_unavailable'):
+            self.git_extended(current_commit='d'*40)
+        path = self.artifact/'migration-manifest.json'
+        original = json.loads(path.read_text())
+        package = json.loads((self.sources/'index.json').read_text())['sources'][0]['source_sha256']['wangp-package.tar.gz']
+        for origins in ({}, {package:self.new_commit}, {package:self.old_commit,'f'*64:self.old_commit},
+                {package:'not-a-commit'}, []):
+            path.write_text(json.dumps(dict(original,native_source_commits=origins)))
+            with self.subTest(origins=origins),self.assertRaises(ValueError): self.git_extended()
+        path.write_text(json.dumps(original))
+        # AST literal reading cannot execute a historical package-tool import.
+        tool = self.root/'deploy/wangp/package_tool.py'
+        tool.write_text("raise AssertionError('Historical source must never execute')\nPRIVATE_FILES = ('comfy_workflow.py',)\n")
+        self.git('add','.');self.git('commit','-qm','Untrusted historical member declaration')
+        changed = self.git('rev-parse','HEAD')
+        path.write_text(json.dumps(dict(original,native_source_commits={package:changed})))
+        with self.assertRaisesRegex(ValueError,'archive_member_invalid'):
+            self.git_extended()
+
+    def test_git_retention_refuses_links_nonliteral_members_and_selection_replacement(self):
+        self.git_fixture()
+        for selections in (list(reversed(self.original))+[(V4,'fl')], self.original[:2]+[(V4,'fl')]):
+            with self.subTest(selections=selections),self.assertRaisesRegex(ValueError,'additive_selection_required'):
+                self.git_extended(selections=selections)
+        tool = self.root/'deploy/wangp/package_tool.py'
+        original = tool.read_bytes()
+        for text in ("PRIVATE_FILES = tuple(['comfy_workflow.py'])\n", "PRIVATE_FILES = ('../escape',)\n",
+                "PRIVATE_FILES = ('comfy_workflow.py','comfy_workflow.py')\n"):
+            tool.write_text(text);self.git('add','.');self.git('commit','-qm','Invalid historical member declaration')
+            with self.subTest(text=text),self.assertRaisesRegex(ValueError,'source_members_invalid'):
+                retention._git_sources(self.root,self.git('rev-parse','HEAD'))
+        tool.write_bytes(original);self.git('add','.');self.git('commit','-qm','Restore tool')
+        # A Git symlink is rejected by tree mode before any file read.
+        result = subprocess.run(['git','-C',str(self.root),'hash-object','-w','--stdin'],
+            input=b'outside-target',stdout=subprocess.PIPE,check=True)
+        self.git('update-index','--add','--cacheinfo','120000,'+result.stdout.decode().strip()+',comfy_workflow.py')
+        self.git('commit','-qm','Symlink source')
+        with self.assertRaisesRegex(ValueError,'source_file_invalid'):
+            retention._git_sources(self.root,self.git('rev-parse','HEAD'))
+
+    def test_git_source_mode_manifest_and_workflow_are_explicit(self):
+        self.git_fixture()
+        platform=self.temp/'git-platform';platform.mkdir()
+        (platform/'release-manifest.json').write_text(json.dumps({'commit':self.new_commit}))
+        inspected=[{'Id':'sha256:'+'d'*64,'Architecture':'amd64','Os':'linux','Config':{
+            'Labels':{'org.opencontainers.image.revision':self.new_commit}}}]
+        process=Mock();process.__enter__=Mock(return_value=process);process.__exit__=Mock(return_value=False)
+        process.stdout=io.BytesIO(b'SYNTHETIC_CPU_IMAGE');process.wait.return_value=0
+        original_popen = subprocess.Popen
+        def popen(command, **kwargs):
+            return process if command[0] == 'docker' else original_popen(command, **kwargs)
+        from deploy.wangp import package_tool
+        with patch.object(package_tool,'ROOT',self.root),patch.object(build_platform_release,'ROOT',self.root), \
+                patch.object(build_platform_release.subprocess,'check_output',return_value=json.dumps(inspected).encode()), \
+                patch.object(build_platform_release.subprocess,'Popen',side_effect=popen), \
+                patch.object(build_platform_release.shutil,'copyfile'):
+            # Config templates are separate public artifact members.
+            # subprocess.check_output is patched for Docker only; the Git blob
+            # reader deliberately uses run(), so pinned object proof stays real.
+            destination=self.temp/'git-release'
+            def copy(source,target): Path(target).write_bytes(b'public config template')
+            with patch.object(build_platform_release.shutil,'copyfile',side_effect=copy):
+                manifest=build_platform_release.build_migration(self.new_commit,platform,destination,
+                    self.original+[(V4,'fl'),(V4,'ref')],retain_native_sources_directory=self.artifact,
+                    retain_native_sources_commit=self.old_commit,retain_native_sources_index_sha256=self.index_sha,
+                    retain_native_sources_from_git=True)
+        self.assertEqual(set(manifest['native_source_commits'].values()),{self.old_commit,self.new_commit})
+        workflow=(ROOT/'.github/workflows/ci.yml').read_text().split('\n  containers:\n',1)[1].split('\n  test:\n',1)[0]
+        self.assertIn('fetch-depth: 0',workflow)
+        self.assertIn('--retain-native-sources-from-git',workflow)
+        for mode in ('fl','ref'): self.assertIn(V4+':'+mode,workflow)
 
 
 if __name__ == "__main__":

@@ -272,6 +272,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          # Historical public blobs are read only after exact prior artifact/run
+          # validation; no historical source is imported or executed.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -375,13 +378,16 @@ jobs:
           retained_args=()
           if [ -n "$RETAIN_RUN" ]; then
             retained_args=(--retain-native-sources-directory retained-migration \
-              --retain-native-sources-commit "$RETAIN_COMMIT" --retain-native-sources-index-sha256 "$RETAIN_INDEX")
+              --retain-native-sources-commit "$RETAIN_COMMIT" --retain-native-sources-index-sha256 "$RETAIN_INDEX" \
+              --retain-native-sources-from-git)
           fi
           python tools/build_platform_release.py "$GITHUB_SHA" platform-release \
             --migration-destination migration-release \
             --migration-selection h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3:fl \
             --migration-selection h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3:ref \
-            --migration-selection h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-lowram-v1:fl "${retained_args[@]}"
+            --migration-selection h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-lowram-v1:fl \
+            --migration-selection h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-cgroups-v4:fl \
+            --migration-selection h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-cgroups-v4:ref "${retained_args[@]}"
           python tools/check_platform_bundle.py "$GITHUB_SHA" platform-release
       - uses: actions/upload-artifact@v4
         if: needs.changes.outputs.action == 'prepare-platform' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
