@@ -92,14 +92,15 @@ class CandidateTests(LedgerCase):
         self.assertEqual(rows[0]["selection"]["gpu_count"], 2)
 
     def test_29gib_discovery_does_not_requalify_historical_96gib_binding(self):
-        self.qualify()  # Existing 96 GiB deployment remains bound to its identity.
+        historical = self.qualify()  # Existing 96 GiB deployment remains bound to its identity.
         self.registry = OperatorRegistry(list(self.registry.bindings.values()), catalog=public_catalog,
                                          qualified_providers=('lium', 'targon'))
         self.publish('lium', [offer('smaller', ram_gib=35)])
         result = self.project()
-        self.assertEqual(len(result['candidates']), 2)
+        self.assertEqual(len(result['candidates']), 3)
         self.assertEqual({row['selection']['runtime_profile_id'] for row in result['candidates']},
-                         {PROFILE_IDS[4], PROFILE_IDS[5]})
+                         {PROFILE_IDS[4], PROFILE_IDS[5], PROFILE_IDS[6]})
+        self.assertEqual(self.registry.bindings[historical.binding_id], historical)
         for candidate in result['candidates']:
             with self.subTest(profile=candidate['selection']['runtime_profile_id']):
                 self.assertFalse(candidate['deployment_qualified'])
@@ -111,6 +112,7 @@ class CandidateTests(LedgerCase):
         self.assertEqual(floors[PROFILE_IDS[0]], 96)
         self.assertEqual(floors[PROFILE_IDS[4]], 29)
         self.assertEqual(floors[PROFILE_IDS[5]], 29)
+        self.assertEqual(floors[PROFILE_IDS[6]], 29)
         self.assertTrue(any(row['runtime_profile_id'] == PROFILE_IDS[0] and
                             'inventory_ram_below_minimum' in row['blockers'] for row in result['excluded']))
         self.assertEqual(self.repo.list_instance_intents(), [])

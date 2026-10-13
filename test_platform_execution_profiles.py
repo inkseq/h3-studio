@@ -14,7 +14,7 @@ from studio_platform.control import WorkerControl, WorkerSpec
 from studio_platform.execution_policy import ExecutionPolicies
 from studio_platform.execution_profiles import read_profiles
 from studio_platform.repository import Repository, Scope
-from studio_platform.runtime_catalog import get_profile, engine_manifest
+from studio_platform.runtime_catalog import PROFILE_IDS, get_profile, engine_manifest
 from studio_platform.qualification_profiles import MULTIMODAL_INPUT_LIMITS, QUEUED_TASK_PROFILE
 from studio_platform.settings import Settings
 from test_platform_api import generation_request
@@ -268,7 +268,7 @@ class ExecutionProfileTests(unittest.TestCase):
             self.assertEqual(client.post('/v1/operator/capacity/previews',json={},
                 headers={'Origin':'https://unrelated.invalid'}).status_code,403)
             catalog=client.get('/v1/operator/capacity/catalog').json()
-            self.assertEqual(len(catalog['profiles']),6)
+            self.assertEqual([profile['id'] for profile in catalog['profiles']], list(PROFILE_IDS))
             self.assertTrue(all('runtime' not in profile for profile in catalog['profiles']))
 
     def test_quick_chat_selection_survives_turn_projection_revision_and_preflight(self):
