@@ -477,6 +477,38 @@ def _resources(value):
         "gpu_count": _range(gpu.get("count")), "gpu_memory": _range(gpu.get("memory"))}
 
 
+def terminal_no_allocation(run, binding):
+    """Pinned no-capacity failure, not missing-identity or billing evidence.
+
+    A task has one job and retry is disabled. Require its complete original
+    submission as well as explicit null allocation/runtime fields. Historical
+    allocation, omitted fields or another submission cannot use this exemption.
+    Call only after the exact owned run/spec has been validated.
+    """
+    if (run.get("status") != "failed" or run.get("termination_reason") != "job_failed"
+            or any(binding.get(key) is not None for key in (
+                "provider_instance_id", "runtime_incarnation", "first_runtime_ready_at"))
+            or any(binding.get(key) not in (None, False) for key in (
+                "bootstrap_started", "bootstrap_launch_started", "runtime_launch_started"))):
+        return False
+    jobs = run.get("jobs")
+    if not isinstance(jobs, list) or len(jobs) != 1 or not isinstance(jobs[0], dict):
+        return False
+    submissions = jobs[0].get("job_submissions")
+    latest = run.get("latest_job_submission")
+    if (not isinstance(submissions, list) or len(submissions) != 1
+            or not isinstance(latest, dict) or latest != submissions[0]):
+        return False
+    try:
+        _uuid(latest.get("id"))
+    except DstackError:
+        return False
+    return (latest.get("status") == "failed"
+        and latest.get("termination_reason") == "failed_to_start_due_to_no_capacity"
+        and all(key in latest and latest[key] is None for key in (
+            "job_provisioning_data", "job_runtime_data")))
+
+
 def live_capacity_usage(client, nodes, *, provider_inventory=None, clock=time.time,
                         fresh_seconds=30):
     """Read current owned dstack capacity without settling historical invoices.
@@ -554,6 +586,11 @@ def live_capacity_usage(client, nodes, *, provider_inventory=None, clock=time.ti
                     "dstack_run_status_invalid")
                 status = observed_status
                 reason = "dstack_capacity_active"
+                if terminal_no_allocation(run, binding):
+                    included, reason = False, "dstack_terminal_no_allocation"
+                    projections.append((intent_id, cost, resource_key, physical_gpus,
+                        included, reason, status, binding.get("backend")))
+                    continue
                 provisioning = (run.get("latest_job_submission") or {}).get("job_provisioning_data") or {}
                 identity = provisioning.get("instance_id")
                 backend = binding.get("backend")
@@ -672,6 +709,8 @@ class DstackCapacity:
             value["estimated_cost_microusd"] = round(cost * 1_000_000)
         if status in TERMINAL:
             value.update(state="stopped", reason_code="dstack_run_terminal_billing_pending")
+            if terminal_no_allocation(run, binding):
+                value["reason_code"] = "dstack_no_capacity_billing_pending"
             value["preparation"]["phase"] = "stopped"
             return value
         if status in {"terminating", "stopping"}:

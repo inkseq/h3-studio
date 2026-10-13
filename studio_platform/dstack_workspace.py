@@ -483,7 +483,10 @@ class CapacityLoss(OperatorError):
 
 def _phase(node, value):
     binding = node["payload"].get("dstack", {})
-    if node["runtime_state"] == "stopped":
+    if (node["runtime_state"] == "stopped" or (
+            binding.get("state") == "stopped" and binding.get("dstack_status") == "failed"
+            and binding.get("reason_code") == "dstack_no_capacity_billing_pending"
+            and binding.get("provider_instance_id") is None)):
         return "stopped"
     if node["desired_state"] == "stopped" or node["runtime_state"] in {"draining", "stopping"}:
         return "stopping"

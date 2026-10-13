@@ -767,6 +767,10 @@ class DstackOperator:
                     and intent["provider_instance_id"] is not None
                     and original.get("provider_instance_id") == intent["provider_instance_id"]):
                 excluded.add(intent["id"])
+            elif (observation["reason_code"] == "dstack_terminal_no_allocation"
+                    and intent["provider_instance_id"] is None
+                    and original.get("provider_instance_id") is None):
+                excluded.add(intent["id"])
             elif (observation["reason_code"] == "dstack_never_applied"
                     and intent["state"] == "destroyed"):
                 excluded.add(intent["id"])

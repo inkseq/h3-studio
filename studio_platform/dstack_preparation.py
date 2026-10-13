@@ -17,7 +17,8 @@ MODEL_STATES = {"not_loaded", "loading", "loaded", "not_observed"}
 DIAGNOSTICS = NATIVE_REASON_CODES | BOOT_FAILURE_CODES | {
     "UnclassifiedBootstrapFailure", "dstack_native_observation_failed", "dstack_response_invalid",
     "dstack_runtime_not_observed", "dstack_apply_requires_reconciliation", "dstack_exact_run_absent",
-    "dstack_stop_pending", "dstack_run_terminal_billing_pending", "dstack_business_obligations_pending",
+    "dstack_stop_pending", "dstack_run_terminal_billing_pending", "dstack_no_capacity_billing_pending",
+    "dstack_business_obligations_pending",
     "dstack_stop_requires_reconciliation", "dstack_runtime_busy", "dstack_runtime_ready",
     "dstack_api_rejected", "dstack_api_unavailable", "dstack_response_limit",
     "dstack_backend_binding_mismatch", "dstack_run_binding_mismatch", "dstack_run_ownership_mismatch",
@@ -25,6 +26,7 @@ DIAGNOSTICS = NATIVE_REASON_CODES | BOOT_FAILURE_CODES | {
     "dstack_runtime_ready_model_load_unobserved", "matching_worker_unavailable",
     "worker_heartbeat_expired", "worker_window_expired", "dstack_broker_unavailable"}
 REASONS = {
+    "dstack_no_capacity_billing_pending": "没有满足当前条件的可用机器；未分配实例，账单待核对",
     "model_download_timeout": "权重下载超时",
     "model_download_failed": "权重下载失败",
     "ModelDownloadFailed": "权重下载失败",
