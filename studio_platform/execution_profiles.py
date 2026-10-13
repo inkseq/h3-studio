@@ -82,7 +82,8 @@ def public_profiles(settings):
     now = time.time()
     for profile in profiles:
         modes = {}
-        for mode, recipe in (("fl", "h3-base-fl2va-v1"), ("ref", "h3-base-ref2va-v1")):
+        for model in profile["models"]:
+            mode, recipe = model["mode"], model["generation_recipe_id"]
             policy = policies.get((profile["id"], recipe))
             constraints = copy.deepcopy(policy['envelope']) if policy else tested_envelope(profile['id'],mode)
             limits = supported_limits(mode)

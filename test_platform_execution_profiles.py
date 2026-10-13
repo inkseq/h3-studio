@@ -58,6 +58,18 @@ class ExecutionProfileTests(unittest.TestCase):
     def write(self):
         self.path.write_text(json.dumps({"schema_version": 1, "policies": self.values}), encoding="utf-8")
 
+    def test_single_gpu_base_candidate_exposes_fl_only_in_live_capability_projection(self):
+        from studio_platform.execution_profiles import public_profiles
+        catalog = public_profiles(self.settings)
+        base = next(profile for profile in catalog if profile['id'] == PROFILE_IDS[7])
+        self.assertEqual({model['mode'] for model in base['models']}, {'fl'})
+        self.assertEqual(set(base['generation_support']), {'fl'})
+        self.assertFalse(base['generation_support']['fl']['enabled'])
+        self.assertFalse(base['generation_support']['fl']['configured'])
+        self.assertEqual(base['generation_support']['fl']['controls']['steps']['maximum'], 100)
+        for profile in catalog[:7]:
+            self.assertEqual(set(profile['generation_support']), {'fl', 'ref'})
+
     def test_explicit_default_seeds_only_new_sessions_with_exact_profile_controls(self):
         from studio_platform.quick_chat import default_next_settings, settings_check
         from studio_platform.inference.wangp_profile_compiler import control_schema

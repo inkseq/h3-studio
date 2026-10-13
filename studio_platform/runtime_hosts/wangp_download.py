@@ -50,6 +50,9 @@ _LOCATOR_PROFILES = {
         "fl": "a92ae3dddb83ab73e4ac292aa7b33f9ea158ac638523d0b0c1e2e771cb0e7517",
         "ref": "a096e69c6b91d6b7200d414e72db870c0198ea02ebcc7ea16bf787091f66d84c",
     },
+    "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2": {
+        "fl": "a50aff06326dcb51dcd74bef968fb452a2d2804e07489d032a460bac4a11dc2d",
+    },
 }
 _LOCATOR_TRANSFORMERS = {
     "fl": "MiniMax-H3-FL2VA-pruned_rank8_int8_convrot.safetensors",
@@ -74,6 +77,21 @@ _LOCATOR_FILES = (
      "37dddc2f3e6d5d5139d823d5ea283bbf304dadcb885b1ccda818aa13dade5ea2"),
     ("minimax_h3/minimax_h3_latent_upscaler_3d_bf16.safetensors", 690592992, "sha256",
      "4f57821f5837f32f7142b67d815606dbd7550f194e5c769f7d6c3f83b146a5e6"),
+)
+# New Base FL binding only; old Base manifests keep their original transport.
+# All ten files' size and hash match official immutable metadata at
+# _LOCATOR_REVISION. Metadata response SHA256 (not payload/inference proof):
+# a6c7e67b7e19a1ebcbd7a7bd84ae8c4eb92cd2cd14a5dacd872cc8eb56ee4316
+_BASE_FL_LOCATOR_FILES = (
+    ("MiniMax-H3-FL2VA_int8_convrot.safetensors", 34038903007, "sha256",
+     "83a36b67776962f44087f2f7c12d95791393f3cce1ef898efc90405216e7b0c0"),
+    ("Qwen3-VL-32B-Instruct/Qwen3-VL-32B-Instruct-layer50_bf16.safetensors", 51506305568, "sha256",
+     "a91ca0cc41bead2e62d8fc044a3ffdbd9487daa7c8997f697049990c7178e0a6"),
+    ("MiniMax-H3-video_vae_fp16.safetensors", 5207806512, "sha256",
+     "455010492bb59a9cc7b8f1ee23905b22a10079f89490adbf820a1728efcaea6b"),
+    *tuple(row for row in _LOCATOR_FILES if row[2] == "git_blob_sha1"
+           or row[0] in {"MiniMax-H3-audio_vae_fp32.safetensors",
+                         "minimax_h3/minimax_h3_latent_upscaler_3d_bf16.safetensors"}),
 )
 SAFE_ERRORS = frozenset({"model_download_manifest_invalid", "model_download_manifest_changed",
     "model_download_locator_invalid",
@@ -180,8 +198,12 @@ def _content_preserving_revision(document, expected_digest, records):
         for item in component["files"]:
             kind = "sha256" if "sha256" in item else "git_blob_sha1"
             files.append((item["path"], item["size_bytes"], kind, item[kind]))
-    omitted = _LOCATOR_TRANSFORMERS["ref" if mode == "fl" else "fl"]
-    if sorted(files) != sorted(row for row in _LOCATOR_FILES if row[0] != omitted):
+    if document.get("deployment_profile_id") == "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2":
+        expected_files = _BASE_FL_LOCATOR_FILES
+    else:
+        omitted = _LOCATOR_TRANSFORMERS["ref" if mode == "fl" else "fl"]
+        expected_files = tuple(row for row in _LOCATOR_FILES if row[0] != omitted)
+    if sorted(files) != sorted(expected_files):
         raise ValueError("model_download_locator_invalid")
     return _LOCATOR_REVISION
 

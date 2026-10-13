@@ -70,6 +70,16 @@ class CandidateProfileTests(unittest.TestCase):
             device(PROFILE, 'NVIDIA RTX PRO 6000 Blackwell Server Edition', 96)
         with self.assertRaises(LockReached):
             device(PROFILE_IDS[0], 'NVIDIA GeForce RTX 5090', 32)
+        for edition in ('Server', 'Workstation'):
+            with self.subTest(edition=edition), self.assertRaises(LockReached):
+                device(PROFILE_IDS[7], 'NVIDIA RTX PRO 6000 Blackwell '+edition+' Edition', 96)
+        for name,size,capability in (
+                ('NVIDIA GeForce RTX 5090', 32, (12, 0)),
+                ('NVIDIA RTX PRO 6000 Blackwell Server Edition', 96, (12, 1)),
+                ('NVIDIA RTX PRO 6000 Blackwell Server Edition', (90*GIB-1)/GIB, (12, 0)),
+                ('NVIDIA RTX PRO 6000 Blackwell Server Edition', (100*GIB+1)/GIB, (12, 0))):
+            with self.subTest(name=name,size=size,capability=capability), self.assertRaisesRegex(ValueError,'gpu_mismatch'):
+                device(PROFILE_IDS[7],name,size,capability)
         for profile,name,size in ((PROFILE,'NVIDIA GeForce RTX 5090',32),
                 (PROFILE_IDS[0],'NVIDIA RTX PRO 6000 Blackwell Server Edition',96),
                 (PROFILE,'NVIDIA RTX PRO 6000 Blackwell Server Edition',48)):
@@ -102,6 +112,29 @@ class VMMemoryTests(unittest.TestCase):
         self.group(self.groups,limit=29*GIB,used=5*GIB,cache=2*GIB,dirty=GIB)
         self.assertEqual(session._effective_total_profile_ram(self.proc,self.groups),29*GIB)
         self.assertEqual(session._available_profile_ram(self.proc,self.groups),25*GIB)
+
+    def test_new_base_dual_gate_observes_tighter_v2_child_headroom_without_changing_old_metric(self):
+        (self.proc/'meminfo').write_text('MemTotal: '+str(512*GIB//1024)+' kB\n'
+            'MemAvailable: '+str(400*GIB//1024)+' kB\n')
+        self.group(self.groups, limit=256*GIB, used=GIB)
+        child = self.groups/'runtime'
+        self.group(child, limit=144*GIB, used=17*GIB)
+        (self.proc/'self/cgroup').write_text('0::/runtime\n')
+        self.assertEqual(session._available_profile_ram(self.proc, self.groups), 255*GIB)
+        self.assertEqual(session._available_profile_ram(self.proc, self.groups, resolve_membership=True), 127*GIB)
+        total, available = session._effective_total_profile_ram, session._available_profile_ram
+        with patch.object(session, '_effective_total_profile_ram', side_effect=lambda: total(self.proc,self.groups)), \
+                patch.object(session, '_available_profile_ram', side_effect=lambda **kw: available(self.proc,self.groups,**kw)), \
+                redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(ValueError, 'memory_headroom_insufficient'):
+                session._profile_memory_admission(NS(cuda=NS(mem_get_info=lambda _:(90*GIB,96*GIB))),get_profile(PROFILE_IDS[7]))
+            self.group(child, limit=144*GIB, used=16*GIB)
+            session._profile_memory_admission(NS(cuda=NS(mem_get_info=lambda _:(90*GIB,96*GIB))),get_profile(PROFILE_IDS[7]))
+        for filename in ('memory.max', 'memory.current', 'memory.stat'):
+            path = child/filename; original = path.read_text(); path.unlink()
+            with self.subTest(missing=filename), self.assertRaises((ValueError, OSError)):
+                session._available_profile_ram(self.proc,self.groups,resolve_membership=True)
+            path.write_text(original)
 
     def test_total_capacity_respects_host_total_and_tighter_ancestor(self):
         (self.proc/'self/cgroup').write_text('0::/system.slice/wangp.service\n')

@@ -374,6 +374,8 @@ class NativeBytes(unittest.TestCase):
         self.assertIn('fetch-depth: 0',workflow)
         self.assertIn('--retain-native-sources-from-git',workflow)
         for mode in ('fl','ref'): self.assertIn(V4+':'+mode,workflow)
+        self.assertIn('h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2:fl',workflow)
+        self.assertNotIn('h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2:ref',workflow)
 
 
 if __name__ == "__main__":

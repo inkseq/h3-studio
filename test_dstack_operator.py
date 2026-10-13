@@ -192,6 +192,28 @@ class DstackOperatorTests(LedgerCase):
         self.assertEqual(self.client.applied, [])
         self.assertEqual(self.counts(), (0, 0, 0, 0))
 
+    def test_base_single_gpu_fl_candidate_binds_144gib_floor_without_rental(self):
+        from studio_platform.runtime_catalog import PROFILE_IDS, engine_manifest
+        candidate = PROFILE_IDS[7]
+        config = copy.deepcopy(self.config)
+        profile = config['profiles'][0]
+        profile.update(runtime_profile_id=candidate, memory_gib=144, disk_gib=350,
+                       gpu_memory_gib=90, gpu_names=['RTXPRO6000S', 'RTXPRO6000WS'],
+                       max_price_microusd=2000000, configuration_id='new-base-single-fl')
+        service = DstackOperator(self.repo, self.settings, self.capacity, config)
+        request = service._capacity_request(service.profiles['5090-fl'], str(uuid.uuid4()), 1., 121., 120)
+        self.assertEqual((request.memory_gib, request.gpu_count, request.disk_gib,
+                          request.max_price_microusd), (144, 1, 350, 2000000))
+        self.assertEqual(request.manifest_digest, engine_manifest(candidate, 'fl').digest)
+        for field, value in (('memory_gib', 143), ('disk_gib', 349), ('gpu_memory_gib', 89),
+                             ('mode', 'ref'), ('gpu_names', ['RTXPRO6000Max-Q'])):
+            bad = copy.deepcopy(config)
+            bad['profiles'][0][field] = value
+            with self.subTest(field=field), self.assertRaises((OperatorError, ValueError)):
+                DstackOperator(self.repo, self.settings, self.capacity, bad)
+        self.assertEqual(self.client.applied, [])
+        self.assertEqual(self.counts(), (0, 0, 0, 0))
+
     def test_base_fl_examples_bind_only_qualified_scheduler_aliases_and_original_floors(self):
         from studio_platform.dstack_operator import plan_offers
         from studio_platform.execution_policy import validate_policy

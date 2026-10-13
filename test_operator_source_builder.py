@@ -20,7 +20,10 @@ EXPECTED_PROFILE_GPU_COUNTS = {
     'h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-v2': 1,
     'h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3': 1,
     'h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-cgroups-v4': 1,
+    'h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2': 1,
 }
+EXPECTED_PROFILE_MODES = {profile: ('fl', 'ref') for profile in EXPECTED_PROFILE_GPU_COUNTS}
+EXPECTED_PROFILE_MODES['h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2'] = ('fl',)
 
 
 class OperatorSourceBuilderTests(unittest.TestCase):
@@ -32,7 +35,7 @@ class OperatorSourceBuilderTests(unittest.TestCase):
             # subprocess, or GPU probe even when creating the full matrix.
             with patch('subprocess.run', side_effect=AssertionError('no subprocess')):
                 receipt = subject.build(output)
-            self.assertEqual(len(receipt['sources']), 18)
+            self.assertEqual(len(receipt['sources']), 19)
             self.assertFalse(receipt['production_adapter_verified'])
             self.assertEqual(json.loads((output/'index.json').read_text()), receipt)
             seen, archives, slots = set(), set(), {}
@@ -78,11 +81,11 @@ class OperatorSourceBuilderTests(unittest.TestCase):
             self.assertEqual(seen, {
                 (profile_id, mode, index)
                 for profile_id, count in EXPECTED_PROFILE_GPU_COUNTS.items()
-                for mode in ('fl', 'ref') for index in range(count)
+                for mode in EXPECTED_PROFILE_MODES[profile_id] for index in range(count)
             })
             self.assertEqual(len(archives), 1)
             for profile_id in PROFILE_IDS:
-                for mode in ('fl','ref'):
+                for mode in EXPECTED_PROFILE_MODES[profile_id]:
                     group = slots[(profile_id,mode)]
                     self.assertEqual(len(group), get_profile(profile_id)['gpu_count_options'][0])
                     for field in ('install_root','config_path','status_path','manifest_path','port'):

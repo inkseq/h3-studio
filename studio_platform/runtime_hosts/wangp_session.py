@@ -391,7 +391,7 @@ def _effective_total_profile_ram(proc_root=Path('/proc'), group_root=Path('/sys/
     return total
 
 
-def _available_profile_ram(proc_root=Path('/proc'), group_root=Path('/sys/fs/cgroup')):
+def _available_profile_ram(proc_root=Path('/proc'), group_root=Path('/sys/fs/cgroup'), *, resolve_membership=False):
     """Headroom after imports; clean mapped file-cache pages are reclaimable."""
     info = {line.split(':',1)[0]: int(line.split()[1])*1024
             for line in (proc_root/'meminfo').read_text().splitlines()}
@@ -399,12 +399,28 @@ def _available_profile_ram(proc_root=Path('/proc'), group_root=Path('/sys/fs/cgr
     legacy = _profile_v1_ram(proc_root, group_root)
     if legacy is not None:
         return min(available, legacy[1])
-    for group in _profile_ram_groups(proc_root, group_root):
+    for group in _profile_ram_groups(proc_root, group_root, resolve_membership=resolve_membership):
+        if resolve_membership:
+            try:
+                metadata = (group/'memory.max').lstat()
+            except FileNotFoundError:
+                if group == group_root:
+                    continue
+                raise ValueError('wangp_profile_cgroup_invalid')
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ValueError('wangp_profile_cgroup_invalid')
+            for name in ('memory.current', 'memory.stat'):
+                path = group/name
+                metadata = path.lstat()
+                if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 262144:
+                    raise ValueError('wangp_profile_cgroup_invalid')
         if (group/'memory.max').is_file():
             limit = _profile_ram_limit(group)
             used = int((group/'memory.current').read_text())
             fields = dict((key,int(value)) for key,value in
                           (line.split() for line in (group/'memory.stat').read_text().splitlines()))
+            if resolve_membership and (used < 0 or any(value < 0 for value in fields.values())):
+                raise ValueError('wangp_profile_cgroup_invalid')
             file_bytes = max(0,fields.get('file',0)-fields.get('shmem',0))
             lru = max(0,fields.get('active_file',0)+fields.get('inactive_file',0))
             exclusions = sum(max(0,fields.get(k,0)) for k in ('file_dirty','file_writeback','unevictable'))
@@ -416,19 +432,27 @@ def _available_profile_ram(proc_root=Path('/proc'), group_root=Path('/sys/fs/cgr
 
 def _profile_memory_admission(torch, profile):
     """Keep allocation evidence separate from an older headroom contract."""
-    available = _available_profile_ram()
     free,_ = torch.cuda.mem_get_info(0)
     runtime = profile['runtime']
     metric = runtime.get('ram_admission_metric', 'available-headroom-v1')
-    if metric == 'effective-total-v1':
+    available = (_available_profile_ram(resolve_membership=True)
+        if metric == 'effective-total-and-available-v1' else _available_profile_ram())
+    if metric in {'effective-total-v1', 'effective-total-and-available-v1'}:
         capacity = _effective_total_profile_ram()
         minimum = runtime['minimum_total_ram_bytes']
         if type(minimum) is not int or minimum <= 0:
             raise ValueError('wangp_profile_total_ram_unconfirmed')
-        print(json.dumps({'event': 'profile_memory_admission', 'ram_metric': metric,
+        observation = {'event': 'profile_memory_admission', 'ram_metric': metric,
             'effective_total_ram_bytes': capacity, 'available_ram_bytes': available,
-            'minimum_total_ram_bytes': minimum, 'free_vram_bytes': free}), flush=True)
+            'minimum_total_ram_bytes': minimum, 'free_vram_bytes': free}
         ram_insufficient = capacity < minimum
+        if metric == 'effective-total-and-available-v1':
+            headroom = runtime['minimum_available_ram_bytes']
+            if type(headroom) is not int or headroom <= 0:
+                raise ValueError('wangp_profile_available_ram_unconfirmed')
+            observation['minimum_available_ram_bytes'] = headroom
+            ram_insufficient = ram_insufficient or available < headroom
+        print(json.dumps(observation), flush=True)
     elif metric == 'available-headroom-v1':
         ram_insufficient = available < runtime['minimum_available_ram_bytes']
     else:

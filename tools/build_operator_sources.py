@@ -62,7 +62,7 @@ def build(output):
     package = None
     for profile in profiles:
         count = profile["gpu_count_options"][0]
-        for mode in ("fl", "ref"):
+        for mode in (model["mode"] for model in profile["models"]):
             manifest = engine_manifest(profile["id"], mode)
             for index in range(count):
                 relative = Path(profile["id"]) / mode / ("gpu-" + str(index))

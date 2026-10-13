@@ -48,7 +48,7 @@ class CompatibilityFingerprints(unittest.TestCase):
 
     def test_runtime_profile_data_changes_both_compatibility_fingerprints(self):
         profiles = [name for name in FIXED if name.startswith('deploy/wangp/profiles/')]
-        self.assertEqual(len(profiles), 7)
+        self.assertEqual(len(profiles), 8)
         for name in profiles:
             before = build_contracts(self.root)
             (self.root / name).write_text('changed model/component/runtime binding')

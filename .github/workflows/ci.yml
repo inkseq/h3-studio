@@ -387,7 +387,8 @@ jobs:
             --migration-selection h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3:ref \
             --migration-selection h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-lowram-v1:fl \
             --migration-selection h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-cgroups-v4:fl \
-            --migration-selection h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-cgroups-v4:ref "${retained_args[@]}"
+            --migration-selection h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-cgroups-v4:ref \
+            --migration-selection h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2:fl "${retained_args[@]}"
           python tools/check_platform_bundle.py "$GITHUB_SHA" platform-release
       - uses: actions/upload-artifact@v4
         if: needs.changes.outputs.action == 'prepare-platform' || (github.event_name == 'push' && github.ref == 'refs/heads/main')

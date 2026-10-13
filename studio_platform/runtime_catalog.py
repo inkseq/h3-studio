@@ -18,6 +18,7 @@ PROFILE_IDS = (
     "h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-v2",
     "h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3",
     "h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-cgroups-v4",
+    "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2",
 )
 PROFILE_DIRECTORY = Path(__file__).resolve().parents[1] / "deploy" / "wangp" / "profiles"
 COMPILER_ID = "sixnine-h3-native-profile-v1"
