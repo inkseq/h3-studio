@@ -28,6 +28,45 @@ test('quality chooses its advertised model and explicit retired profiles never f
   assert.equal(storyboardProfile(cap,'draft','ref','draft'),null);assert.equal(storyboardProfile(cap,'draft','ref'),null);
 });
 
+test('unpinned Final uses the newest configured same-model profile after saved pin and API default',()=>{
+  const cap=capabilities(),old=cap.deployment_profiles[1],latest=structuredClone(old);latest.id='base-144-single-fl';latest.generation_support.ref.enabled=false;
+  cap.deployment_profiles.push(latest);const before=structuredClone(cap);
+  assert.equal(storyboardProfile(cap,'final','fl').id,latest.id);
+  assert.equal(storyboardProfile(cap,'final','fl',old.id).id,old.id);
+  cap.default_deployment_profile_id=old.id;
+  assert.equal(storyboardProfile(cap,'final','fl').id,old.id);
+  cap.default_deployment_profile_id='draft';assert.equal(storyboardProfile(cap,'final','ref').id,old.id);
+  assert.equal(storyboardProfile(cap,'final','ref',latest.id),null);
+  cap.default_deployment_profile_id=before.default_deployment_profile_id;assert.deepEqual(cap,before);
+});
+
+test('fallback excludes newer disabled, unconfigured, wrong-mode and different-precision profiles',()=>{
+  const cap=capabilities(),base=cap.deployment_profiles[1],copy=(id,change)=>{const p=structuredClone(base);p.id=id;change(p);return p;};
+  const latest=copy('latest-base-fl',p=>{p.generation_support.ref.enabled=false;});
+  cap.deployment_profiles.push(latest,
+    copy('disabled',p=>{p.generation_support.fl.enabled=false;}),
+    copy('unconfigured',p=>{p.generation_support.fl.configured=false;}),
+    copy('unknown-configuration',p=>{delete p.generation_support.fl.configured;}),
+    copy('ref-only',p=>{p.generation_support.fl.enabled=false;}),
+    copy('base-bf16',p=>{p.model_id='MiniMax-H3-Base-BF16';}));
+  cap.default_deployment_profile_id='unconfigured';
+  assert.equal(storyboardProfile(cap,'final','fl').id,latest.id);
+  assert.equal(storyboardProfile(cap,'final','fl','unconfigured'),null);
+  assert.equal(storyboardProfile(cap,'final','fl','disabled'),null);
+  assert.equal(storyboardProfile(cap,'draft','fl').id,'draft');
+  for(const p of cap.deployment_profiles)if(p.model_id==='MiniMax-H3-Base-INT8')p.generation_support.fl.enabled=false;
+  assert.equal(storyboardProfile(cap,'final','fl'),null);
+});
+
+test('Final regeneration reselects the latest Base FL context while preserving accepted Draft input history',()=>{
+  const p=fixture(),cap=capabilities(),latest=structuredClone(cap.deployment_profiles[1]);latest.id='base-144-single-fl';latest.generation_support.ref.enabled=false;cap.deployment_profiles.push(latest);
+  shotOf(p).data.storyboard.mode='fl';shotOf(p).data.h3={deploymentProfileId:'draft',controls:{steps:50}};
+  const request={deployment_profile_id:'draft',model:'MiniMax-H3-Pruned-Rank8-INT8',mode:'fl',prompt:'accepted action',steps:50,first_frame:'accepted-frame'};
+  p.jobs=[{id:'accepted',effective_request:request}];const before=structuredClone(p);
+  assert.equal(storyboardGenerationProfile(cap,view(p,cap).shots[0],{quality:'final',sourceRequest:request}).id,latest.id);
+  assert.deepEqual(p,before);
+});
+
 test('generation preserves a qualified exact profile even when another profile becomes default',()=>{
   const p=fixture(),cap=capabilities(),old=structuredClone(cap.deployment_profiles[0]);old.id='qualified-v3';
   cap.deployment_profiles.push(old);shotOf(p).data.h3={deploymentProfileId:old.id};

@@ -7,11 +7,12 @@ const mode=shot=>shot.data.storyboard?.mode||shot.data.h3?.inputMode||'fl';
 const list=value=>Array.isArray(value)?value:[];
 export function chapterShots(project,chapterId){return children(project,chapterId).filter(e=>e.type==='scene').flatMap(scene=>children(project,scene.id).filter(e=>e.type==='shot'));}
 export function storyboardProfile(capabilities,quality,inputMode,explicitId){
-  const profiles=capabilities?.deployment_profiles||[],enabled=p=>p.generation_support?.[inputMode]?.enabled===true;
+  const profiles=capabilities?.deployment_profiles||[],enabled=p=>p.generation_support?.[inputMode]?.configured===true&&p.generation_support?.[inputMode]?.enabled===true;
   const matches=p=>quality==='final'?p.model_id==='MiniMax-H3-Base-INT8':p.model_id==='MiniMax-H3-Pruned-Rank8-INT8';
   if(explicitId){const exact=profiles.find(p=>p.id===explicitId);if(!exact)return null;if(matches(exact))return enabled(exact)?exact:null;}
   const preferred=profiles.find(p=>p.id===capabilities?.default_deployment_profile_id&&matches(p)&&enabled(p));
-  return preferred||profiles.find(p=>matches(p)&&enabled(p))||null;
+  // The API catalogue appends newer profiles while retaining historical ones.
+  return preferred||profiles.findLast(p=>matches(p)&&enabled(p))||null;
 }
 export function storyboardGenerationProfile(capabilities,shot,{quality,sourceRequest}={}){
   const targetQuality=quality||shot.quality,inputMode=sourceRequest?.mode||shot.mode.toLowerCase();
