@@ -95,6 +95,17 @@ class DstackController:
         binding = self.capacity.store.load(intent_id)
         funded = True
         if node["payload"].get("lifecycle", {}).get("version") == 2 and node["desired_state"] == "running":
+            with self.repo.engine.connect() as connection:
+                prior = connection.execute(select(instance_intents).where(
+                    instance_intents.c.id == intent_id)).mappings().one()
+            if binding.get("apply_started") and prior["state"] in {"draining", "destroying", "destroyed"}:
+                # Upstream-only terminal evidence can end a stale projection;
+                # it cannot bootstrap, reopen admission, or fund stopped work.
+                # Any nonterminal/unknown read still meets the original funding
+                # refusal below before native activity can occur.
+                terminal = self.capacity.observe_terminal(intent_id)
+                if terminal is not None:
+                    return {"node_id": intent_id, "state": terminal["state"]}
             try:
                 # Funding precedes native bootstrap as well as admission. Time
                 # spent downloading/holding/uncertain still consumes runway.

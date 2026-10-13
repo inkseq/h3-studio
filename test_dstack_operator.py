@@ -13,6 +13,7 @@ from studio_platform.auth import Principal
 from studio_platform.dstack_capacity import DstackCapacity, DstackError
 from studio_platform.dstack_operator import (DstackOperator, LedgerDstackStore,
     OperatorError, from_environment)
+from studio_platform.dstack_workspace import DstackWorkspace
 from studio_platform.inference.wangp_contract import HostReadiness
 from studio_platform.operator_capacity import operator_commands, operator_nodes
 from studio_platform.repository import (BudgetExceeded, attempts, budget_accounts, budget_reservations,
@@ -563,6 +564,77 @@ class DstackLifetimeTests(LedgerCase):
         self.assertEqual(self.client.applied,[node])
         self.assertEqual(self.client.stopped,[])
         self.assertEqual(self.repo.get_budget('owner-budget')['spent_microusd'],0)
+
+    def terminal_history(self, *, allocated=False):
+        from test_dstack_capacity import no_capacity_run
+        node = self.start()['node_id']
+        binding = self.store.load(node)
+        run = self.client.runs[binding['run_name']]
+        if allocated:
+            run.update(status='failed', termination_reason='job_failed', latest_job_submission={
+                'status':'failed', 'termination_reason':'waiting_instance_limit_exceeded',
+                'job_provisioning_data':{'backend':'vastai', 'instance_id':'original-allocation',
+                    'instance_type':{'resources':{'gpus':[{'name':'RTX5090'}]}}}})
+        else:
+            self.client.runs[binding['run_name']] = no_capacity_run(run)
+        # Reproduce the already-retained stopping projection: funding's policy
+        # rejects destroying while desired state is still running.
+        self.store.record(node, {'state':'stopping', 'ready':False,
+            'reason_code':'dstack_stop_pending', 'observed_at':self.now})
+        return node
+
+    def assert_terminal_history_refresh(self, *, allocated):
+        node = self.terminal_history(allocated=allocated)
+        with self.repo.engine.connect() as connection:
+            before = tuple([dict(row) for row in connection.execute(select(table)).mappings()]
+                for table in (instance_intents, budget_reservations, budget_accounts))
+        self.now += 1
+        controller = self.controller()
+        with patch.object(self.service, 'fund_window', side_effect=AssertionError('terminal must not fund')) as fund, \
+                patch.object(self.capacity, 'readiness', side_effect=AssertionError('terminal must not bootstrap')) as native:
+            self.assertEqual(controller.tick()['nodes'][0]['state'], 'stopped')
+            fund.assert_not_called()
+            native.assert_not_called()
+        state = DstackWorkspace(self.service).state(self.owner)['nodes'][0]
+        self.assertEqual(state['lifecycle_phase'], 'stopped')
+        self.assertFalse(state['ready'])
+        self.assertEqual(state['billing_state'], 'unsettled')
+        self.assertEqual(self.store.load(node)['reason_code'],
+            'dstack_run_terminal_billing_pending' if allocated else 'dstack_no_capacity_billing_pending')
+        with self.repo.engine.connect() as connection:
+            after = tuple([dict(row) for row in connection.execute(select(table)).mappings()]
+                for table in (instance_intents, budget_reservations, budget_accounts))
+            self.assertIsNone(connection.execute(select(registered_workers.c.id)).first())
+        self.assertEqual(after, before)
+        self.assertEqual(self.client.applied, [node])
+        self.assertEqual(self.client.stopped, [])
+
+    def test_destroying_no_allocation_history_refreshes_without_funding_or_bootstrap(self):
+        self.assert_terminal_history_refresh(allocated=False)
+
+    def test_destroying_allocated_terminal_history_ends_without_settling_removal_or_bill(self):
+        self.assert_terminal_history_refresh(allocated=True)
+
+    def test_destroying_nonterminal_cannot_bypass_funding_or_reopen_native_admission(self):
+        node = self.terminal_history()
+        binding = self.store.load(node)
+        run = self.client.runs[binding['run_name']]
+        run.update(status='running', latest_job_submission={'job_provisioning_data':{
+            'backend':'vastai', 'instance_id':'original-allocation',
+            'instance_type':{'resources':{'gpus':[{'name':'RTX5090'}]}}}})
+        before = self.store.load(node)
+        budget = self.repo.get_budget('owner-budget')
+        controller = self.controller()
+        with patch.object(self.service, 'fund_window', wraps=self.service.fund_window) as fund, \
+                patch.object(self.capacity, 'readiness', side_effect=AssertionError('unfunded bootstrap')) as native:
+            result = controller.tick()['nodes'][0]
+            self.assertEqual(result['code'], 'dstack_controller_observation_failed')
+            fund.assert_called_once()
+            native.assert_not_called()
+        self.assertEqual(self.store.load(node), before)
+        self.assertEqual(self.repo.get_budget('owner-budget'), budget)
+        self.assertEqual(self.client.applied, [node])
+        self.assertEqual(self.client.stopped, [])
 
     def test_always_cannot_bypass_money_cap_cold_stop_keeps_reserved_unknown_bill(self):
         node = self.start(preview=self.preview(keep_on='until_stopped'))['node_id']

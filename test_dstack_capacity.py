@@ -149,6 +149,37 @@ class DstackCapacityTests(unittest.TestCase):
         self.assertEqual(self.client.apply_count, 1)
         self.assertEqual(self.store.events, ["apply_committed"])
 
+    def test_terminal_only_refresh_refuses_nonterminal_absent_failed_and_foreign_reads(self):
+        self.start()
+        before = self.store.load(INTENT)
+        original = copy.deepcopy(self.client.run)
+        cases = [None, original, {**original, 'status':'running'},
+            {**original, 'status':'failed', 'project_name':'foreign-project'},
+            {**original, 'status':'failed', 'run_spec':{}},
+            {**original, 'status':'failed', 'latest_job_submission':'malformed'}]
+        for run in cases:
+            with self.subTest(status=run.get('status') if run else None):
+                self.client.run = run
+                self.assertIsNone(self.capacity.observe_terminal(INTENT))
+                self.assertEqual(self.store.load(INTENT), before)
+        self.client.get_failed = True
+        self.assertIsNone(self.capacity.observe_terminal(INTENT))
+        self.assertEqual(self.store.load(INTENT), before)
+        self.native.assert_not_called()
+        self.assertEqual((self.client.apply_count, self.client.stop_count), (1, 0))
+
+    def test_terminal_only_refresh_reuses_owned_terminal_projection_without_native_call(self):
+        self.start()
+        self.client.run = no_capacity_run(self.client.run)
+        result = self.capacity.observe_terminal(INTENT)
+        self.assertEqual(result['state'], 'stopped')
+        self.assertFalse(result['ready'])
+        self.assertEqual(result['reason_code'], 'dstack_no_capacity_billing_pending')
+        self.assertEqual(result['billing_state'], 'unsettled')
+        self.assertNotIn('PRIVATE', json.dumps(result))
+        self.native.assert_not_called()
+        self.assertEqual((self.client.apply_count, self.client.stop_count), (1, 0))
+
     def test_no_capacity_observation_ends_without_native_start_or_settling_billing(self):
         self.start()
         self.client.run = no_capacity_run(self.client.run)

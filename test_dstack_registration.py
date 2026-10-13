@@ -124,6 +124,34 @@ class RegistrationCapacityTests(LedgerCase):
         self.assertTrue(any(row["reference_id"] == failed and row["state"] == "reserved" for row in before[1]))
         self.service.provider_inventory.assert_not_called()
 
+    def test_terminal_absent_allocation_before_identity_journal_does_not_recount_null_intent(self):
+        old = self.start(key='unobserved-allocation')['node_id']
+        binding = self.store.load(old)
+        self.client.runs[binding['run_name']].update(status='failed', latest_job_submission={
+            'job_provisioning_data':{'backend':'vastai', 'instance_id':'old-allocated',
+                'instance_type':{'resources':{'gpus':[{'name':'RTX5090'}]}}}})
+        # No RUNNING observation ever wrote the original provider ID.
+        self.capacity.observe_terminal(old)
+        self.assertIsNone(self.store.load(old).get('provider_instance_id'))
+        live = self.node('live')
+        self.repo.configure_capacity(max_instances=1, max_physical_gpus=1)
+        before = self.snapshot()
+        self.assertEqual(self.usage(live)['resources'], {('vast', 'live'):1})
+        WorkerControl(self.repo, capacity_usage=self.service.registration_capacity_usage).register(self.spec(live))
+        self.assertEqual(self.snapshot(), before)
+        for inventory in (None, {'backend':'vastai', 'complete':True,
+                'observed_at':self.now-31, 'instance_ids':[]},
+                {'backend':'vastai', 'complete':True, 'observed_at':self.now, 'instance_ids':['old-allocated']}):
+            with self.subTest(inventory=inventory):
+                self.service.provider_inventory = Mock(return_value=inventory)
+                self.assertEqual(self.usage(live)['resources'][('vast', 'intent:'+old)], 1)
+        self.service.provider_inventory = Mock(return_value={
+            'backend':'vastai', 'complete':True, 'observed_at':self.now, 'instance_ids':[]})
+        with self.repo.transaction() as connection:
+            connection.execute(update(instance_intents).where(instance_intents.c.id==old)
+                .values(provider_instance_id='conflicting-ledger-instance'))
+        self.assertEqual(self.usage(live)['instances'], 2)
+
     def test_overlay_retains_legacy_instances_and_unreleased_devices(self):
         old = self.node("old", terminal=True)
         live = self.node("live")

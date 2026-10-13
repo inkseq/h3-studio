@@ -672,6 +672,31 @@ class DstackCapacity:
                 "reason_code": "dstack_apply_requires_reconciliation"})
         return self.observe(request.intent_id)
 
+    def observe_terminal(self, intent_id):
+        """Refresh only an exact owned terminal run, without native activity.
+
+        Continuing funding cannot reopen a draining historical intent. Its
+        terminal upstream state can still be projected into the original row.
+        Nonterminal, absent, failed or changed-identity reads grant no evidence
+        and do not alter that row; ordinary funded observation remains separate.
+        """
+        binding = self.store.load(intent_id)
+        _require(isinstance(binding, dict) and binding.get("apply_started") is True,
+            "dstack_intent_not_submitted")
+        try:
+            run = (self.client.get(run_id=binding["run_id"]) if binding.get("run_id")
+                else self.client.get(run_name=binding["run_name"]))
+            if run is None:
+                return None
+            _owns(run, binding, self.client.project)
+            if run.get("status") not in TERMINAL:
+                return None
+            value = self._observation(run, binding)
+        except Exception:
+            return None
+        self.store.record(intent_id, value)
+        return value
+
     def observe(self, intent_id):
         binding = self.store.load(intent_id)
         _require(isinstance(binding, dict) and binding.get("apply_started") is True, "dstack_intent_not_submitted")
