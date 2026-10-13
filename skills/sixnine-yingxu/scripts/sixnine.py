@@ -77,6 +77,35 @@ def write_json(result, destination=None):
         print(text, end="")
 
 
+def safe_authoring_fields(body):
+    """Standalone, closed field vocabulary: never print server input values."""
+    fields = {'body', 'header', 'Idempotency-Key', 'expected_card_version', 'title', 'prompt',
+        'recipe_id', 'controls', 'inputs', 'copies', 'turn_id', 'source_revision_id', 'deployment_profile_id',
+        'first_frame', 'last_frame', 'images', 'videos', 'audios', 'guides', 'asset_id', 'media_id',
+        'purpose', 'source_range', 'start', 'end', 'include_audio', 'time_seconds', 'use_audio',
+        'duration', 'resolution', 'aspect_ratio', 'width', 'height', 'steps', 'seed',
+        'sampler_name', 'scheduler', 'denoise', 'shift_video', 'shift_audio', 'ref_image_size',
+        'video_decode', 'video_tile_size', 'video_overlap', 'video_temporal_size', 'video_temporal_overlap',
+        'audio_decode', 'encoder_device',
+        'generate_audio', 'export_crf'}
+    reasons = {'missing_field', 'type_mismatch', 'unknown_field', 'invalid_value', 'stale_version'}
+    result = []
+    errors = body.get('field_errors')
+    if not isinstance(errors, list):
+        return result
+    for entry in errors[:12]:
+        if not isinstance(entry, dict):
+            continue
+        path, reason = entry.get('path'), entry.get('reason')
+        if (not isinstance(path, list) or not 1 <= len(path) <= 8
+                or path[0] not in ('body', 'header') or not isinstance(reason, str) or reason not in reasons
+                or any(not (type(part) is str and part in fields
+                    or type(part) is int and 0 <= part <= 16) for part in path)):
+            continue
+        result.append({'path': path, 'reason': reason})
+    return result
+
+
 def check_response(response):
     if not 200 <= response.status_code < 300:
         retry = retry_delay(response)
@@ -86,7 +115,7 @@ def check_response(response):
         codes = {'preflight_rejected','incompatible_fl_ref_inputs','invalid_duration',
             'invalid_canvas_grid','invalid_canvas_area','invalid_canvas_aspect','reference_required',
             'reference_video_exceeds_output','invalid_request','invalid_controls','invalid_inputs',
-            'revision_hash_conflict','version_conflict','budget_exceeded','job_capacity_exceeded',
+            'revision_hash_conflict','version_conflict','idempotency_conflict','budget_exceeded','job_capacity_exceeded',
             'reference_conflict','reference_not_ready','invalid_bindings','invalid_prompt','invalid_settings',
             'shot_version_conflict','asset_not_ready','source_hash_conflict','insufficient_scope',
             'execution_adapter_unavailable','profile_not_published','validation_error',
@@ -116,6 +145,10 @@ def check_response(response):
                     stage = body.get('stage',body.get('error_stage'))
                     if stage in ('preflight','validation','generation','runtime','unknown'):
                         safe += '; stage='+stage
+                    if code in ('invalid_request', 'version_conflict'):
+                        field_errors = safe_authoring_fields(body)
+                        if field_errors:
+                            safe += '; field_errors='+json.dumps(field_errors, separators=(',', ':'))
         except (ValueError, TypeError, AttributeError, httpx.ResponseNotRead):
             pass
         raise ValueError(f"API returned HTTP {response.status_code}{suffix}{safe}; other response details suppressed")
