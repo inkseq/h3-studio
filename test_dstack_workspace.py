@@ -15,6 +15,7 @@ from studio_platform.operator_capacity import OperatorError, operator_commands, 
 from studio_platform.repository import attempts, budget_reservations, instance_intents, jobs, registered_workers, Scope
 from test_platform_repository import LedgerCase
 import test_dstack_operator as fixtures
+from test_dstack_capacity import no_capacity_run
 
 
 class WorkspaceTests(LedgerCase):
@@ -27,6 +28,30 @@ class WorkspaceTests(LedgerCase):
     def start_node(self, key=None):
         preview = self.service.preview(self.owner, {"profile_id": "5090-fl", "ttl_seconds": 900})
         return self.service.start(self.owner, {"preview_id": preview["preview_id"]}, key or uuid.uuid4().hex)["node_id"]
+
+    def test_no_capacity_terminal_stays_ended_after_stop_with_pending_bill_and_history(self):
+        node = self.start_node()
+        binding = self.store.load(node)
+        self.client.runs[binding["run_name"]] = no_capacity_run(self.client.runs[binding["run_name"]])
+        self.capacity.observe(node)
+        self.service.node_command(self.owner, node, {}, "stop-ended-no-capacity")
+        with self.repo.engine.connect() as connection:
+            before = tuple([dict(r) for r in connection.execute(select(table)).mappings()]
+                for table in (operator_nodes, instance_intents, budget_reservations))
+        row = next(r for r in self.workspace.state(self.owner)["nodes"] if r["node_id"] == node)
+        self.assertEqual(row["lifecycle_phase"], "stopped")
+        self.assertEqual(row["preparation"]["phase"], "stopped")
+        self.assertEqual(row["preparation"]["reason_code"], "dstack_no_capacity_billing_pending")
+        self.assertEqual(row["billing_state"], "unsettled")
+        self.assertFalse(row["ready"])
+        self.assertEqual(row["slots_ready"], 0)
+        self.assertFalse(self.workspace.state(self.other_owner)["nodes"])
+        with self.repo.engine.connect() as connection:
+            after = tuple([dict(r) for r in connection.execute(select(table)).mappings()]
+                for table in (operator_nodes, instance_intents, budget_reservations))
+        self.assertEqual(after, before)
+        self.assertEqual(after[2][0]["state"], "reserved")
+        self.assertEqual(self.client.stopped, [])
 
     def test_preparation_projection_reuses_original_receipt_and_is_read_only(self):
         node = self.start_node()

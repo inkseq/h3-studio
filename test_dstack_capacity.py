@@ -27,6 +27,17 @@ def request(**changes):
         30, 160, 850000, 10., 3610., 3600), **changes)
 
 
+def no_capacity_run(run):
+    """Pinned 0.22.3 terminal single-task response, no provider allocation."""
+    submission = {"id": "c3333333-3333-4333-8333-333333333333", "status": "failed",
+        "termination_reason": "failed_to_start_due_to_no_capacity",
+        "termination_reason_message": "PRIVATE-PROVIDER-MESSAGE no offers",
+        "job_provisioning_data": None, "job_runtime_data": None}
+    return {**copy.deepcopy(run), "status": "failed", "termination_reason": "job_failed",
+        "latest_job_submission": copy.deepcopy(submission),
+        "jobs": [{"job_submissions": [submission], "job_connection_info": None}]}
+
+
 class Store:
     def __init__(self):
         self.value = {"intent_id": INTENT}
@@ -137,6 +148,19 @@ class DstackCapacityTests(unittest.TestCase):
         self.capacity.start(request(), PUB)
         self.assertEqual(self.client.apply_count, 1)
         self.assertEqual(self.store.events, ["apply_committed"])
+
+    def test_no_capacity_observation_ends_without_native_start_or_settling_billing(self):
+        self.start()
+        self.client.run = no_capacity_run(self.client.run)
+        value = self.capacity.observe(INTENT)
+        self.assertEqual((value["state"], value["ready"], value["billing_state"]),
+            ("stopped", False, "unsettled"))
+        self.assertEqual(value["reason_code"], "dstack_no_capacity_billing_pending")
+        self.assertEqual(value["preparation"]["phase"], "stopped")
+        self.assertNotIn("PRIVATE-PROVIDER-MESSAGE", json.dumps(value))
+        self.native.assert_not_called()
+        self.assertEqual(self.client.apply_count, 1)
+        self.assertEqual(self.client.stop_count, 0)
 
     def test_lost_apply_response_reconciles_same_run(self):
         self.client.apply_lost = True
@@ -689,6 +713,89 @@ class DstackLiveUsageTests(unittest.TestCase):
         self.assertEqual(self.node, original)
         self.client.get.assert_called_once_with(run_id=RUN)
         self.inventory.assert_called_once_with("vastai")
+
+    def no_allocation(self):
+        self.binding.pop("provider_instance_id")
+        self.run = no_capacity_run(self.run)
+
+    def test_complete_no_capacity_submission_releases_capacity_only(self):
+        self.no_allocation()
+        self.node["desired_state"] = "running"
+        original = copy.deepcopy((self.node, self.run))
+        value = self.usage()
+        self.assertEqual((value["instances"], value["physical_gpus"], value["logical_slots"],
+            value["hourly_cost_microusd"], value["active_instance_ids"]), (0, 0, 0, 0, ()))
+        self.assertEqual(value["observations"][0]["reason_code"], "dstack_terminal_no_allocation")
+        self.assertEqual((self.node, self.run), original)
+        self.assertNotIn("PRIVATE-PROVIDER-MESSAGE", json.dumps(value))
+        self.inventory.assert_not_called()
+
+    def test_incomplete_ambiguous_or_other_terminal_failure_retains_capacity(self):
+        self.no_allocation()
+        original = copy.deepcopy(self.run)
+        cases = []
+        for field in ("jobs", "latest_job_submission", "termination_reason"):
+            value = copy.deepcopy(original); value.pop(field); cases.append(value)
+        for jobs in (None, [], [{}], [{"job_submissions": []}],
+                [{"job_submissions": "PRIVATE-PROVIDER-MESSAGE"}]):
+            cases.append({**original, "jobs": jobs})
+        for field in ("job_provisioning_data", "job_runtime_data"):
+            value = copy.deepcopy(original)
+            value["latest_job_submission"].pop(field)
+            value["jobs"][0]["job_submissions"][0].pop(field)
+            cases.append(value)
+            for malformed in ({}, "PRIVATE-PROVIDER-MESSAGE"):
+                value = copy.deepcopy(original)
+                value["latest_job_submission"][field] = malformed
+                value["jobs"][0]["job_submissions"][0][field] = malformed
+                cases.append(value)
+        value = copy.deepcopy(original)
+        value["latest_job_submission"]["termination_reason"] = "job_failed"
+        cases.append(value)
+        for identity in (None, "PRIVATE-PROVIDER-MESSAGE", ""):
+            value = copy.deepcopy(original)
+            value["latest_job_submission"]["id"] = identity
+            value["jobs"][0]["job_submissions"][0]["id"] = identity
+            cases.append(value)
+        for status in ("provisioning", "running", "terminated", "unexpected"):
+            cases.append({**original, "status": status})
+        cases.append({**original, "project_name": "foreign"})
+        for value in cases:
+            with self.subTest(fields=list(value)):
+                self.run = value
+                result = self.usage()
+                self.assertEqual(result["instances"], 1)
+                self.assertEqual(result["active_instance_ids"], (INTENT,))
+                self.assertNotIn("PRIVATE-PROVIDER-MESSAGE", json.dumps(result))
+        self.inventory.assert_not_called()
+
+    def test_prior_allocation_or_native_receipts_prevent_no_allocation_exemption(self):
+        self.no_allocation()
+        original_binding = copy.deepcopy(self.binding)
+        for key, value in (("provider_instance_id", "previous-instance"),
+                ("runtime_incarnation", "c" * 32), ("first_runtime_ready_at", 10.),
+                ("bootstrap_started", True), ("bootstrap_launch_started", True),
+                ("runtime_launch_started", True)):
+            with self.subTest(key=key):
+                self.binding[key] = value
+                self.assertEqual(self.usage()["instances"], 1)
+                self.binding.clear(); self.binding.update(original_binding)
+        previous = {"status": "failed", "job_provisioning_data": {"backend": "vastai",
+            "instance_id": "previous-instance"}, "job_runtime_data": None}
+        self.run["jobs"][0]["job_submissions"].insert(0, previous)
+        self.assertEqual(self.usage()["instances"], 1)
+        self.inventory.assert_not_called()
+
+    def test_allocated_failure_still_needs_existing_fresh_provider_absence(self):
+        provisioning = copy.deepcopy(self.run["latest_job_submission"]["job_provisioning_data"])
+        self.run = no_capacity_run(self.run)
+        self.run["latest_job_submission"]["job_provisioning_data"] = provisioning
+        self.run["jobs"][0]["job_submissions"][0]["job_provisioning_data"] = provisioning
+        self.inventory.return_value = None
+        self.assertEqual(self.usage()["instances"], 1)
+        self.inventory.return_value = {"backend": "vastai", "complete": True,
+            "observed_at": self.now, "instance_ids": []}
+        self.assertEqual(self.usage()["observations"][0]["reason_code"], "dstack_terminal_provider_absent")
 
     def test_pending_new_intent_counts_before_any_apply_and_legacy_never_counts(self):
         pending_id = "a3333333-3333-4333-8333-333333333333"

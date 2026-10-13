@@ -12,6 +12,7 @@ from studio_platform.repository import (BudgetExceeded, Conflict, budget_reserva
     instance_intents, registered_devices, registered_workers, scaler_receipts)
 from test_platform_repository import LedgerCase
 import test_dstack_operator as fixture
+from test_dstack_capacity import no_capacity_run
 
 
 class RegistrationCapacityTests(LedgerCase):
@@ -107,6 +108,21 @@ class RegistrationCapacityTests(LedgerCase):
             self.assertEqual({tuple(row["spec"]["recipe_ids"]) for row in workers},
                 {("h3-base-fl2va-v1",), ("h3-base-ref2va-v1",)})
             self.assertEqual(connection.execute(select(registered_devices.c.state)).scalars().all(), ["owned", "owned"])
+
+    def test_never_allocated_history_does_not_block_registration_or_settle_reservation(self):
+        failed = self.start(key="no-capacity-original")["node_id"]
+        binding = self.store.load(failed)
+        self.client.runs[binding["run_name"]] = no_capacity_run(self.client.runs[binding["run_name"]])
+        self.capacity.observe(failed)
+        live = self.node("live")
+        self.repo.configure_capacity(max_instances=1, max_physical_gpus=1)
+        before = self.snapshot()
+        self.assertEqual(self.usage(live)["resources"], {("vast", "live"): 1})
+        WorkerControl(self.repo, capacity_usage=self.service.registration_capacity_usage).register(self.spec(live))
+        self.assertEqual(self.snapshot(), before)
+        self.assertIsNone(next(row for row in before[0] if row["id"] == failed)["provider_instance_id"])
+        self.assertTrue(any(row["reference_id"] == failed and row["state"] == "reserved" for row in before[1]))
+        self.service.provider_inventory.assert_not_called()
 
     def test_overlay_retains_legacy_instances_and_unreleased_devices(self):
         old = self.node("old", terminal=True)
