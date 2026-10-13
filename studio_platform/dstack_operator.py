@@ -764,8 +764,12 @@ class DstackOperator:
             if intent is None or PROVIDERS.get(original.get("backend")) != intent["provider"]:
                 continue
             if (observation["reason_code"] == "dstack_terminal_provider_absent"
-                    and intent["provider_instance_id"] is not None
                     and original.get("provider_instance_id") == intent["provider_instance_id"]):
+                # The original provider identity may never have been journaled
+                # before provisioning failed. live_capacity_usage still proved
+                # this exact owned allocation terminal and its complete fresh
+                # account absence. Two null journals are consistent with that
+                # proof; conflicting identities remain conservative.
                 excluded.add(intent["id"])
             elif (observation["reason_code"] == "dstack_terminal_no_allocation"
                     and intent["provider_instance_id"] is None
