@@ -6,12 +6,13 @@ import {executionPresetControls,selectedRecipe,blankCloudProject,freestyleProjec
 import {roughCutSnapshot,roughCutJobs} from './roughcut-model.js';
 import {burnCaptionStatus} from './caption-model.js';
 import {requireModeAvailable} from './generation-availability.js';
+import {chapterShots,storyboardProfile,storyboardView,expandStoryboard} from './storyboard-domain.js';
 
 const clone=value=>structuredClone(value),uid=()=>crypto.randomUUID();
 const identity=result=>result?.username||result?.user?.username||result?.user||result?.account?.username;
 export function createCloudController({store=defaultStore,client,storage=globalThis.localStorage,workspaceStorage,readFile=getFile,mediaHandlers=setCloudMediaHandlers}={}){
   if(workspaceStorage===undefined){try{workspaceStorage=globalThis.sessionStorage;}catch{workspaceStorage=null;}}
-  let state={account:null,auth:null,capabilities:null,availability:null,availabilityChecking:false,operatorAccess:false,projects:[],projectsLoaded:false,nextProjectOffset:100,moreProjects:false,plans:{},preflightErrors:{},batchChecking:null,renderPlans:{},renderOptions:{},renderPending:{},jobs:[],activity:null,activityError:'',nextJobOffset:100,moreJobs:false,batches:[],batchesLoaded:false,nextBatchOffset:10,moreBatches:false,assets:[],usage:null,assetError:'',batchPending:null,busy:false,error:'',message:'',conflict:null,draftOffer:null,resumeOffer:null,resumeError:'',remoteUpdate:null,remoteUpdateError:'',unknown:{}},epoch=0,stopped=false,polling=false,operation=false,detailCursor=0,sessionCheck=null,lastRemoteCheck=0,lastCapabilitiesCheck=0,capabilityRequest=0,availabilityRequest=0,lastAvailabilityCheck=0;
+  let state={account:null,auth:null,capabilities:null,availability:null,availabilityChecking:false,operatorAccess:false,storyboardEnabled:false,projects:[],projectsLoaded:false,nextProjectOffset:100,moreProjects:false,plans:{},preflightErrors:{},batchChecking:null,renderPlans:{},renderOptions:{},renderPending:{},jobs:[],activity:null,activityError:'',nextJobOffset:100,moreJobs:false,batches:[],batchesLoaded:false,nextBatchOffset:10,moreBatches:false,assets:[],usage:null,assetError:'',batchPending:null,busy:false,error:'',message:'',conflict:null,draftOffer:null,resumeOffer:null,resumeError:'',remoteUpdate:null,remoteUpdateError:'',unknown:{}},epoch=0,stopped=false,polling=false,operation=false,detailCursor=0,sessionCheck=null,lastRemoteCheck=0,lastCapabilitiesCheck=0,capabilityRequest=0,availabilityRequest=0,lastAvailabilityCheck=0;
   const listeners=new Set(),emit=patch=>{state={...state,...patch};for(const cb of listeners)cb();};
   const api=client||createCloudClient({onUnauthorized:()=>expire()});
   const current=()=>store.getState(),context=()=>({epoch,workspaceEpoch:current().workspaceEpoch,projectId:current().project.id,account:state.account});
@@ -40,7 +41,7 @@ export function createCloudController({store=defaultStore,client,storage=globalT
   function installMedia(){api.setAccount?.(state.account);mediaHandlers({maxBytes:state.capabilities?.upload_max_bytes,read:state.account?async fileId=>{const match=/^cloud_(asset|artifact)_([A-Za-z0-9_-]+)$/.exec(fileId);if(!match)throw Error('云素材标识无效。');const ctx=context(),blob=await api.download(`/v1/${match[1]}s/${match[2]}/content`);guard(ctx);return blob;}:null,upload:state.account&&current().workspace.mode==='cloud'?upload:null});}
   function replaceIdentity(account,message=''){
     epoch++;lastAvailabilityCheck=0;api.reset?.();store.leaveCloudProject();
-    emit({...emptyProjectList,account,capabilities:null,availability:null,availabilityChecking:false,operatorAccess:false,capabilityError:'',assets:[],usage:null,assetError:'',plans:{},preflightErrors:{},batchChecking:null,renderPlans:{},renderOptions:{},renderPending:{},jobs:[],activity:null,activityError:'',nextJobOffset:100,moreJobs:false,batches:[],batchesLoaded:false,nextBatchOffset:10,moreBatches:false,batchPending:null,conflict:null,draftOffer:null,resumeOffer:null,resumeError:'',remoteUpdate:null,remoteUpdateError:'',unknown:{},error:'',message});installMedia();
+    emit({...emptyProjectList,account,capabilities:null,availability:null,availabilityChecking:false,operatorAccess:false,storyboardEnabled:false,capabilityError:'',assets:[],usage:null,assetError:'',plans:{},preflightErrors:{},batchChecking:null,renderPlans:{},renderOptions:{},renderPending:{},jobs:[],activity:null,activityError:'',nextJobOffset:100,moreJobs:false,batches:[],batchesLoaded:false,nextBatchOffset:10,moreBatches:false,batchPending:null,conflict:null,draftOffer:null,resumeOffer:null,resumeError:'',remoteUpdate:null,remoteUpdateError:'',unknown:{},error:'',message});installMedia();
   }
   function expire(){replaceIdentity(null);emit({error:'云登录已失效或身份已改变。原本机作品已恢复，云草稿仍按原账户保留，请重新核对登录。'});}
   async function recheckSession({loadLists=false,refreshCapabilities=false}={}){
@@ -52,7 +53,7 @@ export function createCloudController({store=defaultStore,client,storage=globalT
         if(typeof me!=='string'||!me)throw Error('服务没有返回可核对的账户身份。');
         const changed=state.account!==me||current().workspace.mode==='cloud'&&current().workspace.account!==me;
         if(changed){replaceIdentity(me,'登录身份已重新核对。原本机作品已恢复；请打开当前账户的云项目。');observedEpoch=epoch;}
-        emit({operatorAccess:accountRecord.operator_capacity?.view===true});
+        emit({operatorAccess:accountRecord.operator_capacity?.view===true,storyboardEnabled:accountRecord.features?.storyboard_workspace===true});
         if(loadLists||changed)await reloadProjects();if(observedEpoch===epoch&&(loadLists||changed||refreshCapabilities||Date.now()-lastCapabilitiesCheck>15000))await reloadCapabilities();
         if(observedEpoch===epoch)offerResume();
       }catch(error){if(observedEpoch!==epoch)return;if(error.status===401){if(state.account||current().workspace.mode==='cloud')expire();}else emit({error:'账户状态暂未核对：'+error.message});}
@@ -101,7 +102,55 @@ export function createCloudController({store=defaultStore,client,storage=globalT
     if(!store.editProject(project=>{const entity=project.entities.find(e=>e.id===id);entity.data={...entity.data,...result.data};for(const item of project.entities)if(boundVideoRange(item.data.selectedVideoRange,asset))item.data.selectedVideoRange={...item.data.selectedVideoRange,...videoBinding(entity)};for(const item of project.entities)for(const range of Object.values(item.data.referenceRanges||{}))if(range.fileId===oldFile)range.fileId=result.data.fileId;for(const item of project.entities)for(const guide of item.data.h3?.guides||[])if(guide.source_range?.fileId===oldFile)guide.source_range.fileId=result.data.fileId;for(const tracks of Object.values(project.journey?.soundTracks||{}))for(const track of tracks)if(track.fileId===oldFile)track.fileId=result.data.fileId;},{history:false}))throw Error(current().notice);
     return result.data.cloudAssetId;}
   function assertNotHeld(key,id){if(state.jobs.some(job=>job.status==='recovery_hold'&&job.client_ref?.[key]===id&&(key!=='chapter_id'||job.recipe_id==='chapter-roughcut-v1')))throw Error('原任务恢复后待核对，请等待管理员核对执行与费用；可以继续编辑作品，不能重新提交。');}
+  async function extractFrame(artifactId,selection){
+    requireCloud();const ctx=context(),key=intent('frame',await digest({project:ctx.projectId,artifactId,selection}));guard(ctx);
+    const asset=await api.saveFrame(ctx.projectId,artifactId,selection,key);guard(ctx);
+    if(!asset?.asset_id||asset.status!=='ready'||asset.project_id!==ctx.projectId||asset.kind!=='image'||asset.selection?.artifact_id!==artifactId)throw Error('截帧收据尚未确认；未加入档案或替代原参考。');
+    const existing=current().project.entities.find(e=>e.data.cloudAssetId===asset.asset_id);if(existing)return existing.id;
+    const id=store.addEntity('image',null,{title:asset.file_name||'成片截帧',data:{fileId:'cloud_asset_'+asset.asset_id,cloudAssetId:asset.asset_id,cloudContentPath:asset.content_url,fileName:asset.file_name,mime:asset.metadata?.mime||'image/png',bytes:asset.metadata?.bytes||0,metadata:asset.metadata||{},source:'artifact_frame',sourceSelection:asset.selection,storyboardInbox:true,missingFile:false}});if(!id)throw Error(current().notice);return id;
+  }
+  async function prepareStoryboard(shotId,{sourceJobId}={}){
+    requireCloud();assertNotHeld('shot_id',shotId);const ctx=context();if(readPending()[shotId]||readBatchPending()?.shotIds.includes(shotId))throw Error('原提交尚未核对，请先刷新原记录。');
+    const plans={...state.plans};delete plans[shotId];emit({plans,preflightErrors:{...state.preflightErrors,[shotId]:null}});
+    try{
+    await reloadCapabilities();guard(ctx);let shot=current().project.entities.find(e=>e.id===shotId);if(!shot)throw Error('镜头不存在。');
+    const b=shot.data.storyboard;if(!b)throw Error('请先保存分镜配置。');const selected=storyboardProfile(state.capabilities,b.quality,b.mode,shot.data.h3?.deploymentProfileId);if(!selected||selected.generation_support?.[b.mode]?.enabled!==true||(b.quality==='final'?selected.model_id!=='MiniMax-H3-Base-INT8':selected.model_id!=='MiniMax-H3-Pruned-Rank8-INT8'))throw Error('所选模型与草稿/精修配置不一致或尚不可用；未使用另一模型替代。');
+    if(state.jobs.some(j=>j.client_ref?.shot_id===shotId&&activeJobStatuses.has(j.status)))throw Error('这一镜已有任务排队或执行，请查看原任务。');
+    if(b.continuePrevious&&b.mode==='fl'&&!sourceJobId){
+      const chapter=current().project.entities.find(e=>e.type==='chapter'&&chapterShots(current().project,e.id).some(s=>s.id===shotId)),shots=chapter?chapterShots(current().project,chapter.id):[],previous=shots[shots.findIndex(s=>s.id===shotId)-1],chosen=current().project.entities.find(e=>e.id===previous?.data.selectedAssetId);
+      if(!previous||!chosen?.data.cloudArtifactId||chosen.type!=='video')throw Error('请先选定上一镜的真实成片；不会使用未选定候选。');
+      if(b.previousFrame?.selectedAssetId!==chosen.id||!current().project.entities.some(e=>e.id===b.previousFrame?.frameAssetId)){
+        const frameId=await extractFrame(chosen.data.cloudArtifactId,{position:'last'});guard(ctx);const latest=current().project.entities.find(e=>e.id===previous.id);if(latest?.data.selectedAssetId!==chosen.id)throw Error('截帧期间上一镜的选择已改变，请重新预检。');
+        store.updateEntity(shotId,{data:{storyboard:{...current().project.entities.find(e=>e.id===shotId).data.storyboard,previousFrame:{shotId:previous.id,selectedAssetId:chosen.id,frameAssetId:frameId}}}});
+      }
+    }
+    // Upload only inputs the chosen mode will send. A generated artifact reused
+    // as a reference gets an ordinary owned asset receipt through this same path.
+    if(!sourceJobId){const p=current().project,chapter=p.entities.find(e=>e.type==='chapter'&&chapterShots(p,e.id).some(s=>s.id===shotId)),view=storyboardView(p,{chapterId:chapter?.id,capabilities:state.capabilities,jobs:state.jobs}),s=view.shots.find(s=>s.id===shotId);for(const id of new Set(expandStoryboard(s,view,{forSync:true}).items.filter(i=>i.sent&&i.a?.id).map(i=>i.a.id))){if(!p.entities.find(e=>e.id===id)?.data.cloudAssetId){await syncEntity(id);guard(ctx);}}}
+    const saved=await save();guard(ctx);const snapshot=current().project,localHash=await digest(shotSnapshot(snapshot,shotId));guard(ctx);
+    let preview,plan,recipeId;
+    if(sourceJobId){
+      const source=await api.job(sourceJobId);guard(ctx);if(source.status!=='succeeded'||source.client_ref?.project_id!==ctx.projectId||source.client_ref?.shot_id!==shotId||!source.effective_request)throw Error('原选定成片的请求尚未确认，不能用当前编辑草稿代替。');
+      const chosen=snapshot.entities.find(e=>e.id===shotId)?.data.selectedAssetId,candidate=snapshot.entities.find(e=>e.id===chosen);if(!candidate||candidate.data.sourceJobId!==sourceJobId||candidate.type!=='video')throw Error('精修必须使用当前选定成片的原请求；选择已改变，请重新预检。');
+      const request=source.effective_request;recipeId=source.recipe_id;const recipe=state.capabilities.recipes.find(r=>r.id===recipeId),support=selected.generation_support?.[request.mode];if(!support||b.mode!==request.mode)throw Error('精修模型或模式与原选定请求不一致。');
+      const controls=Object.fromEntries(Object.keys(support.controls||recipe?.controls||{}).filter(k=>Object.hasOwn(request,k)&&!['guides','video_audio'].includes(k)).map(k=>[k,request[k]]));
+      if(!snapshot.entities.find(e=>e.id===shotId)?.data.h3?.controls?.seed)controls.seed=null;
+      const inputs={images:(request.inputs.images||[]).map(asset_id=>({asset_id})),videos:(request.inputs.videos||[]).map(asset_id=>({asset_id,include_audio:request.video_audio?.[asset_id]===true})),audios:(request.inputs.audios||[]).map(asset_id=>({asset_id})),first_frame:request.inputs.first_frame?{asset_id:request.inputs.first_frame}:null,last_frame:request.inputs.last_frame?{asset_id:request.inputs.last_frame}:null,guides:request.guides||[]};
+      const payload={recipe_id:recipeId,deployment_profile_id:selected.id,capabilities_version:state.capabilities.capabilities_version,client_ref:{...source.client_ref,shot_version:snapshot.entities.find(e=>e.id===shotId).version,source_hash:localHash},prompt:request.prompt,controls,inputs,client_edit:{edit_duration_s:request.duration}};
+      plan=await api.plan(payload,intent('final-plan',await digest(payload)));guard(ctx);preview={draft:{prompt:request.prompt,storyboard:{notes:['精修使用选定版本的原提示词、实际输入和参数；旧成片保留。']}}};
+    }else{
+      preview=await api.generationDraft(ctx.projectId,shotId);guard(ctx);if(preview.project_version!==saved.version||preview.issues?.length)throw Error(preview.issues?.join(' ')||'草稿版本已经改变，请重新预检。');
+      recipeId=preview.draft.recipe_id;if(preview.draft.deployment_profile_id!==selected.id)throw Error('服务端模型档案与界面所选不一致，未提交。');
+      plan=await api.savedPlan(ctx.projectId,shotId,{expected_version:saved.version,capabilities_version:state.capabilities.capabilities_version},intent('story-plan',ctx.projectId+':'+shotId+':'+saved.version));guard(ctx);
+    }
+    if(localHash!==await digest(shotSnapshot(current().project,shotId)))throw Error('预检期间镜头或档案已改变，旧计划未当作可提交计划。');
+    if(!plan.plan_id||!['ready','blocked'].includes(plan.status))throw Error('生成计划响应无效。');
+    if(plan.effective_request?.model!==selected.model_id||plan.effective_request?.mode!==b.mode)throw Error('实际预检模型或模式与所选配置不一致，未提交。');
+    emit({plans:{...state.plans,[shotId]:{...plan,storyboardPreview:preview.draft.storyboard,availabilitySettings:{deployment_profile_id:selected.id,recipe_id:recipeId},sourceHash:localHash,sourceSnapshot:stableJSON(shotSnapshot(snapshot,shotId)),shotId,projectId:ctx.projectId}},message:'预检已完成，请核对实际发送输入和预算后确认。'});return plan;
+    }catch(error){guard(ctx);const plans={...state.plans};delete plans[shotId];emit({plans,preflightErrors:{...state.preflightErrors,[shotId]:error.message}});throw error;}
+  }
   async function prepare(shotId){requireCloud();assertNotHeld('shot_id',shotId);if(readPending()[shotId]||readBatchPending()?.shotIds.includes(shotId))throw Error('这个镜头有未确认的提交。先刷新任务或用原标识核对提交，不能创建新计划绕过。');const ctx=context();emit({preflightErrors:{...state.preflightErrors,[shotId]:null}});const currentHash=await digest(shotSnapshot(current().project,shotId));guard(ctx);if(state.jobs.some(job=>job.client_ref?.shot_id===shotId&&job.client_ref.source_hash===currentHash&&activeJobStatuses.has(job.status)))throw Error('这个镜头的相同版本已在队列中，请查看进度或先取消原任务。');await reloadCapabilities();guard(ctx);
+    if(current().project.entities.find(e=>e.id===shotId)?.data.storyboard)return prepareStoryboard(shotId);
     let shot=current().project.entities.find(e=>e.id===shotId);if(!shot)throw Error('镜头不存在。');const recipe=selectedRecipe(state.capabilities.recipes,shot.data.h3);if(!recipe)throw Error('此生成配方已不可用，请刷新并重新选择。');
     const runtime=executionPresetControls(recipe),saved=shot.data.h3?.controls||{};
     if(Object.entries(runtime).some(([field,value])=>saved[field]!==value)){
@@ -118,7 +167,7 @@ export function createCloudController({store=defaultStore,client,storage=globalT
     if(!plan.plan_id||!['ready','blocked'].includes(plan.status))throw Error('服务返回了无效的生成计划。');
     emit({plans:{...state.plans,[shotId]:{...plan,availabilitySettings:{deployment_profile_id:null,recipe_id:payload.recipe_id},sourceHash:hash,sourceSnapshot:stableJSON(shotSnapshot(snapshot,shotId)),shotId,projectId:snapshot.id}},message:plan.status==='ready'?'预检通过；核对生效参数后再提交。':'预检已完成，仍有执行条件未满足。'});return plan;}
   async function validPlan(shotId){const ctx=context();await reloadCapabilities();guard(ctx);assertNotHeld('shot_id',shotId);const plan=state.plans[shotId];if(!plan||plan.status!=='ready')throw Error('请先完成这个镜头的预检，并解决阻塞项。');if(!state.capabilities?.execution_enabled)throw Error('当前服务未启用生成；未提交任务。');if(plan.sourceHash!==await digest(shotSnapshot(current().project,shotId)))throw Error('镜头或参考已改变，请重新预检。');if(plan.expires_at&&(typeof plan.expires_at==='number'?plan.expires_at*1000:Date.parse(plan.expires_at))<=Date.now())throw Error('计划已过期，请重新预检。');return plan;}
-  async function mergeJobs(jobs,ctx){guard(ctx);const hashes={};for(const job of jobs){const shot=current().project.entities.find(e=>e.id===job.client_ref?.shot_id);if(shot)hashes[shot.id]=await digest(shotSnapshot(current().project,shot.id));}guard(ctx);store.editProject(project=>{let changed=false;for(const job of jobs)changed=mergeJobCandidate(project,job,{snapshotHash:hashes[job.client_ref?.shot_id]}).changed||changed;return changed;},{history:false});emit({jobs:jobs.filter(job=>job.client_ref?.project_id===ctx.projectId)});}
+  async function mergeJobs(jobs,ctx){guard(ctx);const hashes={};for(const job of jobs){const shot=current().project.entities.find(e=>e.id===job.client_ref?.shot_id);if(shot&&!shot.data.storyboard)hashes[shot.id]=await digest(shotSnapshot(current().project,shot.id));}guard(ctx);store.editProject(project=>{let changed=false;for(const job of jobs)changed=mergeJobCandidate(project,job,{snapshotHash:hashes[job.client_ref?.shot_id]}).changed||changed;return changed;},{history:false});emit({jobs:jobs.filter(job=>job.client_ref?.project_id===ctx.projectId)});}
   async function collectJobArtifacts(jobs,ctx){for(const job of jobs)if(job.status==='succeeded'&&!job.artifacts?.length){const result=await api.artifacts(job.id);guard(ctx);job.artifacts=result.artifacts||[];}return jobs;}
   async function refreshJobs(){if(!state.account||current().workspace.mode!=='cloud'||polling)return;polling=true;const ctx=context();try{
     const [data,aggregate]=await Promise.all([api.jobs(ctx.projectId),api.activitySummary?api.activitySummary(ctx.projectId).then(value=>({value}),error=>({error})):null]);guard(ctx);
@@ -207,7 +256,7 @@ export function createCloudController({store=defaultStore,client,storage=globalT
     resumeAsset:id=>action(async()=>{requireCloud();const ctx=context();try{const asset=await api.resumeAsset(id);guard(ctx);if(asset.status==='ready')attachRecoveredAsset(asset);await assetInventory();return asset;}catch(error){guard(ctx);try{await assetInventory();}catch{}throw error;}}),
     attachAsset:id=>action(async()=>{requireCloud();const ctx=context(),asset=await api.asset(id);guard(ctx);attachRecoveredAsset(asset);}),
     upload,syncAll:()=>action(async()=>{requireCloud();for(const asset of [...current().project.entities])if(['image','video','audio'].includes(asset.type)&&asset.data.fileId&&!asset.data.cloudArtifactId)await syncEntity(asset.id);await save();emit({message:'可读取的本机素材已同步，项目版本已保存。'});}),
-    prepare:shotId=>action(()=>prepare(shotId)),submit:shotId=>action(()=>submit(shotId)),refresh:()=>action(refreshJobs),loadMoreJobs:()=>action(loadMoreJobs),loadMoreBatches:()=>action(loadMoreBatches),
+    prepare:shotId=>action(()=>prepare(shotId)),prepareStoryboard:(shotId,options)=>action(()=>prepareStoryboard(shotId,options)),saveFrame:(artifactId,selection)=>action(()=>extractFrame(artifactId,selection)),jobReceipt:id=>action(async()=>{requireCloud();const ctx=context(),job=await api.job(id);guard(ctx);if(job.id!==id||job.client_ref?.project_id!==ctx.projectId)throw Error('任务不属于当前项目。');return job;}),submit:shotId=>action(()=>submit(shotId)),refresh:()=>action(refreshJobs),loadMoreJobs:()=>action(loadMoreJobs),loadMoreBatches:()=>action(loadMoreBatches),
     setRenderOptions(chapterId,options){requireCloud();emit({renderOptions:{...state.renderOptions,[chapterId]:clone(options)}});},
     prepareRender:(chapterId,options)=>action(()=>prepareRender(chapterId,options)),submitRender:chapterId=>action(()=>submitRender(chapterId)),
     prepareBatch:shotIds=>action(async()=>{requireCloud();const ctx=context(),errors=[],ids=[...new Set(shotIds)];try{for(const [index,id] of ids.entries()){guard(ctx);emit({batchChecking:{projectId:ctx.projectId,shotId:id,completed:index,total:ids.length}});try{await prepare(id);}catch(error){guard(ctx);errors.push({id,message:error.message});emit({preflightErrors:{...state.preflightErrors,[id]:error.message}});}}guard(ctx);emit({message:`已检查 ${ids.length} 个镜头；请在完整清单核对通过、阻塞和未完成项，再明确提交。`,error:''});return errors;}finally{if(ctx.epoch===epoch&&ctx.projectId===current().project.id&&ctx.account===state.account)emit({batchChecking:null});}}),

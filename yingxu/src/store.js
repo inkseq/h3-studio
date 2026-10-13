@@ -6,7 +6,7 @@ import {locationShots} from './location-model.js';
 import {resolveCanvasPositions} from './canvas-layout.js';
 import legacySeed from './legacy-seed.json' with { type: 'json' };
 
-export const typeLabels = Object.freeze({chapter:'章节',scene:'场戏',shot:'镜头',character:'角色',location:'地点',image:'图片',audio:'音频',video:'视频',note:'笔记',generation:'生成步骤'});
+export const typeLabels = Object.freeze({chapter:'章节',scene:'场戏',shot:'镜头',character:'角色',location:'地点',prop:'道具',image:'图片',audio:'音频',video:'视频',note:'笔记',generation:'生成步骤'});
 export const roleLabels = Object.freeze({identity:'人物身份',location:'场景地点',firstFrame:'首帧图片',lastFrame:'尾帧图片',motion:'动作参考',audio:'声音参考',reference:'通用参考',dependency:'前置步骤'});
 const KEY='yingxu-studio-v4', LEGACY_KEY='yingxu-series-project-v1';
 const clone=x=>structuredClone(x);
