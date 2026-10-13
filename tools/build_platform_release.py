@@ -50,7 +50,9 @@ def build(commit, destination):
     print("Reviewable release manifest SHA-256: "+hashlib.sha256((destination / "release-manifest.json").read_bytes()).hexdigest())
 
 
-def build_migration(commit, platform_directory, destination, selections):
+def build_migration(commit, platform_directory, destination, selections, *,
+        retain_native_sources_directory=None, retain_native_sources_commit=None,
+        retain_native_sources_index_sha256=None):
     """Separate additive artifact; contains public source/config templates only.
 
     The root maintenance helper is included for review, never execution from an
@@ -65,6 +67,14 @@ def build_migration(commit, platform_directory, destination, selections):
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
     from tools.build_dstack_sources import build as build_sources
+    retained = (retain_native_sources_directory, retain_native_sources_commit,
+        retain_native_sources_index_sha256)
+    retained_bytes = None
+    if any(value is not None for value in retained):
+        if not all(value is not None for value in retained):
+            raise ValueError("Native retention requires an explicit directory, source commit and index digest")
+        from tools.native_source_retention import retain
+        retained_bytes = retain(*retained, selections, root=ROOT)
     destination = Path(destination)
     destination.mkdir(parents=False, exist_ok=False)
     image = "sixnine-dispatch:" + commit
@@ -83,14 +93,20 @@ def build_migration(commit, platform_directory, destination, selections):
             shutil.copyfileobj(process.stdout, target, 1024 * 1024)
         if process.wait() != 0:
             raise RuntimeError("Could not export the reviewed CPU dispatch image")
-    with tempfile.TemporaryDirectory(prefix="sixnine-public-migration-sources-") as temporary:
-        sources = Path(temporary) / "sources"
-        build_sources(sources, selections)
-        with tarfile.open(destination / "source-set.tar.gz", "w:gz") as archive:
-            for path in sorted(sources.rglob("*")):
-                if path.is_file() and not path.is_symlink():
-                    archive.add(path, arcname=path.relative_to(sources).as_posix(), recursive=False)
-        index_digest = hashlib.sha256((sources / "index.json").read_bytes()).hexdigest()
+    if retained_bytes is not None:
+        # Preserve all four native hashes and the original index for existing
+        # GPU receipts. The CPU source/dispatch identity above remains new.
+        (destination / "source-set.tar.gz").write_bytes(retained_bytes)
+        index_digest = retain_native_sources_index_sha256
+    else:
+        with tempfile.TemporaryDirectory(prefix="sixnine-public-migration-sources-") as temporary:
+            sources = Path(temporary) / "sources"
+            build_sources(sources, selections)
+            with tarfile.open(destination / "source-set.tar.gz", "w:gz") as archive:
+                for path in sorted(sources.rglob("*")):
+                    if path.is_file() and not path.is_symlink():
+                        archive.add(path, arcname=path.relative_to(sources).as_posix(), recursive=False)
+            index_digest = hashlib.sha256((sources / "index.json").read_bytes()).hexdigest()
     names = {*paths, "dispatch-image.tar.gz", "source-set.tar.gz"}
     checksums = {}
     for name in names:
@@ -113,11 +129,19 @@ if __name__ == "__main__":
     parser.add_argument("destination", type=Path)
     parser.add_argument("--migration-destination", type=Path)
     parser.add_argument("--migration-selection", action="append", metavar="PROFILE:MODE")
+    parser.add_argument("--retain-native-sources-directory", type=Path)
+    parser.add_argument("--retain-native-sources-commit")
+    parser.add_argument("--retain-native-sources-index-sha256")
     args = parser.parse_args()
     build(args.commit, args.destination)
     if args.migration_destination is not None:
         build_migration(args.commit, args.destination, args.migration_destination,
-            [value.rsplit(":", 1) for value in args.migration_selection or []])
-    elif args.migration_selection:
-        parser.error("--migration-selection requires --migration-destination")
+            [value.rsplit(":", 1) for value in args.migration_selection or []],
+            retain_native_sources_directory=args.retain_native_sources_directory,
+            retain_native_sources_commit=args.retain_native_sources_commit,
+            retain_native_sources_index_sha256=args.retain_native_sources_index_sha256)
+    elif args.migration_selection or any(value is not None for value in (
+            args.retain_native_sources_directory, args.retain_native_sources_commit,
+            args.retain_native_sources_index_sha256)):
+        parser.error("Migration selections and native retention require --migration-destination")
     print("CPU platform bundle created; no deployment or cloud changes performed")

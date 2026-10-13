@@ -33,6 +33,7 @@ OBSERVATION_KEYS = {"run_id", "run_name", "state", "ready", "reason_code", "obse
     "provider_instance_id", "runtime_incarnation", "dstack_status", "model_load_state",
     "billing_state", "estimated_cost_microusd", "bootstrap_phase", "preparation"}
 IDENTITY_KEYS = {"run_id", "provider_instance_id", "runtime_incarnation"}
+REGISTRATION_REASON_CODES = frozenset({"global_capacity_exceeded"})
 
 
 def _actor(tenant, owner):
@@ -297,6 +298,35 @@ class LedgerDstackStore:
                 and _window_open(intent, node, self.repo.clock()))
             binding["broker_observation"]=value
             self._save(connection,node,payload)
+
+    def record_registration(self, intent_id, worker_id, reason_code=None):
+        """Safe control-plane outcome, separate from native/runtime readiness.
+
+        A registration receipt cannot settle bills, confirm provider removal,
+        mark a model ready or make a worker transport eligible.
+        """
+        require(safe_id(worker_id) and (reason_code is None or reason_code in REGISTRATION_REASON_CODES),
+            "dstack_registration_observation_invalid")
+        with self.repo.transaction() as connection:
+            self.repo._lock_capacity(connection)
+            node, intent = self._node(connection, intent_id)
+            payload = copy.deepcopy(node["payload"])
+            if reason_code is None:
+                worker = connection.execute(select(registered_workers).where(
+                    registered_workers.c.id == worker_id)).mappings().one_or_none()
+                require(worker is not None and worker["provider"] == intent["provider"]
+                    and worker["instance_id"] == intent["provider_instance_id"]
+                    and worker["spec"].get("dispatch_backend") == "hatchet-v1"
+                    and worker["spec"].get("engine_manifest_digest") == payload["dstack"]["manifest_digest"]
+                    and worker["spec"].get("configuration_id") == payload["dstack"]["configuration_id"],
+                    "dstack_registration_binding_invalid")
+            previous = payload["dstack"].get("registration_observation", {})
+            observation = {"worker_id": worker_id, "reason_code": reason_code,
+                "registered": reason_code is None, "observed_at": self.repo.clock()}
+            payload["dstack"]["registration_observation"] = observation
+            self._save(connection, node, payload)
+            if any(previous.get(key) != observation[key] for key in ("worker_id", "reason_code", "registered")):
+                self._receipt(connection, intent_id, "registration", observation)
 
     def begin_stop(self, intent_id, run_id, *, retry=False):
         with self.repo.transaction() as connection:
@@ -664,6 +694,99 @@ class DstackOperator:
         require(usage["hourly_cost_microusd"] + hourly <= self.policy["max_hourly_cost_microusd"], "dstack_hourly_limit_exceeded")
         return usage
 
+    def registration_capacity_usage(self, connection, spec):
+        """Overlay proven dstack inactivity on ALL original global resources.
+
+        WorkerControl holds the original capacity lock while this read runs.
+        Terminal owned runs plus complete, fresh same-account absence are the
+        existing live_capacity_usage evidence; they are NOT destruction or
+        settlement. Missing identity, legacy intents and unreleased physical
+        devices keep counting. No row, reservation or provider is mutated.
+        """
+        nodes = [dict(node) for node in connection.execute(select(operator_nodes)).mappings()
+            if node["payload"].get("capacity_backend") == BACKEND_MARKER]
+        intents = {row["id"]: dict(row) for row in connection.execute(select(instance_intents)).mappings()}
+        matching = [node for node in nodes if
+            (intent := intents.get(node["intent_id"])) is not None
+            and intent["provider"] == spec.provider and intent["provider_instance_id"] == spec.instance_id
+            and intent["pool"] == spec.pool and node["payload"].get("tenant_id") == self.settings.tenant_id
+            and node["desired_state"] == "running"
+            and intent["state"] in {"starting", "ready", "busy"}]
+        require(len(matching) == 1 and spec.backend == "wangp-worker" and spec.dispatch_backend == "hatchet-v1",
+            "dstack_registration_binding_invalid")
+        binding = matching[0]["payload"]["dstack"]
+        require(binding.get("provider_instance_id") == spec.instance_id
+            and PROVIDERS.get(binding.get("backend")) == spec.provider
+            and binding.get("model_id") == spec.model_id
+            and binding.get("configuration_id") == spec.configuration_id
+            and binding.get("manifest_digest") == spec.engine_manifest_digest
+            and spec.recipe_ids == ({"fl": ("h3-base-fl2va-v1",), "ref": ("h3-base-ref2va-v1",)}.get(binding.get("mode")))
+            and len(spec.physical_gpu_ids) == 1,
+            "dstack_registration_binding_invalid")
+        # Retain only this call's exact read in memory. The existing helper
+        # owns immutable-run/identity validation and account absence; its
+        # conservative count of one is not proof of a one-GPU allocation.
+        observed_runs = {}
+        client = self.capacity.client
+        class ObservedClient:
+            project = client.project
+
+            def get(self, **identity):
+                run = client.get(**identity)
+                observed_runs[(identity.get("run_id"), identity.get("run_name"))] = run
+                return run
+        usage = live_capacity_usage(ObservedClient(), nodes, provider_inventory=self.provider_inventory,
+            clock=self.repo.clock, fresh_seconds=self.policy["observation_fresh_seconds"])
+        current = next(observation for observation in usage["observations"]
+            if observation["intent_id"] == matching[0]["intent_id"])
+        require(current["counted"] and current["dstack_status"] == "running"
+            and current["reason_code"] == "dstack_capacity_active",
+            "dstack_registration_run_unconfirmed")
+        resource_key = binding["backend"] + ":" + spec.instance_id
+        run = observed_runs.get((binding["run_id"], None)) if binding.get("run_id") else observed_runs.get((None, binding["run_name"]))
+        gpus = run["latest_job_submission"]["job_provisioning_data"]["instance_type"]["resources"].get("gpus")
+        require(isinstance(gpus, list) and len(gpus) == 1 and usage["resources"].get(resource_key) == 1,
+            "dstack_registration_allocation_unconfirmed")
+        by_id = {node["intent_id"]: node for node in nodes}
+        excluded = set()
+        for observation in usage["observations"]:
+            if observation["counted"]:
+                continue
+            node, intent = by_id[observation["intent_id"]], intents.get(observation["intent_id"])
+            original = node["payload"]["dstack"]
+            if intent is None or PROVIDERS.get(original.get("backend")) != intent["provider"]:
+                continue
+            if (observation["reason_code"] == "dstack_terminal_provider_absent"
+                    and intent["provider_instance_id"] is not None
+                    and original.get("provider_instance_id") == intent["provider_instance_id"]):
+                excluded.add(intent["id"])
+            elif (observation["reason_code"] == "dstack_never_applied"
+                    and intent["state"] == "destroyed"):
+                excluded.add(intent["id"])
+        resources = {}
+        for intent in intents.values():
+            if intent["state"] == "destroyed" or intent["id"] in excluded or manually_reviewed_inactive(connection, intent):
+                continue
+            key = (intent["provider"], intent["provider_instance_id"] or "intent:" + intent["id"])
+            resources[key] = resources.get(key, 0) + intent["physical_gpus"]
+        device_counts = {}
+        for device in connection.execute(select(registered_devices).where(
+                registered_devices.c.state != "released", registered_devices.c.provider != "mock")).mappings():
+            key = (device["provider"], device["instance_id"])
+            device_counts[key] = device_counts.get(key, 0) + 1
+        for key, count in device_counts.items():
+            resources[key] = max(resources.get(key, 0), count)
+        # Positive live allocations may exceed the original intent's requested
+        # count. Retain them globally even when a different node is registering;
+        # unknown intent-key fallbacks never replace original ledger identities.
+        for resource_key, count in usage["resources"].items():
+            for backend, provider in PROVIDERS.items():
+                if resource_key.startswith(backend + ":"):
+                    key = (provider, resource_key[len(backend) + 1:])
+                    resources[key] = max(resources.get(key, 0), count)
+                    break
+        return {"resources": resources, "instances": len(resources), "physical_gpus": sum(resources.values())}
+
     def start(self, principal, body, key):
         owner = self.authorize(principal)
         require(isinstance(body, dict) and set(body) == {"preview_id"} and safe_id(body["preview_id"]),
@@ -790,8 +913,13 @@ class DstackOperator:
                         deployment_profile_id=payload["selection"]["runtime_profile_id"], expected_runtime_s=expected) is None]
                 ready = bool(native_ready and eligible)
                 dispatch_reason = None
+                registration = binding.get("registration_observation", {})
+                registration_time = registration.get("observed_at")
+                registration_reason = (registration.get("reason_code") if
+                    _finite(registration_time) and 0 <= now-registration_time <= self.policy.get("observation_fresh_seconds", 30)
+                    and registration.get("reason_code") in REGISTRATION_REASON_CODES else None)
                 if native_ready and not ready:
-                    dispatch_reason = next((reason for worker in workers if
+                    dispatch_reason = registration_reason or next((reason for worker in workers if
                         (reason := worker_window_reason(connection,worker,now,
                             deployment_profile_id=payload["selection"]["runtime_profile_id"], expected_runtime_s=expected))),
                         "matching_worker_unavailable")
@@ -804,7 +932,8 @@ class DstackOperator:
                     **({"lifecycle": copy.deepcopy(payload["lifecycle"])} if "lifecycle" in payload else {}),
                     "billing_state": binding.get("billing_state", "unsettled"),
                     "reason_code": payload.get("stop_reason_code") or binding.get("reason_code") or dispatch_reason,
-                    "dispatch_reason_code": dispatch_reason, "version": node["updated_at"]})
+                    "dispatch_reason_code": dispatch_reason,
+                    "registration_reason_code": registration_reason, "version": node["updated_at"]})
         return {"capacity_backend": BACKEND_MARKER, "enabled": self.policy.get("enabled") is True,
             "operator": {"account": owner},
             "nodes": result, "summary": {"ready": sum(node["ready"] for node in result),

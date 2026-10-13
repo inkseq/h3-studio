@@ -27,6 +27,18 @@ on:
         description: Resume an existing SSM command without resubmission (one approved deployment only)
         type: string
         default: ''
+      retain_native_sources_run:
+        description: Optional exact successful main preparation run whose unchanged native source bytes must be retained
+        type: string
+        default: ''
+      retain_native_sources_commit:
+        description: Full source commit of that explicitly selected prior preparation run
+        type: string
+        default: ''
+      retain_native_sources_index_sha256:
+        description: Exact prior native source index digest; all three retention inputs are required together
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -231,6 +243,9 @@ jobs:
     if: needs.changes.outputs.containers == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -308,13 +323,42 @@ jobs:
             --tmpfs /tmp:size=134217728,mode=1777 --memory 1g --cpus 2 \
             "sixnine-dispatch:$GITHUB_SHA" python -c \
             'import studio_platform.hatchet_dispatch, studio_platform.dstack_controller, studio_platform.dstack_factory, studio_platform.telemetry; import importlib.metadata as m; assert m.version("hatchet-sdk")=="1.42.1"; assert m.version("opentelemetry-sdk")=="1.45.0"'
+      - name: Verify explicitly selected prior native source preparation
+        if: needs.changes.outputs.action == 'prepare-platform' && inputs.retain_native_sources_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RETAIN_RUN: ${{ inputs.retain_native_sources_run }}
+          RETAIN_COMMIT: ${{ inputs.retain_native_sources_commit }}
+          RETAIN_INDEX: ${{ inputs.retain_native_sources_index_sha256 }}
+        run: |
+          gh api "repos/inkseq/h3-studio/actions/runs/$RETAIN_RUN" > retained-run.json
+          gh api "repos/inkseq/h3-studio/actions/runs/$RETAIN_RUN/artifacts?per_page=100" > retained-artifacts.json
+          python tools/native_source_retention.py --run-json retained-run.json --artifacts-json retained-artifacts.json \
+            --run "$RETAIN_RUN" --commit "$RETAIN_COMMIT" --index-sha256 "$RETAIN_INDEX"
+      - name: Download only that verified prior migration artifact
+        if: needs.changes.outputs.action == 'prepare-platform' && inputs.retain_native_sources_run != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: sixnine-migration-${{ inputs.retain_native_sources_commit }}
+          run-id: ${{ inputs.retain_native_sources_run }}
+          github-token: ${{ github.token }}
+          path: retained-migration
       - name: Package platform candidate (publication waits for every required gate)
         if: needs.changes.outputs.action == 'prepare-platform' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        env:
+          RETAIN_RUN: ${{ inputs.retain_native_sources_run }}
+          RETAIN_COMMIT: ${{ inputs.retain_native_sources_commit }}
+          RETAIN_INDEX: ${{ inputs.retain_native_sources_index_sha256 }}
         run: |
+          retained_args=()
+          if [ -n "$RETAIN_RUN" ]; then
+            retained_args=(--retain-native-sources-directory retained-migration \
+              --retain-native-sources-commit "$RETAIN_COMMIT" --retain-native-sources-index-sha256 "$RETAIN_INDEX")
+          fi
           python tools/build_platform_release.py "$GITHUB_SHA" platform-release \
             --migration-destination migration-release \
             --migration-selection h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3:fl \
-            --migration-selection h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3:ref
+            --migration-selection h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3:ref "${retained_args[@]}"
           python tools/check_platform_bundle.py "$GITHUB_SHA" platform-release
       - uses: actions/upload-artifact@v4
         if: needs.changes.outputs.action == 'prepare-platform' || (github.event_name == 'push' && github.ref == 'refs/heads/main')

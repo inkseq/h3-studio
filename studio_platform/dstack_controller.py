@@ -35,7 +35,7 @@ class DstackController:
         self.service, self.repo, self.runtime = service, service.repo, runtime
         self.capacity = service.capacity
         self.capacity.readiness = runtime.readiness
-        self.control = WorkerControl(self.repo)
+        self.control = WorkerControl(self.repo, capacity_usage=service.registration_capacity_usage)
         self.worker_process = worker_process
         self.broker_readiness = broker_readiness
 
@@ -183,7 +183,13 @@ class DstackController:
             return {"node_id": intent_id, "state": "draining"}
         if binding.get("state") == "ready" and fresh:
             slot = self.runtime.slot(intent_id)
-            registered = self.control.register(slot.spec)
+            try:
+                registered = self.control.register(slot.spec)
+            except BudgetExceeded as error:
+                if error.args == ("global_capacity_exceeded",):
+                    self.capacity.store.record_registration(intent_id, slot.spec.worker_id, "global_capacity_exceeded")
+                raise
+            self.capacity.store.record_registration(intent_id, slot.spec.worker_id)
             if registered["state"] != "ready" and not registered["current_job_id"] and not registered["drain_requested"]:
                 self.control.mark_ready(slot.spec.worker_id, upstream_idle_confirmed=True)
             if self.worker_process:
@@ -217,8 +223,10 @@ class DstackController:
                         self.runtime.close(node["intent_id"])
                     continue
                 results.append(self._tick_node(node))
-            except Exception:
-                results.append({"node_id": node["intent_id"], "state": "reconciliation_required", "code": "dstack_controller_observation_failed"})
+            except Exception as error:
+                code = ("global_capacity_exceeded" if isinstance(error, BudgetExceeded)
+                    and error.args == ("global_capacity_exceeded",) else "dstack_controller_observation_failed")
+                results.append({"node_id": node["intent_id"], "state": "reconciliation_required", "code": code})
         return {"state": "running", "nodes": results}
 
 

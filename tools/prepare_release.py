@@ -13,6 +13,7 @@ import time
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from tools.ci_changes import DOCUMENTS
+from tools.native_source_retention import INPUTS as RETENTION_INPUTS, binding as retention_binding
 REPO, WORKFLOW = 'inkseq/h3-studio', '.github/workflows/ci.yml'
 API = f'repos/{REPO}/actions/workflows/ci.yml'
 SHA = re.compile(r'[0-9a-f]{40}')
@@ -88,9 +89,14 @@ def runs(root, wid, commit, event):
         require(page <= 11, 'Run inventory incomplete')
 
 
-def prepare(kind, commit=None, *, root=ROOT, sleep=time.sleep):
+def prepare(kind, commit=None, *, root=ROOT, sleep=time.sleep, retain_native_sources=None):
     root = Path(root).resolve()
     require(kind in ('platform', 'frontend') and (commit is None or SHA.fullmatch(commit)), 'Invalid kind or exact commit')
+    try:
+        retained = retention_binding(retain_native_sources or {})
+    except ValueError:
+        raise RuntimeError('Invalid explicit native source retention binding') from None
+    require(retained is None or kind == 'platform', 'Native source retention requires platform preparation')
     commit = local(root, commit)
     store = root / '.release-prepares'
     store.mkdir(exist_ok=True)
@@ -99,6 +105,8 @@ def prepare(kind, commit=None, *, root=ROOT, sleep=time.sleep):
     require(not attempt.exists() and not attempt.is_symlink(), 'Prior intent exists: inspect .release-prepares and GitHub; do not repeat push/cancel/dispatch')
     attempt.mkdir()  # Exclusive persistent guard; a crash never permits blind retry.
     receipt = {'repository': REPO, 'workflow': WORKFLOW, 'commit': commit, 'kind': kind, 'cancelled_run_ids': []}
+    if retained is not None:
+        receipt['retain_native_sources'] = retained
     def record(phase, **fields):
         receipt.update(fields, phase=phase)
         temporary = attempt / 'receipt.next'
@@ -135,7 +143,7 @@ def prepare(kind, commit=None, *, root=ROOT, sleep=time.sleep):
     before = {row['id'] for row in runs(root, wid, commit, 'workflow_dispatch')}
     local(root, commit); remote(root, commit)
     record('dispatch_started', prior_dispatch_ids=sorted(before))
-    api(root, API + '/dispatches', {'ref': 'main', 'inputs': {'deploy': 'true', 'release_kind': kind}})
+    api(root, API + '/dispatches', {'ref': 'main', 'inputs': {'deploy': 'true', 'release_kind': kind, **(retained or {})}})
     record('dispatch_acknowledged')
     for index in range(10):  # Read-only observation, never resend the POST.
         fresh = [row for row in runs(root, wid, commit, 'workflow_dispatch') if row['id'] not in before]
@@ -154,9 +162,14 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--kind', choices=('platform', 'frontend'), required=True)
     parser.add_argument('--commit')
+    parser.add_argument('--retain-native-sources-run')
+    parser.add_argument('--retain-native-sources-commit')
+    parser.add_argument('--retain-native-sources-index-sha256')
     args = parser.parse_args(argv)
     try:
-        print(json.dumps(prepare(args.kind, args.commit), indent=2)); return 0
+        retained = dict(zip(RETENTION_INPUTS, (args.retain_native_sources_run,
+            args.retain_native_sources_commit, args.retain_native_sources_index_sha256)))
+        print(json.dumps(prepare(args.kind, args.commit, retain_native_sources=retained), indent=2)); return 0
     except RuntimeError as error:
         print(str(error), file=sys.stderr)
     except Exception:

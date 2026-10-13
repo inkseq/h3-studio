@@ -145,6 +145,10 @@ def truth(value) -> bool:
 
 
 def dispatch_action(inputs: dict, ref: str) -> str:
+    if __package__:
+        from .native_source_retention import binding
+    else:
+        from native_source_retention import binding
     prepare = truth(inputs.get("deploy"))
     kind = inputs.get("release_kind") or "platform"
     approved = inputs.get("approved_commit") or ""
@@ -162,6 +166,8 @@ def dispatch_action(inputs: dict, ref: str) -> str:
         raise ValueError("invalid_resume_command")
     if (prepare or approved or frontend) and ref != "refs/heads/main":
         raise ValueError("release_actions_require_main")
+    if binding(inputs) is not None and not (prepare and kind == "platform" and not approved and not frontend):
+        raise ValueError("native_retention_requires_platform_preparation")
     if approved:
         return "deploy-platform"
     if frontend:

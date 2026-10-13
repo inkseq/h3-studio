@@ -142,6 +142,17 @@ class ChangeClassificationTests(unittest.TestCase):
 
 
 class DispatchTests(unittest.TestCase):
+    def test_native_retention_is_explicit_platform_prepare_only(self):
+        values = {"retain_native_sources_run": "42", "retain_native_sources_commit": BASE,
+            "retain_native_sources_index_sha256": "c" * 64}
+        self.assertEqual(ci.dispatch_action(dict(values, deploy="true", release_kind="platform"), MAIN), "prepare-platform")
+        for change in ({}, {"deploy": "true", "release_kind": "frontend"}, {"approved_commit": SHA},
+                {"approved_frontend_commit": SHA}):
+            with self.subTest(change=change), self.assertRaises(ValueError): ci.dispatch_action(dict(values, **change), MAIN)
+        for key in values:
+            incomplete = dict(values, deploy="true", release_kind="platform"); incomplete.pop(key)
+            with self.subTest(missing=key), self.assertRaises(ValueError): ci.dispatch_action(incomplete, MAIN)
+
     def test_platform_preparation_is_always_full_and_not_deployment(self):
         result = ci.plan("workflow_dispatch", {"inputs": {"deploy": "true", "release_kind": "platform"}},
                          SHA, MAIN, Path("."))
