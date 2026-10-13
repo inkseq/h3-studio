@@ -6,7 +6,7 @@
       "demand-job-owner-superdan-20261004"
     ],
     "configuration_id": "sixnine-h3-base-int8-fl-20261014",
-    "cpu_count": 4,
+    "cpu_count": 12,
     "disk_gib": 350,
     "extra_reservation_microusd": 0,
     "gpu_memory_gib": 90,
@@ -32,7 +32,7 @@
       "demand-job-owner-supervan-20261004"
     ],
     "configuration_id": "sixnine-h3-base-int8-fl-20261014",
-    "cpu_count": 4,
+    "cpu_count": 12,
     "disk_gib": 350,
     "extra_reservation_microusd": 0,
     "gpu_memory_gib": 90,
