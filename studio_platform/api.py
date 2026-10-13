@@ -253,6 +253,7 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
         principal = request.state.principal
         return {"username": principal.owner, "actor_id": principal.actor_id, "machine": principal.machine,
                 "authentication": settings.auth_mode, "scopes": list(principal.scopes),
+                "features": {"storyboard_workspace": not principal.machine and principal.owner in settings.storyboard_owners},
                 "operator_capacity": {name: not principal.machine and principal.owner in settings.operator_capacity_owners
                     for name in ("view", "start", "drain", "stop", "update_policy")} | {
                     "admin": not principal.machine and principal.owner in settings.operator_admin_owners},

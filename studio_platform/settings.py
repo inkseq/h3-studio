@@ -65,6 +65,7 @@ class Settings:
     default_deployment_profile_id: str | None = None
     operator_capacity_owners: tuple[str, ...] = ()
     operator_admin_owners: tuple[str, ...] = ()
+    storyboard_owners: tuple[str, ...] = ()
     stage_query_config_file: Path | None = None
     render_enabled: bool = False
     recovery_backends: tuple[str, ...] = ()
@@ -107,6 +108,11 @@ class Settings:
                 or any(not isinstance(v, str) or v not in self.operator_capacity_owners
                        for v in self.operator_admin_owners)):
             raise ValueError("Operator administrators must be an explicit subset of capacity accounts")
+        from .auth import USERS
+        if (not isinstance(self.storyboard_owners, tuple)
+                or any(not isinstance(v, str) or v not in USERS for v in self.storyboard_owners)
+                or len(set(self.storyboard_owners)) != len(self.storyboard_owners)):
+            raise ValueError("Storyboard identities must be explicit existing accounts")
         if not self.database_url:
             object.__setattr__(self, "database_url", "sqlite:///" + (self.data_dir / "platform.sqlite3").as_posix())
         if self.auth_mode not in {"password", "local-test"}:
@@ -167,6 +173,7 @@ class Settings:
             default_deployment_profile_id=os.environ.get("SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID") or None,
             operator_capacity_owners=tuple(x.strip() for x in os.environ.get("SIXNINE_OPERATOR_CAPACITY_OWNERS", "").split(",") if x.strip()),
             operator_admin_owners=tuple(x.strip() for x in os.environ.get("SIXNINE_OPERATOR_ADMIN_OWNERS", "").split(",") if x.strip()),
+            storyboard_owners=tuple(x.strip() for x in os.environ.get("SIXNINE_STORYBOARD_OWNERS", "").split(",") if x.strip()),
             stage_query_config_file=Path(os.environ["SIXNINE_STAGE_QUERY_CONFIG_FILE"]) if os.environ.get("SIXNINE_STAGE_QUERY_CONFIG_FILE") else None,
             render_enabled=os.environ.get("SIXNINE_RENDER_ENABLED", "0") == "1",
             recovery_backends=tuple(x.strip() for x in os.environ.get("SIXNINE_RECOVERY_BACKENDS", "").split(",") if x.strip()),

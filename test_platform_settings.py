@@ -55,6 +55,23 @@ class SettingsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "explicit subset"):
             Settings.from_environment()
 
+    def test_storyboard_flag_is_default_off_and_separate_from_operator_privilege(self):
+        self.assertEqual(Settings.from_environment().storyboard_owners, ())
+        os.environ["SIXNINE_STORYBOARD_OWNERS"] = " superdan, supervan "
+        settings = Settings.from_environment()
+        self.assertEqual(settings.storyboard_owners, ("superdan", "supervan"))
+        self.assertEqual(settings.operator_capacity_owners, ())
+        self.assertEqual(settings.operator_admin_owners, ())
+        for value in ("unknown", "superdan,superdan"):
+            with self.subTest(value=value):
+                os.environ["SIXNINE_STORYBOARD_OWNERS"] = value
+                with self.assertRaisesRegex(ValueError, "explicit existing"):
+                    Settings.from_environment()
+        for value in (["superdan"], ([],), (True,)):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "explicit existing"):
+                    Settings(self.path.parent, storyboard_owners=value)
+
     def test_invalid_files_reject_without_content_in_error(self):
         for raw in (b"", b"x"*16385, b"postgresql://fake:synthetic-secret@host/db\nother", b"\xff", b" sqlite:///fake", b"sqlite:///fake\x00"):
             with self.subTest(size=len(raw)):
