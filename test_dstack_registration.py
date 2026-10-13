@@ -270,4 +270,3 @@ class RegistrationCapacityTests(LedgerCase):
                 self.assertNotIn("PRIVATE", str(result))
         with self.assertRaises(fixture.OperatorError):
             self.store.record_registration(node, "known-worker", "PRIVATE-SECRET")
-
