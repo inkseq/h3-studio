@@ -118,7 +118,7 @@ class QuickChatSeedDomainTests(LedgerCase):
         for recipe in catalog["recipes"]:
             self.assertEqual(recipe["controls"]["seed"]["maximum_decimal"], str(MAX_SEED))
         for profile in catalog["deployment_profiles"]:
-            for mode in ("fl", "ref"):
+            for mode in profile["generation_support"]:
                 controls = profile["generation_support"][mode]["controls"]
                 self.assertEqual(controls["seed"]["maximum_decimal"], str(MAX_SEED))
 

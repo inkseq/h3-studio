@@ -22,6 +22,7 @@ EXPECTED_PROFILE_IDS = (
     'h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-v2',
     'h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3',
     'h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-cgroups-v4',
+    'h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2',
 )
 
 
@@ -52,8 +53,9 @@ class RuntimeImagePackagingTests(unittest.TestCase):
             shutil.copyfile(ROOT/'comfy_workflow.py', image/'comfy_workflow.py')
             # Source construction is an offline build operation outside the
             # staged image; the image receives only its protected four inputs.
-            profile_id = EXPECTED_PROFILE_IDS[-1]
-            build(root/'sources', [(profile_id, 'fl'), (profile_id, 'ref')])
+            profile_id = EXPECTED_PROFILE_IDS[6]
+            base_fl = EXPECTED_PROFILE_IDS[7]
+            build(root/'sources', [(profile_id, 'fl'), (profile_id, 'ref'), (base_fl, 'fl')])
             for name, content in (('ssh-key', 'private test fixture'),
                                   ('broker.json', '{"token":"test fixture"}')):
                 path = root/name
@@ -80,14 +82,13 @@ class NoBuildTools:
 sys.meta_path.insert(0,NoBuildTools())
 from studio_platform.dstack_factory import RuntimeFactory
 factory=RuntimeFactory(None,None,sys.argv[2])
-assert {profile for profile,_ in factory.sources}=={sys.argv[3]}
-assert {mode for _,mode in factory.sources}=={'fl','ref'}
+assert set(factory.sources)=={(sys.argv[3],'fl'),(sys.argv[3],'ref'),(sys.argv[4],'fl')}
 assert not factory.work_dir.exists()
 print(json.dumps({'sources':len(factory.sources),'modes':sorted(mode for _,mode in factory.sources)}))
 """
-            result = subprocess.run([sys.executable, '-I', '-c', script, str(image), str(config_path), profile_id],
+            result = subprocess.run([sys.executable, '-I', '-c', script, str(image), str(config_path), profile_id, base_fl],
                                     capture_output=True, text=True, check=True, timeout=30, cwd=image)
-            self.assertEqual(json.loads(result.stdout), {'sources': 2, 'modes': ['fl', 'ref']})
+            self.assertEqual(json.loads(result.stdout), {'sources': 3, 'modes': ['fl', 'fl', 'ref']})
 
     def test_profile_metadata_is_explicit_image_input_and_runtime_fingerprint(self):
         dockerfile = (ROOT/'Dockerfile.platform').read_text()
@@ -132,13 +133,13 @@ for profile in catalog['profiles']:
                 assert measurement['evidence']=='https://github.com/apedintensor/h3-studio/issues/86#issuecomment-6083341543'
             else:
                 assert measurement['evidence'].startswith('https://github.com/apedintensor/h3-studio/blob/')
-    for mode in ('fl','ref'):
+    for mode in (model['mode'] for model in profile['models']):
         assert engine_manifest(profile['id'],mode).document['production_adapter_verified'] is False
-print(json.dumps({'profiles':len(catalog['profiles']),'manifests':len(PROFILE_IDS)*2}))
+print(json.dumps({'profiles':len(catalog['profiles']),'manifests':sum(len(profile['models']) for profile in catalog['profiles'])}))
 """
             result = subprocess.run([sys.executable,'-I','-S','-c',script,str(image),json.dumps(EXPECTED_PROFILE_IDS)],
                                     capture_output=True,text=True,check=True,timeout=20,cwd=image)
-            self.assertEqual(json.loads(result.stdout), {'profiles':7, 'manifests':14})
+            self.assertEqual(json.loads(result.stdout), {'profiles':8, 'manifests':15})
 
 
 if __name__ == '__main__':

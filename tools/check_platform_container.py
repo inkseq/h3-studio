@@ -187,7 +187,7 @@ def main():
             assert profile['validation']['scope'] == 'pending_hardware_qualification'
             assert profile.get('qualification_cases')
             assert all('measurements' not in case for case in profile['qualification_cases'])
-        for mode in ('fl', 'ref'):
+        for mode in (model['mode'] for model in profile['models']):
             assert engine_manifest(profile['id'], mode).document['production_adapter_verified'] is False
     assert os.getuid() == 10001, "Production image must run unprivileged"
     root = Path("/data")

@@ -159,8 +159,8 @@ assert Path(comfy_workflow.__file__).resolve().is_relative_to(root)
 from studio_platform.h3_profile_support import MAX_STEPS
 assert MAX_STEPS==100
 for identity in PROFILE_IDS:
-    for mode in ('fl','ref'):
-        profile=get_profile(identity)
+    profile=get_profile(identity)
+    for mode in (model['mode'] for model in profile['models']):
         inputs={'first_frame':'a','last_frame':'b'} if mode=='fl' else {'images':['a','b']}
         request={'model':profile['model_id'],'mode':mode,'prompt':'Synthetic offline fixture','steps':MAX_STEPS,
             'duration':5,'resolution':'480P','seed':'42','inputs':inputs}

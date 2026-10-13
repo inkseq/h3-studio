@@ -105,6 +105,27 @@ class DownloadTests(unittest.TestCase):
             sdk.assert_not_called()
             self.assertEqual(manifest.document,original)
 
+    def test_new_base_fl_locator_preserves_exact_selected_content_and_old_base_transport(self):
+        from studio_platform.runtime_catalog import engine_manifest, PROFILE_IDS
+        manifest = engine_manifest(PROFILE_IDS[7], 'fl')
+        records = fetch.selected_files(manifest.document, manifest.digest)
+        self.assertEqual(fetch._content_preserving_revision(manifest.document, manifest.digest, records),
+                         '8d9093438ffb3e33d6a058cc20fa3b7ca31f5752')
+        self.assertEqual(len(records), 10)
+        self.assertEqual(sum(row[4] for row in records), 92058859491)
+        old = engine_manifest(PROFILE_IDS[1], 'fl')
+        self.assertIsNone(fetch._content_preserving_revision(old.document, old.digest,
+                                                            fetch.selected_files(old.document, old.digest)))
+        sdk = Mock()
+        for field in ('size_bytes', 'sha256', 'path'):
+            document = copy.deepcopy(manifest.document)
+            transformer = document['components']['transformer']['files'][0]
+            transformer[field] = transformer[field] + 1 if field == 'size_bytes' else '0' * 64
+            changed = EngineManifest.from_dict(document).digest
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, 'model_download_locator_invalid'):
+                fetch.fetch_files(document, changed, self.models, self.progress, downloader=sdk)
+        sdk.assert_not_called()
+
     def test_v3_changed_content_or_revision_refuses_before_sdk(self):
         from studio_platform.runtime_catalog import engine_manifest
         manifest = engine_manifest("h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3", "ref")

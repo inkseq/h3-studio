@@ -92,6 +92,33 @@ class FactoryTests(LedgerCase):
             build(self.root / "invalid", [(PROFILE, "unsupported")])
         self.assertFalse((self.root / "invalid").exists())
 
+    def test_base_single_gpu_fl_source_has_one_slot_and_rejects_ref_before_output(self):
+        candidate = PROFILE_IDS[7]
+        directory = self.root / 'sources-base-single-fl'
+        receipt = build(directory, [(candidate, 'fl')])
+        self.assertEqual(len(receipt['sources']), 1)
+        entry = receipt['sources'][0]
+        self.assertEqual((entry['runtime_profile_id'], entry['mode'], entry['gpu_count'],
+                          entry['profile_slot_index']), (candidate, 'fl', 1, 0))
+        self.assertEqual(entry['engine_manifest_digest'], engine_manifest(candidate, 'fl').digest)
+        source = directory / entry['directory']
+        runtime = json.loads((source / 'wangp-runtime.json').read_text())
+        self.assertEqual((runtime['expected_host_gpus'], runtime['profile_slot_index']), (1, 0))
+        with tarfile.open(source / 'wangp-package.tar.gz') as archive:
+            packaged = json.load(archive.extractfile('deploy/wangp/profiles/' + candidate + '.json'))
+            self.assertEqual(packaged['gpu_count_options'], [1])
+            self.assertEqual({model['mode'] for model in packaged['models']}, {'fl'})
+            session = archive.extractfile('studio_platform/runtime_hosts/wangp_session.py').read()
+            self.assertIn(b'effective-total-and-available-v1', session)
+            self.assertIn(b'hierarchical_memory_limit', session)
+            download = archive.extractfile('studio_platform/runtime_hosts/wangp_download.py').read()
+            self.assertIn(candidate.encode(), download)
+        invalid = self.root / 'no-ref-output'
+        with self.assertRaisesRegex(ValueError, 'profile_mode_unsupported'):
+            build(invalid, [(candidate, 'fl'), (candidate, 'ref')])
+        self.assertFalse(invalid.exists())
+        self.assertEqual(self.client.applied, [])
+
     def test_29gib_sources_package_and_bind_both_independent_modes(self):
         revised = PROFILE_IDS[4]
         directory = self.root / 'sources-29gib'

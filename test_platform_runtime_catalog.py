@@ -17,6 +17,62 @@ TARGON_EVIDENCE = 'https://github.com/apedintensor/h3-studio/issues/86#issuecomm
 
 
 class RuntimeCatalogTests(unittest.TestCase):
+    def test_base_single_gpu_fl_preserves_selected_weights_and_old_base_identity(self):
+        from studio_platform.runtime_catalog import weights_manifest
+        original, candidate = get_profile(PROFILE_IDS[1]), get_profile(PROFILE_IDS[7])
+        self.assertEqual(engine_manifest(PROFILE_IDS[1], 'fl').digest,
+            'edd56bd3cdfc745fd5b91826ce8dc10bd56b339819803a49f373eaa801096d2a')
+        self.assertEqual(weights_manifest(PROFILE_IDS[7], 'fl'), weights_manifest(PROFILE_IDS[1], 'fl'))
+        expected_runtime = original['runtime'].copy()
+        expected_runtime.update(ram_admission_metric='effective-total-and-available-v1',
+                                minimum_total_ram_bytes=144 * 2**30)
+        self.assertEqual(candidate['runtime'], expected_runtime)
+        self.assertEqual(candidate['gpu_count_options'], [1])
+        self.assertEqual(candidate['minimum_ram_bytes'], 144 * 2**30)
+        self.assertEqual(candidate['minimum_free_vram_bytes'], original['minimum_free_vram_bytes'])
+        self.assertEqual(candidate['minimum_disk_bytes'], original['minimum_disk_bytes'])
+        self.assertEqual(candidate['hardware_admission']['minimum_total_vram_bytes'], 90 * 2**30)
+        self.assertEqual(candidate['verified_cases'], [])
+        self.assertTrue(candidate['qualification_cases'])
+        self.assertTrue(all(case['mode'] == 'fl' and 'measurements' not in case
+                            for case in candidate['qualification_cases']))
+        manifest = engine_manifest(PROFILE_IDS[7], 'fl')
+        self.assertEqual(manifest.digest, 'a50aff06326dcb51dcd74bef968fb452a2d2804e07489d032a460bac4a11dc2d')
+        self.assertEqual(validate_manifest(manifest)['id'], PROFILE_IDS[7])
+        self.assertFalse(manifest.document['inference_qualified'])
+        with self.assertRaisesRegex(ValueError, 'profile_mode_unsupported'):
+            engine_manifest(PROFILE_IDS[7], 'ref')
+
+    def test_base_single_gpu_requires_both_effective_capacity_and_available_headroom(self):
+        candidate = get_profile(PROFILE_IDS[7])
+        total, available, free = 144 * 2**30, 128 * 2**30, candidate['minimum_free_vram_bytes']
+        for allocation, headroom, vram, allowed in (
+                (total, available, free, True),
+                (total - 1, available + 10 * 2**30, free, False),
+                (total + 10 * 2**30, available - 1, free, False),
+                (total, 0, free, False),  # Hidden ancestor headroom must not be credited.
+                (total, available, free - 1, False)):
+            torch = SimpleNamespace(cuda=SimpleNamespace(mem_get_info=lambda _: (vram, 96 * 2**30)))
+            output = io.StringIO()
+            with self.subTest(allocation=allocation, headroom=headroom, vram=vram), \
+                    patch('studio_platform.runtime_hosts.wangp_session._available_profile_ram', return_value=headroom), \
+                    patch('studio_platform.runtime_hosts.wangp_session._effective_total_profile_ram', return_value=allocation), \
+                    redirect_stdout(output):
+                if allowed:
+                    _profile_memory_admission(torch, candidate)
+                else:
+                    with self.assertRaisesRegex(ValueError, 'memory_headroom_insufficient'):
+                        _profile_memory_admission(torch, candidate)
+            observed = json.loads(output.getvalue())
+            self.assertEqual(observed['minimum_total_ram_bytes'], total)
+            self.assertEqual(observed['minimum_available_ram_bytes'], available)
+            self.assertEqual(observed['available_ram_bytes'], headroom)
+        candidate['runtime']['minimum_available_ram_bytes'] = True
+        with patch('studio_platform.runtime_hosts.wangp_session._available_profile_ram', return_value=available), \
+                patch('studio_platform.runtime_hosts.wangp_session._effective_total_profile_ram', return_value=total):
+            with self.assertRaisesRegex(ValueError, 'available_ram_unconfirmed'):
+                _profile_memory_admission(torch, candidate)
+
     def test_cgroup_revision_changes_identity_without_changing_model_or_limits(self):
         previous, revised = get_profile(PROFILE_IDS[5]), get_profile(PROFILE_IDS[6])
         for value in (previous,revised):
@@ -127,11 +183,12 @@ class RuntimeCatalogTests(unittest.TestCase):
 
     def test_catalog_is_detached_public_and_unqualified(self):
         catalog = public_catalog()
-        self.assertEqual(len(catalog['profiles']), 7)
+        self.assertEqual(len(catalog['profiles']), 8)
         for profile in catalog['profiles']:
             self.assertNotIn('runtime', profile)
             self.assertIs(profile['validation']['production_adapter_verified'], False)
-            self.assertEqual({v['mode'] for v in profile['models']}, {'fl', 'ref'})
+            self.assertEqual({v['mode'] for v in profile['models']},
+                             {'fl'} if profile['id'] == PROFILE_IDS[7] else {'fl', 'ref'})
         catalog['profiles'][0]['components'].clear()
         self.assertTrue(get_profile(PROFILE_IDS[0])['components'])
         rendered = json.dumps(catalog)
@@ -160,7 +217,7 @@ class RuntimeCatalogTests(unittest.TestCase):
                         self.assertIn('/blob/ff2fa85678e77ba195380b148acc23a4c47ef347/', sample['evidence'])
 
     def test_failed_bf16_and_trimmed_reference_samples_are_excluded(self):
-        self.assertEqual([len(get_profile(p)['verified_cases']) for p in PROFILE_IDS], [8, 7, 7, 2, 0, 0, 0])
+        self.assertEqual([len(get_profile(p)['verified_cases']) for p in PROFILE_IDS], [8, 7, 7, 2, 0, 0, 0, 0])
         self.assertEqual(get_profile(PROFILE_IDS[2])['runtime']['task_config'], 'bf16,bf16')
         self.assertTrue(get_profile(PROFILE_IDS[2])['runtime']['qkv_splitting'])
         self.assertEqual(get_profile(PROFILE_IDS[0])['model_id'], 'MiniMax-H3-Pruned-Rank8-INT8')
@@ -188,7 +245,7 @@ class RuntimeCatalogTests(unittest.TestCase):
 
     def test_one_mode_manifest_binds_exact_assets_and_runtime(self):
         for profile_id in PROFILE_IDS:
-            for mode in ('fl', 'ref'):
+            for mode in (model['mode'] for model in get_profile(profile_id)['models']):
                 manifest = engine_manifest(profile_id, mode)
                 self.assertEqual(validate_manifest(manifest)['id'], profile_id)
                 files = selected_files(manifest.document, manifest.digest)
