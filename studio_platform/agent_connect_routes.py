@@ -18,15 +18,31 @@ MANIFEST_PATH = "/for-agents/connect-manifest.json"
 PUBLIC_GET_PATHS = frozenset({HELPER_PATH, MANIFEST_PATH})
 HELPER_SOURCE = Path(__file__).resolve().parent.parent / "skills" / "sixnine-yingxu" / "scripts" / "connect.py"
 MAX_BODY_BYTES = AGENT_CONNECT_BODY_BYTES
+CONNECTION_STORAGE_REQUIREMENTS = {
+    "windows-user-dpapi": "Current Windows user DPAPI and access to that user's encrypted connection store.",
+    "linux-secret-service": "Existing secret-tool and an accessible user Secret Service; no dependency is installed automatically.",
+    "macos-user-keychain": "Native Security framework and one existing default file-based user Keychain, already unlocked and accessible to this process. Reads and writes bind to that same Keychain. Authentication UI is suppressed; locked, denied or interaction-required access fails closed. Any unlock/authorization is a separate action through trusted system UI; the helper never collects a Keychain password or changes access controls.",
+}
+CONNECTION_VERIFICATION_CHECKLIST = (
+    "Inspect the helper and compare its SHA-256 with the manifest on the exact user-supplied origin; a match proves release consistency, not independent trust.",
+    "Check the applicable OS store and calling process access before exchange; no automatic dependency installation, Keychain creation or plaintext fallback.",
+    "Use the owner's explicit grant and five-minute code through the hidden prompt or stdin, never a permanent key or code in command arguments.",
+    "After connecting, use whoami to confirm the expected account and exact origin; recover a lost response only with the same saved token/verifier and connection ID.",
+    "Verify owner revocation separately without deleting drafts, accepted jobs or assets; connection does not authorize a particular paid task.",
+)
+CONNECTION_VERIFICATION_LIMITS = "These are implementation requirements and verification steps, not per-machine test results. Fake OS tests do not prove native store access or live external onboarding; actual OS access and frontend/production publication require separate evidence."
 
 
 def helper_manifest(raw=None):
     import hashlib
     raw = HELPER_SOURCE.read_bytes() if raw is None else raw
     return {"version": 1, "helper": HELPER_PATH, "sha256": hashlib.sha256(raw).hexdigest(),
-        "protocol": "client-held-pat-v1", "credential_storage": ["windows-user-dpapi", "linux-secret-service"],
+        "protocol": "client-held-pat-v1", "credential_storage": list(CONNECTION_STORAGE_REQUIREMENTS),
         "missing_storage_behavior": "stop_before_exchange", "manual_pat": "advanced_fallback",
-        "exchange": EXCHANGE_PATH, "raw_api_key_response": False, "discovery_is_authorization": False}
+        "exchange": EXCHANGE_PATH, "raw_api_key_response": False, "discovery_is_authorization": False,
+        "credential_storage_requirements": dict(CONNECTION_STORAGE_REQUIREMENTS),
+        "verification_checklist": list(CONNECTION_VERIFICATION_CHECKLIST),
+        "verification_limits": CONNECTION_VERIFICATION_LIMITS}
 
 
 def register_routes(app, *, service=None):

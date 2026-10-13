@@ -18,6 +18,7 @@ class ChangeClassificationTests(unittest.TestCase):
         self.assertEqual(result["category"], "full")
         for gate in ("python", "postgres", "frontend", "containers", "legacy"):
             self.assertTrue(result[gate], gate)
+        self.assertTrue(result["macos_helper"])
 
     def test_only_explicit_document_modifications_skip_heavy_checks(self):
         result = ci.classify([("M", "README.md"), ("M", "deploy/platform/RELEASE.zh-CN.md")])
@@ -71,7 +72,7 @@ class ChangeClassificationTests(unittest.TestCase):
         self.assertNotRegex(triggers, r"(?m)^\s*paths(?:-ignore)?:")
         aggregate = workflow.split("\n  test:\n", 1)[1].split("\n  publish-aws:\n", 1)[0]
         self.assertIn("if: always()", aggregate)
-        self.assertIn("needs: [changes, python, postgres, frontend, frontend-tools, containers]", aggregate)
+        self.assertIn("needs: [changes, python, postgres, frontend, frontend-tools, containers, macos-helper]", aggregate)
         self.assertIn("expected = 'success' if selected == 'true' else 'skipped'", aggregate)
 
     def test_only_frontend_snapshot_can_use_frontend_gates(self):
@@ -90,9 +91,27 @@ class ChangeClassificationTests(unittest.TestCase):
         self.assertTrue(result["containers"])
         self.assertFalse(result["legacy"])
         self.assertFalse(result["frontend"])
+        self.assertFalse(result["macos_helper"])
         combined = ci.classify([("M", "studio_platform/guided.py"), ("M", "yingxu/src/App.jsx")])
         self.assertTrue(combined["frontend"])
         self.assertTrue(combined["python"])
+
+    def test_native_keychain_gate_cannot_be_skipped_for_helper_or_unknown_changes(self):
+        for path in ("skills/sixnine-yingxu/scripts/connect.py", "test_agent_connect_macos_native.py",
+                     ".github/workflows/ci.yml", "new-security-code.py"):
+            self.assertTrue(ci.classify([("M", path)])["macos_helper"])
+        for changes in ([("M", "README.md")], [("M", "yingxu/src/App.jsx")],
+                        [("M", "studio_platform/guided.py")]):
+            self.assertFalse(ci.classify(changes)["macos_helper"])
+        workflow = (Path(__file__).resolve().parent / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        block = workflow.split("\n  macos-helper:\n", 1)[1].split("\n  python:\n", 1)[0]
+        self.assertIn("if: needs.changes.outputs.macos_helper == 'true'", block)
+        self.assertIn("os: [macos-15, macos-15-intel]", block)
+        self.assertIn("test_agent_connect_macos_native", block)
+        self.assertIn('sys.platform == "darwin" or sys.exit', block)
+        self.assertIn("persist-credentials: false", block)
+        self.assertNotIn("secrets.", block)
+        self.assertNotIn("pip install", block)
 
     def test_security_billing_provider_and_ci_changes_require_every_gate(self):
         for path in ("studio_platform/auth.py", "studio_platform/on_demand_scaler.py",

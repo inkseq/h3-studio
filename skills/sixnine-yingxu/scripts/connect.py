@@ -23,6 +23,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
@@ -34,6 +35,7 @@ MAX_RESPONSE_BYTES = 1024 * 1024
 ID = re.compile(r"^connection-[0-9a-f]{32}$")
 HEX = re.compile(r"^[0-9a-f]{64}$")
 CODE = re.compile(r"^sxc_[A-Za-z0-9_-]{43}$")
+_MACOS_INTERACTION_LOCK = threading.RLock()
 
 
 class HelperError(Exception):
@@ -144,15 +146,259 @@ def _dpapi(raw, *, protect):
         kernel.LocalFree(result.data)
 
 
+class _MacOSKeychain:
+    """SecItem records in one existing file-based user Keychain, without UI.
+
+    An unsigned Python CLI cannot assume data-protection Keychain entitlements.
+    The older read-only metadata APIs select/check the existing default; record
+    operations use SecItem. No Keychain is created, unlocked or reconfigured.
+    The optional borrowed reference exists only for isolated native tests.
+    """
+    @staticmethod
+    def _constant(library, name):
+        value = ctypes.c_void_p.in_dll(library, name).value
+        if not value:
+            raise HelperError("os_credential_storage_unavailable")
+        return value
+
+    @staticmethod
+    def _callbacks(library, name):
+        return ctypes.addressof(ctypes.c_byte.in_dll(library, name))
+
+    def __init__(self, *, keychain_ref=None):
+        self.keychain_ref = None
+        if sys.platform != "darwin" or os.getuid() == 0:
+            raise HelperError("os_credential_storage_unavailable")
+        try:
+            self.cf = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+            self.security = ctypes.CDLL("/System/Library/Frameworks/Security.framework/Security")
+            ref, index, status = ctypes.c_void_p, ctypes.c_long, ctypes.c_int32
+            signatures = {
+                "CFStringCreateWithBytes": ([ref, ref, index, ctypes.c_uint32, ctypes.c_ubyte], ref),
+                "CFDataCreate": ([ref, ref, index], ref),
+                "CFDictionaryCreate": ([ref, ctypes.POINTER(ref), ctypes.POINTER(ref), index, ref, ref], ref),
+                "CFArrayCreate": ([ref, ctypes.POINTER(ref), index, ref], ref),
+                "CFRelease": ([ref], None), "CFRetain": ([ref], ref),
+                "CFGetTypeID": ([ref], ctypes.c_ulong), "CFDataGetTypeID": ([], ctypes.c_ulong),
+                "CFDataGetLength": ([ref], index), "CFDataGetBytePtr": ([ref], ref),
+            }
+            for name, (args, result) in signatures.items():
+                function = getattr(self.cf, name)
+                function.argtypes, function.restype = args, result
+            signatures = {
+                "SecKeychainCopyDefault": ([ctypes.POINTER(ref)], status),
+                "SecKeychainGetStatus": ([ref, ctypes.POINTER(ctypes.c_uint32)], status),
+                "SecKeychainGetUserInteractionAllowed": ([ctypes.POINTER(ctypes.c_ubyte)], status),
+                "SecKeychainSetUserInteractionAllowed": ([ctypes.c_ubyte], status),
+                "SecItemCopyMatching": ([ref, ctypes.POINTER(ref)], status),
+                "SecItemAdd": ([ref, ctypes.POINTER(ref)], status), "SecItemUpdate": ([ref, ref], status),
+            }
+            for name, (args, result) in signatures.items():
+                function = getattr(self.security, name)
+                function.argtypes, function.restype = args, result
+            names = ("kSecClass", "kSecClassGenericPassword", "kSecAttrService", "kSecAttrAccount",
+                "kSecUseAuthenticationUI", "kSecUseAuthenticationUIFail", "kSecUseKeychain",
+                "kSecMatchSearchList", "kSecMatchLimit", "kSecMatchLimitOne", "kSecReturnData", "kSecValueData")
+            self.constants = {name: self._constant(self.security, name) for name in names}
+            self.constants["kCFBooleanTrue"] = self._constant(self.cf, "kCFBooleanTrue")
+            self.key_callbacks = self._callbacks(self.cf, "kCFTypeDictionaryKeyCallBacks")
+            self.value_callbacks = self._callbacks(self.cf, "kCFTypeDictionaryValueCallBacks")
+            self.array_callbacks = self._callbacks(self.cf, "kCFTypeArrayCallBacks")
+            with self._no_ui():
+                if keychain_ref is None:
+                    result = ref()
+                    code = self.security.SecKeychainCopyDefault(ctypes.byref(result))
+                    # Copy APIs transfer ownership even if a malformed native
+                    # response also supplies a reference on failure.
+                    self.keychain_ref = result.value
+                    if code != 0 or not self.keychain_ref:
+                        raise HelperError("os_credential_storage_unavailable")
+                else:
+                    if not isinstance(keychain_ref, int) or isinstance(keychain_ref, bool) or keychain_ref <= 0:
+                        raise HelperError("os_credential_storage_unavailable")
+                    self.keychain_ref = self.cf.CFRetain(keychain_ref)
+                    if not self.keychain_ref:
+                        raise HelperError("os_credential_storage_unavailable")
+                self._available()
+        except (OSError, AttributeError, ValueError, TypeError):
+            self.close()
+            raise HelperError("os_credential_storage_unavailable") from None
+        except HelperError:
+            self.close()
+            raise
+
+    def close(self):
+        with _MACOS_INTERACTION_LOCK:
+            if self.keychain_ref:
+                self.cf.CFRelease(self.keychain_ref)
+                self.keychain_ref = None
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+
+    @contextmanager
+    def _no_ui(self):
+        # File-Keychain SecItem shims do not consistently honor the per-query
+        # UI flag. Temporarily suppress UI in this caller process as well. The
+        # original flag is restored even on denial; no persistent ACL changes.
+        with _MACOS_INTERACTION_LOCK:
+            previous = ctypes.c_ubyte()
+            if self.security.SecKeychainGetUserInteractionAllowed(ctypes.byref(previous)) != 0:
+                raise HelperError("os_credential_storage_failed")
+            try:
+                if self.security.SecKeychainSetUserInteractionAllowed(False) != 0:
+                    raise HelperError("os_credential_storage_failed")
+                yield
+            finally:
+                if self.security.SecKeychainSetUserInteractionAllowed(previous.value) != 0:
+                    raise HelperError("os_credential_storage_failed")
+
+    def _available(self, *, write=False):
+        state = ctypes.c_uint32()
+        if (not self.keychain_ref
+                or self.security.SecKeychainGetStatus(self.keychain_ref, ctypes.byref(state)) != 0
+                or state.value & (7 if write else 3) != (7 if write else 3)):
+            raise HelperError("os_credential_storage_failed")
+
+    def _string(self, value):
+        raw = value.encode("utf-8")
+        buffer = ctypes.create_string_buffer(raw)
+        result = self.cf.CFStringCreateWithBytes(None, buffer, len(raw), 0x08000100, False)
+        if not result:
+            raise HelperError("os_credential_storage_failed")
+        return result
+
+    def _data(self, raw):
+        if not isinstance(raw, bytes) or len(raw) > MAX_RECORD_BYTES:
+            raise HelperError("invalid_credential_record")
+        try:
+            raw.decode("utf-8")
+        except UnicodeError:
+            raise HelperError("invalid_credential_record") from None
+        buffer = ctypes.create_string_buffer(raw)
+        result = self.cf.CFDataCreate(None, buffer, len(raw))
+        if not result:
+            raise HelperError("os_credential_storage_failed")
+        return result
+
+    def _dictionary(self, pairs):
+        ref = ctypes.c_void_p
+        keys = (ref * len(pairs))(*(key for key, _ in pairs))
+        values = (ref * len(pairs))(*(value for _, value in pairs))
+        result = self.cf.CFDictionaryCreate(None, keys, values, len(pairs), self.key_callbacks, self.value_callbacks)
+        if not result:
+            raise HelperError("os_credential_storage_failed")
+        return result
+
+    @contextmanager
+    def _query(self, reference, *, add=False, lookup=False, raw=None):
+        if not isinstance(reference, str) or not HEX.fullmatch(reference):
+            raise HelperError("invalid_connection_id")
+        owned = []
+        try:
+            service = self._string("sixnine-agent")
+            owned.append(service)
+            account = self._string(reference)
+            owned.append(account)
+            c = self.constants
+            pairs = [(c["kSecClass"], c["kSecClassGenericPassword"]), (c["kSecAttrService"], service),
+                (c["kSecAttrAccount"], account), (c["kSecUseAuthenticationUI"], c["kSecUseAuthenticationUIFail"])]
+            if add:
+                pairs.append((c["kSecUseKeychain"], self.keychain_ref))
+            else:
+                refs = (ctypes.c_void_p * 1)(self.keychain_ref)
+                search = self.cf.CFArrayCreate(None, refs, 1, self.array_callbacks)
+                if not search:
+                    raise HelperError("os_credential_storage_failed")
+                owned.append(search)
+                pairs.append((c["kSecMatchSearchList"], search))
+            if lookup:
+                pairs += [(c["kSecMatchLimit"], c["kSecMatchLimitOne"]), (c["kSecReturnData"], c["kCFBooleanTrue"])]
+            if raw is not None:
+                data = self._data(raw)
+                owned.append(data)
+                pairs.append((c["kSecValueData"], data))
+            query = self._dictionary(pairs)
+            owned.append(query)
+            yield query
+        finally:
+            for value in reversed(owned):
+                self.cf.CFRelease(value)
+
+    def lookup(self, reference):
+        with self._no_ui():
+            self._available()
+            with self._query(reference, lookup=True) as query:
+                result = ctypes.c_void_p()
+                code = self.security.SecItemCopyMatching(query, ctypes.byref(result))
+                try:
+                    if code == -25300 and not result.value:  # errSecItemNotFound
+                        return None
+                    if code != 0 or not result.value:
+                        raise HelperError("os_credential_storage_failed")
+                    if self.cf.CFGetTypeID(result.value) != self.cf.CFDataGetTypeID():
+                        raise HelperError("invalid_credential_record")
+                    length = self.cf.CFDataGetLength(result.value)
+                    if length < 0 or length > MAX_RECORD_BYTES:
+                        raise HelperError("invalid_credential_record")
+                    pointer = self.cf.CFDataGetBytePtr(result.value)
+                    if length and not pointer:
+                        raise HelperError("invalid_credential_record")
+                    raw = ctypes.string_at(pointer, length) if length else b""
+                    try:
+                        raw.decode("utf-8")
+                    except UnicodeError:
+                        raise HelperError("invalid_credential_record") from None
+                    return raw
+                finally:
+                    if result.value:
+                        self.cf.CFRelease(result.value)
+
+    def write(self, reference, raw, *, replace=False):
+        with self._no_ui():
+            self._available(write=True)
+            with self._query(reference, add=not replace, raw=None if replace else raw) as query:
+                if replace:
+                    data = self._data(raw)
+                    attributes = None
+                    try:
+                        attributes = self._dictionary([(self.constants["kSecValueData"], data)])
+                        code = self.security.SecItemUpdate(query, attributes)
+                    finally:
+                        if attributes:
+                            self.cf.CFRelease(attributes)
+                        self.cf.CFRelease(data)
+                else:
+                    code = self.security.SecItemAdd(query, None)
+                if code == -25299:  # errSecDuplicateItem; never overwrite a racing creator
+                    raise HelperError("connection_already_saved")
+                if code != 0:
+                    raise HelperError("os_credential_storage_failed")
+
+
 class SecureStore:
-    """Encrypted DPAPI blobs or existing Linux Secret Service; never plain JSON."""
+    """User OS credentials: DPAPI, macOS Keychain or Linux Secret Service."""
     def __init__(self):
-        self.platform = "windows" if os.name == "nt" else "linux" if sys.platform.startswith("linux") else "unsupported"
+        self.platform = ("macos" if sys.platform == "darwin" else "windows" if os.name == "nt"
+            else "linux" if sys.platform.startswith("linux") else "unsupported")
         if self.platform == "windows":
             location = os.environ.get("LOCALAPPDATA")
             if not location or not Path(location).is_absolute():
                 raise HelperError("os_credential_storage_unavailable")
             self.directory = Path(location) / "Sixnine" / "agent-credentials"
+        elif self.platform == "macos":
+            try:
+                import pwd
+                self.lock_home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+            except (ImportError, KeyError, OSError):
+                raise HelperError("os_credential_storage_unavailable") from None
+            if not self.lock_home.is_absolute():
+                raise HelperError("os_credential_storage_unavailable")
+            self.lock_directory = self.lock_home / "Library" / "Application Support" / "Sixnine" / "agent-locks"
+            self.keychain = _MacOSKeychain()
         elif self.platform == "linux":
             self.command = shutil.which("secret-tool")
             if not self.command or not os.environ.get("DBUS_SESSION_BUS_ADDRESS"):
@@ -219,6 +465,61 @@ class SecureStore:
         return existing if existing and existing.get("status") == "connected" and incoming.get("status") != "connected" else incoming
 
     @contextmanager
+    def _macos_lock(self, reference):
+        import fcntl
+        # Stable passwd-derived home, independent of HOME/TMPDIR overrides.
+        # Refuse unsafe existing directories instead of chmod or following them.
+        user = os.getuid()
+        for path in reversed([self.lock_home, *self.lock_home.parents]):
+            metadata = path.lstat()
+            if (not stat.S_ISDIR(metadata.st_mode) or path.is_symlink()
+                    or metadata.st_uid not in {0, user} or metadata.st_mode & 0o022):
+                raise HelperError("credential_storage_link_rejected")
+        path = self.lock_home
+        for part in self.lock_directory.relative_to(self.lock_home).parts:
+            path = path / part
+            path.mkdir(mode=0o700, exist_ok=True)
+            metadata = path.lstat()
+            if (not stat.S_ISDIR(metadata.st_mode) or path.is_symlink()
+                    or metadata.st_uid != user or metadata.st_mode & 0o022
+                    or path == self.lock_directory and metadata.st_mode & 0o077):
+                raise HelperError("credential_storage_link_rejected")
+        directory = os.open(self.lock_directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        descriptor = None
+        acquired = False
+        try:
+            metadata = os.fstat(directory)
+            if metadata.st_uid != user or metadata.st_mode & 0o077:
+                raise HelperError("credential_storage_link_rejected")
+            descriptor = os.open(reference + ".lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC,
+                0o600, dir_fd=directory)
+            metadata = os.fstat(descriptor)
+            if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != user
+                    or metadata.st_mode & 0o077 or metadata.st_nlink != 1):
+                raise HelperError("credential_storage_link_rejected")
+            deadline = time.monotonic() + 15
+            while True:
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    acquired = True
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise HelperError("os_credential_storage_busy") from None
+                    time.sleep(0.05)
+            yield
+        finally:
+            try:
+                if descriptor is not None:
+                    try:
+                        if acquired:
+                            fcntl.flock(descriptor, fcntl.LOCK_UN)
+                    finally:
+                        os.close(descriptor)
+            finally:
+                os.close(directory)
+
+    @contextmanager
     def _windows_lock(self, reference):
         import msvcrt
         self._directory()
@@ -256,6 +557,17 @@ class SecureStore:
         raw = canonical(record).encode("utf-8")
         if len(raw) > MAX_RECORD_BYTES:
             raise HelperError("invalid_credential_record")
+        if self.platform == "macos":
+            with self._macos_lock(reference):
+                existing = self.load(origin, connection_id)
+                if not replace and existing is not None:
+                    raise HelperError("connection_already_saved")
+                record = self._preserve_record(existing, record)
+                raw = canonical(record).encode("utf-8")
+                self.keychain.write(reference, raw, replace=existing is not None)
+                if self.load(origin, connection_id) != record:
+                    raise HelperError("os_credential_storage_failed")
+            return
         if self.platform == "linux":
             # Secret Service's store operation itself is not create-if-absent.
             # Serialize local writers without putting credentials in lockfiles.
@@ -303,7 +615,11 @@ class SecureStore:
 
     def load(self, origin, connection_id):
         reference = self.reference(origin, connection_id)
-        if self.platform == "linux":
+        if self.platform == "macos":
+            raw = self.keychain.lookup(reference)
+            if raw is None:
+                return None
+        elif self.platform == "linux":
             raw = self._secret_service("lookup", reference)
             if raw is None:
                 return None
