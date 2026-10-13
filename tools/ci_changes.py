@@ -58,7 +58,7 @@ FRONTEND_ROOT = frozenset({"yingxu/index.html", "yingxu/package.json", "yingxu/p
 BACKEND_MODULES = frozenset({"agent_discovery", "caption_server", "diagnostics", "generation_draft",
                              "guided", "guided_schema", "media", "media_process", "project_activity",
                              "project_validation", "render_backend", "render_cli", "render_plans"})
-GATES = ("python", "postgres", "frontend", "containers", "legacy", "frontend_tools")
+GATES = ("python", "postgres", "frontend", "containers", "legacy", "frontend_tools", "macos_helper")
 SHA = re.compile(r"[0-9a-f]{40}")
 
 
@@ -90,6 +90,9 @@ def selection(kinds, *, reason: str) -> dict:
         "containers": backend, "legacy": full,
         # The full Python suite already includes the frontend release tool tests.
         "frontend_tools": frontend and not backend,
+        # Credential helpers and unknown/critical changes take the complete
+        # path. Native Keychain proof cannot be replaced by Linux mocks.
+        "macos_helper": full,
     }
 
 

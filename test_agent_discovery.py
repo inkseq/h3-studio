@@ -81,12 +81,51 @@ class AgentDiscoveryTests(unittest.TestCase):
             self.assertEqual(archive.read("sixnine-yingxu/README.md"), self.client.get("/for-agents/guide.md").content)
             for name in agent_discovery.SKILL_FILES:
                 self.assertEqual(archive.read("sixnine-yingxu/"+name), (agent_discovery.SKILL_ROOT/name).read_bytes())
+            bundled_helper = archive.read("sixnine-yingxu/scripts/connect.py")
+            bundled_guide = archive.read("sixnine-yingxu/README.md").decode("utf-8")
         manifest = self.client.get("/for-agents/connect-manifest.json").json()
         helper = self.client.get(manifest["helper"]).content
         self.assertEqual(manifest["sha256"], hashlib.sha256(helper).hexdigest())
+        self.assertEqual(bundled_helper, helper)
+        self.assertEqual(manifest["sha256"], hashlib.sha256(bundled_helper).hexdigest())
+        self.assertIn("native macOS user Keychain", bundled_guide)
+        self.assertIn("Fake OS tests do not prove native store access", bundled_guide)
         guide = self.client.get("/for-agents/guide.json").json()
         self.assertFalse(manifest["raw_api_key_response"])
         self.assertTrue(guide["connection"]["profile"]["owner_only"])
+
+    def test_storage_manifest_is_additive_and_matches_full_public_connection_contract(self):
+        manifest = self.client.get("/for-agents/connect-manifest.json").json()
+        original_fields = {name: manifest[name] for name in (
+            "version", "helper", "protocol", "missing_storage_behavior", "manual_pat",
+            "exchange", "raw_api_key_response", "discovery_is_authorization")}
+        self.assertEqual(original_fields, {
+            "version": 1, "helper": "/for-agents/connect.py", "protocol": "client-held-pat-v1",
+            "missing_storage_behavior": "stop_before_exchange", "manual_pat": "advanced_fallback",
+            "exchange": "/v1/agent-connect/exchange", "raw_api_key_response": False,
+            "discovery_is_authorization": False})
+        self.assertEqual(manifest["credential_storage"], [
+            "windows-user-dpapi", "linux-secret-service", "macos-user-keychain"])
+        connection = self.client.get("/for-agents/guide.json").json()["connection"]
+        for field in ("credential_storage", "credential_storage_requirements",
+                      "verification_checklist", "verification_limits"):
+            self.assertEqual(connection[field], manifest[field])
+        self.assertEqual(set(manifest["credential_storage_requirements"]), set(manifest["credential_storage"]))
+        macos = manifest["credential_storage_requirements"]["macos-user-keychain"]
+        for requirement in ("existing default file-based", "already unlocked", "Authentication UI is suppressed",
+                            "same Keychain", "fails closed", "never collects a Keychain password"):
+            self.assertIn(requirement, macos)
+        self.assertTrue(manifest["verification_checklist"])
+        self.assertIn("separate evidence", manifest["verification_limits"])
+        self.assertEqual(connection["profile"]["id"], "creator-full")
+        self.assertEqual(connection["profile"]["version"], 1)
+        self.assertEqual(connection["profile"]["key_lifetime_days"], 90)
+        self.assertEqual(connection["profile"]["scopes"], ["assets:read", "assets:write", "assistant:run",
+            "jobs:read", "jobs:write", "projects:create", "projects:read", "projects:write"])
+        self.assertEqual(connection["code_ttl_seconds"], 300)
+        self.assertEqual(connection["recovery_ttl_seconds"], 300)
+        self.assertNotIn("observed_at", manifest)
+        self.assertNotIn("profiles", manifest)
 
     def test_markdown_read_and_download_include_current_contract_without_login(self):
         guide = self.client.get("/for-agents/guide.json").json()
@@ -104,6 +143,12 @@ class AgentDiscoveryTests(unittest.TestCase):
         self.assertIn("A tool-specific reading failure is not evidence", read.text)
         self.assertIn("account/business API calls do require authentication", read.text)
         self.assertIn("does not install software", read.text)
+        self.assertIn("native macOS user Keychain", read.text)
+        self.assertIn("suppress authentication UI", read.text)
+        self.assertIn("trusted system UI", read.text)
+        self.assertIn("Fake OS tests do not prove native store access", read.text)
+        self.assertNotIn("macOS storage is not implemented", read.text)
+        self.assertNotIn("macOS storage is not implemented", self.client.get("/for-agents/SKILL.md").text)
         self.assertIn("/for-agents/guide.md?download=true", self.client.get("/llms.txt").text)
         head = self.client.head(guide["public_resources"]["guide_download"])
         self.assertEqual(head.status_code, 200)

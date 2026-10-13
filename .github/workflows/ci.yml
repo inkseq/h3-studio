@@ -57,6 +57,7 @@ jobs:
       containers: ${{ steps.scope.outputs.containers }}
       legacy: ${{ steps.scope.outputs.legacy }}
       frontend_tools: ${{ steps.scope.outputs.frontend_tools }}
+      macos_helper: ${{ steps.scope.outputs.macos_helper }}
       category: ${{ steps.scope.outputs.category }}
       action: ${{ steps.scope.outputs.action }}
       tested_sha: ${{ steps.scope.outputs.tested_sha }}
@@ -73,6 +74,27 @@ jobs:
       - name: Select checks from the complete local diff and validate dispatch inputs
         id: scope
         run: python tools/ci_changes.py
+
+  macos-helper:
+    needs: changes
+    if: needs.changes.outputs.macos_helper == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Native isolated Keychain and connection-storage checks (no API calls)
+        run: |
+          python -c 'import sys; sys.platform == "darwin" or sys.exit("Native Keychain checks require macOS")'
+          python -m unittest test_platform_agent_connect_macos test_agent_connect_macos_native -v
 
   python:
     needs: changes
@@ -382,7 +404,7 @@ jobs:
     # Preserve the existing required-check identity. Only explicitly unselected
     # gates may be skipped; failures, cancellations and accidental skips fail it.
     if: always()
-    needs: [changes, python, postgres, frontend, frontend-tools, containers]
+    needs: [changes, python, postgres, frontend, frontend-tools, containers, macos-helper]
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     steps:
@@ -397,7 +419,8 @@ jobs:
               raise SystemExit('CI classification or dispatch validation failed')
           flags = results['changes']['outputs']
           for job, flag in [('python', 'python'), ('postgres', 'postgres'), ('frontend', 'frontend'),
-                            ('frontend-tools', 'frontend_tools'), ('containers', 'containers')]:
+                            ('frontend-tools', 'frontend_tools'), ('containers', 'containers'),
+                            ('macos-helper', 'macos_helper')]:
               selected = flags.get(flag)
               if selected not in ('true', 'false'):
                   raise SystemExit('CI selection output missing: ' + flag)

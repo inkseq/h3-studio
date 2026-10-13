@@ -231,7 +231,7 @@ class WorkflowTests(unittest.TestCase):
         flags = {name: "true" if selected else "false" for name in ci_gate_names()}
         jobs = {"changes": {"result": "success", "outputs": flags}}
         jobs.update({name: {"result": "success" if selected else "skipped"}
-                     for name in ("python", "postgres", "frontend", "frontend-tools", "containers")})
+                     for name in ("python", "postgres", "frontend", "frontend-tools", "containers", "macos-helper")})
         if override:
             jobs[override[0]]["result"] = override[1]
         with patch.dict(os.environ, {"RESULTS": json.dumps(jobs)}), redirect_stdout(io.StringIO()):
@@ -240,10 +240,10 @@ class WorkflowTests(unittest.TestCase):
     def test_stable_aggregate_accepts_successful_matrix_rollups(self):
         self.aggregate()
         self.aggregate(selected=False)
-        self.assertIn("needs: [changes, python, postgres, frontend, frontend-tools, containers]", self.workflow)
+        self.assertIn("needs: [changes, python, postgres, frontend, frontend-tools, containers, macos-helper]", self.workflow)
 
     def test_required_aggregate_rejects_failed_cancelled_or_skipped_matrix(self):
-        for job in ("python", "postgres"):
+        for job in ("python", "postgres", "macos-helper"):
             for result in ("failure", "cancelled", "skipped"):
                 with self.subTest(job=job, result=result), self.assertRaises(SystemExit):
                     self.aggregate(override=(job, result))
@@ -256,7 +256,7 @@ class WorkflowTests(unittest.TestCase):
 
 
 def ci_gate_names():
-    return ("python", "postgres", "frontend", "frontend_tools", "containers")
+    return ("python", "postgres", "frontend", "frontend_tools", "containers", "macos_helper")
 
 
 if __name__ == "__main__":

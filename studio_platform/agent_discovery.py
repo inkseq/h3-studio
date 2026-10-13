@@ -10,7 +10,8 @@ import zipfile
 from fastapi import HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from .agent_connect import CODE_TTL_SECONDS, RECOVERY_TTL_SECONDS, PROFILE_ID, PROFILE_VERSION, CONNECT_SCOPES, KEY_LIFETIME_DAYS
-from .agent_connect_routes import PUBLIC_GET_PATHS, HELPER_PATH, MANIFEST_PATH, helper_manifest
+from .agent_connect_routes import (PUBLIC_GET_PATHS, HELPER_PATH, MANIFEST_PATH, helper_manifest,
+    CONNECTION_STORAGE_REQUIREMENTS, CONNECTION_VERIFICATION_CHECKLIST, CONNECTION_VERIFICATION_LIMITS)
 
 PUBLIC_PATHS = frozenset({"/for-agents", "/for-agents/", "/llms.txt",
     "/for-agents/guide.json", "/for-agents/guide.md", "/for-agents/SKILL.md", "/for-agents/skill.zip"}) | PUBLIC_GET_PATHS
@@ -105,7 +106,11 @@ def public_guide():
                 "all_projects": True, "owner_only": True, "key_lifetime_days": KEY_LIFETIME_DAYS},
             "code_ttl_seconds": CODE_TTL_SECONDS, "recovery_ttl_seconds": RECOVERY_TTL_SECONDS,
             "flow": "The signed-in owner explicitly creates a connection. Copy the returned short-lived code, origin, owner, connection ID and authorization fingerprint to the Agent. Download and inspect the helper, verify its digest against the same-origin manifest, then run connect with the code through the hidden prompt or stdin. Never pass a permanent key in chat or argv.",
-            "storage": "The helper creates the PAT locally and saves it before exchange using Windows current-user DPAPI or Linux Secret Service. Missing supported storage stops before exchange. No internal AI Registry is required; macOS storage is not implemented.",
+            "storage": "The helper creates the PAT locally and saves it before exchange using Windows current-user DPAPI, Linux Secret Service or the native macOS user Keychain. Missing supported storage stops before exchange; no automatic installation or plaintext fallback. No internal AI Registry is required.",
+            "credential_storage": list(CONNECTION_STORAGE_REQUIREMENTS),
+            "credential_storage_requirements": dict(CONNECTION_STORAGE_REQUIREMENTS),
+            "verification_checklist": list(CONNECTION_VERIFICATION_CHECKLIST),
+            "verification_limits": CONNECTION_VERIFICATION_LIMITS,
             "recovery": "After a lost response, resume the same connection and locally saved verifier/token. Do not generate replacement material or request another grant. Code consumption is atomic; scopes, owner, origin and key expiry remain frozen.",
             "authorization": "Connection grants broad access only to the owner's resources. It does not authorize a particular paid task, remove budgets, enable the website conversation assistant or qualify unsupported model controls. Revocation denies further calls without deleting existing work.",
             "publication": "The API/helper contract and the approved Connect UI have separate release gates. If this deployment does not serve the connection UI, use the explicit manual PAT fallback; do not assume a button is present.",
@@ -258,7 +263,9 @@ This is an API workflow. Quick Chat frontend publication is a separate gate; a r
 For one clip, POST /v1/projects with title and workspace=freestyle. Use project.journey.reviewShotId, upload intended references, and save with shot.configure_generation. GET the shot's generation-draft; POST its generation-plans with the returned project_version as expected_version. Only a ready plan within the user's authorization can be confirmed through POST /v1/jobs with a stable Idempotency-Key. The guide JSON contains exact examples and partial-update rules. Return /freestyle?project={project_id}&entity={shot_id}; the same draft and candidates remain editable. Creating/editing a draft does not generate video.
 
 ## Authorization and live capabilities
-A URL is a discovery link, not permission to edit or spend. The owner explicitly authorizes a one-time connection. Read /for-agents/connect-manifest.json, inspect /for-agents/connect.py and verify its digest before executing. The five-minute code may be handed to the Agent; the permanent PAT is generated locally and stored before exchange in Windows user DPAPI or Linux Secret Service. No internal AI Registry is required. Missing supported storage stops before exchange. Resume uncertain exchanges with the same saved connection. Manual PATs remain an advanced fallback using a process-only credential. Never put permanent keys in chat, URLs, argv or ordinary files. The only anonymous POST is /v1/agent-connect/exchange; account/business APIs and OpenAPI require authentication. The connection UI has a separate publication gate. Use only the origin supplied by the user and do not forward its credential to other origins.
+A URL is a discovery link, not permission to edit or spend. The owner explicitly authorizes a one-time connection. Read /for-agents/connect-manifest.json, inspect /for-agents/connect.py and verify its digest before executing. The five-minute code may be handed to the Agent; the permanent PAT is generated locally and stored before exchange in Windows user DPAPI, Linux Secret Service or the native macOS user Keychain. No internal AI Registry is required. Missing supported storage stops before exchange, without automatic installation or plaintext fallback. Resume uncertain exchanges with the same saved connection. Manual PATs remain an advanced fallback using a process-only credential. Never put permanent keys in chat, URLs, argv or ordinary files. The only anonymous POST is /v1/agent-connect/exchange; account/business APIs and OpenAPI require authentication. The connection UI has a separate publication gate. Use only the origin supplied by the user and do not forward its credential to other origins.
+
+For macOS, use an existing default file-based user Keychain, already unlocked and accessible to the calling process. Native operations bind to that same Keychain and suppress authentication UI; locked, denied or interaction-required access stops the helper. Any unlock/access authorization must happen separately through trusted system UI. Retry the original connection/grant; if material was already saved, resume with that same material within the recovery window. The helper never collects a Keychain password, changes access controls, auto-unlocks/creates a Keychain or passes secrets through command arguments. The manifest includes per-OS storage requirements and a verification checklist. Fake OS tests do not prove native store access or live external onboarding; actual OS access and frontend/production publication need separate evidence.
 
 After authorization, read GET /v1/agent-guide, /v1/guided-schema, /v1/capabilities and /openapi.json. Static documentation is not proof that generation is enabled. An actual plan may be blocked; do not invent successful media.
 
@@ -311,7 +318,7 @@ def landing_html():
 <h2>原有快速草稿与故事接口</h2><p>使用本人全部项目范围和 projects:create 权限。为每次新建保存唯一的幂等键；重试原请求沿用原键。返回的 project.journey.reviewShotId 是单镜头 ID。随后用 shot.configure_generation 保存生成设置；创建草稿不会启动 GPU。</p><pre>''' + example + '''</pre><p>完整的纯文字、参考素材、预检、提交和候选采用示例见<a href="/for-agents/guide.json">机器可读指南</a>。</p>
 <h2>真实边界</h2><p>网站公开说明与已授权 API 文档分开。认证后的 <code>/v1/agent-guide</code>、<code>/v1/guided-schema</code>、<code>/v1/capabilities</code> 和 <code>/openapi.json</code> 是调用依据。若生成计划返回阻塞，保留草稿并说明原因；不要把演示素材当成生成成功。</p>
 <p>网站聊天助手默认关闭；不支持未配置的图像/音乐/Marble 生成、团队成员共享权限或服务器媒体 ZIP。外部 Agent 可以自行编写完整提示词并保存为任务卡或故事草稿；已有 API Key 不会扩大这些能力。</p>
-<p><small>Skill 包包含完整指南 README.md、SKILL.md、scripts/sixnine.py 和 scripts/connect.py；连接脚本只需 Python 标准库与受支持的系统凭据存储，API/媒体辅助脚本还需要 httpx。你也可以直接使用同源 HTTP API，无需安装 Skill。下载不会自动安装或授权。</small></p></main></body></html>'''
+<p><small>Skill 包包含完整指南 README.md、SKILL.md、scripts/sixnine.py 和 scripts/connect.py；连接脚本只需 Python 标准库与 Windows 用户 DPAPI、Linux Secret Service 或 macOS 用户 Keychain。macOS 须已有解锁且允许当前进程访问的默认用户 Keychain；脚本不会弹出解锁/授权提示或收集密码，锁定或拒绝访问时会停止。API/媒体辅助脚本还需要 httpx。你也可以直接使用同源 HTTP API，无需安装 Skill。下载不会自动安装或授权。</small></p></main></body></html>'''
 
 
 def register_routes(app):
