@@ -111,6 +111,7 @@ inventory.json
 !studio_platform/render_cli.py
 !studio_platform/caption_server.py
 !studio_platform/artifact_writer.py
+!studio_platform/artifact_frames.py
 !studio_platform/diagnostics.py
 !studio_platform/storage_schema.py
 !studio_platform/backup.py
