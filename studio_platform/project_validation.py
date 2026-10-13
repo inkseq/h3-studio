@@ -6,10 +6,10 @@ import math
 import re
 
 ID = re.compile(r"[A-Za-z0-9_-]{1,160}$")
-TYPES = {"chapter", "scene", "shot", "character", "location", "image", "audio", "video", "note", "generation"}
+TYPES = {"chapter", "scene", "shot", "character", "location", "prop", "image", "audio", "video", "note", "generation"}
 ROLES = {"identity": {"character", "image"}, "location": {"location"}, "firstFrame": {"image"},
          "lastFrame": {"image"}, "motion": {"video"}, "audio": {"audio"},
-         "reference": {"image", "video", "audio", "character", "location", "note"},
+         "reference": {"image", "video", "audio", "character", "location", "prop", "note"},
          "dependency": {"shot", "generation"}}
 
 
@@ -159,6 +159,8 @@ def validate_project(project, max_bytes=8*1024*1024):
             if name in data and (not isinstance(data[name], str) or len(data[name]) > (120000 if name == "script" else 24000)):
                 raise ValueError("节点内容字段无效")
         lookup[e["id"]] = e
+    from .storyboard import validate as validate_storyboard
+    validate_storyboard(project, lookup)
     # These are editable captions, not an execution/approval authority. A
     # timeline edit may leave old cues outside the new chapter or overlapping;
     # keep that recoverable draft. The UI gates confirmation/SRT export; the

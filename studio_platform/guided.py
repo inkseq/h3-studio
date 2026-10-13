@@ -148,6 +148,39 @@ def delete_entity(project, entity_id, cascade):
                 if value in deleted:
                     look["gallery"][slot] = ""
                     look["version"] += 1
+            if "imageIds" in look:
+                retained = [ident for ident in look["imageIds"] if ident not in deleted]
+                if retained != look["imageIds"]:
+                    look["version"] += 1
+                look["imageIds"] = retained
+        if "imageIds" in data:
+            data["imageIds"] = [ident for ident in data["imageIds"] if ident not in deleted]
+        for version in data.get("versions", []):
+            retained = [ident for ident in version.get("imageIds", []) if ident not in deleted]
+            if retained != version.get("imageIds", []):
+                version["version"] += 1
+            version["imageIds"] = retained
+        if "voices" in data:
+            data["voices"] = [voice for voice in data["voices"] if voice["assetId"] not in deleted]
+            voice_ids = {voice["id"] for voice in data["voices"]}
+            if data.get("mainVoiceId") and data["mainVoiceId"] not in voice_ids:
+                data["mainVoiceId"] = ""
+            for look in data.get("looks", []):
+                if look.get("voiceId") and look["voiceId"] not in voice_ids:
+                    look["voiceId"] = ""
+        if (data.get("ambient") or {}).get("assetId") in deleted:
+            data["ambient"] = None
+        if "storyboard" in data:
+            draft = data["storyboard"]
+            draft["propIds"] = [ident for ident in draft.get("propIds", []) if ident not in deleted]
+            draft["extraRefs"] = [ref for ref in draft.get("extraRefs", []) if ref["entityId"] not in deleted]
+            for key in ("firstFrameId", "lastFrameId"):
+                if draft.get(key) in deleted:
+                    draft[key] = ""
+            if (draft.get("place") or {}).get("locationId") in deleted:
+                draft["place"] = None
+            if draft.get("previousFrame") and any(ident in deleted for ident in draft["previousFrame"].values()):
+                draft["previousFrame"] = None
         if data.get("selectedAssetId") in deleted:
             data["selectedAssetId"] = ""
         if isinstance(data.get("candidateIds"), list):
@@ -296,7 +329,9 @@ class Guided:
             return {"type": source["kind"], "title": source["file_name"], "data": {
                 "fileId": "cloud_asset_"+asset_id, "cloudAssetId": asset_id,
                 "cloudContentPath": f"/v1/assets/{asset_id}/content", "fileName": source["file_name"],
-                "mime": source["mime"], "metadata": source["metadata"], "source": "upload", "missingFile": False}}
+                "mime": source["mime"], "metadata": source["metadata"], "source": "upload", "missingFile": False,
+                **({"sourceSelection": copy.deepcopy(source["selection"])}
+                    if isinstance(source.get("selection"), dict) and source["selection"].get("kind") == "artifact_frame" else {})}}
         if not principal.allows(project_id, "jobs:read"):
             raise NotFound("artifact_not_found")
         if not isinstance(action.get("artifact_id"), str) or not ID.fullmatch(action["artifact_id"]):

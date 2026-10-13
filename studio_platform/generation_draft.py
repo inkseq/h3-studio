@@ -236,8 +236,11 @@ def shot_location_ids(project, shot, lookup):
     return list(dict.fromkeys(identities))
 
 
-def read_draft(project, shot_id, *, recipes=None):
+def read_draft(project, shot_id, *, recipes=None, capabilities=None):
     shot = shot_entity(project, shot_id)
+    if "storyboard" in shot["data"]:
+        from .storyboard import compile_draft
+        return compile_draft(project, shot, recipes=recipes, capabilities=capabilities)
     h3 = shot["data"].get("h3", {})
     available = recipes if recipes is not None else [{"id": key, "mode": mode} for key, mode in RECIPES.items()]
     recipe = selected_recipe(available, h3)
@@ -362,8 +365,8 @@ def read_draft(project, shot_id, *, recipes=None):
     return draft, list(dict.fromkeys(issues))
 
 
-def plan_body(project, shot_id, capabilities, derive):
-    draft, issues = read_draft(project, shot_id, recipes=capabilities["recipes"])
+def plan_body(project, shot_id, capabilities, derive, *, validate_frame=None):
+    draft, issues = read_draft(project, shot_id, recipes=capabilities["recipes"], capabilities=capabilities)
     if issues:
         raise ValueError("；".join(issues))
     recipe = next((r for r in capabilities["recipes"] if r["id"] == draft["recipe_id"]), None)
@@ -378,6 +381,16 @@ def plan_body(project, shot_id, capabilities, derive):
     if not isinstance(draft["prompt"], str) or not draft["prompt"].strip():
         raise ValueError("先写清这个镜头的画面与动作")
     shot = shot_entity(project, shot_id)
+    storyboard = shot["data"].get("storyboard")
+    if storyboard and storyboard["mode"] == "fl" and storyboard.get("continuePrevious"):
+        from .storyboard import previous_shot
+        previous = previous_shot(project, shot)
+        lookup = {entity["id"]: entity for entity in project["entities"]}
+        selected = lookup[previous["data"]["selectedAssetId"]]
+        image = lookup[storyboard["previousFrame"]["frameAssetId"]]
+        if validate_frame is None:
+            raise ValueError("上一镜末帧必须由服务端核对来源")
+        validate_frame(image["data"]["cloudAssetId"], selected["data"]["cloudArtifactId"])
     saved = draft["controls"]
     fields(saved, control_schema(), "已保存的生成控制")
     # Changing engines must not silently discard a user's explicit controls.
