@@ -5,6 +5,8 @@ from .repository import request_hash
 def source_snapshot(project, shot_id):
     lookup = {e["id"]: e for e in project["entities"]}
     storyboard = "storyboard" in lookup.get(shot_id, {}).get("data", {})
+    shot = lookup.get(shot_id, {})
+    scene_id = shot.get("parentId")
     chosen, pending = set(), [shot_id]
     incoming = {}
     for link in project["links"]:
@@ -21,7 +23,8 @@ def source_snapshot(project, shot_id):
         for link in incoming.get(identity, []):
             used_links[link["id"]] = link
             pending.append(link["source"])
-        for actor in node.get("data", {}).get("cast", []):
+        inherited_cast = storyboard and identity == scene_id and "cast" in shot.get("data", {})
+        for actor in ([] if inherited_cast else node.get("data", {}).get("cast", [])):
             actor_id = actor.get("characterId") if isinstance(actor, dict) else actor
             if isinstance(actor_id, str) and actor_id in lookup:
                 pending.append(actor_id)

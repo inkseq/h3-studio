@@ -48,6 +48,7 @@ def contract():
             "notes": "Nonblocking preservation/missing-photo explanations.", "limits": "Actual selected capability limits, null means not yet read.",
             "previous_shot_id": "Immediate prior shot in existing ordered chapter or null."}},
         "rules": ["FL/REF switching preserves inactive storyboard inputs; only explicit version 1 shots opt into this compiler.",
+            "For storyboard shots, present shot.data.cast is the exact override (including an empty list); only absent cast inherits the scene. Explicit storyboard.place=null clears inherited place.",
             "Empty cast lookId uses default look. Empty location versionId uses default version. Existing explicit IDs never silently select a different variant.",
             "Voice/ambient/extra video or audio uses a three-second selected source clip; server asset derivation and real inspection remain authoritative.",
             "Exact h3.deploymentProfileId/recipeId/controls are retained. quality is authoring intent, not permission or automatic profile/model replacement.",
@@ -300,7 +301,8 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
             description += "；" + location_version["name"] + "：" + location_version.get("description", "")
         parts.append({"kind": "place", "label": "场景", "entity_id": location["id"], "text": location["title"] + "：" + description})
     cast = []
-    for binding in [*shot["data"].get("cast", []), *scene.get("data", {}).get("cast", [])]:
+    bindings = shot["data"].get("cast", scene.get("data", {}).get("cast", []))
+    for binding in bindings:
         ident = binding if isinstance(binding, str) else binding["characterId"]
         if any(item[0]["id"] == ident for item in cast):
             continue

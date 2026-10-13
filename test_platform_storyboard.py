@@ -126,6 +126,28 @@ class StoryboardPureTests(unittest.TestCase):
         self.assertEqual(draft["deployment_profile_id"], "explicit-profile")
         self.assertIn("当前参考输入范围尚未读取，请刷新生成能力", issues)
 
+    def test_explicit_cast_and_null_place_override_scene_without_loss_on_opt_in(self):
+        shot, scene = self.find("shot-one"), self.find("scene-one")
+        scene["data"].update(cast=[{"characterId": "hero", "lookId": "rain"}], locationId="room")
+        shot["data"]["storyboard"]["place"] = None
+        shot["data"]["cast"] = []
+        draft, issues = read_draft(self.project, "shot-one", capabilities=cap())
+        self.assertFalse(issues)
+        self.assertNotIn("cast", [p["kind"] for p in draft["storyboard"]["prompt_parts"]])
+        self.assertNotIn("place", [p["kind"] for p in draft["storyboard"]["prompt_parts"]])
+        cleared = source_snapshot(self.project, "shot-one")
+        self.find("hero")["description"] += " unrelated removed actor change"
+        self.assertEqual(source_snapshot(self.project, "shot-one"), cleared)
+        del shot["data"]["cast"]
+        inherited, _ = read_draft(self.project, "shot-one", capabilities=cap())
+        cast = next(p for p in inherited["storyboard"]["prompt_parts"] if p["kind"] == "cast")
+        self.assertIn("雨夜", cast["text"])
+        shot["data"]["cast"] = [{"characterId": "hero", "lookId": "day"}]
+        explicit, _ = read_draft(self.project, "shot-one", capabilities=cap())
+        cast = next(p for p in explicit["storyboard"]["prompt_parts"] if p["kind"] == "cast")
+        self.assertIn("白天", cast["text"])
+        self.assertNotIn("雨夜", cast["text"])
+
     def test_profile_resource_limits_apply_without_historical_joint_whitelist(self):
         shot = self.find("shot-one")
         shot["data"]["h3"]["deploymentProfileId"] = "exact-profile"
