@@ -152,6 +152,7 @@ inventory.json
 !tools/check_platform_stack.py
 !tools/soak_platform.py
 !tools/build_platform_release.py
+!tools/native_source_retention.py
 !tools/check_platform_bundle.py
 !tools/backup_platform.py
 !tools/recover_platform_assets.py

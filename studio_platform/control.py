@@ -1,4 +1,4 @@
-"""Durable GPU-slot ownership. Trusted registration only; no cloud API calls.
+"""Durable GPU-slot ownership. Trusted registration only; no provider mutations.
 
 Expiration means UNKNOWN, never idle. Device ownership is retained until an
 operator reconciles the current upstream attempt or confirms retirement. A TP2
@@ -112,12 +112,18 @@ def require_delivery_configuration(connection, backend, configuration_id, output
 
 
 class WorkerControl:
-    def __init__(self, repository, *, registration_seconds=120):
+    def __init__(self, repository, *, registration_seconds=120, capacity_usage=None):
         if not math.isfinite(registration_seconds) or registration_seconds <= 0:
             raise ValueError("invalid_registration_lease")
         self.repo = repository
         self.queue = TaskQueue(repository)
         self.registration_seconds = registration_seconds
+        # Trusted controller-only read, called inside the existing capacity
+        # transaction. HTTP callers cannot supply counts or exclusions. The
+        # default remains the conservative original-ledger observation.
+        if capacity_usage is not None and not callable(capacity_usage):
+            raise ValueError("invalid_registration_capacity_reader")
+        self._capacity_usage = capacity_usage
 
     def _worker(self, connection, worker_id, *, lock=False):
         statement = select(registered_workers).where(registered_workers.c.id == worker_id)
@@ -234,7 +240,17 @@ class WorkerControl:
             if any(row["state"] != "released" for row in bindings):
                 raise Conflict("physical_gpu_already_owned")
             if spec.backend in REAL_GPU_BACKENDS:
-                usage = repo._global_usage(connection)
+                usage = (self._capacity_usage(connection, spec) if self._capacity_usage
+                    else repo._global_usage(connection))
+                resources = usage.get("resources") if isinstance(usage, dict) else None
+                if (not isinstance(resources, dict)
+                        or any(not isinstance(key, tuple) or len(key) != 2
+                            or any(not isinstance(value, str) or not value for value in key)
+                            or type(count) is not int or count < 1 for key, count in resources.items())
+                        or type(usage.get("instances")) is not int or usage["instances"] != len(resources)
+                        or type(usage.get("physical_gpus")) is not int
+                        or usage["physical_gpus"] != sum(resources.values())):
+                    raise ValueError("invalid_registration_capacity_observation")
                 key = (spec.provider, spec.instance_id)
                 existing_count = sum(1 for r in connection.execute(select(registered_devices).where(
                     registered_devices.c.provider == spec.provider,

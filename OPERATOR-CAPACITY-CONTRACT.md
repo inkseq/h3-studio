@@ -22,6 +22,12 @@ An operator-owned execution-profile file can bind several profile/mode policies.
 
 ## Commands and observations
 
+### Worker registration capacity and readiness
+
+The dstack controller uses the existing fresh, exact-owned live-capacity evidence inside the original global worker-registration lock. It excludes historical physical allocations only when the exact run is terminal and a complete, fresh inventory of that same configured supplier account confirms absence. Unknown, stale, incomplete or mismatched evidence keeps capacity occupied. The registration view retains all legacy intents, positive observed physical allocations and unreleased devices; the existing instance/GPU limits remain authoritative.
+
+This projection does not mark an intent destroyed, settle an invoice, release a reservation or authorize another rental. Native readiness and registered dispatch readiness remain separate. A verified registration clears its separate observation; a capacity refusal exposes the static `global_capacity_exceeded` code through `registration_reason_code` and `dispatch_reason_code`, without private exception text. Repeated unchanged failures retain one transition receipt. Workers, accepted tasks and cumulative financial obligations keep their original identities.
+
 ### Current records, history and explicit extensions
 
 The console presents compact current and pending-review rows with per-node detail; terminal/manual-review-complete records move to searchable history. Server `record_group` values are `current`, `pending_review` and `history`. Starting/stopping operations stay visible. Archiving is a read-only presentation choice: records, reservations, unknown bills and removal evidence remain in the same ledger. Ready observations, startup and unknown capacity are separate counts; allocated GPUs are not proof of runnable slots. Historical alerts and bootstrap observations retain timestamps and must not replace fresh status. See [#125](https://github.com/inkseq/h3-studio/issues/125) and [#80](https://github.com/inkseq/h3-studio/issues/80).

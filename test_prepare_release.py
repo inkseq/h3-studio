@@ -69,6 +69,23 @@ class FakeCommands:
 
 
 class PrepareReleaseTests(unittest.TestCase):
+    def test_explicit_native_retention_is_frozen_in_preparation_receipt_and_dispatch(self):
+        values = {"retain_native_sources_run": "42", "retain_native_sources_commit": OTHER,
+            "retain_native_sources_index_sha256": "c" * 64}
+        result = tool.prepare('platform', SHA, root=self.root, sleep=lambda _: None, retain_native_sources=values)
+        self.assertEqual(result['retain_native_sources'], values)
+        self.assertEqual(self.fake.dispatch_body['inputs'], dict(values, deploy='true', release_kind='platform'))
+        receipt = json.loads((self.root / '.release-prepares' / (SHA + '-platform') / 'receipt.json').read_text())
+        self.assertEqual(receipt['retain_native_sources'], values)
+
+    def test_incomplete_or_frontend_retention_refuses_before_mutation(self):
+        values = {"retain_native_sources_run": "42", "retain_native_sources_commit": OTHER,
+            "retain_native_sources_index_sha256": "c" * 64}
+        for kind, selected in (('frontend', values), ('platform', {'retain_native_sources_run': '42'})):
+            with self.subTest(kind=kind), self.assertRaises(RuntimeError):
+                tool.prepare(kind, SHA, root=self.root, sleep=lambda _: None, retain_native_sources=selected)
+        self.assertEqual(self.fake.mutations(), [])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
