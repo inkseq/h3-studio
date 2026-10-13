@@ -20,6 +20,46 @@ bundle. Use its `--migration-destination MIGRATION_DIRECTORY` and repeated
 `build_migration(COMMIT, PLATFORM_DIRECTORY, MIGRATION_DIRECTORY, selections)`
 when an already tested ordinary artifact has the same exact commit.
 
+The platform preparation workflow includes Pruned FL, Pruned REF, and the
+existing `h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-lowram-v1:fl` selection
+for storyboard Final. Each dstack source entry contains one GPU and slot zero;
+this does not change the original native profile's independent-process model
+or its resource admission. With an explicit prior preparation run/commit/index
+binding, adding a catalog selection preserves the old selections in their
+original order and every old four-file byte/hash. The new selection uses the
+verified retained package whose members still equal current native source,
+plus its current canonical manifest/runtime. The resulting archive and index
+are new artifacts; the existing GPU bootstrap receipts still match their old
+entries. Dropping/reordering old choices, changed native source, tampered
+archives, or missing provenance fails the preparation. No native runtime is
+restarted or re-uploaded by this build step.
+
+The nonsecret `base-fl.operator-profiles.example.json` and
+`base-fl.execution-policy.example.json` are reviewed configuration fragments,
+not automatically activated release inputs. They bind Base FL to the existing
+native image digest, the explicit `sixnine-dstack-base-fl-20261014` pool and
+`sixnine-h3-base-int8-fl-20261014` configuration. The operator fragments keep
+owner/project/budget isolation and request one physical GPU, 256 GiB total RAM,
+350 GiB disk and 90 GiB GPU memory, with a US$2.00/hour maximum. These stricter
+host requirements preserve the catalog's original 256 GiB host evidence and
+128 GiB available-headroom check; no 29 GiB Pruned bound is applied to Base.
+Only pinned scheduler names `RTXPRO6000S` and `RTXPRO6000WS` map to the native
+Server/Workstation identities. Max-Q and generic PRO6000 names are excluded;
+CUDA still independently verifies the actual full physical name, capability
+12.0 and 90–100 GiB VRAM.
+
+Install the two owner-scoped operator fragments through the existing protected
+configuration process, without changing global capacity, lifecycle or budget
+limits. Replace the one existing Base FL execution-profile record with its
+new explicit `hatchet-v1` route after review; do not append a duplicate
+profile/recipe. Preserve the old Base REF record and every accepted job's
+frozen execution route. The example execution policy is disabled and marked
+pending acceptance; refreshing its evidence/authority and enabling it requires
+the authorized release owner's bounded real acceptance. The runtime configuration
+keeps the existing source-index path; the new approved index supplies Base FL.
+Neither these examples nor preparation of an archive rents a GPU or certifies
+Final generation success.
+
 `tools/publish_aws_release.py COMMIT PLATFORM_DIRECTORY --migration-directory
 MIGRATION_DIRECTORY` performs conditional immutable uploads under
 `releases/COMMIT/` and `releases/COMMIT/migration/`. Publication never approves

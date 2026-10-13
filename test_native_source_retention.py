@@ -16,6 +16,7 @@ from tools import build_dstack_sources, build_platform_release, native_source_re
 ROOT = Path(__file__).resolve().parent
 OLD, NEW, INDEX = "a" * 40, "b" * 40, "c" * 64
 PROFILE = "h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3"
+BASE = "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-lowram-v1"
 SELECTIONS = [(PROFILE, "fl"), (PROFILE, "ref")]
 INPUTS = dict(zip(retention.INPUTS, ("42", OLD, INDEX)))
 
@@ -153,6 +154,81 @@ class NativeBytes(unittest.TestCase):
         self.assertEqual(manifest["dispatch"]["image"], "sixnine-dispatch:" + NEW)
         self.assertEqual(manifest["source_index_sha256"], self.index_sha)
         self.assertEqual(manifest["files"]["source-set.tar.gz"], hashlib.sha256(self.raw).hexdigest())
+
+    def extended(self, **changes):
+        values = dict(directory=self.artifact, commit=OLD, index_sha256=self.index_sha,
+            selections=SELECTIONS + [(BASE, "fl")], root=self.root); values.update(changes)
+        return retention.retain_or_extend(**values)
+
+    def test_additive_base_selection_preserves_old_bytes_and_exact_single_gpu_identity(self):
+        from studio_platform.runtime_catalog import engine_manifest, get_profile
+        from studio_platform.native_runtime_document import prepared_runtime_document
+        with patch.object(tarfile.TarFile, "extractall", side_effect=AssertionError("No code extraction")), \
+                patch('subprocess.run', side_effect=AssertionError("No process or cloud")):
+            raw, digest = self.extended()
+        def files(value):
+            with tarfile.open(fileobj=io.BytesIO(value), mode="r:gz") as archive:
+                return {member.name: archive.extractfile(member).read() for member in archive}
+        before, after = files(self.raw), files(raw)
+        old_index, new_index = json.loads(before['index.json']), json.loads(after['index.json'])
+        self.assertEqual(new_index['sources'][:2], old_index['sources'])
+        self.assertNotEqual(digest, self.index_sha)
+        self.assertEqual(digest, hashlib.sha256(after['index.json']).hexdigest())
+        for name, value in before.items():
+            if name != 'index.json': self.assertEqual(after[name], value, name)
+        entry = new_index['sources'][2]
+        self.assertEqual((entry['runtime_profile_id'],entry['mode'],entry['gpu_count'],entry['profile_slot_index']),
+            (BASE, 'fl', 1, 0))
+        self.assertEqual(entry['engine_manifest_digest'], engine_manifest(BASE,'fl').digest)
+        relative = entry['directory'] + '/'
+        package = after[relative+'wangp-package.tar.gz']
+        self.assertEqual(package, before[old_index['sources'][0]['directory']+'/wangp-package.tar.gz'])
+        self.assertEqual(json.loads(after[relative+'wangp-runtime.json']),
+            prepared_runtime_document(BASE,0,1,hashlib.sha256(package).hexdigest()))
+        self.assertEqual(entry['source_sha256'], {name:hashlib.sha256(after[relative+name]).hexdigest()
+            for name in ('wangp-bootstrap.py','wangp-manifest.json','wangp-runtime.json','wangp-package.tar.gz')})
+        self.assertEqual(get_profile(BASE)['minimum_ram_bytes'],256*2**30)
+        self.assertEqual(self.raw,(self.artifact/'source-set.tar.gz').read_bytes())
+
+    def test_additive_retention_never_drops_reorders_duplicates_or_substitutes_native_sources(self):
+        for choices in (SELECTIONS[:1]+[(BASE,'fl')],list(reversed(SELECTIONS))+[(BASE,'fl')],
+                SELECTIONS+[(BASE,'fl'),(BASE,'fl')],SELECTIONS+[('unknown','fl')],
+                SELECTIONS+[(BASE,'other')],SELECTIONS+[BASE]):
+            with self.subTest(choices=choices),self.assertRaises(ValueError): self.extended(selections=choices)
+        self.assertEqual(self.extended(selections=SELECTIONS),(self.raw,self.index_sha))
+        source = self.root/PRIVATE_FILES[0]; source.write_bytes(source.read_bytes()+b'\nchanged')
+        with self.assertRaisesRegex(ValueError,'package_source_changed'): self.extended()
+        self.assertEqual(self.raw,(self.artifact/'source-set.tar.gz').read_bytes())
+
+    def test_additive_retention_keeps_manifest_index_and_archive_tamper_fences(self):
+        for changes in (dict(commit=NEW),dict(index_sha256=INDEX)):
+            with self.subTest(changes=changes),self.assertRaises(ValueError): self.extended(**changes)
+        extra = tarfile.TarInfo('../escape'); extra.size = 1
+        self.repackage(extra)
+        with self.assertRaisesRegex(ValueError,'archive_member_invalid'): self.extended()
+        self.repackage()
+        (self.sources/PROFILE/'fl/gpu-0/wangp-manifest.json').write_text('{}')
+        self.repackage()
+        with self.assertRaisesRegex(ValueError,'native_configuration_changed'): self.extended()
+
+    def test_new_cpu_artifact_binds_extended_index_not_the_old_index(self):
+        platform = self.temp/'platform'; platform.mkdir()
+        (platform/'release-manifest.json').write_text(json.dumps({'commit':NEW}))
+        inspected = [{'Id':'sha256:'+'d'*64,'Architecture':'amd64','Os':'linux','Config':{
+            'Labels':{'org.opencontainers.image.revision':NEW}}}]
+        process = Mock(); process.__enter__=Mock(return_value=process); process.__exit__=Mock(return_value=False)
+        process.stdout=io.BytesIO(b'SYNTHETIC_CPU_IMAGE'); process.wait.return_value=0
+        target = self.temp/'extended-release'
+        with patch.object(build_platform_release.subprocess,'check_output',return_value=json.dumps(inspected).encode()), \
+                patch.object(build_platform_release.subprocess,'Popen',return_value=process):
+            manifest=build_platform_release.build_migration(NEW,platform,target,SELECTIONS+[(BASE,'fl')],
+                retain_native_sources_directory=self.artifact,retain_native_sources_commit=OLD,
+                retain_native_sources_index_sha256=self.index_sha)
+        with tarfile.open(target/'source-set.tar.gz','r:gz') as archive:
+            raw=archive.extractfile('index.json').read()
+        self.assertEqual(manifest['source_index_sha256'],hashlib.sha256(raw).hexdigest())
+        self.assertNotEqual(manifest['source_index_sha256'],self.index_sha)
+        self.assertEqual(len(json.loads(raw)['sources']),3)
 
 
 if __name__ == "__main__":

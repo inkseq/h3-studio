@@ -434,6 +434,8 @@ inventory.json
 !studio_platform/native_runtime_document.py
 !tools/build_dstack_sources.py
 !deploy/dstack/runtime-config.example.json
+!deploy/dstack/base-fl.operator-profiles.example.json
+!deploy/dstack/base-fl.execution-policy.example.json
 !deploy/dstack/platform-overlay.yaml
 !tools/check_migration_deploy.py
 !Dockerfile.dispatch
