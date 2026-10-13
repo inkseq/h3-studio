@@ -45,6 +45,50 @@ def _directory(info, code, *, owner=0, group=None, mode=None, writable_group=Fal
         require(bits == mode, code)
 
 
+def validate_docker_config(entries):
+    """Allow no CLI settings; only empty, private Buildx-created scaffolding."""
+    code = "preflight_docker_config_must_be_empty"
+    directories = {"buildx", "buildx/activity", "buildx/defaults", "buildx/instances"}
+    require(type(entries) is dict and set(entries) <= directories | {"buildx/.lock"}, code)
+    require(not entries or "buildx" in entries, code)
+    for name, info in entries.items():
+        if name in directories:
+            _directory(info, code, group=0, mode=0o700)
+        else:
+            require(stat.S_ISREG(info["mode"]) and (info["uid"], info["gid"]) == (0, 0)
+                    and stat.S_IMODE(info["mode"]) == 0o600 and info["links"] == 1
+                    and info["bytes"] == 0, code)
+
+
+def docker_config_metadata(directory):
+    """Inspect bounded names/types without following links or reading files."""
+    code = "preflight_docker_config_must_be_empty"
+
+    def names(path, maximum):
+        result = []
+        with os.scandir(path) as scan:
+            for entry in scan:
+                result.append(entry.name)
+                require(len(result) <= maximum, code)
+        return result
+
+    top = names(directory, 1)
+    require(not top or top == ["buildx"], code)
+    if not top:
+        return {}
+    buildx = directory / "buildx"
+    entries = {"buildx": metadata(buildx)}
+    validate_docker_config(entries)  # Reject a linked/unprotected parent before traversal.
+    for name in names(buildx, 4):
+        require(name in {"activity", "defaults", "instances", ".lock"}, code)
+        relative = "buildx/" + name
+        entries[relative] = metadata(buildx / name)
+        validate_docker_config(entries)
+        if name != ".lock":
+            names(buildx / name, 0)  # Even one instance/activity/config file is unapproved.
+    return entries
+
+
 def validate_snapshot(snapshot):
     """Pure validation used by fake-host tests; input is metadata, never content."""
     require(snapshot["platform"] == "posix" and snapshot["euid"] == 0, "preflight_requires_linux_root")
@@ -69,7 +113,7 @@ def validate_snapshot(snapshot):
             and stat.S_IMODE(pg["mode"]) == 0o700, "preflight_postgres_directory_owner_or_mode")
     for name in ("secret-root", "docker-config"):
         _directory(dirs[name], "preflight_private_root_directory_required", group=0, mode=0o700)
-    require(snapshot["docker_config_empty"] is True, "preflight_docker_config_must_be_empty")
+    validate_docker_config(snapshot["docker_config_entries"])
     names = set(snapshot["secrets"])
     require(names in ({"db_admin_password", "app_database_url"},
                       {"db_admin_password", "app_database_url", "google_titles"}), "preflight_secret_set_invalid")
@@ -135,8 +179,7 @@ def check_host(*, root=ROOT, secret_root=SECRETS, docker_config=DOCKER_CONFIG):
             _directory(info, "preflight_parent_not_root_controlled")
         for name in ("secret-root", "docker-config"):
             _directory(snapshot["directories"][name], "preflight_private_root_directory_required", group=0, mode=0o700)
-        with os.scandir(docker_config) as entries:
-            snapshot["docker_config_empty"] = next(entries, None) is None
+        snapshot["docker_config_entries"] = docker_config_metadata(docker_config)
         names = ["db_admin_password", "app_database_url"]
         if (secret_root/"google_titles").exists() or (secret_root/"google_titles").is_symlink():
             names.append("google_titles")
@@ -146,8 +189,9 @@ def check_host(*, root=ROOT, secret_root=SECRETS, docker_config=DOCKER_CONFIG):
         require(len(mounts) <= 1024*1024, "preflight_mountinfo_too_large")
         snapshot["secret_filesystems"] = {name: filesystem_for(path, mounts) for name, path in {
             "secret-root": secret_root, **{name: secret_root/name for name in names}}.items()}
-        # Empty config disables accidental use of root's registry/login/context
-        # files. Only the local daemon is queried; no network command is issued.
+        # No registry/login/context/plugin settings are accepted. Docker can
+        # leave only its private empty Buildx scaffold after Compose commands.
+        # Only the local daemon is queried; no network command is issued.
         info = subprocess.run(["/usr/bin/docker", "--host", "unix:///var/run/docker.sock", "info",
                                "--format", "{{.OSType}} {{.NCPU}} {{.MemTotal}}"],
             env={"PATH": SAFE_PATH, "LANG": "C.UTF-8", "DOCKER_CONFIG": str(docker_config)},
