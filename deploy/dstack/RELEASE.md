@@ -108,6 +108,49 @@ IDs from `superdan` and `supervan`. Do not inherit this flag from a shell or
 project `.env`, and do not edit an active frozen configuration during a source
 release. Enablement remains a separately reviewed maintenance change after the
 exact source release and acceptance gates in [#161](https://github.com/inkseq/h3-studio/issues/161).
+Independently review/install the matching exact maintenance helper and checker
+before the approved source deployment. Invoke flag maintenance only after that
+current source release is healthy. Read the current
+full commit and SHA256 of `paths.json` and `active.json`, then use only:
+
+```text
+/usr/bin/python3 /opt/sixnine-release/migration_maintenance.py storyboard-owners CURRENT_COMMIT superdan,supervan EXPECTED_PATHS_SHA256 EXPECTED_ACTIVE_SHA256
+```
+
+Use `superdan` or `supervan` for one account, or `-` to disable both. This is not
+a general configuration override. The command takes the existing nonblocking
+`release.lock`, requires the exact healthy current approved platform/migration
+artifacts and installed helper hashes, and rejects stale original bindings.
+It saves the exact old/candidate configuration and marker bytes in the protected
+`migration/storyboard-maintenance/OPERATION_ID/` directory before any mutation.
+The durable `migration/storyboard-maintenance.json` records the pending intent.
+
+The app reads this environment flag at startup. Because dstack, Hatchet,
+dispatcher and controller share its container network namespace, updating it
+reconnects **app and those four CPU members** using their current approved images.
+It does not load images, initialize/restart either database, change the frontend
+pointer, alter lifecycle policies, rent/stop a provider GPU, or write jobs and
+budgets. Original runtime environment and persistent mount signatures are
+checked; only the app's storyboard flag may differ. Once CPU health, namespace,
+broker mounts, authenticated probes and the live app flag pass, the command
+atomically replaces each configuration/marker file and updates their frozen
+binding. The current/previous source release records remain unchanged.
+
+If interrupted or failed, keep the receipt and backups. Ordinary migration
+deploy/activation and another flag update are fenced; do not repeat activation.
+Read the exact current SHA256 of `storyboard-maintenance.json` and explicitly
+restore that same intent:
+
+```text
+/usr/bin/python3 /opt/sixnine-release/migration_maintenance.py restore-storyboard-owners CURRENT_COMMIT EXPECTED_RECEIPT_SHA256
+```
+
+Restore verifies unchanged approved source, backup hashes, the flag-only diff,
+and that current configuration/marker are one of that intent's before/after
+states; unrelated changes are never overwritten. It reconnects the original
+CPU configuration and restores both original files byte-for-byte. Backups stay
+as evidence. A lost success response is checked through the completed receipt,
+current hashes and live flag; it is not permission for a blind replay.
 The derived source-directory path is set by the helper for the exact artifact.
 For first initialization, a temporary private CPU bootstrap project may use
 these same explicitly named Hatchet volumes and persisted infrastructure
