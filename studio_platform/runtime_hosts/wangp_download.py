@@ -44,6 +44,13 @@ _LOCATOR_MANIFESTS = {
     "fl": "e32a141d43774d2e1b61bb45432aea2a2bde3e66e36318c84dd8d4538e64d530",
     "ref": "47e46d47404c198c667bcb5114b4680bab5ed0aac60c5f77c610a197d62d7367",
 }
+_LOCATOR_PROFILES = {
+    _LOCATOR_PROFILE: _LOCATOR_MANIFESTS,
+    "h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-cgroups-v4": {
+        "fl": "a92ae3dddb83ab73e4ac292aa7b33f9ea158ac638523d0b0c1e2e771cb0e7517",
+        "ref": "a096e69c6b91d6b7200d414e72db870c0198ea02ebcc7ea16bf787091f66d84c",
+    },
+}
 _LOCATOR_TRANSFORMERS = {
     "fl": "MiniMax-H3-FL2VA-pruned_rank8_int8_convrot.safetensors",
     "ref": "MiniMax-H3-Ref2VA-pruned_rank8_int8_convrot.safetensors",
@@ -160,10 +167,11 @@ def safe_error(error):
 
 def _content_preserving_revision(document, expected_digest, records):
     """Use one approved locator without changing the immutable model contract."""
-    if document.get("deployment_profile_id") != _LOCATOR_PROFILE:
+    manifests = _LOCATOR_PROFILES.get(document.get("deployment_profile_id"))
+    if manifests is None:
         return None
     mode = document.get("mode")
-    if (_LOCATOR_MANIFESTS.get(mode) != expected_digest
+    if (manifests.get(mode) != expected_digest
             or any(repo != _LOCATOR_REPOSITORY or revision != _LOCATOR_ORIGINAL
                    for _, repo, revision, _, _ in records)):
         raise ValueError("model_download_locator_invalid")
@@ -371,6 +379,26 @@ def run_download(python, source, manifest_path, expected_digest, model_root, sta
                "--manifest", str(manifest_path), "--expected-digest", expected_digest,
                "--model-root", str(root), "--progress", str(receipt), "--workers", str(workers),
                "--owner-pid", str(os.getpid()), "--timeout", str(timeout)]
+    def read_receipt():
+        value = None
+        if receipt.exists():
+            path_checked(receipt)
+            if receipt.stat().st_size > 8192:
+                raise ValueError("model_download_progress_invalid")
+            value = json.loads(receipt.read_text())
+            if (set(value) - {"state", "manifest_digest", "files_complete", "files_total", "bytes_complete",
+                              "bytes_total", "inference_verified", "code"}
+                    or value.get("state") not in {"downloading", "downloaded_unverified", "failed"}
+                    or value.get("manifest_digest") != expected_digest or value.get("inference_verified") is not False
+                    or value.get("files_total") != len(records) or value.get("bytes_total") != sum(r[4] for r in records)
+                    or type(value.get("files_complete")) is not int or not 0 <= value["files_complete"] <= len(records)
+                    or type(value.get("bytes_complete")) is not int or not 0 <= value["bytes_complete"] <= value["bytes_total"]
+                    or value.get("code", "model_download_failed") not in SAFE_ERRORS):
+                raise ValueError("model_download_progress_invalid")
+            if value["state"] == "failed":
+                raise ValueError(value.get("code", "model_download_failed"))
+        return value
+
     deadline = clock() + timeout
     child = None
     last = None
@@ -384,30 +412,17 @@ def run_download(python, source, manifest_path, expected_digest, model_root, sta
             cache_size(state / "cache")
             if shutil.disk_usage(root).free < HEADROOM:
                 raise ValueError("model_download_disk_headroom")
-            value = None
-            if receipt.exists():
-                path_checked(receipt)
-                if receipt.stat().st_size > 8192:
-                    raise ValueError("model_download_progress_invalid")
-                value = json.loads(receipt.read_text())
-                if (set(value) - {"state", "manifest_digest", "files_complete", "files_total", "bytes_complete",
-                                  "bytes_total", "inference_verified", "code"}
-                        or value.get("state") not in {"downloading", "downloaded_unverified", "failed"}
-                        or value.get("manifest_digest") != expected_digest or value.get("inference_verified") is not False
-                        or value.get("files_total") != len(records) or value.get("bytes_total") != sum(r[4] for r in records)
-                        or type(value.get("files_complete")) is not int or not 0 <= value["files_complete"] <= len(records)
-                        or type(value.get("bytes_complete")) is not int or not 0 <= value["bytes_complete"] <= value["bytes_total"]
-                        or value.get("code", "model_download_failed") not in SAFE_ERRORS):
-                    raise ValueError("model_download_progress_invalid")
-                if value["state"] == "failed":
-                    raise ValueError(value.get("code", "model_download_failed"))
-                if value != last:
-                    progress("model_download", files_complete=value["files_complete"], files_total=value["files_total"],
-                             bytes_complete=value["bytes_complete"], bytes_total=value["bytes_total"])
-                    last = value
+            value = read_receipt()
+            if value is not None and value != last:
+                progress("model_download", files_complete=value["files_complete"], files_total=value["files_total"],
+                         bytes_complete=value["bytes_complete"], bytes_total=value["bytes_total"])
+                last = value
             result = child.poll()
             if result is not None:
                 child.wait(timeout=10)
+                # A final atomic receipt may arrive between the prior read and
+                # poll. Validate it after the exact child has exited/reaped.
+                value = read_receipt()
                 if (result != 0 or value is None or value["state"] != "downloaded_unverified"
                         or value["files_complete"] != len(records) or value["bytes_complete"] != value["bytes_total"]):
                     raise ValueError(value.get("code", "model_download_failed") if value else "model_download_failed")

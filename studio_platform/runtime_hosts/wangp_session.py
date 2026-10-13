@@ -256,6 +256,112 @@ def _profile_ram_limit(group):
     return int(value)
 
 
+def _profile_v1_ram(proc_root, group_root):
+    """Observe the actual v1 memory controller, including hybrid hosts.
+
+    Kernel memory.stat supplies the limit of hidden ancestors. Hidden ancestor
+    usage cannot be reconstructed from a leaf (siblings may consume it), so a
+    subtree mount returns zero as its conservative available-memory bound.
+    This never substitutes host RAM for an unobserved controller constraint.
+    """
+    from pathlib import PurePosixPath
+    def path(value):
+        # mountinfo encodes spaces, tabs, newlines and backslashes in octal.
+        value = re.sub(r'\\([0-7]{3})', lambda match:chr(int(match[1], 8)), value)
+        if (not value.startswith('/') or '\\' in value or any(ord(c)<32 for c in value)
+                or any(part in {'.', '..'} for part in value.split('/'))):
+            raise ValueError('wangp_profile_cgroup_invalid')
+        return PurePosixPath(value)
+
+    def read(candidate):
+        try:
+            info = candidate.lstat()
+            if not stat.S_ISREG(info.st_mode) or candidate.is_symlink() or info.st_size>262144:
+                raise ValueError('wangp_profile_cgroup_invalid')
+            value = candidate.read_text()
+            if len(value)>262144:
+                raise ValueError('wangp_profile_cgroup_invalid')
+            return value
+        except (OSError, UnicodeError):
+            raise ValueError('wangp_profile_cgroup_invalid') from None
+
+    def number(value, *, positive=False):
+        if not value.isdecimal() or positive and int(value)<=0:
+            raise ValueError('wangp_profile_cgroup_invalid')
+        return int(value)
+
+    try:
+        memberships = [parts[2] for line in (proc_root/'self/cgroup').read_text().splitlines()
+                       if len(parts:=line.split(':', 2))==3 and 'memory' in parts[1].split(',')]
+        if not memberships:
+            return None  # The existing v2 observer decides whether that is valid.
+        if len(memberships)!=1:
+            raise ValueError('wangp_profile_cgroup_invalid')
+        # A hybrid hierarchy may mount cgroup2 for other controllers while
+        # memory still belongs to v1. Never admit contradictory ownership.
+        controllers = group_root/'cgroup.controllers'
+        try:
+            controllers.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            if 'memory' in read(controllers).split():
+                raise ValueError('wangp_profile_cgroup_invalid')
+        membership = path(memberships[0])
+        mounted = group_root/'memory'
+        matches = []
+        for line in (proc_root/'self/mountinfo').read_text().splitlines():
+            fields, separator, filesystem = line.partition(' - ')
+            before, after = fields.split(), filesystem.split()
+            if separator and len(before)>=6 and len(after)>=3 and after[0]=='cgroup' and 'memory' in after[2].split(','):
+                root, point = path(before[3]), path(before[4])
+                if point==PurePosixPath(mounted.as_posix()):
+                    matches.append(root)
+        if len(matches)!=1 or not membership.is_relative_to(matches[0]):
+            raise ValueError('wangp_profile_cgroup_invalid')
+        mount_root = matches[0]
+        group = mounted.joinpath(*membership.relative_to(mount_root).parts)
+        for candidate in (mounted, *mounted.parents):
+            if candidate.is_symlink() or not candidate.is_dir():
+                raise ValueError('wangp_profile_cgroup_invalid')
+        capacity = None
+        available = None
+        while True:
+            if group.is_symlink() or not group.is_dir():
+                raise ValueError('wangp_profile_cgroup_invalid')
+            if read(group/'memory.use_hierarchy').strip()!='1':
+                raise ValueError('wangp_profile_cgroup_invalid')
+            limit = number(read(group/'memory.limit_in_bytes').strip(), positive=True)
+            used = number(read(group/'memory.usage_in_bytes').strip())
+            fields = {}
+            for line in read(group/'memory.stat').splitlines():
+                key, value = line.split()
+                if key in fields or not re.fullmatch(r'[a-z_]+', key):
+                    raise ValueError('wangp_profile_cgroup_invalid')
+                fields[key] = number(value)
+            hierarchy = number(str(fields.get('hierarchical_memory_limit', '')), positive=True)
+            limit = min(limit, hierarchy)
+            capacity = limit if capacity is None else min(capacity, limit)
+            # Never mix local and hierarchical counters. If an old kernel lacks
+            # a shmem counter, no cache is credited as safely reclaimable.
+            keys = ('cache', 'shmem', 'active_file', 'inactive_file', 'dirty', 'writeback', 'unevictable')
+            reclaimable = 0
+            if all('total_'+key in fields for key in keys):
+                cache = max(0, fields['total_cache']-fields['total_shmem'])
+                lru = fields['total_active_file']+fields['total_inactive_file']
+                exclusions = sum(fields['total_'+key] for key in ('dirty', 'writeback', 'unevictable'))
+                reclaimable = max(0, min(cache, lru)-exclusions)
+            bound = min(limit, max(0, limit-used+reclaimable))
+            available = bound if available is None else min(available, bound)
+            if group==mounted:
+                # Limits include invisible ancestors, but their consumption is
+                # unobserved. Preserve older headroom profiles conservatively.
+                return capacity, available if mount_root==PurePosixPath('/') else 0
+            group = group.parent
+    except (OSError, UnicodeError, TypeError, ValueError):
+        raise ValueError('wangp_profile_cgroup_invalid') from None
+
+
 def _effective_total_profile_ram(proc_root=Path('/proc'), group_root=Path('/sys/fs/cgroup')):
     """Allocated capacity: host total constrained by every finite ancestor."""
     info = {line.split(':',1)[0]: int(line.split()[1])*1024
@@ -263,6 +369,9 @@ def _effective_total_profile_ram(proc_root=Path('/proc'), group_root=Path('/sys/
     total = info.get('MemTotal')
     if type(total) is not int or total <= 0:
         raise ValueError('wangp_profile_total_ram_unconfirmed')
+    legacy = _profile_v1_ram(proc_root, group_root)
+    if legacy is not None:
+        return min(total, legacy[0])
     for group in _profile_ram_groups(proc_root, group_root, resolve_membership=True):
         # A whole VM root can lack memory.max. A resolved non-root memory
         # membership must expose its limit; missing observation is not max.
@@ -287,6 +396,9 @@ def _available_profile_ram(proc_root=Path('/proc'), group_root=Path('/sys/fs/cgr
     info = {line.split(':',1)[0]: int(line.split()[1])*1024
             for line in (proc_root/'meminfo').read_text().splitlines()}
     available = info['MemAvailable']
+    legacy = _profile_v1_ram(proc_root, group_root)
+    if legacy is not None:
+        return min(available, legacy[1])
     for group in _profile_ram_groups(proc_root, group_root):
         if (group/'memory.max').is_file():
             limit = _profile_ram_limit(group)
