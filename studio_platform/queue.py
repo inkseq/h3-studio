@@ -230,7 +230,7 @@ class TaskQueue:
                 not_before=repo.clock() + retry_after_s, error_code=error_code, updated_at=repo.clock()))
             connection.execute(update(attempts).where(attempts.c.id == lease.attempt_id)
                 .values(status="deferred", error_code=error_code, updated_at=repo.clock()))
-            repo._dispatch_wakeup(connection, lease.job_id)
+            repo._emit(connection, "job.queued", lease.job_id, {"job_id": lease.job_id})
             return repo._job(connection, lease.job_id)
 
     def _transition(self, lease, allowed, status, *, attempt_values=None, job_values=None):
@@ -285,6 +285,7 @@ class TaskQueue:
                 cancel_from_status="running" if status == "cancel_requested" else None, updated_at=repo.clock()))
             connection.execute(update(attempts).where(attempts.c.id == lease.attempt_id)
                 .values(status="running", upstream_task_id=upstream_task_id, updated_at=repo.clock()))
+            repo._emit(connection, "job.running", lease.job_id, {"job_id": lease.job_id})
             return repo._job(connection, lease.job_id)
 
     def begin_collection(self, lease):
@@ -301,6 +302,7 @@ class TaskQueue:
                 cancel_from_status="collecting" if status == "cancel_requested" else None, updated_at=repo.clock()))
             connection.execute(update(attempts).where(attempts.c.id == lease.attempt_id)
                 .values(status="collecting", upstream_stopped=1, updated_at=repo.clock()))
+            repo._emit(connection, "job.collecting", lease.job_id, {"job_id": lease.job_id})
             return repo._job(connection, lease.job_id)
 
     def collection_failed(self, lease, *, error_code="collection_failed", retry_after_s=30):
@@ -401,6 +403,7 @@ class TaskQueue:
                 lease_expires_at=None, updated_at=repo.clock()))
             connection.execute(update(attempts).where(attempts.c.id == lease.attempt_id).values(status="failed",
                 error_code=error_code, upstream_stopped=1, actual_cost_microusd=cost, updated_at=repo.clock()))
+            repo._emit(connection, "job.failed", lease.job_id, {"job_id": lease.job_id})
             return repo._job(connection, lease.job_id)
 
     def confirm_cancel(self, lease, *, upstream_stopped=False, actual_cost_microusd=None):
@@ -419,6 +422,7 @@ class TaskQueue:
                 fence=job["fence"] + 1, lease_worker_id=None, lease_expires_at=None, updated_at=repo.clock()))
             connection.execute(update(attempts).where(attempts.c.id == lease.attempt_id).values(status="cancelled",
                 upstream_stopped=1, actual_cost_microusd=cost, updated_at=repo.clock()))
+            repo._emit(connection, "job.cancelled", lease.job_id, {"job_id": lease.job_id})
             return repo._job(connection, lease.job_id)
 
     def recover_expired(self, *, limit=100, summary=False):

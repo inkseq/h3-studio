@@ -150,6 +150,7 @@ jobs = Table(
     Column("current_attempt_id", String(36)), Column("fence", BigInteger, nullable=False, default=0),
     Column("lease_worker_id", String(200)), Column("lease_expires_at", Float),
     Column("cancel_from_status", String(40)), Column("error_code", String(200)),
+    Column("cancellation", JSON),
     Column("result", JSON),
     UniqueConstraint("tenant_id", "owner_id", "project_id", "actor_id", "idempotency_key"),
 )
@@ -186,7 +187,10 @@ outbox = Table(
     Column("event_type", String(100), nullable=False), Column("aggregate_id", String(200), nullable=False),
     Column("payload", JSON, nullable=False), Column("created_at", Float, nullable=False),
     Column("delivered_at", Float),
+    Column("job_event_seq", BigInteger),
 )
+job_event_order = Index("platform_outbox_job_event_order", outbox.c.job_event_seq, unique=True)
+JOB_EVENT_LOCK = 685939796868749722
 dispatch_receipts = Table(
     "platform_dispatch_receipts", metadata,
     Column("event_id", String(36), ForeignKey("platform_outbox.id"), primary_key=True),
@@ -372,6 +376,15 @@ class Repository:
                 # them NULL rather than backfilling from reservation creation.
                 connection.exec_driver_sql(
                     "ALTER TABLE platform_budget_reservations ADD COLUMN settled_at FLOAT")
+            job_columns = {column["name"] for column in inspect(connection).get_columns("platform_jobs")}
+            if "cancellation" not in job_columns:
+                connection.exec_driver_sql("ALTER TABLE platform_jobs ADD COLUMN cancellation JSON")
+            event_columns = {column["name"] for column in inspect(connection).get_columns("platform_outbox")}
+            if "job_event_seq" not in event_columns:
+                # Historical timestamps do not establish commit order. The
+                # new feed starts at this additive activation epoch.
+                connection.exec_driver_sql("ALTER TABLE platform_outbox ADD COLUMN job_event_seq BIGINT")
+            job_event_order.create(connection, checkfirst=True)
 
     def close(self):
         self.engine.dispose()
@@ -380,16 +393,40 @@ class Repository:
     def transaction(self):
         guard = self._memory_lock if self._is_memory else _NullLock()
         with guard, self.engine.connect() as connection:
+            connection.info["job_event_ids"] = []
             try:
                 if self.engine.dialect.name == "sqlite":
                     connection.exec_driver_sql("BEGIN IMMEDIATE")
                 else:
+                    connection = connection.execution_options(isolation_level="READ COMMITTED")
                     connection.begin()
                 yield connection
+                self._sequence_job_events(connection)
                 connection.commit()
             except BaseException:
                 connection.rollback()
                 raise
+            finally:
+                connection.info.pop("job_event_ids", None)
+
+    def _sequence_job_events(self, connection):
+        ids = connection.info.get("job_event_ids", ())
+        if not ids:
+            return
+        # Acquire this last, after ALL business work. No job/account/worker
+        # locks or provider calls follow it: commit is the next outer action.
+        # Holding the lock through commit orders visibility, unlike BIGSERIAL
+        # allocation at insert time. SQLite BEGIN IMMEDIATE already serializes.
+        if connection.dialect.name == "postgresql":
+            connection.exec_driver_sql("SELECT pg_advisory_xact_lock(%s)", (JOB_EVENT_LOCK,))
+        sequence = connection.execute(select(func.max(outbox.c.job_event_seq))).scalar() or 0
+        if sequence + len(ids) > 9_000_000_000_000_000_000:
+            raise Conflict("job_event_sequence_exhausted")
+        for offset, event_id in enumerate(ids, 1):
+            result = connection.execute(update(outbox).where(outbox.c.id == event_id,
+                outbox.c.job_event_seq.is_(None)).values(job_event_seq=sequence + offset))
+            if result.rowcount != 1:
+                raise Conflict("job_event_sequence_unconfirmed")
 
     @staticmethod
     def _scope(table, scope):
@@ -409,8 +446,30 @@ class Repository:
         return dict(row)
 
     def _emit(self, connection, event_type, aggregate_id, payload):
-        connection.execute(insert(outbox).values(id=str(uuid.uuid4()), event_type=event_type,
+        event_id = str(uuid.uuid4())
+        public_event = event_type.startswith("job.") and event_type != "job.dispatch_requested"
+        if public_event:
+            if "job_event_ids" not in connection.info:
+                raise Conflict("job_event_transaction_required")
+            from .job_cancellation import cancellation_fields, failure_metadata
+            state = connection.execute(select(jobs.c.id, jobs.c.status, jobs.c.error_code, jobs.c.cancellation,
+                jobs.c.attempt_no, jobs.c.current_attempt_id, jobs.c.fence, jobs.c.lease_worker_id,
+                jobs.c.lease_expires_at, jobs.c.result["actual_cost_microusd"].label("_actual_cost_microusd"))
+                .where(jobs.c.id == aggregate_id)).mappings().one()
+            state = dict(state)
+            if state["status"] == "failed" and state["cancellation"] is None:
+                state["cancellation"] = failure_metadata(state["error_code"], self.clock())
+                connection.execute(update(jobs).where(jobs.c.id == aggregate_id)
+                    .values(cancellation=state["cancellation"]))
+            error = state["error_code"]
+            if error is not None and (not isinstance(error, str) or re.fullmatch(r"[a-z][a-z0-9_]{0,199}", error) is None):
+                error = "job_error_unclassified"
+            payload = {**payload, "public_state": {"status": state["status"], "error_code": error,
+                **cancellation_fields(connection, state)}}
+        connection.execute(insert(outbox).values(id=event_id, event_type=event_type,
             aggregate_id=aggregate_id, payload=canonical(payload), created_at=self.clock()))
+        if public_event:
+            connection.info["job_event_ids"].append(event_id)
         if event_type in {"job.created", "job.queued", "job.lease_expired", "job.submission_unknown"}:
             self._dispatch_wakeup(connection, aggregate_id)
 
@@ -1194,81 +1253,174 @@ class Repository:
                 result[row["job_id"]].append(dict(row))
         return result
 
-    def request_cancel(self, scope, job_id):
+    def request_cancel(self, scope, job_id, *, cancellation=None):
+        from .job_cancellation import metadata_for
         with self.transaction() as connection:
             job = self._job(connection, job_id, scope, lock=True)
-            if (job["status"] == "failed" and job["error_code"] == "capacity_approval_expired_or_revoked"
-                    and job["attempt_no"] == 0 and job["current_attempt_id"] is None):
-                # A later privileged preparation recovery must honour a user
-                # cancelling this failed, never-submitted request. Historical
-                # versions returned without leaving evidence in this window.
-                result = dict(job["result"] or {})
-                if result.get("recovery_cancel_requested") is not True:
-                    result["recovery_cancel_requested"] = True
-                    connection.execute(update(jobs).where(jobs.c.id == job_id).values(
-                        result=result, updated_at=self.clock()))
-                    self._emit(connection, "job.cancel_requested", job_id,
-                        {"job_id": job_id, "status": "failed", "upstream_stopped": True})
-                    return self._job(connection, job_id)
-            if job["status"] in ("succeeded", "failed", "cancelled", "cancel_requested"):
-                return job
-            if job["status"] == "recovery_hold":
-                # Restored attempts may still be running/billable upstream.
-                # A browser cancellation must not escape quarantine into the
-                # ordinary reconcile queue or pretend zero-cost cancellation.
-                result = dict(job["result"] or {})
-                if result.get("recovery_cancel_requested") is True:
-                    return job
+            value = cancellation if cancellation is not None else metadata_for(
+                "owner", "owner_request_cancelled", scope.actor_id, self.clock())
+            return self._cancel_locked(connection, job, value)
+
+    def _cancel_locked(self, connection, job, cancellation):
+        from .job_cancellation import validate_metadata
+        job_id = job["id"]
+        value = validate_metadata(cancellation)
+        if job["status"] not in {"succeeded", "failed", "cancelled", "cancel_requested"} and job.get("cancellation") is None:
+            connection.execute(update(jobs).where(jobs.c.id == job_id).values(cancellation=value))
+            job = dict(job, cancellation=value)
+        if (job["status"] == "failed" and job["error_code"] == "capacity_approval_expired_or_revoked"
+                and job["attempt_no"] == 0 and job["current_attempt_id"] is None):
+            # A later privileged preparation recovery must honour a user
+            # cancelling this failed, never-submitted request. Historical
+            # versions returned without leaving evidence in this window.
+            result = dict(job["result"] or {})
+            if result.get("recovery_cancel_requested") is not True:
                 result["recovery_cancel_requested"] = True
                 connection.execute(update(jobs).where(jobs.c.id == job_id).values(
                     result=result, updated_at=self.clock()))
                 self._emit(connection, "job.cancel_requested", job_id,
+                    {"job_id": job_id, "status": "failed", "upstream_stopped": True})
+                return self._job(connection, job_id)
+        if job["status"] in ("succeeded", "failed", "cancelled", "cancel_requested"):
+            return job
+        if job["status"] == "recovery_hold":
+            # Restored attempts may still be running/billable upstream.
+            # A browser cancellation must not escape quarantine into the
+            # ordinary reconcile queue or pretend zero-cost cancellation.
+            result = dict(job["result"] or {})
+            if result.get("recovery_cancel_requested") is True:
+                return job
+            result["recovery_cancel_requested"] = True
+            connection.execute(update(jobs).where(jobs.c.id == job_id).values(
+                result=result, updated_at=self.clock()))
+            self._emit(connection, "job.cancel_requested", job_id,
+                {"job_id": job_id, "status": "recovery_hold", "upstream_stopped": False})
+            return self._job(connection, job_id)
+        immediate = job["status"] in ("planned", "blocked", "queued", "claimed", "waiting_capacity")
+        if immediate and job["status"] != "waiting_capacity" and (job["current_attempt_id"] or job["attempt_no"]):
+            previous = connection.execute(select(attempts.c.submission_started_at, attempts.c.upstream_task_id)
+                .where(attempts.c.id == job["current_attempt_id"], attempts.c.job_id == job_id)).first()
+            if previous is None or previous.submission_started_at is not None or previous.upstream_task_id is not None:
+                # A malformed/manual status change must not turn a paid or
+                # uncertain attempt into a free cancellation. Keep the
+                # attempt/invoice evidence and require reconciliation, as
+                # generate-claim does for the same unsafe requeue window.
+                result = dict(job["result"] or {})
+                result["recovery_cancel_requested"] = True
+                connection.execute(update(jobs).where(jobs.c.id == job_id).values(
+                    status="recovery_hold", error_code="cancellation_requires_reconciliation",
+                    cancel_from_status=job["status"], result=result, fence=job["fence"]+1,
+                    lease_worker_id=None, lease_expires_at=None, updated_at=self.clock()))
+                self._emit(connection, "job.cancel_requested", job_id,
                     {"job_id": job_id, "status": "recovery_hold", "upstream_stopped": False})
                 return self._job(connection, job_id)
-            immediate = job["status"] in ("planned", "blocked", "queued", "claimed", "waiting_capacity")
-            if immediate and job["status"] != "waiting_capacity" and (job["current_attempt_id"] or job["attempt_no"]):
-                previous = connection.execute(select(attempts.c.submission_started_at, attempts.c.upstream_task_id)
-                    .where(attempts.c.id == job["current_attempt_id"], attempts.c.job_id == job_id)).first()
-                if previous is None or previous.submission_started_at is not None or previous.upstream_task_id is not None:
-                    # A malformed/manual status change must not turn a paid or
-                    # uncertain attempt into a free cancellation. Keep the
-                    # attempt/invoice evidence and require reconciliation, as
-                    # generate-claim does for the same unsafe requeue window.
-                    result = dict(job["result"] or {})
-                    result["recovery_cancel_requested"] = True
-                    connection.execute(update(jobs).where(jobs.c.id == job_id).values(
-                        status="recovery_hold", error_code="cancellation_requires_reconciliation",
-                        cancel_from_status=job["status"], result=result, fence=job["fence"]+1,
-                        lease_worker_id=None, lease_expires_at=None, updated_at=self.clock()))
-                    self._emit(connection, "job.cancel_requested", job_id,
-                        {"job_id": job_id, "status": "recovery_hold", "upstream_stopped": False})
-                    return self._job(connection, job_id)
-            new_status = "cancelled" if immediate else "cancel_requested"
-            values = dict(status=new_status, cancel_from_status=job["status"], updated_at=self.clock())
-            if immediate:
-                if job["status"] == "waiting_capacity":
-                    if job["attempt_no"] or job["current_attempt_id"]:
-                        raise Conflict("capacity_waiter_has_attempt_requires_review")
-                values.update(fence=job["fence"] + 1, lease_worker_id=None, lease_expires_at=None)
-                self._settle(connection, "job", job_id, 0)
-                if job["status"] == "waiting_capacity":
-                    # The scaler links waiters after locking shared budgets.
-                    # Use budget-before-waiter here too, even when task and
-                    # instance happen to use the same account.
-                    connection.execute(update(capacity_waiters).where(capacity_waiters.c.job_id == job_id)
-                                       .values(state="cancelled"))
-                if job["current_attempt_id"]:
-                    connection.execute(update(attempts).where(attempts.c.id == job["current_attempt_id"])
-                        .values(status="cancelled", updated_at=self.clock(), actual_cost_microusd=0))
-            connection.execute(update(jobs).where(jobs.c.id == job_id).values(**values))
-            self._emit(connection, "job.cancel_requested", job_id,
-                       {"job_id": job_id, "status": new_status, "upstream_stopped": immediate})
-            return self._job(connection, job_id)
+        new_status = "cancelled" if immediate else "cancel_requested"
+        values = dict(status=new_status, cancel_from_status=job["status"], updated_at=self.clock())
+        if immediate:
+            if job["status"] == "waiting_capacity":
+                if job["attempt_no"] or job["current_attempt_id"]:
+                    raise Conflict("capacity_waiter_has_attempt_requires_review")
+            values.update(fence=job["fence"] + 1, lease_worker_id=None, lease_expires_at=None)
+            self._settle(connection, "job", job_id, 0)
+            if job["status"] == "waiting_capacity":
+                # The scaler links waiters after locking shared budgets.
+                # Use budget-before-waiter here too, even when task and
+                # instance happen to use the same account.
+                connection.execute(update(capacity_waiters).where(capacity_waiters.c.job_id == job_id)
+                                   .values(state="cancelled"))
+            if job["current_attempt_id"]:
+                connection.execute(update(attempts).where(attempts.c.id == job["current_attempt_id"])
+                    .values(status="cancelled", updated_at=self.clock(), actual_cost_microusd=0))
+        connection.execute(update(jobs).where(jobs.c.id == job_id).values(**values))
+        self._emit(connection, "job.cancel_requested", job_id,
+                   {"job_id": job_id, "status": new_status, "upstream_stopped": immediate})
+        return self._job(connection, job_id)
 
     def approve_capacity(self, approval_id, **kwargs):
         """Trusted operator only; creates an immutable approval, not a cloud instance."""
         from .capacity import approve_capacity
         return approve_capacity(self, approval_id, **kwargs)
+
+    def cancel_queued_jobs(self, connection, *, tenant_id, selections, actor_id, reason_code):
+        """Trusted human-admin caller owns authorization, capacity lock and replay.
+
+        Lock and validate the entire selection before cancelling any row. A
+        worker winning a claim or an old submitted attempt refuses the batch.
+        """
+        from .job_cancellation import OPERATOR_REASONS, cancel_eligibility, cancel_snapshot, metadata_for
+        identifier(tenant_id), identifier(actor_id)
+        if (not isinstance(selections, list) or not 1 <= len(selections) <= 100
+                or not isinstance(reason_code, str) or reason_code not in OPERATOR_REASONS):
+            raise ValueError("invalid_queued_job_cancellation")
+        chosen = {}
+        for value in selections:
+            if not isinstance(value, dict) or set(value) != {"id", "expected_snapshot"}:
+                raise ValueError("invalid_queued_job_cancellation")
+            job_id = identifier(value["id"])
+            digest = value["expected_snapshot"]
+            if (job_id in chosen or not isinstance(digest, str)
+                    or re.fullmatch(r"[0-9a-f]{64}", digest) is None):
+                raise ValueError("invalid_queued_job_cancellation")
+            chosen[job_id] = digest
+        locked = []
+        for job_id in sorted(chosen):
+            row = self._locked(connection, select(jobs).where(
+                jobs.c.id == job_id, jobs.c.tenant_id == tenant_id))
+            if row is None:
+                raise NotFound("job_not_found")
+            if cancel_snapshot(row) != chosen[job_id]:
+                raise Conflict("job_cancel_snapshot_changed")
+            if not cancel_eligibility(connection, row)["cancellable"]:
+                raise Conflict("job_not_safely_cancellable")
+            locked.append(dict(row))
+        value = metadata_for("operator", reason_code, actor_id, self.clock())
+        # Jobs are already locked. Pre-lock the union in one global order,
+        # rather than obtaining each job's overlapping accounts piecemeal.
+        # Ordinary settlement locks its job before reservations/accounts too.
+        accounts = connection.execute(select(budget_reservations.c.account_id).where(
+            budget_reservations.c.reference_type == "job",
+            budget_reservations.c.reference_id.in_(chosen), budget_reservations.c.state == "reserved")
+            .distinct().order_by(budget_reservations.c.account_id)).scalars()
+        for account_id in list(accounts):
+            if self._locked(connection, select(budget_accounts).where(budget_accounts.c.id == account_id)) is None:
+                raise NotFound("budget_not_found")
+        return [self._cancel_locked(connection, row, value) for row in locked]
+
+    def get_job_cancellation_fields(self, tenant_id, owner_id, job_projects, *, expected_states=None):
+        """At most 100 owned pairs; one consistent, bounded status/proof snapshot."""
+        from .job_cancellation import cancellation_columns, cancellation_fields
+        permitted = self._job_batch_predicate(tenant_id, owner_id, job_projects, maximum=100)
+        if permitted is None:
+            return {}
+        if expected_states is not None and (not isinstance(expected_states, dict)
+                or set(expected_states) != set(job_projects) or any(not isinstance(value, dict)
+                or set(value) != {"status", "updated_at", "error_code"} for value in expected_states.values())):
+            raise ValueError("invalid_job_cancellation_snapshot")
+        with self._budget_read() as connection:
+            rows = list(connection.execute(select(*cancellation_columns()).where(permitted)).mappings())
+            if {row["id"] for row in rows} != set(job_projects):
+                raise NotFound("job_not_found")
+            history = {row["id"]: [] for row in rows}
+            for item in connection.execute(select(attempts).join(jobs, attempts.c.job_id == jobs.c.id)
+                    .where(permitted).order_by(attempts.c.number)).mappings():
+                history[item["job_id"]].append(item)
+            reservations = {row["id"]: [] for row in rows}
+            for item in connection.execute(select(budget_reservations).join(jobs,
+                    budget_reservations.c.reference_id == jobs.c.id).where(permitted,
+                    budget_reservations.c.reference_type == "job")).mappings():
+                reservations[item["reference_id"]].append(item)
+            result = {}
+            for row in rows:
+                expected = expected_states[row["id"]] if expected_states is not None else None
+                if expected is not None and any(row[key] != expected[key] for key in expected):
+                    # The original job DTO was read before this proof snapshot.
+                    # Do not mix a newer reason/retry grant into its older phase.
+                    result[row["id"]] = {"cancelled_by": None, "reason_code": None, "message": None,
+                        "retry_advice": {"safe_to_retry": False, "charged": None, "upstream_still_running": None}}
+                else:
+                    result[row["id"]] = cancellation_fields(connection, row,
+                        history=history[row["id"]], reservations=reservations[row["id"]])
+            return result
 
     def reserve_capacity_member(self, approval_id, member_id, *, connection=None):
         from .capacity import reserve_capacity_member
