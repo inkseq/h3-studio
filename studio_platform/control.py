@@ -137,14 +137,18 @@ class WorkerControl:
             return self._worker(connection, worker_id)
 
     @staticmethod
-    def _proven_unsubmitted_queue(connection, job):
+    def _proven_unsubmitted_queue(connection, job, *, expired_lease_only=False):
         """A status label alone cannot prove this bound slot stopped executing."""
         if job["status"] != "queued" or not job["current_attempt_id"]:
             return False
-        previous = connection.execute(select(attempts.c.submission_started_at, attempts.c.upstream_task_id).where(
+        if expired_lease_only and (job["lease_worker_id"] is not None or job["lease_expires_at"] is not None):
+            return False
+        previous = connection.execute(select(attempts.c.submission_started_at, attempts.c.upstream_task_id,
+            attempts.c.status).where(
             attempts.c.id == job["current_attempt_id"], attempts.c.job_id == job["id"])).first()
         return (previous is not None and previous.submission_started_at is None
-                and previous.upstream_task_id is None)
+                and previous.upstream_task_id is None
+                and (not expired_lease_only or previous.status == "lease_expired"))
 
     def pool_status(self, pool, *, model_id, configuration_id, recipe_id=None,
                     backend="comfy-worker", engine_manifest_digest=None, output_delivery="",

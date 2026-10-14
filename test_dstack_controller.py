@@ -8,7 +8,8 @@ from studio_platform.dstack_controller import DstackController
 from studio_platform.dstack_controller import HatchetProcesses
 from studio_platform.fleet import SlotConfig
 from studio_platform.operator_capacity import operator_nodes
-from studio_platform.repository import instance_intents, registered_workers
+from studio_platform.repository import attempts, budget_reservations, instance_intents, jobs, registered_workers
+from studio_platform.queue import TaskQueue
 from studio_platform.operator_capacity import operator_commands
 from studio_platform.worker_admission import worker_window_reason
 from test_platform_repository import LedgerCase
@@ -163,6 +164,97 @@ class DstackControllerTests(fixture.DstackOperatorTests):
         self.assertEqual(self.repo.get_budget("owner-budget"),budget)
         with self.repo.engine.connect() as connection:
             self.assertEqual(connection.execute(select(registered_workers.c.state)).scalar_one(),"retired")
+
+    def _expired_queue_history(self):
+        node, controller = self.ready()
+        job = self.job()
+        queue = TaskQueue(self.repo)
+        claim = queue.claim("dstack-test-slot", job["pool"], lease_seconds=10)
+        self.assertIsNotNone(claim)
+        with self.repo.transaction() as connection:
+            connection.execute(update(registered_workers).where(
+                registered_workers.c.id == "dstack-test-slot").values(
+                state="leased", current_job_id=job["id"]))
+        self.now += 11
+        self.assertEqual(queue.recover_expired()[0]["id"], job["id"])
+        with self.repo.engine.connect() as connection:
+            original_job = dict(connection.execute(select(jobs).where(jobs.c.id == job["id"])).mappings().one())
+            original_attempt = dict(connection.execute(select(attempts).where(
+                attempts.c.id == original_job["current_attempt_id"])).mappings().one())
+        self.assertEqual(original_job["status"], "queued")
+        self.assertIsNone(original_job["lease_worker_id"])
+        self.assertIsNone(original_job["lease_expires_at"])
+        self.assertEqual(original_attempt["status"], "lease_expired")
+        self.assertIsNone(original_attempt["submission_started_at"])
+        self.assertIsNone(original_attempt["upstream_task_id"])
+        return node, controller, original_job, original_attempt
+
+    def test_expired_unsubmitted_queue_history_drains_without_changing_original_job(self):
+        node, controller, job, attempt = self._expired_queue_history()
+        budget = self.repo.get_budget("owner-budget")
+        with self.repo.engine.connect() as connection:
+            reservations = [dict(row) for row in connection.execute(select(budget_reservations)).mappings()]
+        self.service.node_command(self.owner, node, {}, "stop-expired-history")
+        self.assertEqual(controller.tick()["nodes"][0]["state"], "stopping")
+        self.assertEqual(len(self.client.stopped), 1)
+        self.assertEqual(len(self.client.applied), 1)
+        self.assertEqual(self.repo.get_budget("owner-budget"), budget)
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(dict(connection.execute(select(jobs).where(jobs.c.id == job["id"])).mappings().one()), job)
+            self.assertEqual(dict(connection.execute(select(attempts).where(attempts.c.id == attempt["id"])).mappings().one()), attempt)
+            self.assertEqual([dict(row) for row in connection.execute(select(budget_reservations)).mappings()], reservations)
+            worker = connection.execute(select(registered_workers)).mappings().one()
+            self.assertEqual(worker["state"], "retired")
+            self.assertIsNone(worker["current_job_id"])
+
+    def test_expired_queue_is_still_an_obligation_on_a_running_host(self):
+        node, controller, job, attempt = self._expired_queue_history()
+        with self.repo.engine.connect() as connection:
+            intent = connection.execute(select(instance_intents).where(instance_intents.c.id == node)).mappings().one()
+        self.assertEqual(controller._obligations(intent)[1:3], (1, 0))
+        self.service.node_command(self.owner, node, {}, "stop-expired-history")
+        self.assertEqual(controller._obligations(intent)[1:3], (0, 0))
+        with self.repo.transaction() as connection:
+            connection.execute(update(attempts).where(attempts.c.id == attempt["id"]).values(upstream_task_id="unknown-task"))
+        self.assertEqual(controller._obligations(intent)[1:3], (1, 1))
+        self.assertEqual(self.client.stopped, [])
+
+    def test_final_stop_rechecks_expired_queue_and_rejects_live_or_uncertain_history(self):
+        node, controller, job, attempt = self._expired_queue_history()
+        self.service.node_command(self.owner, node, {}, "stop-expired-history")
+        controller.control.drain("dstack-test-slot")
+        controller.control.retire("dstack-test-slot", upstream_idle_confirmed=True)
+        variants = (
+            (jobs, job, {"lease_worker_id": "dstack-test-slot"}),
+            (jobs, job, {"lease_expires_at": self.now + 60}),
+            (jobs, job, {"status": "claimed"}),
+            (jobs, job, {"status": "collecting"}),
+            (jobs, job, {"status": "submission_unknown"}),
+            (jobs, job, {"current_attempt_id": None}),
+            (jobs, job, {"current_attempt_id": "missing-attempt"}),
+            (attempts, attempt, {"status": "claimed"}),
+            (attempts, attempt, {"submission_started_at": self.now}),
+            (attempts, attempt, {"upstream_task_id": "unknown-task"}),
+        )
+        for table, original, changed in variants:
+            with self.subTest(table=table.name, changed=changed):
+                with self.repo.transaction() as connection:
+                    connection.execute(update(table).where(table.c.id == original["id"]).values(**changed))
+                binding = self.store.load(node)
+                self.assertFalse(self.store.begin_stop(node, binding["run_id"]))
+                self.assertFalse(self.store.load(node).get("stop_started", False))
+                with self.repo.transaction() as connection:
+                    connection.execute(update(table).where(table.c.id == original["id"]).values(
+                        **{key: original[key] for key in changed}))
+        with self.repo.transaction() as connection:
+            connection.execute(update(jobs).where(jobs.c.id == job["id"]).values(status="failed"))
+            connection.execute(update(attempts).where(attempts.c.id == attempt["id"]).values(upstream_task_id="unknown-task"))
+        self.assertFalse(self.store.begin_stop(node, self.store.load(node)["run_id"]))
+        with self.repo.transaction() as connection:
+            connection.execute(update(jobs).where(jobs.c.id == job["id"]).values(status=job["status"]))
+            connection.execute(update(attempts).where(attempts.c.id == attempt["id"]).values(upstream_task_id=None))
+        self.assertTrue(self.store.begin_stop(node, self.store.load(node)["run_id"]))
+        self.assertEqual(self.client.stopped, [])
 
     def test_cold_preparation_does_not_consume_idle_window(self):
         node=self.start()["node_id"]
