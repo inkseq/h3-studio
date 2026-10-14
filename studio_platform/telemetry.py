@@ -29,6 +29,9 @@ STAGES = frozenset({"queue_wait", "capacity_provision", "image_pull", "weights_d
 OUTCOMES = frozenset({"success", "failure", "unknown", "cancelled"})
 PROVIDERS = frozenset({"vast", "runpod", "lium", "targon", "local", "unknown"})
 GPU_TYPES = frozenset({"rtx5090", "rtx-pro6000", "h100", "h200", "b200", "b300", "unknown"})
+_GPU_NAMES = {"RTX5090": "rtx5090", "RTX 5090": "rtx5090",
+    "RTXPRO6000S": "rtx-pro6000", "RTXPRO6000WS": "rtx-pro6000",
+    "H100": "h100", "H200": "h200", "B200": "b200", "B300": "b300"}
 ERROR_CODES = WANGP_VALIDATION_CODES | COMMON_CODES | INFERENCE_FAILURE_CODES | frozenset({"unknown_error",
     "stage_failed", "cancel_requested", "submission_rejected", "submission_needs_reconciliation",
     "upstream_status_unknown", "worker_preparation_not_ready", "worker_preparation_failed",
@@ -49,6 +52,15 @@ def _choice(value, allowed):
     return value if isinstance(value, str) and value in allowed else "unknown"
 
 
+def _gpu_type(source):
+    # CPU allocation/cold observations carry the already captured native name.
+    # An explicit telemetry type keeps its existing closed validation/precedence.
+    if "gpu_type" in source:
+        return _choice(source["gpu_type"], GPU_TYPES)
+    name = source.get("gpu")
+    return _choice(_GPU_NAMES.get(name, name) if isinstance(name, str) else None, GPU_TYPES)
+
+
 def _context(value):
     """Accept trusted identifiers/dimensions, never arbitrary text or objects."""
     source = value if type(value) is dict else {}
@@ -56,7 +68,7 @@ def _context(value):
         "provider": _choice(source.get("provider"), PROVIDERS),
         "profile_id": _choice(source.get("profile_id"), frozenset(PROFILE_IDS) | {"unknown"}),
         "mode": _choice(source.get("mode"), {"fl", "ref", "unknown"}),
-        "gpu_type": _choice(source.get("gpu_type"), GPU_TYPES),
+        "gpu_type": _gpu_type(source),
         "warmth": _choice(source.get("warmth"), {"cold", "warm", "mode_switch", "unknown"}),
     }
     if type(source.get("simulation")) is bool:

@@ -108,11 +108,24 @@
           "options": {
             "mode": "columns"
           }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "Time": 0,
+              "machine_id": 1,
+              "Value #A": 2,
+              "Value": 3
+            },
+            "excludeByName": {},
+            "renameByName": {}
+          }
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "none",
           "custom": {
             "align": "auto",
             "cellOptions": {
@@ -121,7 +134,40 @@
             "inspect": false
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "machine_id"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^Value(?: #A)?$"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "showHeader": true,
@@ -156,11 +202,35 @@
           "options": {
             "mode": "columns"
           }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "Time": 0,
+              "machine_id": 1,
+              "Value #A": 2,
+              "Value": 3,
+              "mode": 4,
+              "profile_id": 5,
+              "width": 6,
+              "height": 7,
+              "frames": 8,
+              "fps": 9,
+              "steps": 10,
+              "image_refs": 11,
+              "video_refs": 12,
+              "audio_refs": 13,
+              "warmth": 14
+            },
+            "excludeByName": {},
+            "renameByName": {}
+          }
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
+          "unit": "none",
           "custom": {
             "align": "auto",
             "cellOptions": {
@@ -169,7 +239,40 @@
             "inspect": false
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "machine_id"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^Value(?: #A)?$"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "showHeader": true,
@@ -204,11 +307,28 @@
           "options": {
             "mode": "columns"
           }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "Time": 0,
+              "machine_id": 1,
+              "Value #A": 2,
+              "Value": 3,
+              "stage": 4,
+              "mode": 5,
+              "profile_id": 6,
+              "warmth": 7
+            },
+            "excludeByName": {},
+            "renameByName": {}
+          }
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "s",
+          "unit": "none",
           "custom": {
             "align": "auto",
             "cellOptions": {
@@ -217,7 +337,40 @@
             "inspect": false
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "machine_id"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^Value(?: #A)?$"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "s"
+              },
+              {
+                "id": "decimals",
+                "value": 2
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "showHeader": true,
@@ -252,11 +405,26 @@
           "options": {
             "mode": "columns"
           }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "indexByName": {
+              "Time": 0,
+              "machine_id": 1,
+              "Value #A": 2,
+              "Value": 3,
+              "gpu_type": 4,
+              "region": 5
+            },
+            "excludeByName": {},
+            "renameByName": {}
+          }
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "short",
+          "unit": "none",
           "custom": {
             "align": "auto",
             "cellOptions": {
@@ -265,7 +433,40 @@
             "inspect": false
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "machine_id"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^Value(?: #A)?$"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "none"
+              },
+              {
+                "id": "decimals",
+                "value": 0
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "showHeader": true,
