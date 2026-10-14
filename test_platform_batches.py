@@ -162,7 +162,11 @@ class BatchReadBoundaryTests(unittest.TestCase):
         projected = [columns for _, columns in statements if "_summary_request" in columns]
         self.assertEqual(len(projected), 1)
         self.assertFalse(any("request" in columns or "execution_plan" in columns for _, columns in statements))
-        self.assertLessEqual(len(statements), 7)
+        # Original bounded reads plus one three-query cancellation proof batch,
+        # independent of item count. Never add one proof read per job.
+        proof_queries = [columns for _, columns in statements if "_actual_cost_microusd" in columns]
+        self.assertEqual(len(proof_queries), 1)
+        self.assertLessEqual(len(statements), 10)
 
     def test_list_pages_ten_batches_and_rejects_oversize_page(self):
         self.ready()
