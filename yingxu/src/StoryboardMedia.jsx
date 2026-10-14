@@ -1,10 +1,25 @@
 import React,{useEffect,useRef,useState} from 'react';
-import {getFile} from './media.js';
+import {getFile,download} from './media.js';
 import {artifactMedia} from './artifact-media.js';
 
 export function StoryboardDownloads({version,title}){
   const video=version.asset?.entity,audio=version.audio,items=[video?{id:version.artifactId,kind:'video',mime:video.data.mime,content_url:video.data.cloudContentPath}:null,audio].map(artifact=>artifactMedia(artifact,{id:version.jobId},{title})).filter(Boolean);
-  return <span className="row tight">{items.map(media=><a key={media.id} href={media.downloadURL} download={media.filename.replace('粗剪','镜头')} referrerPolicy="no-referrer">{media.type==='video'?'下载视频':'下载独立音频'}</a>)}</span>;
+  return <span className="row tight">{items.map(media=><StoryboardDownload key={media.id} media={media}/>)}</span>;
+}
+function StoryboardDownload({media}){
+  const [loading,setLoading]=useState(false),[error,setError]=useState(''),pending=useRef(false),alive=useRef(true);
+  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
+  const save=async()=>{
+    if(pending.current)return;pending.current=true;setLoading(true);setError('');
+    try{
+      const blob=await getFile('cloud_artifact_'+media.id);
+      if(!alive.current)return;
+      if(!blob?.size)throw Error('成片文件暂不可读取，请刷新原任务后重试。');
+      download(blob,media.filename.replace('粗剪','镜头'));
+    }catch(error){if(alive.current)setError('下载失败：'+error.message);}
+    finally{pending.current=false;if(alive.current)setLoading(false);}
+  };
+  return <span><button type="button" disabled={loading} onClick={save}>{loading?'正在读取…':media.type==='video'?'下载视频':'下载独立音频'}</button>{error&&<small role="alert">{error}</small>}</span>;
 }
 
 // Reuse the existing owner-scoped media reader; Blob URLs live only as long as

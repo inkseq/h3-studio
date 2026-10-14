@@ -481,7 +481,7 @@ export function ShotEditor({shotId, onClose, inline}) {
       {shot.versions.length > 0 && <div className="versions">
         {shot.versions.map(v => (
           <button key={v.id} className={'ver' + (v.id === shot.chosen ? ' chosen' : '') + (v.id === viewing?.id ? ' viewing' : '')} onClick={() => ['done','succeeded'].includes(v.status)&&setPreview(v.id)}>
-            {['done','succeeded'].includes(v.status)?<StoryboardAssetImage asset={v.asset||v}/>:<div className="ver-wait">{v.status==='queued'?'排队':Number.isFinite(v.progress)?`${Math.round(v.progress*100)}%`:v.message||'状态待更新'}</div>}
+            {['done','succeeded'].includes(v.status)?<StoryboardAssetImage asset={v.asset||v}/>:<div className="ver-wait">{v.status==='queued'?'排队':Number.isFinite(v.progress)?`${Math.round(v.progress*100)}%`:v.message||({running:'生成中',collecting:'收集结果'}[v.status]||'状态待更新')}</div>}
             <span>v{v.n} · {QUALITY_LABEL[v.quality]||'视频'}{v.sameSeedAs ? ' · 同种子' : ''}</span>
             {v.id === shot.chosen && <em>使用中</em>}
             {v.status === 'queued' && <i className="x" onClick={e => { e.stopPropagation(); dispatch({type:'cancel',shot:shot.id,version:v.id,jobId:v.jobId}); }}>取消</i>}
