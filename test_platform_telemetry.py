@@ -3,6 +3,7 @@ import base64
 import json
 import os
 from pathlib import Path
+import re
 import tempfile
 import time
 import unittest
@@ -103,6 +104,30 @@ class TelemetryTests(unittest.TestCase):
         self.assertLessEqual(self.telemetry.status()["metric_labelsets"], 128)
         self.assertTrue(any(attrs.get("stage") == "unknown" for _, attrs in self.telemetry.duration.points))
 
+    def test_captured_gpu_names_reach_allocation_and_cold_events_without_host_metric_labels(self):
+        for captured, expected in (("RTX5090", "rtx5090"), ("RTX 5090", "rtx5090"),
+                ("RTXPRO6000S", "rtx-pro6000"), ("RTXPRO6000WS", "rtx-pro6000"),
+                ("H100", "h100"), ("H200", "h200"), ("B200", "b200"), ("B300", "b300"),
+                ("PRIVATE unsupported model", "unknown"), ({"PRIVATE": "value"}, "unknown")):
+            with self.subTest(captured=captured):
+                context = {"gpu": captured, "machine_id": "149273", "offer_id": "55370775",
+                    "provider_instance_id": "55970464", "provider": "vast", "simulation": False}
+                self.telemetry.host_event(context)
+                allocation = self.logger.events[-1]
+                self.telemetry.start("capacity_provision", context).finish(
+                    duration_seconds=42, timing_basis="durable_cpu_interval")
+                cold = self.logger.events[-1]
+                self.assertEqual((allocation["gpu_type"], cold["gpu_type"]), (expected, expected))
+                self.assertEqual(allocation["machine_id"], "149273")
+                self.assertEqual(cold["duration_seconds"], 42)
+                for _, labels in self.telemetry.duration.points:
+                    for field in ("machine_id", "offer_id", "provider_instance_id", "gpu"):
+                        self.assertNotIn(field, labels)
+        from studio_platform.telemetry import _context
+        self.assertEqual(_context({"gpu_type": "h100", "gpu": "RTX5090"})["gpu_type"], "h100")
+        self.assertEqual(_context({"gpu_type": "PRIVATE", "gpu": "RTX5090"})["gpu_type"], "unknown")
+        self.assertNotIn("PRIVATE", json.dumps(self.logger.events))
+
     def test_recovered_interval_and_unknown_note_keep_observation_time_and_original_duration(self):
         stage = self.telemetry.start("generate", {}, started_at=1769999900.25)
         stage.note("submission_response_unknown")
@@ -137,6 +162,35 @@ class TelemetryTests(unittest.TestCase):
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_host_dashboard_formats_result_values_without_scaling_physical_ids_or_controls(self):
+        dashboard = json.loads((Path(__file__).parent /
+            "deploy/observability/sixnine-host-scorecard.json").read_text(encoding="utf-8"))
+        self.assertEqual(dashboard["uid"], "sixnine-host-scorecard")
+        tables = {panel["id"]: panel for panel in dashboard["panels"] if panel["type"] == "table"}
+        for panel_id, metric_unit in ((2, "none"), (3, "s"), (4, "s"), (5, "none")):
+            panel = tables[panel_id]
+            defaults = panel["fieldConfig"]["defaults"]
+            self.assertEqual(defaults["unit"], "none")
+            overrides = panel["fieldConfig"]["overrides"]
+            # Actual single-ref Loki frames expose Value #A; older frames use Value.
+            for name in ("Value #A", "Value", "machine_id", "width", "frames", "steps"):
+                properties = {"unit": defaults["unit"]}
+                for override in overrides:
+                    matcher = override["matcher"]
+                    matched = ((matcher["id"] == "byName" and matcher["options"] == name)
+                        or (matcher["id"] == "byRegexp" and re.fullmatch(matcher["options"], name)))
+                    if matched:
+                        properties.update({prop["id"]: prop["value"] for prop in override["properties"]})
+                self.assertEqual(properties["unit"], metric_unit if name.startswith("Value") else "none")
+                if name == "machine_id":
+                    self.assertEqual(properties["decimals"], 0)
+            self.assertEqual(panel["targets"][0]["refId"], "A")
+            order = next(t["options"]["indexByName"] for t in panel["transformations"] if t["id"] == "organize")
+            self.assertLess(order["machine_id"], order["Value #A"])
+            if "profile_id" in order:
+                self.assertLess(order["Value #A"], order["profile_id"])
+                self.assertLess(order["Value"], order["profile_id"])
+
     def test_https_cloud_destination_and_authorization_are_required_and_not_represented(self):
         self.assertNotIn("PRIVATE_WRITE_TOKEN", repr(config()))
         for endpoint in ("http://otlp-gateway-prod-us-east-0.grafana.net/otlp",
