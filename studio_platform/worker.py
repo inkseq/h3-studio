@@ -515,7 +515,9 @@ class WorkerRunner:
                          "-pix_fmt", "yuv420p", "-fps_mode", "passthrough"]
                 args += ["-c:a", "aac", "-ar", "32000", "-ac", "2"] if audio else ["-an"]
             with _lease_keepalive(heartbeat):
-                ffmpeg([*args, "-fs", 512*1024*1024+1, "-movflags", "+faststart", final], timeout=media_timeout)
+                # media.ffmpeg bounds input decoding; this output-side limit
+                # bounds encoder buffers inside the shared CPU worker cgroup.
+                ffmpeg([*args, "-threads", "1", "-fs", 512*1024*1024+1, "-movflags", "+faststart", final], timeout=media_timeout)
                 video_evidence = _validate_video(final, width, height, duration, audio, timeout=media_timeout)
                 if delivery is not None:
                     observed = probe(final)
@@ -534,7 +536,7 @@ class WorkerRunner:
                 heartbeat()
                 with _lease_keepalive(heartbeat):
                     ffmpeg(["-i", paths["audio"], *([] if delivery is not None else ["-t", duration]),
-                            "-c:a", "flac", "-ar", "32000", "-ac", "2",
+                            "-c:a", "flac", "-threads", "1", "-ar", "32000", "-ac", "2",
                             "-fs", 512*1024*1024+1, output], timeout=media_timeout)
                     actual_audio_duration = _validate_audio(output, duration, flac=True, timeout=media_timeout)
                 files.append(("audio", output, "audio/flac", {"duration_s": actual_audio_duration, "has_audio": True,
@@ -624,7 +626,7 @@ def _validate_video(path, width, height, duration, audio, *, timeout=180):
         _validate_audio(path, duration, timeout=timeout)
     elif any(s.get("codec_type") == "audio" for s in data.get("streams", [])):
         raise BackendError("unexpected_output_audio")
-    ffmpeg(["-xerror", "-i", path, "-map", "0:v:0", "-map", "0:a:0?", "-f", "null", "-"], timeout=timeout)
+    ffmpeg(["-xerror", "-i", path, "-map", "0:v:0", "-map", "0:a:0?", "-threads", "1", "-f", "null", "-"], timeout=timeout)
     return {"width": width, "height": height, "duration_s": duration, "fps": 24, "has_audio": audio}
 
 
@@ -640,7 +642,7 @@ def _validate_audio(path, duration, *, flac=False, timeout=180):
             raise ValueError
     except (ValueError, TypeError, KeyError):
         raise BackendError("output_audio_verification_failed") from None
-    ffmpeg(["-xerror", "-i", path, "-map", "0:a:0", "-f", "null", "-"], timeout=timeout)
+    ffmpeg(["-xerror", "-i", path, "-map", "0:a:0", "-threads", "1", "-f", "null", "-"], timeout=timeout)
     return actual
 
 
