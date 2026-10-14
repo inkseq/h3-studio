@@ -24,12 +24,13 @@ from .dstack_operator import BACKEND_MARKER, _request, _cold_unadmitted_runtime,
 from .operator_capacity import operator_nodes
 from .repository import BudgetExceeded, attempts, instance_intents, jobs, registered_workers, scaler_actions
 from .worker import _slot_lock
+from .telemetry import NullTelemetry, configured_telemetry
 
 TERMINAL = {"succeeded", "failed", "cancelled"}
 
 
 class DstackController:
-    def __init__(self, service, runtime, *, worker_process=None, broker_readiness=None):
+    def __init__(self, service, runtime, *, worker_process=None, broker_readiness=None, telemetry=None):
         if service.capacity is None:
             raise ValueError("dstack_capacity_disabled")
         self.service, self.repo, self.runtime = service, service.repo, runtime
@@ -38,6 +39,11 @@ class DstackController:
         self.control = WorkerControl(self.repo, capacity_usage=service.registration_capacity_usage)
         self.worker_process = worker_process
         self.broker_readiness = broker_readiness
+        # The existing original-row writer publishes bounded allocation facts.
+        # Import/construction stays offline; only the explicit entry point loads
+        # the already mounted Cloud configuration. Export never owns state.
+        self.telemetry = telemetry if telemetry is not None else NullTelemetry()
+        self.capacity.store.telemetry = self.telemetry
 
     def _nodes(self):
         with self.repo.engine.connect() as connection:
@@ -336,7 +342,7 @@ def main(argv=None):
     from .dstack_factory import create_runtime
     settings=Settings.from_environment()
     repo=Repository(settings.database_url)
-    service=None; runtime=None; processes=None
+    service=None; runtime=None; processes=None; telemetry=None
     try:
         service=from_environment(repo,settings)
         if service.capacity is None:
@@ -346,7 +352,9 @@ def main(argv=None):
         from .hatchet_dispatch import read_broker_config
         readiness=BrokerReadiness(read_broker_config(broker),clock=repo.clock)
         processes=HatchetProcesses(work_dir,broker).__enter__()
-        controller=DstackController(service,runtime,worker_process=processes,broker_readiness=readiness)
+        telemetry=configured_telemetry()
+        controller=DstackController(service,runtime,worker_process=processes,broker_readiness=readiness,
+            telemetry=telemetry)
         stop=threading.Event()
         if threading.current_thread() is threading.main_thread():
             for signum in (signal.SIGINT,signal.SIGTERM):
@@ -371,7 +379,18 @@ def main(argv=None):
                     if service and service.capacity:
                         service.capacity.client.close()
                 finally:
-                    repo.close()
+                    try:
+                        repo.close()
+                    finally:
+                        if telemetry is not None:
+                            try:
+                                telemetry.force_flush(timeout_millis=1000)
+                            except Exception:
+                                pass
+                            try:
+                                telemetry.close()
+                            except Exception:
+                                pass
 
 
 if __name__ == "__main__":

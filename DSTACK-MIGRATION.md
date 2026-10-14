@@ -186,6 +186,65 @@ qualification scope above; Lium/Targon original jobs,
 leases and historical reconciliation remain supported on the legacy path. Custom
 provider plugins are deferred until measured value justifies their maintenance.
 
+## Physical host history and future selection (#177)
+
+Keep Vast physical `machine_id`, native bundle/offer ID, rented instance ID and
+Sixnine node/run ID distinct. Record a closed, time-stamped physical-host
+observation on the original node at allocation, with source identity, provider
+quote, region, GPU, allocated RAM/VRAM/CPU and reliability. Physical machine RAM
+is not silently equated with the rented VM allocation. Missing historical
+identity remains unknown; never fabricate a backfill from a coincidental account
+list or turn an old cancellation into a confirmed supplier failure.
+
+`GET /v1/operator/hosts` is a human-operator, owner-scoped scorecard.
+`GET /v1/operator/admin/hosts` is a human-admin, same-tenant aggregate with no
+other-owner prompts, job payloads, credentials or SSH coordinates. Both use
+bounded `limit`/`offset` pages. Admin `machine_id` lookup can return a policy-only
+row for an explicitly entered numeric ID: zero measured rentals, null timings
+and `operator_supplied_numeric` provenance. It does not claim a provider has
+observed that host. `POST /v1/operator/admin/hosts/policy` requires the closed
+default/prefer/deny choice, reason, expected policy revision/snapshot and original
+Idempotency-Key. The existing policy, command and audit authority owns the
+change; `GET .../admin/hosts/audit` is a bounded admin read. PATs have no host
+policy authority. Recover an unknown response with the same key/body after
+checking current identity, never issue a second policy command blindly.
+
+Manual denial applies to new allocation decisions; it does not terminate or
+rebind an already accepted rental/job. Two explicitly qualified provider
+startup failures within 24 hours produce a seven-day temporary denial, expiring
+by the ordinary policy read clock without a new polling/reconciliation loop.
+Manual preference cannot override an active temporary denial. Owner stop,
+business cancellation, unknown model loading, unrelated transport uncertainty
+and missing measurements do not count as confirmed provider startup failures.
+
+Use dstack 0.22.3's supported `profile.instance_types` for selected Vast bundle
+IDs. An authenticated fresh raw offer mapping must prove each bundle's physical
+host and current policy; unknown/denied hosts cannot pass enforced selection.
+Carry this selection through preview, start, frozen run spec/hash, ownership
+checks and normal apply. The pinned native reuse path skips its type gate when
+provisioning metadata is absent, so recheck the complete reusable-instance view
+and reject missing/conflicting identity rather than claiming the offer filter
+alone is sufficient. Preserve dstack's native allocation/fleet/stop operations,
+the original capacity lock, command replay, hourly caps and reservations. No
+regional restriction, direct provider rental, new physical-removal reconciler,
+unsupported create-only mode or parallel scheduler is introduced.
+
+The scorecard derives measured samples from original allocations and authorized
+successful attempts plus bounded Grafana Cloud stage evidence. Compare model,
+mode, dimensions/duration, steps, reference counts and cold/warm controls before
+ranking. Null timing is not zero; observed sample count and basis accompany each
+median. The original create-request to first native-worker-ready interval is
+explicitly `bootstrap_to_native_worker_ready`; it excludes first-job model
+loading. The generate interval includes submission, loading and terminal polling,
+so do not count that model loading twice in per-video cost. Native model-load or
+network download timing needs its own qualified same-clock evidence; completed
+file counts can include cache hits and alone do not prove download bandwidth.
+Price × generation plus measured amortized bootstrap is a quote-based estimate,
+never settlement of an unknown invoice. `machine_id` belongs in safe
+stage logs, not permanent high-cardinality metric/index labels. The existing
+Cloud pipeline and the additive `sixnine-host-scorecard.json` dashboard share
+the original telemetry; no long-term local metrics database is added.
+
 ## Grafana Cloud telemetry
 
 Use the existing Cloud stack for metrics (Mimir), logs (Loki) and traces (Tempo),
@@ -289,9 +348,12 @@ start; starts from Find/Queue are Ungrouped by default. Group Add defaults to on
 machine; a typical FL/REF pair remains an explicit batch choice.
 
 Every batch child obtains a fresh single-use preview and independent original
-start/idempotency journal. dstack plans and allocates each run. Public offers are
-advisory resource quotes without a pinnable physical offer identity or guaranteed
-quantity; displaying one quote does not assign it repeatedly to several machines.
+start/idempotency journal. dstack plans and allocates each run. A normalized Vast
+offer has a native bundle/offer identity; it is not the physical `machine_id` or
+the rented instance ID. The #177 selection path joins a fresh authenticated
+provider mapping before freezing eligible `profile.instance_types` in the normal
+dstack run specification. Public quotes do not guarantee quantity; displaying one
+quote does not assign it repeatedly to several machines.
 Partial results are shown per machine; an unknown response stops subsequent batch
 children until the original command is recovered. No new allocation reconciler
 or browser-controlled provider request is introduced.

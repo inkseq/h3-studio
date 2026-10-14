@@ -467,3 +467,13 @@ inventory.json
 !test_operator_budgets.py
 !test_operator_budget_routes.py
 !test_dstack_prices.py
+
+# Closed per-host observations and original-journal policy; no runtime data.
+!studio_platform/operator_host_routes.py
+!studio_platform/host_scorecard.py
+!studio_platform/host_policy.py
+!test_host_scorecard.py
+!test_host_policy.py
+!test_dstack_host_selection.py
+!test_operator_host_routes.py
+!deploy/observability/sixnine-host-scorecard.json

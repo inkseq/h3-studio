@@ -38,15 +38,40 @@ class Client:
     def plan(self, spec):
         return {"run_spec": spec, "job_plans": [{"offers":[{"backend":"vastai","region":"test-region",
             "price":.7,"availability":"available","backend_data":"SECRET",
-            "instance":{"resources":{"cpus":12,"memory_mib":96*1024,"disk":{"size_mib":128*1024},
+            "instance":{"name":"12345","resources":{"cpus":12,"memory_mib":96*1024,"disk":{"size_mib":128*1024},
                 "gpus":[{"name":"RTX5090","memory_mib":32*1024}]}}}]}]}
+
+    def vast_offer_mapping(self, request, *, clock):
+        return {"observed_at": clock(), "offers": [{"offer_id": "12345", "machine_id": "19493"}]}
+
+    def reusable_hosts_confirmed(self, approved):
+        return True
+
+    def vast_instance_identity(self, identity):
+        return {"provider_instance_id": identity, "machine_id": "19493", "reliability": .99}
 
     def get(self, *, run_name=None, run_id=None):
         if self.absent:
             return None
         result = self.runs.get(run_name) if run_name else next(
             (run for run in self.runs.values() if run["id"] == run_id), None)
-        return copy.deepcopy(result)
+        result = copy.deepcopy(result)
+        if result and result.get("latest_job_submission", {}).get("job_provisioning_data"):
+            data = result["latest_job_submission"]["job_provisioning_data"]
+            data.setdefault("region", "test-region")
+            data.setdefault("price", .7)
+            kind = data.setdefault("instance_type", {})
+            kind.setdefault("name", "12345")
+            resource = kind.setdefault("resources", {})
+            resource.setdefault("cpus", 12)
+            resource.setdefault("memory_mib", 96*1024)
+            resource.setdefault("disk", {"size_mib": 128*1024})
+            gpus = resource.get("gpus")
+            if isinstance(gpus, list):
+                for gpu in gpus:
+                    if isinstance(gpu, dict):
+                        gpu.setdefault("memory_mib", 32*1024)
+        return result
 
     def apply(self, spec):
         intent = spec["configuration"]["tags"]["sixnine_intent"]
@@ -110,7 +135,7 @@ class DstackOperatorTests(LedgerCase):
         binding = self.store.load(node_id)
         run = self.client.runs[binding["run_name"]]
         run.update(status="running", latest_job_submission={"job_provisioning_data": {
-            "backend": "vastai", "instance_id": "gpu-123", "instance_type": {"resources": {"gpus": [{"name": "RTX5090"}]}}}})
+            "backend": "vastai", "instance_id": "1234567", "instance_type": {"resources": {"gpus": [{"name": "RTX5090"}]}}}})
         return self.capacity.observe(node_id)
 
     def test_reserves_atomically_before_apply_and_replay_does_not_rent(self):
@@ -261,6 +286,8 @@ class DstackOperatorTests(LedgerCase):
         self.client.absent = True
         request = self.service._capacity_request(self.service.profiles["5090-fl"], node,
             binding["created_at"], binding["hard_deadline"], 900)
+        from dataclasses import replace
+        request = replace(request, host_selection=copy.deepcopy(binding["host_selection"]))
         for _ in range(3):
             self.assertEqual(self.capacity.start(request, PUB)["state"], "creation_unknown")
         self.assertEqual(len(self.client.applied), 1)
@@ -338,7 +365,7 @@ class DstackOperatorTests(LedgerCase):
         job = self.job()
         with self.repo.transaction() as connection:
             connection.execute(insert(registered_workers).values(id="worker-1", pool="dstack-test", provider="vast",
-                instance_id="gpu-123", spec={}, spec_hash="a"*64, state="busy", current_job_id=job["id"],
+                instance_id="1234567", spec={}, spec_hash="a"*64, state="busy", current_job_id=job["id"],
                 drain_requested=0, fence=1, expires_at=self.now+60, updated_at=self.now))
             connection.execute(update(jobs).where(jobs.c.id == job["id"]).values(lease_worker_id="worker-1"))
         self.service.node_command(self.owner, node, {}, "stop-1")
@@ -367,9 +394,9 @@ class DstackOperatorTests(LedgerCase):
         self.capacity.readiness = None
         self.running(node)
         binding = self.store.load(node)
-        self.assertTrue(self.store.begin_bootstrap(node, binding["run_id"], "gpu-123"))
-        self.assertFalse(self.store.begin_bootstrap(node, binding["run_id"], "gpu-123"))
-        self.assertTrue(self.store.begin_runtime_launch(node, binding["run_id"], "gpu-123"))
+        self.assertTrue(self.store.begin_bootstrap(node, binding["run_id"], "1234567"))
+        self.assertFalse(self.store.begin_bootstrap(node, binding["run_id"], "1234567"))
+        self.assertTrue(self.store.begin_runtime_launch(node, binding["run_id"], "1234567"))
         # A runtime incarnation proves this is no longer cold unadmitted
         # preparation; missing native idle must continue to block shutdown.
         self.store.record(node, {"state": "runtime_unconfirmed", "ready": False,
@@ -384,7 +411,7 @@ class DstackOperatorTests(LedgerCase):
         job = self.job()
         with self.repo.transaction() as connection:
             connection.execute(insert(registered_workers).values(id="worker-1", pool="dstack-test", provider="vast",
-                instance_id="gpu-123", spec={}, spec_hash="a"*64, state="retired", current_job_id=None,
+                instance_id="1234567", spec={}, spec_hash="a"*64, state="retired", current_job_id=None,
                 drain_requested=1, fence=1, expires_at=self.now-60, updated_at=self.now))
             connection.execute(update(jobs).where(jobs.c.id == job["id"]).values(status="failed"))
             connection.execute(insert(attempts).values(id=str(uuid.uuid4()), job_id=job["id"], number=1,
@@ -573,8 +600,14 @@ class DstackLifetimeTests(LedgerCase):
         if allocated:
             run.update(status='failed', termination_reason='job_failed', latest_job_submission={
                 'status':'failed', 'termination_reason':'waiting_instance_limit_exceeded',
-                'job_provisioning_data':{'backend':'vastai', 'instance_id':'original-allocation',
+                'job_provisioning_data':{'backend':'vastai', 'instance_id':'1234567',
                     'instance_type':{'resources':{'gpus':[{'name':'RTX5090'}]}}}})
+            # New host observation latches a positive allocation as soon as
+            # JPD is known. Seed that real pre-terminal boundary, then test
+            # that terminal refresh still cannot settle/remove its history.
+            run['status'] = 'provisioning'
+            self.capacity.observe(node)
+            run['status'] = 'failed'
         else:
             self.client.runs[binding['run_name']] = no_capacity_run(run)
         # Reproduce the already-retained stopping projection: funding's policy
