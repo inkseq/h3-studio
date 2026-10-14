@@ -8,6 +8,7 @@ import {StoryboardDownloads,StoryboardAssetImage,StoryboardVideo,StoryboardPlayB
 import {chosenVersion,coverOf,expand,fmt,MODE_LABEL,modeOf,QUALITY_LABEL,planDrop,segments,shotProfiles,shotStatus,startFrame,totalDuration,variantOf,queuePositions} from './storyboard-ui-model.js';
 import {useStoryboardUI as useStore} from './storyboard-ui-context.jsx';
 import {StoryboardNameDialog,StoryboardDeleteDialog} from './StoryboardDialog.jsx';
+import {createStoryboardPlayback} from './storyboard-playback.js';
 
 /* ---------- thumbs & draggable tiles ---------- */
 
@@ -594,11 +595,13 @@ export function usePlayer(shots) {
 }
 
 export function Screen({player,big,style}){
-  const {seg,t,playing}=player,ref=useRef(),local=seg?t-seg.start:0;
-  const sync=()=>{const video=ref.current;if(!video||!seg?.version)return;if(Number.isFinite(video.duration)&&Math.abs(video.currentTime-local)>.4)video.currentTime=Math.max(0,Math.min(local,video.duration));if(playing)video.play().catch(()=>player.setPlaying(false));else video.pause();};
+  const {seg,t,playing}=player,ref=useRef(),playback=useRef(null),local=seg?t-seg.start:0;
+  if(!playback.current)playback.current=createStoryboardPlayback();
+  const sync=()=>playback.current.sync({video:ref.current,time:local,playing,onFailure:()=>player.setPlaying(false)});
   useEffect(sync,[seg?.version?.id,seg?.shot.id,playing,local]);
+  useEffect(()=>()=>playback.current.reset(),[]);
   if(!seg)return <div className="screen" style={style}><div className="screen-empty">还没有镜头</div></div>;
-  return <div className={'screen'+(big?' big':'')} style={style}>{seg.version?<StoryboardVideo asset={seg.version.asset||seg.version} videoRef={ref} onLoadedMetadata={sync}/>:<div className="screen-empty"><b>{seg.shot.title}</b><span>尚未选定视频 · 文字占位</span></div>}<div className="screen-cap">{seg.shot.title}<small>{seg.shot.script}</small></div></div>;
+  return <div className={'screen'+(big?' big':'')} style={style}>{seg.version?<StoryboardVideo key={seg.shot.id+':'+seg.version.id} asset={seg.version.asset||seg.version} videoRef={ref} onLoadedMetadata={sync} onCanPlay={sync}/>:<div className="screen-empty"><b>{seg.shot.title}</b><span>尚未选定视频 · 文字占位</span></div>}<div className="screen-cap">{seg.shot.title}<small>{seg.shot.script}</small></div></div>;
 }
 
 export function Transport({player}) {
