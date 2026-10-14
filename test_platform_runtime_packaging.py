@@ -111,7 +111,7 @@ print(json.dumps({'sources':len(factory.sources),'modes':sorted(mode for _,mode 
             image = Path(temporary)
             modules = ('studio_platform/__init__.py', 'studio_platform/runtime_catalog.py',
                        'studio_platform/inference/__init__.py', 'studio_platform/inference/wangp_contract.py',
-                       'studio_platform/inference/protocol.py', 'studio_platform/inference/outputs.py')
+                       'studio_platform/inference/protocol.py', 'studio_platform/inference/native_outputs.py')
             for name in (*modules, *('deploy/wangp/profiles/'+profile+'.json' for profile in PROFILE_IDS)):
                 target = image/name
                 target.parent.mkdir(parents=True, exist_ok=True)
