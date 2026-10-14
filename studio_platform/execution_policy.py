@@ -449,8 +449,12 @@ class ExecutionPolicies:
                     raise NotFound("budget_not_found")
                 if account["spent_microusd"] + account["reserved_microusd"] + quote["cost_microusd"] > account["limit_microusd"]:
                     raise BudgetExceeded("budget_exceeded")
-            except (NotFound, BudgetExceeded, ValueError):
-                blockers.append("当前项目的生成预算未配置或可用预留额度不足")
+            except BudgetExceeded:
+                base["budget_error_code"] = "budget_exceeded"
+                blockers.append("额度不足；可用额度不足以预留本次生成，请联系管理员调整额度。")
+                break
+            except (NotFound, ValueError):
+                blockers.append("当前项目的生成预算未配置，请联系管理员。")
                 break
         approval, cold_latest_start, member_warm = None, None, False
         if not blockers:
@@ -535,6 +539,8 @@ class ExecutionPolicies:
     def ensure_current(self, plan, scope):
         previous = plan["execution_plan"]
         current = self.evaluate(plan["request"], scope, previous["fingerprint"])
+        if current.execution.get("budget_error_code") == "budget_exceeded":
+            raise BudgetExceeded("budget_exceeded")
         if (not previous.get("enabled") or not current.execution["enabled"]
                 or previous.get("policy_hash") != current.execution.get("policy_hash")
                 or previous.get("backend") != current.execution["backend"]

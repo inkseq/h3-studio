@@ -14,7 +14,7 @@ from studio_platform.capabilities import MODEL, compile_request
 from studio_platform.control import WorkerControl, WorkerSpec
 from studio_platform.execution_policy import ExecutionPolicies, read_policy, validate_policy
 from studio_platform.qualification_profiles import MULTIMODAL_PROFILE, MULTIMODAL_INPUT_LIMITS
-from studio_platform.repository import Repository, Scope, Conflict
+from studio_platform.repository import Repository, Scope, Conflict, BudgetExceeded
 from studio_platform.settings import Settings
 from test_platform_api import project, generation_request
 
@@ -355,6 +355,34 @@ class ExecutionPolicyTests(unittest.TestCase):
                 self.assertEqual(admission.execution["admission_state"], "queued")
         denied = self.policies.evaluate(self.compiled, Scope("sixnine", "unfunded-user", "new-story"), self.fingerprint)
         self.assertFalse(denied.execution["enabled"])
+
+    def test_exhaustion_reports_clear_reason_and_rejects_new_submit_without_hiding_replay(self):
+        app = create_app(self.settings, repository=self.repo)
+        with TestClient(app) as client:
+            client.post("/api/auth/login", json={"username": "superdan"})
+            client.post("/v1/projects", json={"project": project()}).raise_for_status()
+            plan = client.post("/v1/generation-plans", json=generation_request()).json()
+            original = client.post("/v1/jobs", json={"plan_id": plan["plan_id"]},
+                headers={"Idempotency-Key": "before-exhaustion"})
+            original.raise_for_status()
+            self.repo.configure_budget("test-owner:sixnine:superdan", tenant_id="sixnine",
+                owner_id="superdan", limit_microusd=500000)
+            denied = self.evaluate()
+            self.assertEqual(denied.execution["budget_error_code"], "budget_exceeded")
+            self.assertIn("额度不足", " ".join(denied.execution["blockers"]))
+            retry = client.post("/v1/jobs", json={"plan_id": plan["plan_id"]},
+                headers={"Idempotency-Key": "before-exhaustion"})
+            self.assertEqual(retry.json()["id"], original.json()["id"])
+            fresh = client.post("/v1/jobs", json={"plan_id": plan["plan_id"]},
+                headers={"Idempotency-Key": "after-exhaustion"})
+            self.assertEqual(fresh.status_code, 429, fresh.text)
+            self.assertEqual(fresh.json()["code"], "budget_exceeded")
+            self.assertIn("额度不足", fresh.json()["detail"])
+            blocked_plan = client.post("/v1/generation-plans", json=generation_request()).json()
+            denied_submit = client.post("/v1/jobs", json={"plan_id": blocked_plan["plan_id"]},
+                headers={"Idempotency-Key": "blocked-original-plan"})
+            self.assertEqual(denied_submit.status_code, 429, denied_submit.text)
+            self.assertEqual(len(self.repo.list_jobs_for_owner("sixnine", "superdan")), 1)
 
     def test_near_expiry_blocks_new_work_without_changing_policy_or_existing_reservation(self):
         now = self.repo.clock()

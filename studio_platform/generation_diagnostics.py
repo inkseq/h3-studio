@@ -53,6 +53,8 @@ def preflight_diagnostic(error):
             result['error_code'] = text
             result['error_message'] = ('当前适配器尚未映射此输入或控制，请保留原设置并联系管理员。'
                 if '_unmapped' in text or '_unsupported_' in text else '参数或参考素材不符合所选模型的支持范围，请根据错误代码检查设置。')
+            if text == 'budget_exceeded':
+                result['error_message'] = '额度不足；可用额度不足以预留本次生成，请联系管理员调整额度。'
         elif text in STATIC_VALIDATION_TEXT:
             result['error_code'],result['error_message'] = STATIC_VALIDATION_TEXT[text]
     return result

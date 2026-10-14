@@ -9,9 +9,11 @@ from __future__ import annotations
 
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import math
+import re
 import threading
 import time
 import uuid
@@ -89,6 +91,20 @@ def identifier(value):
     return value
 
 
+def budget_snapshot(row):
+    """CAS identity of the original account, including committed balances."""
+    value = {name: row[name] for name in ("id", "tenant_id", "owner_id", "project_id",
+        "limit_microusd", "spent_microusd", "reserved_microusd")}
+    for name in ("id", "tenant_id"):
+        identifier(value[name])
+    for name in ("owner_id", "project_id"):
+        if value[name] is not None:
+            identifier(value[name])
+    for name in ("limit_microusd", "spent_microusd", "reserved_microusd"):
+        money(value[name])
+    return request_hash(value)
+
+
 metadata = MetaData()
 
 
@@ -156,6 +172,7 @@ budget_reservations = Table(
     Column("reference_type", String(30), nullable=False), Column("reference_id", String(200), nullable=False),
     Column("amount_microusd", BigInteger, nullable=False), Column("state", String(30), nullable=False),
     Column("actual_cost_microusd", BigInteger), Column("created_at", Float, nullable=False),
+    Column("settled_at", Float),
     UniqueConstraint("account_id", "reference_type", "reference_id"),
 )
 artifacts = Table(
@@ -349,6 +366,12 @@ class Repository:
             if "application_idle_since" not in scaler_columns:
                 connection.exec_driver_sql(
                     "ALTER TABLE platform_scaler_actions ADD COLUMN application_idle_since FLOAT")
+            reservation_columns = {column["name"] for column in inspect(connection).get_columns("platform_budget_reservations")}
+            if "settled_at" not in reservation_columns:
+                # Old confirmed charges have no proven settlement date. Keep
+                # them NULL rather than backfilling from reservation creation.
+                connection.exec_driver_sql(
+                    "ALTER TABLE platform_budget_reservations ADD COLUMN settled_at FLOAT")
 
     def close(self):
         self.engine.dispose()
@@ -546,6 +569,164 @@ class Repository:
                 raise NotFound("budget_not_found")
             return dict(row)
 
+    @contextmanager
+    def _budget_read(self):
+        """Account balances and their settlement dates share one read snapshot."""
+        guard = self._memory_lock if self._is_memory else _NullLock()
+        with guard, self.engine.connect() as connection:
+            if self.engine.dialect.name == "postgresql":
+                connection = connection.execution_options(
+                    isolation_level="REPEATABLE READ", postgresql_readonly=True)
+                connection.begin()
+            else:
+                connection.exec_driver_sql("BEGIN")
+            try:
+                yield connection
+            finally:
+                connection.rollback()
+
+    def _budget_now(self):
+        now = self.clock()
+        if type(now) not in (int, float) or not math.isfinite(now) or now < 0:
+            raise ValueError("invalid_budget_clock")
+        return float(now)
+
+    def _budget_projection(self, connection, row, now):
+        today = datetime.fromtimestamp(now, timezone.utc).date()
+        start = datetime.combine(today - timedelta(days=6), datetime.min.time(), timezone.utc).timestamp()
+        confirmed = and_(budget_reservations.c.account_id == row["id"],
+            budget_reservations.c.state.in_(("settled", "released")),
+            budget_reservations.c.actual_cost_microusd.is_not(None))
+        # Settlement date is the confirmed ledger event, never reservation
+        # creation or a guessed supplier-invoice date. Legacy NULLs stay apart.
+        day = (func.date(func.timezone("UTC", func.to_timestamp(budget_reservations.c.settled_at)))
+               if connection.dialect.name == "postgresql" else
+               func.date(budget_reservations.c.settled_at, "unixepoch"))
+        daily = connection.execute(select(day.label("date"),
+            func.sum(budget_reservations.c.actual_cost_microusd).label("cost_microusd"))
+            .where(confirmed, budget_reservations.c.settled_at >= start,
+                   budget_reservations.c.settled_at <= now).group_by(day).order_by(day)).mappings()
+        legacy = connection.execute(select(
+            func.coalesce(func.sum(budget_reservations.c.actual_cost_microusd), 0).label("cost_microusd"),
+            func.count().label("reservation_count")).where(
+                confirmed, budget_reservations.c.settled_at.is_(None))).mappings().one()
+        limit, spent, reserved = (row[name] for name in
+            ("limit_microusd", "spent_microusd", "reserved_microusd"))
+        committed = spent + reserved
+        return {"id": row["id"], "tenant_id": row["tenant_id"],
+            "owner_id": row["owner_id"], "project_id": row["project_id"],
+            "basis": "cumulative", "currency": "USD", "limit_microusd": limit,
+            "spent_microusd": spent, "reserved_microusd": reserved,
+            "remaining_microusd": max(0, limit - committed),
+            "usage_percent": min(100, committed * 100 / limit) if limit else 100,
+            "status": "exhausted" if committed >= limit else
+                      "warning" if committed * 5 >= limit * 4 else "ok",
+            "snapshot": budget_snapshot(row), "as_of": now,
+            "window": {"timezone": "UTC", "start_date": (today - timedelta(days=6)).isoformat(),
+                       "end_date": today.isoformat()},
+            "daily7": [{"date": str(value["date"]), "cost_microusd": int(value["cost_microusd"])}
+                       for value in daily],
+            "unattributed_legacy": {"cost_microusd": int(legacy["cost_microusd"]),
+                                    "reservation_count": int(legacy["reservation_count"])}}
+
+    def list_budget_projections(self, tenant_id, *, owner_id=None, account_ids=None,
+                                admin=False, limit=100, after_id=None):
+        """Authorized service supplies tenant, owner and trusted configured IDs.
+
+        A non-admin can never obtain a global or another owner's account. An
+        optional trusted configured-ID selection can only narrow that scope.
+        """
+        identifier(tenant_id)
+        if type(admin) is not bool or type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("invalid_budget_pagination")
+        if after_id is not None:
+            identifier(after_id)
+        statement = select(budget_accounts).where(budget_accounts.c.tenant_id == tenant_id)
+        if not admin:
+            identifier(owner_id)
+            statement = statement.where(budget_accounts.c.owner_id == owner_id)
+            if account_ids is not None:
+                if not isinstance(account_ids, (tuple, list, set, frozenset)) or len(account_ids) > 128:
+                    raise ValueError("invalid_budget_selection")
+                allowed = tuple(sorted({identifier(value) for value in account_ids}))
+                statement = statement.where(budget_accounts.c.id.in_(allowed))
+        if after_id is not None:
+            statement = statement.where(budget_accounts.c.id > after_id)
+        now = self._budget_now()
+        with self._budget_read() as connection:
+            rows = list(connection.execute(statement.order_by(budget_accounts.c.id)
+                .limit(limit + 1)).mappings())
+            values = [self._budget_projection(connection, row, now) for row in rows[:limit]]
+        return {"budgets": values, "next_after_id": rows[limit-1]["id"] if len(rows) > limit else None,
+                "as_of": now}
+
+    def compare_set_budget_limit(self, account_id, *, tenant_id, expected_snapshot,
+                                 limit_microusd, actor_id, actor_owner):
+        """Change only an existing original limit and audit it atomically."""
+        for value in (account_id, tenant_id, actor_id, actor_owner):
+            identifier(value)
+        if not isinstance(expected_snapshot, str) or re.fullmatch(r"[0-9a-f]{64}", expected_snapshot) is None:
+            raise ValueError("invalid_budget_snapshot")
+        limit_microusd = money(limit_microusd)
+        now = self._budget_now()
+        with self.transaction() as connection:
+            row = self._locked(connection, select(budget_accounts).where(
+                budget_accounts.c.id == account_id, budget_accounts.c.tenant_id == tenant_id))
+            if row is None:
+                raise NotFound("budget_not_found")
+            old_snapshot = budget_snapshot(row)
+            if old_snapshot != expected_snapshot:
+                raise Conflict("budget_snapshot_changed")
+            if limit_microusd < row["spent_microusd"] + row["reserved_microusd"]:
+                raise BudgetExceeded("budget_below_committed")
+            changed = limit_microusd != row["limit_microusd"]
+            audit_event_id = None
+            if changed:
+                connection.execute(update(budget_accounts).where(
+                    budget_accounts.c.id == account_id, budget_accounts.c.tenant_id == tenant_id)
+                    .values(limit_microusd=limit_microusd))
+                new = dict(row, limit_microusd=limit_microusd)
+                audit_event_id = str(uuid.uuid4())
+                names = ("limit_microusd", "spent_microusd", "reserved_microusd")
+                payload = {"version": 1, "tenant_id": tenant_id, "account_id": account_id,
+                    "actor": {"owner_id": actor_owner, "actor_id": actor_id},
+                    "owner_id": row["owner_id"], "project_id": row["project_id"],
+                    "old": {name: row[name] for name in names},
+                    "new": {name: new[name] for name in names},
+                    "old_snapshot": old_snapshot, "new_snapshot": budget_snapshot(new)}
+                connection.execute(insert(outbox).values(id=audit_event_id,
+                    event_type="operator.budget_limit_updated", aggregate_id=account_id,
+                    payload=canonical(payload), created_at=now))
+                row = new
+            return {"budget": self._budget_projection(connection, row, now),
+                    "changed": changed, "audit_event_id": audit_event_id}
+
+    def list_budget_audit(self, tenant_id, *, limit=100, before=None):
+        identifier(tenant_id)
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("invalid_budget_pagination")
+        statement = select(outbox).where(outbox.c.event_type == "operator.budget_limit_updated",
+            outbox.c.payload["tenant_id"].as_string() == tenant_id)
+        if before is not None:
+            if not isinstance(before, str) or len(before) > 80:
+                raise ValueError("invalid_budget_audit_cursor")
+            match = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?):([0-9a-f-]{36})", before)
+            if not match:
+                raise ValueError("invalid_budget_audit_cursor")
+            stamp = float(match[1])
+            if not math.isfinite(stamp) or str(uuid.UUID(match[2])) != match[2]:
+                raise ValueError("invalid_budget_audit_cursor")
+            statement = statement.where(or_(outbox.c.created_at < stamp,
+                and_(outbox.c.created_at == stamp, outbox.c.id < match[2])))
+        with self._budget_read() as connection:
+            rows = list(connection.execute(statement.order_by(
+                outbox.c.created_at.desc(), outbox.c.id.desc()).limit(limit + 1)).mappings())
+        events = [{"id": row["id"], "account_id": row["aggregate_id"], "created_at": row["created_at"],
+            **{key: row["payload"][key] for key in ("actor", "owner_id", "project_id",
+                "old", "new", "old_snapshot", "new_snapshot")}} for row in rows[:limit]]
+        cursor = f'{rows[limit-1]["created_at"]}:{rows[limit-1]["id"]}' if len(rows) > limit else None
+        return {"events": events, "next_before": cursor}
+
     def _reserve(self, connection, scope, account_ids, reference_type, reference_id, amount):
         account_ids = sorted(set(account_ids))
         if amount and not account_ids:
@@ -566,6 +747,7 @@ class Repository:
 
     def _settle(self, connection, reference_type, reference_id, actual_cost):
         actual_cost = money(actual_cost)
+        settled_at = self._budget_now()
         rows = list(connection.execute(select(budget_reservations).where(
             budget_reservations.c.reference_type == reference_type,
             budget_reservations.c.reference_id == reference_id).order_by(
@@ -581,7 +763,8 @@ class Repository:
                 reserved_microusd=budget_accounts.c.reserved_microusd - row["amount_microusd"],
                 spent_microusd=budget_accounts.c.spent_microusd + actual_cost))
             connection.execute(update(budget_reservations).where(budget_reservations.c.id == row["id"])
-                .values(state="released" if actual_cost == 0 else "settled", actual_cost_microusd=actual_cost))
+                .values(state="released" if actual_cost == 0 else "settled", actual_cost_microusd=actual_cost,
+                        settled_at=settled_at))
 
     def fund_instance_window(self, connection, intent_id, minimum_reserved_cost_microusd,
                              budget_account_ids):

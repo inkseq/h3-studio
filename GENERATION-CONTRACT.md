@@ -509,3 +509,33 @@ Existing suites to reuse: `test_platform_repository`, `test_platform_queue`, `te
 A1/A2 can complete with dated baseline/specification evidence. B2 can complete locally after compatibility and fake-engine checks; that does not mean WanGP or generation is live. B/D public acceptance additionally requires a tested release, current operational authorization, exact runtime/model identity, original obligations preserved, real artifact validation and rollback.
 
 No API/profile import, successful model load, empty queue, health endpoint, local mock, or passing CI proves a current GPU is ready. No issue or new specification renews the expired finite window. Keep the existing budget/reservations and review remaining authorization before paid acceptance.
+
+## 10. Owner budgets and per-machine price caps
+
+`GET /v1/operator/budgets` is a human owner's read-only view of their existing
+tenant/owner-scoped budget accounts, independent of machine-start permission.
+It never exposes a global or other owner's balance. Amounts are cumulative USD
+microunits: limit, settled spend, current reservations and remaining. Seven-day
+rows use confirmed UTC settlement dates; legacy settlements without a date are
+reported separately, never assigned to the reservation's creation day.
+
+Human administrators may read `/v1/operator/admin/budgets` and change an existing
+limit with `PUT /v1/operator/admin/budgets/{id}` using the exact snapshot and
+`limit_microusd`. The limit cannot be less than settled plus reserved. The same
+transaction records actor, time and old/new balances in the original outbox;
+spent/reserved amounts are never reset. Audit uses a composite descending cursor.
+
+`/v1/operator/dstack/admin/prices` exposes price-only policy overlays for trusted
+deployment profiles. An administrator may CAS-edit a default hourly cap and
+ceiling, with an atomic outbox audit. A stale profile binding fails closed. The
+hardware, native model, source and engine binding are not editable through this
+surface. Owner previews may choose `max_price_microusd` at or below the ceiling.
+The cap is frozen in the original request, reservation and continuing funding;
+it is a maximum hourly rate, not a quote for actual settled spend.
+
+The price snapshot is checked after provider planning and immediately before a
+new start. Each preview is single-use. A prior accepted idempotency key returns
+its original command before current-policy checks, without renting again.
+Lost admin write responses are resolved by exact readback, never blind replay.
+Monetary exhaustion is reported as `budget_exceeded` / “额度不足”; it does not
+silently add a queued job or change existing accepted jobs or invoices.

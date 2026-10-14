@@ -626,22 +626,59 @@ class DstackOperator:
         owner = self.authorize(principal)
         fields = ("id", "runtime_profile_id", "model_id", "mode", "pool", "backend", "gpu_names",
             "memory_gib", "disk_gib", "gpu_memory_gib", "cpu_count", "max_price_microusd", "max_ttl_seconds")
+        from .operator_prices import OperatorPrices
+        with self.repo.engine.connect() as connection:
+            prices = OperatorPrices(self.repo, self.settings)
+            profiles = []
+            for profile in self.profiles.values():
+                if profile["owner_id"] != owner:
+                    continue
+                price, _, _ = prices.read(connection, profile)
+                profiles.append({**{key: copy.deepcopy(profile[key]) for key in fields},
+                    "max_price_microusd": price["max_price_microusd"],
+                    "price_ceiling_microusd": price["price_ceiling_microusd"],
+                    "price_policy_snapshot": price["snapshot"]})
         return {"capacity_backend": BACKEND_MARKER, "enabled": self.policy.get("enabled") is True,
             "lifecycle_version": self.policy.get("lifecycle_version", 1),
             "operator": {"account": owner},
-            "profiles": [{key: copy.deepcopy(profile[key]) for key in fields}
-                for profile in self.profiles.values() if profile["owner_id"] == owner]}
+            "profiles": profiles}
+
+    def admin_prices(self, principal):
+        owner = self.authorize_admin(principal)
+        from .operator_prices import OperatorPrices
+        prices = OperatorPrices(self.repo, self.settings)
+        with self.repo.engine.connect() as connection:
+            return {"operator": {"account": owner, "admin": True},
+                "profiles": [prices.read(connection, profile)[0] for profile in self.profiles.values()],
+                "audits": prices.audits(connection)}
+
+    def update_price(self, principal, profile_id, body):
+        self.authorize_admin(principal)
+        profile = self.profiles.get(profile_id)
+        require(profile is not None, "dstack_profile_not_found", 404)
+        from .operator_prices import OperatorPrices
+        return OperatorPrices(self.repo, self.settings).update(profile, body, principal)
 
     def preview(self, principal, body):
         owner = self.authorize(principal)
         self._enabled()
         continuing = self.policy.get("lifecycle_version") == 2
         allowed = {"profile_id", "ttl_seconds", "keep_on", "hold_seconds", "idle_shutdown_seconds", "group_id"} if continuing else {"profile_id", "ttl_seconds", "group_id"}
+        allowed.add("max_price_microusd")
         require(isinstance(body, dict) and "profile_id" in body and not set(body)-allowed
             and (continuing or {"profile_id", "ttl_seconds"} <= set(body)), "dstack_preview_invalid", 422)
         require(safe_id(body["profile_id"]), "dstack_preview_invalid", 422)
         profile = self.profiles.get(body["profile_id"])
         require(profile is not None and profile["owner_id"] == owner, "dstack_profile_not_found", 404)
+        from .operator_prices import OperatorPrices
+        prices = OperatorPrices(self.repo, self.settings)
+        with self.repo.engine.connect() as connection:
+            price, _, _ = prices.read(connection, profile)
+        chosen_price = body.get("max_price_microusd", price["max_price_microusd"])
+        require(_integer(chosen_price) and chosen_price <= price["price_ceiling_microusd"],
+            "dstack_price_ceiling_exceeded", 422)
+        profile = copy.deepcopy(profile)
+        profile["max_price_microusd"] = chosen_price
         ttl = body.get("ttl_seconds", self.policy.get("reservation_seconds"))
         require(_integer(ttl, 120, 86400 if continuing else min(profile["max_ttl_seconds"], self.policy["max_ttl_seconds"])),
             "dstack_runtime_limit_invalid", 422)
@@ -667,11 +704,15 @@ class DstackOperator:
         cost = math.ceil(profile["max_price_microusd"] * (initial_seconds + 300) / 3600) + profile["extra_reservation_microusd"]
         payload = {"capacity_backend": BACKEND_MARKER, "tenant_id": self.settings.tenant_id, "owner_id": owner,
             "profile_id": profile["id"], "profile": profile, "config_fingerprint": self.fingerprint,
-            "request": asdict(request), "reservation_microusd": cost}
+            "request": asdict(request), "reservation_microusd": cost,
+            "price_policy_snapshot": price["snapshot"]}
         if continuing:
             payload["lifecycle"] = lifecycle
         expires = min(now + 120, self.policy["expires_at"], request.hard_deadline or self.policy["expires_at"])
         with self.repo.transaction() as connection:
+            self.repo._lock_capacity(connection)
+            require(prices.read(connection, self.profiles[profile["id"]])[0]["snapshot"] == price["snapshot"],
+                "dstack_price_policy_changed")
             from .dstack_workspace import owned_group
             group_id = body.get("group_id")
             if group_id is not None:
@@ -682,6 +723,7 @@ class DstackOperator:
         return {"preview_id": preview_id, "expires_at": expires,
             "hard_deadline": request.hard_deadline, "reservation_microusd": cost,
             "hourly_cost_microusd": profile["max_price_microusd"], "price_basis": "approved_ceiling",
+            "max_price_microusd": profile["max_price_microusd"],
             "offer_status": "advisory", "offers": offers, "can_start": True, "capacity_backend": BACKEND_MARKER,
             **({"lifecycle": copy.deepcopy(lifecycle), "initial_reservation_seconds": initial_seconds}
                if continuing else {})}
@@ -825,6 +867,14 @@ class DstackOperator:
             value = preview["payload"]
             require(value.get("config_fingerprint") == self.fingerprint and value.get("capacity_backend") == BACKEND_MARKER,
                 "dstack_preview_configuration_changed")
+            from .operator_prices import OperatorPrices
+            trusted = self.profiles.get(value["profile_id"])
+            require(trusted is not None and trusted["owner_id"] == owner,
+                "dstack_profile_not_found", 404)
+            price, _, price_version = OperatorPrices(self.repo, self.settings).read(connection, trusted)
+            require(price["snapshot"] == value["price_policy_snapshot"] if "price_policy_snapshot" in value else
+                price_version == 0 and value["profile"]["max_price_microusd"] == price["max_price_microusd"],
+                "dstack_price_policy_changed")
             # A preview is single-use even when another idempotency key is supplied.
             previous = connection.execute(select(operator_commands.c.id).where(operator_commands.c.actor == actor,
                 operator_commands.c.kind == "dstack_start",
