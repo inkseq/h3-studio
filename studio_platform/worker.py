@@ -15,6 +15,7 @@ import math
 import os
 from pathlib import Path
 import signal
+import stat
 import subprocess
 import threading
 import time
@@ -138,6 +139,7 @@ class WorkerRunner:
         self.telemetry_context = dict(telemetry_context) if type(telemetry_context) is dict else {}
         # One observed generation per physical slot; this is not execution state.
         self._generation_observation = None
+        self._qualification_delivery_ack_dropped = False
         self._drain = threading.Event()
 
     def _telemetry_context(self, job, lease):
@@ -580,7 +582,8 @@ class WorkerRunner:
                 targets = writer.remote_targets(receipt, heartbeat, upload_stopped=stopped)
                 if targets:
                     try:
-                        self.backend.upload_delivery(job, tag, task_id, targets, heartbeat)
+                        uploaded = self.backend.upload_delivery(job, tag, task_id, targets, heartbeat)
+                        self._drop_qualification_delivery_ack(job, tag, task_id, receipt, uploaded)
                     except Exception:
                         writer.remote_unknown(receipt)
                         # A lost response may already have delivered both files.
@@ -594,6 +597,81 @@ class WorkerRunner:
                 else:
                     specs = writer.verify_remote(receipt, heartbeat)
         return self._complete_collection(writer, job, lease, tag, specs, self._cost(job, task_id), receipt)
+
+    def _drop_qualification_delivery_ack(self, job, tag, task_id, receipt, uploaded):
+        """One root-protected qualification control; normal jobs are unaffected."""
+        if self._qualification_delivery_ack_dropped or type(uploaded) is not dict or os.name != "posix":
+            return
+        try:
+            from .inference.wangp_delivery import validate_delivery_receipt
+            uploaded = validate_delivery_receipt(uploaded)
+            sealed = receipt["gpu_delivery"]
+            if any(uploaded[name] != sealed[name] for name in sealed):
+                return
+            identity = uploaded["identity"]
+            expected_roles = {"video", "audio"} if uploaded["generate_audio"] else {"video"}
+            if (uploaded["state"] != "uploaded" or set(uploaded["roles"]) != expected_roles
+                    or set(uploaded["objects"]) != expected_roles
+                    or any(value["state"] != "uploaded" or value["stop_proven"] is not True
+                           for value in uploaded["objects"].values())
+                    or any(value["key"] != receipt["roles"][kind]["key"]
+                           or value["storage_binding"] != receipt["binding"]
+                           for kind, value in uploaded["objects"].items())
+                    or uploaded["owner_id"] != job["owner_id"] or identity["job_id"] != job["id"]
+                    or identity["attempt_tag"] != tag or identity["operation_id"] != task_id
+                    or identity["request_hash"] != job["request_hash"]
+                    or identity["manifest_digest"] != job["execution_plan"]["engine_manifest_digest"]):
+                return
+            path = self.work_dir / "qualification-drop-delivery-ack.json"
+            before = path.lstat()
+            def trusted(info):
+                return (stat.S_ISREG(info.st_mode) and info.st_uid == 0 and info.st_gid in {0, 10001}
+                    and info.st_nlink == 1 and not info.st_mode & 0o027 and 0 < info.st_size <= 4096
+                    and not getattr(info, "st_file_attributes", 0) & 0x400)
+            def unchanged(info):
+                return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+                        info.st_nlink, info.st_size, info.st_mtime_ns)
+            if not trusted(before):
+                return
+            descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_BINARY", 0))
+            try:
+                opened = os.fstat(descriptor)
+                if not trusted(opened) or unchanged(opened) != unchanged(before):
+                    return
+                raw = os.read(descriptor, 4097)
+                if len(raw) != opened.st_size or unchanged(os.fstat(descriptor)) != unchanged(opened):
+                    return
+                if unchanged(path.lstat()) != unchanged(opened):
+                    return
+            finally:
+                os.close(descriptor)
+            def unique_pairs(pairs):
+                result = {}
+                for name, value in pairs:
+                    if name in result:
+                        raise ValueError("duplicate_qualification_control_field")
+                    result[name] = value
+                return result
+            control = json.loads(raw, object_pairs_hook=unique_pairs)
+            expected = {"version": 1, "mode": "drop_delivery_rpc_ack_once", "owner_id": job["owner_id"],
+                "job_id": job["id"], "attempt_tag": tag, "request_hash": job["request_hash"],
+                "deployment_profile_id": job["execution_plan"]["deployment_profile_id"],
+                "manifest_digest": identity["manifest_digest"], "slot_key": identity["slot_key"],
+                "incarnation": identity["incarnation"]}
+            now = self.repo.clock()
+            if (type(control) is not dict or set(control) != set(expected) | {"expires_at"}
+                    or type(control["version"]) is not int or any(control[name] != value for name, value in expected.items())
+                    or type(control["expires_at"]) not in (int, float) or not math.isfinite(control["expires_at"])
+                    or type(now) not in (int, float) or not math.isfinite(now)
+                    or not now < control["expires_at"] <= now + 3600):
+                return
+        except Exception:
+            # Missing, malformed or inaccessible controls never change collection.
+            return
+        self._qualification_delivery_ack_dropped = True
+        logging.getLogger(__name__).warning("qualification_delivery_rpc_ack_dropped_once job_id=%s attempt_tag=%s",
+                                          job["id"], tag)
+        raise BackendError("qualification_delivery_rpc_ack_dropped_once")
 
     def run_forever(self, worker_id, pool, *, poll_interval_s=1):
         """Explicit CLI lifecycle; SIGTERM drains without globally interrupting Comfy."""
