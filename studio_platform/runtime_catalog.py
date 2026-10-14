@@ -49,7 +49,7 @@ def public_catalog():
 
 def profile_output_delivery(profile_id):
     """An appended profile binds delivery; retained profiles stay unchanged."""
-    from .inference.outputs import NATIVE_DELIVERY, GPU_R2_DELIVERY
+    from .inference.native_outputs import NATIVE_DELIVERY, GPU_R2_DELIVERY
     value = get_profile(profile_id).get("output_delivery", NATIVE_DELIVERY)
     if value not in {NATIVE_DELIVERY, GPU_R2_DELIVERY}:
         raise ValueError("wangp_profile_delivery_invalid")

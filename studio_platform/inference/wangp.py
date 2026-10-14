@@ -145,7 +145,7 @@ class WanGPBackend:
 
     def _delivery_request(self,job,tag,task_id):
         from .wangp_delivery import POLICY, delivery_fingerprint, validate_delivery_request
-        from .outputs import delivery_spec
+        from .native_outputs import delivery_spec
         self._ready();self._binding(job)
         if task_id!=operation_id(tag) or self.expected_incarnation is None or self.manifest.document.get('output_delivery')!=POLICY or job['execution_plan'].get('output_delivery')!=POLICY:
             raise BackendError('wangp_delivery_capability_unavailable')
