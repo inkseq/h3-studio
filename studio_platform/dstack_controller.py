@@ -62,8 +62,13 @@ class DstackController:
                 operator_nodes.c.intent_id == intent["id"])).mappings().one()
             for job in matching_dstack_queued_jobs(connection,intent,node):
                 by_id.setdefault(job["id"],job)
-        active = sum(job["status"] not in TERMINAL for job in by_id.values())
-        unsafe = sum(attempt["submission_started_at"] is not None and attempt["upstream_stopped"] != 1 for attempt in related)
+            # Expired, fenced, never-submitted queue history is not work on
+            # this stopped host. Keep it queued for another matching worker.
+            active = sum(job["status"] not in TERMINAL and not (node["desired_state"] == "stopped"
+                and self.control._proven_unsubmitted_queue(connection, job, expired_lease_only=True))
+                for job in by_id.values())
+        unsafe = sum((attempt["submission_started_at"] is not None or attempt["upstream_task_id"] is not None)
+            and attempt["upstream_stopped"] != 1 for attempt in related)
         last = max([intent["created_at"], *[job["updated_at"] for job in by_id.values()]])
         return workers, active, unsafe, last
 

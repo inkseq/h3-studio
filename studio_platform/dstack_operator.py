@@ -362,11 +362,16 @@ class LedgerDstackStore:
             if workers and any(worker["state"] != "retired" or worker["current_job_id"] for worker in workers):
                 return False
             if worker_ids:
+                from .control import WorkerControl
                 relevant = jobs.outerjoin(attempts, jobs.c.id == attempts.c.job_id)
-                for row in connection.execute(select(jobs.c.status, attempts.c.submission_started_at,
-                        attempts.c.upstream_stopped).select_from(relevant).where(
+                for row in connection.execute(select(jobs.c.id, jobs.c.status, jobs.c.current_attempt_id,
+                        jobs.c.lease_worker_id, jobs.c.lease_expires_at, attempts.c.submission_started_at,
+                        attempts.c.upstream_task_id, attempts.c.upstream_stopped).select_from(relevant).where(
                     (jobs.c.lease_worker_id.in_(worker_ids)) | (attempts.c.worker_id.in_(worker_ids)))).mappings():
-                    if row["status"] not in TERMINAL_JOBS or row["submission_started_at"] is not None and row["upstream_stopped"] != 1:
+                    if ((row["status"] not in TERMINAL_JOBS and not
+                            WorkerControl._proven_unsubmitted_queue(connection, row, expired_lease_only=True))
+                            or (row["submission_started_at"] is not None or row["upstream_task_id"] is not None)
+                            and row["upstream_stopped"] != 1):
                         return False
             # An owned cold runtime which has never admitted a worker cannot
             # have business inference to drain. Model download may already be
