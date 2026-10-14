@@ -186,6 +186,11 @@ def matching_dstack_queued_jobs(connection, intent, node):
     recipe = {"fl": "h3-base-fl2va-v1", "ref": "h3-base-ref2va-v1"}.get(original["mode"])
     if recipe is None:
         return ()
+    from .runtime_catalog import profile_output_delivery
+    try:
+        original_delivery = profile_output_delivery(original["profile_id"])
+    except ValueError:
+        return ()
     # Unclaimed work is not bound to this machine. A manual stop must leave it
     # queued for other capacity rather than hold a drained worker indefinitely.
     queued = connection.execute(select(jobs).where(
@@ -205,7 +210,7 @@ def matching_dstack_queued_jobs(connection, intent, node):
                 or effective.get("model") != original["model_id"] or effective.get("mode") != original["mode"]
                 or plan.get("pool") != intent["pool"] or plan.get("backend") != "wangp-worker"
                 or plan.get("enabled") is not True or plan.get("dispatch_backend") != "hatchet-v1"
-                or plan.get("output_delivery") != "native-frames-v1"
+                or plan.get("output_delivery") != original_delivery
                 or plan.get("deployment_profile_id") != original["profile_id"]
                 or plan.get("configuration_id") != original["configuration_id"]
                 or plan.get("engine_manifest_digest") != original["manifest_digest"]):

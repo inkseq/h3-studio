@@ -26,7 +26,7 @@ class WanGPHost:
     def __init__(self, *, session, journal: ReceiptJournal, manifest: EngineManifest,
                  output_root: Path, sealed_root: Path, settings_resolver: Callable | None = None,
                  max_artifact_bytes=512 * 1024 * 1024, max_transfer_seconds=180,
-                 fault_hook: Callable[[str], None] | None = None):
+                 fault_hook: Callable[[str], None] | None = None, delivery_processor=None):
         if (manifest.digest != journal.manifest_digest or type(max_artifact_bytes) is not int
                 or max_artifact_bytes <= 0 or not 0 < max_transfer_seconds < float("inf")):
             raise ValueError("wangp_invalid_host_configuration")
@@ -46,6 +46,8 @@ class WanGPHost:
         self._lock = threading.RLock()
         self._closed = False
         self._fault_hook = fault_hook
+        self._delivery_processor = delivery_processor
+        self._delivery_locks = {}
         journal.acquire_host()
         try:
             journal.recover(self.incarnation)
@@ -123,6 +125,8 @@ class WanGPHost:
             except Exception:
                 raise BackendError("wangp_settings_resolution_failed") from None
             receipt, fresh = self.journal.claim(prepared, self.incarnation)
+            if self.manifest.document.get('output_delivery') == 'native-frames-r2-v1':
+                self.journal.save_delivery_context(prepared)
             if not fresh:
                 return receipt
             self._fault("after_prepared")
@@ -190,6 +194,59 @@ class WanGPHost:
                 return self.journal.transition(operation_id, expected={"running", "unknown", "sealing"},
                     state="unknown", stop_proven=latest.stop_proven,
                     reason="wangp_observation_or_collection_unknown")
+
+
+    def _delivery_original(self, identity):
+        from ..inference.wangp_delivery import POLICY, validate_identity
+        identity=validate_identity(identity)
+        with self._lock:
+            self._open()
+            if self.manifest.document.get('output_delivery')!=POLICY:
+                raise NotReady('wangp_delivery_capability_unavailable')
+            original=self.journal.get(identity['operation_id'])
+            if original is None or original.state!='succeeded' or not original.stop_proven or original.hold_reason:
+                raise NotReady('wangp_delivery_original_output_unavailable')
+            if identity!={name:getattr(original,name) for name in identity} or original.incarnation!=self.incarnation:
+                raise NotReady('wangp_delivery_identity_mismatch')
+            return original
+
+    def _delivery_lock(self,op):
+        with self._lock:
+            return self._delivery_locks.setdefault(op,threading.Lock())
+
+    def _delivery_engine(self):
+        with self._lock:
+            if self._delivery_processor is None:
+                from .wangp_delivery import GPUDelivery
+                self._delivery_processor=GPUDelivery(self.sealed_root)
+            return self._delivery_processor
+
+    def prepare_delivery(self,request):
+        from ..inference.wangp_delivery import validate_delivery_request
+        request=validate_delivery_request(request)
+        original=self._delivery_original(request['identity'])
+        if request['generate_audio'] is not original.generate_audio:
+            raise NotReady('wangp_delivery_audio_mismatch')
+        with self._delivery_lock(original.operation_id):
+            # Only the per-operation lock spans FFmpeg, never the readiness lock.
+            self._delivery_original(request['identity'])
+            return self._delivery_engine().prepare(request,original,
+                self.journal.delivery_context(original.operation_id),self.journal)
+
+    def delivery_status(self,identity):
+        original=self._delivery_original(identity)
+        with self._delivery_lock(original.operation_id):
+            self._delivery_original(identity)
+            return self.journal.delivery(original.operation_id)
+
+    def upload_delivery(self,identity,fingerprint,targets):
+        original=self._delivery_original(identity)
+        with self._delivery_lock(original.operation_id):
+            self._delivery_original(identity)
+            value=self.journal.delivery(original.operation_id)
+            if value is None or value['fingerprint']!=fingerprint:
+                raise NotReady('wangp_delivery_fingerprint_mismatch')
+            return self._delivery_engine().upload(original,targets,self.journal)
 
     def cancel(self, operation_id):
         with self._lock:

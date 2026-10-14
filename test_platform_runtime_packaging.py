@@ -23,6 +23,8 @@ EXPECTED_PROFILE_IDS = (
     'h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3',
     'h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-cgroups-v4',
     'h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2',
+    'h3-pruned-rank8-int8-sdpa-p4-29gib-fl-r2-v5',
+    'h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-fl-r2-v3',
 )
 
 
@@ -109,7 +111,7 @@ print(json.dumps({'sources':len(factory.sources),'modes':sorted(mode for _,mode 
             image = Path(temporary)
             modules = ('studio_platform/__init__.py', 'studio_platform/runtime_catalog.py',
                        'studio_platform/inference/__init__.py', 'studio_platform/inference/wangp_contract.py',
-                       'studio_platform/inference/protocol.py')
+                       'studio_platform/inference/protocol.py', 'studio_platform/inference/outputs.py')
             for name in (*modules, *('deploy/wangp/profiles/'+profile+'.json' for profile in PROFILE_IDS)):
                 target = image/name
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -139,7 +141,7 @@ print(json.dumps({'profiles':len(catalog['profiles']),'manifests':sum(len(profil
 """
             result = subprocess.run([sys.executable,'-I','-S','-c',script,str(image),json.dumps(EXPECTED_PROFILE_IDS)],
                                     capture_output=True,text=True,check=True,timeout=20,cwd=image)
-            self.assertEqual(json.loads(result.stdout), {'profiles':8, 'manifests':15})
+            self.assertEqual(json.loads(result.stdout), {'profiles':10, 'manifests':17})
 
 
 if __name__ == '__main__':

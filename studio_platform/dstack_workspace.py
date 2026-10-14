@@ -111,8 +111,9 @@ def _matches(node, intent, job):
     if (job["tenant_id"] != payload.get("tenant_id") or job["owner_id"] != payload.get("owner_id")
             or job["request"].get("deployment_profile_id") != binding.get("profile_id")):
         return False
+    from .runtime_catalog import profile_output_delivery
     spec = {"pool": intent["pool"], "backend": "wangp-worker", "dispatch_backend": "hatchet-v1",
-        "output_delivery": "native-frames-v1", "recipe_ids": [{"fl": "h3-base-fl2va-v1",
+        "output_delivery": profile_output_delivery(binding["profile_id"]), "recipe_ids": [{"fl": "h3-base-fl2va-v1",
             "ref": "h3-base-ref2va-v1"}.get(binding.get("mode"))],
         "model_id": binding.get("model_id"), "configuration_id": binding.get("configuration_id"),
         "engine_manifest_digest": binding.get("manifest_digest")}

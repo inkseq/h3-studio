@@ -142,6 +142,67 @@ class WanGPBackend:
     def poll(self, tag, task_id):
         return self.reconcile(tag, task_id)
 
+
+    def _delivery_request(self,job,tag,task_id):
+        from .wangp_delivery import POLICY, delivery_fingerprint, validate_delivery_request
+        from .outputs import delivery_spec
+        self._ready();self._binding(job)
+        if task_id!=operation_id(tag) or self.expected_incarnation is None or self.manifest.document.get('output_delivery')!=POLICY or job['execution_plan'].get('output_delivery')!=POLICY:
+            raise BackendError('wangp_delivery_capability_unavailable')
+        raw=job['request'].get('request',job['request'])
+        identity={'operation_id':task_id,'job_id':job['id'],'attempt_tag':tag,'request_hash':job['request_hash'],
+            'manifest_digest':self.manifest.digest,'slot_key':self.slot_key,'incarnation':self.expected_incarnation}
+        spec=delivery_spec(job);crf=raw.get('export_crf',18);audio=raw.get('generate_audio',True)
+        request={'version':1,'identity':identity,'owner_id':job['owner_id'],'delivery_spec':spec,
+            'export_crf':crf,'generate_audio':audio,
+            'fingerprint':delivery_fingerprint(identity,spec,crf,audio,job['owner_id'])}
+        return validate_delivery_request(request)
+
+    @staticmethod
+    def _delivery_receipt(value,request):
+        from .wangp_delivery import validate_delivery_receipt
+        value=validate_delivery_receipt(value)
+        if any(value[name]!=expected or type(value[name]) is not type(expected) for name,expected in request.items()):
+            raise BackendError('wangp_delivery_receipt_mismatch')
+        return value
+
+    def prepare_delivery(self,job,tag,task_id,heartbeat):
+        request=self._delivery_request(job,tag,task_id);heartbeat()
+        try:value=self._delivery_receipt(self.transport.prepare_delivery(task_id,request),request)
+        except Exception:raise BackendError('wangp_delivery_prepare_unconfirmed') from None
+        heartbeat();return value
+
+    def delivery_status(self,job,tag,task_id):
+        request=self._delivery_request(job,tag,task_id)
+        try:
+            value=self.transport.delivery_status(task_id,request['identity'])
+            return None if value is None else self._delivery_receipt(value,request)
+        except Exception:raise BackendError('wangp_delivery_status_unconfirmed') from None
+
+    def upload_delivery(self,job,tag,task_id,targets,heartbeat):
+        from ..storage import SecretURL
+        from .wangp_delivery import validate_upload_target
+        request=self._delivery_request(job,tag,task_id)
+        receipt=self.delivery_status(job,tag,task_id)
+        if receipt is None or type(targets) is not dict or not targets:
+            raise BackendError('wangp_delivery_not_prepared')
+        wire={}
+        try:
+            for kind,target in targets.items():
+                if type(target) is not dict or set(target)!={'object_key','size_bytes','sha256','content_md5','content_type','upload','storage_binding'}:
+                    raise ValueError
+                signed=target['upload']
+                if not isinstance(signed,SecretURL) or signed.method!='PUT':raise ValueError
+                wire[kind]={'key':target['object_key'],'size_bytes':target['size_bytes'],'sha256':target['sha256'],
+                    'content_md5':target['content_md5'],'content_type':target['content_type'],'storage_binding':target['storage_binding'],
+                    'expires_at':signed.expires_at,'url':signed.reveal(),'headers':signed.required_headers}
+                validate_upload_target(kind,wire[kind],receipt,now=time.time())
+            heartbeat()
+            return self._delivery_receipt(self.transport.upload_delivery(task_id,request['identity'],request['fingerprint'],wire),request)
+        except Exception:raise BackendError('wangp_delivery_upload_unconfirmed') from None
+        finally:
+            wire.clear()  # Bearer URLs are ephemeral private transport inputs.
+
     def cancel(self, tag, task_id):
         self._ready()
         if task_id != operation_id(tag):

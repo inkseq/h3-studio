@@ -104,6 +104,8 @@ Keep IDs stable. A material reversal receives a new decision ID and a `supersede
 - **Revisit when:** Backup/restore evidence, storage semantics and measured scale/cost requirements support a reviewed provider decision.
 - **Evidence / current contract:** [Pinned hosting/storage direction][P-storage], [pinned F sequencing][P-pool]; [F #6](https://github.com/apedintensor/h3-studio/issues/6), [current plan](PROJECT-PLAN.md#7-engine-and-deployment-decisions).
 
+- **GPU delivery refinement (#174, 2026-10-14):** Move final encoding, full media validation and upload to the original pinned GPU host. CPU authorizes a short-lived conditional presigned PUT per immutable owner/attempt object and verifies bounded streaming SHA-256. Reuse the existing operation journal, ArtifactWriter quota and atomic publication; unknown upload reads the same object without regeneration. Additive `native-frames-r2-v1` profiles freeze the route per accepted job, with protected policy enablement as the rollout gate. Old CPU delivery stays available for at least 14 stable days and old obligations. This addresses CPU collection OOM without resizing the host or altering output quality. See [generation contract](GENERATION-CONTRACT.md#gpu-artifact-delivery-extension-174) and [#174](https://github.com/inkseq/h3-studio/issues/174) for qualification evidence.
+
 ## DEC-010 — Agents own bounded PR delivery; acceptance requires scoped evidence
 
 - **Status / scope:** Accepted; cross-session development, source protection and acceptance.

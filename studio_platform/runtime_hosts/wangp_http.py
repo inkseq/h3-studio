@@ -288,6 +288,51 @@ def create_app(host, inputs, *, token):
             return JSONResponse({"error": "not_found"}, status_code=404)
         return receipt.to_dict()
 
+
+    async def delivery_body(request):
+        raw=bytearray()
+        async for chunk in request.stream():
+            raw.extend(chunk)
+            if len(raw)>65536:raise ValueError('wangp_delivery_request_invalid')
+        if not raw:raise ValueError('wangp_delivery_request_invalid')
+        value=json.loads(raw)
+        if type(value) is not dict:raise ValueError('wangp_delivery_request_invalid')
+        return value
+
+    @app.post('/v1/operations/{operation_id}/delivery/prepare')
+    async def prepare_delivery(operation_id: str, request: Request):
+        from ..inference.wangp_http import _operation
+        from starlette.concurrency import run_in_threadpool
+        try:
+            value=await delivery_body(request)
+            if value.get('identity',{}).get('operation_id')!=_operation(operation_id):raise ValueError
+            return await run_in_threadpool(host.prepare_delivery,value)
+        except Exception:
+            return JSONResponse({'error':'wangp_delivery_prepare_unconfirmed'},status_code=409)
+
+    @app.post('/v1/operations/{operation_id}/delivery/upload')
+    async def upload_delivery(operation_id: str, request: Request):
+        from ..inference.wangp_http import _operation
+        from starlette.concurrency import run_in_threadpool
+        try:
+            value=await delivery_body(request)
+            if set(value)!={'identity','fingerprint','targets'} or value['identity'].get('operation_id')!=_operation(operation_id):raise ValueError
+            return await run_in_threadpool(host.upload_delivery,value['identity'],value['fingerprint'],value['targets'])
+        except Exception:
+            return JSONResponse({'error':'wangp_delivery_upload_unconfirmed'},status_code=409)
+
+    @app.get('/v1/operations/{operation_id}/delivery')
+    def delivery_status(operation_id: str, job_id: str, attempt_tag: str, request_hash: str,
+                        manifest_digest: str, slot_key: str, incarnation: str):
+        from ..inference.wangp_http import _operation
+        try:
+            identity={'operation_id':_operation(operation_id),'job_id':job_id,'attempt_tag':attempt_tag,
+                'request_hash':request_hash,'manifest_digest':manifest_digest,'slot_key':slot_key,'incarnation':incarnation}
+            value=host.delivery_status(identity)
+            return value if value is not None else JSONResponse({'error':'not_found'},status_code=404)
+        except Exception:
+            return JSONResponse({'error':'wangp_delivery_status_unconfirmed'},status_code=409)
+
     @app.post("/v1/operations/{operation_id}/cancel")
     def cancel(operation_id: str):
         from ..inference.wangp_http import _operation

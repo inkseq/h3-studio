@@ -6,7 +6,7 @@ from .execution_policy import read_policy
 from .execution_profiles import read_profiles
 from .operator_capacity import operator_nodes, operator_heartbeats, OperatorError, CONTROLLER_FRESH_SECONDS
 from .repository import instance_intents
-from .runtime_catalog import public_catalog
+from .runtime_catalog import public_catalog, profile_output_delivery
 
 MODES = {"fl": "h3-base-fl2va-v1", "ref": "h3-base-ref2va-v1"}
 
@@ -52,7 +52,7 @@ def _preparing(repo, registry, policy, mode, now):
                     and original.get("manifest_digest") == policy["engine_manifest_digest"]
                     and request.get("profile_id") == policy["deployment_profile_id"]
                     and request.get("mode") == mode
-                    and policy.get("output_delivery") == "native-frames-v1")
+                    and policy.get("output_delivery") == profile_output_delivery(policy["deployment_profile_id"]))
             else:
                 binding = registry.get(row["binding_id"]) if registry is not None else None
                 exact = bool(binding and binding.fingerprint == row["binding_hash"]

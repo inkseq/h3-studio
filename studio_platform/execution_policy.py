@@ -17,7 +17,7 @@ import string
 
 from .capabilities import MODEL, RECIPES
 from .control import WorkerControl, REAL_GPU_BACKENDS
-from .inference.outputs import validate_delivery_policy, native_delivery_spec, delivery_spec
+from .inference.outputs import validate_delivery_policy, native_delivery_spec, delivery_spec, GPU_R2_DELIVERY
 from .inference.protocol import BackendError
 from .repository import BudgetExceeded, NotFound, identifier, request_hash
 from .qualification_profiles import (FL50_PROFILE, MULTIMODAL_PROFILE, QUEUED_TASK_PROFILE,
@@ -56,6 +56,8 @@ def validate_policy(value):
             or type(value["enabled"]) is not bool):
         raise ValueError("Invalid execution policy identity")
     validate_delivery_policy(value["backend"], value.get("output_delivery", ""))
+    if value.get("output_delivery") == GPU_R2_DELIVERY and not value.get("deployment_profile_id"):
+        raise ValueError("gpu_delivery_requires_explicit_deployment_profile")
     if "output_delivery" in value and not value["output_delivery"]:
         raise ValueError("Explicit output delivery must name a supported policy")
     if value["backend"] == "wangp-worker":
@@ -142,7 +144,7 @@ def validate_policy(value):
     if any(not isinstance(options, list) or not options or any(not isinstance(x, str) or len(x)>80 for x in options) for options in controls.values()):
         raise ValueError("Invalid execution control values")
     if "deployment_profile_id" in value:
-        from .runtime_catalog import engine_manifest, get_profile
+        from .runtime_catalog import engine_manifest, get_profile, profile_output_delivery
         from .h3_profile_support import envelope as support_envelope
         mode = "fl" if recipes == ["h3-base-fl2va-v1"] else "ref"
         profile = get_profile(value["deployment_profile_id"])
@@ -153,7 +155,7 @@ def validate_policy(value):
                 or any("measurements" in case for case in candidates)):
             raise ValueError("Deployment profile candidate qualification is not pending")
         supported = support_envelope(profile['id'],mode)
-        if (value.get("output_delivery") != "native-frames-v1"
+        if (value.get("output_delivery") != profile_output_delivery(profile["id"])
                 or qualification.get("profile") != QUEUED_TASK_PROFILE
                 or value["engine_manifest_digest"] != engine_manifest(profile["id"], mode).digest
                 or envelope["max_pixels"] > supported['max_pixels']
@@ -509,7 +511,8 @@ class ExecutionPolicies:
         if compiled.get("deployment_profile_id") is not None:
             base["deployment_profile_id"] = compiled["deployment_profile_id"]
         if "output_delivery" in policy:
-            base.update(output_delivery=policy["output_delivery"], delivery_spec=native_delivery_spec(compiled))
+            base.update(output_delivery=policy["output_delivery"],
+                        delivery_spec=native_delivery_spec(compiled, policy["output_delivery"]))
         if approval:
             base.update(capacity_approval_id=approval["id"], capacity_approval_hash=approval["approval_hash"],
                 **({"capacity_binding": "pool-members-v1"} if "pool_members" in approval["payload"] else {}))

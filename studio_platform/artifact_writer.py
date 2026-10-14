@@ -91,6 +91,9 @@ class ArtifactWriter:
         if (record["fingerprint"] != fingerprint or record["binding"] != self.binding
                 or record["staging_root"] != str(self.work_dir)):
             raise ArtifactWritePending("artifact_receipt_identity_mismatch")
+        if record.get("collection_route") == "gpu-r2-v1" and (
+                record.get("owner") != job["owner_id"] or record.get("tag") != tag or record.get("id") != ident):
+            raise ArtifactWritePending("artifact_receipt_identity_mismatch")
         return dict(record, version=row.version)
 
     def _path(self, record, role):
@@ -148,6 +151,173 @@ class ArtifactWriter:
         except SQLIntegrityError:
             return self.get(job, attempt_id, tag)
         return dict(record, version=0)
+
+    def _remote_route(self, job=None, record=None):
+        if not isinstance(self.store, S3ObjectStore) or self.store.config.provider != "r2":
+            raise UnsupportedStorageOperation("GPU artifact delivery requires the selected R2 store")
+        if job is not None:
+            from .inference.outputs import gpu_delivery
+            if not gpu_delivery(job):
+                raise IntegrityError("artifact_gpu_delivery_not_frozen")
+        if record is not None and record.get("collection_route") != "gpu-r2-v1":
+            raise ArtifactWritePending("artifact_collection_route_mismatch")
+        if record is not None:
+            if record.get("binding") != self.binding or record.get("staging_root") != str(self.work_dir):
+                raise ArtifactWritePending("artifact_receipt_identity_mismatch")
+            for kind, role in record["roles"].items():
+                if (kind not in {"video", "audio"}
+                        or role.get("key") != f'owners/{_part(record["owner"])}/assets/{_part(record["tag"])}/result.'
+                            + ("mp4" if kind == "video" else "flac")
+                        or type(role.get("size_bytes")) is not int or not 1 <= role["size_bytes"] <= self.max_bytes
+                        or role.get("status") not in {"planned", "putting", "unknown", "verified"}):
+                    raise IntegrityError("artifact_remote_role_identity_mismatch")
+
+    def begin_remote(self, job, attempt_id, tag, *, kinds=("video",)):
+        """Reserve final R2 objects before GPU encoding; no CPU media staging."""
+        self._remote_route(job)
+        from .inference.outputs import _shape
+        expected = ("video", "audio") if _shape(job)[3] else ("video",)
+        if tuple(kinds) != expected:
+            raise IntegrityError("artifact_roles_invalid")
+        existing = self.get(job, attempt_id, tag)
+        if existing is not None:
+            self._remote_route(record=existing)
+            if existing.get("expected_roles") != list(expected):
+                raise IntegrityError("artifact_roles_changed_after_reservation")
+            return existing
+        ident, fingerprint = self._identity(job, attempt_id, tag)
+        record = dict(id=ident, owner=job["owner_id"], tag=tag, fingerprint=fingerprint,
+            binding=self.binding, staging_root=str(self.work_dir), phase="staging", roles={},
+            collection_route="gpu-r2-v1", expected_roles=list(expected),
+            reserved_bytes=self.max_bytes*len(expected), raw_staging_bytes=0)
+        self.quota._ensure(record["owner"])
+        try:
+            with self.engine.begin() as conn:
+                self.quota._change(conn, record["owner"], record["reserved_bytes"], 0)
+                conn.execute(insert(write_receipts).values(id=ident, tenant=self.tenant, owner=record["owner"],
+                    job_id=job["id"], attempt_id=attempt_id, version=0, record=json.dumps(record)))
+        except SQLIntegrityError:
+            return self.begin_remote(job, attempt_id, tag, kinds=kinds)
+        return dict(record, version=0)
+
+    def prepare_remote(self, job, attempt_id, tag, task_id, description):
+        """Freeze sealed GPU output identities in the original collection receipt."""
+        self._remote_route(job)
+        from .inference.outputs import _request, _shape, delivery_spec, validate_delivery_evidence
+        from .inference.wangp_delivery import validate_delivery_receipt
+        description = validate_delivery_receipt(description)
+        if description["state"] not in {"prepared", "uploading", "uploaded", "rejected", "unknown"}:
+            raise ArtifactWritePending("artifact_gpu_delivery_not_sealed")
+        identity = description["identity"]
+        width, height, _, audio = _shape(job)
+        if (description["owner_id"] != job["owner_id"] or identity["job_id"] != job["id"] or identity["attempt_tag"] != tag
+                or identity["operation_id"] != task_id or identity["request_hash"] != job["request_hash"]
+                or identity["manifest_digest"] != job["execution_plan"]["engine_manifest_digest"]
+                or description["delivery_spec"] != delivery_spec(job)
+                or description["export_crf"] != _request(job).get("export_crf", 18)
+                or description["generate_audio"] is not audio):
+            raise IntegrityError("artifact_gpu_delivery_identity_mismatch")
+        existing = self.get(job, attempt_id, tag)
+        if existing is None:
+            raise ArtifactWritePending("artifact_remote_reservation_missing")
+        self._remote_route(record=existing)
+        if set(description["roles"]) != set(existing["expected_roles"]):
+            raise IntegrityError("artifact_roles_changed_after_reservation")
+        roles = {}
+        for kind, value in description["roles"].items():
+            if value["size_bytes"] > self.max_bytes:
+                raise IntegrityError("artifact_output_exceeds_limit")
+            evidence = value["evidence"]
+            validate_delivery_evidence(job, evidence, kind)
+            if kind == "video" and (evidence.get("width") != width or evidence.get("height") != height
+                    or evidence.get("has_audio") is not audio):
+                raise IntegrityError("artifact_gpu_media_shape_mismatch")
+            if kind == "audio" and evidence.get("has_audio") is not True:
+                raise IntegrityError("artifact_gpu_audio_evidence_missing")
+            role = dict(value, status="planned", key=validate_key(
+                f'owners/{existing["owner"]}/assets/{tag}/result.' + ("mp4" if kind == "video" else "flac")))
+            roles[kind] = role
+        if any(value["key"] != roles[kind]["key"] or value["storage_binding"] != self.binding
+               for kind, value in description["objects"].items()):
+            raise IntegrityError("artifact_gpu_storage_binding_mismatch")
+        sealed = {name: description[name] for name in (
+            "version", "fingerprint", "identity", "owner_id", "delivery_spec", "export_crf", "generate_audio", "roles")}
+        if existing["phase"] != "staging":
+            if existing.get("gpu_delivery") != sealed:
+                raise IntegrityError("artifact_gpu_sealed_outputs_changed")
+            return existing
+        record = dict(existing, phase="reserved", roles=roles, gpu_delivery=sealed,
+                      reserved_bytes=sum(role["size_bytes"] for role in roles.values()))
+        self._save(record, byte_delta=record["reserved_bytes"]-existing["reserved_bytes"])
+        return record
+
+    def remote_targets(self, record, heartbeat=lambda: None, *, upload_stopped=False):
+        """Short lived capabilities only; durable records never contain URLs.
+
+        A missing object after a prior intent does not prove the PUT stopped.
+        Only the bound GPU delivery receipt can positively fence a new attempt.
+        """
+        self._remote_route(record=record)
+        if record["phase"] != "reserved" or not record["roles"]:
+            raise ArtifactWritePending("artifact_not_ready_for_storage")
+        pending = []
+        for kind, role in record["roles"].items():
+            try:
+                self._verify_remote(role, heartbeat)
+            except ObjectNotFound:
+                if role["status"] != "planned" and upload_stopped is not True:
+                    raise ArtifactWritePending("artifact_put_unknown_keep_reserved_key") from None
+                pending.append(kind)
+            else:
+                if role["status"] != "verified":
+                    role["status"] = "verified"
+                    self._save(record)
+        targets = {kind: {"object_key": role["key"], "size_bytes": role["size_bytes"],
+            "sha256": role["sha256"], "content_md5": role["content_md5"],
+            "content_type": role["content_type"], "storage_binding": self.binding,
+            "upload": self.store.presign_artifact_upload(role["key"], content_type=role["content_type"],
+                size_bytes=role["size_bytes"], content_md5=role["content_md5"])}
+            for kind in pending for role in (record["roles"][kind],)}
+        if pending:
+            for kind in pending:
+                record["roles"][kind]["status"] = "putting"
+            # Signing above is local only. Commit before the caller can send
+            # any capability to the GPU, while a signer failure stays planned.
+            self._save(record)
+        return targets
+
+    def remote_unknown(self, record):
+        self._remote_route(record=record)
+        changed = False
+        for role in record["roles"].values():
+            if role["status"] == "putting":
+                role["status"] = "unknown"
+                changed = True
+        if changed:
+            self._save(record)
+
+    def verify_remote(self, record, heartbeat=lambda: None):
+        """HEAD and bounded streaming SHA only; never download to CPU disk."""
+        self._remote_route(record=record)
+        if record["phase"] not in {"reserved", "settled"} or not record["roles"]:
+            raise ArtifactWritePending("artifact_not_ready_for_storage")
+        if record["phase"] == "settled" and any(role["status"] != "verified" for role in record["roles"].values()):
+            raise ArtifactWritePending("artifact_settlement_evidence_missing")
+        missing = False
+        for role in record["roles"].values():
+            try:
+                self._verify_remote(role, heartbeat)
+            except ObjectNotFound:
+                # Preserve complete roles even if the missing role sorts first.
+                # Their own readback may resolve an unknown upload acknowledgement.
+                missing = True
+                continue
+            if role["status"] != "verified":
+                role["status"] = "verified"
+                self._save(record)
+        if missing:
+            raise ObjectNotFound("artifact_remote_roles_missing")
+        return self._specs(record)
 
     def prepare(self, job, attempt_id, tag, files, *, raw_paths=()):
         existing = self.get(job, attempt_id, tag)

@@ -8,18 +8,23 @@ import math
 from .protocol import BackendError
 
 NATIVE_DELIVERY = "native-frames-v1"
+GPU_R2_DELIVERY = "native-frames-r2-v1"
+NATIVE_POLICIES = frozenset({NATIVE_DELIVERY, GPU_R2_DELIVERY})
 NATIVE_EVIDENCE_FIELDS = {"delivery_spec", "frame_count", "container_duration_s", "audio_duration_s"}
 
 
 def validate_delivery_policy(backend, policy):
     """An operator/slot capability, never a public generation control."""
-    if policy != "" and (backend != "wangp-worker" or policy != NATIVE_DELIVERY):
+    if policy != "" and (backend != "wangp-worker" or policy not in NATIVE_POLICIES):
         raise ValueError("unsupported_output_delivery_policy")
 
 
-def native_delivery_spec(compiled):
+def native_delivery_spec(compiled, policy=NATIVE_DELIVERY):
     """Resolve new-plan delivery once; do not rewrite native or requested inputs."""
     from comfy_workflow import native_output_spec
+    validate_delivery_policy("wangp-worker", policy)
+    if policy not in NATIVE_POLICIES:
+        raise ValueError("invalid_native_delivery_spec")
     request, output = compiled["request"], compiled["output_spec"]
     if (compiled.get("recipe_id") not in {"h3-base-fl2va-v1", "h3-base-ref2va-v1"}
             or type(request.get("duration")) is not int
@@ -33,7 +38,7 @@ def native_delivery_spec(compiled):
     elif compiled["recipe_id"] == "h3-base-ref2va-v1":
         from .wangp_ref_compiler import normalize_request
         normalize_request(request, {k:v["metadata"] for k,v in compiled["assets"].items()}, output)
-    return {"policy": NATIVE_DELIVERY, "fps": 24, "frame_count": output["frames"],
+    return {"policy": policy, "fps": 24, "frame_count": output["frames"],
             "duration_s": output["frames"] / 24, "requested_duration_s": request["duration"]}
 
 
@@ -46,13 +51,19 @@ def delivery_spec(job):
         return None
     try:
         validate_delivery_policy(execution.get("backend"), policy)
-        expected = native_delivery_spec(job["request"])
-        if (policy != NATIVE_DELIVERY or not isinstance(value, dict) or value != expected
+        expected = native_delivery_spec(job["request"], policy)
+        if (policy not in NATIVE_POLICIES or not isinstance(value, dict) or value != expected
                 or any(type(value[k]) is not type(v) for k, v in expected.items())):
             raise ValueError
         return dict(value)
     except (KeyError, TypeError, ValueError):
         raise BackendError("invalid_output_delivery_contract") from None
+
+
+def gpu_delivery(job):
+    """Only the accepted immutable policy selects the GPU export route."""
+    value = delivery_spec(job)
+    return value is not None and value["policy"] == GPU_R2_DELIVERY
 
 
 def validate_delivery_evidence(job, evidence, kind):

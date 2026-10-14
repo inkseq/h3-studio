@@ -281,17 +281,25 @@ No request settings, prompts, credentials or runtime error strings are persisted
         if row is None:
             return None
         try:
-            return OperationReceipt.from_dict(json.loads(row[0]))
+            value=json.loads(row[0])
+            value.pop('_delivery_context',None);value.pop('_delivery',None)
+            return OperationReceipt.from_dict(value)
         except (ValueError, TypeError, KeyError):
             raise NotReady("wangp_receipt_invalid") from None
 
     @staticmethod
     def _put(db, receipt):
+        payload=receipt.to_dict()
+        previous=db.execute('SELECT receipt FROM operations WHERE operation_id=?',(receipt.operation_id,)).fetchone()
+        if previous is not None:
+            old=json.loads(previous[0])
+            for name in ('_delivery_context','_delivery'):
+                if name in old:payload[name]=old[name]
         db.execute("""INSERT INTO operations VALUES (?,?,?,?,?,?)
             ON CONFLICT(operation_id) DO UPDATE SET state=excluded.state,
             hold_reason=excluded.hold_reason, receipt=excluded.receipt""",
             (receipt.operation_id, receipt.slot_key, receipt.state, receipt.hold_reason,
-             receipt.incarnation, canonical_json(receipt.to_dict())))
+             receipt.incarnation, canonical_json(payload)))
 
     def get(self, op: str) -> OperationReceipt | None:
         _identifier(op)
@@ -331,6 +339,63 @@ No request settings, prompts, credentials or runtime error strings are persisted
                               reason=reason, artifacts=artifacts)
             self._put(db, updated)
             return updated
+
+
+    def save_delivery_context(self, prepared):
+        """Keep only original geometry in the existing record; never a new prompt."""
+        with self._connection() as db:
+            receipt=self._get(db,prepared.operation_id)
+            if receipt is None or receipt.identity_digest!=prepared.identity_digest:
+                raise NotReady('wangp_delivery_identity_mismatch')
+            raw=json.loads(db.execute('SELECT receipt FROM operations WHERE operation_id=?',(prepared.operation_id,)).fetchone()[0])
+            context={'output_spec':json.loads(prepared.output_spec_json)}
+            if '_delivery_context' in raw and raw['_delivery_context']!=context:
+                raise NotReady('wangp_delivery_context_mismatch')
+            raw['_delivery_context']=context
+            db.execute('UPDATE operations SET receipt=? WHERE operation_id=?',(canonical_json(raw),prepared.operation_id))
+
+    def delivery_context(self, op):
+        _identifier(op)
+        with self._connection() as db:
+            row=db.execute('SELECT receipt FROM operations WHERE operation_id=?',(op,)).fetchone()
+            value=json.loads(row[0]).get('_delivery_context') if row else None
+            if type(value) is not dict or set(value)!={'output_spec'} or type(value['output_spec']) is not dict:
+                raise NotReady('wangp_delivery_context_missing')
+            return value
+
+    def delivery(self, op):
+        from ..inference.wangp_delivery import validate_delivery_receipt
+        _identifier(op)
+        with self._connection() as db:
+            row=db.execute('SELECT receipt FROM operations WHERE operation_id=?',(op,)).fetchone()
+            value=json.loads(row[0]).get('_delivery') if row else None
+            return validate_delivery_receipt(value) if value is not None else None
+
+    def save_delivery(self, op, value):
+        from ..inference.wangp_delivery import validate_delivery_receipt
+        value=validate_delivery_receipt(value)
+        with self._connection() as db:
+            receipt=self._get(db,op)
+            if receipt is None or receipt.state!='succeeded' or not receipt.stop_proven or receipt.hold_reason:
+                raise NotReady('wangp_delivery_original_output_unavailable')
+            identity={name:getattr(receipt,name) for name in value['identity']}
+            if value['identity']!=identity or value['generate_audio'] is not receipt.generate_audio:
+                raise NotReady('wangp_delivery_identity_mismatch')
+            raw=json.loads(db.execute('SELECT receipt FROM operations WHERE operation_id=?',(op,)).fetchone()[0])
+            old=raw.get('_delivery')
+            if old is not None:
+                old=validate_delivery_receipt(old)
+                if old['fingerprint']!=value['fingerprint']:
+                    raise NotReady('wangp_delivery_fingerprint_mismatch')
+                if old['roles'] and value['roles']!=old['roles']:
+                    raise NotReady('wangp_delivery_roles_changed')
+                for kind,prior in old['objects'].items():
+                    current=value['objects'].get(kind)
+                    if current is None or any(current[name]!=prior[name] for name in ('key','storage_binding')):
+                        raise NotReady('wangp_delivery_storage_binding_changed')
+            raw['_delivery']=value
+            db.execute('UPDATE operations SET receipt=? WHERE operation_id=?',(canonical_json(raw),op))
+            return value
 
     def request_cancel(self, op: str):
         with self._connection() as db:

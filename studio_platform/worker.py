@@ -459,6 +459,7 @@ class WorkerRunner:
 
     def _collect(self, job, lease, tag, task_id, heartbeat):
         from .artifact_writer import ArtifactWriter
+        from .inference.outputs import gpu_delivery
         writer = ArtifactWriter(self.repo.engine, self.store, self.work_dir, tenant=job["tenant_id"])
         receipt = writer.get(job, lease.attempt_id, tag)
         if receipt is not None and receipt["phase"] == "settled":
@@ -467,6 +468,8 @@ class WorkerRunner:
                 raise BackendError("artifact_settlement_job_mismatch")
             self._cleanup_collection(writer, current, lease, tag)
             return self._summary(current)
+        if gpu_delivery(job):
+            return self._collect_remote(writer, job, lease, tag, task_id, heartbeat, receipt)
         if receipt is not None and receipt["phase"] != "staging":
             with _lease_keepalive(heartbeat), self._stage("upload", job, lease):
                 specs = writer.write(receipt, heartbeat)
@@ -545,6 +548,51 @@ class WorkerRunner:
                 receipt = writer.prepare(job, lease.attempt_id, tag, files, raw_paths=paths.values())
         with _lease_keepalive(heartbeat), self._stage("upload", job, lease):
             specs = writer.write(receipt, heartbeat)
+        return self._complete_collection(writer, job, lease, tag, specs, self._cost(job, task_id), receipt)
+
+    def _collect_remote(self, writer, job, lease, tag, task_id, heartbeat, receipt):
+        """Frozen GPU/R2 delivery: CPU authorizes and hashes, never handles media."""
+        if receipt is None:
+            kinds = ("video", "audio") if _shape(job)[3] else ("video",)
+            receipt = writer.begin_remote(job, lease.attempt_id, tag, kinds=kinds)
+        if receipt["phase"] == "staging":
+            with _lease_keepalive(heartbeat), self._stage("collect", job, lease):
+                description = self.backend.prepare_delivery(job, tag, task_id, heartbeat)
+            with self._stage("validate_output", job, lease):
+                receipt = writer.prepare_remote(job, lease.attempt_id, tag, task_id, description)
+        with _lease_keepalive(heartbeat), self._stage("upload", job, lease):
+            try:
+                specs = writer.verify_remote(receipt, heartbeat)
+            except ObjectNotFound:
+                unresolved = {kind for kind, role in receipt["roles"].items()
+                              if role["status"] in {"putting", "unknown"}}
+                stopped = False
+                if unresolved:
+                    status = self.backend.delivery_status(job, tag, task_id)
+                    # Validate the original sealed identities before using any
+                    # mutable upload-stop fact. Missing HEAD is not that proof.
+                    receipt = writer.prepare_remote(job, lease.attempt_id, tag, task_id, status)
+                    objects = status.get("objects", {})
+                    stopped = all(isinstance(objects.get(kind), dict)
+                        and objects[kind].get("state") in {"not_started", "rejected"}
+                        and objects[kind].get("stop_proven") is True
+                        for kind in unresolved)
+                targets = writer.remote_targets(receipt, heartbeat, upload_stopped=stopped)
+                if targets:
+                    try:
+                        self.backend.upload_delivery(job, tag, task_id, targets, heartbeat)
+                    except Exception:
+                        writer.remote_unknown(receipt)
+                        # A lost response may already have delivered both files.
+                        # This is readback only, never another upload or encoding.
+                        try:
+                            specs = writer.verify_remote(receipt, heartbeat)
+                        except ObjectNotFound:
+                            raise BackendError("artifact_put_needs_original_reconciliation") from None
+                    else:
+                        specs = writer.verify_remote(receipt, heartbeat)
+                else:
+                    specs = writer.verify_remote(receipt, heartbeat)
         return self._complete_collection(writer, job, lease, tag, specs, self._cost(job, task_id), receipt)
 
     def run_forever(self, worker_id, pool, *, poll_interval_s=1):
