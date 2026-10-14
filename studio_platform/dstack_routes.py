@@ -19,6 +19,12 @@ def register_routes(app, *, service=None):
     @app.get(PREFIX+"/catalog")
     def catalog(request:Request):
         return response(service.catalog(principal(request)))
+    @app.get(PREFIX+"/admin/prices")
+    def admin_prices(request:Request):
+        return response(service.admin_prices(principal(request)))
+    @app.put(PREFIX+"/admin/prices/{profile_id}")
+    def update_price(profile_id:str,request:Request,body:dict):
+        return response(service.update_price(principal(request),profile_id,body))
     @app.post(PREFIX+"/previews")
     def preview(request:Request,body:dict):
         return response(service.preview(principal(request),body))

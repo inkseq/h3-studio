@@ -5,7 +5,7 @@ admission boundary. This module does not own a queue, permissions or GPU calls.
 """
 from .capabilities import capabilities
 from .generation_draft import plan_body, read_draft
-from .repository import Scope, Conflict
+from .repository import Scope, Conflict, BudgetExceeded
 from .render_plans import RECIPE as RENDER_RECIPE
 from .source_snapshot import source_snapshot
 
@@ -98,6 +98,8 @@ class GenerationAdmission:
             return self.repo.create_job(task_scope, plan_id, key)
         self.planning.check_source(project, plan["request"])
         execution = plan["execution_plan"]
+        if execution.get("budget_error_code") == "budget_exceeded":
+            raise BudgetExceeded("budget_exceeded")
         enabled_setting = (self.settings.render_enabled if plan["request"]["recipe_id"] == RENDER_RECIPE
                            else self.settings.generation_enabled)
         ready = enabled_setting and execution.get("enabled") and execution.get("quote_known")

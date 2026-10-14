@@ -458,3 +458,9 @@ inventory.json
 !STORAGE-MIGRATION.md
 
 !test_platform_wangp_memory.py
+!studio_platform/operator_budgets.py
+!studio_platform/operator_budget_routes.py
+!studio_platform/operator_prices.py
+!test_operator_budgets.py
+!test_operator_budget_routes.py
+!test_dstack_prices.py

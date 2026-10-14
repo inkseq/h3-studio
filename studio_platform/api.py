@@ -111,8 +111,16 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
         return JSONResponse({"detail": str(error)}, status_code=409)
 
     @app.exception_handler(BudgetExceeded)
-    async def quota(_request, _error):
-        return JSONResponse({"detail": "预算或容量不足，未新增付费执行"}, status_code=429)
+    async def quota(_request, error):
+        # Closed monetary vocabulary: capacity failures must not masquerade as
+        # a depleted account, and exception strings must never expose secrets.
+        code = str(error)
+        if code in {"budget_exceeded", "budget_below_committed", "budget_not_configured"}:
+            messages = {"budget_exceeded": "额度不足；可用额度不足以预留本次操作，未新增付费执行。",
+                "budget_below_committed": "额度不能低于已花费用与当前预留之和。",
+                "budget_not_configured": "本次操作的预算尚未配置，未新增付费执行。"}
+            return JSONResponse({"code": code, "detail": messages[code], "message": messages[code]}, status_code=429)
+        return JSONResponse({"detail": "容量不足，未新增付费执行", "code": "capacity_unavailable"}, status_code=429)
 
     @app.exception_handler(ValueError)
     async def invalid(_request, error):
@@ -627,6 +635,8 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
     register_operator_routes(app, registry=registry)
     from .dstack_routes import register_routes as register_dstack_routes
     register_dstack_routes(app, service=dstack_operator)
+    from .operator_budget_routes import register_routes as register_budget_routes
+    register_budget_routes(app)
     from .frontend import register_routes as register_frontend_routes
     register_frontend_routes(app)
     # Last-added middleware is outermost, including the authentication guard.

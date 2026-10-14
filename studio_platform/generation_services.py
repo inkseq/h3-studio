@@ -67,6 +67,7 @@ class GenerationRead:
         return {"admission_state": execution.get("admission_state", "queued" if execution.get("enabled") else "blocked"),
                 "enabled": bool(execution.get("enabled")), "quote_known": bool(execution.get("quote_known")),
                 "backend": execution.get("backend"),
+                **({"budget_error_code": "budget_exceeded"} if execution.get("budget_error_code") == "budget_exceeded" else {}),
                 **({"deployment_profile_id": execution["deployment_profile_id"]} if execution.get("deployment_profile_id") else {}),
                 **({"timing_hint": execution["timing_hint"]} if execution.get("timing_hint") else {}),
                 **({"delivery_spec": execution["delivery_spec"]} if "delivery_spec" in execution else {})}
