@@ -99,3 +99,31 @@ test('actual budget cards show sparse recorded dates and legacy uncertainty with
   assert.match(markup,/累计额度/);assert.match(markup,/已结算/);assert.match(markup,/已预留/);assert.match(markup,/剩余额度/);assert.match(markup,/80%/);assert.match(markup,/2026-10-14/);assert.doesNotMatch(markup,/2026-10-13|月度|monthly/);assert.match(markup,/旧记录日期未确认/);assert.match(markup,/\$2\.00/);assert.match(markup,/没有记录的日期不视为零费用/);
   const exhausted=renderToStaticMarkup(React.createElement(module.exports.BudgetAccounts,{budgets:[row({reserved_microusd:80000000,status:'exhausted'})],compact:true}));assert.match(exhausted,/额度不足/);
 });
+
+test('definite monetary start rejection clears only its journal and allows explicit budget restore without a paid retry',async()=>{
+  for(const code of ['budget_exceeded','budget_not_configured']){
+    const calls=[],accepted=[],storage=memory();let restored=false;
+    const api=createP4OperatorClient({fetcher:async(path,options)=>{
+      calls.push({path,options});let value,status=200;
+      if(path.endsWith('/workspace'))value={capacity_backend:'dstack-v1',operator:{account:'superdan',admin:true},nodes:[],groups:[],queue:[]};
+      else if(path.endsWith('/catalog'))value={profiles:[]};
+      else if(path==='/v1/operator/dstack/starts'){
+        if(!restored){status=429;value={code,detail:'额度不足，未新增付费执行。'};}
+        else{value={node_id:'explicit-new-node',state:'accepted'};accepted.push(JSON.parse(options.body).preview_id);}
+      }else if(path==='/v1/operator/admin/budgets/owner-budget'){
+        assert.deepEqual(JSON.parse(options.body),{expected_snapshot:row().snapshot,limit_microusd:106000000});restored=true;value={budget:row({limit_microusd:106000000,snapshot:'b'.repeat(64)}),changed:true,audit_event_id:'restore-audit'};
+      }else throw Error('unexpected request');
+      return new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json','X-Authenticated-Account':'superdan'}});
+    }}),controller=createP4OperatorController({client:api,storage});await controller.setAccount('superdan');
+    await assert.rejects(controller.start({preview_id:'rejected-preview'}),/额度不足/);assert.equal(controller.getState().pending,null);assert.equal(storage.getItem('sixnine:operator:dstack:pending:superdan'),null);assert.deepEqual(accepted,[]);assert.equal(calls.filter(call=>call.path.endsWith('/starts')).length,1);
+    await controller.updateBudget(row(),106000000);assert.deepEqual(accepted,[]);assert.equal(calls.filter(call=>call.path.endsWith('/starts')).length,1,'restoring the original budget does not repeat start');
+    await controller.start({preview_id:'explicit-fresh-preview'});assert.deepEqual(accepted,['explicit-fresh-preview']);assert.equal(calls.filter(call=>call.path.endsWith('/starts')).length,2);
+  }
+});
+
+test('generic rate limits, unavailable capacity, timeouts and service failures retain the original start without replay',async()=>{
+  for(const failure of [{status:429,detail:{code:'capacity_unavailable'}},{status:429,detail:{code:'rate_limited'}},{status:429,detail:{detail:'budget_exceeded'}},{status:408,detail:{code:'budget_exceeded'}},{status:503,detail:{code:'budget_exceeded'}}]){
+    let calls=0;const storage=memory(),controller=createP4OperatorController({client:fake({start:async()=>{calls++;throw Object.assign(Error('unconfirmed'),failure);}}),storage});await controller.setAccount('superdan');await assert.rejects(controller.start({preview_id:'original-preview'}));const original=controller.getState().pending;assert.equal(original.body.preview_id,'original-preview');assert.equal(JSON.parse(storage.getItem('sixnine:operator:dstack:pending:superdan')).key,original.key);await assert.rejects(controller.start({preview_id:'other-preview'}),/原操作结果/);assert.equal(calls,1);
+  }
+  const controller=createP4OperatorController({client:fake({updateBudget:async()=>{throw Object.assign(Error('uncertain other operation'),{status:429,detail:{code:'budget_exceeded'}});}}),storage:memory()});await controller.setAccount('superdan');await assert.rejects(controller.updateBudget(row(),106000000));assert.equal(controller.getState().pending.method,'updateBudget','the definite start-only proof does not broaden other command semantics');
+});
