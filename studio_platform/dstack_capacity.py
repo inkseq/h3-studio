@@ -879,7 +879,17 @@ class DstackCapacity:
         # failure). Never postpone its capture until a successful bootstrap.
         provisioning = submission.get("job_provisioning_data")
         if isinstance(provisioning, dict) and provisioning:
-            physical = self._host_observation(provisioning, binding, value["observed_at"])
+            try:
+                physical = self._host_observation(provisioning, binding, value["observed_at"])
+            except DstackError:
+                # Physical telemetry cannot erase an exact owned upstream
+                # terminal state when the supplier has already removed it.
+                # This grants no host identity, readiness, removal or billing
+                # proof; live-capacity exclusion still needs fresh complete
+                # provider absence through its original independent guard.
+                if status not in TERMINAL:
+                    raise
+                physical = None
             if physical is not None:
                 value.update(host_observation=physical, provider_instance_id=physical["provider_instance_id"])
             if (physical is not None and status == "failed" and not binding.get("stop_started")

@@ -113,6 +113,30 @@ class HostSelectionTests(ledger.LedgerCase):
         result = self.start(self.preview())
         self.assertEqual(self.store.load(result["node_id"])["run_spec"]["profile"]["instance_types"], ["54321"])
 
+    def test_enforced_terminal_without_physical_capture_never_blocks_ended_projection(self):
+        result = self.start(self.preview())
+        binding = self.store.load(result["node_id"])
+        run = self.client.runs[binding["run_name"]]
+        run.update(status="running", latest_job_submission={"job_provisioning_data": {
+            "backend": "vastai", "instance_id": "1234567", "instance_type": {"resources": {
+                "gpus": [{"name": "RTX5090"}]}}}})
+        self.client.vast_instance_identity = Mock(return_value=None)
+        self.capacity.readiness = Mock()
+        unknown = self.capacity.observe(result["node_id"])
+        self.assertEqual(unknown["state"], "observation_unknown")
+        self.capacity.readiness.assert_not_called()
+        self.assertNotIn("provider_instance_id", self.store.load(result["node_id"]))
+        run["status"] = "failed"
+        terminal = self.capacity.observe_terminal(result["node_id"])
+        self.assertEqual(terminal["state"], "stopped")
+        self.assertFalse(terminal["ready"])
+        self.assertEqual(terminal["billing_state"], "unsettled")
+        with self.repo.engine.connect() as conn:
+            payload = conn.execute(select(operator_nodes.c.payload).where(operator_nodes.c.intent_id == result["node_id"])).scalar_one()
+        self.assertNotIn("host_observation", payload)
+        self.assertNotIn("provider_instance_id", payload["dstack"])
+        self.capacity.readiness.assert_not_called()
+
     def test_policy_changed_before_controller_apply_preserves_accepted_intent(self):
         with patch.object(self.capacity, "start", return_value={"state": "starting"}):
             result = self.start(self.preview())

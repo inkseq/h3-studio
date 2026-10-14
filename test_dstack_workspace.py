@@ -90,7 +90,9 @@ class WorkspaceTests(LedgerCase):
     def ready_worker(self, node_id, *, state="ready"):
         binding = self.store.load(node_id)
         run = self.client.runs[binding["run_name"]]
-        instance = "gpu-"+node_id
+        # Vast uses numeric contract IDs; keep separate fake allocations for
+        # each original node while exercising the real identity guard.
+        instance = str(uuid.UUID(node_id).int % 10**17 + 1)
         run.update(status="running", latest_job_submission={"job_provisioning_data": {
             "backend": "vastai", "instance_id": instance,
             "instance_type": {"resources": {"gpus": [{"name": "RTX5090"}]}}}})

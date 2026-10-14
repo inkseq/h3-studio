@@ -66,8 +66,11 @@ class Client:
             resource.setdefault("cpus", 12)
             resource.setdefault("memory_mib", 96*1024)
             resource.setdefault("disk", {"size_mib": 128*1024})
-            for gpu in resource.get("gpus", []):
-                gpu.setdefault("memory_mib", 32*1024)
+            gpus = resource.get("gpus")
+            if isinstance(gpus, list):
+                for gpu in gpus:
+                    if isinstance(gpu, dict):
+                        gpu.setdefault("memory_mib", 32*1024)
         return result
 
     def apply(self, spec):

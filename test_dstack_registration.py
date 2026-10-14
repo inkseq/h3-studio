@@ -84,8 +84,8 @@ class RegistrationCapacityTests(LedgerCase):
             return self.service.registration_capacity_usage(connection, spec)
 
     def test_nine_original_intents_allow_two_existing_slots_with_seven_proven_inactive(self):
-        historical = [self.node("old-" + str(i), terminal=True) for i in range(7)]
-        current = [self.node("live-fl"), self.node("live-ref", mode="ref")]
+        historical = [self.node(str(2000010 + i), terminal=True) for i in range(7)]
+        current = [self.node("2000020"), self.node("2000021", mode="ref")]
         self.repo.configure_capacity(max_instances=4, max_physical_gpus=4)
         before = self.snapshot()
         with self.repo.engine.connect() as connection:
@@ -114,10 +114,10 @@ class RegistrationCapacityTests(LedgerCase):
         binding = self.store.load(failed)
         self.client.runs[binding["run_name"]] = no_capacity_run(self.client.runs[binding["run_name"]])
         self.capacity.observe(failed)
-        live = self.node("live")
+        live = self.node("2000001")
         self.repo.configure_capacity(max_instances=1, max_physical_gpus=1)
         before = self.snapshot()
-        self.assertEqual(self.usage(live)["resources"], {("vast", "live"): 1})
+        self.assertEqual(self.usage(live)["resources"], {("vast", "2000001"): 1})
         WorkerControl(self.repo, capacity_usage=self.service.registration_capacity_usage).register(self.spec(live))
         self.assertEqual(self.snapshot(), before)
         self.assertIsNone(next(row for row in before[0] if row["id"] == failed)["provider_instance_id"])
@@ -128,20 +128,25 @@ class RegistrationCapacityTests(LedgerCase):
         old = self.start(key='unobserved-allocation')['node_id']
         binding = self.store.load(old)
         self.client.runs[binding['run_name']].update(status='failed', latest_job_submission={
-            'job_provisioning_data':{'backend':'vastai', 'instance_id':'old-allocated',
+            'job_provisioning_data':{'backend':'vastai', 'instance_id':'2000030',
                 'instance_type':{'resources':{'gpus':[{'name':'RTX5090'}]}}}})
-        # No RUNNING observation ever wrote the original provider ID.
-        self.capacity.observe_terminal(old)
+        # No earlier observation recorded an allocation ID. The supplier has
+        # already removed this exact instance: terminal state is still usable
+        # without fabricating physical telemetry or a ledger provider ID.
+        original_identity = self.client.vast_instance_identity
+        self.client.vast_instance_identity = lambda identity: (None if identity == '2000030'
+            else original_identity(identity))
+        self.assertEqual(self.capacity.observe_terminal(old)['state'], 'stopped')
         self.assertIsNone(self.store.load(old).get('provider_instance_id'))
-        live = self.node('live')
+        live = self.node('2000001')
         self.repo.configure_capacity(max_instances=1, max_physical_gpus=1)
         before = self.snapshot()
-        self.assertEqual(self.usage(live)['resources'], {('vast', 'live'):1})
+        self.assertEqual(self.usage(live)['resources'], {('vast', '2000001'):1})
         WorkerControl(self.repo, capacity_usage=self.service.registration_capacity_usage).register(self.spec(live))
         self.assertEqual(self.snapshot(), before)
         for inventory in (None, {'backend':'vastai', 'complete':True,
                 'observed_at':self.now-31, 'instance_ids':[]},
-                {'backend':'vastai', 'complete':True, 'observed_at':self.now, 'instance_ids':['old-allocated']}):
+                {'backend':'vastai', 'complete':True, 'observed_at':self.now, 'instance_ids':['2000030']}):
             with self.subTest(inventory=inventory):
                 self.service.provider_inventory = Mock(return_value=inventory)
                 self.assertEqual(self.usage(live)['resources'][('vast', 'intent:'+old)], 1)
@@ -153,26 +158,26 @@ class RegistrationCapacityTests(LedgerCase):
         self.assertEqual(self.usage(live)['instances'], 2)
 
     def test_overlay_retains_legacy_instances_and_unreleased_devices(self):
-        old = self.node("old", terminal=True)
-        live = self.node("live")
+        old = self.node("2000002", terminal=True)
+        live = self.node("2000001")
         self.repo.configure_pool("legacy", max_instances=1, max_physical_gpus=1)
         legacy = self.repo.reserve_instance_intent(self.scope, "legacy", "legacy-intent",
             provider="lium", physical_gpus=1, hard_deadline=2000,
             reserved_cost_microusd=100_000, budget_account_ids=["owner-budget"], dry_run=False)
         WorkerControl(self.repo).register(self.spec(old))
         usage = self.usage(live)
-        self.assertEqual(usage["resources"], {("vast", "live"): 1, ("vast", "old"): 1,
+        self.assertEqual(usage["resources"], {("vast", "2000001"): 1, ("vast", "2000002"): 1,
             ("lium", "intent:" + legacy["id"]): 1})
         self.assertEqual((usage["instances"], usage["physical_gpus"]), (3, 3))
         self.assertEqual(next(row for row in self.snapshot()[0] if row["id"] == old)["state"], "destroying")
 
     def test_partial_wrong_stale_present_or_failed_account_reads_cannot_free_capacity(self):
-        self.node("old", terminal=True)
-        live = self.node("live")
+        self.node("2000002", terminal=True)
+        live = self.node("2000001")
         self.repo.configure_capacity(max_instances=1, max_physical_gpus=1)
         good = {"backend": "vastai", "complete": True, "observed_at": self.now, "instance_ids": []}
         cases = [None, {**good, "backend": "runpod"}, {**good, "complete": False},
-            {**good, "observed_at": self.now-31}, {**good, "instance_ids": ["old"]}]
+            {**good, "observed_at": self.now-31}, {**good, "instance_ids": ["2000002"]}]
         before = self.snapshot()
         for value in cases:
             with self.subTest(value=value):
@@ -186,8 +191,8 @@ class RegistrationCapacityTests(LedgerCase):
         self.assertEqual(self.snapshot(), before)
 
     def test_absent_inventory_does_not_exclude_running_or_identity_drifted_history(self):
-        old = self.node("old")
-        live = self.node("live")
+        old = self.node("2000002")
+        live = self.node("2000001")
         self.assertEqual(self.usage(live)["instances"], 2)
         run = self.client.runs[self.store.load(old)["run_name"]]
         run["status"] = "terminated"
@@ -198,7 +203,7 @@ class RegistrationCapacityTests(LedgerCase):
         self.assertEqual(self.usage(live)["instances"], 2)
 
     def test_current_run_change_cannot_register_from_old_native_readiness(self):
-        node = self.node("live")
+        node = self.node("2000001")
         run = self.client.runs[self.store.load(node)["run_name"]]
         run["status"] = "terminated"
         with self.assertRaisesRegex(fixture.OperatorError, "dstack_registration_run_unconfirmed"):
@@ -207,7 +212,7 @@ class RegistrationCapacityTests(LedgerCase):
             self.assertIsNone(connection.execute(select(registered_workers.c.id)).first())
 
     def test_current_instance_or_backend_drift_and_malformed_identity_cannot_register(self):
-        node = self.node("live")
+        node = self.node("2000001")
         spec = self.spec(node)
         run = self.client.runs[self.store.load(node)["run_name"]]
         original = copy.deepcopy(run["latest_job_submission"])
@@ -227,7 +232,7 @@ class RegistrationCapacityTests(LedgerCase):
                     self.assertIsNone(connection.execute(select(registered_devices.c.gpu_id)).first())
 
     def test_current_actual_multigpu_or_unconfirmed_gpu_shape_is_rejected(self):
-        node = self.node("live")
+        node = self.node("2000001")
         spec = self.spec(node)
         run = self.client.runs[self.store.load(node)["run_name"]]
         resource = run["latest_job_submission"]["job_provisioning_data"]["instance_type"]["resources"]
@@ -244,8 +249,8 @@ class RegistrationCapacityTests(LedgerCase):
                     self.assertIsNone(connection.execute(select(registered_devices.c.gpu_id)).first())
 
     def test_other_included_actual_allocation_counts_above_original_intent(self):
-        other = self.node("other")
-        live = self.node("live")
+        other = self.node("2000003")
+        live = self.node("2000001")
         run = self.client.runs[self.store.load(other)["run_name"]]
         run["latest_job_submission"]["job_provisioning_data"]["instance_type"]["resources"]["gpus"] = [
             {"name": "RTX5090"}, {"name": "RTX5090"}]
@@ -253,7 +258,7 @@ class RegistrationCapacityTests(LedgerCase):
         with patch.object(self.client, "get", wraps=self.client.get) as read:
             usage = self.usage(live)
             self.assertEqual(read.call_count, 2)  # No additional provider/run read.
-        self.assertEqual(usage["resources"], {("vast", "other"): 2, ("vast", "live"): 1})
+        self.assertEqual(usage["resources"], {("vast", "2000003"): 2, ("vast", "2000001"): 1})
         self.assertEqual((usage["instances"], usage["physical_gpus"]), (2, 3))
         self.repo.configure_capacity(max_instances=2, max_physical_gpus=2)
         with self.assertRaisesRegex(BudgetExceeded, "global_capacity_exceeded"):
@@ -263,7 +268,7 @@ class RegistrationCapacityTests(LedgerCase):
             self.assertIsNone(connection.execute(select(registered_workers.c.id)).first())
 
     def test_registration_capacity_pause_and_existing_idempotency_are_preserved(self):
-        node = self.node("live")
+        node = self.node("2000001")
         control = WorkerControl(self.repo, capacity_usage=self.service.registration_capacity_usage)
         self.repo.configure_capacity()
         with self.assertRaisesRegex(BudgetExceeded, "global_capacity_exceeded"):
@@ -278,8 +283,8 @@ class RegistrationCapacityTests(LedgerCase):
             control.register(replace(self.spec(node), worker_id="another-worker"))
 
     def test_static_blocker_is_projected_separately_then_cleared_without_repeated_receipts(self):
-        self.node("old", terminal=True)
-        live = self.node("live")
+        self.node("2000002", terminal=True)
+        live = self.node("2000001")
         self.repo.configure_capacity(max_instances=1, max_physical_gpus=1)
         self.service.provider_inventory = Mock(return_value=None)
         controller = self.controller()
@@ -296,7 +301,7 @@ class RegistrationCapacityTests(LedgerCase):
             self.assertEqual(len(connection.execute(select(scaler_receipts).where(
                 scaler_receipts.c.intent_id == live, scaler_receipts.c.operation == "registration")).all()), 1)
         self.service.provider_inventory = Mock(return_value={"backend": "vastai", "complete": True,
-            "observed_at": self.now, "instance_ids": ["live"]})
+            "observed_at": self.now, "instance_ids": ["2000001"]})
         controller.tick()
         node = next(row for row in self.service.state(self.owner)["nodes"] if row["node_id"] == live)
         self.assertIsNone(node["registration_reason_code"])
@@ -304,7 +309,7 @@ class RegistrationCapacityTests(LedgerCase):
         self.assertEqual(self.snapshot()[1:], before)
 
     def test_arbitrary_exception_text_never_becomes_public_code(self):
-        node = self.node("live")
+        node = self.node("2000001")
         controller = self.controller()
         for error in (BudgetExceeded("PRIVATE-SECRET"), ValueError("PRIVATE-SECRET"),
                 BudgetExceeded("global_capacity_exceeded", "PRIVATE-SECRET")):
