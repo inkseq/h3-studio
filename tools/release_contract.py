@@ -24,6 +24,8 @@ FIXED = (
     'deploy/wangp/profiles/h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3.json',
     'deploy/wangp/profiles/h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-cgroups-v4.json',
     'deploy/wangp/profiles/h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2.json',
+    'deploy/wangp/profiles/h3-pruned-rank8-int8-sdpa-p4-29gib-fl-r2-v5.json',
+    'deploy/wangp/profiles/h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-fl-r2-v3.json',
 )
 AGENT_FILES = ('skills/sixnine-yingxu/SKILL.md', 'skills/sixnine-yingxu/scripts/sixnine.py')
 # These modules serve static files or describe Agent discovery; neither runs

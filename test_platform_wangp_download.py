@@ -126,6 +126,30 @@ class DownloadTests(unittest.TestCase):
                 fetch.fetch_files(document, changed, self.models, self.progress, downloader=sdk)
         sdk.assert_not_called()
 
+    def test_gpu_r2_profiles_use_existing_content_preserving_locator_only(self):
+        from studio_platform.runtime_catalog import engine_manifest
+        pairs = (
+            ('h3-pruned-rank8-int8-sdpa-p4-29gib-fl-r2-v5',
+             'h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-cgroups-v4'),
+            ('h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-fl-r2-v3',
+             'h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2'),
+        )
+        for profile, previous in pairs:
+            with self.subTest(profile=profile):
+                manifest = engine_manifest(profile, 'fl')
+                records = fetch.selected_files(manifest.document, manifest.digest)
+                old = engine_manifest(previous, 'fl')
+                self.assertEqual(records, fetch.selected_files(old.document, old.digest))
+                self.assertEqual(fetch._content_preserving_revision(manifest.document, manifest.digest, records),
+                                 '8d9093438ffb3e33d6a058cc20fa3b7ca31f5752')
+                changed = copy.deepcopy(manifest.document)
+                changed['components']['transformer']['files'][0]['sha256'] = '0' * 64
+                sdk = Mock()
+                with self.assertRaisesRegex(ValueError, 'model_download_locator_invalid'):
+                    fetch.fetch_files(changed, EngineManifest.from_dict(changed).digest,
+                                      self.models, self.progress, downloader=sdk)
+                sdk.assert_not_called()
+
     def test_v3_changed_content_or_revision_refuses_before_sdk(self):
         from studio_platform.runtime_catalog import engine_manifest
         manifest = engine_manifest("h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3", "ref")

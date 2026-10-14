@@ -49,6 +49,8 @@
 
 ## Local preview
 
+- Routine live browser acceptance uses `superdan` in the user's Chrome **Monash** profile. Reuse an authenticated session; do not repeatedly switch accounts or log in again. One account is sufficient for ordinary functional acceptance. Run a second identity only when a specific owner-isolation check requires it, and reuse existing valid isolation evidence when unaffected.
+
 - Manual GPU capacity work uses `OPERATOR-CAPACITY-CONTRACT.md`, `OPERATOR-CAPACITY-OPERATIONS.md` and E3 #71. `/operator` and the Quick Chat profile selector share the existing API/ledgers. Catalog evidence is historical; protected bindings and a live receipt are required for operational claims. Isolated console preview: `tools/run_operator_preview.py`, loopback 8897, no provider or generation.
 
 - Quick Chat: `tools/run_quick_chat_preview.py`, isolated `127.0.0.1:8870/quick-chat` and `.platform-quick-chat-preview`; generation/assistant/render disabled by default. Older isolated preview uses `tools/run_local_preview.py` and `.platform-preview-v2`.

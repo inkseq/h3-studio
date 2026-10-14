@@ -56,7 +56,7 @@ class HTTPWanGPTransport:
                 follow_redirects=False, trust_env=False)
         return self._client
 
-    def _json(self, method, path, *, value=None, missing=False, submission=False):
+    def _json(self, method, path, *, value=None, missing=False, submission=False, timeout_seconds=None):
         try:
             started = time.monotonic()
             headers = {"Content-Type": "application/json"}
@@ -66,7 +66,7 @@ class HTTPWanGPTransport:
                 headers["X-Wangp-Incarnation"] = self.expected_incarnation
             with self._http().stream(method, path,
                     content=canonical_json(value).encode() if value is not None else None,
-                    headers=headers) as response:
+                    headers=headers, **({"timeout":timeout_seconds} if timeout_seconds is not None else {})) as response:
                 if missing and response.status_code == 404:
                     return None
                 # Even rejection of this POST cannot disprove a prior accepted
@@ -76,7 +76,7 @@ class HTTPWanGPTransport:
                 data = bytearray()
                 for chunk in response.iter_bytes():
                     data.extend(chunk)
-                    if len(data) > 2 * 1024 * 1024 or time.monotonic() - started > self.max_transfer_seconds:
+                    if len(data) > 2 * 1024 * 1024 or time.monotonic() - started > (timeout_seconds or self.max_transfer_seconds):
                         raise BackendError("wangp_private_response_limit")
                 import json
                 return json.loads(data)
@@ -97,6 +97,20 @@ class HTTPWanGPTransport:
     def inspect(self, operation_id):
         value = self._json("GET", "/v1/operations/" + _operation(operation_id), missing=True)
         return None if value is None else OperationReceipt.from_dict(value)
+
+
+    def prepare_delivery(self,operation_id,request):
+        return self._json('POST','/v1/operations/'+_operation(operation_id)+'/delivery/prepare',
+            value=request,timeout_seconds=900)
+
+    def upload_delivery(self,operation_id,identity,fingerprint,targets):
+        return self._json('POST','/v1/operations/'+_operation(operation_id)+'/delivery/upload',
+            value={'identity':identity,'fingerprint':fingerprint,'targets':targets},timeout_seconds=400)
+
+    def delivery_status(self,operation_id,identity):
+        from urllib.parse import urlencode
+        query={k:v for k,v in identity.items() if k!='operation_id'}
+        return self._json('GET','/v1/operations/'+_operation(operation_id)+'/delivery?'+urlencode(query),missing=True)
 
     def cancel(self, operation_id):
         value = self._json("POST", "/v1/operations/" + _operation(operation_id) + "/cancel")

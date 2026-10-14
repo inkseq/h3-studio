@@ -31,6 +31,35 @@ shutdown margin. Funding failure closes new admission and requests normal
 drain; recovery and collection retain the original attempt. Historical finite
 deadline contracts and guardian evidence are unchanged.
 
+## GPU artifact delivery extension (#174)
+
+New immutable FL deployment profiles explicitly bind `output_delivery=native-frames-r2-v1`.
+Their protected execution-policy enabled bits are the rollout gate; qualification
+precedes general activation. Admission freezes the policy and native-frame
+delivery specification into each job. Historical `native-frames-v1` and absent
+policies keep CPU collection; later flags/defaults cannot reroute accepted work.
+Keep the CPU route for at least 14 stable days and outstanding old obligations.
+
+The pinned GPU host encodes the same H.264 MP4 and independent 32 kHz stereo FLAC,
+preserves every native frame, fully decodes and seals size/SHA-256/MD5 and media
+evidence. An extension in the original operation journal binds the original
+job/attempt/manifest/slot/incarnation, owner and fixed delivery parameters, without
+changing PreparedRequest or generation-receipt identity. No new queue or ledger.
+
+Existing ArtifactWriter reserves final-object quota before GPU processing, then
+commits descriptors and immutable owner/attempt keys before issuing short-lived
+conditional R2 PUT authorization. URLs/headers are ephemeral: never journaled,
+logged, or passed through process environment/arguments. No storage credentials
+reach the GPU. CPU verification uses HEAD size/type and bounded streaming SHA-256;
+no local output staging, full decode or re-encode. Only both verified role receipts
+permit existing atomic publication, quota and job settlement. An uncertain PUT
+verifies the same key; it cannot overwrite a wrong object, change stores,
+regenerate or release an unknown quota.
+
+[#174](https://github.com/inkseq/h3-studio/issues/174) records exact source, review
+and live media/security/recovery/memory evidence. This source contract alone does
+not enable a protected profile or prove GPU qualification.
+
 ## Current authoring and admission refinements
 
 As clarified in [#126](https://github.com/inkseq/h3-studio/issues/126), historic measurements are not a parameter whitelist. The pinned adapter implements text-only, first-only, last-only and paired first/last FL inputs; REF inputs remain a separate mapped mode. Capability discovery describes implemented model/API support and explicit adapter gaps. Preflight separately checks ownership, valid parameters, configured resource ceilings and budget. A supported but unmeasured combination requires no extra confirmation; a historical timing hint is optional. Static diagnostic codes identify invalid/unmapped inputs without exposing raw exception text, credentials, prompts or media paths. Source support does not upgrade a running worker bundle or widen a protected policy implicitly.

@@ -28,7 +28,7 @@ from .fleet import SlotConfig
 from .inference.wangp_contract import HostReadiness, safe_model_progress
 from .inference.wangp_factory import create_backend, read_document
 from .inference.wangp_http import HTTPWanGPTransport
-from .runtime_catalog import engine_manifest, get_profile
+from .runtime_catalog import engine_manifest, get_profile, profile_output_delivery
 from .runtime_hosts.wangp_http import private_token_file
 from .wangp_bootstrap import (SOURCE_NAMES, BootError, WanGPSSHHost, _write_immutable,
                              read_sources, validate_report, safe_preparation_report)
@@ -108,6 +108,7 @@ class DstackRuntimeConfig:
             and type(self.min_gpu_bytes) is int and self.min_gpu_bytes >= floor,
             "dstack_runtime_manifest_binding_invalid")
         object.__setattr__(self, "recipe_ids", (manifest.document["generation_recipe_id"],))
+        object.__setattr__(self, "output_delivery", profile_output_delivery(self.deployment_profile_id))
         _require(type(self.source_sha256) is dict and set(self.source_sha256) == SOURCE_NAMES
             and all(isinstance(v, str) and re.fullmatch(r"[0-9a-f]{64}", v) for v in self.source_sha256.values()),
             "dstack_runtime_source_hashes_invalid")

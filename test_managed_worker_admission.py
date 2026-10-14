@@ -1,4 +1,5 @@
 """Fresh worker rows cannot override managed provider or execution windows."""
+from dataclasses import replace
 from sqlalchemy import delete, select, update
 
 from studio_platform.control import WorkerControl
@@ -129,6 +130,12 @@ class ManagedAdmissionTests(OperatorCase):
         self.assertEqual(len(self.provider.creates), 1)
 
     def prepare_dstack_lifetime(self, *, keep_on="idle", hold_until=0):
+        # New-path delivery is an explicit catalog-profile capability. Keep
+        # this synthetic lifecycle fixture on the retained CPU-delivery profile.
+        self.binding = replace(self.binding,
+            runtime_profile_id="h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-cgroups-v4")
+        self.registry.bindings[self.binding.binding_id] = self.binding
+        self.chosen["runtime_profile_id"] = self.binding.runtime_profile_id
         self.prepare(duration=1800)
         with self.repo.transaction() as conn:
             node = dict(conn.execute(select(operator_nodes)).mappings().one())

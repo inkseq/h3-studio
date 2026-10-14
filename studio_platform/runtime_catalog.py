@@ -19,6 +19,8 @@ PROFILE_IDS = (
     "h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3",
     "h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-cgroups-v4",
     "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2",
+    "h3-pruned-rank8-int8-sdpa-p4-29gib-fl-r2-v5",
+    "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-fl-r2-v3",
 )
 PROFILE_DIRECTORY = Path(__file__).resolve().parents[1] / "deploy" / "wangp" / "profiles"
 COMPILER_ID = "sixnine-h3-native-profile-v1"
@@ -43,6 +45,15 @@ def public_catalog():
         value.pop("schema_version")
         profiles.append(value)
     return {"schema_version": 1, "profiles": profiles}
+
+
+def profile_output_delivery(profile_id):
+    """An appended profile binds delivery; retained profiles stay unchanged."""
+    from .inference.native_outputs import NATIVE_DELIVERY, GPU_R2_DELIVERY
+    value = get_profile(profile_id).get("output_delivery", NATIVE_DELIVERY)
+    if value not in {NATIVE_DELIVERY, GPU_R2_DELIVERY}:
+        raise ValueError("wangp_profile_delivery_invalid")
+    return value
 
 
 def timing_hint(profile_id, mode, width, height, frames, fps, steps, roles):
@@ -118,6 +129,8 @@ def engine_manifest(profile_id, mode):
     # an explicit immutable binding, never inferred from the model's precision.
     if "hardware_admission" in profile:
         document["hardware_admission"] = copy.deepcopy(profile["hardware_admission"])
+    if "output_delivery" in profile:
+        document["output_delivery"] = profile_output_delivery(profile_id)
     return EngineManifest.from_dict(document)
 
 

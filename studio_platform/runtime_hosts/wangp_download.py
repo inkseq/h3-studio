@@ -53,6 +53,12 @@ _LOCATOR_PROFILES = {
     "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2": {
         "fl": "a50aff06326dcb51dcd74bef968fb452a2d2804e07489d032a460bac4a11dc2d",
     },
+    "h3-pruned-rank8-int8-sdpa-p4-29gib-fl-r2-v5": {
+        "fl": "06f5b7cb298bbbd578cee2860e9348f9458693397d6ca95aa0efcef9947e24a6",
+    },
+    "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-fl-r2-v3": {
+        "fl": "0e5e6ad95dc6c28177c2c008c43fb2f26b337a5ce44b539779703a024dd2d704",
+    },
 }
 _LOCATOR_TRANSFORMERS = {
     "fl": "MiniMax-H3-FL2VA-pruned_rank8_int8_convrot.safetensors",
@@ -198,7 +204,9 @@ def _content_preserving_revision(document, expected_digest, records):
         for item in component["files"]:
             kind = "sha256" if "sha256" in item else "git_blob_sha1"
             files.append((item["path"], item["size_bytes"], kind, item[kind]))
-    if document.get("deployment_profile_id") == "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2":
+    if document.get("deployment_profile_id") in {
+            "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2",
+            "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-fl-r2-v3"}:
         expected_files = _BASE_FL_LOCATOR_FILES
     else:
         omitted = _LOCATOR_TRANSFORMERS["ref" if mode == "fl" else "fl"]

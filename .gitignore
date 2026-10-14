@@ -83,6 +83,11 @@ inventory.json
 !studio_platform/inference/__init__.py
 !studio_platform/inference/protocol.py
 !studio_platform/inference/outputs.py
+!studio_platform/inference/native_outputs.py
+!studio_platform/inference/wangp_delivery.py
+!studio_platform/runtime_hosts/wangp_delivery.py
+!deploy/wangp/profiles/h3-pruned-rank8-int8-sdpa-p4-29gib-fl-r2-v5.json
+!deploy/wangp/profiles/h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-fl-r2-v3.json
 !studio_platform/inference/comfy.py
 !CURRENT-BASELINE.md
 !GENERATION-CONTRACT.md

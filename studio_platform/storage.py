@@ -6,6 +6,7 @@ Use write_new for assets and persist its returned key, never a signed URL.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -183,6 +184,8 @@ class ObjectStore(Protocol):
     def delete(self, key: str) -> None: ...
     def presign_download(self, key: str, *, expires_seconds: int = 300, download_filename: str | None = None) -> SecretURL: ...
     def presign_upload(self, key: str, *, content_type: str, expires_seconds: int = 300) -> SecretURL: ...
+    def presign_artifact_upload(self, key: str, *, content_type: str, size_bytes: int,
+                               content_md5: str, expires_seconds: int = 300) -> SecretURL: ...
 
 
 def _no_links(path: Path, *, missing_ok: bool = False):
@@ -340,6 +343,10 @@ class LocalObjectStore:
     def presign_upload(self, key: str, *, content_type: str, expires_seconds=300) -> SecretURL:
         validate_key(key)
         raise UnsupportedStorageOperation("Local uploads require an authenticated application upload route")
+
+    def presign_artifact_upload(self, key: str, *, content_type: str, size_bytes: int,
+                               content_md5: str, expires_seconds=300) -> SecretURL:
+        raise UnsupportedStorageOperation("GPU artifact delivery requires the selected R2 store")
 
 
 class _SafeBody:
@@ -508,6 +515,30 @@ class S3ObjectStore:
         return self._presign(key, "PUT", expires_seconds,
                              {"Content-Type": _content_type(content_type), "If-None-Match": "*"})
 
+    def presign_artifact_upload(self, key: str, *, content_type: str, size_bytes: int,
+                               content_md5: str, expires_seconds=300) -> SecretURL:
+        """Authorize one immutable GPU output; no credentials leave this process.
+
+        This explicit artifact limit does not widen browser/direct PUT limits.
+        MD5 is transport integrity only; collection still verifies full SHA-256.
+        """
+        if (self.config.provider != "r2" or not self.capabilities.conditional_create
+                or not self.capabilities.presigned_upload):
+            raise UnsupportedStorageOperation("GPU artifact delivery requires the selected R2 store")
+        if (content_type not in {"video/mp4", "audio/flac"}
+                or type(size_bytes) is not int or not 1 <= size_bytes <= 512 * 1024 * 1024
+                or type(expires_seconds) is not int or not 1 <= expires_seconds <= 300):
+            raise StorageError("Invalid GPU artifact upload constraints")
+        try:
+            checksum = base64.b64decode(content_md5, validate=True)
+            if len(checksum) != 16 or base64.b64encode(checksum).decode("ascii") != content_md5:
+                raise ValueError
+        except (TypeError, ValueError):
+            raise StorageError("Invalid GPU artifact upload checksum") from None
+        return self._presign(key, "PUT", expires_seconds, {
+            "Content-Type": content_type, "If-None-Match": "*",
+            "Content-Length": str(size_bytes), "Content-MD5": content_md5})
+
     def _presign(self, key, method, expires_seconds, headers, *, disposition=None):
         validate_key(key)
         # Application policy deliberately shorter than the providers' maximum.
@@ -520,6 +551,10 @@ class S3ObjectStore:
             params["ResponseContentDisposition"] = disposition
         if method == "PUT":
             params.update(ContentType=headers["Content-Type"], IfNoneMatch="*")
+            if "Content-Length" in headers:
+                params["ContentLength"] = int(headers["Content-Length"])
+            if "Content-MD5" in headers:
+                params["ContentMD5"] = headers["Content-MD5"]
         try:
             url = self._client.generate_presigned_url("get_object" if method == "GET" else "put_object",
                                                       Params=params, ExpiresIn=expires_seconds, HttpMethod=method)
