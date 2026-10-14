@@ -171,6 +171,25 @@ Use `/?project={id}&entity={entity_id}` for story content, `/?project={id}&panel
 
 ## Recovery and deliverables
 
+Use `GET /v1/job-events?since=<saved next_cursor>&limit=100` with `jobs:read` to
+observe the owner's authorized projects. Process all events before persisting
+the returned cursor, drain `has_more`, then wait `poll_after_seconds`. Empty
+pages keep the old cursor. HTTP410 requires resynchronizing original jobs and
+submission receipts; it never requests a new generation. Events begin at
+activation; earlier history stays in original job/execution reads.
+
+Job/event `cancelled_by`, closed `reason_code` and short `message` explain owner,
+operator or system cancellation/failure. `retry_advice.charged` and
+`upstream_still_running` can be null when unknown. Refresh the original job and
+submission before relying on historical event advice. Even `safe_to_retry=true`
+requires current `items[].retryable`, fresh preflight, permission, budget and
+explicit user-authorized confirmation. Follow `/for-agents/guide.json`
+`quick_chat.job_changes.retry`: preserve the original immutable revision,
+prompt, inputs, controls and seed, preflight this exact item with
+`retry_of_execution_id`, then submit one linked item retry with one durable
+body/key. Keep the original cancellation/execution/accounting. Never retry
+automatically or replay initial confirmation expecting a different job.
+
 `execution_support.status=runtime_required` means a bounded request may queue while a newly started GPU completes qualification; it is not completed testing or immediately available capacity. Even `qualified` needs current preflight. Preserve drafts for `not_qualified`, `disabled`, `unavailable` or blocked plans; do not claim generation or evade a block with another recipe.
 
 If `verification_method=queued_user_task`, the new GPU performs runtime checks and executes the original queued user job directly. Runtime readiness does not prove generation; a verified real result is returned without generating a duplicate acceptance clip. An allowed longer duration has not necessarily been tested on that GPU.

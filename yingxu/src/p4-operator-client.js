@@ -1,6 +1,7 @@
 import {createDstackClient} from './dstack-client.js';
 import {CloudError} from './cloud-client.js';
 import {validBudgetPage} from './operator-budget-model.js';
+import {validAdminJobs} from './operator-jobs-model.js';
 
 const ROOT='/v1/operator/dstack',id=value=>encodeURIComponent(value);
 export function createP4OperatorClient(options={}){
@@ -22,6 +23,8 @@ export function createP4OperatorClient(options={}){
     updateBudget:(budgetId,body,key)=>api.request('/v1/operator/admin/budgets/'+id(budgetId),{method:'PUT',body,key}),
     async adminPrices(){const value=await api.request(ROOT+'/admin/prices');if(value?.operator?.account!==account||value.operator.admin!==true||!Array.isArray(value.profiles)||!Array.isArray(value.audits))throw new CloudError('价格管理身份尚未确认，请刷新。');return value;},
     updatePrice:(profileId,body,key)=>api.request(ROOT+'/admin/prices/'+id(profileId),{method:'PUT',body,key}),
+    async adminJobs({after_id,limit=100}={}){const value=await api.request('/v1/operator/admin/jobs?limit='+limit+(after_id?'&after_id='+id(after_id):''));if(!validAdminJobs(value,account))throw new CloudError('管理员任务身份或原状态尚未确认，请刷新。');return value;},
+    cancelJobs:(body,key)=>api.request('/v1/operator/admin/jobs/cancel',{method:'POST',body,key}),
     createGroup:(body,key)=>api.request(ROOT+'/groups',{method:'POST',body,key}),
     move:(nodeId,body,key)=>api.request(ROOT+`/nodes/${id(nodeId)}/group`,{method:'POST',body,key}),
     stopImpact:(kind,target)=>api.request(ROOT+`/${kind==='group'?'groups':'nodes'}/${id(target)}/stop-impact`),

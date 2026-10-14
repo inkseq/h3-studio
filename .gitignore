@@ -72,6 +72,9 @@ inventory.json
 !studio_platform/manage.py
 !studio_platform/repository.py
 !studio_platform/queue.py
+!studio_platform/job_cancellation.py
+!studio_platform/job_events.py
+!studio_platform/operator_jobs.py
 !studio_platform/autoscale.py
 !studio_platform/storage.py
 !studio_platform/storage_config.py
