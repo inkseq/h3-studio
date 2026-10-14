@@ -7,7 +7,7 @@ readiness; a dstack RUNNING task alone never authorizes generation.
 """
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import copy
 import json
 import math
@@ -37,7 +37,8 @@ SCHEDULER_GPU_ALIASES = {
 TERMINAL_JOBS = {"succeeded", "failed", "cancelled"}
 OBSERVATION_KEYS = {"run_id", "run_name", "state", "ready", "reason_code", "observed_at",
     "provider_instance_id", "runtime_incarnation", "dstack_status", "model_load_state",
-    "billing_state", "estimated_cost_microusd", "bootstrap_phase", "preparation"}
+    "billing_state", "estimated_cost_microusd", "bootstrap_phase", "preparation",
+    "host_observation", "host_failure"}
 IDENTITY_KEYS = {"run_id", "provider_instance_id", "runtime_incarnation"}
 REGISTRATION_REASON_CODES = frozenset({"global_capacity_exceeded"})
 
@@ -106,6 +107,7 @@ def plan_offers(plan, request):
                 or availability not in {"available","idle","unknown"}):
             continue
         result.append({"backend":request.backend,"region":item.get("region"),
+            "offer_id": instance.get("name"),
             "gpu_type":gpus[0]["name"],"gpu_count":1,"memory_gib":memory/1024,
             "disk_gib":disk/1024,"gpu_memory_gib":gpus[0]["memory_mib"]/1024,"cpu_count":cpus,
             "hourly_cost_microusd":math.ceil(price*1_000_000),"availability":availability,
@@ -141,6 +143,10 @@ class LedgerDstackStore:
     def __init__(self, repo, tenant_id, *, observation_fresh_seconds=30):
         self.repo, self.tenant_id = repo, tenant_id
         self.observation_fresh_seconds = observation_fresh_seconds
+        self.host_client = None
+
+    def set_host_client(self, client):
+        self.host_client = client
 
     def _node(self, connection, intent_id):
         node = self.repo._locked(connection, select(operator_nodes).where(operator_nodes.c.intent_id == intent_id))
@@ -169,6 +175,14 @@ class LedgerDstackStore:
                 return False
             require(intent["state"] == "reserved" and _window_open(intent, node, self.repo.clock()),
                 "dstack_start_window_expired")
+            if stored.get("host_selection") is not None:
+                from .host_policy import HostPolicyStore, selection
+                selected = selection(stored["host_selection"], now=self.repo.clock())
+                require(HostPolicyStore(self.repo, self.tenant_id).admission_snapshot(connection,
+                    selected["offers"]) == selected["policy_snapshot"], "host_policy_changed")
+                require(self.host_client is not None, "host_reuse_unconfirmed")
+                self.host_client.reusable_hosts_confirmed({r["offer_id"]: r["machine_id"] for r in selected["offers"]})
+                selection(selected, now=self.repo.clock())
             reservations = list(connection.execute(select(budget_reservations).where(
                 budget_reservations.c.reference_type == "instance",
                 budget_reservations.c.reference_id == intent_id)).mappings())
@@ -237,6 +251,7 @@ class LedgerDstackStore:
         require("bootstrap_phase" not in observation or observation["bootstrap_phase"] in {
             "provisioning", "model_download", "runtime_start", "model_load", "runtime_ready"},
             "dstack_observation_phase_invalid", 422)
+        allocation_event, cold_event = None, None
         with self.repo.transaction() as connection:
             self.repo._lock_capacity(connection)
             node, intent = self._node(connection, intent_id)
@@ -250,11 +265,42 @@ class LedgerDstackStore:
             if observation.get("run_name"):
                 require(observation["run_name"] == binding["run_name"], "dstack_observation_identity_changed")
             value = copy.deepcopy(observation)
+            if "host_observation" in value:
+                from .host_policy import observation as physical_observation
+                physical = physical_observation(value.pop("host_observation"), now=self.repo.clock())
+                require(binding["backend"] == "vastai" and
+                    physical["provider_instance_id"] == value.get("provider_instance_id", binding.get("provider_instance_id")),
+                    "host_observation_binding_invalid")
+                prior = payload.get("host_observation")
+                require(prior is None or all(prior[k] == physical[k] for k in
+                    ("provider_instance_id", "machine_id", "offer_id")), "host_observation_identity_changed")
+                payload.setdefault("host_observation", physical)
+                binding.setdefault("host_observation", physical)
+                if prior is None:
+                    allocation_event = {**physical, "node_id": intent_id,
+                        "dstack_run": binding["run_name"], "provider": "vast",
+                        "profile_id": binding["profile_id"], "mode": binding["mode"], "simulation": False}
+            if "host_failure" in value:
+                from .host_policy import failure
+                failed = failure(value.pop("host_failure"), now=self.repo.clock())
+                # A user stop, model failure or already-ready runtime is never
+                # retrospectively converted into a provider startup failure.
+                if (payload.get("host_observation") is not None and node["desired_state"] == "running"
+                        and not payload.get("stop_requested_at") and not binding.get("stop_started")
+                        and not binding.get("first_runtime_ready_at")):
+                    payload.setdefault("host_failure", failed)
             # A stale error, stop intent or expired window cannot leave a ready projection.
             value["ready"] = bool(value.get("ready") is True and value.get("state") == "ready"
                 and node["desired_state"] == "running"
                 and _window_open(intent, node, self.repo.clock()))
             if value.get("runtime_incarnation") and value.get("state") in {"ready", "busy"}:
+                started = binding.get("apply_started_at")
+                physical = payload.get("host_observation")
+                if (not binding.get("first_runtime_ready_at") and physical is not None
+                        and _finite(started) and 0 < started < value["observed_at"]):
+                    cold_event = ({**physical, "node_id": intent_id, "dstack_run": binding["run_name"],
+                        "provider": "vast", "profile_id": binding["profile_id"], "mode": binding["mode"],
+                        "warmth": "cold", "simulation": False}, started, value["observed_at"] - started)
                 binding.setdefault("first_runtime_ready_at", value["observed_at"])
             if value.get("state") == "stopped":
                 # Preserve the first terminal observation in the original row;
@@ -275,6 +321,18 @@ class LedgerDstackStore:
             self._save(connection, node, payload, runtime_state=value.get("state", "observation_unknown"))
             connection.execute(update(scaler_actions).where(scaler_actions.c.intent_id == intent_id)
                 .values(last_observation=value, last_observed_at=value["observed_at"]))
+        # Original SQL evidence commits first. Export failure cannot affect
+        # authority, roll back the rental journal or advance its timestamps.
+        telemetry = getattr(self, "telemetry", None)
+        try:
+            if allocation_event is not None and telemetry is not None:
+                telemetry.host_event(allocation_event)
+            if cold_event is not None and telemetry is not None:
+                context, started, duration = cold_event
+                telemetry.start("capacity_provision", context, started_at=started).finish(
+                    "success", duration_seconds=duration, timing_basis="durable_cpu_interval")
+        except Exception:
+            pass
 
     def record_broker(self, intent_id, worker_id, observation):
         """Separate transport eligibility from native/provider readiness."""
@@ -693,6 +751,32 @@ class DstackOperator:
             None if continuing else ttl, lifecycle_version=2 if continuing else 1)
         offers=plan_offers(self.capacity.plan(request, self.config["ssh_public_key"]),request)
         require(bool(offers),"dstack_no_compatible_offers")
+        if request.backend == "vastai":
+            from .host_policy import FRESH_SECONDS, HostPolicyStore, selection
+            mapper = getattr(self.capacity.client, "vast_offer_mapping", None)
+            require(callable(mapper), "host_identity_unconfirmed")
+            mapping = mapper(request, clock=self.repo.clock)
+            require(isinstance(mapping, dict) and isinstance(mapping.get("offers"), list),
+                "host_identity_unconfirmed")
+            by_offer = {r["offer_id"]: r for r in mapping["offers"]}
+            store = HostPolicyStore(self.repo, self.settings.tenant_id)
+            with self.repo._budget_read() as connection:
+                from .host_policy import original_nodes
+                nodes = original_nodes(connection, self.settings.tenant_id)
+                allowed = [r for r in offers if r.get("offer_id") in by_offer
+                    and store.read(connection, by_offer[r["offer_id"]]["machine_id"], nodes=nodes)[0]["effective"] != "deny"]
+                preferred = [r for r in allowed if store.read(connection,
+                    by_offer[r["offer_id"]]["machine_id"], nodes=nodes)[0]["effective"] == "prefer"]
+                offers = preferred or allowed
+                require(offers, "dstack_no_compatible_host_offers")
+                approved = [copy.deepcopy(by_offer[r["offer_id"]]) for r in offers]
+                # Plan/native assignment uses bundle IDs, not a display-only
+                # filtered offers list. The same selector is frozen below.
+                selected = selection({"version": 1, "observed_at": mapping["observed_at"],
+                    "expires_at": mapping["observed_at"] + FRESH_SECONDS,
+                    "policy_snapshot": store.admission_snapshot(connection, approved), "offers": approved},
+                    now=self.repo.clock())
+            request = replace(request, host_selection=selected)
         # Reserve preparation and a complete job from the first paid request,
         # plus shutdown grace; continuing funding has no absolute lifetime.
         initial_seconds = lifecycle["reservation_seconds"] if continuing else ttl
@@ -709,10 +793,24 @@ class DstackOperator:
         if continuing:
             payload["lifecycle"] = lifecycle
         expires = min(now + 120, self.policy["expires_at"], request.hard_deadline or self.policy["expires_at"])
+        if request.host_selection is not None:
+            expires = min(expires, request.host_selection["expires_at"])
         with self.repo.transaction() as connection:
             self.repo._lock_capacity(connection)
             require(prices.read(connection, self.profiles[profile["id"]])[0]["snapshot"] == price["snapshot"],
                 "dstack_price_policy_changed")
+            if request.host_selection is not None:
+                require(store.admission_snapshot(connection, request.host_selection["offers"]) ==
+                    request.host_selection["policy_snapshot"], "host_policy_changed")
+                from .host_scorecard import OperatorHosts
+                from .stage_metrics import configured_stage_reader
+                stage_reader = configured_stage_reader(getattr(self.settings, "stage_query_config_file", None))
+                histories = OperatorHosts(self.repo, self.settings, stage_reader).histories(connection, owner,
+                    request.host_selection["offers"], profile_id=profile["id"],
+                    observed_at=request.host_selection["observed_at"], expires_at=expires)
+                for offer in offers:
+                    offer["host_history"] = histories[offer["offer_id"]]
+                selection(request.host_selection, now=self.repo.clock())
             from .dstack_workspace import owned_group
             group_id = body.get("group_id")
             if group_id is not None:
@@ -887,6 +985,23 @@ class DstackOperator:
             usage = self._limits(connection, profile["max_price_microusd"])
             now = self.repo.clock()
             original = value["request"]
+            host_selection = original.get("host_selection")
+            if profile["backend"] == "vastai":
+                from .host_policy import HostPolicyStore, selection
+                require(host_selection is not None, "host_selection_required")
+                host_selection = selection(host_selection, now=now)
+                require(HostPolicyStore(self.repo, self.settings.tenant_id).admission_snapshot(
+                    connection, host_selection["offers"], now=now) == host_selection["policy_snapshot"],
+                    "host_policy_changed")
+                # Re-read exact offer identities before any reservation. Stock
+                # presence isn't allocation proof; a missing/changed mapping
+                # refuses this new intent, without changing old paid runs.
+                fresh = self.capacity.client.vast_offer_mapping(_request(original), clock=self.repo.clock)
+                current = {r["offer_id"]: r["machine_id"] for r in fresh["offers"]}
+                require(all(current.get(r["offer_id"]) == r["machine_id"] for r in host_selection["offers"]),
+                    "host_offer_identity_changed")
+                self.capacity.client.reusable_hosts_confirmed({r["offer_id"]: r["machine_id"] for r in host_selection["offers"]})
+                selection(host_selection, now=self.repo.clock())
             continuing = original.get("lifecycle_version", 1) == 2
             if continuing:
                 # A tenant/global account alone cannot authorize unlimited
@@ -906,6 +1021,8 @@ class DstackOperator:
                 continuing=continuing, capacity_usage=usage, active_instance_ids=usage["active_instance_ids"])
             request = self._capacity_request(profile, intent["id"], now, original["hard_deadline"], original["max_duration_s"],
                 lifecycle_version=original.get("lifecycle_version", 1))
+            if host_selection is not None:
+                request = replace(request, host_selection=copy.deepcopy(host_selection))
             binding = request.binding(self.config["ssh_public_key"])
             command_id = str(uuid.uuid4())
             command_payload = {"preview_id": body["preview_id"], "node_id": intent["id"], "capacity_backend": BACKEND_MARKER}

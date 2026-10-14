@@ -78,6 +78,24 @@ def _context(value):
         item = source.get(name)
         if type(item) in (int, float) and math.isfinite(item) and 0 < item <= 1048576:
             result[name] = float(item)
+    for name in ("machine_id", "offer_id", "provider_instance_id"):
+        item = source.get(name)
+        if isinstance(item, str) and re.fullmatch(r"[1-9][0-9]{0,17}", item):
+            result[name] = item
+    if source.get("host_identity_source", source.get("physical_id_source")) == "vast_machine_id":
+        result["host_identity_source"] = "vast_machine_id"
+    observed = source.get("host_observed_at", source.get("observed_at"))
+    if type(observed) in (int, float) and math.isfinite(observed) and observed > 0:
+        result["host_observed_at"] = observed
+    region = source.get("region")
+    if isinstance(region, str) and re.fullmatch(r"[a-z0-9-]{1,100}", region):
+        result["region"] = region
+    for name, maximum in {"reliability": 1, "allocated_ram_mib": 2**40,
+            "allocated_vram_mib": 2**40, "cpu": 65536, "download_mb_s": 1_000_000,
+            "quoted_hourly_microusd": 9_000_000_000_000}.items():
+        item = source.get(name)
+        if type(item) in (int, float) and math.isfinite(item) and 0 <= item <= maximum:
+            result[name] = item
     # These values distinguish reproducible environments without arbitrary tags.
     for name in ("runtime_revision", "image_digest"):
         item = source.get(name)
@@ -164,6 +182,9 @@ class NullTelemetry:
 
     def start(self, stage, context=None, *, started_at=None):
         return NullStage()
+
+    def host_event(self, context):
+        return None
 
     def call(self, stage, context, operation, *args, **kwargs):
         with self.start(stage, context):
@@ -256,6 +277,19 @@ class StageTelemetry(NullTelemetry):
         except Exception:
             # Optional observation must not fail admission, inference or cleanup.
             return NullStage()
+
+    def host_event(self, context):
+        """Physical identity is a closed log field, never a metric label."""
+        try:
+            safe = _context(context)
+            if self._closed or "machine_id" not in safe or safe.get("simulation") is not False:
+                return
+            stamp = self.timestamp()
+            self.logger.emit(body=json.dumps({"schema_version": 1, "event": "host_allocation_observed",
+                "time_unix_ns": stamp, **safe}, separators=(",", ":"), allow_nan=False),
+                event_name="sixnine.host_allocation_observed", timestamp=stamp)
+        except Exception:
+            pass
 
     def _labels(self, stage, context, outcome=None):
         labels = {"stage": stage, **{name: context[name] for name in _LABEL_FIELDS[1:]}}

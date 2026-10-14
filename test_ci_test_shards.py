@@ -160,7 +160,8 @@ class ShardTests(unittest.TestCase):
                           "test_dstack_operator", "test_dstack_controller", "test_dstack_runtime",
                           "test_dstack_factory", "test_dstack_budget_window", "test_hatchet_dispatch", "test_hatchet_dispatch_telemetry",
                           "test_hatchet_affinity", "test_dstack_prices", "test_operator_budgets",
-                          "test_job_cancellation_ledger", "test_job_events", "test_operator_jobs"})
+                         "test_job_cancellation_ledger", "test_job_events", "test_operator_jobs",
+                         "test_host_policy", "test_host_scorecard", "test_dstack_host_selection", "test_operator_host_routes"})
         self.assertEqual(len(ci.POSTGRES_MODULES), len(set(ci.POSTGRES_MODULES)))
 
     def test_postgres_loader_uses_complete_manifest(self):

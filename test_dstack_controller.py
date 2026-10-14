@@ -70,12 +70,12 @@ class DstackControllerTests(fixture.DstackOperatorTests):
             def readiness(self,binding,run):
                 from studio_platform.inference.wangp_contract import HostReadiness
                 # Transport must have committed exact identity before native boot.
-                outer.assertEqual(outer.store.load(binding["intent_id"])["provider_instance_id"],"gpu-123")
+                outer.assertEqual(outer.store.load(binding["intent_id"])["provider_instance_id"],"1234567")
                 return HostReadiness(binding["manifest_digest"],binding["intent_id"],"c"*32,True)
             def slot(self,intent_id):
                 binding=outer.store.load(intent_id)
                 profile=outer.service.profiles["5090-fl"]
-                spec=WorkerSpec("dstack-test-slot","dstack-test","vast","gpu-123",("GPU-real-one",),
+                spec=WorkerSpec("dstack-test-slot","dstack-test","vast","1234567",("GPU-real-one",),
                     (profile["recipe_id"],),binding["model_id"],binding["configuration_id"],"wangp-worker",
                     binding["manifest_digest"],dispatch_backend="hatchet-v1")
                 return SlotConfig(spec,True,"http://127.0.0.1:8199",("http://127.0.0.1:8199",),"",True,
@@ -271,8 +271,8 @@ class DstackControllerTests(fixture.DstackOperatorTests):
         self.capacity.readiness=None
         self.running(node)
         binding=self.store.load(node)
-        self.assertTrue(self.store.begin_bootstrap(node,binding["run_id"],"gpu-123"))
-        self.assertTrue(self.store.begin_runtime_launch(node,binding["run_id"],"gpu-123"))
+        self.assertTrue(self.store.begin_bootstrap(node,binding["run_id"],"1234567"))
+        self.assertTrue(self.store.begin_runtime_launch(node,binding["run_id"],"1234567"))
         budget=self.repo.get_budget("owner-budget")
         self.service.node_command(self.owner,node,{},"cold-stop-original")
         controller=self.controller()
@@ -290,8 +290,8 @@ class DstackControllerTests(fixture.DstackOperatorTests):
         self.capacity.readiness=None
         self.running(node)
         binding=self.store.load(node)
-        self.store.begin_bootstrap(node,binding["run_id"],"gpu-123")
-        self.store.begin_runtime_launch(node,binding["run_id"],"gpu-123")
+        self.store.begin_bootstrap(node,binding["run_id"],"1234567")
+        self.store.begin_runtime_launch(node,binding["run_id"],"1234567")
         self.service.node_command(self.owner,node,{},"cold-stop-original")
         with self.repo.engine.connect() as connection:
             original=dict(connection.execute(select(operator_nodes).where(operator_nodes.c.intent_id==node)).mappings().one())["payload"]

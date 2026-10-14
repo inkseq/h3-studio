@@ -8,6 +8,7 @@ come from the original scoped business ledger, not from telemetry counters.
 from __future__ import annotations
 
 import base64
+import copy
 from collections import OrderedDict
 from dataclasses import dataclass, field
 import http.client
@@ -116,6 +117,9 @@ class NullStageReader:
     def generate(self, **_kwargs):
         return _empty(self.code)
 
+    def host_samples(self, **_kwargs):
+        return []
+
 
 class CloudStageReader:
     def __init__(self, config, *, transport=_http_read, monotonic=time.monotonic):
@@ -194,6 +198,89 @@ class CloudStageReader:
             return value
         except Exception:
             return _empty("query_unavailable")
+
+    def host_samples(self, *, attempts, now):
+        """One bounded query for the whole authorized host page, not per host.
+
+        Return qualified original per-attempt intervals so the caller computes
+        a median of samples, never a median of already aggregated averages.
+        Missing, old, censored, truncated and conflicting spans remain absent.
+        """
+        if type(attempts) is not list or not _finite(now):
+            return []
+        eligible = [dict(r) for r in attempts if type(r) is dict
+            and all(isinstance(r.get(k), str) and _UUID.fullmatch(r[k]) for k in ("node_id", "job_id", "attempt_id"))
+            and r.get("provider") in {"vast", "runpod"} and r.get("mode") in {"fl", "ref"}
+            and isinstance(r.get("profile_id"), str) and _PROFILE.fullmatch(r["profile_id"])
+            and _finite(r.get("submission_started_at")) and _finite(r.get("completed_at"))
+            and now-MAX_WINDOW <= r["submission_started_at"] <= r["completed_at"] <= now]
+        eligible.sort(key=lambda r: (r["completed_at"], r["attempt_id"]), reverse=True)
+        eligible = eligible[:MAX_ATTEMPTS]
+        if not eligible:
+            return []
+        key = ("hosts", tuple(tuple(r[k] for k in ("node_id", "provider", "profile_id", "mode",
+            "job_id", "attempt_id", "submission_started_at", "completed_at")) for r in eligible))
+        with self._lock:
+            tick = self.monotonic()
+            cached = self._cache.get(key)
+            if cached is not None and 0 <= tick-cached[0] < 60:
+                self._cache.move_to_end(key)
+                return copy.deepcopy(cached[1])
+            start = max(0, now-MAX_WINDOW, min(r["submission_started_at"] for r in eligible)-1)
+            end = min(now, max(r["completed_at"] for r in eligible)+1)
+            ids = "|".join(r["attempt_id"] for r in eligible)
+            query = ('{service_name=~"sixnine-worker|sixnine-acceptance"} | json | __error__="" '
+                '| event="stage_finished" | stage="generate" | outcome="success" '
+                '| simulation="false" | attempt_id=~'+json.dumps(ids))
+            path = "/loki/api/v1/query_range?" + urlencode({"query": query,
+                "start": str(int(start*1_000_000_000)), "end": str(int(end*1_000_000_000)),
+                "limit": str(MAX_ROWS), "direction": "backward"})
+            samples = []
+            try:
+                result = self.transport(self.config, path, 1.0)
+                if (type(result) is dict and result.get("status") == "success"
+                        and type(result.get("data")) is dict and result["data"].get("resultType") == "streams"
+                        and type(result["data"].get("result")) is list):
+                    rows = []
+                    for stream in result["data"]["result"]:
+                        if type(stream) is not dict or type(stream.get("values")) is not list:
+                            raise ValueError
+                        rows.extend(stream["values"])
+                        if len(rows) >= MAX_ROWS:
+                            raise ValueError
+                    samples = project_host_samples(rows, attempts=eligible, start=start, end=end)
+            except Exception:
+                pass
+            self._cache[key] = (tick, copy.deepcopy(samples))
+            self._cache.move_to_end(key)
+            while len(self._cache) > 64:
+                self._cache.popitem(last=False)
+            return samples
+
+
+def project_host_samples(rows, *, attempts, start, end):
+    result = []
+    for original in attempts[:MAX_ATTEMPTS]:
+        options = dict(node_id=original["node_id"], provider=original["provider"],
+            profile_id=original["profile_id"], mode=original["mode"], attempts=[original], start=start, end=end)
+        projected = project_generate(rows, **options)
+        if projected["generate_samples"] != 1:
+            continue
+        qualified_warmth = []
+        for warmth in ("cold", "warm", "mode_switch", "unknown"):
+            matching = []
+            for row in rows:
+                try:
+                    if json.loads(row[1]).get("warmth") == warmth:
+                        matching.append(row)
+                except (ValueError, TypeError, IndexError, AttributeError):
+                    continue
+            if project_generate(matching, **options)["generate_samples"] == 1:
+                qualified_warmth.append(warmth)
+        result.append({"job_id": original["job_id"], "attempt_id": original["attempt_id"],
+            "duration_seconds": projected["average_generate_seconds"],
+            "warmth": qualified_warmth[0] if len(qualified_warmth) == 1 else "unknown"})
+    return result
 
 
 def project_generate(rows, *, node_id, provider, profile_id, mode, attempts, start, end):

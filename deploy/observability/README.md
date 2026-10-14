@@ -145,6 +145,30 @@ small initial deployment, with bounded loss during outages. If stronger delivery
 becomes necessary, Grafana's recommended Alloy/Collector can relay the same OTLP
 projection to Cloud without adding a self-hosted long-term telemetry database.
 
+### Physical host observations (#177)
+
+Import `sixnine-host-scorecard.json` into the same Cloud stack with its existing
+Loki data source. It adds the **机器排行 · Sixnine Vast 宿主** dashboard alongside
+the original pipeline dashboard. `machine_id` and allocation/job/attempt IDs are
+parsed log fields only; never add them as Mimir metric or Loki index labels.
+`host_allocation_observed` identifies the original rental and its typed provider
+observation, not an accepted video or an invoice. The optional numeric search
+filters physical host fields without creating a regional selection rule.
+
+Generation and cold-phase medians remain separate, with model, mode, dimensions,
+steps and cold/warm controls in comparison groups. Missing events show no data,
+not zero. Recovery may repeat telemetry; the operator scorecard qualifies and
+deduplicates samples against original successful attempts. The dashboard's log
+counts/quantiles are diagnostics and must not be used as billing or automatic
+denial authority. The console exposes the original-record failure rate and
+estimated per-video cost, including measured cold-start amortization only when
+its basis is available. Quotes are estimates; unsettled invoices remain unknown.
+
+Host preference/denial is an audited human-admin operation in the original
+operator policy/journal. Cloud has no write access to that policy or to the
+business database. No dashboard API credential or additional access policy is
+required when importing through the owner's existing logged-in Cloud session.
+
 Official sources: [Cloud OTLP gateway](https://grafana.com/docs/grafana-cloud/send-data/otlp/send-data-otlp/),
 [OTLP to Cloud signal mapping](https://grafana.com/docs/grafana-cloud/send-data/otlp/otlp-format-considerations/),
 [Cloud access policies](https://grafana.com/docs/grafana-cloud/platform/security-and-account-management/security-and-access/authentication-and-permissions/access-policies/),

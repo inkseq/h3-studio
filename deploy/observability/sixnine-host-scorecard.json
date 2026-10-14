@@ -1,0 +1,340 @@
+{
+  "uid": "sixnine-host-scorecard",
+  "title": "机器排行 · Sixnine Vast 宿主",
+  "description": "Observed physical host histories from existing Grafana Cloud logs; original ledger remains authoritative for policy, jobs and billing.",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "timezone": "browser",
+  "tags": [
+    "sixnine",
+    "vast",
+    "hosts"
+  ],
+  "refresh": "1m",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "annotations": {
+    "list": []
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "DS_LOKI",
+        "label": "Cloud logs",
+        "type": "datasource",
+        "query": "loki",
+        "current": {
+          "text": "grafanacloud-tallgodwit3049-logs",
+          "value": "grafanacloud-logs",
+          "selected": true
+        }
+      },
+      {
+        "name": "machine_id",
+        "label": "Vast physical machine_id (optional)",
+        "type": "textbox",
+        "current": {
+          "text": "",
+          "value": ""
+        },
+        "options": [
+          {
+            "text": "",
+            "value": "",
+            "selected": true
+          }
+        ]
+      }
+    ]
+  },
+  "links": [
+    {
+      "title": "Generation pipeline",
+      "type": "link",
+      "url": "/d/sixnine-generation-pipeline/sixnine-generation-pipeline",
+      "targetBlank": true
+    },
+    {
+      "title": "GPU console (policy and deduplicated scorecard)",
+      "type": "link",
+      "url": "https://www.sixnine.art/operator",
+      "targetBlank": true
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "title": "如何比较",
+      "type": "text",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 4
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "物理 machine_id 与 offer/instance/node ID 不同。只比较同模型、FL/REF、分辨率、步数与冷/热状态的样本。缺数据不等于 0；报价不是账单。日志可能在恢复时重复，任务数/去重耗时/自动拒绝与费用以 GPU 控制台原始记录为准；这里不授予重试或租赁权限。旧租赁没有自动补造主机身份。"
+      }
+    },
+    {
+      "id": 2,
+      "title": "已观测租赁（按原 node 去重）",
+      "type": "table",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (machine_id) (sum by (machine_id,node_id) (count_over_time({service_namespace=\"sixnine\",service_name=~\"sixnine-controller|sixnine-worker|sixnine-acceptance\"} | json | __error__=\"\" | machine_id=~\".*${machine_id:regex}.*\" | machine_id!=\"\" | simulation=\"false\" | event=\"host_allocation_observed\" [$__range])) > bool 0)",
+          "queryType": "instant",
+          "editorMode": "code"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 3,
+      "title": "生成中位秒数 · 同参数分组",
+      "type": "table",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "quantile_over_time(0.5, {service_namespace=\"sixnine\",service_name=~\"sixnine-controller|sixnine-worker|sixnine-acceptance\"} | json | __error__=\"\" | machine_id=~\".*${machine_id:regex}.*\" | machine_id!=\"\" | simulation=\"false\" | event=\"stage_finished\" | stage=\"generate\" | outcome=\"success\" | unwrap duration_seconds | __error__=\"\" [$__range]) by (machine_id,profile_id,mode,width,height,frames,fps,steps,image_refs,video_refs,audio_refs,warmth)",
+          "queryType": "instant",
+          "editorMode": "code"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 4,
+      "title": "冷启动各阶段 · 中位秒数",
+      "type": "table",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "quantile_over_time(0.5, {service_namespace=\"sixnine\",service_name=~\"sixnine-controller|sixnine-worker|sixnine-acceptance\"} | json | __error__=\"\" | machine_id=~\".*${machine_id:regex}.*\" | machine_id!=\"\" | simulation=\"false\" | event=\"stage_finished\" | stage=~\"capacity_provision|image_pull|weights_download|model_load|runtime_ready\" | outcome=\"success\" | unwrap duration_seconds | __error__=\"\" [$__range]) by (machine_id,profile_id,mode,stage,warmth)",
+          "queryType": "instant",
+          "editorMode": "code"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 5,
+      "title": "供应商小时报价 · 最新观测（微美元）",
+      "type": "table",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "last_over_time({service_namespace=\"sixnine\",service_name=~\"sixnine-controller|sixnine-worker|sixnine-acceptance\"} | json | __error__=\"\" | machine_id=~\".*${machine_id:regex}.*\" | machine_id!=\"\" | simulation=\"false\" | event=\"host_allocation_observed\" | unwrap quoted_hourly_microusd | __error__=\"\" [$__range]) by (machine_id,region,gpu_type)",
+          "queryType": "instant",
+          "editorMode": "code"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "id": 6,
+      "title": "原租赁身份、分配资源与报价",
+      "type": "logs",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service_namespace=\"sixnine\",service_name=~\"sixnine-controller|sixnine-worker|sixnine-acceptance\"} | json | __error__=\"\" | machine_id=~\".*${machine_id:regex}.*\" | machine_id!=\"\" | simulation=\"false\" | event=\"host_allocation_observed\"",
+          "queryType": "range",
+          "editorMode": "code"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true,
+        "prettifyLogMessage": true
+      }
+    },
+    {
+      "id": 7,
+      "title": "失败、未确认与人工停止（不自动归咎供应商）",
+      "type": "logs",
+      "datasource": {
+        "type": "loki",
+        "uid": "${DS_LOKI}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 29,
+        "w": 24,
+        "h": 9
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "{service_namespace=\"sixnine\",service_name=~\"sixnine-controller|sixnine-worker|sixnine-acceptance\"} | json | __error__=\"\" | machine_id=~\".*${machine_id:regex}.*\" | machine_id!=\"\" | simulation=\"false\" | outcome=~\"failure|unknown|cancelled\"",
+          "queryType": "range",
+          "editorMode": "code"
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "showLabels": false,
+        "showCommonLabels": false,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true,
+        "prettifyLogMessage": true
+      }
+    }
+  ]
+}

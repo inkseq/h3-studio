@@ -127,6 +127,7 @@ class CapacityRequest:
     min_reliability: float = 0.90
     regions: tuple[str, ...] = ()
     lifecycle_version: int = 1
+    host_selection: dict | None = None
 
     def __post_init__(self):
         _uuid(self.intent_id)
@@ -163,6 +164,13 @@ class CapacityRequest:
             all(isinstance(n, str) and IDENTIFIER.fullmatch(n) for n in self.regions), "dstack_region_invalid")
         _require(type(self.min_reliability) in (int, float) and math.isfinite(self.min_reliability)
             and 0.9 <= self.min_reliability <= 1, "dstack_reliability_invalid")
+        if self.host_selection is not None:
+            _require(self.backend == "vastai", "dstack_host_backend_invalid")
+            try:
+                from .host_policy import selection
+                selection(self.host_selection)
+            except ValueError:
+                raise DstackError("dstack_host_selection_invalid") from None
 
     @property
     def run_name(self):
@@ -192,6 +200,10 @@ class CapacityRequest:
             configuration["backend_options"] = [{"type": "vastai", "offer_order": "price",
                 "min_reliability": self.min_reliability}]
         spec = {"run_name": self.run_name, "configuration": configuration, "ssh_key_pub": ssh_key_pub}
+        if self.host_selection is not None:
+            # Native 0.22.3 uses this selector for backend offers AND fleet
+            # reuse. Editing plan.offers would not constrain its later apply.
+            spec["profile"] = {"instance_types": [row["offer_id"] for row in self.host_selection["offers"]]}
         configuration["tags"]["sixnine_spec"] = _hash(spec)
         return spec
 
@@ -204,6 +216,8 @@ class CapacityRequest:
             "spec_digest": _hash(spec), "run_spec": spec}
         if self.lifecycle_version == 2:
             value["lifecycle_version"] = 2
+        if self.host_selection is not None:
+            value["host_selection"] = copy.deepcopy(self.host_selection)
         return value
 
 
@@ -286,7 +300,9 @@ class DstackClient:
             {"id": run_id} if run_id else {"run_name": run_name}, absent=True)
 
     def _provider_document(self, method, url, key, *, timeout, body=None, params=None):
-        _require((method, url) in {("GET", VAST_INSTANCES_URL), ("POST", RUNPOD_GRAPHQL_URL)},
+        _require((method, url) in {("GET", VAST_INSTANCES_URL), ("POST", RUNPOD_GRAPHQL_URL),
+                ("POST", "https://console.vast.ai/api/v0/bundles/")}
+            or method == "GET" and re.fullmatch(r"https://console\.vast\.ai/api/v0/instances/[1-9][0-9]{0,17}/", url),
             "dstack_provider_inventory_unconfirmed")
         if self._provider_session is None:
             self._provider_session = httpx.Client(follow_redirects=False, trust_env=False)
@@ -313,6 +329,122 @@ class DstackClient:
             raise
         except Exception:
             raise DstackError("dstack_provider_inventory_unavailable") from None
+
+    def _vast_key(self):
+        # The exact existing dstack backend remains credential authority.
+        # No registry/profile switch, key persistence or process env mutation.
+        config = self._post(f"/api/project/{self.project}/backends/vastai/config_info", {})
+        creds = config.get("creds") if isinstance(config, dict) else None
+        _require(isinstance(config, dict) and config.get("type") == "vastai"
+            and isinstance(creds, dict) and creds.get("type") == "api_key",
+            "dstack_host_account_unconfirmed")
+        key = creds.get("api_key")
+        _require(isinstance(key, str) and 16 <= len(key) <= 4096 and not any(c.isspace() for c in key),
+            "dstack_host_account_unconfirmed")
+        return key
+
+    def vast_offer_mapping(self, request, *, clock=time.time):
+        """One search-only POST; mirror the installed gpuhunt 0.1.33 body.
+
+        This is its direct filter JSON, not the distinct Vast CLI q wrapper.
+        Unknown physical IDs are omitted; an offer ID is never a machine ID.
+        Native planning still qualifies resources and its verified-first filter.
+        """
+        _require(request.backend == "vastai", "dstack_host_backend_invalid")
+        observed = clock()
+        query = {"direct_port_count": {"gte": 1}, "reliability2": {"gte": request.min_reliability},
+            "inet_down": {"gt": 128}, "verified": {"eq": True}, "cuda_max_good": {"gte": 12.8},
+            "compute_cap": {"gte": 600}, "rentable": {"eq": True}, "rented": {"eq": False},
+            "num_gpus": {"eq": 1}, "cpu_cores": {"gte": request.cpu_count},
+            "cpu_ram": {"gte": request.memory_gib * 1000},
+            "gpu_ram": {"gte": request.gpu_memory_gib * 1024 * .93},
+            "disk_space": {"gte": request.disk_gib},
+            "dph_total": {"lte": request.max_price_microusd / 1_000_000},
+            "order": [["dph_base", "asc"]], "limit": 1000}
+        # Exact gpuhunt aliases; the normal backend plan does final GPU matching.
+        names = []
+        for name in request.gpu_names:
+            if re.fullmatch(r"RTX[0-9]{4}[A-Za-z]?", name):
+                names.append("RTX " + name[3:])
+        if names and len(names) == len(request.gpu_names):
+            query["gpu_name"] = {"in": names}
+        document = self._provider_document("POST", "https://console.vast.ai/api/v0/bundles/",
+            self._vast_key(), timeout=min(self.timeout, 25), body=query)
+        _require(isinstance(document, dict) and isinstance(document.get("offers"), list)
+            and len(document["offers"]) <= 1000, "dstack_host_offers_unconfirmed")
+        found = {}
+        for row in document["offers"]:
+            if not isinstance(row, dict):
+                raise DstackError("dstack_host_offers_unconfirmed")
+            offer, machine = row.get("id"), row.get("machine_id")
+            if type(offer) is not int or offer <= 0 or type(machine) is not int or machine <= 0:
+                continue
+            # Vast verification has appeared as a string as well as boolean.
+            # Missing is unobserved, never projected as verified=False. The
+            # exact verified-first search/native plan remains authoritative.
+            verified = row.get("verified")
+            if verified is False or verified in ("unverified", "deverified"):
+                continue
+            item = {"offer_id": str(offer), "machine_id": str(machine)}
+            _require(str(offer) not in found or found[str(offer)] == item,
+                "dstack_host_offer_identity_conflict")
+            found[str(offer)] = item
+        ended = clock()
+        _require(type(observed) in (int, float) and math.isfinite(observed) and observed > 0
+            and type(ended) in (int, float) and math.isfinite(ended) and 0 <= ended-observed < 120,
+            "dstack_host_clock_invalid")
+        return {"observed_at": observed, "offers": list(found.values())}
+
+    def vast_instance_identity(self, identity):
+        _require(isinstance(identity, str) and re.fullmatch(r"[1-9][0-9]{0,17}", identity),
+            "dstack_host_instance_invalid")
+        document = self._provider_document("GET", f"https://console.vast.ai/api/v0/instances/{identity}/",
+            self._vast_key(), timeout=min(self.timeout, 15))
+        _require(isinstance(document, dict), "dstack_host_instance_unconfirmed")
+        row = document.get("instances")
+        if row is None:
+            return None
+        _require(isinstance(row, dict) and type(row.get("id")) is int and str(row["id"]) == identity
+            and type(row.get("machine_id")) is int and row["machine_id"] > 0,
+            "dstack_host_instance_unconfirmed")
+        reliability = row.get("reliability2")
+        return {"provider_instance_id": identity, "machine_id": str(row["machine_id"]),
+            "reliability": reliability if type(reliability) in (int, float)
+                and math.isfinite(reliability) and 0 <= reliability <= 1 else None}
+
+    def reusable_hosts_confirmed(self, approved):
+        """Complete project fleet read before apply; no unknown reuse fallback.
+
+        Native 0.22.3 skips type constraints if an existing instance has no JPD.
+        Refuse every potentially reusable unknown instance; a known matching
+        bundle additionally needs an exact same-account physical identity read.
+        """
+        fleets = self._post(f"/api/project/{self.project}/fleets/list", {"include_imported": True})
+        _require(isinstance(fleets, list) and len(fleets) < 1000, "dstack_host_reuse_unconfirmed")
+        count = 0
+        for fleet in fleets:
+            _require(isinstance(fleet, dict) and isinstance(fleet.get("instances"), list),
+                "dstack_host_reuse_unconfirmed")
+            for instance in fleet["instances"]:
+                count += 1
+                _require(count <= 4096 and isinstance(instance, dict), "dstack_host_reuse_unconfirmed")
+                status = instance.get("status")
+                _require(status in {"pending", "provisioning", "idle", "busy", "terminating", "terminated"},
+                    "dstack_host_reuse_unconfirmed")
+                if status in {"terminated", "terminating"}:
+                    continue
+                # Public Instance assigns instance_type only from JPD. Public
+                # DTOs omit the JPD/provider ID, so do not guess those fields.
+                # With no type witness native filtering skips the selector.
+                data = instance.get("instance_type")
+                _require(instance.get("backend") in BACKENDS and isinstance(data, dict)
+                    and isinstance(data.get("name"), str) and data["name"],
+                    "dstack_host_reuse_identity_unknown")
+                # Known nonmatching types are rejected again by native locked
+                # assignment. Matching types use the same exact bundle-ID
+                # selector; final allocation still needs a same-account
+                # machine-ID read before any native bootstrap/readiness.
+        return True
 
     def provider_inventory(self, backend, *, clock=None):
         """Transient complete account read using the SAME configured backend key.
@@ -430,6 +562,14 @@ def _owns(run, binding, project):
     _require(actual.get("env", {}) in ({}, None) and actual.get("ports", []) in ([], None)
         and actual.get("dstack", False) is False, "dstack_run_binding_mismatch")
     _require(spec.get("ssh_key_pub") == wanted["ssh_key_pub"], "dstack_run_binding_mismatch")
+    if "profile" in wanted:
+        profile = spec.get("profile")
+        _require(isinstance(profile, dict) and profile.get("instance_types") == wanted["profile"]["instance_types"],
+            "dstack_host_selector_changed")
+        _require(actual.get("instance_types") is None, "dstack_host_selector_changed")
+        _require(all(value in (None, False, "", "default") for key, value in profile.items()
+            if key not in {"instance_types", "name"}) and profile.get("name") in (None, "", "default"),
+            "dstack_host_selector_changed")
     for key in ("privileged", "docker", "registry_auth", "entrypoint", "schedule", "groups"):
         _require(actual.get(key) in (None, False), "dstack_run_binding_mismatch")
     # 0.22.3 run preprocessing stores a homogeneous TaskConfiguration's
@@ -640,6 +780,9 @@ def live_capacity_usage(client, nodes, *, provider_inventory=None, clock=time.ti
 class DstackCapacity:
     def __init__(self, client: DstackClient, store: DstackStore, *, clock=time.time, readiness=None):
         self.client, self.store, self.clock, self.readiness = client, store, clock, readiness
+        configure = getattr(store, "set_host_client", None)
+        if callable(configure):
+            configure(client)
 
     def plan(self, request, ssh_key_pub):
         _require(request.hard_deadline is None or self.clock() < request.hard_deadline, "dstack_window_expired")
@@ -732,6 +875,19 @@ class DstackCapacity:
         cost = run.get("cost")
         if type(cost) in (int, float) and math.isfinite(cost) and cost >= 0:
             value["estimated_cost_microusd"] = round(cost * 1_000_000)
+        # Allocation evidence may exist before RUNNING (or survive terminal
+        # failure). Never postpone its capture until a successful bootstrap.
+        provisioning = submission.get("job_provisioning_data")
+        if isinstance(provisioning, dict) and provisioning:
+            physical = self._host_observation(provisioning, binding, value["observed_at"])
+            if physical is not None:
+                value.update(host_observation=physical, provider_instance_id=physical["provider_instance_id"])
+            if (physical is not None and status == "failed" and not binding.get("stop_started")
+                    and not binding.get("first_runtime_ready_at")
+                    and submission.get("termination_reason") == "waiting_runner_limit_exceeded"):
+                value["host_failure"] = {"version": 1, "stage": "runtime_start",
+                    "reason_code": "provider_runner_timeout", "at": value["observed_at"],
+                    "qualified_start_failure": True}
         if status in TERMINAL:
             value.update(state="stopped", reason_code="dstack_run_terminal_billing_pending")
             if terminal_no_allocation(run, binding):
@@ -843,6 +999,60 @@ class DstackCapacity:
                 value["reason_code"] = model["reason_code"]
         value["preparation"] = {**preparation, "image": image}
         return value
+
+    def _host_observation(self, provisioning, binding, now):
+        """Original JPD resources plus one same-account physical identity.
+
+        An expected/selected offer is not an allocated host. Old unknown runs
+        remain compatible; new enforced selectors fail closed before readiness.
+        """
+        if binding.get("backend") != "vastai":
+            return None
+        strict = binding.get("host_selection") is not None
+        try:
+            _require(provisioning.get("backend") == "vastai", "dstack_host_allocation_unconfirmed")
+            instance = provisioning.get("instance_id")
+            kind = provisioning.get("instance_type")
+            _require(isinstance(instance, str) and re.fullmatch(r"[1-9][0-9]{0,17}", instance)
+                and isinstance(kind, dict) and isinstance(kind.get("name"), str)
+                and re.fullmatch(r"[1-9][0-9]{0,17}", kind["name"]), "dstack_host_allocation_unconfirmed")
+            prior = binding.get("host_observation")
+            if prior is not None:
+                from .host_policy import observation
+                prior = observation(prior, now=now)
+                _require(prior["provider_instance_id"] == instance and prior["offer_id"] == kind["name"],
+                    "dstack_host_allocation_changed")
+                return prior
+            reader = getattr(self.client, "vast_instance_identity", None)
+            _require(callable(reader), "dstack_host_allocation_unconfirmed")
+            identity = reader(instance)
+            _require(isinstance(identity, dict) and identity.get("provider_instance_id") == instance,
+                "dstack_host_allocation_unconfirmed")
+            if strict:
+                approved = {r["offer_id"]: r["machine_id"] for r in binding["host_selection"]["offers"]}
+                _require(approved.get(kind["name"]) == identity.get("machine_id"), "dstack_host_allocation_changed")
+            resource = kind.get("resources", {})
+            gpus = resource.get("gpus")
+            _require(isinstance(gpus, list) and len(gpus) == 1 and isinstance(gpus[0], dict),
+                "dstack_host_allocation_unconfirmed")
+            price = provisioning.get("price")
+            _require(type(price) in (int, float) and math.isfinite(price) and price > 0,
+                "dstack_host_allocation_unconfirmed")
+            _require(not strict or price <= binding["run_spec"]["configuration"]["max_price"],
+                "dstack_host_allocation_unconfirmed")
+            value = {"version": 1, "provider": "vastai", "machine_id": identity["machine_id"],
+                "provider_instance_id": instance, "offer_id": kind["name"], "observed_at": now,
+                "region": provisioning.get("region"), "gpu": gpus[0].get("name"), "gpu_count": 1,
+                "allocated_ram_mib": resource.get("memory_mib"), "allocated_vram_mib": gpus[0].get("memory_mib"),
+                "cpu": resource.get("cpus"), "disk_mib": resource.get("disk", {}).get("size_mib"),
+                "reliability": identity.get("reliability"), "quoted_hourly_microusd": math.ceil(price * 1_000_000),
+                "identity_confirmed": True, "physical_id_source": "vast_machine_id"}
+            from .host_policy import observation
+            return observation(value, now=now)
+        except Exception:
+            if strict:
+                raise DstackError("dstack_host_allocation_unconfirmed") from None
+            return None
 
     def _stop_retry_reason(self, binding):
         count, due = binding.get("stop_attempt_count"), binding.get("stop_next_retry_at")

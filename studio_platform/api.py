@@ -642,6 +642,8 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
     register_budget_routes(app)
     from .operator_jobs import register_routes as register_operator_jobs
     register_operator_jobs(app)
+    from .operator_host_routes import register_routes as register_operator_host_routes
+    register_operator_host_routes(app)
     from .frontend import register_routes as register_frontend_routes
     register_frontend_routes(app)
     # Last-added middleware is outermost, including the authentication guard.
