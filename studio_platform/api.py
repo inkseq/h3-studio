@@ -552,6 +552,9 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
         return generation_read.list_jobs(request.state.principal,
             project_id=client_project_id, limit=limit, offset=offset)
 
+    from .job_events import register_routes as register_job_events
+    register_job_events(app)
+
     @app.get("/v1/jobs/{job_id}")
     def get_job(job_id: str, request: Request):
         return generation_read.job(request.state.principal, job_id)
@@ -637,6 +640,8 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
     register_dstack_routes(app, service=dstack_operator)
     from .operator_budget_routes import register_routes as register_budget_routes
     register_budget_routes(app)
+    from .operator_jobs import register_routes as register_operator_jobs
+    register_operator_jobs(app)
     from .frontend import register_routes as register_frontend_routes
     register_frontend_routes(app)
     # Last-added middleware is outermost, including the authentication guard.

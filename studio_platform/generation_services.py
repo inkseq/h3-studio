@@ -82,13 +82,18 @@ class GenerationRead:
                 "content_url": f'/v1/artifacts/{record["id"]}/content',
                 "download_url": f'/v1/artifacts/{record["id"]}/content?download=1'}
 
-    def public_job(self, job, *, artifact_records=None):
+    def public_job(self, job, *, artifact_records=None, cancellation=None):
         stored_request = job["request"]
         visible = {k: job.get(k) for k in ("id", "status", "created_at", "updated_at", "request_hash", "error_code", "result", "created")}
         visible.update(client_ref=stored_request.get("client_ref", {}), phase=job["status"],
             recipe_id=stored_request.get("recipe_id"), effective_request=stored_request.get("request", {}),
             simulation=job["execution_plan"].get("backend") == "mock" or stored_request.get("simulation") is True, plan_id=job["plan_id"],
             project_id=job["project_id"], artifacts=[])
+        if cancellation is None:
+            cancellation = self.repo.get_job_cancellation_fields(self.access.tenant_id, job["owner_id"],
+                {job["id"]: job["project_id"]}, expected_states={job["id"]:
+                    {key: job[key] for key in ("status", "updated_at", "error_code")}})[job["id"]]
+        visible.update(cancellation)
         if stored_request.get("deployment_profile_id"):
             visible["deployment_profile_id"] = stored_request["deployment_profile_id"]
         if "delivery_spec" in job["execution_plan"]:
@@ -115,9 +120,13 @@ class GenerationRead:
         values = self.repo.list_jobs_for_owner(self.access.tenant_id, principal.owner, project_id=project_id, project_ids=allowed,
                                                limit=limit, offset=offset, summary=True)
         visible = [v for v in values if principal.allows(v["project_id"], "jobs:read")]
+        cancellation = self.repo.get_job_cancellation_fields(self.access.tenant_id, principal.owner,
+            {v["id"]: v["project_id"] for v in visible}, expected_states={v["id"]:
+                {key: v[key] for key in ("status", "updated_at", "error_code")} for v in visible})
         media = self.repo.list_artifacts_for_jobs(self.access.tenant_id, principal.owner,
             {v["id"]: v["project_id"] for v in visible if v["status"] == "succeeded"})
-        return {"jobs": [self.public_job(v, artifact_records=media.get(v["id"], [])) for v in visible]}
+        return {"jobs": [self.public_job(v, artifact_records=media.get(v["id"], []),
+            cancellation=cancellation[v["id"]]) for v in visible]}
 
 
 class GenerationPlanning:

@@ -74,6 +74,7 @@ def public_guide():
         "description": "Create one quick H3 clip or edit a multi-chapter story; save the same prompt, separate references and controls visible on the website, plan generation and adopt results without replacing prior takes.",
         "discovery_is_authorization": False,
         "quick_chat": agent_contract(),
+        "job_changes": agent_contract()["job_changes"],
         "creation_titles": {
             "kind": "optional_short_title_metadata", "model_id": "gemma-4-31b-it",
             "trigger": "Once from the first meaningful turn text or card prompt, only for a new Quick Chat session created while naming is enabled with the title field omitted.",
@@ -137,7 +138,8 @@ def public_guide():
             "generation_draft": "/v1/projects/{project_id}/shots/{shot_id}/generation-draft",
             "saved_generation_plans": "/v1/projects/{project_id}/shots/{shot_id}/generation-plans",
             "generation_plans": "/v1/generation-plans", "render_plans": "/v1/render-plans",
-            "jobs": "/v1/jobs", "job": "/v1/jobs/{job_id}", "artifacts": "/v1/jobs/{job_id}/artifacts",
+            "jobs": "/v1/jobs", "job": "/v1/jobs/{job_id}", "job_events": "/v1/job-events",
+            "artifacts": "/v1/jobs/{job_id}/artifacts",
         },
         "workflow": [
             {"step": "Discover", "action": "Read the public skill; no key is needed to learn the contract. A shared URL alone does not authorize editing or spending."},
@@ -147,7 +149,7 @@ def public_guide():
             {"step": "Edit", "action": "Read the current project/version, then POST atomic guided actions with expected_version. On 409 read again and reconcile; preserve unrelated edits."},
             {"step": "Prepare media", "action": "Upload into the same project, wait for ready, then shot.configure_generation saves prompt, controls and separate receipt-ID input slots. It maintains web associations; asset.attach remains available for general library editing. Preserve originals and explicit selections."},
             {"step": "Plan and submit", "action": "Read the saved generation-draft and its project_version, then POST that shot's generation-plans with expected_version. Inspect effective settings, output shape, blockers and estimate; only then, within user authorization/budget, POST a ready plan_id to jobs using one durable Idempotency-Key."},
-            {"step": "Observe", "action": "Poll the original job with bounded backoff and Retry-After. A timeout or submission_unknown is unresolved; reconcile the original receipt, never resubmit with a new key."},
+            {"step": "Observe", "action": "Poll the original job or owner/project-scoped /v1/job-events with its stable cursor, bounded backoff and Retry-After. Read cancellation reason and retry_advice; null charge/upstream means unknown. A timeout or submission_unknown is unresolved; reconcile the original receipt, never resubmit with a new key. Retry only explicitly through the linked Quick Chat item-retry contract after fresh preflight."},
             {"step": "Review and adopt", "action": "Verify successful artifacts, adopt video/audio into the intended shot using guided actions, and GET the document again. Preserve existing takes until an explicit selection change."},
             {"step": "Return to the website", "action": "Return the story/entity link, job ID and actual outcome. The user can inspect activity, open the affected section, adjust inputs and request a new take; unsaved browser drafts require an explicit reload decision."},
         ],

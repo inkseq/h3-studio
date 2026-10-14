@@ -673,7 +673,9 @@ class FiniteController:
         for row in pending:
             # A simultaneous POST can change state before this call; the
             # repository then records cancel_requested/hold, never a false $0.
-            self.repo.request_cancel(Scope(row["tenant_id"], row["owner_id"], row["project_id"]), row["id"])
+            from .job_cancellation import metadata_for
+            self.repo.request_cancel(Scope(row["tenant_id"], row["owner_id"], row["project_id"]), row["id"],
+                cancellation=metadata_for("system", "capacity_unavailable", None, self.repo.clock()))
 
     def hold_queued_task_backlog(self):
         """Preserve only this profile's proven-unsubmitted accepted jobs.

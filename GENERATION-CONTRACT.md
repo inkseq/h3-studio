@@ -106,6 +106,55 @@ Refreshing an inert Quick Chat plan uses the same global capacity lock and deliv
 
 Public jobs retain `id`, `status`, `phase`, `request_hash`, `error_code`, `plan_id`, `project_id`, `client_ref`, `recipe_id`, `effective_request`, `simulation`, `result` and `artifacts`. Today `phase` mirrors status. Future progress details are additive; do not replace old strings with a new incompatible enum or silently return a different envelope.
 
+### Cancellation reasons and original job change feed (#176)
+
+Jobs add `cancelled_by` (`owner`, `operator`, `system` or null), `reason_code`, a
+closed short `message`, and `retry_advice {safe_to_retry, charged,
+upstream_still_running}`. Charge/upstream values are nullable when not proven;
+unknown cost is never represented as free. Dedicated nullable job metadata
+survives execution/result updates. Existing owner cancellation, identity,
+fences, reconciliation and settlement rules remain authoritative. A failure or
+an accepted stop alone does not establish permission to resubmit.
+If the job DTO changes between its initial read and the bounded proof snapshot,
+reason fields remain null and retry advice is conservative/unknown until the
+next read; never attach a newer retry grant to an older queued/running phase.
+
+`GET /v1/job-events?since=<cursor>&limit=100` requires `jobs:read` for a PAT and
+filters the original outbox by tenant, owner and current PAT project authority
+before pagination. Only new commit-ordered job events after activation are
+included; earlier NULL-sequence events and original job/attempt history are
+preserved. Delivery acknowledgement does not remove an event. The opaque
+`je1.<event UUID>` cursor is resolved under the identical authority filter;
+unavailable, foreign or revoked-project cursors return the same HTTP410.
+Pages contain closed event status/reason/advice snapshots and IDs, never raw
+outbox payloads, prompts, media, actor credentials or global sequence counts.
+`next_cursor` advances only to the last returned authorized event; empty pages
+retain the input cursor. Drain `has_more` pages, then observe
+`poll_after_seconds`. Refresh current job/submission before a new explicit
+retry; event snapshots describe their original transition, not current state.
+
+The original transaction finalizer assigns append-only `job_event_seq` values
+after business locks, under one fixed PostgreSQL advisory transaction lock and
+READ COMMITTED, and immediately commits; rollback removes both event and
+sequence. SQLite retains its existing serialized write transaction. No separate
+event broker/ledger or historical backfill is introduced. A future retention
+change must preserve valid cursors or explicitly require resynchronization.
+
+Human administrators use `GET /v1/operator/admin/jobs` and
+`POST /v1/operator/admin/jobs/cancel` with one durable Idempotency-Key,
+`{jobs:[{id,expected_snapshot}],reason_code}`. Only queued/waiting jobs proven
+unsubmitted and unleased qualify. Sorted original job locks, snapshots and all
+original attempt/worker obligations are rechecked atomically; any stale or
+ineligible selection rejects the entire batch. Cancellation/refund, the original
+operator command and audit commit together. Running/uncertain work is never
+silently included. Reasons are closed codes; account/admin/CSRF guards remain.
+Unknown command results reuse the exact key/body; no automatic new command,
+new job, machine rental or budget reset follows.
+
+Safe linked retry reuses the immutable Quick Chat revision/prompt/inputs/seed,
+requires fresh original-item preflight and explicit confirmation, and records
+`retry_of_execution_id`. Initial confirmation replay retains the old job.
+
 Current errors are HTTP 401 authentication, 403 browser-origin rejection, 404 missing/inaccessible resources, 409 conflicts, 413 size limits, 422 invalid requests, 429 budget/capacity limits and 503 transient service failures. Existing `detail` responses are not yet a universal structured-error schema. Add safe codes compatibly; never expose raw provider exceptions, secrets, filesystem paths or signed URLs. Private prompts/media are only returned through existing authorized user-data responses, not operational logs.
 
 Direct generation independent of a story is a target, not an invented available endpoint. Preserve current source mappings until a versioned contract and migration exist.

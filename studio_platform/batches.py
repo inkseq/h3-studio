@@ -133,10 +133,14 @@ def register_routes(app):
                     raise
 
     def visible(principal, record, *, job_records=None, artifact_records=None, statuses=None, summary=False):
+        cancellation = {}
         if not summary:
             app.state.authorized_project(principal, record["project_id"], "jobs:read")
             pairs = {item["job_id"]: record["project_id"] for item in record["items"] if item["job_id"]}
             job_records = repo.get_job_summaries_for_owner(service.tenant, principal.owner, pairs)
+            cancellation = repo.get_job_cancellation_fields(service.tenant, principal.owner, pairs,
+                expected_states={ident: {key: row[key] for key in ("status", "updated_at", "error_code")}
+                    for ident, row in job_records.items()})
             artifact_records = repo.list_artifacts_for_jobs(service.tenant, principal.owner,
                 {ident: record["project_id"] for ident, row in job_records.items() if row["status"] == "succeeded"})
         statuses = statuses or {ident: row["status"] for ident, row in (job_records or {}).items()}
@@ -147,7 +151,8 @@ def register_routes(app):
                 state = statuses[item["job_id"]]
                 if not summary:
                     value["job"] = app.state.public_job(job_records[item["job_id"]],
-                        artifact_records=artifact_records.get(item["job_id"], []))
+                        artifact_records=artifact_records.get(item["job_id"], []),
+                        cancellation=cancellation[item["job_id"]])
                 value["status"] = "admission_blocked" if state == "planned" and item["error_code"] else state
             else:
                 value["status"] = "rejected" if item["error_code"] else ("cancelled" if record["cancel_requested"] else "pending_admission")
