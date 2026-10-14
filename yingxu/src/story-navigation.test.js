@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createStore} from './store.js';
 import {blankCloudProject} from './cloud-model.js';
-import {LOCAL_STORIES_KEY,archiveLocalStory,createLocalStory,openLocalStory,readLocalStoryLibrary} from './story-navigation.js';
+import {LOCAL_STORIES_KEY,archiveLocalStory,createLocalStory,openLocalStory,readLocalStoryLibrary,storyCoverFileId,storyEditedTimestamp,storyLibrarySummary} from './story-navigation.js';
 
 function fixture(){const data=new Map();let fail=false;const storage={getItem:key=>data.get(key)||null,setItem(key,value){if(fail)throw Error('storage full');data.set(key,value);}},store=createStore({storage});store.newProject('故事 A');const cloud={getState:()=>({busy:false}),leave:()=>store.leaveCloudProject()};return {store,cloud,storage,data,setFail:value=>fail=value};}
 
@@ -29,4 +29,29 @@ test('corrupt local story is rejected before leaving a cloud story',()=>{
   const h=fixture(),remote=blankCloudProject('云故事');h.store.enterCloudProject(remote,{account:'supervan',version:1});
   h.data.set(LOCAL_STORIES_KEY,JSON.stringify([{id:'broken',title:'损坏故事',entities:[]}]))
   assert.throws(()=>openLocalStory('broken',h));assert.equal(h.store.getState().workspace.mode,'cloud');assert.equal(h.store.getState().project.id,remote.id);
+});
+
+
+test('library metadata stays unknown for summaries and uses only the first chosen shot cover',()=>{
+  assert.deepEqual(storyLibrarySummary({id:'p',title:'仅摘要'}),{id:'p',title:'仅摘要',updatedAt:null,shotCount:null,chosenCount:null,cover:null});
+  const project={id:'p',title:'故事',entities:[
+    {id:'chapter-late',type:'chapter',order:1},{id:'chapter-first',type:'chapter',order:0},
+    {id:'scene-late',type:'scene',parentId:'chapter-late',order:0},{id:'scene-first',type:'scene',parentId:'chapter-first',order:0},
+    {id:'shot-late',type:'shot',parentId:'scene-late',order:0,data:{selectedAssetId:'video-late'}},
+    {id:'shot-first',type:'shot',parentId:'scene-first',order:0,data:{selectedAssetId:'video-first',storyboard:{firstFrameId:'unrelated-input'}}},
+    {id:'video-late',type:'video',data:{}},{id:'video-first',type:'video',data:{cloudArtifactId:'first-artifact'}},
+    {id:'unrelated-input',type:'image',data:{}},
+    {id:'chosen-frame',type:'image',data:{fileId:'frame-file',sourceSelection:{kind:'artifact_frame',artifact_id:'first-artifact'}}},
+  ]};
+  const before=structuredClone(project),summary=storyLibrarySummary(project);
+  assert.equal(summary.shotCount,2);assert.equal(summary.chosenCount,2);assert.equal(summary.cover.id,'chosen-frame');assert.deepEqual(project,before);
+});
+
+test('library cover file identity stays owned and malformed edit times do not break cards',()=>{
+  const cover={type:'video',data:{fileId:'cloud_artifact_original',cloudArtifactId:'original'}};
+  assert.deepEqual(storyCoverFileId(cover,{mode:'cloud'}),{fileId:'cloud_artifact_original',kind:'video',cloudPath:'/v1/artifacts/original/content'});
+  assert.equal(storyCoverFileId(cover,{mode:'local'}),null);
+  assert.equal(storyCoverFileId({...cover,data:{...cover.data,cloudArtifactId:'different'}},{mode:'cloud'}),null);
+  assert.equal(storyCoverFileId({type:'image',data:{fileId:'../outside'}},{mode:'local'}),null);
+  assert.equal(storyEditedTimestamp(1791960000),1791960000000);assert.equal(storyEditedTimestamp(9e99),null);assert.equal(storyEditedTimestamp('not a date'),null);
 });
