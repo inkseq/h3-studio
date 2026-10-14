@@ -1,10 +1,14 @@
 """GPU delivery contract over fake R2 and the original ledger; no media/network."""
 import base64
 import copy
+from contextlib import contextmanager
 import hashlib
 import json
+import os
 from pathlib import Path
 import socket
+import stat
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -88,7 +92,7 @@ class GPUCollectionTests(LedgerCase):
         self.fake = FakeS3(config())
         self.store = S3ObjectStore(config(), client=self.fake)
 
-    def fixture(self, *, audio=True):
+    def fixture(self, *, audio=True, deployment_profile_id=None, key="one-original-job"):
         request = {"model": "MiniMax-H3-Base-BF16", "prompt": "synthetic offline fixture",
             "duration": 4, "resolution": "custom", "width": 256, "height": 256,
             "steps": 50, "generate_audio": audio, "export_crf": 18}
@@ -98,9 +102,11 @@ class GPUCollectionTests(LedgerCase):
         execution = {"pool": "test-pool", "backend": "wangp-worker", "enabled": True,
             "configuration_id": "synthetic-config", "engine_manifest_digest": "a"*64,
             "expected_runtime_s": 120, "output_delivery": GPU_R2_DELIVERY, "delivery_spec": delivery}
+        if deployment_profile_id is not None:
+            execution["deployment_profile_id"] = deployment_profile_id
         plan = self.repo.create_plan(self.scope, compiled, execution,
             expires_at=self.now+3600, estimated_cost_microusd=100_000)
-        job = self.repo.create_job(self.scope, plan["id"], "one-original-job", budget_account_ids=("owner-budget",))
+        job = self.repo.create_job(self.scope, plan["id"], key, budget_account_ids=("owner-budget",))
         queue = TaskQueue(self.repo)
         lease = queue.claim("synthetic-worker", "test-pool").lease
         tag, task = lease.attempt_id, operation_id(lease.attempt_id)
@@ -163,6 +169,121 @@ class GPUCollectionTests(LedgerCase):
         values[6].lose_response = True
         self.assertEqual(self.collect(values)["state"], "succeeded")
         self.assertEqual((values[6].prepares, values[6].uploads), (1, 1))
+
+    def qualification_control(self, values):
+        _, job, _, tag, _, description, _, _ = values
+        identity = description["identity"]
+        return {"version": 1, "mode": "drop_delivery_rpc_ack_once", "expires_at": self.now + 300,
+            "owner_id": job["owner_id"], "job_id": job["id"], "attempt_tag": tag,
+            "request_hash": job["request_hash"], "deployment_profile_id": job["execution_plan"]["deployment_profile_id"],
+            "manifest_digest": identity["manifest_digest"], "slot_key": identity["slot_key"],
+            "incarnation": identity["incarnation"]}
+
+    @contextmanager
+    def qualification_file(self, values, *, control=None, raw=None, metadata=None):
+        """Model Linux protected ownership without administrator chmod on Windows."""
+        path = values[7].work_dir / "qualification-drop-delivery-ack.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(raw if raw is not None else json.dumps(
+            self.qualification_control(values) if control is None else control).encode())
+        original_lstat, original_open, original_fstat, original_close = Path.lstat, os.open, os.fstat, os.close
+        descriptors = set()
+        def protected(info):
+            fields = {name: getattr(info, name) for name in ("st_dev", "st_ino", "st_size", "st_mtime_ns")}
+            fields.update(st_mode=stat.S_IFREG | 0o640, st_uid=0, st_gid=10001, st_nlink=1,
+                          st_file_attributes=0)
+            return SimpleNamespace(**(fields | (metadata or {})))
+        def lstat(selected, *args, **kwargs):
+            info = original_lstat(selected, *args, **kwargs)
+            return protected(info) if selected == path else info
+        def opened(selected, flags, *args, **kwargs):
+            descriptor = original_open(selected, flags, *args, **kwargs)
+            if selected == path:
+                descriptors.add(descriptor)
+            return descriptor
+        def fstat(descriptor):
+            info = original_fstat(descriptor)
+            return protected(info) if descriptor in descriptors else info
+        def close(descriptor):
+            descriptors.discard(descriptor)
+            return original_close(descriptor)
+        worker_os = SimpleNamespace(**vars(os))
+        worker_os.name = "posix"
+        worker_os.O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+        worker_os.open, worker_os.fstat, worker_os.close = opened, fstat, close
+        with mock.patch("studio_platform.worker.os", worker_os), mock.patch.object(Path, "lstat", lstat):
+            yield
+
+    def test_root_qualification_ack_drop_recovers_original_keys_once_and_restart_only_reads(self):
+        values = self.fixture(deployment_profile_id="synthetic-r2-profile")
+        _, job, lease, tag, _, _, backend, runner = values
+        original_unknown = ArtifactWriter.remote_unknown
+        with self.qualification_file(values), mock.patch.object(ArtifactWriter, "remote_unknown", autospec=True,
+                side_effect=original_unknown) as unknown, self.assertLogs("studio_platform.worker", level="WARNING") as logs:
+            self.assertEqual(self.collect(values)["state"], "succeeded")
+            self.assertEqual(unknown.call_count, 1)
+            self.assertEqual(unknown.call_args.args[1]["tag"], tag)
+            self.assertTrue(runner._qualification_delivery_ack_dropped)
+            restarted = WorkerRunner(self.repo, self.store, self.work, backend=backend)
+            self.assertEqual(self.collect((*values[:7], restarted))["state"], "succeeded")
+            self.assertFalse(restarted._qualification_delivery_ack_dropped)
+            self.assertEqual(unknown.call_count, 1)
+        self.assertEqual((backend.prepares, backend.uploads), (1, 1))
+        self.assertEqual(self.repo.get_job(self.scope, job["id"])["current_attempt_id"], lease.attempt_id)
+        self.assertEqual({a["metadata"]["kind"] for a in self.repo.list_artifacts(self.scope, job["id"])}, {"video", "audio"})
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn(job["id"], logs.output[0])
+        self.assertIn(tag, logs.output[0])
+        self.assertNotIn("https://", logs.output[0])
+
+    def test_invalid_qualification_controls_cannot_change_successful_collection(self):
+        cases = [("malformed", {}, b"{", None), ("oversized", {}, b"x"*4097, None),
+            ("duplicate", {}, b'{"version":1,"version":1}', None),
+            ("owner", {"owner_id": "supervan"}, None, None),
+            ("job", {"job_id": "another-job"}, None, None),
+            ("attempt", {"attempt_tag": "another-attempt"}, None, None),
+            ("hash", {"request_hash": "f"*64}, None, None),
+            ("profile", {"deployment_profile_id": "another-profile"}, None, None),
+            ("manifest", {"manifest_digest": "f"*64}, None, None),
+            ("slot", {"slot_key": "another-slot"}, None, None),
+            ("incarnation", {"incarnation": "c"*32}, None, None),
+            ("expired", {"expires_at": self.now}, None, None),
+            ("too_far", {"expires_at": self.now+3601}, None, None),
+            ("nonfinite", {"expires_at": float("nan")}, None, None),
+            ("bool_version", {"version": True}, None, None),
+            ("mode", {"mode": "another-mode"}, None, None),
+            ("extra", {"extra": True}, None, None),
+            ("unprivileged", {}, None, {"st_uid": 10001}),
+            ("foreign_group", {}, None, {"st_gid": 10002}),
+            ("group_write", {}, None, {"st_mode": stat.S_IFREG | 0o660}),
+            ("other_read", {}, None, {"st_mode": stat.S_IFREG | 0o644}),
+            ("hardlink", {}, None, {"st_nlink": 2}),
+            ("symlink", {}, None, {"st_mode": stat.S_IFLNK | 0o600}),
+            ("reparse", {}, None, {"st_file_attributes": 0x400})]
+        for name, changes, raw, metadata in cases:
+            with self.subTest(case=name):
+                values = self.fixture(deployment_profile_id="synthetic-r2-profile", key="qualification-"+name)
+                control = self.qualification_control(values) | changes
+                with self.qualification_file(values, control=control, raw=raw, metadata=metadata):
+                    self.assertEqual(self.collect(values)["state"], "succeeded")
+                self.assertFalse(values[7]._qualification_delivery_ack_dropped)
+                self.assertEqual((values[6].prepares, values[6].uploads), (1, 1))
+
+    def test_nondict_or_unsealed_upload_ack_does_not_enable_qualification_fault(self):
+        for index, state in enumerate((None, "prepared")):
+            values = self.fixture(deployment_profile_id="synthetic-r2-profile", key=f"ordinary-upload-{index}")
+            backend = values[6]
+            upload = backend.upload_delivery
+            def returned(*args, **kwargs):
+                result = upload(*args, **kwargs)
+                if state is None:
+                    return None
+                result["state"] = state
+                return result
+            with self.qualification_file(values), mock.patch.object(backend, "upload_delivery", side_effect=returned):
+                self.assertEqual(self.collect(values)["state"], "succeeded")
+            self.assertFalse(values[7]._qualification_delivery_ack_dropped)
+            self.assertEqual(backend.uploads, 1)
 
     def test_unknown_missing_object_keeps_original_reservation_and_does_not_retry_put(self):
         values = self.fixture()

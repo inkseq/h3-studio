@@ -5,6 +5,55 @@ the existing `sixnine-platform` Compose project. It does not rent a GPU, stop a
 provider instance, settle a bill, reset accepted jobs or delete storage. Native
 GPU images are published separately and are never downloaded to this CPU host.
 
+## Finite GPU/R2 qualification (#174)
+
+Qualification uses the normal owner-confirmed job, registered slot, Hatchet
+worker, immutable native operation and artifact writer. It does not run a
+parallel collector, replay a settled write, or regenerate an old result to
+repair storage. Keep the original CPU delivery route available for retained
+jobs and rollback; a qualification release is not a default-route switch.
+
+The normal CPU worker has one deliberately disabled acceptance seam: an absent
+`qualification-drop-delivery-ack.json` in that worker's existing work directory
+means no injected fault. A qualification operator may install one bounded,
+root-owned control file after the exact test attempt is claimed and before
+collection. It contains only closed identity fields, a versioned mode and an
+expiry of at most one hour: owner, job, attempt, request hash, deployment profile,
+manifest, slot and native incarnation must match the same uploaded receipt.
+No bearer URL or credential belongs in the control file. The file is not an
+HTTP/request option; an owner cannot request it through a generation parameter.
+
+The injected fault discards only a validated, complete upload acknowledgement,
+after both original output objects are uploaded with stop proof. It is consumed
+in memory before raising the fixed error. The existing unknown-write branch
+then verifies those same immutable R2 keys and commits the original job. On a
+worker restart, matching objects are read before another upload is considered.
+Do not inject midway through a PUT or invent an upload-stop fact. Invalid,
+expired, foreign, linked or writable-by-others controls cannot inject a fault;
+ordinary jobs retain their existing behavior. Remove the disposable control
+after recording the actual injection and recovery evidence.
+
+Record collection-scoped controller/cgroup and CPU-host memory, R2 descriptors,
+native stage durations, normal website/PAT downloads and full decode/hash
+checks. Whole cold-start windows are not collection benchmarks. Expired and
+wrong-key grants must be tested against R2 without exposing permanent storage
+credentials to the GPU; wrong-size/hash rejection must retain the original
+write and job identities.
+
+For a matched media-processing baseline, wait until the new job succeeds and
+its normal collection measurement ends. Read its original sealed native files
+through the existing authenticated, size/hash-bounded artifact transport into
+a protected benchmark fixture. Run only the existing `GPUDelivery._export`
+export/validation code in a finite isolated CPU container using the exact CPU
+image, a 640 MiB limit, no network, no secrets/database/active volumes, read-only
+fixture input and a separate writable benchmark output. This is media-only
+measurement, not a second business collection or publication. Compare its
+encoding/validation time and cgroup peak with the same job's GPU receipt and
+normal controller observation; report fetch, upload and commit separately.
+An OOM is a ceiling hit with censored timing, not a successful baseline. Keep
+historical unknown measurements explicit and stop all qualification machines
+before accepting the issue.
+
 The ordinary platform bundle remains unchanged. The optional migration bundle
 contains the exact tested dispatch image archive, the reviewed overlay/checker
 and maintenance source, nonsecret examples, and selected public four-file WanGP

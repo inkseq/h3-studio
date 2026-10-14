@@ -8,8 +8,12 @@ import unittest
 from studio_platform.dstack_capacity import DstackCapacity, DstackError, image_preparation, native_preparation
 from studio_platform.inference.wangp_contract import HostReadiness, safe_model_progress
 from studio_platform.runtime_hosts.wangp_session import ModelLoadProgress, PinnedWanGPSession
+from studio_platform.runtime_hosts.wangp_launcher import PendingSession
+from studio_platform.runtime_hosts.wangp import WanGPHost
+from studio_platform.runtime_hosts.wangp_receipts import ReceiptJournal
 from studio_platform.wangp_bootstrap import safe_preparation_report, WanGPSSHHost
 from test_dstack_capacity import FakeClient, Store, request, INTENT
+from test_platform_wangp_receipts import manifest, prepared
 
 
 class SafeStartupProgressTests(unittest.TestCase):
@@ -120,6 +124,50 @@ class SafeStartupProgressTests(unittest.TestCase):
 
 
 class ActualModelProgressTests(unittest.TestCase):
+    def test_launcher_wrapper_reports_same_job_model_callbacks_without_changing_readiness(self):
+        loaded, now = ["not_loaded"], [100]
+        observer = ModelLoadProgress(lambda: loaded[0], clock=lambda: now[0])
+        class Native:
+            active_job = None
+            calls = 0
+            def get_default_settings(self, model):
+                return {"model_type": model}
+            def submit_task(self, settings, *, callbacks):
+                self.calls += 1
+                callbacks.on_status("Loading Model SECRET model path...")
+                self.active_job = NS(done=False)
+                return self.active_job
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "output"
+            output.mkdir()
+            pending, native = PendingSession(), Native()
+            journal = ReceiptJournal(root / "journal" / "operations.sqlite3",
+                slot_key="slot-1", manifest_digest=manifest().digest, create=True)
+            host = WanGPHost(session=pending, journal=journal, manifest=manifest(),
+                output_root=output, sealed_root=root / "sealed")
+            try:
+                self.assertFalse(host.readiness().idle)
+                self.assertIsNone(host.readiness().preparation)
+                pending.delegate = PinnedWanGPSession(native, output, quiesce=lambda: None,
+                    worker_alive=lambda: False, model_progress=observer)
+                self.assertTrue(host.readiness().idle)
+                self.assertEqual(host.readiness().preparation["model"]["state"], "not_loaded")
+                accepted = prepared()
+                host.submit(accepted)
+                self.assertEqual(host.readiness().preparation["model"]["state"], "loading")
+                self.assertFalse(host.readiness().idle)
+                loaded[0], now[0] = "loaded", 110
+                observer.on_progress(NS(phase="inference", prompt="SECRET"))
+                readiness = host.readiness()
+                self.assertEqual(readiness.preparation["model"]["state"], "loaded")
+                self.assertFalse(readiness.idle)  # Loading telemetry cannot release the active slot.
+                self.assertEqual(native.calls, 1)
+                self.assertEqual(journal.get(accepted.operation_id).operation_id, accepted.operation_id)
+                self.assertNotIn("SECRET", json.dumps(readiness.preparation))
+            finally:
+                host.close()
+
     def test_callback_is_added_to_same_submission_without_altering_accepted_settings(self):
         observer = ModelLoadProgress(lambda: "not_loaded", clock=lambda: 100)
         class Native:

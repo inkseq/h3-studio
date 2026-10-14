@@ -36,6 +36,13 @@ class PendingSession:
     def is_idle(self):
         return self.delegate is not None and self.delegate.is_idle() is True
 
+    def preparation(self):
+        # The host is bound to this wrapper before runtime initialization.
+        # Forward optional observations without loading or submitting a model;
+        # WanGPHost remains responsible for sanitizing the public projection.
+        probe = getattr(self.delegate, "preparation", None)
+        return probe() if callable(probe) else None
+
     def submit_task(self, settings):
         if self.delegate is None:
             raise ValueError("wangp_runtime_not_initialized")
