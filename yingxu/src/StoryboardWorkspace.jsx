@@ -17,16 +17,25 @@ function collision(args){
 }
 function QueueSummary(){
   const {state}=useStoryboardUI(),queues=state.queue;
-  return <div className="sb-queue" aria-label="当前生成队列">{['FL','REF'].map(mode=>{const row=Array.isArray(queues)?queues.find(item=>String(item.mode).toUpperCase()===mode):queues?.[mode];return <span key={mode}>{mode==='FL'?'首尾帧':'全能参考'}：{row?`${row.waiting??row.waiting_jobs??row.queued??'—'} 等待 · ${row.ready??row.ready_machines??'—'} 台就绪${Number.isFinite(row.roughWaitSeconds)?' · 约等 '+Math.ceil(row.roughWaitSeconds/60)+' 分钟':''}`:'队列观测未读取'}</span>;})}</div>;
+  const rows=['FL','REF'].map(mode=>{
+    const row=Array.isArray(queues)?queues.find(item=>String(item.mode).toUpperCase()===mode):queues?.[mode];
+    const versions=state.shots.filter(shot=>shot.mode===mode).flatMap(shot=>shot.versions);
+    const waiting=versions.filter(version=>['queued','waiting_capacity','claimed','submitting','submission_unknown'].includes(version.status)).length;
+    const running=versions.filter(version=>['generating','running','collecting','checking','cancel_requested'].includes(version.status)).length;
+    const observed=row?.waiting??row?.waiting_jobs??row?.queued;
+    return {mode,row,waiting:Math.max(Number.isFinite(observed)?observed:0,waiting),running};
+  }).filter(row=>row.waiting>0||row.running>0);
+  if(!rows.length)return null;
+  return <div className="sb-queue" aria-label="当前生成队列">{rows.map(({mode,row,waiting,running})=><span key={mode}>{mode==='FL'?'首尾帧':'全能参考'}：{waiting} 等待{running>0&&` · ${running} 处理中`}{waiting>0&&Number.isFinite(row?.roughWaitSeconds)&&row.roughWaitSeconds>0&&` · 约等 ${Math.ceil(row.roughWaitSeconds/60)} 分钟`}</span>)}</div>;
 }
 function StoryboardLayoutA({selected,setSelected,pickAsset}){
-  const {state,dispatch}=useStoryboardUI(),player=usePlayer(state.shots);
-  const library=useStoryboardPanelSize('library',250,140,560),dock=useStoryboardPanelSize('dock',190,110,460),drawer=useStoryboardPanelSize('drawer',440,340,820);
-  const count=state.shots.filter(shot=>shot.chosen).length;
-  return <div className="layout A" data-testid="storyboard-layout-a" style={{gridTemplateColumns:`${library.size}px 8px minmax(0,1fr)`,'--libw':library.size+'px'}}>
-    <AssetLibrary onPick={pickAsset} selectedShot={state.shots.find(shot=>shot.id===selected)}/>
-    <StoryboardSplitter panel={library} label="素材库宽度"/>
-    <div className="col"><main className="main"><div className="chapter-head"><div><h1>{state.project.chapter||state.project.title}</h1><small>{state.shots.length} 个镜头 · 总长 {fmt(totalDuration(state.shots))} · 已选定 {count}/{state.shots.length} · {state.project.aspect}</small><label className="style-field"><span>全片风格</span><input aria-label="全片风格" value={state.project.style||''} placeholder="例如：电影感，冷色调，胶片颗粒" onChange={event=>dispatch({type:'project',patch:{style:event.target.value}})}/></label></div><small className="hint">拖动镜头排序 · 右键选参考</small></div>
+  const {state,dispatch}=useStoryboardUI(),player=usePlayer(state.shots),[libraryCollapsed,setLibraryCollapsed]=useState(false);
+  const library=useStoryboardPanelSize('library',280,140,560),dock=useStoryboardPanelSize('dock',190,110,460),drawer=useStoryboardPanelSize('drawer',440,340,820);
+  const count=state.shots.filter(shot=>shot.chosen).length,pending=state.shots.filter(shot=>!shot.versions.length);
+  return <div className={'layout A'+(libraryCollapsed?' library-collapsed':'')} data-testid="storyboard-layout-a" style={{gridTemplateColumns:libraryCollapsed?'44px minmax(0,1fr)':`${library.size}px 8px minmax(0,1fr)`,'--libw':(libraryCollapsed?44:library.size)+'px'}}>
+    <AssetLibrary onPick={pickAsset} selectedShot={state.shots.find(shot=>shot.id===selected)} collapsed={libraryCollapsed} onToggle={()=>setLibraryCollapsed(value=>!value)}/>
+    {!libraryCollapsed&&<StoryboardSplitter panel={library} label="素材库宽度"/>}
+    <div className="col"><main className="main"><div className="chapter-head"><div className="chapter-summary"><small>{state.shots.length} 个镜头 · 总长 {fmt(totalDuration(state.shots))} · 已选定 {count}/{state.shots.length} · {state.project.aspect}</small><label className="style-field"><span>全片风格</span><input aria-label="全片风格" value={state.project.style||''} placeholder="例如：电影感，冷色调，胶片颗粒" onChange={event=>dispatch({type:'project',patch:{style:event.target.value}})}/></label></div><div className="chapter-actions"><QueueSummary/><button className="primary" disabled={state.busy||!pending.length} onClick={()=>dispatch({type:'generate',ids:pending.map(shot=>shot.id)})}>预检全部未生成 · {pending.length}</button></div></div>
       <SortableContext items={state.shots.map(shot=>'shot:'+shot.id)} strategy={rectSortingStrategy}><div className="wall">{state.shots.map((shot,index)=><ShotCard key={shot.id} shot={shot} index={index} selected={selected===shot.id} onOpen={setSelected}/>)}<AddCard onAdd={()=>dispatch({type:'add'})}/></div></SortableContext>
     </main><StoryboardSplitter panel={dock} axis="y" sign={-1} label="播放器和时间线高度"/><div className="dock" style={{height:dock.size}}><Screen player={player}/><div className="dock-right"><Transport player={player}/><Timeline player={player} selectedId={selected} onPick={setSelected}/><small className="muted">点击一段时间线，编辑对应镜头</small></div></div></div>
     {selected&&<aside className="drawer" aria-label="镜头编辑器" style={{width:drawer.size}}><StoryboardSplitter panel={drawer} sign={-1} className="edge" label="镜头编辑器宽度"/><ShotEditor shotId={selected} onClose={()=>setSelected(null)}/></aside>}
@@ -65,9 +74,7 @@ function StoryboardShell({onLegacyGuide,onCanvas}){
     }
   };
   const dragged=dragging&&(dragging.asset?db.asset(dragging.asset):db.profile(dragging.profile)),thumb=dragging?.profile?coverOf(db,dragged,dragged?.def):dragged;
-  const pending=state.shots.filter(shot=>!shot.versions.length);
   return <DndContext sensors={sensors} collisionDetection={collision} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={()=>setDragging(null)}><section ref={container} className="sb-workspace" aria-label="故事分镜工作台">
-    <header className="sb-toolbar"><div><b>分镜工作台</b><QueueSummary/></div><div className="row tight">{onLegacyGuide&&<button className="small ghost" onClick={onLegacyGuide}>七步引导</button>}{onCanvas&&<button className="small ghost" onClick={onCanvas}>无限画布</button>}<button className="primary" disabled={state.busy||!pending.length} onClick={()=>dispatch({type:'generate',ids:pending.map(shot=>shot.id)})}>预检全部未生成 · {pending.length}</button></div></header>
     {state.error&&<div className="sb-error" role="alert"><span>{state.error}</span><button className="x" aria-label="关闭操作提示" onClick={clearError}>×</button></div>}
     <StoryboardLayoutA selected={selected} setSelected={setSelected} pickAsset={pick}/>
     <DragOverlay dropAnimation={null}>{dragged?<div className="sb-portal achip overlay"><AssetThumb asset={thumb}/><b>{dragged.name}</b></div>:null}</DragOverlay>

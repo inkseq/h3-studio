@@ -1,0 +1,32 @@
+.story-screen{height:100dvh;display:flex;flex-direction:column;min-height:0}
+.story-topbar{height:64px;min-height:64px;flex:none;padding:0 24px;gap:14px}
+.story-topbar .brand{min-width:0}
+.story-topbar .top-actions{min-width:0}
+.story-home-back{flex:none;border:0;background:transparent;padding:7px 4px;font-size:12px}
+.story-source-badge{flex:none;background:#eef3e6;color:#627b58;border-radius:5px;padding:3px 7px;font-size:10px}
+.story-topbar .view-switch{flex:none}
+.story-topbar .view-switch button{font-size:12px;padding:6px 10px}
+.story-home-main{flex:1;min-height:0;overflow:hidden;outline:none}
+.story-chapter-select{min-width:0;max-width:135px;padding:6px 8px;border:1px solid var(--line);border-radius:7px;background:#fff;font-size:11px;color:var(--ink)}
+.story-single-shell{display:flex;flex:1;min-height:0;height:auto}
+.story-single-shell>.workspace{width:100%;flex:1}
+.story-single-shell .storyboard-main-stage{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.story-single-shell .storyboard-main-stage>.sb-workspace{flex:1;min-height:0}
+.story-account-menu{position:relative;flex:none;font-size:12px}
+.story-account-menu>summary{cursor:pointer;display:flex;align-items:center;gap:9px;list-style:none;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.story-account-menu>summary::-webkit-details-marker{display:none}
+.story-account-menu[open]>summary>svg{transform:rotate(90deg)}
+.story-account-panel{position:absolute;right:0;top:calc(100% + 8px);width:320px;max-width:calc(100vw - 24px);max-height:calc(100dvh - 90px);overflow:auto;padding:16px;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 16px 46px #1729231f;z-index:20}
+.story-account-panel>p{font-size:12px;padding:0 5px 10px;border-bottom:1px solid var(--line);margin-bottom:8px}
+.story-account-panel small{display:block;color:var(--muted);font-size:10px}
+.story-account-panel>button,.story-account-panel>a,.story-more-content>button{display:flex;width:100%;justify-content:flex-start;gap:9px;border:0;background:transparent;padding:9px 6px;font-size:12px;border-radius:6px}
+.story-account-panel>button:hover,.story-account-panel>a:hover,.story-more-content>button:hover{background:#eef3e8}
+.story-account-attention{font-size:8px;color:#b1873c}
+.story-more-content{border-top:1px solid var(--line);margin-top:8px;padding-top:8px}
+.story-more-content>summary{cursor:pointer;font-size:12px;padding:7px 6px}
+.story-account-panel .cloud-workspace-bar,.story-account-panel .cloud-resume{display:block;padding:10px 6px;font-size:11px;border:0;border-top:1px solid var(--line);margin-top:10px}
+.story-account-panel .cloud-workspace-bar>div{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.story-account-panel .cloud-workspace-bar button,.story-account-panel .cloud-resume button{padding:6px 8px;font-size:11px}
+.story-account-panel .cloud-storage{margin-top:10px}
+@media(max-width:1220px){.story-topbar{gap:10px;padding:0 16px}.story-topbar .save-state{display:none}.story-topbar .view-switch button{padding:6px 8px}}
+@media(max-width:760px){.story-topbar{height:auto;min-height:64px;padding:10px 12px;flex-wrap:wrap;gap:8px}.story-topbar .view-switch{order:3;width:100%}.story-topbar .brand{flex:1}.story-topbar .top-actions{margin-left:auto}.story-topbar .view-switch button{flex:1}.story-source-badge{font-size:9px}.story-single-shell{height:auto}.story-topbar .undo{display:none}}

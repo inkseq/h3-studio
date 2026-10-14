@@ -52,3 +52,38 @@ export function createLocalStory(title,{store,cloud,storage=globalThis.localStor
   store.setSection('journey');store.setMode('guide');
   return true;
 }
+
+
+// Library presentation derives from the owned story document. A list summary is
+// not an empty document: missing entities keeps counts and covers unknown.
+export function storyLibrarySummary(value){
+  const project=value?.project||value||{},entities=Array.isArray(project.entities)?project.entities:null;
+  const details={id:project.id||value?.id,title:project.title||value?.title||'未命名故事',updatedAt:project.updatedAt??value?.updated_at??value?.updatedAt??null,shotCount:null,chosenCount:null,cover:null};
+  if(!entities)return details;
+  const byId=new Map(entities.map(entity=>[entity.id,entity])),shots=entities.filter(entity=>entity.type==='shot');
+  const orderPath=entity=>{const path=[],seen=new Set();for(let item=entity;item&&!seen.has(item.id);item=byId.get(item.parentId)){seen.add(item.id);path.unshift(Number.isFinite(item.order)?item.order:0);}return path;};
+  const compare=(a,b)=>{const x=orderPath(a),y=orderPath(b);for(let i=0;i<Math.max(x.length,y.length);i++){const difference=(x[i]??-1)-(y[i]??-1);if(difference)return difference;}return entities.indexOf(a)-entities.indexOf(b);};
+  const chosen=shots.filter(shot=>typeof shot.data?.selectedAssetId==='string'&&shot.data.selectedAssetId).sort(compare);
+  details.shotCount=shots.length;details.chosenCount=chosen.length;
+  for(const shot of chosen){
+    const selected=byId.get(shot.data.selectedAssetId);if(!selected||!['image','video'].includes(selected.type))continue;
+    const frame=selected.type==='video'&&selected.data?.cloudArtifactId?entities.find(entity=>entity.type==='image'&&entity.data?.fileId&&!entity.data.missingFile&&entity.data.sourceSelection?.kind==='artifact_frame'&&entity.data.sourceSelection.artifact_id===selected.data.cloudArtifactId):null;
+    details.cover=frame||selected;break;
+  }
+  return details;
+}
+
+export function storyCoverFileId(entity,{mode}={}){
+  if(!entity||!['image','video'].includes(entity.type)||entity.data?.missingFile)return null;
+  const fileId=entity.data?.fileId;
+  if(typeof fileId!=='string'||!/^[\w-]{1,100}$/.test(fileId))return null;
+  const cloud=/^cloud_(asset|artifact)_([A-Za-z0-9_-]+)$/.exec(fileId);
+  if(!cloud)return {fileId,kind:entity.type,cloudPath:null};
+  if(mode!=='cloud'||entity.data[cloud[1]==='asset'?'cloudAssetId':'cloudArtifactId']!==cloud[2])return null;
+  return {fileId,kind:entity.type,cloudPath:'/v1/'+cloud[1]+'s/'+cloud[2]+'/content'};
+}
+
+export function storyEditedTimestamp(value){
+  const date=typeof value==='number'?value*(value<1e12?1000:1):Date.parse(value);
+  return Number.isFinite(date)&&date>0&&Number.isFinite(new Date(date).getTime())?date:null;
+}

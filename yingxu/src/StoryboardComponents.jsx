@@ -52,11 +52,11 @@ function ProfileCard({p, used, onOpen, onAdd}) {
     <div ref={n => { drag.setNodeRef(n); drop.setNodeRef(n); }} {...drag.listeners} {...drag.attributes}
       className={'pcard ' + p.type + (drag.isDragging ? ' dragging' : '') + (used ? ' used' : '') + (fileOver ? ' drop-hot' : '')}
       onClick={onOpen} title="点击：打开档案编辑 · 拖到镜头上：加进镜头">
-      <AssetThumb asset={cover} size={52} />
-      <div className="pcard-body"><b>{p.name}</b>
+      {cover?<AssetThumb asset={cover} size={38}/>:<span className="profile-initial" aria-hidden="true">{Array.from((p.name||'档案').trim())[0]?.toLocaleUpperCase()||'档'}</span>}
+      <div className="pcard-body"><b title={p.name}>{p.name}</b>
         <small>{p.type === 'prop' ? `${count} 张图` : `${p.variants.length} 个${VARIANT_LABEL[p.type]} · ${count} 张图`}{p.voices?.length ? ` · ${p.voices.length} 段声音` : ''}{p.ambient ? ' · 有环境声' : ''}</small>
         <small className="muted clip">{p.desc}</small></div>
-      {onAdd && <button className="pcard-open" title="加到当前选中的镜头" onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onAdd(); }}>{used ? '✓ 已在镜头' : '＋ 镜头'}</button>}
+      {onAdd && <button className="pcard-open" aria-label={used?`${p.name}已在当前镜头`:`将${p.name}加入当前镜头`} title={used?'已在当前镜头':'加到当前选中的镜头'} onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onAdd(); }}>{used ? '✓' : '＋'}</button>}
       {fileOver && <div className={'drop-hint' + (dragged.kind === 'video' || (dragged.kind === 'audio' && p.type === 'prop') ? ' warn' : '')}>{hint}</div>}
     </div>
   );
@@ -104,7 +104,7 @@ function ChooseFiles({kind, exclude, title, onPick, onFiles, onClose}) {
 
 const LIB_TABS = [['character', '人物'], ['location', '场景'], ['prop', '道具'], ['image', '图片'], ['video', '动作'], ['audio', '声音'], ['inbox', '待整理']];
 
-export function AssetLibrary({onPick, selectedShot, compact}) {
+export function AssetLibrary({onPick, selectedShot, compact,collapsed=false,onToggle}) {
   const {state, dispatch, db} = useStore();
   const [tab,setTab]=useState('character'),[q,setQ]=useState(''),[wide,setWide]=useState(false),[zoom,setZoom]=useState(null),[newProfileType,setNewProfileType]=useState(null);
   const uploadInput=useRef();
@@ -117,9 +117,9 @@ export function AssetLibrary({onPick, selectedShot, compact}) {
   const usedA=new Set(selectedShot?[...selectedShot.refs,selectedShot.start,selectedShot.end,...profileFiles].filter(Boolean):[]);
   const isProfileTab = ['character', 'location', 'prop'].includes(tab);
   return (
-    <aside className={'library' + (wide ? ' wide' : '') + (compact ? ' compact' : '')}>
-      <div className="lib-head"><b>素材库</b><small>{state.profiles.length} 个档案 · {state.assets.length} 个文件</small>
-        <button className="small ghost" onClick={() => setWide(!wide)}>{wide ? '收起' : '展开'}</button></div>
+    <aside className={'library' + (wide ? ' wide' : '') + (compact ? ' compact' : '')+(collapsed?' collapsed':'')} aria-label="素材库">
+      <div className="lib-head">{!collapsed&&<><b>素材库</b><small>{state.profiles.length} 个档案 · {state.assets.length} 个文件</small></>}
+        {onToggle?<button className="small ghost library-toggle" aria-label={collapsed?'展开素材库':'收起素材库'} aria-expanded={!collapsed} onClick={onToggle} title={collapsed?'展开素材库':'收起素材库'}>{collapsed?'›':'‹'}</button>:<button className="small ghost" onClick={() => setWide(!wide)}>{wide ? '收起' : '展开'}</button>}</div>
       <div className="row tight"><button className="small" onClick={()=>uploadInput.current.click()} disabled={state.busy}>＋ 上传素材</button><input ref={uploadInput} type="file" hidden multiple accept="image/*,video/*,audio/*" onChange={event=>{dispatch({type:'uploadFiles',files:[...event.target.files]});event.target.value='';}}/></div>
       <input className="lib-search" aria-label="搜索档案和文件" placeholder="搜索档案、文件…" value={q} onChange={e => setQ(e.target.value)} />
       <div className="lib-tabs">{LIB_TABS.map(([k, l], i) => (
@@ -370,7 +370,7 @@ function Progress({v}) {
   if(!v||!Number.isFinite(v.progress)||!['generating','running','queued'].includes(v.status))return null;
   return <div className="progress"><i style={{width: `${Math.round(v.progress * 100)}%`}} /></div>;
 }
-export function ShotThumb({shot}){const v=chosenVersion(shot);return v?<StoryboardAssetImage asset={v.asset||v} className="sthumb"/>:<div className="sthumb empty"><span>{shot.title}</span></div>;}
+export function ShotThumb({shot}){const v=chosenVersion(shot);return v?<StoryboardAssetImage asset={v.asset||v} className="sthumb"/>:<div className="sthumb empty" role="img" aria-label="尚未生成镜头预览"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m9 14 3-3 5 5M7 8h.01"/></svg></div>;}
 
 export function WhoChips({shot, small}) {
   const {db} = useStore();
@@ -409,7 +409,7 @@ export function ShotCard({shot, index, selected, onOpen}) {
         <Progress v={latest} />
       </div>
       <div className="card-body">
-        <div className="card-title">{shot.title}</div>
+        <div className="card-title" title={shot.title}>{shot.title}</div>
         <div className="card-meta"><ModeChip info={info} /><span className="q">{QUALITY_LABEL[shot.quality]}</span>
           {info.warnings.length > 0 && <span className="warnbadge" title={info.warnings.join('\n')}>!</span>}</div>
         <WhoChips shot={shot} small />
