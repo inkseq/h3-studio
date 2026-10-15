@@ -143,6 +143,7 @@ class WorkerRunner:
         self._drain = threading.Event()
 
     def _telemetry_context(self, job, lease):
+        from .generation_diagnostics import failure_log_context
         compiled = job.get("request", {})
         request, output = compiled.get("request", {}), compiled.get("output_spec", {})
         context = dict(self.telemetry_context)
@@ -161,7 +162,17 @@ class WorkerRunner:
             for name, plural in (("image_refs", "images"), ("video_refs", "videos"), ("audio_refs", "audios")):
                 if type(inputs.get(plural)) is list:
                     context[name] = len(inputs[plural])
+        context.update(failure_log_context(job))
         return context
+
+    def _fail(self, job, lease, error_code, *, actual_cost_microusd, upstream_stopped=False):
+        try:
+            context = self._telemetry_context(job, lease)
+        except Exception:
+            context = None  # Optional observation never prevents original failure/settlement.
+        result = self.queue.fail(lease, error_code, actual_cost_microusd=actual_cost_microusd,
+            upstream_stopped=upstream_stopped, failure_context=context)
+        return self._summary(result)
 
     def _stage_start(self, name, job, lease, *, started_at=None):
         try:
@@ -347,8 +358,8 @@ class WorkerRunner:
                 return self._summary(self.queue.defer_unsubmitted(lease, error_code="worker_backend_not_authorized"))
             if purpose == "generate":
                 if not self._submission_allowed(job):
-                    return self._summary(self.queue.fail(lease, "execution_policy_unavailable_before_submission",
-                        actual_cost_microusd=0, upstream_stopped=True))
+                    return self._fail(job, lease, "execution_policy_unavailable_before_submission",
+                        actual_cost_microusd=0, upstream_stopped=True)
                 try:
                     delivery_spec(job)  # Reject unknown/malformed export policy before any engine preparation.
                     with self._stage("input_transfer", job, lease):
@@ -358,8 +369,8 @@ class WorkerRunner:
                     # evidence stays untouched; do not grow attempts forever
                     # against an operator-managed cache with no automatic GC.
                     if self.backend.kind == "cpu-render":
-                        return self._summary(self.queue.fail(lease, "render_cache_capacity_exhausted",
-                            actual_cost_microusd=0, upstream_stopped=True))
+                        return self._fail(job, lease, "render_cache_capacity_exhausted",
+                            actual_cost_microusd=0, upstream_stopped=True)
                     return self._summary(self.queue.defer_unsubmitted(lease, retry_after_s=30,
                         error_code="worker_preparation_not_ready"))
                 except (BackendError, OSError, ValueError):
@@ -369,15 +380,15 @@ class WorkerRunner:
                 if self._drain.is_set():
                     return self._summary(self.queue.defer_unsubmitted(lease, error_code="worker_draining"))
                 if not self._submission_allowed(job):
-                    return self._summary(self.queue.fail(lease, "execution_policy_unavailable_before_submission",
-                        actual_cost_microusd=0, upstream_stopped=True))
+                    return self._fail(job, lease, "execution_policy_unavailable_before_submission",
+                        actual_cost_microusd=0, upstream_stopped=True)
                 submitting = self.queue.begin_submission(lease)
                 self._generation_start(job, lease, submitting["updated_at"])
                 try:
                     task_id = self.backend.submit(prepared, tag)
                 except SubmissionRejected:
                     self._generation_finish(lease, "failure", error_code="submission_rejected")
-                    return self._summary(self.queue.fail(lease, "submission_rejected", actual_cost_microusd=0, upstream_stopped=True))
+                    return self._fail(job, lease, "submission_rejected", actual_cost_microusd=0, upstream_stopped=True)
                 except Exception:
                     self._generation_note("submission_response_unknown")
                     return self._summary(self.queue.mark_submission_unknown(lease))
@@ -416,8 +427,8 @@ class WorkerRunner:
                 # into public/durable error fields. It cannot authorize retry.
                 code = (safe_failure_code(getattr(outcome, "error_code", None))
                     if self.backend.kind == "wangp-worker" and outcome.state == "failed" else None)
-                return self._summary(self.queue.fail(lease, code or "upstream_generation_failed",
-                    actual_cost_microusd=cost, upstream_stopped=True))
+                return self._fail(job, lease, code or "upstream_generation_failed",
+                    actual_cost_microusd=cost, upstream_stopped=True)
             if outcome.state == "unknown":
                 self._generation_note("upstream_status_unknown")
             return self._summary(self.queue.release(lease, retry_after_s=self.retry_after_s,

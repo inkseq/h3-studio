@@ -14,7 +14,10 @@ from studio_platform.inference.protocol import BackendError
 from studio_platform.inference.wangp_contract import EngineManifest, InputDescriptor, canonical_json
 from studio_platform.inference.wangp_profile_compiler import (
     H3ProfileCompiler, compile_settings, control_schema, normalize_request, validate_prepared)
-from studio_platform.runtime_catalog import PROFILE_IDS, engine_manifest, get_profile, runtime_config
+from studio_platform.runtime_catalog import PROFILE_IDS as ALL_PROFILE_IDS, engine_manifest, get_profile, runtime_config
+# These fixtures assert the retained v1 compiler bytes and semantics. New v2
+# profiles are covered by test_platform_full_controls and the native v2 compiler.
+PROFILE_IDS = tuple(p for p in ALL_PROFILE_IDS if get_profile(p).get("compiler_epoch") != "full-controls-v2")
 from studio_platform.runtime_hosts.wangp_http import StagedInputs
 from studio_platform.runtime_hosts.wangp_launcher import resolve_inputs
 from studio_platform.runtime_hosts.wangp_session import _check_config, _audit_profile_runtime, PinnedWanGPSession

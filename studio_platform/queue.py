@@ -392,7 +392,7 @@ class TaskQueue:
             repo._emit(connection, "job.succeeded", lease.job_id, {"job_id": lease.job_id, "artifact_ids": artifact_ids})
             return repo._job(connection, lease.job_id)
 
-    def fail(self, lease, error_code, *, actual_cost_microusd, upstream_stopped=False):
+    def fail(self, lease, error_code, *, actual_cost_microusd, upstream_stopped=False, failure_context=None):
         identifier(error_code)
         cost = None if actual_cost_microusd is None else money(actual_cost_microusd)
         repo = self.repository
@@ -412,7 +412,8 @@ class TaskQueue:
                 lease_expires_at=None, updated_at=repo.clock()))
             connection.execute(update(attempts).where(attempts.c.id == lease.attempt_id).values(status="failed",
                 error_code=error_code, upstream_stopped=1, actual_cost_microusd=cost, updated_at=repo.clock()))
-            repo._emit(connection, "job.failed", lease.job_id, {"job_id": lease.job_id})
+            repo._emit(connection, "job.failed", lease.job_id,
+                {"job_id": lease.job_id, "failure_context": failure_context})
             return repo._job(connection, lease.job_id)
 
     def confirm_cancel(self, lease, *, upstream_stopped=False, actual_cost_microusd=None):

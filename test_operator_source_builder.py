@@ -23,6 +23,10 @@ EXPECTED_PROFILE_GPU_COUNTS = {
     'h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2': 1,
     'h3-pruned-rank8-int8-sdpa-p4-29gib-fl-r2-v5': 1,
     'h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-fl-r2-v3': 1,
+    'h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6': 1,
+    'h3-pruned-rank8-int8-pro6000-sdpa-p4-controls-v2': 1,
+    'h3-unpruned33b-int8-sdpa-p3-controls-v2': 2,
+    'h3-unpruned33b-bf16-sdpa-p3-controls-v3': 2,
 }
 EXPECTED_PROFILE_MODES = {profile: ('fl', 'ref') for profile in EXPECTED_PROFILE_GPU_COUNTS}
 EXPECTED_PROFILE_MODES['h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2'] = ('fl',)
@@ -39,7 +43,7 @@ class OperatorSourceBuilderTests(unittest.TestCase):
             # subprocess, or GPU probe even when creating the full matrix.
             with patch('subprocess.run', side_effect=AssertionError('no subprocess')):
                 receipt = subject.build(output)
-            self.assertEqual(len(receipt['sources']), 21)
+            self.assertEqual(len(receipt['sources']), 33)
             self.assertFalse(receipt['production_adapter_verified'])
             self.assertEqual(json.loads((output/'index.json').read_text()), receipt)
             seen, archives, slots = set(), set(), {}

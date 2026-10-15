@@ -21,9 +21,23 @@ PROFILE_IDS = (
     "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2",
     "h3-pruned-rank8-int8-sdpa-p4-29gib-fl-r2-v5",
     "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-fl-r2-v3",
+    "h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6",
+    "h3-pruned-rank8-int8-pro6000-sdpa-p4-controls-v2",
+    "h3-unpruned33b-int8-sdpa-p3-controls-v2",
+    "h3-unpruned33b-bf16-sdpa-p3-controls-v3",
 )
 PROFILE_DIRECTORY = Path(__file__).resolve().parents[1] / "deploy" / "wangp" / "profiles"
 COMPILER_ID = "sixnine-h3-native-profile-v1"
+FULL_COMPILER_ID = "sixnine-h3-native-profile-v2"
+
+
+def compiler_id(profile):
+    epoch = profile.get("compiler_epoch", "native-profile-v1")
+    if epoch == "native-profile-v1":
+        return COMPILER_ID
+    if epoch == "full-controls-v2":
+        return FULL_COMPILER_ID
+    raise ValueError("wangp_profile_compiler_epoch_unsupported")
 
 
 def get_profile(profile_id):
@@ -114,7 +128,7 @@ def engine_manifest(profile_id, mode):
     document = {
         "protocol_version": PROTOCOL_VERSION, "engine": "wangp",
         "source_repository": "https://github.com/deepbeepmeep/Wan2GP",
-        "source_revision": profile["source_revision"], "compiler_id": COMPILER_ID,
+        "source_revision": profile["source_revision"], "compiler_id": compiler_id(profile),
         "profile_id": profile_id, "deployment_profile_id": profile_id,
         "mode": mode, "model_id": profile["model_id"],
         "generation_recipe_id": model["generation_recipe_id"],

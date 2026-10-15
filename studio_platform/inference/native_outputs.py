@@ -31,7 +31,7 @@ def native_delivery_spec(compiled, policy=NATIVE_DELIVERY):
             or type(output.get("frames")) is not int):
         raise ValueError("invalid_native_delivery_spec")
     if compiled.get('deployment_profile_id'):
-        from .wangp_profile_compiler import normalize_request
+        from .wangp_profile_dispatch import normalize_request
         normalize_request(request, {k:v['metadata'] for k,v in compiled['assets'].items()}, output,
             compiled['deployment_profile_id'])
     elif compiled["recipe_id"] == "h3-base-ref2va-v1":

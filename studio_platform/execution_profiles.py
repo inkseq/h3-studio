@@ -71,8 +71,8 @@ def default_profile_id(settings, profiles=None):
 
 def public_profiles(settings):
     from .runtime_catalog import public_catalog
-    from .inference.wangp_profile_compiler import control_schema
-    from .h3_profile_support import limits as supported_limits, INPUT_SUPPORT, ADAPTER_GAPS, envelope
+    from .inference.wangp_profile_dispatch import control_schema
+    from .h3_profile_support import limits as supported_limits, input_support, adapter_gaps, envelope, full_controls
     import time
     profiles = public_catalog()["profiles"]
     try:
@@ -86,7 +86,7 @@ def public_profiles(settings):
             mode, recipe = model["mode"], model["generation_recipe_id"]
             policy = policies.get((profile["id"], recipe))
             constraints = copy.deepcopy(policy['envelope']) if policy else tested_envelope(profile['id'],mode)
-            limits = supported_limits(mode)
+            limits = supported_limits(mode, profile['id'])
             current = bool(policy and policy["enabled"]
                 and policy["qualification"]["status"] in {"accepted", "runtime_required"}
                 and policy["qualification"]["verified_at"] <= now
@@ -97,13 +97,14 @@ def public_profiles(settings):
                 "reason": "仍需预检实际容量和账户额度" if enabled else "此配置尚未接入当前执行池",
                 "capacity_checked": False, "controls": control_schema(profile["id"], mode),
                 'constraints':constraints,'limits':limits,
-                'support_basis':'implemented_pinned_model_api','input_support':copy.deepcopy(INPUT_SUPPORT[mode]),
-                'adapter_gaps':list(ADAPTER_GAPS),'supported_constraints':envelope(profile['id'],mode),
+                'support_basis':'implemented_pinned_model_api','input_support':input_support(profile['id'],mode),
+                'adapter_gaps':adapter_gaps(profile['id']),'supported_constraints':envelope(profile['id'],mode),
                 'execution_policy_constraints':copy.deepcopy(policy['envelope']) if policy else None,
                 'custom_canvas_constraints':{'maximum_pixel_area':constraints['max_pixels'],
                     'minimum_aspect_ratio':.4,'maximum_aspect_ratio':2.5},
-                'input_notes':'按模型和适配器支持范围使用；历史实测组合仅供时间参考。'
-                    +'当前适配器分开FL/REF输入；参考视频须24fps原生帧网格且关闭原声，音频2–15秒。实际资源和费用范围仍须预检。',
+                'input_notes':('按原生输入用途与数量限制使用，历史案例不限制新组合。视频原声逐项选择；视频/音频选段2–15秒，时间图片按目标帧注入。'
+                    if full_controls(profile['id']) else '按模型和适配器支持范围使用；当前旧适配器分开FL/REF输入，视频须关闭原声。')
+                    +'实际资源和费用仍须预检；FL视频须明确选择去噪或上下文用途。',
                 'joint_cases_scope':'historical_examples_not_admission_allowlist',
                 'joint_cases':[{'input_roles':c['input_roles'],'width':c['width'],'height':c['height'],
                     'frames':c['frames'],'steps':c['steps']} for c in

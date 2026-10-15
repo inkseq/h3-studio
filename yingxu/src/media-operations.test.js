@@ -15,6 +15,16 @@ function fixture({cloud=false}={}){
 const file=()=>new File(['test-image-bytes'],'local-only.png',{type:'image/png'});
 const uploaded=()=>({type:'image',data:{fileId:'new-file',fileName:'new.png',mime:'image/png',bytes:16,source:'upload',missingFile:false}});
 const entity=(h,id)=>h.store.getState().project.entities.find(e=>e.id===id);
+test('audio guide upload binds its own audio without requesting a nonexistent original video track',async()=>{
+ const h=fixture();await uploadFreestyleFiles({store:h.store,shotId:h.shot,files:[new File(['audio'],'source.wav',{type:'audio/wav'})],guide:true,maximum:1,upload:async()=>({type:'audio',data:{fileId:'audio-file',mime:'audio/wav',bytes:5}})});
+ const guide=entity(h,h.shot).data.h3.guides[0];assert.equal(guide.use_audio,false);assert.equal(h.store.getState().project.entities.find(item=>item.id===guide.media_id).type,'audio');
+});
+test('late guided upload cannot join a changed deployment profile even when FL/REF and recipe stay unchanged',async()=>{
+ const h=fixture(),wait=deferred();h.store.updateEntity(h.shot,{data:{h3:{recipeId:'fl',deploymentProfileId:'old'}}});
+ const pending=uploadFreestyleFiles({store:h.store,shotId:h.shot,files:[file()],kind:'image',role:'firstFrame',maximum:1,upload:()=>wait.promise}),rejected=assert.rejects(pending,/方式已改变/);
+ h.store.updateEntity(h.shot,{data:{h3:{recipeId:'fl',deploymentProfileId:'new'}}});wait.resolve(uploaded());await rejected;
+ assert.equal(h.store.getState().project.links.some(link=>link.target===h.shot&&link.role==='firstFrame'),false);assert.equal(entity(h,h.shot).data.h3.deploymentProfileId,'new');
+});
 
 test('workspace visits invalidate pending work across same-ID import and cloud return, never ordinary edits',()=>{
  const h=fixture(),ctx=captureWorkspace(h.store),original=h.store.exportProject();h.store.updateEntity(h.image,{description:'new description'});assert.doesNotThrow(()=>assertWorkspace(h.store,ctx));

@@ -1,6 +1,6 @@
 /* Layout A projection of the existing v4 document. No second project store. */
 import {children,ancestors} from './store.js';
-import {effectiveLimits,effectiveControlSchema} from './quick-chat-model.js';
+import {effectiveLimits,effectiveControlSchema,roleSupported} from './quick-chat-model.js';
 const uid=kind=>kind+'-'+crypto.randomUUID();
 const find=(p,id)=>p.entities.find(e=>e.id===id);
 const mode=shot=>shot.data.storyboard?.mode||shot.data.h3?.inputMode||'fl';
@@ -44,8 +44,8 @@ export function expandStoryboard(shot,state,{forSync=false}={}){
   const parts=[],items=[],notes=[],warnings=[],inputMode=shot.mode.toLowerCase();
   const chosen=storyboardProfile(state.capabilities,shot.quality,inputMode,shot.entity?.data.h3?.deploymentProfileId),support=chosen?.generation_support?.[inputMode];
   const constraints=support?.execution_policy_constraints||support?.constraints||support?.execution_support?.constraints||{};
-  const advertised=support?{...support,execution_support:{...support,constraints}}:null;
-  const schema=effectiveControlSchema(advertised),limits=support?effectiveLimits(advertised):null;
+  const advertised=support?{...support,mode:inputMode,execution_support:{...support,constraints}}:null;
+  const schema=effectiveControlSchema(advertised),limits=support?effectiveLimits(advertised):null,nativeRoles=support?.limits?.input_count_semantics==='native_roles_v2';
   if(!support)warnings.push('当前模型能力尚未读取，请刷新服务能力。');
   if(state.project.style.trim())parts.push({label:'全片风格',text:state.project.style.trim()});
   const place=profile(shot.place?.id),pv=variant(place,shot.place?.variant);
@@ -60,6 +60,14 @@ export function expandStoryboard(shot,state,{forSync=false}={}){
     if(!id)return;const a=asset(id),expected=['开头画面','结尾画面','图片'].includes(kind)?'image':kind==='视频'?'video':'audio';
     let reason=!a?'参考素材不存在，请重新选择':a.kind!==expected?'素材类型不符合这个输入位置':!a.fileId||a.entity?.data.missingFile?'素材文件缺失，请补传':!forSync&&!a.entity?.data.cloudAssetId?'素材尚未同步为可用的云端输入':'';
     items.push({a:a||{id,name:'已失效参考'},kind,why,sent:!reason,reason,clipStart:start});
+  };
+  const addFrames=()=>{
+    if(shot.continuePrev){
+      const previous=state.shots[state.shots.findIndex(s=>s.id===shot.id)-1],selected=previous?.versions.find(v=>v.id===previous.chosen),frame=asset(shot.previousFrame),binding=shot.entity?.data.storyboard?.previousFrame,selection=frame?.entity?.data.sourceSelection;
+      const currentFrame=frame&&selected&&binding?.shotId===previous.id&&binding.selectedAssetId===previous.chosen&&selection?.kind==='artifact_frame'&&selection.position==='last'&&selection.artifact_id===selected.artifactId;
+      if(!selected)warnings.push('请先选定上一镜的成片版本。');
+      if(currentFrame)add(frame.id,'开头画面','接上一镜');else items.push({a:{name:'上一镜选定版本的最后一帧'},kind:'开头画面',why:'接上一镜',sent:false,reason:!selected?'上一镜尚未选定版本':'预检前从上一镜当前选定版本提取最后一帧'});
+    }else add(shot.start,'开头画面','首帧');add(shot.end,'结尾画面','尾帧');
   };
   if(shot.mode==='REF'){
     // Same ordering as the saved-draft compiler: each character's main image
@@ -78,19 +86,17 @@ export function expandStoryboard(shot,state,{forSync=false}={}){
       else if(duration&&Number.isFinite(maximumSeconds)&&durations[item.kind]+duration>maximumSeconds+.01)item.reason='当前能力总参考时长上限；按优先级未发送';
       item.sent=!item.reason;if(!item.sent)continue;seen.add(identity);counts[item.kind]++;sent++;if(duration)durations[item.kind]+=duration;
     }
-    if(!items.some(i=>i.sent))warnings.push('全能参考至少需要一份可用参考。');
-    if(shot.start||shot.end||shot.continuePrev)notes.push('首尾帧设置保留，在全能参考中不发送。');
+    if(roleSupported(advertised,'first_frame','image')||roleSupported(advertised,'last_frame','image'))addFrames();else if(shot.start||shot.end||shot.continuePrev)notes.push('首尾帧设置保留，此旧配方的全能参考中不发送。');
   }else{
-    if(shot.continuePrev){
-      const previous=state.shots[state.shots.findIndex(s=>s.id===shot.id)-1],selected=previous?.versions.find(v=>v.id===previous.chosen),frame=asset(shot.previousFrame),binding=shot.entity?.data.storyboard?.previousFrame,selection=frame?.entity?.data.sourceSelection;
-      const currentFrame=frame&&selected&&binding?.shotId===previous.id&&binding.selectedAssetId===previous.chosen&&selection?.kind==='artifact_frame'&&selection.position==='last'&&selection.artifact_id===selected.artifactId;
-      if(!selected)warnings.push('请先选定上一镜的成片版本。');
-      if(currentFrame)add(frame.id,'开头画面','接上一镜');else items.push({a:{name:'上一镜选定版本的最后一帧'},kind:'开头画面',why:'接上一镜',sent:false,reason:!selected?'上一镜尚未选定版本':'预检前从上一镜当前选定版本提取最后一帧'});
-    }else add(shot.start,'开头画面','首帧');add(shot.end,'结尾画面','尾帧');
-    if(shot.refs.length)notes.push('附加参考保留，切回全能参考时使用。');if(cast.length||place||shot.props.length)notes.push('人物、场景和道具在首尾帧模式中使用文字描述。');
+    addFrames();
+    if(nativeRoles){for(const id of shot.refs){const a=asset(id),slot={image:'images',video:'videos',audio:'audios'}[a?.kind],range=shot.entity?.data.storyboard?.extraRefs?.find(ref=>ref.entityId===id);if(a&&roleSupported(advertised,slot,a.kind)){add(id,kinds[a.kind],'附加控制素材',a.kind!=='image'?range?.clipStart??0:undefined);if(a.kind==='video'&&['denoise','in_context'].includes(shot.entity?.data.h3?.controls?.video_conditioning))items.at(-1).clipDuration=shot.entity?.data.h3?.controls?.duration||shot.duration;}else if(a)items.push({a,kind:kinds[a.kind],why:'附加素材',sent:false,reason:'当前FL配方不接收普通参考图片；需要时请设为时间锚点或改用REF。'});}}else if(shot.refs.length)notes.push('附加参考保留，切回全能参考时使用。');if(cast.length||place||shot.props.length)notes.push('人物、场景和道具在首尾帧模式中使用文字描述。');
   }
+  if(nativeRoles){
+    const guides=shot.entity?.data.h3?.guides||[];for(const guide of guides){const a=asset(guide.media_id),before=items.length;add(guide.media_id,kinds[a?.kind]||'图片','时间锚点');if(items.length>before){const item=items.at(-1);Object.assign(item,{slot:'guides',time_seconds:guide.time_seconds,use_audio:a?.kind==='video'&&guide.use_audio===true,...(guide.source_range?{source_range:guide.source_range}:{})});if(!limits||Number.isInteger(limits.max_guides)&&guides.length>limits.max_guides){item.sent=false;item.reason='当前能力的时间锚点数量上限';warnings.push(item.reason);}}}
+  }
+  if(shot.mode==='REF'&&!items.some(i=>i.sent))warnings.push('全能参考至少需要一份可用参考。');
   const known=value=>Number.isFinite(value)?value:'—';
-  return {mode:shot.mode,kind:shot.mode==='REF'?'全能参考':shot.continuePrev?'接上一镜':shot.start&&shot.end?'首尾帧':shot.start?'首帧生成':shot.end?'尾帧生成':'文字生成',machine:chosen?.label||'未选择模型',sec:shot.duration,res:shot.entity?.data.h3?.controls?.resolution||schema.resolution?.default||'待确认',parts,items,warnings,notes,durationRange:{minimum:schema.duration?.minimum,maximum:schema.duration?.maximum,step:schema.duration?.multipleOf||1},limitsLabel:limits?`图片 ${known(limits.max_images)} · 视频 ${known(limits.max_videos)} · 声音 ${known(limits.max_audios)} · 总计 ${known(limits.max_total_files)}`:'能力尚未读取'};
+  return {mode:shot.mode,frameInputs:inputMode==='fl'||support?.input_support?.first_frame===true||support?.input_support?.last_frame===true,controlInputs:inputMode==='fl'&&(support?.input_support?.video_conditioning===true||support?.input_support?.kept_soundtrack===true),kind:shot.mode==='REF'?'全能参考':shot.continuePrev?'接上一镜':shot.start&&shot.end?'首尾帧':shot.start?'首帧生成':shot.end?'尾帧生成':'文字生成',machine:chosen?.label||'未选择模型',sec:shot.duration,res:shot.entity?.data.h3?.controls?.resolution||schema.resolution?.default||'待确认',parts,items,warnings,notes,durationRange:{minimum:schema.duration?.minimum,maximum:schema.duration?.maximum,step:schema.duration?.multipleOf||1},limitsLabel:limits?`图片 ${known(limits.max_images)} · 视频 ${known(limits.max_videos)} · 声音 ${known(limits.max_audios)} · 总计 ${known(limits.max_total_files)}`:'能力尚未读取'};
 }
 export function storyboardDrop(shot,item,slot,state){
   if(item.profile){const p=item.profile,v=p.variants.find(v=>v.id===p.def)||p.variants[0];if(['start','end'].includes(slot)&&p.type!=='character'){if(!v?.images[0])return {patch:null,msg:'档案还没有主图。'};return {patch:{[slot]:v.images[0],...(slot==='start'?{continuePrev:false}:{})},msg:'已使用档案主图。'};}
@@ -101,7 +107,8 @@ export function storyboardDrop(shot,item,slot,state){
   const a=item.asset;if(!a)return {patch:null,msg:'素材不存在。'};
   if(['start','end'].includes(slot)){if(a.kind!=='image')return {patch:null,msg:'首尾帧需要图片。'};return {patch:{[slot]:a.id,...(slot==='start'?{continuePrev:false}:{})},msg:'已设置'+(slot==='start'?'首帧':'尾帧')+'。'};}
   if(slot!=='refs'&&shot.mode==='FL'&&a.kind==='image')return {patch:{[!shot.start&&!shot.continuePrev?'start':'end']:a.id},msg:'已设置画面。',hint:'松开：设置画面'};
-  return {patch:{refs:[...new Set([...shot.refs,a.id])]},msg:shot.mode==='FL'?'参考已保存，切到全能参考时发送。':'已加入附加参考。',hint:'松开：加入参考'};
+  const selected=storyboardProfile(state.capabilities,shot.quality,shot.mode.toLowerCase(),shot.entity?.data.h3?.deploymentProfileId),supported=roleSupported({mode:shot.mode.toLowerCase(),input_support:selected?.generation_support?.[shot.mode.toLowerCase()]?.input_support},{image:'images',video:'videos',audio:'audios'}[a.kind],a.kind);
+  return {patch:{refs:[...new Set([...shot.refs,a.id])]},msg:shot.mode==='FL'&&!supported?'参考已保存，切到全能参考时发送。':'已加入附加参考，控制方式由预检核对。',hint:'松开：加入参考'};
 }
 export function storyboardSnapshot(project,shotId){const shot=find(project,shotId),chap=ancestors(project,shotId).find(e=>e.type==='chapter'),shots=chap?chapterShots(project,chap.id):[],at=shots.findIndex(s=>s.id===shotId);return {shot,style:project.journey?.storyboard?.style||'',profiles:project.entities.filter(e=>['character','location','prop'].includes(e.type)),assets:project.entities.filter(e=>['image','video','audio'].includes(e.type)),previous:shot?.data.storyboard?.continuePrevious?shots[at-1]?.data.selectedAssetId:null};}
 export function patchStoryboardShot(project,id,patch){const shot=find(project,id);if(!shot)throw Error('镜头不存在。');const b={version:1,mode:mode(shot),quality:'draft',place:null,propIds:[],firstFrameId:'',lastFrameId:'',continuePrevious:false,extraRefs:[],...shot.data.storyboard};

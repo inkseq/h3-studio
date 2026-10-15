@@ -231,7 +231,7 @@ def compile_request(body: dict, resolve_asset, *, backend="comfy-worker"):
         raise ValueError("请输入1至12000字符的单镜提示词")
     controls = copy.deepcopy(body.get("controls", {}))
     if profile is not None:
-        from .inference.wangp_profile_compiler import control_schema as profile_schema
+        from .inference.wangp_profile_dispatch import control_schema as profile_schema
         selected_schema = lambda: profile_schema(profile_id, RECIPES[recipe])
     elif backend == "wangp-worker":
         if RECIPES[recipe] == "ref":
@@ -295,9 +295,10 @@ def compile_request(body: dict, resolve_asset, *, backend="comfy-worker"):
         raise ValueError("时间锚点必须是数组")
     ids = [*inputs["images"], *inputs["videos"], *inputs["audios"],
            *[x for x in (inputs["first_frame"], inputs["last_frame"]) if x]]
-    if len(ids) != len(set(ids)):
+    full_native = profile is not None and profile.get('compiler_epoch')=='full-controls-v2'
+    if len(ids) != len(set(ids)) and not full_native:
         raise ValueError("同一参考素材不能重复添加；时间锚点可复用")
-    if len(ids) > LIMITS["max_total_files"]:
+    if len(ids) > LIMITS["max_total_files"] and not full_native:
         raise ValueError("参考素材总数不能超过12份")
     for guide in controls.get("guides", []):
         if not isinstance(guide, dict) or not isinstance(guide.get("media_id"), str):
@@ -313,7 +314,7 @@ def compile_request(body: dict, resolve_asset, *, backend="comfy-worker"):
         raise ValueError("生成时长须为整数秒，声音开关须为布尔值")
     spec = native_output_spec(request)
     if profile is not None:
-        from .inference.wangp_profile_compiler import normalize_request as normalize_profile
+        from .inference.wangp_profile_dispatch import normalize_request as normalize_profile
         request = normalize_profile(request, metadata, spec, profile_id)
     elif backend == "wangp-worker":
         if RECIPES[recipe] == "ref":

@@ -37,13 +37,14 @@ DEFAULT_SETTINGS = {"recipe_id": "h3-base-fl2va-v1", "controls": {"duration": 5,
 def default_next_settings(settings):
     """New sessions only; changing the default never migrates authored history."""
     from .execution_profiles import default_profile_id
-    from .inference.wangp_profile_compiler import control_schema
+    from .inference.wangp_profile_dispatch import control_schema
     result = copy.deepcopy(DEFAULT_SETTINGS)
     profile_id = default_profile_id(settings)
     if profile_id is not None:
         result["deployment_profile_id"] = profile_id
         result["controls"] = {key: copy.deepcopy(value["default"])
-            for key, value in control_schema(profile_id, "fl").items() if "default" in value}
+            for key, value in control_schema(profile_id, "fl").items()
+            if "default" in value and key not in {'guides','video_audio'}}
     return result
 
 
@@ -232,11 +233,13 @@ class QuickChatService(QuickChatHistoryMixin, QuickChatTitleMixin):
             raise QuickChatError("version_conflict", "内容已被修改；请保留本地草稿并读取当前版本。")
 
     @staticmethod
-    def _effective_bindings(bindings, recipe_id):
+    def _effective_bindings(bindings, recipe_id, deployment_profile_id=None):
         mode = RECIPES[recipe_id]
+        from .h3_profile_support import full_controls
+        native_roles = bool(deployment_profile_id and full_controls(deployment_profile_id))
         values = []
         for binding in bindings:
-            incompatible = ((mode == "fl" and binding["slot"] in {"images", "videos", "audios"})
+            incompatible = not native_roles and ((mode == "fl" and binding["slot"] in {"images", "videos", "audios"})
                 or (mode == "ref" and binding["slot"] in {"first_frame", "last_frame"}))
             enabled = binding["enabled"] and not incompatible
             values.append({**copy.deepcopy(binding), "requested_enabled": binding["enabled"], "enabled": enabled,
@@ -244,9 +247,9 @@ class QuickChatService(QuickChatHistoryMixin, QuickChatTitleMixin):
         return values
 
     @staticmethod
-    def _inputs(bindings, recipe_id=None):
+    def _inputs(bindings, recipe_id=None, deployment_profile_id=None):
         if recipe_id is not None:
-            bindings = QuickChatService._effective_bindings(bindings, recipe_id)
+            bindings = QuickChatService._effective_bindings(bindings, recipe_id, deployment_profile_id)
         result = copy.deepcopy(EMPTY_INPUTS)
         for item in bindings:
             if not item["enabled"]:
@@ -273,7 +276,8 @@ class QuickChatService(QuickChatHistoryMixin, QuickChatTitleMixin):
             **self._history_public(row),
             "title_generation": public_title_state(p),
             "composer_reset": p.get("composer_reset"),
-            "next_settings": p["next_settings"], "input_refs": self._inputs(p["bindings"], p["next_settings"]["recipe_id"]),
+            "next_settings": p["next_settings"], "input_refs": self._inputs(p["bindings"], p["next_settings"]["recipe_id"],
+                p['next_settings'].get('deployment_profile_id')),
             "latest_seq": p["latest_seq"], "web_url": "/quick-chat?session="+row["id"],
             "created_at": row["created_at"], "updated_at": row["updated_at"]}
 
@@ -416,11 +420,12 @@ class QuickChatService(QuickChatHistoryMixin, QuickChatTitleMixin):
                     "purpose": {"image": "reference", "video": "motion", "audio": "audio"}[asset["kind"]],
                     "enabled": False, "asset": asset})
         recipe = session["payload"]["next_settings"]["recipe_id"]
-        effective = self._effective_bindings(bindings, recipe)
+        profile_id = session['payload']['next_settings'].get('deployment_profile_id')
+        effective = self._effective_bindings(bindings, recipe, profile_id)
         for binding, participation in zip(bindings, effective):
             binding.update(effective_enabled=participation["enabled"], inactive_reason=participation["inactive_reason"])
         return {"bindings": bindings, "session_version": session["version"], "active_recipe_id": recipe,
-            "input_refs": self._inputs(session["payload"]["bindings"], recipe)}
+            "input_refs": self._inputs(session["payload"]["bindings"], recipe, profile_id)}
 
     def put_materials(self, principal, session_id, body, key):
         fields(body, {"expected_version", "bindings"}, {"expected_version", "bindings"})
@@ -490,9 +495,11 @@ class QuickChatService(QuickChatHistoryMixin, QuickChatTitleMixin):
         prepare_patch(body, lambda ident: sources[ident])
         inputs = {**copy.deepcopy(EMPTY_INPUTS), **canonical(body["inputs"])}
         # Intent may be incomplete, but mixing ordinary FL/REF references is never silently fixed.
-        if RECIPES[body["recipe_id"]] == "fl" and any(inputs[k] for k in ("images", "videos", "audios")):
+        from .h3_profile_support import full_controls
+        native_roles = bool(body.get('deployment_profile_id') and full_controls(body['deployment_profile_id']))
+        if not native_roles and RECIPES[body["recipe_id"]] == "fl" and any(inputs[k] for k in ("images", "videos", "audios")):
             raise QuickChatError("reference_conflict", "首尾帧方式不能同时使用普通参考。", 422)
-        if RECIPES[body["recipe_id"]] == "ref" and (inputs["first_frame"] or inputs["last_frame"]):
+        if not native_roles and RECIPES[body["recipe_id"]] == "ref" and (inputs["first_frame"] or inputs["last_frame"]):
             raise QuickChatError("reference_conflict", "全能参考方式不能同时指定首尾帧。", 422)
         snapshot = {k: canonical(body[k]) for k in ("prompt", "recipe_id", "controls", "copies")}
         if body.get("deployment_profile_id") is not None:
@@ -503,7 +510,7 @@ class QuickChatService(QuickChatHistoryMixin, QuickChatTitleMixin):
         return snapshot, sources
 
     @staticmethod
-    def _composer_snapshot(bindings, *, inputs=None, recipe_id=None):
+    def _composer_snapshot(bindings, *, inputs=None, recipe_id=None, deployment_profile_id=None):
         """Freeze authoring versions, optionally only inputs of a legacy card.
 
         Legacy requests do not carry a composer origin. A new explicit edit or
@@ -525,7 +532,7 @@ class QuickChatService(QuickChatHistoryMixin, QuickChatTitleMixin):
             if not value["enabled"]:
                 continue
             if wanted is not None:
-                entries = input_entries(QuickChatService._inputs([value], recipe_id))
+                entries = input_entries(QuickChatService._inputs([value], recipe_id, deployment_profile_id))
                 if not entries or not all((slot, comparable(slot, entry)) in wanted for slot, entry, _ in entries):
                     continue
             values.append(value)
@@ -548,7 +555,8 @@ class QuickChatService(QuickChatHistoryMixin, QuickChatTitleMixin):
                 origin = previous["bindings"]
         elif card["payload"].get("turn_id"):
             origin = self._get(conn, principal, card["payload"]["turn_id"], session["id"], "turn")["payload"]["bindings"]
-        composer = self._composer_snapshot(origin, **({"inputs": snapshot["inputs"], "recipe_id": snapshot["recipe_id"]} if legacy else {}))
+        composer = self._composer_snapshot(origin, **({"inputs": snapshot["inputs"], "recipe_id": snapshot["recipe_id"],
+            'deployment_profile_id':snapshot.get('deployment_profile_id')} if legacy else {}))
         project_scope = Scope(self.tenant, principal.owner, "__projects")
         where = (self.repo._scope(documents, project_scope), documents.c.kind == "project",
                  documents.c.document_id == session["payload"]["project_id"])
@@ -692,7 +700,8 @@ class QuickChatService(QuickChatHistoryMixin, QuickChatTitleMixin):
                     "revision_hash": revision["input_hash"], "status": "checking", "items": [{"item_id": i["id"],
                         "index": i["index"], "seed": i["seed"], "plan": None, "error_code": None} for i in revision["items"] if i["id"] in selected],
                     **({"composer_snapshot": self._composer_snapshot(session["payload"]["bindings"],
-                        inputs=revision["inputs"], recipe_id=revision["recipe_id"])} if revision.get("composer_snapshot") is None else {}),
+                        inputs=revision["inputs"], recipe_id=revision["recipe_id"],
+                        deployment_profile_id=revision.get('deployment_profile_id'))} if revision.get("composer_snapshot") is None else {}),
                     "retry_of_execution_id": body.get("retry_of_execution_id"), "expires_at": None}, parent=revision_id)
                 self._remember(conn, principal, namespace, key, body, record["id"])
         if self.hooks is None:
@@ -1122,7 +1131,8 @@ class QuickChatService(QuickChatHistoryMixin, QuickChatTitleMixin):
                 latest_card = conn.execute(select(events.c.resource_id).where(events.c.tenant == self.tenant,
                     events.c.owner == principal.owner, events.c.session_id == session_id,
                     events.c.type.in_(["card.created", "card.revised"])).order_by(events.c.seq.desc()).limit(1)).scalar_one_or_none()
-                active_bindings = self._effective_bindings(session["payload"]["bindings"], session["payload"]["next_settings"]["recipe_id"])
+                active_bindings = self._effective_bindings(session["payload"]["bindings"], session["payload"]["next_settings"]["recipe_id"],
+                    session['payload']['next_settings'].get('deployment_profile_id'))
                 payload = {"text": body["text"], "model_id": model, "assistant_mode": mode,
                     "input_refs": self._inputs(active_bindings), "next_settings": session["payload"]["next_settings"],
                     "bindings": active_bindings, "input_exclusions": [{"binding_id": b["binding_id"], "asset_id": b["asset_id"],

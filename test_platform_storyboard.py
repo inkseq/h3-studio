@@ -126,6 +126,135 @@ class StoryboardPureTests(unittest.TestCase):
         self.assertEqual(draft["deployment_profile_id"], "explicit-profile")
         self.assertIn("当前参考输入范围尚未读取，请刷新生成能力", issues)
 
+    def test_full_native_ref_anchors_survive_without_consuming_ordinary_reference_slots(self):
+        profile='h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6'
+        shot=self.find('shot-one')
+        shot['data']['h3']['deploymentProfileId']=profile
+        shot['data']['storyboard'].update(place=None,propIds=[],extraRefs=[])
+        current=cap(1,1,2)
+        current['deployment_profiles']=[{'id':profile,'generation_support':{'ref':{
+            'limits':copy.deepcopy(current['recipes'][1]['limits'])}}}]
+        before=copy.deepcopy(self.project)
+        draft,issues=read_draft(self.project,'shot-one',capabilities=current)
+        self.assertFalse(issues)
+        self.assertEqual(draft['inputs']['first_frame'],{'asset_id':'receipt-portrait'})
+        self.assertEqual(draft['inputs']['last_frame'],{'asset_id':'receipt-night'})
+        self.assertEqual(draft['inputs']['images'],[{'asset_id':'receipt-portrait'}])
+        self.assertNotIn('首尾帧输入已保留，全能参考模式不发送',draft['storyboard']['notes'])
+        self.assertEqual(self.project,before)
+        # Native REF can use anchors alone. It must not invent another
+        # reference merely to satisfy the old reference-only authoring rule.
+        shot['data']['cast']=[]
+        shot['data']['storyboard'].update(place=None,propIds=[],extraRefs=[])
+        only_anchors,issues=read_draft(self.project,'shot-one',capabilities=current)
+        self.assertFalse(issues)
+        self.assertEqual(only_anchors['inputs']['images'],[])
+        self.assertEqual(only_anchors['inputs']['first_frame'],{'asset_id':'receipt-portrait'})
+
+    def test_full_native_storyboard_preserves_explicit_existing_guide_associations(self):
+        profile='h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6'
+        shot=self.find('shot-one')
+        shot['data']['cast']=[]
+        shot['data']['storyboard'].update(place=None,propIds=[],extraRefs=[{'entityId':'extra'}])
+        shot['data']['h3'].update(deploymentProfileId=profile,guides=[
+            {'media_id':'night','time_seconds':1,'use_audio':False},
+            {'media_id':'night','time_seconds':2,'use_audio':False}])
+        current=cap(1,0,1)
+        current['deployment_profiles']=[{'id':profile,'generation_support':{'ref':{
+            'limits':copy.deepcopy(current['recipes'][1]['limits'])}}}]
+        before=copy.deepcopy(self.project)
+        draft,issues=read_draft(self.project,'shot-one',capabilities=current)
+        self.assertFalse(issues)
+        self.assertEqual(draft['inputs']['guides'],[
+            {'media_id':'receipt-night','time_seconds':1,'use_audio':False},
+            {'media_id':'receipt-night','time_seconds':2,'use_audio':False}])
+        self.assertEqual(len(draft['inputs']['images']),1)
+        self.assertEqual(self.project,before)
+        shot['data']['h3']['deploymentProfileId']='h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-cgroups-v4'
+        current['deployment_profiles'][0]['id']=shot['data']['h3']['deploymentProfileId']
+        legacy,_=read_draft(self.project,'shot-one',capabilities=current)
+        self.assertEqual(legacy['inputs']['guides'],[])
+
+    def test_full_native_fl_control_video_range_matches_requested_duration_before_native_padding(self):
+        from comfy_workflow import native_output_spec
+        from studio_platform.capabilities import compile_request
+        profile='h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6'
+        shot=self.find('shot-one')
+        shot['data']['h3'].update(deploymentProfileId=profile,recipeId='h3-base-fl2va-v1',
+            controls={'duration':5,'resolution':'480P','seed':'42','video_conditioning':'denoise','denoise':.5})
+        shot['data']['storyboard'].update(mode='fl',firstFrameId='',lastFrameId='',
+            extraRefs=[{'entityId':'motion','clipStart':1}])
+        # Native normalization retains 124 frames from a five-second selection;
+        # it does not require selecting 124/24 source seconds or silently use3s.
+        draft,issues=read_draft(self.project,'shot-one',capabilities=cap())
+        self.assertFalse(issues)
+        self.assertEqual(draft['inputs']['videos'],[{'asset_id':'receipt-motion',
+            'source_range':{'start':1,'end':6},'include_audio':False}])
+        calls=[]
+        body=plan_body(self.project,'shot-one',cap(),
+            lambda ident,start,end:calls.append((ident,start,end)) or 'derived-motion')
+        self.assertEqual(calls,[('receipt-motion',1,6)])
+        def asset(_identity):
+            return {'metadata':{'kind':'video','model_ready':True,'width':832,'height':480,
+                'duration':124/24,'frame_count':124,'fps':24,'source_duration':5,'has_audio':False},
+                'model':{'key':'owners/superdan/assets/derived-motion/file','sha256':'a'*64,'size_bytes':4}}
+        compiled,_=compile_request(body,asset,backend='wangp-worker')
+        self.assertEqual(compiled['output_spec']['frames'],124)
+        self.assertEqual(compiled['output_spec'],native_output_spec(compiled['request']))
+        shot['data']['h3']['video_audio']={'motion':True}
+        self.assertTrue(read_draft(self.project,'shot-one',capabilities=cap())[0]['inputs']['videos'][0]['include_audio'])
+        # A deliberately selected guide range is independently authored and is
+        # not rewritten to the control-video length.
+        from studio_platform.generation_draft import configure
+        configure(self.project,{'shot_id':'shot-one','inputs':{'guides':[
+            {'media_id':'receipt-motion','time_seconds':0,'use_audio':False,
+             'source_range':{'start':2,'end':5}}]}},{'receipt-motion':self.find('motion')})
+        self.assertEqual(shot['data']['h3']['guides'][0]['source_range'],
+            {'start':2,'end':5,'fileId':'file-motion'})
+        before=copy.deepcopy(self.project)
+        self.assertEqual(read_draft(self.project,'shot-one',capabilities=cap())[0]['inputs']['guides'][0]['source_range'],
+            {'start':2,'end':5})
+        calls=[]
+        planned=plan_body(self.project,'shot-one',cap(),
+            lambda ident,start,end:calls.append((ident,start,end)) or f'derived-{start}-{end}')
+        self.assertEqual(calls,[('receipt-motion',1,6),('receipt-motion',2,5)])
+        self.assertEqual(planned['inputs']['guides'][0]['media_id'],'derived-2-5')
+        self.assertEqual(self.project,before)
+        self.find('motion')['data']['fileId']='replaced-motion'
+        blocked,issues=read_draft(self.project,'shot-one',capabilities=cap())
+        self.assertTrue(any('原素材文件已改变，请重新确认选段' in issue for issue in issues))
+        self.assertEqual(blocked['inputs']['guides'],[])
+        with self.assertRaisesRegex(ValueError,'原素材文件已改变'):
+            plan_body(self.project,'shot-one',cap(),lambda *_:self.fail('stale input was derived'))
+        self.find('motion')['data']['fileId']='file-motion'
+        for metadata,data_duration in (({'duration':10},None),({},10)):
+            self.find('motion')['data']['metadata']=metadata
+            if data_duration is not None:
+                self.find('motion')['data']['duration']=data_duration
+            self.assertFalse(read_draft(self.project,'shot-one',capabilities=cap())[1])
+        self.find('motion')['data'].pop('duration')
+        self.assertTrue(any('缺少已核验' in issue for issue in
+            read_draft(self.project,'shot-one',capabilities=cap())[1]))
+        self.find('motion')['data']['metadata']['source_duration']=4
+        blocked,issues=read_draft(self.project,'shot-one',capabilities=cap())
+        self.assertTrue(any('控制视频选段超出原素材' in issue for issue in issues))
+        self.assertEqual(blocked['inputs']['videos'],[])
+
+    def test_full_native_reference_limits_block_instead_of_silently_omitting_authored_inputs(self):
+        shot=self.find('shot-one')
+        shot['data']['h3']['deploymentProfileId']='h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6'
+        for current,reason in ((cap(),'数量上限'),(cap(4,2,7),'总时长上限')):
+            current['recipes'][1]['limits']['max_total_audio_duration']=3
+            current['deployment_profiles']=[{'id':shot['data']['h3']['deploymentProfileId'],
+                'generation_support':{'ref':{'limits':copy.deepcopy(current['recipes'][1]['limits'])}}}]
+            draft,issues=read_draft(self.project,'shot-one',capabilities=current)
+            self.assertTrue(any(reason in issue for issue in issues),issues)
+            self.assertTrue(any(not reference['sent'] for reference in draft['storyboard']['references']))
+            with self.assertRaisesRegex(ValueError,reason):
+                plan_body(self.project,'shot-one',current,lambda *_:self.fail('over-limit input was derived'))
+        shot['data']['h3'].pop('deploymentProfileId')
+        self.assertFalse(read_draft(self.project,'shot-one',capabilities=cap())[1])
+
     def test_explicit_cast_and_null_place_override_scene_without_loss_on_opt_in(self):
         shot, scene = self.find("shot-one"), self.find("scene-one")
         scene["data"].update(cast=[{"characterId": "hero", "lookId": "rain"}], locationId="room")

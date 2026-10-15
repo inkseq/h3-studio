@@ -12,6 +12,10 @@ import stat
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXED = (
+    'deploy/wangp/profiles/h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6.json',
+    'deploy/wangp/profiles/h3-pruned-rank8-int8-pro6000-sdpa-p4-controls-v2.json',
+    'deploy/wangp/profiles/h3-unpruned33b-int8-sdpa-p3-controls-v2.json',
+    'deploy/wangp/profiles/h3-unpruned33b-bf16-sdpa-p3-controls-v3.json',
     'platform_app.py', 'comfy_workflow.py', 'comfy-object-info.json',
     'requirements.lock.txt', 'Dockerfile.platform', 'tools/release_contract.py',
     'deploy/platform/compose.yaml', 'deploy/platform/check_config.py',

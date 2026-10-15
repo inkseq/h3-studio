@@ -43,10 +43,10 @@ export const freestyleRoles=(kind,role)=>kind==='image'&&role==='reference'?['re
 export function freestyleInputIds(project,shotId,{kind,role,guide=false}){const shot=project.entities.find(e=>e.id===shotId);return guide?(shot?.data.h3?.guides||[]).map(g=>g.media_id):[...new Set(project.links.filter(l=>l.target===shotId&&freestyleRoles(kind,role).includes(l.role)&&project.entities.some(e=>e.id===l.source&&e.type===kind)).map(l=>l.source))];}
 
 export async function uploadFreestyleFiles({store,shotId,files,kind,role,guide=false,maximum,countAllReferences=false,upload}){
- const context=captureWorkspace(store),shot=find(store,shotId),recipe=shot?.data.h3?.recipeId??null;
+ const context=captureWorkspace(store),shot=find(store,shotId),recipe=shot?.data.h3?.recipeId??null,profile=shot?.data.h3?.deploymentProfileId??null;
  if(!shot||!['shot','generation'].includes(shot.type)||shot.type==='generation'&&shot.data.recipe!=='video')throw Error('请先打开要添加参考的视频镜头。');
  const draftMode=shot.data.h3?.inputMode??null;
- const unchanged=()=>{const live=find(store,shotId);return !!live&&live.type===shot.type&&(live.data.h3?.recipeId??null)===recipe&&(live.data.h3?.inputMode??null)===draftMode;};
+ const unchanged=()=>{const live=find(store,shotId);return !!live&&live.type===shot.type&&(live.data.h3?.recipeId??null)===recipe&&(live.data.h3?.inputMode??null)===draftMode&&(live.data.h3?.deploymentProfileId??null)===profile;};
  const check=count=>{assertWorkspace(store,context);if(!unchanged())throw Error('镜头或生成方式已改变；没有把迟到的素材接入新设置。');const used=countAllReferences?effectiveReferenceCount(store.getState().project,shotId,kind):freestyleInputIds(store.getState().project,shotId,{kind,role,guide}).length;if(!Number.isInteger(maximum)||maximum<1||used+count>maximum)throw Error(`此区域最多 ${maximum} 份${countAllReferences?'（含人物与地点继承参考）':''}，请先移除一份关联再替换。原文件会保留。`);};
  check(files.length);
  for(const file of files){
@@ -56,7 +56,7 @@ export async function uploadFreestyleFiles({store,shotId,files,kind,role,guide=f
    const live=p.entities.find(e=>e.id===shotId);
    p.entities.push({id,type:result.type,title:file.name.slice(0,160),description:'',parentId:null,order:Math.max(-1,...p.entities.filter(e=>e.parentId===null).map(e=>e.order))+1,version:1,status:'draft',data:result.data});
    p.layout.positions[id]=resolveCanvasPositions(p.entities,p.layout.positions)[id];
-   if(guide)live.data.h3={...live.data.h3,guides:[...(live.data.h3?.guides||[]),{media_id:id,time_seconds:0,use_audio:result.type==='audio'}]};
+   if(guide)live.data.h3={...live.data.h3,guides:[...(live.data.h3?.guides||[]),{media_id:id,time_seconds:0,use_audio:false}]};
    else{const checked=validateLink(p,id,shotId,role);if(!checked.ok)throw Error(checked.error);p.links.push({id:`link-${crypto.randomUUID()}`,source:id,target:shotId,role});}
    live.version++;live.status='review';
   }));

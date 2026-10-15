@@ -2,7 +2,7 @@ import {boundVideoRange,videoBinding} from './video-cut-model.js';
 import {createCloudClient,safeCloudPath} from './cloud-client.js';
 import {store as defaultStore} from './store.js';
 import {getFile,setCloudMediaHandlers} from './media.js';
-import {executionPresetControls,selectedRecipe,blankCloudProject,freestyleProject,copyForCloud,checkedProjectRecord,referenceSpecs,shotSnapshot,stableJSON,digest,buildPlanPayload,mergeJobCandidate,activeJobStatuses} from './cloud-model.js';
+import {executionPresetControls,selectedRecipe,selectedProfileRecipe,blankCloudProject,freestyleProject,copyForCloud,checkedProjectRecord,referenceSpecs,shotSnapshot,stableJSON,digest,buildPlanPayload,mergeJobCandidate,activeJobStatuses} from './cloud-model.js';
 import {roughCutSnapshot,roughCutJobs} from './roughcut-model.js';
 import {burnCaptionStatus} from './caption-model.js';
 import {requireModeAvailable} from './generation-availability.js';
@@ -116,7 +116,7 @@ export function createCloudController({store=defaultStore,client,storage=globalT
     await reloadCapabilities();guard(ctx);let shot=current().project.entities.find(e=>e.id===shotId);if(!shot)throw Error('镜头不存在。');
     const b=shot.data.storyboard;if(!b)throw Error('请先保存分镜配置。');const selected=storyboardProfile(state.capabilities,b.quality,b.mode,shot.data.h3?.deploymentProfileId);if(!selected||selected.generation_support?.[b.mode]?.enabled!==true||(b.quality==='final'?selected.model_id!=='MiniMax-H3-Base-INT8':selected.model_id!=='MiniMax-H3-Pruned-Rank8-INT8'))throw Error('所选模型与草稿/精修配置不一致或尚不可用；未使用另一模型替代。');
     if(state.jobs.some(j=>j.client_ref?.shot_id===shotId&&activeJobStatuses.has(j.status)))throw Error('这一镜已有任务排队或执行，请查看原任务。');
-    if(b.continuePrevious&&b.mode==='fl'&&!sourceJobId){
+    if(b.continuePrevious&&(b.mode==='fl'||selected.generation_support?.[b.mode]?.input_support?.first_frame===true)&&!sourceJobId){
       const chapter=current().project.entities.find(e=>e.type==='chapter'&&chapterShots(current().project,e.id).some(s=>s.id===shotId)),shots=chapter?chapterShots(current().project,chapter.id):[],previous=shots[shots.findIndex(s=>s.id===shotId)-1],chosen=current().project.entities.find(e=>e.id===previous?.data.selectedAssetId);
       if(!previous||!chosen?.data.cloudArtifactId||chosen.type!=='video')throw Error('请先选定上一镜的真实成片；不会使用未选定候选。');
       if(b.previousFrame?.selectedAssetId!==chosen.id||!current().project.entities.some(e=>e.id===b.previousFrame?.frameAssetId)){
@@ -151,7 +151,7 @@ export function createCloudController({store=defaultStore,client,storage=globalT
   }
   async function prepare(shotId){requireCloud();assertNotHeld('shot_id',shotId);if(readPending()[shotId]||readBatchPending()?.shotIds.includes(shotId))throw Error('这个镜头有未确认的提交。先刷新任务或用原标识核对提交，不能创建新计划绕过。');const ctx=context();emit({preflightErrors:{...state.preflightErrors,[shotId]:null}});const currentHash=await digest(shotSnapshot(current().project,shotId));guard(ctx);if(state.jobs.some(job=>job.client_ref?.shot_id===shotId&&job.client_ref.source_hash===currentHash&&activeJobStatuses.has(job.status)))throw Error('这个镜头的相同版本已在队列中，请查看进度或先取消原任务。');await reloadCapabilities();guard(ctx);
     if(current().project.entities.find(e=>e.id===shotId)?.data.storyboard)return prepareStoryboard(shotId);
-    let shot=current().project.entities.find(e=>e.id===shotId);if(!shot)throw Error('镜头不存在。');const recipe=selectedRecipe(state.capabilities.recipes,shot.data.h3);if(!recipe)throw Error('此生成配方已不可用，请刷新并重新选择。');
+    let shot=current().project.entities.find(e=>e.id===shotId);if(!shot)throw Error('镜头不存在。');const recipe=selectedProfileRecipe(state.capabilities,shot.data.h3);if(!recipe)throw Error('此生成配方已不可用，请刷新并重新选择。');
     const runtime=executionPresetControls(recipe),saved=shot.data.h3?.controls||{};
     if(Object.entries(runtime).some(([field,value])=>saved[field]!==value)){
       if(!store.updateEntity(shotId,{data:{h3:{...shot.data.h3,controls:{...saved,...runtime}}}}))throw Error('自动匹配云端设置未保存，请重新预检。');
@@ -165,7 +165,7 @@ export function createCloudController({store=defaultStore,client,storage=globalT
     await save();guard(ctx);const snapshot=current().project,hash=await digest(shotSnapshot(snapshot,shotId)),payload=buildPlanPayload(snapshot,shotId,{recipe,capabilitiesVersion:state.capabilities.capabilities_version,assetMap,sourceHash:hash});
     const plan=await api.plan(payload,intent('plan',snapshot.id+':'+shotId+':'+hash));guard(ctx);
     if(!plan.plan_id||!['ready','blocked'].includes(plan.status))throw Error('服务返回了无效的生成计划。');
-    emit({plans:{...state.plans,[shotId]:{...plan,availabilitySettings:{deployment_profile_id:null,recipe_id:payload.recipe_id},sourceHash:hash,sourceSnapshot:stableJSON(shotSnapshot(snapshot,shotId)),shotId,projectId:snapshot.id}},message:plan.status==='ready'?'预检通过；核对生效参数后再提交。':'预检已完成，仍有执行条件未满足。'});return plan;}
+    emit({plans:{...state.plans,[shotId]:{...plan,availabilitySettings:{deployment_profile_id:payload.deployment_profile_id||null,recipe_id:payload.recipe_id},sourceHash:hash,sourceSnapshot:stableJSON(shotSnapshot(snapshot,shotId)),shotId,projectId:snapshot.id}},message:plan.status==='ready'?'预检通过；核对生效参数后再提交。':'预检已完成，仍有执行条件未满足。'});return plan;}
   async function validPlan(shotId){const ctx=context();await reloadCapabilities();guard(ctx);assertNotHeld('shot_id',shotId);const plan=state.plans[shotId];if(!plan||plan.status!=='ready')throw Error('请先完成这个镜头的预检，并解决阻塞项。');if(!state.capabilities?.execution_enabled)throw Error('当前服务未启用生成；未提交任务。');if(plan.sourceHash!==await digest(shotSnapshot(current().project,shotId)))throw Error('镜头或参考已改变，请重新预检。');if(plan.expires_at&&(typeof plan.expires_at==='number'?plan.expires_at*1000:Date.parse(plan.expires_at))<=Date.now())throw Error('计划已过期，请重新预检。');return plan;}
   async function mergeJobs(jobs,ctx){guard(ctx);const hashes={};for(const job of jobs){const shot=current().project.entities.find(e=>e.id===job.client_ref?.shot_id);if(shot&&!shot.data.storyboard)hashes[shot.id]=await digest(shotSnapshot(current().project,shot.id));}guard(ctx);store.editProject(project=>{let changed=false;for(const job of jobs)changed=mergeJobCandidate(project,job,{snapshotHash:hashes[job.client_ref?.shot_id]}).changed||changed;return changed;},{history:false});emit({jobs:jobs.filter(job=>job.client_ref?.project_id===ctx.projectId)});}
   async function collectJobArtifacts(jobs,ctx){for(const job of jobs)if(job.status==='succeeded'&&!job.artifacts?.length){const result=await api.artifacts(job.id);guard(ctx);job.artifacts=result.artifacts||[];}return jobs;}

@@ -1,5 +1,6 @@
 """Original-ledger dstack commands, using isolated databases and fake HTTP only."""
 import copy
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -186,6 +187,20 @@ class DstackOperatorTests(LedgerCase):
             with self.assertRaises((OperatorError, DstackError)):
                 DstackOperator(self.repo, self.settings, self.capacity, config)
 
+    def test_catalog_prefers_authoring_default_without_changing_saved_profiles(self):
+        target = 'h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6'
+        config = copy.deepcopy(self.config)
+        config['profiles'].append({**config['profiles'][0], 'id':'controls-v6-fl',
+            'runtime_profile_id':target})
+        settings = copy.copy(self.settings)
+        settings.default_deployment_profile_id = target
+        service = DstackOperator(self.repo,settings,self.capacity,config)
+        original = copy.deepcopy(service.profiles)
+        self.assertEqual([p['id'] for p in service.catalog(self.owner)['profiles']],
+            ['controls-v6-fl','5090-fl'])
+        self.assertEqual(service.profiles,original)
+        self.assertEqual(service.catalog(self.other_owner)['profiles'],[])
+
     def test_owner_isolation_and_machine_principal_denied(self):
         node = self.start()["node_id"]
         self.assertEqual(self.service.catalog(self.other_owner)["profiles"], [])
@@ -286,7 +301,6 @@ class DstackOperatorTests(LedgerCase):
         self.client.absent = True
         request = self.service._capacity_request(self.service.profiles["5090-fl"], node,
             binding["created_at"], binding["hard_deadline"], 900)
-        from dataclasses import replace
         request = replace(request, host_selection=copy.deepcopy(binding["host_selection"]))
         for _ in range(3):
             self.assertEqual(self.capacity.start(request, PUB)["state"], "creation_unknown")
@@ -772,7 +786,6 @@ class DstackLifetimeTests(LedgerCase):
         return self.repo.create_job(self.scope,plan['id'],str(__import__('uuid').uuid4()))
 
     def queue_controller(self):
-        from dataclasses import replace
         controller = self.controller()
         original_slot = controller.runtime.slot
         def native_slot(intent_id):

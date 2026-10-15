@@ -11,7 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, Stri
 from pydantic import ValidationError, create_model, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
-from .capabilities import LIMITS, RECIPES, control_schema
+from .capabilities import LIMITS, RECIPES
+from .generation_draft import control_schema
 
 
 MAX_FIELD_ERRORS = 12
@@ -66,6 +67,11 @@ class GuideInput(AuthoringObject):
     source_range: SourceRange | None = None
 
 
+class ExcerptInput(AuthoringObject):
+    time_seconds: Annotated[Number, Field(ge=0, le=362/24)]
+    duration_seconds: Annotated[Number, Field(ge=2, le=15)]
+
+
 class CardInputs(AuthoringObject):
     first_frame: FrameInput | None = None
     last_frame: FrameInput | None = None
@@ -92,11 +98,14 @@ def _control_fields():
         types = schema["type"] if isinstance(schema["type"], list) else [schema["type"]]
         annotation = (Literal[tuple(schema["enum"])] if "enum" in schema else
             StrictInt if "integer" in types else Number if "number" in types else
-            StrictBool if "boolean" in types else StrictStr)
+            StrictBool if "boolean" in types else
+            list[ExcerptInput] if "array" in types and name in {'video_excerpts','audio_excerpts'} else StrictStr)
         if "null" in types:
             annotation = annotation | None
         constraints = {key: schema[source] for key, source in
             (("ge", "minimum"), ("le", "maximum"), ("pattern", "pattern")) if source in schema}
+        if 'array' in types and 'maxItems' in schema:
+            constraints['max_length'] = schema['maxItems']
         fields[name] = (annotation, Field(default=schema.get("default"), **constraints))
     return fields
 

@@ -25,6 +25,10 @@ EXPECTED_PROFILE_IDS = (
     'h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2',
     'h3-pruned-rank8-int8-sdpa-p4-29gib-fl-r2-v5',
     'h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-fl-r2-v3',
+    'h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6',
+    'h3-pruned-rank8-int8-pro6000-sdpa-p4-controls-v2',
+    'h3-unpruned33b-int8-sdpa-p3-controls-v2',
+    'h3-unpruned33b-bf16-sdpa-p3-controls-v3',
 )
 
 
@@ -111,21 +115,41 @@ print(json.dumps({'sources':len(factory.sources),'modes':sorted(mode for _,mode 
             image = Path(temporary)
             modules = ('studio_platform/__init__.py', 'studio_platform/runtime_catalog.py',
                        'studio_platform/inference/__init__.py', 'studio_platform/inference/wangp_contract.py',
-                       'studio_platform/inference/protocol.py', 'studio_platform/inference/native_outputs.py')
+                       'studio_platform/inference/protocol.py', 'studio_platform/inference/native_outputs.py',
+                       'studio_platform/inference/wangp_profile_dispatch.py',
+                       'studio_platform/inference/wangp_profile_compiler.py',
+                       'studio_platform/inference/wangp_full_compiler.py',
+                       'studio_platform/inference/wangp_compiler.py',
+                       'studio_platform/h3_profile_support.py', 'studio_platform/storage.py',
+                       'studio_platform/storage_config.py', 'comfy_workflow.py')
             for name in (*modules, *('deploy/wangp/profiles/'+profile+'.json' for profile in PROFILE_IDS)):
                 target = image/name
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(ROOT/name, target)
             script = """import json,sys
 sys.path.insert(0,sys.argv[1])
+class NoRuntimeImports:
+    def find_spec(self,name,path=None,target=None):
+        if name.split('.')[0] in {'torch','transformers','huggingface_hub','requests','boto3','sqlalchemy'}:
+            raise AssertionError('runtime or network dependency imported')
+sys.meta_path.insert(0,NoRuntimeImports())
 from studio_platform.runtime_catalog import PROFILE_IDS,public_catalog,engine_manifest
+from studio_platform.inference.wangp_profile_dispatch import control_schema
 catalog=public_catalog()
 expected_profile_ids=tuple(json.loads(sys.argv[2]))
 assert PROFILE_IDS==expected_profile_ids
 assert tuple(profile['id'] for profile in catalog['profiles'])==expected_profile_ids
 for profile in catalog['profiles']:
     assert profile['validation']['production_adapter_verified'] is False
-    if not profile['verified_cases']:
+    if profile.get('compiler_epoch')=='full-controls-v2':
+        assert profile['validation']['scope']=='pinned_native_control_mapping'
+        assert profile['verified_cases']==[]
+        assert profile['qualification_cases']==[]
+        for mode in ('fl','ref'):
+            schema=control_schema(profile['id'],mode)
+            assert 'er_sde' in schema['sampler_name']['enum']
+            assert 'video_excerpts' in schema
+    elif not profile['verified_cases']:
         assert profile['validation']['scope']=='pending_hardware_qualification'
         assert profile.get('qualification_cases')
         assert all('measurements' not in case for case in profile['qualification_cases'])
@@ -141,7 +165,7 @@ print(json.dumps({'profiles':len(catalog['profiles']),'manifests':sum(len(profil
 """
             result = subprocess.run([sys.executable,'-I','-S','-c',script,str(image),json.dumps(EXPECTED_PROFILE_IDS)],
                                     capture_output=True,text=True,check=True,timeout=20,cwd=image)
-            self.assertEqual(json.loads(result.stdout), {'profiles':10, 'manifests':17})
+            self.assertEqual(json.loads(result.stdout), {'profiles':14, 'manifests':25})
 
 
 if __name__ == '__main__':

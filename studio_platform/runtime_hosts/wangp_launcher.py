@@ -112,12 +112,34 @@ def resolve_inputs(prepared, inputs, manifest=None):
                  (REF_COMPILER_ID, REF_PROFILE_ID): "minimax_h3_ref2va"}.get(
             (manifest.document["compiler_id"], manifest.document["profile_id"]))
         if profile_id is not None:
-            from ..inference.wangp_profile_compiler import validate_prepared
+            from ..inference.wangp_profile_dispatch import validate_prepared
             from ..runtime_catalog import model_for
             validate_prepared(prepared, manifest)
             model = model_for(profile_id, manifest.document['mode'])['model_type']
         if model is None or settings.get("model_type") != model or prepared.manifest_digest != manifest.digest:
             raise ValueError("wangp_manifest_binding_mismatch")
+        if manifest.document['compiler_id']=='sixnine-h3-native-profile-v2':
+            from ..inference.wangp_full_compiler import validate_prepared_media,audio_source_handles
+            descriptors={d.handle:d for d in prepared.inputs}
+            paths,metadata={},{}
+            for handle,descriptor in descriptors.items():
+                path,facts=inputs.full_input(descriptor,deployment_profile_id=profile_id)
+                paths[handle]=str(path); metadata[descriptor.asset_id]=facts
+            # Complete actual-byte checks before materializing selected audio or
+            # entering the upstream Session. One input may serve several roles.
+            validate_prepared_media(prepared,manifest,metadata)
+            audio_paths={}
+            for handle in audio_source_handles(settings):
+                descriptor=descriptors[handle]
+                audio_paths[handle]=(str(inputs.audio_from_video_path(descriptor,deployment_profile_id=profile_id))
+                    if descriptor.kind=='video' else paths[handle])
+            for field in ('image_start','image_end','video_guide','video_guide2','video_guide3'):
+                if settings.get(field) is not None: settings[field]=paths[settings[field]]
+            for field in ('audio_guide','audio_guide2','audio_guide3'):
+                if settings.get(field) is not None: settings[field]=audio_paths[settings[field]]
+            if settings.get('image_refs') is not None:
+                settings['image_refs']=[paths[handle] for handle in settings['image_refs']]
+            return settings
     handles = {item.handle: item for item in prepared.inputs}
     used = set()
     if settings.get("model_type") in {"minimax_h3_ref2va", "minimax_h3_ref2va_pruned"}:

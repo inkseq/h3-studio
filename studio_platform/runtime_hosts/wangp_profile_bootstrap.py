@@ -46,6 +46,9 @@ def prepare(config, manifest, source, status):
     gpu = selected_devices(config, observed_devices())[0]
     environment.update(PYTHONPATH=str(source), PYTHONUNBUFFERED="1",
         CUDA_VISIBLE_DEVICES=gpu['uuid'], TOKENIZERS_PARALLELISM="false")
+    if profile.get('compiler_epoch')=='full-controls-v2':
+        from .wangp_media_tools import verify_media_tools
+        verify_media_tools(runtime,environment,cwd=source)
     return runtime, sys.executable, environment
 
 

@@ -2,6 +2,7 @@ import {boundVideoRange} from './video-cut-model.js';
 import {ancestors,validateProject} from './store.js';
 import {effectiveLook} from './character-model.js';
 import {shotLocationIds} from './location-model.js';
+import {roleSupported,validControlValue,recipeFor,effectiveControlSchema,CONTROL_LABELS} from './quick-chat-model.js';
 
 const clone=value=>structuredClone(value);
 export const jobLabels={planned:'等待批次确认',waiting_capacity:'等待计算容量',queued:'等待执行',claimed:'已分配',submitting:'正在提交',running:'生成中',collecting:'保存与核验结果',checking:'检查成片',succeeded:'已完成',failed:'失败',cancel_requested:'正在确认取消',cancelled:'已取消',blocked:'等待条件满足',submission_unknown:'提交结果待核对',recovery_hold:'恢复后待核对'};
@@ -28,7 +29,21 @@ export function capacityWaitMessage(job){
   };
   return reasons[job.error_code]||'等待计算容量启动与验收，尚未开始模型推理。保持原任务，可请求取消；无需重新提交。';
 }
-export function jobMessage(job){if(job?.status==='waiting_capacity'||job?.status==='queued'&&job?.error_code==='capacity_queued_task_repair_required')return capacityWaitMessage(job);if(job?.status==='recovery_hold')return recoveryMessage(job);if(job?.error_code==='render_cache_capacity_exhausted')return '粗剪服务的工作空间已满，本次已停止，尚未开始编码。素材保持不变；请等管理员处理容量后，再预检并确认新的粗剪任务。';return job?.message||job?.error?.message||job?.error_code||'';}
+export function jobMessage(job){if(job?.status==='waiting_capacity'||job?.status==='queued'&&job?.error_code==='capacity_queued_task_repair_required')return capacityWaitMessage(job);if(job?.status==='recovery_hold')return recoveryMessage(job);if(job?.error_code==='render_cache_capacity_exhausted')return '粗剪服务的工作空间已满，本次已停止，尚未开始编码。素材保持不变；请等管理员处理容量后，再预检并确认新的粗剪任务。';return job?.failure_diagnostic?.message||job?.message||job?.error?.message||job?.error_code||'';}
+export function failureDetails(job){
+  const diagnostic=job?.failure_diagnostic;if(!diagnostic||diagnostic.version!==1)return null;
+  const code=value=>typeof value==='string'&&/^[A-Za-z0-9_.:-]{1,200}$/.test(value)?value:'未知',scalar=value=>typeof value==='number'&&Number.isFinite(value)?String(value):typeof value==='boolean'?value?'是':'否':typeof value==='string'&&/^[A-Za-z0-9_.:-]{1,200}$/.test(value)?value:null,rows=[];
+  const add=(label,value)=>{const text=scalar(value);if(text!==null)rows.push([label,text]);};
+  add('任务',job.id);add('方式',diagnostic.mode);add('模型配方',diagnostic.profile_id);
+  for(const field of ['duration','resolution','aspect_ratio','steps','sampler_name','scheduler','seed','denoise','shift_video','generate_audio','video_conditioning','audio_conditioning','image_refs_relative_size','audio_refinement','mask_mode','export_crf'])add(CONTROL_LABELS[field]||field,diagnostic.controls?.[field]);
+  for(const [field,label]of [['video_excerpts','视频摘录'],['audio_excerpts','声音摘录']])if(Array.isArray(diagnostic.controls?.[field]))rows.push([label,diagnostic.controls[field].map(entry=>`中心 ${scalar(entry.time_seconds)??'?'} 秒 / ${scalar(entry.duration_seconds)??'?'} 秒`).join('；')||'无']);
+  for(const [field,label]of [['images','图片参考'],['videos','视频参考'],['audios','声音参考']]){const entry=diagnostic.inputs?.[field];add(label+'数量',entry?.count);if(Array.isArray(entry?.durations_seconds)&&entry.durations_seconds.length)rows.push([label+'片段（秒）',entry.durations_seconds.map(value=>scalar(value)??'?').join('、')]);add(label+'累计（秒）',entry?.total_duration_seconds);}
+  add('首帧',diagnostic.inputs?.first_frame);add('尾帧',diagnostic.inputs?.last_frame);add('视频原声数',diagnostic.inputs?.video_audio_enabled_count);
+  if(Array.isArray(diagnostic.inputs?.guides))rows.push(['时间锚点',diagnostic.inputs.guides.map(guide=>`${code(guide.kind)} · ${scalar(guide.time_seconds)??'?'} 秒${guide.use_audio?' · 含原声':''}`).join('；')||'无']);
+  for(const [field,label]of [['width','宽'],['height','高'],['frames','帧数'],['fps','帧率'],['duration_s','生成时长']])add(label,diagnostic.output?.[field]);
+  for(const [field,label]of [['provider','平台'],['machine_id','主机'],['offer_id','报价'],['provider_instance_id','供应商实例'],['node_id','节点'],['gpu_type','GPU']])add(label,diagnostic.host?.[field]);
+  return {stage:({preflight:'预检',input:'输入处理',submit:'模型提交',generation:'模型生成',collect:'收集结果',export:'导出',runtime:'运行环境'})[diagnostic.stage]||code(diagnostic.stage),reason:code(diagnostic.reason_code),rows};
+}
 export function estimateLabel(estimate){if(!estimate||estimate.cost_microusd==null)return '费用尚未报价，不能据此认为免费。';if(estimate.source==='mock'||estimate.kind==='simulation')return '模拟测试不调用模型，费用为 $0；真实推理价格尚未验证。';if(estimate.kind==='included')return '此项粗剪当前不单独计费；服务器资源仍有运行成本。';if(estimate.kind==='budget_reservation')return `预算预留 $${(estimate.cost_microusd/1000000).toFixed(4)} ${estimate.currency||'USD'}；这是运营配置的额度占用，实际费用待核对，不是最终账单。`;if(typeof estimate.cost_microusd==='number')return `预计 $${(estimate.cost_microusd/1000000).toFixed(4)} ${estimate.currency||'USD'}；以实际执行结算为准。`;return '费用信息暂不可用。';}
 export function stableJSON(value){if(Array.isArray(value))return '['+value.map(stableJSON).join(',')+']';if(value&&typeof value==='object')return '{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+stableJSON(value[key])).join(',')+'}';return JSON.stringify(value);}
 export async function digest(value){const bytes=new TextEncoder().encode(stableJSON(value));return [...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(n=>n.toString(16).padStart(2,'0')).join('');}
@@ -70,6 +85,7 @@ export function referenceSpecs(project,shotId,{mode}={}){
   return {references,issues:[...new Set(issues)]};
 }
 export function selectedRecipe(recipes,h3={}){return h3.recipeId?recipes.find(recipe=>recipe.id===h3.recipeId):h3.inputMode?recipes.find(recipe=>recipe.mode===h3.inputMode):recipes[0];}
+export function selectedProfileRecipe(capabilities,h3={}){const base=selectedRecipe(capabilities?.recipes||[],h3);if(!base)return base;const resolved=recipeFor(capabilities,{recipe_id:base.id,deployment_profile_id:h3.deploymentProfileId||null});return {...resolved,controls:effectiveControlSchema(resolved),deployment_profile_id:h3.deploymentProfileId||null};}
 export function effectiveReferenceCount(project,shotId,kind){
   const {references}=referenceSpecs(project,shotId);
   // The service counts ordinary inputs separately from reusable time guides.
@@ -114,8 +130,7 @@ export function validateControlValues(recipe,controls){
     if(schema.enum&&!schema.enum.includes(value)){issues.push(`${schema.title||field} 不在支持的选项内。`);continue;}
     if(value===null&&Array.isArray(schema.type)&&schema.type.includes('null'))continue;
     if(field==='seed'){if(typeof value!=='string'||!/^\d{1,20}$/.test(value)||BigInt(value)>18446744073709551615n)issues.push('种子须为 uint64 十进制字符串。');continue;}
-    if(schema.type==='boolean'&&typeof value!=='boolean')issues.push(`${schema.title||field} 必须为开关值。`);
-    if(['integer','number'].includes(schema.type)&&(typeof value!=='number'||!Number.isFinite(value)||schema.type==='integer'&&!Number.isInteger(value)||schema.minimum!==undefined&&value<schema.minimum||schema.maximum!==undefined&&value>schema.maximum))issues.push(`${schema.title||field} 超出支持范围。`);
+    if(!validControlValue(value,schema))issues.push(`${schema.title||field} 超出支持的类型或范围。`);
   }return issues;
 }
 export function buildPlanPayload(project,shotId,{recipe,capabilitiesVersion,assetMap={},sourceHash}={}){
@@ -136,13 +151,17 @@ export function buildPlanPayload(project,shotId,{recipe,capabilitiesVersion,asse
     const entry={asset_id:assetId,purpose:role};if(kind==='video')entry.include_audio=shot.data.h3?.video_audio?.[ref.entity.id]!==false;
     inputs[{image:'images',video:'videos',audio:'audios'}[kind]].push(entry);
   }
-  for(const [guideIndex,guide] of (shot.data.h3?.guides||[]).entries()){const entity=project.entities.find(e=>e.id===guide.media_id),assetId=assetMap['guide:'+guideIndex]||(!guide.source_range?entity?.data.cloudAssetId:null);if(!assetId){issues.push('有时间锚点的素材还未同步。');continue;}inputs.guides.push({media_id:assetId,time_seconds:guide.time_seconds,use_audio:!!guide.use_audio});}
-  if(recipe.mode==='fl'&&(inputs.images.length||inputs.videos.length||inputs.audios.length))issues.push('首尾帧配方不能混用全能参考；请切换配方或解除这些关联。');
-  if(recipe.mode==='ref'&&(inputs.first_frame||inputs.last_frame))issues.push('全能参考配方不接受首尾帧约束；请切换配方或更改参考用途。');
-  if(recipe.mode==='ref'&&!inputs.images.length&&!inputs.videos.length&&!inputs.audios.length)issues.push('全能参考至少需要一份参考素材；纯文字请选择文生/首尾帧配方。');
+  for(const [guideIndex,guide] of (shot.data.h3?.guides||[]).entries()){const entity=project.entities.find(e=>e.id===guide.media_id),assetId=assetMap['guide:'+guideIndex]||(!guide.source_range?entity?.data.cloudAssetId:null);if(!assetId){issues.push('有时间锚点的素材还未同步。');continue;}inputs.guides.push({media_id:assetId,time_seconds:guide.time_seconds,use_audio:entity?.type==='video'&&!!guide.use_audio});}
+  const extended=recipe.limits?.input_count_semantics==='native_roles_v2';
+  if(extended){for(const [slot,kind]of [['images','image'],['videos','video'],['audios','audio'],['first_frame','image'],['last_frame','image']])if((Array.isArray(inputs[slot])?inputs[slot].length:inputs[slot])&&!roleSupported(recipe,slot,kind))issues.push(`所选配方不接受此输入用途：${slot}，请调整用途或生成方式。`);}
+  else{
+    if(recipe.mode==='fl'&&(inputs.images.length||inputs.videos.length||inputs.audios.length))issues.push('首尾帧配方不能混用全能参考；请切换配方或解除这些关联。');
+    if(recipe.mode==='ref'&&(inputs.first_frame||inputs.last_frame))issues.push('全能参考配方不接受首尾帧约束；请切换配方或更改参考用途。');
+  }
+  if(recipe.mode==='ref'&&!inputs.images.length&&!inputs.videos.length&&!inputs.audios.length&&!(extended&&(inputs.first_frame||inputs.last_frame||inputs.guides.length)))issues.push('全能参考至少需要一份参考素材；纯文字请选择文生/首尾帧配方。');
   if(issues.length)throw Error([...new Set(issues)].join(' '));
   const parents=ancestors(project,shot.id);
-  return {client_ref:{project_id:project.id,chapter_id:parents.find(e=>e.type==='chapter')?.id||null,scene_id:parents.find(e=>e.type==='scene')?.id||null,shot_id:shot.id,shot_version:shot.version,...(sourceHash?{source_hash:sourceHash}:{})},recipe_id:recipe.id,capabilities_version:capabilitiesVersion,prompt,inputs,controls,client_edit:{edit_duration_s:shot.data.seconds}};
+  return {client_ref:{project_id:project.id,chapter_id:parents.find(e=>e.type==='chapter')?.id||null,scene_id:parents.find(e=>e.type==='scene')?.id||null,shot_id:shot.id,shot_version:shot.version,...(sourceHash?{source_hash:sourceHash}:{})},recipe_id:recipe.id,...(recipe.deployment_profile_id?{deployment_profile_id:recipe.deployment_profile_id}:{}),capabilities_version:capabilitiesVersion,prompt,inputs,controls,client_edit:{edit_duration_s:shot.data.seconds}};
 }
 
 export function mergeJobCandidate(project,job,{snapshotHash,now=new Date().toISOString()}={}){

@@ -1,6 +1,10 @@
 """Static, credential-safe validation diagnostics; never expose exception text."""
 from __future__ import annotations
 
+import math
+import re
+import uuid
+
 # Closed source-level vocabulary, not a regex that could disclose a credential
 # disguised as a well-formed exception code. Unknown exceptions remain opaque.
 WANGP_VALIDATION_CODES = frozenset({
@@ -20,6 +24,90 @@ WANGP_VALIDATION_CODES = frozenset({
 } | {'wangp_unsupported_'+name for name in ('sampler_name','scheduler','denoise',
     'shift_video','shift_audio','video_decode','video_tile_size','video_overlap','audio_decode',
     'encoder_device','generate_audio','export_crf')})
+
+# Native v2 source-level validation vocabulary; unknown/free-form text stays opaque.
+WANGP_VALIDATION_CODES |= frozenset({
+    'wangp_asset_owner_mismatch',
+    'wangp_audio_excerpts_require_video_soundtrack',
+    'wangp_audio_from_video_requires_denoise',
+    'wangp_audio_guide_requires_soundtrack',
+    'wangp_audio_refinement_soundtrack_conflict',
+    'wangp_conflicting_guides_alias',
+    'wangp_conflicting_image_anchors',
+    'wangp_conflicting_video_audio',
+    'wangp_control_audio_requires_soundtrack',
+    'wangp_control_source_count_exceeded',
+    'wangp_control_video_canvas_mismatch',
+    'wangp_control_video_required',
+    'wangp_control_video_timeline_mismatch',
+    'wangp_denoise_requires_control_video',
+    'wangp_duplicate_input_handle',
+    'wangp_excerpt_outside_selected_source',
+    'wangp_excerpts_require_single_reference_video',
+    'wangp_fl_audio_requires_soundtrack',
+    'wangp_fl_reference_image_unsupported',
+    'wangp_fl_reference_video_unsupported',
+    'wangp_frame_injection_denoise_conflict',
+    'wangp_guide_outside_output',
+    'wangp_image_size_requires_reference_images',
+    'wangp_input_handles_mismatch',
+    'wangp_input_kind_mismatch',
+    'wangp_input_snapshot_mismatch',
+    'wangp_invalid_audio_conditioning',
+    'wangp_invalid_audio_refinement',
+    'wangp_invalid_compiled_request',
+    'wangp_invalid_custom_settings',
+    'wangp_invalid_duration',
+    'wangp_invalid_excerpt_duration',
+    'wangp_invalid_excerpt_position',
+    'wangp_invalid_excerpts',
+    'wangp_invalid_denoise',
+    'wangp_invalid_shift_video',
+    'wangp_native_timed_video_guide_unsupported',
+    'wangp_native_timed_audio_guide_unsupported',
+    'wangp_invalid_export_crf',
+    'wangp_invalid_generate_audio',
+    'wangp_invalid_guide_audio',
+    'wangp_invalid_guide_time',
+    'wangp_invalid_guides',
+    'wangp_invalid_image_positions',
+    'wangp_invalid_image_refs_relative_size',
+    'wangp_invalid_input_identity',
+    'wangp_invalid_inputs',
+    'wangp_invalid_mask_mode',
+    'wangp_invalid_native_flags',
+    'wangp_invalid_prompt',
+    'wangp_invalid_request',
+    'wangp_invalid_seed',
+    'wangp_invalid_steps',
+    'wangp_invalid_video_audio',
+    'wangp_invalid_video_conditioning',
+    'wangp_manifest_binding_mismatch',
+    'wangp_mask_mode_requires_denoise',
+    'wangp_output_spec_mismatch',
+    'wangp_profile_model_mismatch',
+    'wangp_profile_reference_count_exceeded',
+    'wangp_profile_settings_mismatch',
+    'wangp_ref_aligned_video_required',
+    'wangp_ref_audio_requires_visual_reference',
+    'wangp_ref_invalid_dimensions',
+    'wangp_ref_media_not_ready',
+    'wangp_ref_reference_required',
+    'wangp_ref_selected_audio_required',
+    'wangp_ref_total_audio_duration_exceeded',
+    'wangp_ref_total_excerpt_duration_exceeded',
+    'wangp_ref_total_video_duration_exceeded',
+    'wangp_selected_video_has_no_audio',
+    'wangp_single_soundtrack_required',
+    'wangp_staged_input_mismatch',
+    'wangp_unbound_input_handle',
+    'wangp_unsupported_controls',
+    'wangp_unsupported_sampler_name',
+    'wangp_unused_input_handle',
+    'wangp_video_conditioning_required',
+    'wangp_video_excerpts_require_explicit_audio_excerpts',
+    'wangp_video_soundtrack_requires_single_video',
+})
 
 STATIC_VALIDATION_TEXT = {
     'Reference video exceeds the output length; increase duration or explicitly trim the reference':
@@ -57,4 +145,206 @@ def preflight_diagnostic(error):
                 result['error_message'] = '额度不足；可用额度不足以预留本次生成，请联系管理员调整额度。'
         elif text in STATIC_VALIDATION_TEXT:
             result['error_code'],result['error_message'] = STATIC_VALIDATION_TEXT[text]
+    return result
+
+
+_ENUM_CONTROLS = {
+    'sampler_name': {'euler', 'er_sde', 'res_multistep', 'ralston_2s'}, 'scheduler': {'auto'},
+    'video_decode': {'tiled', 'full'}, 'audio_decode': {'normal', 'chunked'},
+    'encoder_device': {'default', 'cpu', 'cuda'},
+    'video_conditioning': {'reference', 'denoise', 'in_context'},
+    'audio_conditioning': {'reference', 'soundtrack', 'from_video'},
+    'audio_refinement': {'none', 'enabled'}, 'mask_mode': {'grouped_rows', 'shared_timestep'},
+}
+_NUMBER_CONTROLS = {'steps': (0, 1000), 'denoise': (0, 1), 'shift_video': (0, 100),
+    'shift_audio': (0, 100), 'video_tile_size': (0, 16384), 'video_overlap': (0, 16384),
+    'export_crf': (0, 51), 'image_refs_relative_size': (0, 1000)}
+_WORKER_CODES = frozenset({'submission_rejected', 'upstream_generation_failed',
+    'worker_preparation_not_ready', 'worker_preparation_failed', 'collection_failed',
+    'upload_failed', 'artifact_validation_failed', 'output_video_verification_failed',
+    'output_audio_verification_failed', 'output_dimensions_mismatch', 'independent_audio_missing',
+    'output_too_short', 'output_duration_unknown', 'native_output_timing_mismatch',
+    'unexpected_output_audio', 'execution_policy_unavailable_before_submission',
+    'render_cache_capacity_exhausted', 'capacity_wait_deadline_expired',
+    'capacity_approval_expired_or_revoked', 'machine_failed', 'runtime_process_exited',
+    'worker_process_failed', 'worker_reconciliation_needed', 'submission_response_unknown',
+    'upstream_status_unknown', 'generation_failure_unclassified'})
+
+
+def _number(value, minimum=0, maximum=1_000_000):
+    return value if type(value) in (int, float) and minimum <= value <= maximum and math.isfinite(value) else None
+
+
+def _choice(value, allowed, default=None):
+    return value if type(value) is str and value in allowed else default
+
+
+def _identity(value):
+    return value if type(value) is str and re.fullmatch(r'[1-9][0-9]{0,17}', value) else None
+
+
+def _uuid(value):
+    try:
+        return value if type(value) is str and str(uuid.UUID(value)) == value else None
+    except ValueError:
+        return None
+
+
+def failure_reason(code):
+    from .inference.protocol import INFERENCE_FAILURE_CODES
+    return code if type(code) is str and code in WANGP_VALIDATION_CODES | COMMON_CODES | INFERENCE_FAILURE_CODES | _WORKER_CODES else 'generation_failure_unclassified'
+
+
+def failure_stage(code):
+    if code.startswith('wangp_'):
+        phase = code.split('_')[1]
+        return {'generation': 'generate', 'runtime': 'runtime', 'validation': 'validation',
+            'unknown': 'unknown'}.get(phase, 'validation')
+    if code.startswith(('capacity_', 'machine_', 'runtime_', 'worker_process_')):
+        return 'capacity_provision'
+    if code.startswith('submission_'):
+        return 'submission'
+    if code.startswith(('worker_preparation_', 'render_cache_')):
+        return 'input_transfer'
+    if code.startswith(('output_', 'native_output_', 'artifact_', 'independent_audio_', 'unexpected_output_')):
+        return 'validate_output'
+    return {'upstream_generation_failed': 'generate', 'collection_failed': 'collect',
+        'upload_failed': 'upload'}.get(code, 'unknown')
+
+
+def _parts(job):
+    compiled = job.get('request') if type(job.get('request')) is dict else {}
+    request = compiled.get('request') if type(compiled.get('request')) is dict else {}
+    return compiled, request
+
+
+def control_summary(job):
+    """Closed scalar settings and selected-media statistics, never media IDs."""
+    compiled, request = _parts(job)
+    controls = {key: _choice(request.get(key), allowed) for key, allowed in _ENUM_CONTROLS.items()}
+    controls.update({key: _number(request.get(key), *bounds) for key, bounds in _NUMBER_CONTROLS.items()})
+    controls['generate_audio'] = request.get('generate_audio') if type(request.get('generate_audio')) is bool else None
+    seed = request.get('seed')
+    controls['seed'] = str(seed) if type(seed) in (str, int) and re.fullmatch(r'[0-9]{1,20}', str(seed)) and int(seed) <= 2**64-1 else None
+    for key in ('video_excerpts', 'audio_excerpts'):
+        values = request.get(key)
+        controls[key] = [{'time_seconds': _number(item.get('time_seconds'), maximum=15),
+            'duration_seconds': _number(item.get('duration_seconds'), maximum=15)}
+            for item in values[:3] if type(item) is dict] if type(values) is list else []
+    inputs = request.get('inputs') if type(request.get('inputs')) is dict else {}
+    stored_assets = compiled.get('assets') if type(compiled.get('assets')) is dict else {}
+    assets = {identity: item.get('metadata', item) for identity, item in stored_assets.items()
+        if type(item) is dict}
+    media = {}
+    for role in ('images', 'videos', 'audios'):
+        ids = inputs.get(role)
+        if type(ids) is not list or len(ids) > 100:
+            media[role] = {'count': None, 'durations_seconds': [], 'total_duration_seconds': None}
+            continue
+        durations = []
+        if role != 'images':
+            for identity in ids:
+                meta = assets.get(identity, {}) if type(identity) is str else {}
+                meta = meta if type(meta) is dict else {}
+                durations.append(_number(meta.get('duration'), maximum=86400))
+        media[role] = {'count': len(ids), 'durations_seconds': durations,
+            'total_duration_seconds': sum(durations) if role != 'images' and all(v is not None for v in durations) else None}
+    media.update({role: inputs.get(role) is not None for role in ('first_frame', 'last_frame')})
+    guides = request.get('guides', inputs.get('guides', []))
+    media['guides'] = [{'kind': _choice(assets.get(item.get('media_id'), {}).get('kind'), {'image', 'video', 'audio'}),
+        'time_seconds': _number(item.get('time_seconds'), maximum=362/24),
+        'use_audio': item.get('use_audio') if type(item.get('use_audio')) is bool else None}
+        for item in guides[:8] if type(item) is dict and type(item.get('media_id')) is str
+        and type(assets.get(item['media_id'], {})) is dict] if type(guides) is list else []
+    audio = request.get('video_audio')
+    media['video_audio_enabled_count'] = sum(v is True for v in audio.values()) if type(audio) is dict and len(audio) <= 100 else None
+    output = compiled.get('output_spec') if type(compiled.get('output_spec')) is dict else {}
+    shape = {key: _number(output.get('frame_count' if key == 'frames' else key,
+        output.get(key, request.get(key))), maximum=100000) for key in ('width', 'height', 'frames', 'fps')}
+    shape.update(duration_s=_number(request.get('duration'), maximum=86400),
+        resolution=_choice(request.get('resolution'), {'480P', '576P', '768P', 'custom'}),
+        aspect_ratio=_choice(request.get('aspect_ratio'), {'21:9', '16:9', '4:3', '1:1', '3:4', '9:16', 'custom'}))
+    from .runtime_catalog import PROFILE_IDS
+    execution = job.get('execution_plan') if type(job.get('execution_plan')) is dict else {}
+    return {'controls': controls, 'inputs': media, 'output': shape,
+        'mode': _choice(request.get('mode'), {'fl', 'ref'}, 'unknown'),
+        'profile_id': _choice(execution.get('deployment_profile_id', compiled.get('deployment_profile_id')), PROFILE_IDS, 'unknown')}
+
+
+def safe_failure_summary(job, context=None):
+    summary = control_summary(job)
+    source = context if type(context) is dict else {}
+    host = {key: _identity(source.get(key)) for key in ('machine_id', 'offer_id', 'provider_instance_id')}
+    host.update(node_id=_uuid(source.get('node_id')),
+        provider=_choice(source.get('provider'), {'vast', 'runpod', 'lium', 'targon', 'local'}, 'unknown'),
+        gpu_type=_choice(source.get('gpu_type'), {'rtx5090', 'rtx-pro6000', 'h100', 'h200', 'b200', 'b300'}, 'unknown'))
+    code = failure_reason(job.get('error_code'))
+    return {'version': 1, 'stage': failure_stage(code), 'reason_code': code, **summary, 'host': host,
+        'automatic_generation_retry': False,
+        'message': '生成未完成。请核对原任务的停止和费用状态，再手动重试；也可减少参考素材、时长或分辨率后重新确认。'}
+
+
+def failure_notice_id(job, summary):
+    """Stable owner-only notice identity; random controls never affect its kind."""
+    import json
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, 'sixnine:failure-kind:v1:' + json.dumps([
+        job['tenant_id'], job['owner_id'], summary['stage'], summary['reason_code'],
+        summary['profile_id'], summary['mode']], ensure_ascii=True, separators=(',', ':'))))
+
+
+def failure_log_context(job):
+    """Flat bounded log fields; these must never become metric/index labels."""
+    value = control_summary(job)
+    context = {key: item for key, item in value['controls'].items() if type(item) in (str, int, float, bool)}
+    context.update({key: item for key, item in value['output'].items() if type(item) in (str, int, float)})
+    for plural, name in (('images', 'image_refs'), ('videos', 'video_refs'), ('audios', 'audio_refs')):
+        entry = value['inputs'][plural]
+        if entry['count'] is not None:
+            context[name] = entry['count']
+        if plural != 'images' and entry['total_duration_seconds'] is not None:
+            context[plural[:-1] + '_duration_s'] = entry['total_duration_seconds']
+    context.update(first_frame=value['inputs']['first_frame'], last_frame=value['inputs']['last_frame'],
+        guide_count=len(value['inputs']['guides']))
+    if value['inputs']['video_audio_enabled_count'] is not None:
+        context['video_audio_enabled_count'] = value['inputs']['video_audio_enabled_count']
+    for kind in ('video', 'audio'):
+        context[kind + '_ref_durations_s'] = value['inputs'][kind + 's']['durations_seconds']
+        for field in ('time_seconds', 'duration_seconds'):
+            context[kind + '_excerpt_' + field] = [item[field] for item in value['controls'][kind + '_excerpts']]
+    context['guide_times_s'] = [item['time_seconds'] for item in value['inputs']['guides']]
+    context['guide_kinds'] = [item['kind'] for item in value['inputs']['guides']]
+    context['guide_use_audio'] = [item['use_audio'] for item in value['inputs']['guides']]
+    return context
+
+
+def safe_failure_log_fields(source):
+    """Validate again at the Cloud export boundary, including injected context."""
+    result = {key: source[key] for key, allowed in _ENUM_CONTROLS.items()
+        if _choice(source.get(key), allowed) is not None}
+    for key, bounds in {**_NUMBER_CONTROLS, 'duration_s': (0, 86400),
+            'video_duration_s': (0, 8640000), 'audio_duration_s': (0, 8640000),
+            'guide_count': (0, 8), 'video_audio_enabled_count': (0, 100)}.items():
+        value = _number(source.get(key), *bounds)
+        if value is not None:
+            result[key] = value
+    for key in ('generate_audio', 'first_frame', 'last_frame'):
+        if type(source.get(key)) is bool:
+            result[key] = source[key]
+    seed = source.get('seed')
+    if type(seed) is str and re.fullmatch(r'[0-9]{1,20}', seed) and int(seed) <= 2**64-1:
+        result['seed'] = seed
+    for key, maximum in {'video_ref_durations_s': 100, 'audio_ref_durations_s': 100,
+            'video_excerpt_time_seconds': 3, 'video_excerpt_duration_seconds': 3,
+            'audio_excerpt_time_seconds': 3, 'audio_excerpt_duration_seconds': 3,
+            'guide_times_s': 8}.items():
+        values = source.get(key)
+        if type(values) is list and len(values) <= maximum and all(
+                item is None or _number(item, maximum=86400) is not None for item in values):
+            result[key] = list(values)
+    for key, allowed in {'guide_kinds': {'image', 'video', 'audio'}, 'guide_use_audio': {True, False}}.items():
+        values = source.get(key)
+        if type(values) is list and len(values) <= 8 and all(item is None or
+                (type(item) is str and item in allowed if key == 'guide_kinds' else type(item) is bool)
+                for item in values):
+            result[key] = list(values)
     return result

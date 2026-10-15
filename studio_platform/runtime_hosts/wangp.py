@@ -117,7 +117,7 @@ class WanGPHost:
                 raise BackendError("wangp_input_resolver_required")
             try:
                 if self.manifest.document.get('deployment_profile_id') is not None:
-                    from ..inference.wangp_profile_compiler import validate_prepared
+                    from ..inference.wangp_profile_dispatch import validate_prepared
                     validate_prepared(prepared, self.manifest)
                 settings = (self.settings_resolver(prepared) if self.settings_resolver
                             else prepared.settings)
