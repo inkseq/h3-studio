@@ -12,7 +12,7 @@ from botocore.exceptions import ClientError
 REGION = 'ap-southeast-1'
 INSTANCE = 'i-03d81d2d153b5e2fd'
 DOCUMENT = 'Sixnine-DeployApprovedRelease'
-STAGING_INSTANCE = None  # Bound to the separately provisioned, reviewed host before enabling CI.
+STAGING_INSTANCE = 'i-07805df7bd6984bd9'
 COMMIT = re.compile(r'[0-9a-f]{40}\Z')
 COMMAND_ID = re.compile(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\Z')
 
