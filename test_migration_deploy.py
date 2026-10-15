@@ -261,6 +261,22 @@ class MigrationDeployTests(unittest.TestCase):
                 }[change])
             with self.assertRaises(ValueError): validate(broken, target='staging')
 
+    def test_checker_inherits_stage_identity_from_the_render_environment(self):
+        document = copy.deepcopy(self.document)
+        for name in ('app', 'controller', 'dispatch'):
+            document['services'][name]['environment']['PUBLIC_ORIGIN'] = 'https://staging.inkseq.com'
+        document['services']['app']['environment']['PUBLIC_ORIGIN_ALIASES'] = ''
+        document['services']['caddy']['environment'] = {'INKSEQ_LEGACY_REDIRECT': '0'}
+        mount = next(item for item in document['services']['caddy']['volumes'] if item['target'] == '/etc/caddy/Caddyfile')
+        mount['source'] = str(ROOT/'deploy/platform/Caddyfile.staging')
+        calls = []
+        def render(command, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(returncode=0, stdout=json.dumps(document))
+        with patch.dict(os.environ, {'INKSEQ_DEPLOYMENT_TARGET': 'staging', 'INKSEQ_LEGACY_REDIRECT': '0'}, clear=False):
+            check(ROOT/'deploy/platform/compose.yaml', ROOT/'deploy/dstack/platform-overlay.yaml', runner=render)
+        self.assertIsNone(calls[0]['env'])
+
     def test_r2_split_missing_opt_in_fallback_and_environment_keys_are_rejected(self):
         baseline = self.render_r2()
         for mutate, code in (

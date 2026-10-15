@@ -464,7 +464,8 @@ jobs:
 
   publish-aws:
     # Publication cannot approve/execute a host release, read passwords or rent
-    # compute. Push/PR events never assume a publication identity.
+    # compute. PRs never assume publication identity; tested main publishes
+    # staging candidates while production approval remains independent.
     if: ${{ !cancelled() && needs.test.result == 'success' && needs.changes.result == 'success' && (github.event_name == 'workflow_dispatch' || github.event_name == 'push') && github.ref == 'refs/heads/main' && (needs.changes.outputs.action == 'prepare-platform' || needs.changes.outputs.action == 'stage-platform') && vars.SIXNINE_AWS_PUBLISH_ROLE != '' }}
     needs: [changes, test]
     runs-on: ubuntu-24.04

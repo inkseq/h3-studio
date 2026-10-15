@@ -246,6 +246,7 @@ def local_inputs(document):
 
 def check(base, overlay, *, environment=None, runner=subprocess.run, host_memory_mib=3840,
           check_inputs=False, probe=False):
+    effective_environment = environment if environment is not None else os.environ
     # An explicit empty env file suppresses automatic project .env discovery.
     with tempfile.TemporaryDirectory(prefix="sixnine-compose-check-") as directory:
         empty = Path(directory) / "empty.env"
@@ -259,11 +260,11 @@ def check(base, overlay, *, environment=None, runner=subprocess.run, host_memory
         except ValueError:
             raise ValueError("migration_compose_render_invalid") from None
         receipt = validate(document, host_memory_mib=host_memory_mib,
-            dstack_image=(environment or {}).get("SIXNINE_DSTACK_SERVER_IMAGE", DSTACK_IMAGE),
-            target=deployment_target.environment(environment or {})['name'])
+            dstack_image=effective_environment.get("SIXNINE_DSTACK_SERVER_IMAGE", DSTACK_IMAGE),
+            target=deployment_target.environment(effective_environment)['name'])
         if "PUBLIC_ORIGIN" in document["services"]["app"]["environment"]:
             require(document["services"]["caddy"]["environment"]["INKSEQ_LEGACY_REDIRECT"]
-                == (environment if environment is not None else os.environ).get("INKSEQ_LEGACY_REDIRECT", "0"),
+                == effective_environment.get("INKSEQ_LEGACY_REDIRECT", "0"),
                 "migration_domain_redirect_phase_unbound")
         if check_inputs:
             local_inputs(document)
