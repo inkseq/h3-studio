@@ -1,4 +1,4 @@
-# Sixnine / H3 session entry
+# Inkseq / H3 session entry
 
 Read this file, the assigned issue's latest owner comments and current claims before editing. This is the only mandatory repository start-up document; expand linked contracts only for the affected task. Check current remote main without resetting another checkout.
 

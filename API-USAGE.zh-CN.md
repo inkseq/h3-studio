@@ -1,6 +1,6 @@
 # 映序与 H3 的实际 v1 API
 
-这份文档说明 `studio_platform/api.py` 的代码契约。公网入口为 `https://www.sixnine.art/v1`；实际已发布版本、运行状态与验证范围须分别看发布回执、能力接口和当次预检，不能由文档推断 GPU 可用。本机预览可经 `http://localhost:8850/v1` 代理到8845；模拟模式与真实生成必须明确区分。
+这份文档说明 `studio_platform/api.py` 的代码契约。映序 / Inkseq 的公网入口为 `https://inkseq.com/v1`；实际已发布版本、运行状态与验证范围须分别看发布回执、能力接口和当次预检，不能由文档推断 GPU 可用。本机预览可经 `http://localhost:8850/v1` 代理到8845；模拟模式与真实生成必须明确区分。域名迁移后网页需重新登录一次；已有 API Key 的权限和期限不变。Agent 应使用新域名及已核验的连接迁移入口，不自动跟随任意跨域重定向。
 
 映序网页直接使用这一套API与项目文稿。其他小说或制作服务可以作为受限服务客户端接入；不需要把ComfyUI暴露到公网，也不需要拥有GPU云账号或对象存储主密钥。
 
@@ -85,7 +85,7 @@ Swagger/OpenAPI由服务生成，访问仍需本账户身份。表中的模型�
 4. GET `/v1/projects/{p}/shots/{s}/generation-draft`，核对 `draft/ issues/ project_version`；读取 `/v1/capabilities` 的实时约束及仅对未设置字段生效的 `deployment_preset`。随后 POST 同路径的 `/generation-plans`，body 为 `{"expected_version":当前project_version}`，可加当前 `capabilities_version`。服务端从已保存文稿编译，不需要手算 source_hash 或 shot_version。存在明确选段时可能创建派生素材，需要 `assets:write`，不代表已经生成视频。
 5. 检查计划实际参数、阻塞、费用与期限；仅在用户已经授权的范围内，用单独持久幂等键 POST `/v1/jobs {"plan_id":"..."}`。未知结果继续原计划/原键；不另建任务“重试”。
 6. 查原 job，成功后取 artifact 清单并核对下载 SHA256。用 `artifact.adopt` 加入候选（`select:false`）；只有明确要采用时才 `shot.select`，传采用后文稿的**实体 ID**。音频仅以实际清单为准，不凭音频开关承诺一定存在 FLAC。
-7. 返回 `https://www.sixnine.art/freestyle?project={p}&entity={s}`。用户仍需登录有权限的账户；可看到同一份草稿、输入、控制与结果候选，再局部修改重做。其他章节和旧候选保留。
+7. 返回 `https://inkseq.com/freestyle?project={p}&entity={s}`。用户仍需登录有权限的账户；可看到同一份草稿、输入、控制与结果候选，再局部修改重做。其他章节和旧候选保留。
 
 直接调用通用 `/v1/generation-plans` 仍受支持，但它不把请求 prompt/controls 自动写回网页。需要“Agent 做了什么，网页就能继续改什么”时，应使用上述保存草稿路径。
 

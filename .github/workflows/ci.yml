@@ -1,4 +1,4 @@
-name: Test and release Sixnine platform
+name: Test and release Inkseq platform
 
 on:
   push:

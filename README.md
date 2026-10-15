@@ -1,8 +1,10 @@
-# Sixnine · 映序与 H3 Studio
+# 映序 / Inkseq · H3 Studio
 
-**New development session:** read [AGENTS.md](AGENTS.md), [PROJECT-PLAN.md](PROJECT-PLAN.md), [DECISIONS.md](DECISIONS.md), then [WORKFLOW.md](WORKFLOW.md), and claim an existing task on the [Sixnine Platform Delivery board](https://github.com/orgs/inkseq/projects/1). [workflow/project.json](workflow/project.json) links the actual work packages and fields. Check the latest main guidance and claims before relying on an older branch; preserve its checkout. Use English on GitHub; code completion, verification and production release are separate states.
+**New development session:** read the short [AGENTS.md](AGENTS.md) entry and the assigned issue's latest owner comments and claims on the [Inkseq Delivery board](https://github.com/orgs/inkseq/projects/1). Expand linked contracts only as needed; [workflow/project.json](workflow/project.json) contains board identifiers. Preserve older checkouts. Use English on GitHub; merged source, a published release and verified live usability are separate states.
 
-Sixnine provides one business API for Quick Chat, Yingxu story creation and external agents. The target generation runtime is WanGP, with the historical Comfy route retained for original-job recovery and rollback until qualified replacement. Backend source is `platform_app.py` / `studio_platform/`; platform deployment definitions are in `deploy/platform/`. These source boundaries and choices do not establish current online availability.
+Inkseq provides one business API for Quick Chat, Yingxu story creation and external agents at **https://inkseq.com**. The `www` hostname and the previous product domains redirect to that origin after the verified cutover. Host-bound login cookies require one new login; existing API keys and Agent grants keep their original authority and expiry. Follow the public [Agent guide](https://inkseq.com/for-agents/guide.json) or [download the skill](https://inkseq.com/for-agents/skill.zip).
+
+The generation runtime uses WanGP; historical Comfy routes remain for original-job recovery and rollback. Backend source is `platform_app.py` / `studio_platform/`; deployment definitions are in `deploy/platform/`. Internal `sixnine` identifiers, tenant IDs and encrypted credential records remain compatible. These source boundaries do not establish live GPU availability.
 
 ## Documentation map
 
