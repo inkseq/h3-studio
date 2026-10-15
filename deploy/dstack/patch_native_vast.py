@@ -22,7 +22,7 @@ def replace_once(source, before, after):
 
 def transform(path, source):
     if path.endswith("vastai/api_client.py"):
-        source = "from " + HELPER_MODULE + " import create_instance_once, read_request\n" + source
+        source = "from " + HELPER_MODULE + " import create_instance_once, read_request, VastReadRateLimited\n" + source
         before = '''        resp = self.s.put(f"/v0/asks/{bundle_id}/", json=payload)
         try:
             data = resp.json()
@@ -34,7 +34,11 @@ def transform(path, source):
             )
         return data["new_contract"]'''
         source = replace_once(source, before, "        return create_instance_once(self.s, bundle_id, payload)")
-        return replace_once(source, '        resp = self.s.get(f"/v0/instances/{instance_id}/")', '        resp = read_request(lambda: self.s.get(f"/v0/instances/{instance_id}/"))')
+        return replace_once(source, '        resp = self.s.get(f"/v0/instances/{instance_id}/")', '''        try:
+            resp = read_request(lambda: self.s.get(f"/v0/instances/{instance_id}/"))
+        except VastReadRateLimited:
+            # Preserve native provisioning's transient-429 catch and original instance.
+            raise VastAIRateLimitError() from None''')
     if path.endswith("vastai/compute.py"):
         source = "from " + HELPER_MODULE + " import VastAllocationUnknown, VastSafeReject\n" + source
         start = source.index("        except VastAICreateInstanceError as e:")

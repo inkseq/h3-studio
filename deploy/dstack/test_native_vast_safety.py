@@ -204,6 +204,49 @@ class NativeVastSafetyTests(unittest.TestCase):
         self.assertIs(ordered[1], original[1])
         self.assertEqual({id(item) for item in original}, {id(item) for item in ordered})
 
+    def test_pinned_allocated_instance_rate_limit_stays_provisioning(self):
+        if not CACHES:
+            self.skipTest("supply the reviewed source caches for native AST boundary checks")
+        provenance = json.loads((HERE / "native-vast-provenance.json").read_text())
+        sources = {}
+        for path in ("dstack/_internal/core/backends/vastai/api_client.py",
+                     "dstack/_internal/core/backends/vastai/compute.py"):
+            file = next(cache / path.replace("/", "__") for cache in CACHES
+                        if (cache / path.replace("/", "__")).is_file())
+            raw = file.read_bytes()
+            self.assertEqual(hashlib.sha256(raw).hexdigest(), provenance["sources"][path]["sha256"])
+            sources[path] = installer.transform(path, raw.decode())
+        import __future__
+        class ProvisioningError(Exception):pass
+        scope = {**vars(safety), "ProvisioningError": ProvisioningError,
+                 "logger": NS(warning=Mock()), "DSTACK_RUNNER_SSH_PORT": 10022}
+        selected = []
+        for path, names in [("dstack/_internal/core/backends/vastai/api_client.py", {"VastAIRateLimitError", "get_instance"}),
+                            ("dstack/_internal/core/backends/vastai/compute.py", {"update_provisioning_data"})]:
+            selected.extend(copy.deepcopy(node) for node in ast.walk(ast.parse(sources[path]))
+                            if isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name in names)
+        module = ast.fix_missing_locations(ast.Module(body=selected, type_ignores=[]))
+        exec(compile(module, "pinned_native_provisioning_read", "exec", flags=__future__.annotations.compiler_flag), scope)
+        for header, expected_reads in [({}, 3), ({"Retry-After": "999"}, 1)]:
+            safety._cooldown_until = 0.
+            with self.subTest(headers=header), patch.object(safety.time, "sleep", side_effect=self.advance):
+                session = NS(get=Mock(return_value=response(429, {}, header)), put=Mock(), delete=Mock())
+                api = NS(s=session);api.get_instance = MethodType(scope["get_instance"], api)
+                compute = NS(api_client=api, terminate_instance=Mock())
+                update = MethodType(scope["update_provisioning_data"], compute)
+                original = NS(instance_id="555", hostname=None, ssh_port=None, backend_data={"original": True})
+                before = copy.deepcopy(vars(original))
+                self.assertIsNone(update(original, "original-public", "original-private"))
+                self.assertEqual(session.get.call_count, expected_reads)
+                # The next native tick is also transient, without another HTTP call.
+                self.assertIsNone(update(original, "original-public", "original-private"))
+                with self.assertRaises(scope["VastAIRateLimitError"]):api.get_instance("555")
+                self.assertEqual(session.get.call_count, expected_reads)
+                session.get.assert_called_with("/v0/instances/555/")
+                self.assertEqual(vars(original), before)
+                session.put.assert_not_called();session.delete.assert_not_called()
+                compute.terminate_instance.assert_not_called()
+
 
 def native_loop(sources):
     """Execute exact pinned methods/loop AST with only HTTP and native IO faked."""
