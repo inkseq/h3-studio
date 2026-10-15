@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 import httpx
 
 from studio_platform.dstack_capacity import (CapacityRequest, DstackCapacity,
-    DstackClient, DstackError, DstackReadRateLimited, idle_action, live_capacity_usage, native_bootstrap_config, main)
+    DstackClient, DstackError, DstackReadRateLimited, idle_action, live_capacity_usage, native_bootstrap_config, terminal_no_allocation, main)
 from studio_platform.inference.wangp_contract import HostReadiness
 from studio_platform.worker_admission import managed_window_reason
 
@@ -748,6 +748,163 @@ class DstackLiveUsageTests(unittest.TestCase):
     def no_allocation(self):
         self.binding.pop("provider_instance_id")
         self.run = no_capacity_run(self.run)
+
+    def unknown_no_allocation(self):
+        self.no_allocation()
+        self.binding["billing_state"] = "unsettled"
+        message = "sixnine_vast_attempts_v1:" + json.dumps({"version": 1, "outcome": "unknown",
+            "attempted_count": 1, "attempts": [{"ask_id": "46211052", "http_status": 400,
+                "code": "mutation_unknown", "outcome": "unknown", "contract_id": None}]})
+        self.run["latest_job_submission"]["termination_reason_message"] = message
+        self.run["jobs"][0]["job_submissions"][0]["termination_reason_message"] = message
+
+    def test_failed_unknown_put_and_complete_empty_account_free_only_current_capacity(self):
+        self.unknown_no_allocation()
+        original = copy.deepcopy((self.node, self.run))
+        self.assertFalse(terminal_no_allocation(self.run, self.binding))
+        result = self.usage()
+        self.assertEqual((result["instances"], result["physical_gpus"], result["logical_slots"],
+            result["hourly_cost_microusd"], result["active_instance_ids"]), (0, 0, 0, 0, ()))
+        self.assertEqual(result["observations"][0]["reason_code"], "dstack_terminal_provider_accounted")
+        self.assertFalse(terminal_no_allocation(self.run, self.binding))
+        self.assertEqual((self.node, self.run), original)
+        self.assertEqual(self.binding["billing_state"], "unsettled")
+        self.assertIsNone(self.node["payload"]["historical_bill"]["actual_cost_microusd"])
+        self.inventory.assert_called_once_with("vastai")
+
+    def test_failed_unknown_put_needs_current_complete_empty_same_account(self):
+        self.unknown_no_allocation()
+        original = copy.deepcopy((self.node, self.run))
+        good = self.inventory.return_value
+        for bad in (None, {**good, "backend": "runpod"}, {**good, "complete": False},
+                {**good, "observed_at": -1}, {**good, "observed_at": True}, {**good, "observed_at": 20.1},
+                {**good, "instance_ids": "1234567"}, {**good, "instance_ids": ["1234567", "1234567"]},
+                {**good, "instance_ids": ["1234567"]}):
+            with self.subTest(bad=bad):
+                self.inventory.return_value = bad
+                self.assertEqual(self.usage()["active_instance_ids"], (INTENT,))
+                self.assertEqual((self.node, self.run), original)
+        self.inventory.return_value = {**good, "observed_at": 1.}
+        self.now = 32.
+        self.assertEqual(self.usage()["instances"], 1)
+        self.inventory.side_effect = ValueError("private supplier failure")
+        result = self.usage()
+        self.assertEqual(result["instances"], 1)
+        self.assertNotIn("private supplier failure", json.dumps(result))
+
+    def test_empty_account_never_frees_unknown_active_or_ambiguous_native_run(self):
+        self.unknown_no_allocation()
+        original = copy.deepcopy(self.run)
+        cases = [{**original, "status": state} for state in ("running", "provisioning", "terminating")]
+        cases += [{**original, "project_name": "another"}, {**original, "jobs": []}]
+        missing = copy.deepcopy(original)
+        missing["latest_job_submission"].pop("job_runtime_data")
+        missing["jobs"][0]["job_submissions"][0].pop("job_runtime_data")
+        cases.append(missing)
+        for value in cases:
+            with self.subTest(status=value.get("status")):
+                self.run = value
+                self.inventory.reset_mock()
+                self.assertEqual(self.usage()["instances"], 1)
+                self.inventory.assert_not_called()
+
+    def test_empty_account_does_not_erase_prior_runtime_or_host_evidence(self):
+        self.unknown_no_allocation()
+        for key, value in (("runtime_incarnation", "a" * 32), ("bootstrap_started", True),
+                ("host_observation", {}), ("host_failure", {})):
+            with self.subTest(key=key):
+                self.binding[key] = value
+                self.inventory.reset_mock()
+                self.assertEqual(self.usage()["instances"], 1)
+                self.inventory.assert_not_called()
+                self.binding.pop(key)
+
+    def test_later_read_expiry_restores_unknown_failed_capacity_without_another_account_read(self):
+        self.unknown_no_allocation()
+        other_id = "a3333333-3333-4333-8333-333333333333"
+        other_run_id = "b3333333-3333-4333-8333-333333333333"
+        other = copy.deepcopy(self.node)
+        other["intent_id"] = other_id
+        other["payload"]["dstack"] = {**request(intent_id=other_id).binding(PUB),
+            "apply_started": True, "run_id": other_run_id}
+        other_run = {**copy.deepcopy(self.run), "id": other_run_id, "status": "running",
+            "run_spec": request(intent_id=other_id).run_spec(PUB)}
+        def read_run(**identity):
+            if identity["run_id"] == RUN:return copy.deepcopy(self.run)
+            self.now = 51.
+            return copy.deepcopy(other_run)
+        self.client.get.side_effect = read_run
+        original = copy.deepcopy([self.node, other])
+        result = self.usage([self.node, other])
+        self.assertEqual(set(result["active_instance_ids"]), {INTENT, other_id})
+        self.assertEqual(result["instances"], 2)
+        self.assertEqual(result["observations"][0]["reason_code"], "dstack_terminal_provider_unconfirmed")
+        self.assertEqual([self.node, other], original)
+        self.inventory.assert_called_once_with("vastai")
+
+    def test_unknown_failed_slot_stays_excluded_when_another_owned_allocation_appears(self):
+        self.unknown_no_allocation()
+        other_id = "a3333333-3333-4333-8333-333333333333"
+        other_run_id = "b3333333-3333-4333-8333-333333333333"
+        other = copy.deepcopy(self.node)
+        other["intent_id"] = other_id
+        other["payload"]["dstack"] = {**request(intent_id=other_id).binding(PUB),
+            "apply_started": True, "run_id": other_run_id, "provider_instance_id": "56042378"}
+        other_run = {"id": other_run_id, "project_name": "sixnine", "status": "running",
+            "run_spec": request(intent_id=other_id).run_spec(PUB), "latest_job_submission": {
+                "job_provisioning_data": {"backend": "vastai", "instance_id": "56042378"}}}
+        self.client.get.side_effect = lambda **identity: copy.deepcopy(
+            self.run if identity["run_id"] == RUN else other_run)
+        self.inventory.return_value["instance_ids"] = ["56042378"]
+        original = copy.deepcopy([self.node, other])
+        for nodes in ([self.node, other], [other, self.node]):
+            with self.subTest(order=[node["intent_id"] for node in nodes]):
+                self.inventory.reset_mock()
+                result = self.usage(nodes)
+                self.assertEqual(result["instances"], 1)
+                self.assertEqual(result["hourly_cost_microusd"], 850000)
+                self.assertEqual(result["active_instance_ids"], (other_id,))
+                observed = next(row for row in result["observations"] if row["intent_id"] == INTENT)
+                self.assertEqual(observed["reason_code"], "dstack_terminal_provider_accounted")
+                self.assertEqual([self.node, other], original)
+                self.inventory.assert_called_once_with("vastai")
+        # An additional unidentified provider allocation could be the old PUT.
+        self.inventory.return_value["instance_ids"].append("56042379")
+        self.assertIn(INTENT, self.usage([self.node, other])["active_instance_ids"])
+        # A conflicting or foreign other run never accounts for that provider ID.
+        self.inventory.return_value["instance_ids"] = ["56042378"]
+        other["payload"]["dstack"]["provider_instance_id"] = "conflicting-id"
+        self.assertIn(INTENT, self.usage([self.node, other])["active_instance_ids"])
+        other["payload"]["dstack"]["provider_instance_id"] = "56042378"
+        other_run["project_name"] = "foreign"
+        self.assertIn(INTENT, self.usage([self.node, other])["active_instance_ids"])
+        other_run["project_name"] = "sixnine"
+        original_spec = copy.deepcopy(other_run["run_spec"])
+        other_run["run_spec"]["configuration"]["max_price"] = .84
+        self.assertIn(INTENT, self.usage([self.node, other])["active_instance_ids"])
+        other_run["run_spec"] = original_spec
+        original_provisioning = copy.deepcopy(other_run["latest_job_submission"]["job_provisioning_data"])
+        other_run["latest_job_submission"]["job_provisioning_data"]["instance_type"] = None
+        self.assertIn(INTENT, self.usage([self.node, other])["active_instance_ids"])
+        other_run["latest_job_submission"]["job_provisioning_data"] = original_provisioning
+        original_read = self.client.get.side_effect
+        def failed_witness(**identity):
+            if identity["run_id"] == RUN:return copy.deepcopy(self.run)
+            raise DstackError("dstack_api_unavailable")
+        self.client.get.side_effect = failed_witness
+        self.assertIn(INTENT, self.usage([self.node, other])["active_instance_ids"])
+        self.client.get.side_effect = original_read
+        duplicate_id = "a4444444-4444-4444-8444-444444444444"
+        duplicate_run_id = "b4444444-4444-4444-8444-444444444444"
+        duplicate = copy.deepcopy(other)
+        duplicate["intent_id"] = duplicate_id
+        duplicate["payload"]["dstack"] = {**request(intent_id=duplicate_id).binding(PUB),
+            "apply_started": True, "run_id": duplicate_run_id, "provider_instance_id": "56042378"}
+        duplicate_run = {**copy.deepcopy(other_run), "id": duplicate_run_id,
+            "run_spec": request(intent_id=duplicate_id).run_spec(PUB)}
+        observed_runs = {RUN: self.run, other_run_id: other_run, duplicate_run_id: duplicate_run}
+        self.client.get.side_effect = lambda **identity: copy.deepcopy(observed_runs[identity["run_id"]])
+        self.assertIn(INTENT, self.usage([self.node, other, duplicate])["active_instance_ids"])
 
     def test_complete_no_capacity_submission_releases_capacity_only(self):
         self.no_allocation()

@@ -1,5 +1,6 @@
 """Registration capacity reconciliation, isolated ledger and fake reads only."""
 import copy
+import json
 from unittest.mock import Mock, patch
 
 from sqlalchemy import select, update
@@ -156,6 +157,35 @@ class RegistrationCapacityTests(LedgerCase):
             connection.execute(update(instance_intents).where(instance_intents.c.id==old)
                 .values(provider_instance_id='conflicting-ledger-instance'))
         self.assertEqual(self.usage(live)['instances'], 2)
+
+    def test_unknown_terminal_history_does_not_block_two_accounted_live_slots_or_settle_money(self):
+        failed = self.start(key="unknown-original")["node_id"]
+        binding = self.store.load(failed)
+        run = no_capacity_run(self.client.runs[binding["run_name"]])
+        message = "sixnine_vast_attempts_v1:" + json.dumps({"version": 1, "outcome": "unknown",
+            "attempted_count": 1, "attempts": [{"ask_id": "12345", "http_status": 400,
+                "code": "mutation_unknown", "outcome": "unknown", "contract_id": None}]})
+        run["latest_job_submission"]["termination_reason_message"] = message
+        run["jobs"][0]["job_submissions"][0]["termination_reason_message"] = message
+        self.client.runs[binding["run_name"]] = run
+        self.capacity.observe(failed)
+        live = [self.node("2000020"), self.node("2000021", mode="ref")]
+        self.service.provider_inventory = Mock(return_value={"backend": "vastai", "complete": True,
+            "observed_at": self.now, "instance_ids": ["2000020", "2000021"]})
+        self.repo.configure_capacity(max_instances=2, max_physical_gpus=2)
+        original_run, original_binding, before = copy.deepcopy(run), self.store.load(failed), self.snapshot()
+        self.assertEqual(self.usage(live[0])["instances"], 2)
+        control = WorkerControl(self.repo, capacity_usage=self.service.registration_capacity_usage)
+        for node in live:
+            control.register(self.spec(node))
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(self.store.load(failed), original_binding)
+        self.assertEqual(self.client.runs[binding["run_name"]], original_run)
+        held = [row for row in before[1] if row["reference_id"] == failed]
+        self.assertTrue(held)
+        self.assertTrue(all(row["state"] == "reserved" and row["actual_cost_microusd"] is None for row in held))
+        self.service.provider_inventory.return_value["instance_ids"].append("2999999")
+        self.assertEqual(self.usage(live[0])["instances"], 3)
 
     def test_overlay_retains_legacy_instances_and_unreleased_devices(self):
         old = self.node("2000002", terminal=True)

@@ -12,7 +12,8 @@ import re
 import uuid
 
 PREFIX = "sixnine_vast_attempts_v1:"
-SAFE_REJECTIONS = {(404, "no_such_ask"), (429, "rate_limited")}
+SAFE_REJECTIONS = {(400, "invalid_args"), (404, "no_such_ask"),
+    (410, "no_such_ask"), (429, "rate_limited")}
 ATTEMPT_FIELDS = {"ask_id", "http_status", "code", "outcome", "contract_id"}
 PROOF_FIELDS = {"version", "source", "run_id", "submission_id", "attempted_count", "attempts", "evidence_sha256"}
 

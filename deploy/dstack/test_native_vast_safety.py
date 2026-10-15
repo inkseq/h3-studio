@@ -35,6 +35,11 @@ def response(status, data, headers=None):
     return NS(status_code=status, headers=headers or {}, json=Mock(return_value=data), close=Mock())
 
 
+def unavailable(ask_id):
+    return {"success": False, "error": "invalid_args", "ask_id": int(ask_id),
+            "msg": f"error 404/3603: no_such_ask Instance type by id {ask_id} is not available."}
+
+
 def attempt(ask, error):
     return NS(backend="vastai", instance=str(ask), error=safety.closed_error(ask, error))
 
@@ -95,12 +100,20 @@ class NativeVastSafetyTests(unittest.TestCase):
         self.assertEqual(call.call_count, 3)
 
     def test_only_explicit_nonallocation_rejections_allow_next_offer(self):
-        for status, data in [(404, {"success": False, "error": "no_such_ask"}), (429, {"success": False})]:
+        for status, data, expected_code in [
+                (400, {"success": False, "error": "invalid_args", "ask_id": 123}, "invalid_args"),
+                (404, {"success": False, "error": "no_such_ask"}, "no_such_ask"),
+                (404, unavailable(123), "no_such_ask"),
+                (410, {"success": False, "error": "no_such_ask", "ask_id": "123"}, "no_such_ask"),
+                (429, {"success": False}, "rate_limited"),
+                (429, {"detail": "API requests too frequent endpoint threshold=4.5"}, "rate_limited"),
+                (429, {"detail": "API requests too frequent endpoint threshold=7.25"}, "rate_limited")]:
             with self.subTest(status=status), patch.object(safety.time, "sleep", side_effect=self.advance):
                 session = NS(put=Mock(return_value=response(status, data)))
                 with self.assertRaises(safety.VastSafeReject) as caught:
                     safety.create_instance_once(session, "123", {"label": "original"})
                 self.assertNotIsInstance(caught.exception, safety.VastAllocationUnknown)
+                self.assertEqual(caught.exception.outcome["code"], expected_code)
                 self.assertTrue(safety.safe_for_fallback(safety.closed_error("123", caught.exception)))
                 session.put.assert_called_once_with("/v0/asks/123/", json={"label": "original"})
 
@@ -108,7 +121,29 @@ class NativeVastSafetyTests(unittest.TestCase):
         outcomes = [TimeoutError("private https://secret.invalid/token"), response(500, {"success": False}),
                     response(200, {"success": False, "new_contract": 555}), response(429, {"success": False, "new_contract": 555}),
                     response(200, {"success": True}), response(404, {"success": False, "error": "different"}),
-                    response(429, []), response(429, {"success": False, "new_contract": 0})]
+                    response(429, []), response(429, {"success": False, "new_contract": 0}),
+                    response(400, {"success": False, "error": "invalid_price"}),
+                    response(400, {"success": False, "error": "no_ssh_key_for_vm"}),
+                    response(400, {"success": False, "error": "invalid_args", "ask_id": 124}),
+                    response(400, {"success": False, "error": "invalid_args", "ask_id": True}),
+                    response(400, {"success": False, "error": "invalid_args", "ask_id": None}),
+                    response(400, {"success": False, "error": "invalid_args", "new_contract": 555}),
+                    response(404, {**unavailable(123), "ask_id": 124}),
+                    response(404, {**unavailable(124), "ask_id": 123}),
+                    response(404, {**unavailable(123), "msg": "error404/3603: no_such_ask"}),
+                    response(404, {"success": False, "error": 3603, "msg": "no_such_ask"}),
+                    response(410, {"success": False, "error": "no_such_ask", "ask_id": "0123"}),
+                    response(410, {"success": False, "error": "no_such_ask", "new_contract": 555}),
+                    response(429, {"detail": "API requests too frequent endpoint threshold=4.5 extra"}),
+                    response(429, {"detail": "API requests too frequent endpoint threshold=0"}),
+                    response(429, {"detail": "API requests too frequent endpoint threshold=-1"}),
+                    response(429, {"detail": "API requests too frequent endpoint threshold=nan"}),
+                    response(429, {"detail": "API requests too frequent endpoint threshold=inf"}),
+                    response(429, {"detail": "API requests too frequent endpoint threshold=1000001"}),
+                    response(429, {"detail": "API requests too frequent endpoint threshold=4.5", "extra": True}),
+                    response(429, {"detail": "API requests too frequent endpoint threshold=4.5", "success": True}),
+                    response(429, {"detail": "API requests too frequent endpoint threshold=4.5", "new_contract": 555}),
+                    response(500, unavailable(123)), response(200, {"success": True, "new_contract": 555, "ask_id": 124})]
         for outcome in outcomes:
             with self.subTest(outcome=type(outcome).__name__):
                 session = NS(put=Mock(side_effect=outcome) if isinstance(outcome, Exception) else Mock(return_value=outcome), delete=Mock())
@@ -177,11 +212,13 @@ class NativeVastSafetyTests(unittest.TestCase):
                 with self.assertRaises(ValueError):installer.install(root)
         loop = native_loop(sources)
         for responses, expected_puts, expected in [
-            ([response(404, {"success": False, "error": "no_such_ask"}), response(429, {"success": False}), response(200, {"success": True, "new_contract": 555})], 3, "success"),
+            ([response(404, unavailable(100)), response(429, {"detail": "API requests too frequent endpoint threshold=4.5"}), response(200, {"success": True, "new_contract": 555})], 3, "success"),
+            ([response(400, {"success": False, "error": "invalid_args", "ask_id": 100}), response(410, {"success": False, "error": "no_such_ask", "ask_id": 101}), response(200, {"success": True, "new_contract": 555})], 3, "success"),
             ([TimeoutError("unknown"), response(200, {"success": True, "new_contract": 555})], 1, "unknown"),
             ([response(200, {"success": False, "new_contract": 999}), response(200, {"success": True, "new_contract": 555})], 1, "unknown"),
             ([response(429, {"success": False}, {"Retry-After": "999"}), response(200, {"success": True, "new_contract": 555})], 1, "no_allocation"),
-            ([response(404, {"success": False, "error": "no_such_ask"}), response(429, {"success": False})], 2, "no_allocation")]:
+            ([response(404, unavailable(100)), response(429, {"success": False})], 2, "no_allocation"),
+            ([response(400, {"success": False, "error": "invalid_args"}), response(410, {"success": False, "error": "no_such_ask"})], 2, "no_allocation")]:
             safety._cooldown_until = 0.
             with self.subTest(expected=expected), patch.object(safety.time, "sleep", side_effect=self.advance):
                 session = NS(put=Mock(side_effect=responses), delete=Mock())

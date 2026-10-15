@@ -16,7 +16,8 @@ ATTEMPTS_PREFIX = "sixnine_vast_attempts_v1:"
 READ_ATTEMPTS = 3
 MAX_ATTEMPTS = 25
 OUTCOME_KEYS = {"ask_id", "http_status", "code", "outcome", "contract_id"}
-SAFE_CODES = {"no_such_ask", "rate_limited"}
+SAFE_REJECTIONS = {(400, "invalid_args"), (404, "no_such_ask"), (410, "no_such_ask"), (429, "rate_limited")}
+SAFE_CODES = {code for _, code in SAFE_REJECTIONS}
 _cooldown_lock = threading.Lock()
 _cooldown_until = 0.
 
@@ -42,6 +43,48 @@ def _numeric_id(value):
     if type(value) not in (str, int) or not re.fullmatch(r"[1-9][0-9]{0,17}", str(value)):
         raise ValueError("sixnine_vast_numeric_identity_required")
     return str(value)
+
+
+def _matching_ask(data, ask_id):
+    if "ask_id" not in data:
+        return True
+    try:
+        return _numeric_id(data["ask_id"]) == ask_id
+    except ValueError:
+        return False
+
+
+def _rejection_code(status, data, ask_id):
+    """Only documented create-response failures prove this PUT allocated nothing."""
+    if type(status) is not int or not _matching_ask(data, ask_id):
+        return None
+    if status == 429 and (data.get("success") is False or _rate_limit_detail(data)):
+        return "rate_limited"
+    if data.get("success") is not False:
+        return None
+    error = data.get("error")
+    if status == 400 and error == "invalid_args":
+        return "invalid_args"
+    if status == 404 and error == "no_such_ask":
+        return "no_such_ask"  # Retain the previously supported explicit rejection.
+    if status == 404 and error == "invalid_args":
+        message = data.get("msg")
+        prefix = f"error 404/3603: no_such_ask Instance type by id {ask_id} is not available."
+        if isinstance(message, str) and len(message) <= 2048 and message.startswith(prefix):
+            return "no_such_ask"
+    if status == 410 and error == "no_such_ask":
+        return "no_such_ask"
+    return None
+
+
+def _rate_limit_detail(data):
+    if set(data) != {"detail"} or not isinstance(data["detail"], str):
+        return False
+    match = re.fullmatch(r"API requests too frequent endpoint threshold=([0-9]{1,6}(?:\.[0-9]{1,6})?)", data["detail"])
+    if match is None:
+        return False
+    threshold = float(match[1])
+    return math.isfinite(threshold) and 0 < threshold <= 1000000
 
 
 def _retry_hint(response):
@@ -132,12 +175,13 @@ def create_instance_once(session, bundle_id, payload):
                 contract = _numeric_id(contract)
             except ValueError:
                 raise VastAllocationUnknown(unknown) from None
-            if status == 200 and data.get("success") is True:
+            if type(status) is int and status == 200 and data.get("success") is True and _matching_ask(data, ask_id):
                 return int(contract)
             unknown.update(code="contract_returned_with_error", contract_id=contract)
             raise VastAllocationUnknown(unknown) from None
-        if data.get("success") is False and (status == 429 or status == 404 and data.get("error") == "no_such_ask"):
-            outcome = {**unknown, "code": "rate_limited" if status == 429 else "no_such_ask", "outcome": "rejected"}
+        code = _rejection_code(status, data, ask_id)
+        if code is not None:
+            outcome = {**unknown, "code": code, "outcome": "rejected"}
             if status == 429:
                 delay = _delay(response)
                 _record_rate_limit(response, delay)
@@ -188,7 +232,7 @@ def _validated_outcome(value, ask_id):
             or value["code"] not in SAFE_CODES | {"mutation_unknown", "contract_returned_with_error"}
             or value["contract_id"] is not None and _numeric_id(value["contract_id"]) != value["contract_id"]):
         raise ValueError("sixnine_vast_outcome_invalid")
-    if value["outcome"] == "rejected" and not (value["contract_id"] is None and ((value["code"], value["http_status"]) in {("no_such_ask", 404), ("rate_limited", 429)})):
+    if value["outcome"] == "rejected" and not (value["contract_id"] is None and (value["http_status"], value["code"]) in SAFE_REJECTIONS):
         raise ValueError("sixnine_vast_rejection_unconfirmed")
     return value
 
