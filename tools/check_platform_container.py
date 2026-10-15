@@ -183,7 +183,10 @@ def main():
     assert {profile['id'] for profile in catalog['profiles']} == set(PROFILE_IDS)
     for profile in catalog['profiles']:
         assert profile['validation']['production_adapter_verified'] is False
-        if not profile['verified_cases']:
+        if profile.get('compiler_epoch') == 'full-controls-v2':
+            assert profile['validation']['scope'] == 'pinned_native_control_mapping'
+            assert profile['verified_cases'] == [] and profile['qualification_cases'] == []
+        elif not profile['verified_cases']:
             assert profile['validation']['scope'] == 'pending_hardware_qualification'
             assert profile.get('qualification_cases')
             assert all('measurements' not in case for case in profile['qualification_cases'])

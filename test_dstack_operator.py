@@ -1,5 +1,6 @@
 """Original-ledger dstack commands, using isolated databases and fake HTTP only."""
 import copy
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
