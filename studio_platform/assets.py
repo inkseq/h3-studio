@@ -475,18 +475,16 @@ class AssetService:
         clauses = [asset_table.c.id == asset_id, asset_table.c.tenant == self.tenant, asset_table.c.owner == owner]
         if project_id is not None:
             clauses.append(asset_table.c.project_id == project_id)
-        with self.engine.begin() as conn:
-            owner_reference_gate(conn, self.tenant, owner)
+        with self.engine.connect() as conn:
             value = conn.execute(select(asset_table.c.record).where(*clauses)).scalar_one_or_none()
             if value is None:
                 raise AssetNotFound("素材不存在")
             record = json.loads(value)
-            self.journal._available(conn, owner, record)
+            self.journal._available(conn, owner, record, acquire_gate=False)
             return record
 
     def list(self, owner, project_id):
-        with self.engine.begin() as conn:
-            owner_reference_gate(conn, self.tenant, owner)
+        with self.engine.connect() as conn:
             rows = conn.execute(select(asset_table.c.record).where(asset_table.c.tenant == self.tenant,
                 asset_table.c.owner == owner, asset_table.c.project_id == project_id, asset_table.c.status != "duplicate").order_by(asset_table.c.created.desc()).limit(500)).scalars()
             result = []

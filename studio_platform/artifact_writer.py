@@ -82,8 +82,9 @@ class ArtifactWriter:
             fingerprint.append(delivery)
         return _hash([self.tenant, job["owner_id"], job["id"], attempt_id]), _hash(fingerprint)
 
-    def _available(self, conn, record, *, job=None, writable=False):
-        owner_reference_gate(conn, self.tenant, record["owner"])
+    def _available(self, conn, record, *, job=None, writable=False, acquire_gate=True):
+        if acquire_gate:
+            owner_reference_gate(conn, self.tenant, record["owner"])
         if record.get("binding") != self.binding:
             raise ArtifactWritePending("artifact_receipt_identity_mismatch")
         if job is None:
@@ -106,13 +107,12 @@ class ArtifactWriter:
 
     def get(self, job, attempt_id, tag):
         ident, fingerprint = self._identity(job, attempt_id, tag)
-        with self.engine.begin() as conn:
-            owner_reference_gate(conn, self.tenant, job["owner_id"])
+        with self.engine.connect() as conn:
             row = conn.execute(select(write_receipts).where(write_receipts.c.id == ident)).first()
             if row is None:
                 return None
             record = json.loads(row.record)
-            self._available(conn, record, job=job)
+            self._available(conn, record, job=job, acquire_gate=False)
         if (record["fingerprint"] != fingerprint or record["binding"] != self.binding
                 or record["staging_root"] != str(self.work_dir)):
             raise ArtifactWritePending("artifact_receipt_identity_mismatch")

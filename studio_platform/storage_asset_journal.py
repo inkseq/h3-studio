@@ -76,9 +76,10 @@ class AssetUploadJournal:
         return ((f"tenant:{self.tenant}", self.tenant_limit, self.total_active),
                 (f"tenant:{self.tenant}:owner:{owner}", self.owner_limit, self.owner_active))
 
-    def _available(self, conn, owner, asset, *, receipt=None, writable=False):
+    def _available(self, conn, owner, asset, *, receipt=None, writable=False, acquire_gate=True):
         """The caller owns the asset OS lock before opening a write transaction."""
-        owner_reference_gate(conn, self.tenant, owner)
+        if acquire_gate:
+            owner_reference_gate(conn, self.tenant, owner)
         selection = asset.get("selection") or {}
         keys = [asset[role]["key"] for role in ("original", "model")
                 if isinstance(asset.get(role), dict) and asset[role].get("key")]
@@ -195,15 +196,14 @@ class AssetUploadJournal:
 
     def get(self, owner, asset_id, *, include_deleted=False):
         """include_deleted is private audit access, never a public ready replay."""
-        with self.engine.begin() as conn:
-            owner_reference_gate(conn, self.tenant, owner)
+        with self.engine.connect() as conn:
             row = conn.execute(select(receipts).where(receipts.c.id == asset_id,
                 receipts.c.tenant == self.tenant, receipts.c.owner == owner)).first()
             if row is None:
                 raise AssetConflict("此素材没有可恢复上传记录；旧素材保持不变")
             record = json.loads(row.record)
             if not include_deleted:
-                self._available(conn, owner, record["asset"], receipt=record)
+                self._available(conn, owner, record["asset"], receipt=record, acquire_gate=False)
             record["version"] = row.version
         return record
 
@@ -253,8 +253,8 @@ class AssetUploadJournal:
     def legacy_match(self, receipt, client_key):
         if client_key is None:
             return None
-        with self.engine.begin() as conn:
-            self._available(conn, receipt["owner"], receipt["asset"], receipt=receipt, writable=True)
+        with self.engine.connect() as conn:
+            self._available(conn, receipt["owner"], receipt["asset"], receipt=receipt, writable=True, acquire_gate=False)
             rows = conn.execute(select(self.assets.c.record).select_from(
                 self.assets.outerjoin(receipts, self.assets.c.id == receipts.c.id)).where(
                     self.assets.c.tenant == self.tenant, self.assets.c.owner == receipt["owner"],
@@ -263,7 +263,7 @@ class AssetUploadJournal:
             for asset in values:
                 if asset.get("client_asset_id") != client_key:
                     continue
-                self._available(conn, receipt["owner"], asset)
+                self._available(conn, receipt["owner"], asset, acquire_gate=False)
                 info = asset.get("metadata", {})
                 if (asset.get("status") != "ready" or info.get("sha256") != receipt["sha256"]
                         or info.get("bytes") != receipt["size_bytes"] or asset.get("mime") != receipt["asset"]["mime"]

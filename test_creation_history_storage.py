@@ -233,3 +233,17 @@ class CreationHistoryStorageTests(LedgerCase):
         self.assertEqual(self.assets.get(self.scope.owner_id, original["id"])["status"], "ready")
         with self.assertRaisesRegex(Conflict, "quick_chat_session_not_active"):
             self.upload(client="new-in-trash")
+
+    def test_nested_read_only_asset_and_receipt_lookups_do_not_reacquire_owner_gate(self):
+        original = self.upload()
+        cached = self.assets.journal.get(self.scope.owner_id, original["id"])
+        _, job, lease, tag, _, _ = self.prepared(settled=True)
+        # Quick Chat freezes an original turn under this gate before reading
+        # material snapshots. A second-connection exclusive gate deadlocks.
+        with self.repo.transaction() as conn:
+            owner_reference_gate(conn, self.scope.tenant_id, self.scope.owner_id)
+            self.assertEqual(self.assets.get(self.scope.owner_id, original["id"])["id"], original["id"])
+            self.assertEqual(self.assets.list(self.scope.owner_id, self.scope.project_id)[0]["id"], original["id"])
+            self.assertEqual(self.assets.journal.get(self.scope.owner_id, original["id"])["id"], original["id"])
+            self.assertIsNone(self.assets.journal.legacy_match(cached, "no-legacy-match"))
+            self.assertEqual(self.writer.get(job, lease.attempt_id, tag)["phase"], "settled")
