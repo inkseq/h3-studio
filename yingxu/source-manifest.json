@@ -132,7 +132,7 @@
     "src/media.test.js": "1b105b30742767d5fc50b927d20da3fd949ca0660d101cb8eb4b893f93375ec6",
     "src/operator-budget-model.js": "c6bb610a3b75b4ebcd0bfc10a761459fc0f30bd9da7e8ad66ba861cf3002ebde",
     "src/operator-budget.css": "b64fe22cc5a6bbed95ce253e8955acc6ec661223425075f77cc533f5214705f2",
-    "src/operator-budget.test.js": "e01d83538bd1de620edff00e57b090eb334752f134f05b072da000ee87ef33f9",
+    "src/operator-budget.test.js": "084b9c59b7ad12805baf12d8234a26bc62cdc1806c20d6b32a67aa5e8b768830",
     "src/operator-client.js": "a3a0582a87f8e4bf46f204d461d0490059635ad1478744eb8fff88c8cff76b12",
     "src/operator-controller.js": "b5d6eb83a7e4306f36bec100bbf55bc5fe7a73bc1ba2f0cce360942e38433d70",
     "src/operator-host-model.js": "0f96de05dc98152d5133ae99efd85a0c81a335e7e75f5ad7ce04b84810a1b852",
