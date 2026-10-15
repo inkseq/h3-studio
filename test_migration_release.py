@@ -59,18 +59,29 @@ class MigrationArtifacts(unittest.TestCase):
         raw = json.dumps({"os": "linux", "architecture": "amd64", "config": {
             "Labels": {"org.opencontainers.image.revision": COMMIT}}}).encode()
         self.image_id = "sha256:" + hashlib.sha256(raw).hexdigest()
-        image = io.BytesIO()
-        with tarfile.open(fileobj=image, mode="w") as archive:
-            for name, data in ((self.image_id[7:] + ".json", raw), ("manifest.json", json.dumps([{
-                    "Config": self.image_id[7:] + ".json", "RepoTags": ["sixnine-dispatch:" + COMMIT], "Layers": []}]).encode())):
-                member = tarfile.TarInfo(name); member.size = len(data); archive.addfile(member, io.BytesIO(data))
         inspected = [{"Id": self.image_id, "Architecture": "amd64", "Os": "linux", "Config": {
             "Labels": {"org.opencontainers.image.revision": COMMIT}}}]
-        process = Mock(); process.__enter__ = Mock(return_value=process); process.__exit__ = Mock(return_value=False)
-        process.stdout = io.BytesIO(image.getvalue()); process.wait.return_value = 0
+        provenance = json.loads((ROOT / "deploy/dstack/native-vast-provenance.json").read_text())
+        checked = {field: hashlib.sha256((ROOT / "deploy/dstack" / name).read_bytes()).hexdigest()
+            for field, name in (("helper_sha256", "native_vast_safety.py"), ("installer_sha256", "patch_native_vast.py"),
+                                ("source_provenance_sha256", "native-vast-provenance.json"))}
+        checked["installed"] = {"patched_sources": 6, "dstack_version": "0.22.3",
+            "upstream_commit": provenance["dstack_upstream_commit"], "helper_sha256": checked["helper_sha256"],
+            "original_sources": {name: item["sha256"] for name,item in provenance["sources"].items()},
+            "sources": {name:"e"*64 for name in provenance["sources"]}}
+        def saved(command, **kwargs):
+            image = io.BytesIO()
+            with tarfile.open(fileobj=image, mode="w") as archive:
+                for name, data in ((self.image_id[7:] + ".json", raw), ("manifest.json", json.dumps([{
+                        "Config": self.image_id[7:] + ".json", "RepoTags": [command[-1]], "Layers": []}]).encode())):
+                    member = tarfile.TarInfo(name); member.size = len(data); archive.addfile(member, io.BytesIO(data))
+            process = Mock(); process.__enter__ = Mock(return_value=process); process.__exit__ = Mock(return_value=False)
+            process.stdout = io.BytesIO(image.getvalue()); process.wait.return_value = 0
+            return process
         self.artifact = self.root / "artifact"
-        with patch.object(builder.subprocess, "check_output", return_value=json.dumps(inspected).encode()), \
-                patch.object(builder.subprocess, "Popen", return_value=process):
+        with patch.object(builder.subprocess, "check_output", side_effect=lambda command, **kwargs:
+                json.dumps(checked if command[1] == "run" else inspected).encode()), \
+                patch.object(builder.subprocess, "Popen", side_effect=saved):
             self.value = builder.build_migration(COMMIT, self.platform, self.artifact, [(PROFILE, "fl")])
 
     def test_exact_dispatch_and_public_source_set_round_trip(self):
@@ -79,6 +90,9 @@ class MigrationArtifacts(unittest.TestCase):
         self.assertEqual(value, self.value)
         self.assertEqual(release.validate_image_archive(self.artifact / "dispatch-image.tar.gz",
             {"commit": COMMIT, **value["dispatch"]}), (self.image_id,))
+        self.assertEqual(release.validate_image_archive(self.artifact / "dstack-server-image.tar.gz",
+            {"commit": COMMIT, **value["dstack"]}), (self.image_id,))
+        self.assertEqual(builder.DSTACK_IMAGE_CHECK, maintenance.DSTACK_IMAGE_CHECK)
         target = self.root / "sources"
         with patch.object(maintenance.os, "chown", create=True):
             maintenance.extract_sources(self.artifact / "source-set.tar.gz", target, value["source_index_sha256"])
@@ -114,6 +128,35 @@ class MigrationArtifacts(unittest.TestCase):
         legacy = dict(value);legacy.pop('native_source_commits')
         path.write_text(json.dumps(legacy))
         self.assertEqual(maintenance.manifest(self.artifact,COMMIT),legacy)
+
+    def test_derivative_archive_and_installed_proof_are_bound_before_load(self):
+        directory = self.root / "derivative"; directory.mkdir()
+        self.artifact.rename(directory / "artifact"); self.artifact = directory / "artifact"
+        with patch.object(release, "command") as command:
+            server = maintenance.dstack_image(directory, self.value, {}, load=True)
+        self.assertEqual(server["archive_image_ids"], (self.image_id,))
+        self.assertEqual(server["installed_provenance"], maintenance.dstack_provenance(self.artifact, self.value))
+        self.assertEqual(command.call_args.args[0], ["load", "--input", str(self.artifact / "dstack-server-image.tar.gz")])
+        # A different image's archive cannot be relabelled as this derivative.
+        (self.artifact / "dstack-server-image.tar.gz").write_bytes((self.artifact / "dispatch-image.tar.gz").read_bytes())
+        with patch.object(release, "command") as command, self.assertRaisesRegex(release.ReleaseError, "identity_mismatch"):
+            maintenance.dstack_image(directory, self.value, {}, load=True)
+        command.assert_not_called()
+
+    def test_legacy_artifact_has_no_derivative_fallback_or_extra_file_acceptance(self):
+        legacy = dict(self.value)
+        legacy.pop("dstack")
+        legacy["files"] = {name:digest for name,digest in self.value["files"].items() if name not in maintenance.DSTACK_FILES}
+        for name in maintenance.DSTACK_FILES:
+            (self.artifact/name).unlink()
+        (self.artifact/maintenance.MANIFEST).write_text(json.dumps(legacy))
+        self.assertEqual(maintenance.manifest(self.artifact,COMMIT),legacy)
+        with patch.object(release,"command") as command:
+            self.assertIsNone(maintenance.dstack_image(self.root,legacy,{},load=True))
+        command.assert_not_called()
+        (self.artifact/"dstack-native-provenance.json").write_text("{}")
+        with self.assertRaisesRegex(release.ReleaseError,"artifact_files_invalid"):
+            maintenance.manifest(self.artifact,COMMIT)
 
     def test_optional_admin_and_stage_query_config_preserve_old_host_contract(self):
         directory = self.root / "migration"
@@ -235,11 +278,37 @@ class MigrationArtifacts(unittest.TestCase):
             maintenance.approved(self.root, self.artifact, COMMIT)
 
     def test_incoming_helper_is_never_the_execution_trust_path(self):
-        with patch.object(release, "regular"), patch.object(release, "checksum", side_effect=["a" * 64, "b" * 64]), \
+        with patch.object(release, "regular"), patch.object(release, "checksum", side_effect=["a" * 64, "a" * 64, "b" * 64, "b" * 64]), \
                 patch.object(maintenance.importlib.util, "spec_from_file_location") as importer, \
                 self.assertRaisesRegex(release.ReleaseError, "helpers_need_reviewed_update"):
             maintenance.installed_checker(self.artifact)
         importer.assert_not_called()
+
+    def test_only_two_reviewed_legacy_pairs_can_use_installed_checker(self):
+        trusted_path = Path(maintenance.__file__).resolve().with_name("migration_check.py")
+        original = self.artifact / maintenance.MANIFEST
+        for commit, pair in maintenance.LEGACY_HELPER_PAIRS.items():
+            original.write_text(json.dumps({"commit": commit}))
+            spec, module = Mock(), types.ModuleType("trusted_checker")
+            with patch.object(release, "regular"), \
+                    patch.object(release, "checksum", side_effect=["a" * 64, "b" * 64, *pair]), \
+                    patch.object(maintenance.importlib.util, "spec_from_file_location", return_value=spec) as importer, \
+                    patch.object(maintenance.importlib.util, "module_from_spec", return_value=module):
+                self.assertIs(maintenance.installed_checker(self.artifact), module)
+                importer.assert_called_once_with("sixnine_trusted_migration_checker", trusted_path)
+                spec.loader.exec_module.assert_called_once_with(module)
+        legacy_commit = next(iter(maintenance.LEGACY_HELPER_PAIRS))
+        pair = maintenance.LEGACY_HELPER_PAIRS[legacy_commit]
+        for value, incoming in (({"commit": COMMIT}, pair),
+                ({"commit": legacy_commit, "dstack": {}}, pair),
+                ({"commit": legacy_commit}, (pair[0], "f" * 64))):
+            original.write_text(json.dumps(value))
+            with patch.object(release, "regular"), \
+                    patch.object(release, "checksum", side_effect=["a" * 64, "b" * 64, *incoming]), \
+                    patch.object(maintenance.importlib.util, "spec_from_file_location") as importer, \
+                    self.assertRaisesRegex(release.ReleaseError, "helpers_need_reviewed_update"):
+                maintenance.installed_checker(self.artifact)
+            importer.assert_not_called()
 
     def test_publication_is_conditional_immutable_and_never_self_approves(self):
         class S3:
@@ -259,7 +328,7 @@ class MigrationArtifacts(unittest.TestCase):
         first = publisher.publish_migration(COMMIT, self.artifact, api=api)
         self.assertEqual(first["status"], "migration_published_pending_independent_host_approval")
         self.assertEqual(publisher.publish_migration(COMMIT, self.artifact, api=api), first)
-        self.assertEqual(len(api.objects), len(maintenance.FILES) + 1)
+        self.assertEqual(len(api.objects), len(maintenance.artifact_files(self.value)) + 1)
         self.assertFalse((self.root / "approved-migrations").exists())
         key = "releases/" + COMMIT + "/migration/broker.example.json"
         data, metadata = api.objects[key]; api.objects[key] = (data + b"changed", metadata)

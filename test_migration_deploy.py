@@ -15,7 +15,7 @@ import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
 
-from tools.check_migration_deploy import PROBE, ROOT, check, local_inputs, main, memory_mib, validate
+from tools.check_migration_deploy import DSTACK_IMAGE, PROBE, ROOT, check, local_inputs, main, memory_mib, validate
 
 
 class MigrationPrivateProbeTests(unittest.TestCase):
@@ -105,6 +105,7 @@ def fixture_environment():
     environment.pop("SIXNINE_STORYBOARD_OWNERS", None)
     names = ("SIXNINE_POSTGRES_IMAGE", "SIXNINE_CADDY_IMAGE", "SIXNINE_IMAGE", "SIXNINE_DISPATCH_IMAGE")
     environment.update({name: "test/never-pulled@sha256:"+"a"*64 for name in names})
+    environment["SIXNINE_DSTACK_SERVER_IMAGE"] = DSTACK_IMAGE
     for name in ("SIXNINE_DB_ADMIN_SECRET_FILE", "SIXNINE_APP_DSN_SECRET_FILE",
         "SIXNINE_EXECUTION_PROFILES_SECRET_FILE", "SIXNINE_GRAFANA_CONFIG_FILE", "SIXNINE_DSTACK_OPERATOR_CONFIG_FILE",
         "SIXNINE_DSTACK_RUNTIME_CONFIG_FILE", "SIXNINE_DSTACK_TOKEN_FILE", "SIXNINE_DSTACK_DSN_FILE",
@@ -137,6 +138,16 @@ class MigrationDeployTests(unittest.TestCase):
         value = copy.deepcopy(self.document); mutate(value)
         with self.assertRaisesRegex(ValueError, "^"+code+"$"):
             validate(value)
+
+    def test_derivative_requires_the_explicit_immutable_artifact_binding(self):
+        value = copy.deepcopy(self.document)
+        reference = "sixnine-dstack:"+"b"*40+"@sha256:"+"c"*64
+        value["services"]["dstack"]["image"] = reference
+        validate(value, dstack_image=reference)
+        with self.assertRaisesRegex(ValueError,"infrastructure_image_changed"):
+            validate(value)
+        with self.assertRaisesRegex(ValueError,"dstack_image_binding_invalid"):
+            validate(value, dstack_image="some-other-image@sha256:"+"c"*64)
 
     def render_r2(self):
         environment = fixture_environment()

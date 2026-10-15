@@ -47,6 +47,7 @@ GOVERNANCE_DOCUMENTS = frozenset("""
 AGENTS.md WORKFLOW.md WORKFLOW.zh-CN.md PROJECT-PLAN.md
 CURRENT-BASELINE.md GENERATION-CONTRACT.md GENERATION-FOUNDATION-RESULT.md
 PLANNING-INDEX.zh-CN.md UNIFIED-BACKEND-API-PLAN.zh-CN.md REUSE-AND-MIGRATION-DECISION.zh-CN.md
+workflow/owner-changes.md
 """.split())
 
 FRONTEND_ROOT = frozenset({"yingxu/index.html", "yingxu/package.json", "yingxu/package-lock.json",

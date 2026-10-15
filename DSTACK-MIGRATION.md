@@ -113,6 +113,18 @@ No additional rental or billing ledger is created. Insufficient funds drains new
 work, collects existing results and requests stop when safe. Keep-on does not
 bypass the spend cap. Charge estimates include provisioning/download and are not
 invoices; manual operational review never releases or settles unknown money.
+An exact failed native submission with complete typed rejected/no-contract
+attempt evidence releases its original reservation at zero. Older starts the
+owner explicitly confirms never allocated can use a trusted one-shot review
+with fresh exact-run and complete empty account checks; record the review on
+the same intent. Unknown PUTs/contracts and incomplete evidence remain held.
+
+With no live capacity, tasks or unresolved outcomes, controller/dispatch block
+on committed PostgreSQL wake hints, then re-read these original authorities.
+Only a rare15–30minute read-only provider safety sweep runs while idle. Active
+capacity retains its existing timely observation/idle-stop cadence. The pinned
+CPU dstack safety derivative disables idle catalog preload and retains native
+offer allocation, adding bounded Vast429 cooldown and explicit outcome evidence.
 
 Under the existing capacity lock, new-path limits count original owned live or
 uncertain dstack runs and actual GPU allocations. Legacy Lium/Targon intents do

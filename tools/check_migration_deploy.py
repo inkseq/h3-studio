@@ -104,11 +104,13 @@ def validate_storage(document):
         "migration_storage_r2_configuration_invalid")
 
 
-def validate(document, *, host_memory_mib=3840):
+def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE):
     require(type(document) is dict and type(document.get("services")) is dict, "migration_compose_invalid")
     services = document["services"]
     require({"app", "db", "db-init", "caddy", "hatchet-db", *CPU_SHARED} <= set(services), "migration_services_missing")
-    require(services["dstack"]["image"] == DSTACK_IMAGE and services["hatchet"]["image"] == HATCHET_IMAGE,
+    require(dstack_image == DSTACK_IMAGE or re.fullmatch(r"sixnine-dstack:[0-9a-f]{40}@sha256:[0-9a-f]{64}", dstack_image),
+            "migration_dstack_image_binding_invalid")
+    require(services["dstack"]["image"] == dstack_image and services["hatchet"]["image"] == HATCHET_IMAGE,
             "migration_infrastructure_image_changed")
     for name, service in services.items():
         require(re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", service.get("image", "")), "migration_image_unpinned")
@@ -221,7 +223,8 @@ def check(base, overlay, *, environment=None, runner=subprocess.run, host_memory
             document = json.loads(result.stdout)
         except ValueError:
             raise ValueError("migration_compose_render_invalid") from None
-        receipt = validate(document, host_memory_mib=host_memory_mib)
+        receipt = validate(document, host_memory_mib=host_memory_mib,
+            dstack_image=(environment or {}).get("SIXNINE_DSTACK_SERVER_IMAGE", DSTACK_IMAGE))
         if check_inputs:
             local_inputs(document)
         if probe:

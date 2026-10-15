@@ -488,3 +488,21 @@ inventory.json
 !yingxu/src/CreationHistory.jsx
 !yingxu/src/creation-history-model.js
 !yingxu/src/creation-history.test.js
+
+# Event wakeup and reviewed native Vast safety source; no runtime receipts.
+!studio_platform/demand_wakeup.py
+!studio_platform/dstack_allocation_proof.py
+!test_demand_wakeup.py
+!test_dstack_allocation_proof.py
+!test_dstack_native_vast.py
+!deploy/dstack/Dockerfile.server-vast
+!deploy/dstack/native_vast_safety.py
+!deploy/dstack/patch_native_vast.py
+!deploy/dstack/native-vast-provenance.json
+!workflow/owner-changes.md
+!docs/archive/
+!docs/archive/workflow-20261008/
+!docs/archive/workflow-20261008/AGENTS.md
+!docs/archive/workflow-20261008/WORKFLOW.md
+!docs/archive/workflow-20261008/WORKFLOW.zh-CN.md
+!docs/archive/workflow-20261008/README.md

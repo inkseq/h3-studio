@@ -27,6 +27,7 @@ from .repository import (Scope, BudgetExceeded, attempts, budget_accounts, budge
 from .runtime_catalog import engine_manifest, get_profile
 
 BACKEND_MARKER = "dstack-v1"
+MAX_HOST_CANDIDATES = 10
 PROVIDERS = {"vastai": "vast", "runpod": "runpod"}
 # Pinned dstack/gpuhunt scheduler labels, not native CUDA device identities.
 # The native worker still checks the full physical name, capability and VRAM.
@@ -38,7 +39,7 @@ TERMINAL_JOBS = {"succeeded", "failed", "cancelled"}
 OBSERVATION_KEYS = {"run_id", "run_name", "state", "ready", "reason_code", "observed_at",
     "provider_instance_id", "runtime_incarnation", "dstack_status", "model_load_state",
     "billing_state", "estimated_cost_microusd", "bootstrap_phase", "preparation",
-    "host_observation", "host_failure"}
+    "host_observation", "host_failure", "no_allocation_proof"}
 IDENTITY_KEYS = {"run_id", "provider_instance_id", "runtime_incarnation"}
 REGISTRATION_REASON_CODES = frozenset({"global_capacity_exceeded"})
 
@@ -265,6 +266,25 @@ class LedgerDstackStore:
             if observation.get("run_name"):
                 require(observation["run_name"] == binding["run_name"], "dstack_observation_identity_changed")
             value = copy.deepcopy(observation)
+            no_allocation = value.pop("no_allocation_proof", None)
+            if no_allocation is not None:
+                from .dstack_allocation_proof import validate_proof
+                no_allocation = validate_proof(no_allocation, binding)
+                require(no_allocation is not None and value.get("state") == "stopped"
+                    and value.get("dstack_status") == "failed"
+                    and not intent.get("provider_instance_id")
+                    and value.get("provider_instance_id") is None,
+                    "dstack_no_allocation_proof_invalid")
+            if binding.get("billing_state") == "no_charge_confirmed" and (
+                    binding.get("no_allocation_proof") or binding.get("no_allocation_review")):
+                require(value.get("state") == "stopped" and value.get("dstack_status") == "failed"
+                    and value.get("provider_instance_id") is None
+                    and value.get("runtime_incarnation") is None
+                    and "host_observation" not in value and "host_failure" not in value,
+                    "dstack_no_allocation_history_conflict")
+                value["billing_state"] = "no_charge_confirmed"
+                if value.get("state") == "stopped":
+                    value["reason_code"] = "dstack_never_allocated"
             if "host_observation" in value:
                 from .host_policy import observation as physical_observation
                 physical = physical_observation(value.pop("host_observation"), now=self.repo.clock())
@@ -318,6 +338,23 @@ class LedgerDstackStore:
                 "runtime_incarnation": binding.get("runtime_incarnation"),
                 "reason_code": value.get("reason_code"), "manifest_digest": binding["manifest_digest"]}
             self._advance(connection, intent, value)
+            if no_allocation is not None:
+                # The complete typed native rejection list proves every PUT
+                # returned no contract. Settle this original reservation once;
+                # terminal/JPD-null history without that evidence stays pending.
+                self.repo.update_instance(intent_id, "destroyed", destruction_confirmed=True,
+                    actual_cost_microusd=0, connection=connection)
+                previous_proof = binding.get("no_allocation_proof")
+                binding["no_allocation_proof"] = no_allocation
+                binding.update(billing_state="no_charge_confirmed", reason_code="dstack_never_allocated")
+                connection.execute(update(operator_nodes).where(operator_nodes.c.intent_id == intent_id)
+                    .values(desired_state="stopped"))
+                if previous_proof is None:
+                    self._receipt(connection, intent_id, "no_allocation", {
+                        "state": "not_created", "actual_cost_microusd": 0, "proof": no_allocation})
+                    self.repo._emit(connection, "dstack.no_allocation_confirmed", intent_id,
+                        {"intent_id": intent_id, "run_id": no_allocation["run_id"],
+                         "evidence_sha256": no_allocation["evidence_sha256"]})
             self._save(connection, node, payload, runtime_state=value.get("state", "observation_unknown"))
             connection.execute(update(scaler_actions).where(scaler_actions.c.intent_id == intent_id)
                 .values(last_observation=value, last_observed_at=value["observed_at"]))
@@ -529,6 +566,47 @@ class LedgerDstackStore:
             self._save(connection, node, payload, runtime_state="stopped")
             self._receipt(connection, intent_id, "cancel", {"state": "never_applied", "actual_cost_microusd": 0})
             return True
+
+    def review_unallocated_start(self, intent_id, review):
+        """Commit an explicit trusted owner review through the original ledger."""
+        with self.repo.transaction() as connection:
+            self.repo._lock_capacity(connection)
+            node, intent = self._node(connection, intent_id)
+            payload = copy.deepcopy(node["payload"])
+            binding = payload["dstack"]
+            require(isinstance(review, dict) and review.get("version") == 1
+                and review.get("owner_confirmation") == "no_machine_allocated"
+                and review.get("run_id") == binding.get("run_id")
+                and binding.get("dstack_status") == "failed"
+                and binding.get("state") == "stopped"
+                and review.get("provider") == binding.get("backend") == "vastai"
+                and review.get("complete_account_empty") is True
+                and _finite(review.get("observed_at"))
+                and 0 <= self.repo.clock() - review["observed_at"] <= 30
+                and _finite(review.get("inventory_observed_at"))
+                and 0 <= self.repo.clock() - review["inventory_observed_at"] <= 30
+                and not intent.get("provider_instance_id")
+                and all(binding.get(key) is None for key in (
+                    "provider_instance_id", "runtime_incarnation", "first_runtime_ready_at"))
+                and all(binding.get(key) in (None, False) for key in (
+                    "bootstrap_started", "bootstrap_launch_started", "runtime_launch_started")),
+                "dstack_no_allocation_review_unconfirmed")
+            if binding.get("no_allocation_review"):
+                return {"node_id": intent_id, "state": "not_created", "actual_cost_microusd": 0,
+                    "already_reviewed": True}
+            self.repo.update_instance(intent_id, "destroyed", destruction_confirmed=True,
+                actual_cost_microusd=0, connection=connection)
+            binding.update(no_allocation_review=copy.deepcopy(review), billing_state="no_charge_confirmed",
+                reason_code="dstack_never_allocated", ready=False)
+            self._save(connection, node, payload, runtime_state="stopped")
+            connection.execute(update(operator_nodes).where(operator_nodes.c.intent_id == intent_id)
+                .values(desired_state="stopped"))
+            self._receipt(connection, intent_id, "no_allocation_review", {
+                "state": "not_created", "actual_cost_microusd": 0, "review": review})
+            self.repo._emit(connection, "dstack.no_allocation_confirmed", intent_id,
+                {"intent_id": intent_id, "run_id": review["run_id"], "source": review["source"]})
+            return {"node_id": intent_id, "state": "not_created", "actual_cost_microusd": 0,
+                "already_reviewed": False}
 
 
 class DstackOperator:
@@ -765,9 +843,11 @@ class DstackOperator:
                 nodes = original_nodes(connection, self.settings.tenant_id)
                 allowed = [r for r in offers if r.get("offer_id") in by_offer
                     and store.read(connection, by_offer[r["offer_id"]]["machine_id"], nodes=nodes)[0]["effective"] != "deny"]
-                preferred = [r for r in allowed if store.read(connection,
-                    by_offer[r["offer_id"]]["machine_id"], nodes=nodes)[0]["effective"] == "prefer"]
-                offers = preferred or allowed
+                # Preference must not discard qualified ordinary fallback.
+                # instance_types freezes membership; the reviewed native Vast
+                # patch also preserves the explicit preferred-first order.
+                offers = sorted(allowed, key=lambda r: store.read(connection,
+                    by_offer[r["offer_id"]]["machine_id"], nodes=nodes)[0]["effective"] != "prefer")[:MAX_HOST_CANDIDATES]
                 require(offers, "dstack_no_compatible_host_offers")
                 approved = [copy.deepcopy(by_offer[r["offer_id"]]) for r in offers]
                 # Plan/native assignment uses bundle IDs, not a display-only

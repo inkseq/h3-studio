@@ -1,0 +1,130 @@
+"""Build-time, exact-source patch for the existing dstack 0.22.3 CPU server.
+
+No package import, dependency resolution, service command or network operation.
+Every original source is checked before any write; repeat application refuses.
+"""
+import argparse
+import ast
+import hashlib
+import importlib.metadata
+import json
+from pathlib import Path
+
+HERE = Path(__file__).parent
+HELPER_MODULE = "dstack._internal.core.backends.vastai.sixnine_safety"
+
+
+def replace_once(source, before, after):
+    if source.count(before) != 1:
+        raise ValueError("native_patch_anchor_mismatch")
+    return source.replace(before, after, 1)
+
+
+def transform(path, source):
+    if path.endswith("vastai/api_client.py"):
+        source = "from " + HELPER_MODULE + " import create_instance_once, read_request\n" + source
+        before = '''        resp = self.s.put(f"/v0/asks/{bundle_id}/", json=payload)
+        try:
+            data = resp.json()
+        except json.JSONDecodeError:
+            raise VastAICreateInstanceError(resp=resp.text)
+        if resp.status_code != 200 or not data["success"]:
+            raise VastAICreateInstanceError(
+                resp=resp.text, created_instance_id=data.get("new_contract")
+            )
+        return data["new_contract"]'''
+        source = replace_once(source, before, "        return create_instance_once(self.s, bundle_id, payload)")
+        return replace_once(source, '        resp = self.s.get(f"/v0/instances/{instance_id}/")', '        resp = read_request(lambda: self.s.get(f"/v0/instances/{instance_id}/"))')
+    if path.endswith("vastai/compute.py"):
+        source = "from " + HELPER_MODULE + " import VastAllocationUnknown, VastSafeReject\n" + source
+        start = source.index("        except VastAICreateInstanceError as e:")
+        end = source.index("        return JobProvisioningData(", start)
+        source = source[:start] + '''        except VastAllocationUnknown:
+            raise
+        except VastSafeReject as error:
+            rejected = NoCapacityError(str(error))
+            rejected.sixnine_vast_outcome = error.outcome
+            rejected.sixnine_vast_stop_fallback = getattr(error, "sixnine_vast_stop_fallback", False)
+            raise rejected from None
+''' + source[end:]
+        return source
+    if path == "gpuhunt/providers/vastai.py":
+        source = "from " + HELPER_MODULE + " import read_request\n" + source
+        return replace_once(source, "        resp = requests.post(bundles_url, json=filters, timeout=10)", "        resp = read_request(lambda: requests.post(bundles_url, json=filters, timeout=10))")
+    if path.endswith("services/backends/__init__.py"):
+        source = "from fastapi import HTTPException\nfrom " + HELPER_MODULE + " import VastReadRateLimited\n" + source
+        return replace_once(source, "        if isinstance(result, BackendError):", '''        if isinstance(result, VastReadRateLimited):
+            raise HTTPException(status_code=429, detail="sixnine_vast_read_rate_limited", headers={"Retry-After": str(result.retry_after)})
+        if isinstance(result, BackendError):''')
+    if path.endswith("pipeline_tasks/jobs_submitted.py"):
+        source = "from " + HELPER_MODULE + " import closed_error, failure_message, safe_for_fallback, order_offers\n" + source
+        source = replace_once(source, "    offers_iter = iter(offers)", "    offers = order_offers(offers, profile.instance_types)\n    offers_iter = iter(offers)")
+        source = replace_once(source, '''    if attempts.total == 0:
+''', '''    if attempts.errors and all(error.backend == "vastai" for error in attempts.errors):
+        return failure_message(attempts)
+    if attempts.total == 0:
+''')
+        before = "            offer_errors.append(_get_offer_attempt_error(offer=offer, error=e))\n"
+        if source.count(before) != 2:
+            raise ValueError("native_patch_offer_catch_mismatch")
+        source = source.replace(before, before + '''            if offer.backend.value == "vastai" and (getattr(e, "sixnine_vast_stop_fallback", False) or not safe_for_fallback(offer_errors[-1].error)):
+                break  # Possible allocation: terminate this submission, never try another PUT.
+''')
+        return replace_once(source, "    # Backend errors may be multiline and arbitrarily long since they often wrap cloud API errors.\n", '''    if offer.backend.value == "vastai":
+        return _OfferAttemptError(backend="vastai", region=offer.region,
+            instance=offer.instance.name, error=closed_error(offer.instance.name, error))
+    # Backend errors may be multiline and arbitrarily long since they often wrap cloud API errors.
+''')
+    if path.endswith("scheduled_tasks/offers_catalog.py"):
+        source = "import os\n" + source
+        return replace_once(source, '    logger.debug("Pre-loading offers catalog")', '''    if os.environ.get("SIXNINE_DSTACK_PRELOAD_CATALOG", "1") == "0":
+        return  # Demand reads remain native; idle provider safety sweep is external.
+    logger.debug("Pre-loading offers catalog")''')
+    raise ValueError("native_patch_path_not_allowlisted")
+
+
+def install(site_packages, *, check_only=False):
+    root = Path(site_packages).resolve(strict=True)
+    provenance = json.loads((HERE / "native-vast-provenance.json").read_text(encoding="utf-8"))
+    if importlib.metadata.version("dstack") != provenance["dstack_version"]:
+        raise ValueError("native_patch_dstack_version_mismatch")
+    prepared = []
+    for path, expected in provenance["sources"].items():
+        target = root / path
+        if target.is_symlink() or not target.is_file() or root not in target.resolve().parents:
+            raise ValueError("native_patch_source_untrusted")
+        data = target.read_bytes()
+        if hashlib.sha256(data).hexdigest() != expected["sha256"]:
+            raise ValueError("native_patch_source_hash_mismatch")
+        changed = transform(path, data.decode("utf-8"))
+        ast.parse(changed, filename=path)
+        prepared.append((target, changed.encode("utf-8")))
+    helper = HERE / "native_vast_safety.py"
+    data = helper.read_bytes()
+    ast.parse(data, filename=helper.name)
+    installed = root / "dstack/_internal/core/backends/vastai/sixnine_safety.py"
+    if installed.exists():
+        raise ValueError("native_patch_already_applied")
+    if check_only:
+        return {"checked_sources": len(prepared), "writes": 0}
+    for target, changed in prepared:
+        target.write_bytes(changed)
+    with installed.open("xb") as target:
+        target.write(data)
+    return {"patched_sources": len(prepared), "dstack_version": provenance["dstack_version"],
+        "upstream_commit": provenance["dstack_upstream_commit"],
+        "original_sources": {path: record["sha256"] for path, record in provenance["sources"].items()},
+        "helper_sha256": hashlib.sha256(data).hexdigest(),
+        "sources": {str(target.relative_to(root)): hashlib.sha256(changed).hexdigest() for target, changed in prepared}}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
+    parser.add_argument("--site-packages", required=True)
+    parser.add_argument("--check-only", action="store_true")
+    args = parser.parse_args()
+    print(json.dumps(install(args.site_packages, check_only=args.check_only), sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

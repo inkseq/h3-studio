@@ -348,6 +348,12 @@ jobs:
             --tmpfs /tmp:size=134217728,mode=1777 --memory 1g --cpus 2 \
             "sixnine-dispatch:$GITHUB_SHA" python -c \
             'import studio_platform.hatchet_dispatch, studio_platform.dstack_controller, studio_platform.dstack_factory, studio_platform.telemetry; import importlib.metadata as m; assert m.version("hatchet-sdk")=="1.42.1"; assert m.version("opentelemetry-sdk")=="1.45.0"'
+      - name: Build exact CPU dstack safety derivative
+        run: |
+          docker build --build-arg "SOURCE_COMMIT=$GITHUB_SHA" \
+            -f deploy/dstack/Dockerfile.server-vast --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            -t "sixnine-dstack:$GITHUB_SHA" .
+          python -m unittest deploy.dstack.test_native_vast_safety -v
       - name: Verify explicitly selected prior native source preparation
         if: needs.changes.outputs.action == 'prepare-platform' && inputs.retain_native_sources_run != ''
         env:

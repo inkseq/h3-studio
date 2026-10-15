@@ -9,12 +9,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 import argparse
 import copy
+from email.utils import parsedate_to_datetime
 import hashlib
 import importlib
 import json
 import math
 from pathlib import Path, PurePosixPath
 import re
+import random
 import time
 from typing import Protocol
 from urllib.parse import urlsplit
@@ -33,6 +35,8 @@ TERMINAL = frozenset({"done", "failed", "aborted", "terminated"})
 RUN_STATUSES = TERMINAL | frozenset({"pending", "submitted", "provisioning", "running", "terminating", "stopping"})
 VAST_INSTANCES_URL = "https://console.vast.ai/api/v1/instances/"
 RUNPOD_GRAPHQL_URL = "https://api.runpod.io/graphql"
+PROVIDER_READ_ATTEMPTS = 3
+PROVIDER_READ_MAX_DELAY = 5.0
 NATIVE_REASON_CODES = frozenset({
     "wangp_model_load_failed", "wangp_model_load_unobserved",
     "dstack_runtime_preparing", "dstack_runtime_downloading_weights", "dstack_runtime_starting_runtime",
@@ -83,6 +87,29 @@ def image_preparation(submission):
 
 class DstackError(ValueError):
     """Static diagnostics only; do not wrap provider response/exception text."""
+
+
+class DstackReadRateLimited(DstackError):
+    """A rejected read is unconfirmed inventory, never evidence of no stock."""
+
+    def __init__(self, retry_after=None):
+        super().__init__("dstack_provider_rate_limited")
+        self.retry_after = min(86400, max(1, math.ceil(retry_after or 1)))
+
+
+def _provider_retry_after(value):
+    if not isinstance(value, str) or len(value) > 128:
+        return None
+    value = value.strip()
+    if re.fullmatch(r"[0-9]{1,8}", value):
+        return float(value)
+    try:
+        parsed = parsedate_to_datetime(value)
+        if parsed.tzinfo is not None:
+            return max(0.0, parsed.timestamp() - time.time())
+    except (ValueError, TypeError, OverflowError):
+        pass
+    return None
 
 
 def _require(condition, code):
@@ -315,16 +342,33 @@ class DstackClient:
         def invalid_constant(_):
             raise DstackError("dstack_provider_inventory_unconfirmed")
         try:
-            with self._provider_session.stream(method, url, headers={"Authorization": "Bearer " + key},
-                    json=body, params=params, timeout=timeout, follow_redirects=False) as response:
-                # Reject redirects and HTTP errors before reading untrusted bodies.
-                _require(response.status_code == 200, "dstack_provider_inventory_rejected")
-                content = bytearray()
-                for chunk in response.iter_bytes(chunk_size=65536):
-                    _require(len(content) + len(chunk) <= 4 * 1024**2,
-                        "dstack_provider_inventory_response_limit")
-                    content.extend(chunk)
-                return json.loads(content, object_pairs_hook=unique_object, parse_constant=invalid_constant)
+            deadline = time.monotonic() + timeout
+            for attempt in range(PROVIDER_READ_ATTEMPTS):
+                remaining = deadline - time.monotonic()
+                _require(remaining > 0, "dstack_provider_inventory_unavailable")
+                with self._provider_session.stream(method, url, headers={"Authorization": "Bearer " + key},
+                        json=body, params=params, timeout=remaining, follow_redirects=False) as response:
+                    # These exact allowlisted endpoints are reads, including
+                    # search/GraphQL POSTs. Mutations use _post and never retry.
+                    if response.status_code == 429:
+                        retry_after = _provider_retry_after(response.headers.get("Retry-After"))
+                    else:
+                        _require(response.status_code == 200, "dstack_provider_inventory_rejected")
+                        content = bytearray()
+                        for chunk in response.iter_bytes(chunk_size=65536):
+                            _require(len(content) + len(chunk) <= 4 * 1024**2,
+                                "dstack_provider_inventory_response_limit")
+                            content.extend(chunk)
+                        return json.loads(content, object_pairs_hook=unique_object, parse_constant=invalid_constant)
+                # Close the refused response before sleeping. A long server
+                # delay is surfaced rather than retried earlier than requested.
+                delay = retry_after if retry_after is not None else 2**attempt
+                if attempt + 1 == PROVIDER_READ_ATTEMPTS or delay > PROVIDER_READ_MAX_DELAY:
+                    raise DstackReadRateLimited(retry_after)
+                delay += random.uniform(0, .25)
+                if delay >= deadline - time.monotonic():
+                    raise DstackReadRateLimited(retry_after)
+                time.sleep(delay)
         except DstackError:
             raise
         except Exception:
@@ -643,10 +687,17 @@ def terminal_no_allocation(run, binding):
         _uuid(latest.get("id"))
     except DstackError:
         return False
-    return (latest.get("status") == "failed"
+    terminal = (latest.get("status") == "failed"
         and latest.get("termination_reason") == "failed_to_start_due_to_no_capacity"
         and all(key in latest and latest[key] is None for key in (
             "job_provisioning_data", "job_runtime_data")))
+    message = latest.get("termination_reason_message")
+    if terminal and isinstance(message, str) and message.startswith("sixnine_vast_attempts_v1:"):
+        # New native outcomes distinguish explicit rejection from an unknown
+        # PUT/returned contract. Unknown must keep capacity and money held.
+        from .dstack_allocation_proof import from_terminal_run
+        return from_terminal_run(run, binding) is not None
+    return terminal
 
 
 def live_capacity_usage(client, nodes, *, provider_inventory=None, clock=time.time,
@@ -840,6 +891,41 @@ class DstackCapacity:
         self.store.record(intent_id, value)
         return value
 
+    def review_unallocated_start(self, intent_id, *, reviewed_by, source):
+        """Trusted one-shot owner review of an older unallocated failed start.
+
+        This is not an HTTP/automatic settlement rule. The operator supplies
+        the explicit owner confirmation; current exact-run and complete empty
+        same-account inventory are independently re-read before ledger commit.
+        """
+        _require(isinstance(reviewed_by, str) and IDENTIFIER.fullmatch(reviewed_by)
+            and isinstance(source, str) and re.fullmatch(
+                r"https://github\.com/inkseq/h3-studio/issues/[1-9][0-9]*(?:#issuecomment-[0-9]+)?", source),
+            "dstack_no_allocation_review_invalid")
+        binding = self.store.load(intent_id)
+        _require(binding.get("backend") == "vastai" and binding.get("run_id"),
+            "dstack_no_allocation_review_unconfirmed")
+        run = self.client.get(run_id=binding["run_id"])
+        _owns(run, binding, self.client.project)
+        _require(terminal_no_allocation(run, binding), "dstack_no_allocation_review_unconfirmed")
+        inventory = self.client.provider_inventory(binding["backend"])
+        at = self.clock()
+        _require(isinstance(inventory, dict) and inventory.get("backend") == binding["backend"]
+            and inventory.get("complete") is True and inventory.get("instance_ids") == []
+            and type(inventory.get("observed_at")) in (int, float)
+            and 0 <= at - inventory["observed_at"] <= 30,
+            "dstack_no_allocation_review_unconfirmed")
+        latest = run["latest_job_submission"]
+        message = latest.get("termination_reason_message")
+        _require(isinstance(message, str) and 0 < len(message.encode()) <= 8192,
+            "dstack_no_allocation_review_unconfirmed")
+        review = {"version": 1, "source": source, "reviewed_by": reviewed_by,
+            "owner_confirmation": "no_machine_allocated", "run_id": run["id"],
+            "submission_id": latest["id"], "message_sha256": hashlib.sha256(message.encode()).hexdigest(),
+            "observed_at": at, "inventory_observed_at": inventory["observed_at"],
+            "provider": binding["backend"], "complete_account_empty": True}
+        return self.store.review_unallocated_start(intent_id, review)
+
     def observe(self, intent_id):
         binding = self.store.load(intent_id)
         _require(isinstance(binding, dict) and binding.get("apply_started") is True, "dstack_intent_not_submitted")
@@ -900,8 +986,19 @@ class DstackCapacity:
                     "qualified_start_failure": True}
         if status in TERMINAL:
             value.update(state="stopped", reason_code="dstack_run_terminal_billing_pending")
+            message = submission.get("termination_reason_message")
+            if isinstance(message, str) and message.startswith("sixnine_vast_attempts_v1:"):
+                from .dstack_allocation_proof import from_terminal_run
+                if from_terminal_run(run, binding) is None:
+                    value.update(state="creation_unknown", reason_code="dstack_allocation_requires_reconciliation")
+                    return value
             if terminal_no_allocation(run, binding):
                 value["reason_code"] = "dstack_no_capacity_billing_pending"
+                from .dstack_allocation_proof import from_terminal_run
+                proof = from_terminal_run(run, binding)
+                if proof is not None:
+                    value["no_allocation_proof"] = proof
+                    value.update(billing_state="no_charge_confirmed", reason_code="dstack_never_allocated")
             value["preparation"]["phase"] = "stopped"
             return value
         if status in {"terminating", "stopping"}:

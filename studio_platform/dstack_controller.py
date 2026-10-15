@@ -16,7 +16,7 @@ import argparse
 import signal
 import threading
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from .control import WorkerControl, worker_spec_payload
 from .dstack_capacity import idle_action
@@ -44,6 +44,62 @@ class DstackController:
         # the already mounted Cloud configuration. Export never owns state.
         self.telemetry = telemetry if telemetry is not None else NullTelemetry()
         self.capacity.store.telemetry = self.telemetry
+        self._cleanup_pending = set()
+
+    def has_demand(self):
+        """Historical stopped rows/invoices alone do not require fast polling."""
+        if self._cleanup_pending or getattr(self.worker_process, "children", None):
+            return True
+        with self.repo.engine.connect() as connection:
+            node = connection.execute(select(operator_nodes.c.intent_id).where(
+                operator_nodes.c.payload["capacity_backend"].as_string() == BACKEND_MARKER,
+                operator_nodes.c.payload["tenant_id"].as_string() == self.service.settings.tenant_id,
+                operator_nodes.c.runtime_state != "stopped").limit(1)).first()
+            if node:
+                return True
+            if connection.execute(select(jobs.c.id).where(
+                jobs.c.tenant_id == self.service.settings.tenant_id,
+                jobs.c.execution_plan["dispatch_backend"].as_string() == "hatchet-v1",
+                jobs.c.status.in_(("waiting_capacity", "queued", "claimed", "submitting", "running",
+                                   "collecting", "submission_unknown", "cancel_requested", "recovery_hold")))
+                .limit(1)).first():
+                return True
+            return connection.execute(select(attempts.c.id).select_from(attempts.join(jobs,
+                attempts.c.job_id == jobs.c.id)).where(
+                jobs.c.tenant_id == self.service.settings.tenant_id,
+                jobs.c.execution_plan["dispatch_backend"].as_string() == "hatchet-v1",
+                or_(attempts.c.submission_started_at.is_not(None), attempts.c.upstream_task_id.is_not(None)),
+                or_(attempts.c.upstream_stopped != 1, attempts.c.upstream_stopped.is_(None)))
+                .limit(1)).first() is not None
+
+    def safety_sweep(self):
+        """Rare complete-account observation; never stops or settles a resource."""
+        try:
+            client = self.capacity.client
+            rows = client._post("/api/runs/list", {"project_name": client.project,
+                "only_active": True, "include_jobs": True, "job_submissions_limit": 1, "limit": 100})
+            if not isinstance(rows, list) or len(rows) >= 100:
+                raise ValueError("incomplete_active_runs")
+            providers = {name: client.provider_inventory(name) for name in ("vastai", "runpod")}
+            if not all(value["complete"] is True for value in providers.values()):
+                raise ValueError("incomplete_provider_inventory")
+            known = {name: set() for name in providers}
+            known_runs = set()
+            for node in self._nodes():
+                binding = node["payload"].get("dstack", {})
+                if binding.get("backend") in known and binding.get("provider_instance_id"):
+                    known[binding["backend"]].add(binding["provider_instance_id"])
+                if binding.get("run_id"):
+                    known_runs.add(binding["run_id"])
+            return {"state": "idle_safety_observed", "active_runs": len(rows),
+                "provider_allocations": {name: len(value["instance_ids"]) for name, value in providers.items()},
+                "untracked_active_runs": sum(row["id"] not in known_runs for row in rows),
+                "untracked_provider_allocations": {name: len(set(value["instance_ids"]) - known[name])
+                                                   for name, value in providers.items()},
+                "provider_observed_at": {name: value["observed_at"] for name, value in providers.items()},
+                "business_writes": 0, "provider_mutations": 0}
+        except Exception:
+            return {"state": "idle_safety_unconfirmed", "business_writes": 0, "provider_mutations": 0}
 
     def _nodes(self):
         with self.repo.engine.connect() as connection:
@@ -243,8 +299,12 @@ class DstackController:
                         if self.worker_process:
                             self.worker_process.stop(node["intent_id"])
                         self.runtime.close(node["intent_id"])
+                        self._cleanup_pending.discard(node["intent_id"])
                     continue
-                results.append(self._tick_node(node))
+                result = self._tick_node(node)
+                results.append(result)
+                if result["state"] == "stopped":
+                    self._cleanup_pending.add(node["intent_id"])
             except Exception as error:
                 code = ("global_capacity_exceeded" if isinstance(error, BudgetExceeded)
                     and error.args == ("global_capacity_exceeded",) else "dstack_controller_observation_failed")
@@ -359,11 +419,20 @@ def main(argv=None):
         if threading.current_thread() is threading.main_thread():
             for signum in (signal.SIGINT,signal.SIGTERM):
                 signal.signal(signum,lambda *_:stop.set())
-        while not stop.is_set():
-            print(json.dumps(controller.tick(),sort_keys=True),flush=True)
-            if args.once:
-                return 0
-            stop.wait(15)
+        if args.once:
+            print(json.dumps(controller.tick(), sort_keys=True), flush=True)
+            return 0
+        from .demand_wakeup import DemandWakeup, run_demand_loop
+        wakeup = DemandWakeup(repo, stop)
+        try:
+            if threading.current_thread() is threading.main_thread():
+                for signum in (signal.SIGINT, signal.SIGTERM):
+                    signal.signal(signum, lambda *_: (stop.set(), wakeup.interrupt()))
+            run_demand_loop(stop, wakeup, controller.has_demand, controller.tick,
+                active_seconds=15, safety=controller.safety_sweep,
+                report=lambda value: print(json.dumps(value, sort_keys=True), flush=True))
+        finally:
+            wakeup.close()
     finally:
         # Closing local tunnels is safe; durable broker/original attempts remain
         # recoverable. Do not translate process shutdown into paid-host stop.

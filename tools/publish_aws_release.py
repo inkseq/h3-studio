@@ -72,7 +72,9 @@ def publish_migration(commit, directory, *, api=None):
         directory = Path(directory)
         manifest = module.manifest(directory, commit)
         module.release.validate_image_archive(directory / "dispatch-image.tar.gz", {"commit": commit, **manifest["dispatch"]})
-        names = module.FILES | {module.MANIFEST}
+        if "dstack" in manifest:
+            module.release.validate_image_archive(directory / "dstack-server-image.tar.gz", {"commit": commit, **manifest["dstack"]})
+        names = module.artifact_files(manifest) | {module.MANIFEST}
     finally:
         sys.path[:] = previous
     api = api or boto3.client("s3", region_name=REGION, endpoint_url="https://s3.ap-southeast-1.amazonaws.com",

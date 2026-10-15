@@ -23,6 +23,14 @@ SELECTIONS = [(PROFILE, "fl"), (PROFILE, "ref")]
 INPUTS = dict(zip(retention.INPUTS, ("42", OLD, INDEX)))
 
 
+def synthetic_dstack_bundle(commit, destination):
+    # These retention cases inspect only immutable GPU bytes; the dedicated
+    # migration tests validate real synthetic Docker tar/provenance boundaries.
+    (Path(destination)/"dstack-server-image.tar.gz").write_bytes(b"SYNTHETIC_DSTACK_IMAGE")
+    (Path(destination)/"dstack-native-provenance.json").write_text("{}")
+    return {"image":"sixnine-dstack:"+commit,"image_id":"sha256:"+"d"*64}
+
+
 class Provenance(unittest.TestCase):
     def setUp(self):
         self.run = dict(id=42, path=retention.WORKFLOW, event="workflow_dispatch", head_sha=OLD,
@@ -146,7 +154,8 @@ class NativeBytes(unittest.TestCase):
         process = Mock(); process.__enter__ = Mock(return_value=process); process.__exit__ = Mock(return_value=False)
         process.stdout = io.BytesIO(b"SYNTHETIC_CPU_IMAGE"); process.wait.return_value = 0
         target = self.temp / "new-release"
-        with patch.object(build_platform_release.subprocess, "check_output", return_value=json.dumps(inspected).encode()), \
+        with patch.object(build_platform_release,"bundle_dstack",side_effect=synthetic_dstack_bundle), \
+                patch.object(build_platform_release.subprocess, "check_output", return_value=json.dumps(inspected).encode()), \
                 patch.object(build_platform_release.subprocess, "Popen", return_value=process):
             manifest = build_platform_release.build_migration(NEW, platform, target, SELECTIONS,
                 retain_native_sources_directory=self.artifact, retain_native_sources_commit=OLD,
@@ -221,7 +230,8 @@ class NativeBytes(unittest.TestCase):
         process = Mock(); process.__enter__=Mock(return_value=process); process.__exit__=Mock(return_value=False)
         process.stdout=io.BytesIO(b'SYNTHETIC_CPU_IMAGE'); process.wait.return_value=0
         target = self.temp/'extended-release'
-        with patch.object(build_platform_release.subprocess,'check_output',return_value=json.dumps(inspected).encode()), \
+        with patch.object(build_platform_release,'bundle_dstack',side_effect=synthetic_dstack_bundle), \
+                patch.object(build_platform_release.subprocess,'check_output',return_value=json.dumps(inspected).encode()), \
                 patch.object(build_platform_release.subprocess,'Popen',return_value=process):
             manifest=build_platform_release.build_migration(NEW,platform,target,SELECTIONS+[(BASE,'fl')],
                 retain_native_sources_directory=self.artifact,retain_native_sources_commit=OLD,
@@ -356,6 +366,7 @@ class NativeBytes(unittest.TestCase):
             return process if command[0] == 'docker' else original_popen(command, **kwargs)
         from deploy.wangp import package_tool
         with patch.object(package_tool,'ROOT',self.root),patch.object(build_platform_release,'ROOT',self.root), \
+                patch.object(build_platform_release,'bundle_dstack',side_effect=synthetic_dstack_bundle), \
                 patch.object(build_platform_release.subprocess,'check_output',return_value=json.dumps(inspected).encode()), \
                 patch.object(build_platform_release.subprocess,'Popen',side_effect=popen), \
                 patch.object(build_platform_release.shutil,'copyfile'):

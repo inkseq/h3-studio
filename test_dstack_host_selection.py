@@ -95,7 +95,7 @@ class HostSelectionTests(ledger.LedgerCase):
         self.capacity.observe(result["node_id"])
         self.capacity.readiness.assert_not_called()
 
-    def test_prefer_changes_native_selector_not_only_display_order(self):
+    def test_prefer_keeps_ordinary_native_fallback_on_the_same_start(self):
         native_plan = self.client.plan
         def two(spec):
             value = native_plan(spec)
@@ -110,8 +110,41 @@ class HostSelectionTests(ledger.LedgerCase):
         self.hosts.policy(self.owner, {"provider": "vastai", "machine_id": "19494", "policy": "prefer",
             "reason_code": "operator_host_preferred", "expected_revision": policy["revision"],
             "expected_snapshot": policy["snapshot"]}, "prefer-host")
-        result = self.start(self.preview())
-        self.assertEqual(self.store.load(result["node_id"])["run_spec"]["profile"]["instance_types"], ["54321"])
+        preview = self.preview()
+        self.assertEqual([offer["offer_id"] for offer in preview["offers"]], ["54321", "12345"])
+        result = self.start(preview)
+        # This is the native membership selector, not a promise that dstack's
+        # price ordering will try the preferred host before the cheaper one.
+        self.assertEqual(self.store.load(result["node_id"])["run_spec"]["profile"]["instance_types"],
+            ["54321", "12345"])
+        self.assertEqual(self.client.applied, [result["node_id"]])
+
+    def test_ten_candidates_keep_deny_identity_price_and_resource_guards(self):
+        base = self.client.plan({})["job_plans"][0]["offers"][0]
+        offers = []
+        for index in range(15):
+            offer = copy.deepcopy(base)
+            offer["instance"]["name"] = str(12345+index)
+            offers.append(offer)
+        offers[10]["instance"]["resources"]["memory_mib"] = 95*1024
+        offers[11]["price"] = .76
+        self.client.plan = lambda spec: {"run_spec": spec, "job_plans": [{"offers": offers}]}
+        self.client.vast_offer_mapping = lambda *a, **kw: {"observed_at": self.now, "offers": [
+            {"offer_id": str(12345+i), "machine_id": str(19493+i)} for i in range(14)]}
+        for index, policy in ((12, "prefer"), (13, "deny")):
+            machine = str(19493+index)
+            current = self.hosts.list(self.owner, admin=True, machine_id=machine)["hosts"][0]["policy"]
+            self.hosts.policy(self.owner, {"provider": "vastai", "machine_id": machine, "policy": policy,
+                "reason_code": "operator_host_preferred" if policy == "prefer" else "operator_host_denied",
+                "expected_revision": current["revision"], "expected_snapshot": current["snapshot"]}, "policy-"+machine)
+        preview = self.preview()
+        expected = [str(12345+12), *[str(12345+i) for i in range(9)]]
+        self.assertEqual([offer["offer_id"] for offer in preview["offers"]], expected)
+        result = self.start(preview)
+        binding = self.store.load(result["node_id"])
+        self.assertEqual(binding["run_spec"]["profile"]["instance_types"], expected)
+        self.assertEqual(len(binding["host_selection"]["offers"]), 10)
+        self.assertEqual(self.client.applied, [result["node_id"]])
 
     def test_enforced_terminal_without_physical_capture_never_blocks_ended_projection(self):
         result = self.start(self.preview())

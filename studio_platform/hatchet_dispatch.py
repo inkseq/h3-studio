@@ -117,6 +117,25 @@ def _input_matches(job, message):
 
 class OutboxDispatcher:
     """A leased delivery receipt is not a second business task state machine."""
+    def has_demand(self):
+        """Original rows, including uncertain deliveries, determine wakefulness."""
+        with self.repo.engine.connect() as connection:
+            active = jobs.c.status.in_(("waiting_capacity", "queued", "claimed", "submitting", "running",
+                "submission_unknown", "collecting", "cancel_requested", "recovery_hold"))
+            if connection.execute(select(jobs.c.id).where(active,
+                jobs.c.execution_plan["dispatch_backend"].as_string() == ROUTE).limit(1)).first():
+                return True
+            if connection.execute(select(attempts.c.id).select_from(attempts.join(jobs,
+                attempts.c.job_id == jobs.c.id)).where(
+                jobs.c.execution_plan["dispatch_backend"].as_string() == ROUTE,
+                or_(attempts.c.submission_started_at.is_not(None), attempts.c.upstream_task_id.is_not(None)),
+                or_(attempts.c.upstream_stopped != 1, attempts.c.upstream_stopped.is_(None)))
+                .limit(1)).first():
+                return True
+            return connection.execute(select(outbox.c.id).where(outbox.c.event_type == EVENT,
+                outbox.c.delivered_at.is_(None)).limit(1)).first() is not None
+
+
     def __init__(self, repository, publisher, *, publisher_id, lease_seconds=90, retry_seconds=30):
         identifier(publisher_id)
         if (not math.isfinite(lease_seconds) or not 5 <= lease_seconds <= 3600
@@ -593,16 +612,27 @@ def main(argv=None):
             for signum in (signal.SIGINT, signal.SIGTERM):
                 signal.signal(signum, lambda *_: stop.set())
         next_recovery = 0
-        while not stop.is_set():
+        def work():
+            nonlocal next_recovery
             if time.monotonic() >= next_recovery:
                 dispatcher.recover_wakeups()
                 next_recovery = time.monotonic()+config.recovery_interval_s
-            result = dispatcher.publish_once()
-            # Only public identity/status fields are written, no raw exceptions.
+            return dispatcher.publish_once()
+        if args.once:
+            result = work()
             print(json.dumps(result), flush=True)
-            if args.once:
-                return result
-            stop.wait(config.poll_interval_s)
+            return result
+        from .demand_wakeup import DemandWakeup, run_demand_loop
+        wakeup = DemandWakeup(repo, stop)
+        try:
+            if threading.current_thread() is threading.main_thread():
+                for signum in (signal.SIGINT, signal.SIGTERM):
+                    signal.signal(signum, lambda *_: (stop.set(), wakeup.interrupt()))
+            run_demand_loop(stop, wakeup, dispatcher.has_demand, work,
+                active_seconds=config.poll_interval_s,
+                report=lambda result: print(json.dumps(result), flush=True))
+        finally:
+            wakeup.close()
     finally:
         repo.close()
 
