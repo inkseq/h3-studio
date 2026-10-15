@@ -1,0 +1,214 @@
+{
+  "schema_version": 1,
+  "id": "h3-unpruned33b-bf16-sdpa-p3-256gib-single-controls-v4",
+  "label": "RTX PRO 6000 · Base BF16 · Single GPU native controls",
+  "model_id": "MiniMax-H3-Base-BF16",
+  "gpu_models": [
+    "RTX PRO 6000 Blackwell Server Edition",
+    "RTX PRO 6000 Blackwell Workstation Edition"
+  ],
+  "gpu_count_options": [
+    1
+  ],
+  "models": [
+    {
+      "mode": "fl",
+      "model_type": "minimax_h3_fl2va",
+      "generation_recipe_id": "h3-base-fl2va-v1"
+    },
+    {
+      "mode": "ref",
+      "model_type": "minimax_h3_ref2va",
+      "generation_recipe_id": "h3-base-ref2va-v1"
+    }
+  ],
+  "source_revision": "0e58385fbde7ff102d276e4a9e490845de76b4ea",
+  "weights_revision": "adc81ccb71352192214d83d5fafb9487e860be39",
+  "components": {
+    "transformer_fl": {
+      "repository": "DeepBeepMeep/MiniMax-H3",
+      "revision": "adc81ccb71352192214d83d5fafb9487e860be39",
+      "precision": "bf16",
+      "files": [
+        {
+          "path": "MiniMax-H3-FL2VA_bf16.safetensors",
+          "sha256": "f10704606e376815298cb6bd9d94ea721346b62cd840177cd3723971edd83367",
+          "size_bytes": 66280486944
+        }
+      ]
+    },
+    "transformer_ref": {
+      "repository": "DeepBeepMeep/MiniMax-H3",
+      "revision": "adc81ccb71352192214d83d5fafb9487e860be39",
+      "precision": "bf16",
+      "files": [
+        {
+          "path": "MiniMax-H3-Ref2VA_bf16.safetensors",
+          "sha256": "ca877ed2b1bf72cfda76fe38117832544d6c0530abcfb9463e114cd767a39516",
+          "size_bytes": 66280486944
+        }
+      ]
+    },
+    "text_encoder": {
+      "repository": "DeepBeepMeep/MiniMax-H3",
+      "revision": "adc81ccb71352192214d83d5fafb9487e860be39",
+      "precision": "bf16",
+      "files": [
+        {
+          "path": "Qwen3-VL-32B-Instruct/Qwen3-VL-32B-Instruct-layer50_bf16.safetensors",
+          "sha256": "a91ca0cc41bead2e62d8fc044a3ffdbd9487daa7c8997f697049990c7178e0a6",
+          "size_bytes": 51506305568
+        },
+        {
+          "git_blob_sha1": "29e925092dee9f14278c53e7e7d876cea8a997bc",
+          "path": "Qwen3-VL-32B-Instruct/config.json",
+          "size_bytes": 1474
+        },
+        {
+          "git_blob_sha1": "2ea84a437d448ff71b08df68fdd949d5cc4ebb64",
+          "path": "Qwen3-VL-32B-Instruct/preprocessor_config.json",
+          "size_bytes": 390
+        },
+        {
+          "git_blob_sha1": "c6cc1014128b19d1fc46b1d30a23e3b1d35db421",
+          "path": "Qwen3-VL-32B-Instruct/tokenizer.json",
+          "size_bytes": 7032403
+        },
+        {
+          "git_blob_sha1": "5e463a18949779b8a38a03f0a6d9089094970eed",
+          "path": "Qwen3-VL-32B-Instruct/tokenizer_config.json",
+          "size_bytes": 11004
+        },
+        {
+          "git_blob_sha1": "4783fe10ac3adce15ac8f358ef5462739852c569",
+          "path": "Qwen3-VL-32B-Instruct/vocab.json",
+          "size_bytes": 2776833
+        }
+      ]
+    },
+    "video_vae": {
+      "repository": "DeepBeepMeep/MiniMax-H3",
+      "revision": "adc81ccb71352192214d83d5fafb9487e860be39",
+      "precision": "fp16",
+      "files": [
+        {
+          "path": "MiniMax-H3-video_vae_fp16.safetensors",
+          "sha256": "455010492bb59a9cc7b8f1ee23905b22a10079f89490adbf820a1728efcaea6b",
+          "size_bytes": 5207806512
+        }
+      ]
+    },
+    "audio_vae": {
+      "repository": "DeepBeepMeep/MiniMax-H3",
+      "revision": "adc81ccb71352192214d83d5fafb9487e860be39",
+      "precision": "fp32",
+      "files": [
+        {
+          "path": "MiniMax-H3-audio_vae_fp32.safetensors",
+          "sha256": "37dddc2f3e6d5d5139d823d5ea283bbf304dadcb885b1ccda818aa13dade5ea2",
+          "size_bytes": 605429308
+        }
+      ]
+    },
+    "latent_upscaler": {
+      "repository": "DeepBeepMeep/MiniMax-H3",
+      "revision": "adc81ccb71352192214d83d5fafb9487e860be39",
+      "precision": "bf16",
+      "files": [
+        {
+          "path": "minimax_h3/minimax_h3_latent_upscaler_3d_bf16.safetensors",
+          "sha256": "4f57821f5837f32f7142b67d815606dbd7550f194e5c769f7d6c3f83b146a5e6",
+          "size_bytes": 690592992
+        }
+      ]
+    }
+  },
+  "minimum_ram_bytes": 274877906944,
+  "minimum_free_vram_bytes": 94489280512,
+  "minimum_disk_bytes": 375809638400,
+  "hardware_filters": {
+    "minimum_cpu_cores": 12,
+    "minimum_download_mbps": 500,
+    "maximum_price_per_gpu_hour_microusd": 2000000
+  },
+  "tested_topology": {
+    "hosts": 1,
+    "gpus_per_host": 1,
+    "gpus_per_model": 1,
+    "active_jobs_per_gpu": 1,
+    "startup": "single_slot"
+  },
+  "validation": {
+    "scope": "pinned_native_control_mapping",
+    "production_adapter_verified": false,
+    "source_profile_id": "h3-unpruned33b-bf16-sdpa-p3-controls-v3"
+  },
+  "verified_cases": [],
+  "warnings": [
+    "Additive single-GPU compiler epoch for pinned native controls; no historical test case is an admission whitelist.",
+    "Pinned model components, precision, runtime configuration, 256 GiB host RAM floor and 128 GiB available RAM admission are inherited unchanged from h3-unpruned33b-bf16-sdpa-p3-controls-v3.",
+    "One physical GPU runs one complete model. The former two independent GPU slots are not required by a single model; no single-host inference or timing claim is inherited.",
+    "Retained profiles/manifests and accepted jobs remain unchanged. Runtime failures preserve the original job and require explicit manual retry."
+  ],
+  "runtime": {
+    "config": {
+      "attention_mode": "sdpa",
+      "audio_output_codec": "aac_128",
+      "boost": 1,
+      "compile": "",
+      "embed_source_images": false,
+      "enhancer_enabled": 3,
+      "fit_canvas": 2,
+      "int8_kernels": "disabled",
+      "kernel_precision": "strict",
+      "mixed_precision": "0",
+      "notification_sound_enabled": 0,
+      "perc_reserved_mem_max": 20,
+      "preload_model_policy": [],
+      "profile": 3,
+      "read_ahead": false,
+      "save_queue_if_crash": 0,
+      "smart_memory_pinning": true,
+      "text_encoder_quantization": "bf16",
+      "transformer_dtype_policy": "bf16",
+      "transformer_quantization": "bf16",
+      "vae_config": 3,
+      "vae_precision": "16",
+      "video_container": "mp4",
+      "video_output_codec": "libx264_8",
+      "video_preload_in_VRAM": 0,
+      "video_preload_mode": "default",
+      "video_profile": 3,
+      "vram_allocator": "default"
+    },
+    "task_config": "bf16,bf16",
+    "memory_profile": 3,
+    "qkv_splitting": true,
+    "effective_int8_backend": "pytorch",
+    "minimum_available_ram_bytes": 137438953472,
+    "cli_args": [
+      "--attention",
+      "sdpa",
+      "--profile",
+      "3",
+      "--perc-reserved-mem-max",
+      "0.2"
+    ],
+    "core_versions": {
+      "torch": "2.7.1+cu128",
+      "torchvision": "0.22.1+cu128",
+      "torchaudio": "2.7.1+cu128",
+      "diffusers": "0.36.0",
+      "transformers": "4.54.0",
+      "numpy": "2.1.2",
+      "optimum-quanto": "0.2.7",
+      "comfy-kitchen": "0.2.35",
+      "triton": "3.3.1",
+      "soundfile": "0.14.0"
+    },
+    "requirements_sha256": "09ac07c3dece0260c19399907b0128d8d355c5422e7061cc757b335a80a9489e"
+  },
+  "compiler_epoch": "full-controls-v2",
+  "output_delivery": "native-frames-r2-v1",
+  "qualification_cases": []
+}

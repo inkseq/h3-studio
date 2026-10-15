@@ -29,6 +29,8 @@ EXPECTED_PROFILE_IDS = (
     'h3-pruned-rank8-int8-pro6000-sdpa-p4-controls-v2',
     'h3-unpruned33b-int8-sdpa-p3-controls-v2',
     'h3-unpruned33b-bf16-sdpa-p3-controls-v3',
+    'h3-unpruned33b-int8-sdpa-p3-144gib-single-controls-v4',
+    'h3-unpruned33b-bf16-sdpa-p3-256gib-single-controls-v4',
 )
 
 
@@ -165,7 +167,7 @@ print(json.dumps({'profiles':len(catalog['profiles']),'manifests':sum(len(profil
 """
             result = subprocess.run([sys.executable,'-I','-S','-c',script,str(image),json.dumps(EXPECTED_PROFILE_IDS)],
                                     capture_output=True,text=True,check=True,timeout=20,cwd=image)
-            self.assertEqual(json.loads(result.stdout), {'profiles':14, 'manifests':25})
+            self.assertEqual(json.loads(result.stdout), {'profiles':16, 'manifests':29})
 
 
 if __name__ == '__main__':
