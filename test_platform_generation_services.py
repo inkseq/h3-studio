@@ -185,3 +185,31 @@ class GenerationServicesTests(ledger.LedgerCase):
             "engine_manifest_digest": "private-engine"})
         self.assertEqual(public, {"admission_state": "waiting_capacity", "enabled": True,
             "quote_known": True, "backend": "wangp-worker", "delivery_spec": delivery})
+
+    def test_pending_and_completed_cleanup_preserve_job_but_refuse_artifact_reads(self):
+        ident, artifact_id, _ = self.completed_fixture()
+        from studio_platform.quick_chat import metadata
+        from studio_platform.content_lifecycle import owner_reference_gate, put_tombstone
+        metadata.create_all(self.repo.engine)
+        with self.repo.transaction() as conn:
+            owner_reference_gate(conn, self.settings.tenant_id, self.principal.owner)
+            put_tombstone(conn, self.settings.tenant_id, self.principal.owner,
+                kind="artifact", value=artifact_id, action_id="original-purge", now=self.now)
+        with self.assertRaisesRegex(Conflict, "content_purging_or_purged"):
+            self.access.artifact(self.principal, artifact_id)
+        restricted = Principal("superdan", "unrelated", True, ("elsewhere",), ("jobs:read",))
+        with self.assertRaises(NotFound):
+            self.access.artifact(restricted, artifact_id)
+        original = self.read.job(self.principal, ident)
+        with self.repo.transaction() as conn:
+            row = conn.execute(select(artifacts).where(artifacts.c.id == artifact_id)).mappings().one()
+            conn.execute(update(artifacts).where(artifacts.c.id == artifact_id).values(
+                metadata={**row["metadata"], "content_deleted": True}))
+            conn.execute(update(jobs).where(jobs.c.id == ident).values(request={"content_deleted": True}))
+        with self.assertRaises(NotFound):
+            self.access.artifact(self.principal, artifact_id)
+        retained = self.read.job(self.principal, ident)
+        self.assertEqual((retained["id"], retained["status"], retained["request_hash"]),
+                         (original["id"], original["status"], original["request_hash"]))
+        self.assertEqual(retained["artifacts"], [])
+        self.assertFalse(retained["retry_advice"]["safe_to_retry"])

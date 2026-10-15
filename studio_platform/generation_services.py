@@ -48,10 +48,12 @@ class GenerationAccess:
                 jobs.c.owner_id == principal.owner)).mappings().first()
         if not row:
             raise NotFound("artifact_not_found")
+        self.job(principal, row["job_id"])
+        if row["metadata"].get("content_deleted"):
+            raise NotFound("artifact_not_found")
         from .content_lifecycle import assert_content_available
         with self.repo.engine.connect() as connection:
             assert_content_available(connection, self.tenant_id, principal.owner, artifact_ids=(artifact_id,))
-        self.job(principal, row["job_id"])
         return row
 
 

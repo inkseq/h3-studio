@@ -284,8 +284,12 @@ class RenderApiTests(unittest.TestCase):
         self.assertEqual(response.json()["status"], "blocked")
         self.client.post("/api/auth/login", json={"username": "supervan"})
         self.assertEqual(self.client.post("/v1/render-plans", json=BODY).status_code, 404)
-        self.client.post("/v1/projects", json={"project": self.project}).raise_for_status()
-        self.assertEqual(self.plan()["status"], "blocked")
+        # Reference fencing rejects a new cross-owner attachment at save time,
+        # before it could race that owner's permanent cleanup. The same-owner
+        # other-project case above still reaches the original render precheck.
+        denied = self.client.post("/v1/projects", json={"project": self.project})
+        self.assertEqual(denied.status_code, 409, denied.text)
+        self.assertEqual(self.client.get("/v1/projects/story-one").status_code, 404)
 
 
 if __name__ == "__main__":
