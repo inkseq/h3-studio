@@ -6,7 +6,10 @@ export function createQuickChatClient(options={}){
   const api=createCloudClient(options),write=(path,body,key,method='POST')=>api.request(path,{method,body,key});
   return {...api,
     schema:()=>api.request('/v1/quick-chat/schema'),
-    sessions:({cursor,limit=30}={})=>api.request('/v1/quick-chat/sessions?'+new URLSearchParams({limit,...(cursor?{cursor}:{})})),
+    sessions:({cursor,limit=30,view='active',hideTests=false}={})=>api.request('/v1/quick-chat/sessions?'+new URLSearchParams({limit,view,hide_tests:String(hideTests),...(cursor?{cursor}:{})})),
+    previewHistory:body=>write('/v1/quick-chat/sessions/history/preview',body),
+    actionHistory:(body,key)=>write('/v1/quick-chat/sessions/history/actions',body,key),
+    historyAction:id=>api.request('/v1/quick-chat/sessions/history/actions/'+enc(id)),
     createSession:(body,key)=>write('/v1/quick-chat/sessions',body,key),
     session:id=>api.request(base(id)),
     patchSession:(id,body,key)=>write(base(id),body,key,'PATCH'),

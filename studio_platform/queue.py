@@ -356,12 +356,21 @@ class TaskQueue:
                 raise ValueError("invalid_artifact_evidence")
         repo = self.repository
         with repo.transaction() as connection:
+            # Match the content-cleanup lock order: owner fence, then job lock.
+            # The unlocked read identifies the owner only; _leased revalidates
+            # the original lease after we hold the fence.
+            from .content_lifecycle import owner_reference_gate, assert_content_available, assert_reference_payload
+            owner = repo._job(connection, lease.job_id)
+            owner_reference_gate(connection, owner["tenant_id"], owner["owner_id"])
             job = self._leased(connection, lease)
             if job["status"] != "collecting" and not (
                 job["status"] == "cancel_requested" and job["cancel_from_status"] == "collecting"):
                 raise InvalidTransition("not_collecting")
             for spec in specs:
                 validate_delivery_evidence(job, spec, spec["kind"])
+            assert_content_available(connection, job["tenant_id"], job["owner_id"],
+                object_keys=[spec["object_key"] for spec in specs])
+            assert_reference_payload(connection, job["tenant_id"], job["owner_id"], specs)
             if settlement is not None:
                 settlement(connection, specs)
             artifact_ids = []

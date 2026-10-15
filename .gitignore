@@ -477,3 +477,14 @@ inventory.json
 !test_dstack_host_selection.py
 !test_operator_host_routes.py
 !deploy/observability/sixnine-host-scorecard.json
+
+# Owner-scoped creation history and original-object retention.
+!studio_platform/content_lifecycle.py
+!studio_platform/content_references.py
+!studio_platform/quick_chat_history.py
+!test_quick_chat_history.py
+!test_creation_history_storage.py
+!test_creation_history_routes.py
+!yingxu/src/CreationHistory.jsx
+!yingxu/src/creation-history-model.js
+!yingxu/src/creation-history.test.js

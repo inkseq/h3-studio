@@ -169,6 +169,48 @@ On 409, read the latest project and reconcile the requested change; do not blind
 
 Use `/?project={id}&entity={entity_id}` for story content, `/?project={id}&panel=activity` for activity, or the quick link above. URL-encode IDs. Links grant no access, contain no credentials, and require the authorized account to sign in. The website presents remote updates without silently overwriting unsaved local drafts. Report the saved version, not that an existing tab already refreshed.
 
+## Creation history and acceptance records
+
+For empty-trash preview use exactly `{"action":"empty_trash","sessions":[]}`.
+The server captures the complete authorized trash set, rather than the currently
+loaded page or selected IDs. Review every returned target before confirming.
+
+Use the same authenticated owner API and read `quick_chat.creation_history` in
+`/for-agents/guide.json`. Listing supports `view=active|trash`, `hide_tests=true`
+and the original bounded cursor. Preserve the returned session IDs and versions.
+Never infer that a session is disposable from its title alone.
+
+When the user authorizes cleanup, POST
+`/v1/quick-chat/sessions/history/preview` with `action` (`trash`, `restore`,
+`purge` or `empty_trash`) and exact `sessions:[{id,expected_version}]`.
+Empty-trash preview captures the entire authorized trash set; it is not limited
+to the page currently visible. Read eligibility, removed/kept counts, reference
+warnings, expiry and review holds before confirming. Shared saved assets and
+storyboard-chosen versions are retained. The server cannot see unsaved browser
+draft references. Deletion never cancels active/uncertain jobs or implies a refund.
+
+Confirm only that fresh preview through POST
+`/v1/quick-chat/sessions/history/actions` with
+`{"preview_id":"RETURNED_ID","confirmed":true}` and one saved
+`Idempotency-Key`. Retain the exact confirmation body/key. For `state=pending`,
+GET the original `/history/actions/{action_id}`; never report it deleted or send
+a replacement purge. An uncertain confirmation uses its original identical
+key/body. No restore is allowed after irreversible purge intent.
+
+Ordinary full-scope trash preserves content and permits restoration for five
+days before automatic cleanup. Inspect `auto_purge_enabled`,
+`purge_blocked_reason` and `review_hold`: limited-scope keys do not gain R2
+deletion authority by waiting, and curated older acceptance records wait for
+explicit owner purge review. Metadata trash/restore requires project read/write;
+purge requires project, asset and job read/write scopes. Do not acquire or expand
+credentials to bypass missing authority.
+
+Create new authorized acceptance sessions with `is_test:true`. After validating
+their results, PATCH the same session with its current `expected_version` and
+`test_accepted:true` to request safe archival. Unresolved work still blocks it.
+The website's hide-tests filter does not delete records. Existing acceptance
+sessions moved to review-held trash must remain there for owner review.
+
 ## Recovery and deliverables
 
 Use `GET /v1/job-events?since=<saved next_cursor>&limit=100` with `jobs:read` to
