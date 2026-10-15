@@ -57,6 +57,42 @@ test('unknown first start blocks a later machine instead of duplicating the pend
   let calls=0;const controller=createP4OperatorController({client:client({start:async()=>{calls++;throw Error('lost');}}),storage:memory()});await controller.setAccount('superdan');await assert.rejects(controller.start({preview_id:'first'}));await assert.rejects(controller.start({preview_id:'second'}),/原操作结果/);assert.equal(calls,1);
 });
 
+test('known application capacity refusal clears only its start journal and allows a new explicit click',async()=>{
+  const storage=memory(),calls=[];
+  const api=createP4OperatorClient({fetcher:async(path,options)=>{
+    if(path.endsWith('/starts')){
+      calls.push({body:JSON.parse(options.body),key:options.headers['Idempotency-Key']});
+      return new Response(JSON.stringify({code:'capacity_unavailable',detail:'容量不足，未新增付费执行'}),{status:429,headers:{'Content-Type':'application/json'}});
+    }
+    return new Response(JSON.stringify(path.endsWith('/workspace')?{capacity_backend:'dstack-v1',operator:{account:'supervan'},nodes:[],groups:[],queue:[]}:{profiles:[]}),{headers:{'Content-Type':'application/json'}});
+  }});
+  const controller=createP4OperatorController({client:api,storage});await controller.setAccount('supervan');
+  await assert.rejects(controller.start({preview_id:'first'}),/机器池尚未配置或已达到容量上限.*capacity_unavailable/);
+  assert.equal(calls.length,1,'a refused write is never automatically retried');
+  assert.equal(controller.getState().pending,null);assert.equal(storage.getItem('sixnine:operator:dstack:pending:supervan'),null);
+  assert.match(controller.getState().error,/没有新增付费执行/);
+  await assert.rejects(controller.start({preview_id:'second'}),/capacity_unavailable/);
+  assert.equal(calls.length,2);assert.deepEqual(calls.map(call=>call.body),[{preview_id:'first'},{preview_id:'second'}]);
+  assert.notEqual(calls[0].key,calls[1].key,'only the second explicit click creates a new operation');controller.destroy();
+});
+
+test('unclassified 429 and uncertain start failures retain the original request across reload',async()=>{
+  for(const error of [Object.assign(Error('rate limited'),{status:429}),Object.assign(Error('provider limited'),{status:429,detail:{code:'provider_rate_limited'}}),Object.assign(Error('timed out'),{status:408,detail:{code:'capacity_unavailable'}}),Object.assign(Error('server failed'),{status:503,detail:{code:'capacity_unavailable'}})]){
+    const storage=memory(),calls=[],api=client({start:async(body,key)=>{calls.push({body,key});throw error;}});
+    const first=createP4OperatorController({client:api,storage});await first.setAccount('supervan');await assert.rejects(first.start({preview_id:'original'}));
+    const original=structuredClone(first.getState().pending);first.destroy();assert.ok(original);
+    const resumed=createP4OperatorController({client:api,storage});await resumed.setAccount('supervan');assert.deepEqual(resumed.getState().pending,original);
+    await assert.rejects(resumed.start({preview_id:'replacement'}),/原操作结果/);assert.equal(calls.length,1);
+    await assert.rejects(resumed.recover());assert.deepEqual(calls[1],calls[0]);assert.deepEqual(resumed.getState().pending,original);resumed.destroy();
+  }
+});
+
+test('a known capacity code cannot clear an uncertain stop or lose its original recovery key',async()=>{
+  const storage=memory(),calls=[],api=client({state:async()=>({operator:{account:'supervan'},nodes:[{id:'owned',owner_id:'supervan',version:2}],groups:[],queue:[]}),stop:async(id,body,key)=>{calls.push({id,body,key});throw Object.assign(Error('capacity unavailable'),{status:429,detail:{code:'capacity_unavailable'}});}});
+  const controller=createP4OperatorController({client:api,storage});await controller.setAccount('supervan');await assert.rejects(controller.stop({id:'owned',owner_id:'supervan',version:1},{warnings:[]}));
+  const original=structuredClone(controller.getState().pending);assert.ok(original);await assert.rejects(controller.recover());assert.deepEqual(calls[1],calls[0]);assert.deepEqual(controller.getState().pending,original);controller.destroy();
+});
+
 test('heartbeat versions are freshly read immediately before stop, hold and move are journaled',async()=>{
   const calls=[];let version=1;
   const api=client({state:async()=>({operator:{account:'superdan'},nodes:[{id:'original',owner_id:'superdan',version:++version}],groups:[],queue:[]}),...Object.fromEntries(['stop','hold','move'].map(method=>[method,async(id,body,key)=>{calls.push({method,id,body,key});return {node_id:id};}]))});

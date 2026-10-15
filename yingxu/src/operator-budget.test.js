@@ -121,8 +121,8 @@ test('definite monetary start rejection clears only its journal and allows expli
   }
 });
 
-test('generic rate limits, unavailable capacity, timeouts and service failures retain the original start without replay',async()=>{
-  for(const failure of [{status:429,detail:{code:'capacity_unavailable'}},{status:429,detail:{code:'rate_limited'}},{status:429,detail:{detail:'budget_exceeded'}},{status:408,detail:{code:'budget_exceeded'}},{status:503,detail:{code:'budget_exceeded'}}]){
+test('generic rate limits, unconfirmed capacity, timeouts and service failures retain the original start without replay',async()=>{
+  for(const failure of [{status:503,detail:{code:'capacity_unavailable'}},{status:429,detail:{code:'rate_limited'}},{status:429,detail:{detail:'budget_exceeded'}},{status:408,detail:{code:'budget_exceeded'}},{status:503,detail:{code:'budget_exceeded'}}]){
     let calls=0;const storage=memory(),controller=createP4OperatorController({client:fake({start:async()=>{calls++;throw Object.assign(Error('unconfirmed'),failure);}}),storage});await controller.setAccount('superdan');await assert.rejects(controller.start({preview_id:'original-preview'}));const original=controller.getState().pending;assert.equal(original.body.preview_id,'original-preview');assert.equal(JSON.parse(storage.getItem('sixnine:operator:dstack:pending:superdan')).key,original.key);await assert.rejects(controller.start({preview_id:'other-preview'}),/原操作结果/);assert.equal(calls,1);
   }
   const controller=createP4OperatorController({client:fake({updateBudget:async()=>{throw Object.assign(Error('uncertain other operation'),{status:429,detail:{code:'budget_exceeded'}});}}),storage:memory()});await controller.setAccount('superdan');await assert.rejects(controller.updateBudget(row(),106000000));assert.equal(controller.getState().pending.method,'updateBudget','the definite start-only proof does not broaden other command semantics');
