@@ -178,6 +178,21 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
         finally:
             lease.release("authentication")
         expected_account = request.headers.get("x-expected-account")
+        native_content = (request.method in {"GET", "HEAD"}
+            and re.fullmatch(r"/v1/(?:assets|artifacts)/[^/]+/content", request.url.path) is not None)
+        if native_content and "expected_account" in request.query_params:
+            # Native media/navigation cannot send the browser's custom header.
+            # This hint fences cookie identity only; it never selects an owner
+            # or grants a machine client access to a different project/account.
+            accounts = request.query_params.getlist("expected_account")
+            header_accounts = request.headers.getlist("x-expected-account")
+            if (len(accounts) != 1 or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", accounts[0])
+                    or len(header_accounts) > 1
+                    or expected_account is not None and expected_account != accounts[0]):
+                return JSONResponse({"detail": "账户校验参数无效或互相冲突",
+                                     "code": "invalid_account_context"}, status_code=400,
+                                    headers={"Cache-Control": "no-store"})
+            expected_account = accounts[0]
         if (principal and not principal.machine and request.url.path.startswith("/v1/")
                 and expected_account is not None and expected_account != principal.owner):
             # Cookies are shared across tabs and ports. An old tab must not
@@ -424,7 +439,8 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
         return StreamingResponse(iter(()) if request.method == "HEAD" else stream(), status_code=status, media_type=mime, headers=headers)
 
     @app.api_route("/v1/assets/{asset_id}/content", methods=["GET", "HEAD"])
-    def asset_content(asset_id: str, request: Request, download: bool = False):
+    def asset_content(asset_id: str, request: Request, download: bool = False,
+                      expected_account: str | None = Query(None, description="Optional browser account fence for native media/navigation; does not grant access")):
         principal = request.state.principal
         value = asset_service.get(principal.owner, asset_id)
         authorized_project(principal, value["project_id"], "assets:read")
@@ -593,7 +609,8 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
             artifact_id, job["id"], row["metadata"], body, idempotency_key)
 
     @app.api_route("/v1/artifacts/{artifact_id}/content", methods=["GET", "HEAD"])
-    def artifact_content(artifact_id: str, request: Request, download: bool = False):
+    def artifact_content(artifact_id: str, request: Request, download: bool = False,
+                         expected_account: str | None = Query(None, description="Optional browser account fence for native media/navigation; does not grant access")):
         principal = request.state.principal
         row = generation_access.artifact(principal, artifact_id)
         value = row["metadata"]

@@ -394,5 +394,142 @@ class ApiTests(unittest.TestCase):
             Settings(Path(self.tmp.name), public_origin="https://www.sixnine.art", execution_backend="mock")
 
 
+class NativeMediaAccountTests(unittest.TestCase):
+    """Native browser content keeps the same cookie/owner boundary as fetch."""
+    setUp = ApiTests.setUp
+    login = ApiTests.login
+    setup_project = ApiTests.setup_project
+    make_plan = ApiTests.make_plan
+
+    def content_fixture(self):
+        from sqlalchemy import insert, update
+        from studio_platform.repository import artifacts, attempts, jobs
+
+        self.setup_project()
+        raw = png()
+        uploaded = self.client.post("/v1/assets", data={"client_project_id": "story-one"},
+            files={"file": ("native.png", raw, "image/png")})
+        self.assertEqual(uploaded.status_code, 201, uploaded.text)
+        asset = uploaded.json()
+        private = self.app.state.assets.get("superdan", asset["id"])
+        plan = self.make_plan()
+        job = self.client.post("/v1/jobs", json={"plan_id": plan["plan_id"]},
+            headers={"Idempotency-Key": "native-media-fixture"}).json()
+        with self.app.state.repository.engine.begin() as connection:
+            connection.execute(update(jobs).where(jobs.c.id == job["id"]).values(status="succeeded"))
+            connection.execute(insert(attempts).values(id="native-attempt", job_id=job["id"], number=1,
+                status="succeeded", fence=1, worker_id="cpu-fixture", created_at=1, updated_at=1))
+            connection.execute(insert(artifacts).values(id="native-artifact", job_id=job["id"],
+                attempt_id="native-attempt", created_at=1, metadata={"kind": "image", "mime": "image/png",
+                    "object_key": private["original"]["key"], "size_bytes": len(raw),
+                    "sha256": private["original"]["sha256"]}))
+        return (asset["content_url"], "/v1/artifacts/native-artifact/content"), raw, private["original"]["key"]
+
+    def test_native_content_matching_account_preserves_range_head_and_attachment(self):
+        paths, raw, _ = self.content_fixture()
+        for path in paths:
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get(path).content, raw)  # Existing URL remains valid.
+                response = self.client.get(path, params={"expected_account": "superdan"},
+                    headers={"Range": "bytes=2-6"})
+                self.assertEqual(response.status_code, 206)
+                self.assertEqual(response.content, raw[2:7])
+                self.assertEqual(response.headers["content-range"], f"bytes 2-6/{len(raw)}")
+                head = self.client.head(path, params={"expected_account": "superdan"})
+                self.assertEqual(head.status_code, 200)
+                self.assertEqual(head.content, b"")
+                self.assertEqual(head.headers["content-length"], str(len(raw)))
+                attachment = self.client.get(path, params={"expected_account": "superdan", "download": 1})
+                self.assertEqual(attachment.content, raw)
+                self.assertTrue(attachment.headers["content-disposition"].startswith("attachment;"))
+
+    def test_native_content_account_switch_and_foreign_or_anonymous_access_fail_before_storage(self):
+        paths, _, _ = self.content_fixture()
+        self.login("supervan")
+        with mock.patch.object(self.app.state.storage, "stat", side_effect=AssertionError("Must not read storage")), \
+             mock.patch.object(self.app.state.storage, "open", side_effect=AssertionError("Must not read body")):
+            for path in paths:
+                for method in ("GET", "HEAD"):
+                    response = self.client.request(method, path, params={"expected_account": "superdan"})
+                    self.assertEqual(response.status_code, 409)
+                    self.assertEqual(response.headers["x-authenticated-account"], "supervan")
+                    if method == "GET":
+                        self.assertEqual(response.json()["code"], "account_context_changed")
+                self.assertEqual(self.client.get(path, params={"expected_account": "supervan"}).status_code, 404)
+            self.client.cookies.clear()
+            for path in paths:
+                self.assertEqual(self.client.get(path, params={"expected_account": "superdan"}).status_code, 401)
+
+    def test_native_account_hint_rejects_ambiguity_only_on_exact_content_reads(self):
+        paths, _, _ = self.content_fixture()
+        invalid = [({"expected_account": ""}, {}), ({"expected_account": " "}, {}),
+            ([('expected_account', 'superdan'), ('expected_account', 'superdan')], {}),
+            ({"expected_account": "superdan"}, {"X-Expected-Account": "supervan"}),
+            ({"expected_account": "superdan"}, [('X-Expected-Account', 'superdan'), ('X-Expected-Account', 'superdan')])]
+        with mock.patch.object(self.app.state.storage, "stat", side_effect=AssertionError("Must not read storage")):
+            for path in paths:
+                for params, headers in invalid:
+                    response = self.client.get(path, params=params, headers=headers)
+                    self.assertEqual(response.status_code, 400)
+                    self.assertEqual(response.json()["code"], "invalid_account_context")
+            self.assertEqual(self.client.post(paths[0], params={"expected_account": "supervan"}).status_code, 405)
+            self.assertEqual(self.client.get("/v1/assets/not/an/id/content",
+                params={"expected_account": "supervan"}).status_code, 404)
+        self.assertEqual(self.client.get("/v1/projects/story-one", params={"expected_account": ""}).status_code, 200)
+        self.assertEqual(self.client.post("/v1/projects", params={"expected_account": "supervan"},
+            json={"project": project("query-does-not-fence-writes")}).status_code, 201)
+
+    def test_native_account_query_never_reinterprets_or_expands_machine_authority(self):
+        paths, raw, _ = self.content_fixture()
+        token = secrets.token_urlsafe(32)
+        auth = self.app.state.auth
+        auth.register_client("native-read", token, "superdan", ["story-one"],
+            ["projects:read", "assets:read", "jobs:read"])
+        self.login("supervan")
+        headers = {"Authorization": "Bearer " + token}
+        for path in paths:
+            self.assertEqual(self.client.get(path, headers=headers).content, raw)
+            response = self.client.get(path, headers=headers, params={"expected_account": "supervan"})
+            self.assertEqual(response.content, raw)
+            self.assertEqual(response.headers["x-authenticated-account"], "superdan")
+        for scopes, owner, projects in ((["projects:read"], "superdan", ["story-one"]),
+                                       (["assets:read", "jobs:read"], "superdan", ["different"]),
+                                       (["assets:read", "jobs:read"], "supervan", ["story-one"])):
+            auth.register_client("native-read", token, owner, projects, scopes)
+            for path in paths:
+                self.assertEqual(self.client.get(path, headers=headers,
+                    params={"expected_account": "superdan"}).status_code, 404)
+
+    def test_native_r2_redirect_and_head_require_account_guard_before_presign(self):
+        from studio_platform.storage import S3ObjectStore
+        from test_platform_storage import config, FakeS3
+
+        paths, raw, key = self.content_fixture()
+        selected = config()
+        fake = FakeS3(selected)
+        store = S3ObjectStore(selected, client=fake)
+        store.put(key, io.BytesIO(raw), content_type="image/png")
+        remote_app = create_app(self.settings, repository=self.app.state.repository, storage=store)
+        with TestClient(remote_app, follow_redirects=False) as remote:
+            remote.post("/api/auth/login", json={"username": "superdan"}).raise_for_status()
+            for path in paths:
+                response = remote.get(path, params={"expected_account": "superdan", "download": 1},
+                    headers={"Range": "bytes=0-0", "X-Expected-Account": "superdan"})
+                self.assertEqual(response.status_code, 307)
+                self.assertEqual(fake.calls[-1][0], "presign")
+                self.assertTrue(fake.calls[-1][1]["Params"]["ResponseContentDisposition"].startswith("attachment;"))
+                head = remote.head(path, params={"expected_account": "superdan"})
+                self.assertEqual(head.status_code, 200)
+                self.assertEqual(head.headers["content-length"], str(len(raw)))
+            remote.post("/api/auth/login", json={"username": "supervan"}).raise_for_status()
+            fake.calls.clear()
+            for path in paths:
+                self.assertEqual(remote.get(path, params={"expected_account": "superdan"}).status_code, 409)
+                self.assertEqual(remote.head(path, params={"expected_account": "superdan"}).status_code, 409)
+                self.assertEqual(remote.get(path, params={"expected_account": "supervan"},
+                    headers={"X-Expected-Account": "superdan"}).status_code, 400)
+            self.assertEqual(fake.calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()
