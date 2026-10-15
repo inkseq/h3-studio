@@ -23,9 +23,9 @@ def verify(directory, commit):
     directory = Path(directory)
     if directory.is_symlink() or not directory.is_dir():
         raise ValueError("bundle_directory_invalid")
-    if {entry.name for entry in directory.iterdir()} != release.FILES | {"release-manifest.json"}:
-        raise ValueError("bundle_contains_unreviewed_files")
     expected = release.manifest(directory, commit)
+    if {entry.name for entry in directory.iterdir()} != set(expected['files']) | {"release-manifest.json"}:
+        raise ValueError("bundle_contains_unreviewed_files")
     release.validate_image_archive(directory/"image.tar.gz", expected)
     return {"state": "bundle_manifest_and_archive_verified", "commit": commit,
             "manifest_sha256": hashlib.sha256((directory/"release-manifest.json").read_bytes()).hexdigest(),

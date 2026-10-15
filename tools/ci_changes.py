@@ -157,25 +157,28 @@ def dispatch_action(inputs: dict, ref: str) -> str:
     kind = inputs.get("release_kind") or "platform"
     approved = inputs.get("approved_commit") or ""
     frontend = inputs.get("approved_frontend_commit") or ""
+    promoted = inputs.get('promote_commit') or ''
     resume = inputs.get("resume_command") or ""
     if kind not in {"platform", "frontend"}:
         raise ValueError("invalid_release_kind")
-    if sum((prepare, bool(approved), bool(frontend))) > 1:
+    if sum((prepare, bool(approved), bool(frontend), bool(promoted))) > 1:
         raise ValueError("preparation_and_approved_deployment_are_exclusive")
-    if any(value and not SHA.fullmatch(value) for value in (approved, frontend)):
+    if any(value and not SHA.fullmatch(value) for value in (approved, frontend, promoted)):
         raise ValueError("approved_commit_must_be_full_sha")
-    if resume and not (approved or frontend):
+    if resume and not (approved or frontend or promoted):
         raise ValueError("resume_requires_an_approved_deployment")
     if resume and not re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", resume):
         raise ValueError("invalid_resume_command")
-    if (prepare or approved or frontend) and ref != "refs/heads/main":
+    if (prepare or approved or frontend or promoted) and ref != "refs/heads/main":
         raise ValueError("release_actions_require_main")
-    if binding(inputs) is not None and not (prepare and kind == "platform" and not approved and not frontend):
+    if binding(inputs) is not None and not (prepare and kind == "platform" and not approved and not frontend and not promoted):
         raise ValueError("native_retention_requires_platform_preparation")
     if approved:
-        return "deploy-platform"
+        raise ValueError('production_requires_staging_accepted_promotion')
     if frontend:
-        return "deploy-frontend"
+        raise ValueError('production_requires_staging_accepted_promotion')
+    if promoted:
+        return 'promote'
     return "prepare-" + kind if prepare else "check"
 
 
@@ -183,7 +186,7 @@ def plan(event_name: str, event: dict, head: str, ref: str, root: Path) -> dict:
     if not SHA.fullmatch(head or ""):
         raise ValueError("invalid_tested_sha")
     action = dispatch_action(event.get("inputs") or {}, ref) if event_name == "workflow_dispatch" else "check"
-    if action.startswith("deploy-"):
+    if action.startswith("deploy-") or action == 'promote':
         result = selection([], reason="independently-approved-deployment")
     elif action == "prepare-frontend":
         result = selection({"frontend"}, reason="independent-frontend-artifact-contract")
@@ -203,6 +206,13 @@ def plan(event_name: str, event: dict, head: str, ref: str, root: Path) -> dict:
             # Missing history, unreadable or malformed paths must never produce
             # an empty successful docs-only run. No raw paths/errors are logged.
             result = selection({"full"}, reason="diff-unavailable-requires-full")
+    if event_name == 'push' and ref == 'refs/heads/main':
+        if result['containers']:
+            # A platform candidate includes the matching static/API pair.
+            result['frontend'] = True
+            action = 'stage-platform'
+        elif result['frontend']:
+            action = 'stage-frontend'
     return {**result, "action": action, "tested_sha": head}
 
 

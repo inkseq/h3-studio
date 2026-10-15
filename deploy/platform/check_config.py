@@ -10,6 +10,10 @@ import argparse
 from pathlib import Path
 import re
 import sys
+try:
+    import deployment_target
+except ImportError:
+    from deploy.platform import deployment_target
 
 
 class ConfigurationError(ValueError):
@@ -21,7 +25,8 @@ def require(condition, message):
         raise ConfigurationError(message)
 
 
-def validate(config, *, deployment_directory=None, compose_version=None):
+def validate(config, *, deployment_directory=None, compose_version=None, target='production'):
+    selected = deployment_target.profile(target)
     require(compose_version is None or isinstance(compose_version, str), "Compose version must be trusted binary output")
     deployment = Path(deployment_directory) if deployment_directory is not None else Path(__file__).resolve().parent
     require(deployment.is_absolute(), "Deployment directory must be an explicit absolute trusted path")
@@ -84,11 +89,13 @@ def validate(config, *, deployment_directory=None, compose_version=None):
     # Accept retained old release bytes or this exact dual-origin successor,
     # never an arbitrary public host, alias list or mixed legacy/new setting.
     if "PUBLIC_ORIGIN" in app.get("environment", {}):
-        required.update(PUBLIC_ORIGIN="https://inkseq.com",
-            PUBLIC_ORIGIN_ALIASES="https://www.sixnine.art,https://sixnine.art")
+        required.update(PUBLIC_ORIGIN=selected['origin'], PUBLIC_ORIGIN_ALIASES=selected['aliases'])
         require(caddy.get("environment") in ({"INKSEQ_LEGACY_REDIRECT": "0"}, {"INKSEQ_LEGACY_REDIRECT": "1"}),
                 "Domain redirect phase must be the explicit reviewed value")
+        require(target != 'staging' or caddy['environment']['INKSEQ_LEGACY_REDIRECT'] == '0',
+                'Staging cannot enable production domain redirects')
     else:
+        require(target == 'production', 'Staging requires its explicit public origin')
         required["SIXNINE_PUBLIC_ORIGIN"] = "https://www.sixnine.art"
         require(not caddy.get("environment"), "Legacy proxy must not inherit new domain settings")
     # Only the exact legacy baseline or the complete reviewed frontend pair is
@@ -172,7 +179,7 @@ def validate(config, *, deployment_directory=None, compose_version=None):
                + ([bind("/srv/sixnine/frontend", "/frontend", readonly=True)] if independent_frontend else []),
         "db": [bind("/srv/sixnine/postgres", "/var/lib/postgresql/data")],
         "db-init": [bind(deployment / "init_database.py", "/bootstrap/init_database.py", readonly=True)],
-        "caddy": [bind(deployment / "Caddyfile", "/etc/caddy/Caddyfile", readonly=True),
+        "caddy": [bind(deployment / selected['caddy'], "/etc/caddy/Caddyfile", readonly=True),
                   {"type": "volume", "source": "caddy_data", "target": "/data", "volume": {}},
                   {"type": "volume", "source": "caddy_config", "target": "/config", "volume": {}}],
     }.items():
@@ -210,9 +217,10 @@ def validate(config, *, deployment_directory=None, compose_version=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--compose-version", help="Version obtained from the trusted installed Compose binary; never from bundle metadata")
+    parser.add_argument('--target', choices=('production', 'staging'), default='production')
     args = parser.parse_args(argv)
     try:
-        validate(json.load(sys.stdin), compose_version=args.compose_version)
+        validate(json.load(sys.stdin), compose_version=args.compose_version, target=args.target)
         print("Production configuration policy passed; secret contents and online readiness were not checked")
         return 0
     except Exception:

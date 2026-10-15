@@ -69,23 +69,6 @@ class FakeCommands:
 
 
 class PrepareReleaseTests(unittest.TestCase):
-    def test_explicit_native_retention_is_frozen_in_preparation_receipt_and_dispatch(self):
-        values = {"retain_native_sources_run": "42", "retain_native_sources_commit": OTHER,
-            "retain_native_sources_index_sha256": "c" * 64}
-        result = tool.prepare('platform', SHA, root=self.root, sleep=lambda _: None, retain_native_sources=values)
-        self.assertEqual(result['retain_native_sources'], values)
-        self.assertEqual(self.fake.dispatch_body['inputs'], dict(values, deploy='true', release_kind='platform'))
-        receipt = json.loads((self.root / '.release-prepares' / (SHA + '-platform') / 'receipt.json').read_text())
-        self.assertEqual(receipt['retain_native_sources'], values)
-
-    def test_incomplete_or_frontend_retention_refuses_before_mutation(self):
-        values = {"retain_native_sources_run": "42", "retain_native_sources_commit": OTHER,
-            "retain_native_sources_index_sha256": "c" * 64}
-        for kind, selected in (('frontend', values), ('platform', {'retain_native_sources_run': '42'})):
-            with self.subTest(kind=kind), self.assertRaises(RuntimeError):
-                tool.prepare(kind, SHA, root=self.root, sleep=lambda _: None, retain_native_sources=selected)
-        self.assertEqual(self.fake.mutations(), [])
-
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -98,79 +81,47 @@ class PrepareReleaseTests(unittest.TestCase):
     def prepare(self):
         return tool.prepare('frontend', SHA, root=self.root, sleep=lambda _: None)
 
-    def receipt(self):
-        return json.loads((self.root / '.release-prepares' / (SHA + '-frontend') / 'receipt.json').read_text())
-
-    def test_only_exact_unfinished_push_is_cancelled_then_one_dispatch(self):
-        self.fake.pushes += [run(11) | {'head_sha': OTHER}, run(12) | {'event': 'pull_request'},
-            run(13) | {'repository': {'full_name': 'other/repo'}}, run(14) | {'path': '.github/workflows/other.yml'},
-            run(15) | {'status': 'completed'}, run(16) | {'event': 'workflow_dispatch'}]
+    def test_push_is_observed_without_cancellation_or_second_workflow(self):
         result = self.prepare()
-        self.assertEqual(result['run_id'], 20)
-        self.assertEqual(result['observed_head_sha'], SHA)
-        self.assertFalse(result['completed'])
+        self.assertEqual(result['run_id'], 10)
+        self.assertTrue(result['automatic_staging'])
         self.assertFalse(result['deployed'])
-        self.assertEqual(len(self.fake.mutations()), 3)
-        self.assertEqual(self.fake.dispatch_body, {'ref': 'main', 'inputs': {'deploy': 'true', 'release_kind': 'frontend'}})
-        self.assertEqual(self.receipt()['cancelled_run_ids'], [10])
+        self.assertEqual(len(self.fake.mutations()), 1)
+        self.assertEqual(self.fake.mutations()[0][:2], ['git', 'push'])
         with self.assertRaisesRegex(RuntimeError, 'Prior intent'):
             self.prepare()
-        self.assertEqual(len(self.fake.mutations()), 3)
+        self.assertEqual(len(self.fake.mutations()), 1)
 
-    def test_runtime_dirty_source_and_nonmain_refuse_before_any_mutation(self):
-        for status, branch in [('?? tools/new.py\0', 'main'), (' M AGENTS.md\0', 'main'),
-                               ('R  README.md\0studio_platform/api.py\0', 'main'), ('', 'topic')]:
+    def test_runtime_dirty_source_and_nonmain_refuse_before_mutation(self):
+        for status, branch in [('?? tools/new.py\0', 'main'), (' M AGENTS.md\0', 'main'), ('', 'topic')]:
             self.fake.status, self.fake.branch = status, branch
             with self.assertRaises(RuntimeError): self.prepare()
         self.assertEqual(self.fake.mutations(), [])
 
-    def test_remote_main_race_stops_before_dispatch(self):
+    def test_unknown_remote_main_is_not_cancelled_or_dispatched(self):
         self.fake.race = True
         with self.assertRaisesRegex(RuntimeError, 'Remote main changed'): self.prepare()
         self.assertFalse(self.fake.dispatched)
-        self.assertNotEqual(self.receipt()['phase'], 'dispatch_started')
+        self.assertEqual(len(self.fake.mutations()), 1)
 
-    def test_refresh_completed_push_is_not_cancelled(self):
-        self.fake.complete_at_refresh = True
-        self.prepare()
-        self.assertEqual(len(self.fake.mutations()), 2)
-        self.assertEqual(self.receipt()['cancelled_run_ids'], [])
+    def test_explicit_retention_cannot_dispatch_duplicate_build(self):
+        values = {'retain_native_sources_run': '42', 'retain_native_sources_commit': OTHER,
+            'retain_native_sources_index_sha256': 'c'*64}
+        with self.assertRaisesRegex(RuntimeError, 'repository native-retention'):
+            tool.prepare('platform', SHA, root=self.root, retain_native_sources=values)
+        self.assertEqual(self.fake.mutations(), [])
 
-    def test_uncertain_cancel_preserves_intent_and_blocks_retry(self):
-        self.fake.fail_cancel = True
-        with self.assertRaisesRegex(RuntimeError, 'outcome unknown'): self.prepare()
-        self.assertEqual(self.receipt()['phase'], 'cancel_started')
-        self.assertFalse(self.fake.dispatched)
-        before = len(self.fake.mutations())
-        with self.assertRaisesRegex(RuntimeError, 'Prior intent'): self.prepare()
-        self.assertEqual(len(self.fake.mutations()), before)
-
-    def test_uncertain_dispatch_is_never_repeated(self):
-        self.fake.fail_dispatch = True
-        with self.assertRaisesRegex(RuntimeError, 'outcome unknown'): self.prepare()
-        self.assertEqual(self.receipt()['phase'], 'dispatch_started')
-        before = len(self.fake.mutations())
-        with self.assertRaisesRegex(RuntimeError, 'Prior intent'): self.prepare()
-        self.assertEqual(len(self.fake.mutations()), before)
-
-    def test_acknowledged_dispatch_without_visible_run_does_not_resend(self):
-        self.fake.fresh = False
-        with self.assertRaisesRegex(RuntimeError, 'run not observed'): self.prepare()
-        self.assertEqual(self.receipt()['phase'], 'dispatch_acknowledged')
-        self.assertEqual(sum(args[4].endswith('/dispatches') for args in self.fake.mutations() if args[0] == 'gh'), 1)
-
-    def test_late_push_visibility_is_observed_before_cancel_and_dispatch(self):
+    def test_late_push_visibility_is_observed_without_resubmitting(self):
         self.fake.empty_push_reads = 2
         self.prepare()
-        self.assertEqual(self.receipt()['cancelled_run_ids'], [10])
-        self.assertEqual(len(self.fake.mutations()), 3)
+        self.assertEqual(len(self.fake.mutations()), 1)
 
-    def test_invisible_push_never_starts_duplicate_preparation(self):
+    def test_invisible_push_keeps_intent_and_never_dispatches(self):
         self.fake.empty_push_reads = 20
-        with self.assertRaisesRegex(RuntimeError, 'not visible yet'):
-            self.prepare()
+        with self.assertRaisesRegex(RuntimeError, 'not visible yet'): self.prepare()
         self.assertFalse(self.fake.dispatched)
         self.assertEqual(len(self.fake.mutations()), 1)
+        with self.assertRaisesRegex(RuntimeError, 'Prior intent'): self.prepare()
 
 
 if __name__ == '__main__':

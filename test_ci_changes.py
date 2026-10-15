@@ -188,11 +188,13 @@ class DispatchTests(unittest.TestCase):
         for gate in ("python", "postgres", "containers", "legacy"):
             self.assertFalse(result[gate], gate)
 
-    def test_approved_deployment_preserves_exact_commit_without_rebuilding(self):
-        for key, action in (("approved_commit", "deploy-platform"), ("approved_frontend_commit", "deploy-frontend")):
-            result = ci.plan("workflow_dispatch", {"inputs": {key: BASE}}, SHA, MAIN, Path("."))
-            self.assertEqual(result["action"], action)
-            self.assertFalse(any(result[gate] for gate in ci.GATES))
+    def test_accepted_promotion_preserves_exact_commit_without_rebuilding(self):
+        result = ci.plan('workflow_dispatch', {'inputs': {'promote_commit': BASE}}, SHA, MAIN, Path('.'))
+        self.assertEqual(result['action'], 'promote')
+        self.assertFalse(any(result[gate] for gate in ci.GATES))
+        for key in ('approved_commit', 'approved_frontend_commit'):
+            with self.assertRaisesRegex(ValueError, 'staging_accepted'):
+                ci.dispatch_action({key: BASE}, MAIN)
 
     def test_conflicting_inputs_invalid_refs_and_incomplete_hashes_fail(self):
         cases = [
@@ -213,7 +215,7 @@ class DispatchTests(unittest.TestCase):
         with patch.object(ci, "git_changes", return_value=[("M", "studio_platform/auth.py")]):
             result = ci.plan("push", {"before": BASE, "inputs": {"deploy": True, "release_kind": "frontend"}},
                              SHA, MAIN, Path("."))
-        self.assertEqual(result["action"], "check")
+        self.assertEqual(result["action"], "stage-platform")
         self.assertTrue(result["postgres"])
 
 
