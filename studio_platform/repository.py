@@ -394,6 +394,7 @@ class Repository:
         guard = self._memory_lock if self._is_memory else _NullLock()
         with guard, self.engine.connect() as connection:
             connection.info["job_event_ids"] = []
+            connection.info.pop("sixnine_demand_notified", None)
             try:
                 if self.engine.dialect.name == "sqlite":
                     connection.exec_driver_sql("BEGIN IMMEDIATE")
@@ -408,6 +409,7 @@ class Repository:
                 raise
             finally:
                 connection.info.pop("job_event_ids", None)
+                connection.info.pop("sixnine_demand_notified", None)
 
     def _sequence_job_events(self, connection):
         ids = connection.info.get("job_event_ids", ())
@@ -477,6 +479,9 @@ class Repository:
                 **cancellation_fields(connection, state)}}
         connection.execute(insert(outbox).values(id=event_id, event_type=event_type,
             aggregate_id=aggregate_id, payload=canonical(payload), created_at=self.clock()))
+        if event_type.startswith(("job.", "dstack.")) or event_type == "instance.reserved":
+            from .demand_wakeup import notify_demand
+            notify_demand(connection)
         if public_event:
             connection.info["job_event_ids"].append(event_id)
         if event_type in {"job.created", "job.queued", "job.lease_expired", "job.submission_unknown"}:
@@ -522,6 +527,8 @@ class Repository:
         connection.execute(insert(dispatch_receipts).values(event_id=event_id, job_id=job_id,
             state="pending", publish_attempts=0, sequence=sequence+1,
             not_before=job["not_before"], updated_at=self.clock()))
+        from .demand_wakeup import notify_demand
+        notify_demand(connection)
 
     def put_document(self, scope, kind, document_id, payload, *, expected_version=None):
         kind, document_id, payload = identifier(kind), identifier(document_id), canonical(payload)

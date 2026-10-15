@@ -60,6 +60,31 @@ and maintenance source, nonsecret examples, and selected public four-file WanGP
 source sets. It contains no API token, SSH private key, Grafana credential, model
 weight or local `.env`.
 
+The #193 migration also includes the exact CPU dstack safety image and installed
+provenance. It derives from the pinned 0.22.3 base and verifies six upstream
+source hashes before applying the bounded Vast fixes: qualified-offer fallback,
+shared 429 cooldown, explicit no-contract evidence, and disabled idle catalog
+preload. The original native allocator and GPU image/source bundles remain in
+use. The protected migration manifest binds the derivative image, helper and
+installed source hashes before publication/loading; old approved artifacts keep
+their original pinned dstack image for rollback.
+
+Controller and dispatcher subscribe to committed PostgreSQL wake hints before
+scanning the original ledgers. With no work or unresolved outcome they block;
+only the controller performs a read-only account safety sweep every15minutes.
+Active observations/idle-stop cadence is unchanged. Notifications do not grant
+permission to rent or replay a task.
+
+A failed start releases its original reservation automatically only when its
+exact native submission carries the complete typed no-contract rejection proof.
+Unknown PUTs, returned contracts and incomplete/legacy summaries retain their
+obligations. A historical start the owner explicitly confirms was unallocated
+can use the trusted one-shot `review_unallocated_start` operation: it re-reads
+the exact failed run and a fresh complete empty same-provider account, then
+commits the original row/zero settlement/review receipt atomically. This is not
+a public endpoint or a background settlement rule. Use it only for the exact
+owner-authorized record; do not rerun consumed operational scripts.
+
 ## Build and independent approval
 
 Build the tested app and dispatch images with the complete source commit label.

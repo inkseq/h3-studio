@@ -1,0 +1,12 @@
+# CPU dstack server only. The accepted native GPU images/bundles are untouched.
+ARG DSTACK_SERVER_IMAGE=dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc1682dc2169075c6210d2ec873146f1ad8
+FROM ${DSTACK_SERVER_IMAGE}
+ARG SOURCE_COMMIT
+LABEL org.opencontainers.image.revision=${SOURCE_COMMIT} role=sixnine-dstack
+COPY deploy/dstack/native_vast_safety.py deploy/dstack/patch_native_vast.py deploy/dstack/native-vast-provenance.json /opt/sixnine/native-vast/
+RUN /root/.local/share/uv/tools/dstack/bin/python /opt/sixnine/native-vast/patch_native_vast.py \
+    --site-packages /root/.local/share/uv/tools/dstack/lib/python3.11/site-packages \
+    > /opt/sixnine/native-vast/installed-provenance.json
+# The upstream startup/10-minute catalog preload becomes a no-op. Explicit
+# demand discovery and the original native allocator continue to own requests.
+ENV SIXNINE_DSTACK_PRELOAD_CATALOG=0 PYTHONDONTWRITEBYTECODE=1

@@ -67,4 +67,8 @@ deploy/wangp/profiles/*
 !deploy/dstack/
 !deploy/dstack/Dockerfile.wangp
 !deploy/dstack/repair_decord_metadata.py
+!deploy/dstack/Dockerfile.server-vast
+!deploy/dstack/native_vast_safety.py
+!deploy/dstack/patch_native_vast.py
+!deploy/dstack/native-vast-provenance.json
 !deploy/wangp/bootstrap.py

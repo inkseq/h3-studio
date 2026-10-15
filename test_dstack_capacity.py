@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 import httpx
 
 from studio_platform.dstack_capacity import (CapacityRequest, DstackCapacity,
-    DstackClient, DstackError, idle_action, live_capacity_usage, native_bootstrap_config, main)
+    DstackClient, DstackError, DstackReadRateLimited, idle_action, live_capacity_usage, native_bootstrap_config, main)
 from studio_platform.inference.wangp_contract import HostReadiness
 from studio_platform.worker_admission import managed_window_reason
 
@@ -950,6 +950,91 @@ class DstackLiveUsageTests(unittest.TestCase):
 
 
 class DstackRESTTests(unittest.TestCase):
+    def test_inventory_429_retries_closed_original_read_with_remaining_timeout(self):
+        seen, responses, sleeps, clock = [], [], [], [10.]
+        def provider(req):
+            seen.append(req)
+            clock[0] += .1
+            response = (httpx.Response(429, headers={"Retry-After": "2"}, text="PRIVATE") if len(seen) == 1
+                else httpx.Response(200, json={"success": True, "instances": [], "instances_found": 0,
+                    "total_instances": 0, "next_token": None}))
+            responses.append(response)
+            return response
+        def sleep(delay):
+            self.assertTrue(all(response.is_closed for response in responses))
+            sleeps.append(delay)
+            clock[0] += delay
+        with patch("studio_platform.dstack_capacity.time.monotonic", side_effect=lambda: clock[0]), \
+                patch("studio_platform.dstack_capacity.time.sleep", side_effect=sleep), \
+                patch("studio_platform.dstack_capacity.random.uniform", return_value=.125):
+            result = self.provider_client("vastai", provider).provider_inventory("vastai", clock=lambda: 1000.)
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["instance_ids"], [])
+        self.assertEqual(sleeps, [2.125])
+        self.assertEqual(len(seen), 2)
+        self.assertEqual(seen[0].url, seen[1].url)
+        self.assertEqual(seen[0].content, seen[1].content)
+        self.assertLess(seen[1].extensions["timeout"]["read"], seen[0].extensions["timeout"]["read"])
+
+    def test_search_429_http_date_preserves_exact_query_then_maps_original_offer(self):
+        seen = []
+        def provider(req):
+            seen.append(req)
+            if len(seen) == 1:
+                return httpx.Response(429, headers={"Retry-After": "Thu, 01 Jan 1970 00:00:02 GMT"})
+            return httpx.Response(200, json={"offers": [{"id": 12345, "machine_id": 19493, "verified": "verified"}]})
+        with patch("studio_platform.dstack_capacity.time.time", return_value=0), \
+                patch("studio_platform.dstack_capacity.time.sleep") as sleep, \
+                patch("studio_platform.dstack_capacity.random.uniform", return_value=.125):
+            result = self.provider_client("vastai", provider).vast_offer_mapping(request(), clock=lambda: 1000.)
+        self.assertEqual(result["offers"], [{"offer_id": "12345", "machine_id": "19493"}])
+        sleep.assert_called_once_with(2.125)
+        self.assertEqual([req.method for req in seen], ["POST", "POST"])
+        self.assertEqual(seen[0].content, seen[1].content)
+        self.assertEqual(json.loads(seen[0].content)["verified"], {"eq": True})
+
+    def test_429_exhaustion_or_long_retry_after_never_returns_empty_inventory(self):
+        for header, calls, delays, retry_after in ((None, 3, [1.125, 2.125], 1), ("120", 1, [], 120),
+                ("PRIVATE invalid header", 3, [1.125, 2.125], 1)):
+            with self.subTest(header=header):
+                seen = []
+                def provider(req):
+                    seen.append(req)
+                    return httpx.Response(429, headers={} if header is None else {"Retry-After": header},
+                        json={"instances": [], "PRIVATE": "never emitted"})
+                with patch("studio_platform.dstack_capacity.time.sleep") as sleep, \
+                        patch("studio_platform.dstack_capacity.random.uniform", return_value=.125), \
+                        self.assertRaises(DstackReadRateLimited) as error:
+                    self.provider_client("vastai", provider).provider_inventory("vastai")
+                self.assertEqual(str(error.exception), "dstack_provider_rate_limited")
+                self.assertEqual(error.exception.retry_after, retry_after)
+                self.assertEqual(len(seen), calls)
+                self.assertEqual([call.args[0] for call in sleep.call_args_list], delays)
+
+    def test_other_read_errors_and_uncertain_apply_are_not_retried(self):
+        for outcome in (httpx.Response(503, text="PRIVATE"), httpx.ReadTimeout("PRIVATE")):
+            with self.subTest(outcome=type(outcome).__name__):
+                seen = []
+                def provider(req):
+                    seen.append(req)
+                    if isinstance(outcome, Exception):
+                        raise outcome
+                    return outcome
+                with patch("studio_platform.dstack_capacity.time.sleep") as sleep, self.assertRaises(DstackError):
+                    self.provider_client("vastai", provider).provider_inventory("vastai")
+                self.assertEqual(len(seen), 1)
+                sleep.assert_not_called()
+        seen = []
+        def rejected(req):
+            seen.append(req)
+            return httpx.Response(429, text="PRIVATE")
+        client = DstackClient("http://127.0.0.1:3000", "dstack-secret-token-123456", "sixnine",
+            session=httpx.Client(transport=httpx.MockTransport(rejected)))
+        with patch("studio_platform.dstack_capacity.time.sleep") as sleep, self.assertRaises(DstackError):
+            client.apply({"run_name": "original"})
+        self.assertEqual(len(seen), 1)
+        sleep.assert_not_called()
+
     def provider_client(self, backend, handler, *, config_changes=None):
         key = "provider-secret-token-123456"
         config = {"type": backend, "creds": {"type": "api_key", "api_key": key}}

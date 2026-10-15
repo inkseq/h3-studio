@@ -25,6 +25,22 @@ import release
 FILES = frozenset({"dispatch-image.tar.gz", "platform-overlay.yaml", "hatchet-entrypoint.sh",
     "source-set.tar.gz", "migration-check.py", "maintenance.py", "runtime-config.example.json",
     "server-config.example.yml", "broker.example.json"})
+DSTACK_FILES = frozenset({"dstack-server-image.tar.gz", "dstack-native-provenance.json"})
+# These are the two independently approved releases observed as current/previous
+# before this helper upgrade. Only their original helper bytes may use the new
+# installed checker for rollback; incoming artifact code is never executed.
+LEGACY_HELPER_PAIRS = {commit: (
+    "a8da20579bb9d776ad8337b2e5182dcb3dbaf6dfc0b533cd8958600a6a60b1b9",
+    "eb6a7d8cab5cbd161b70643f6f0fa193d75f206862e6ac62c61905ce7353f3e3") for commit in (
+        "4f093976bed7cd89696127981cf22835a82d6d23",
+        "07da40322559ee5a12829be6884c541c401d852a")}
+DSTACK_BASE_IMAGE = "dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc1682dc2169075c6210d2ec873146f1ad8"
+DSTACK_SOURCE_PATHS = frozenset({"dstack/_internal/core/backends/vastai/api_client.py",
+    "dstack/_internal/core/backends/vastai/compute.py", "gpuhunt/providers/vastai.py",
+    "dstack/_internal/server/services/backends/__init__.py",
+    "dstack/_internal/server/background/pipeline_tasks/jobs_submitted.py",
+    "dstack/_internal/server/background/scheduled_tasks/offers_catalog.py"})
+DSTACK_IMAGE_CHECK = "import hashlib,json\nfrom pathlib import Path\nroot=Path('/root/.local/share/uv/tools/dstack/lib/python3.11/site-packages')\nfolder=Path('/opt/sixnine/native-vast')\npaths={'dstack/_internal/core/backends/vastai/api_client.py','dstack/_internal/core/backends/vastai/compute.py',\n 'gpuhunt/providers/vastai.py','dstack/_internal/server/services/backends/__init__.py',\n 'dstack/_internal/server/background/pipeline_tasks/jobs_submitted.py',\n 'dstack/_internal/server/background/scheduled_tasks/offers_catalog.py'}\nvalue=json.loads((folder/'installed-provenance.json').read_text())\nassert set(value)=={'patched_sources','dstack_version','upstream_commit','original_sources','helper_sha256','sources'} and value['patched_sources']==6 and set(value['sources'])==paths\noriginal=json.loads((folder/'native-vast-provenance.json').read_text())\nassert value['dstack_version']==original['dstack_version']=='0.22.3' and value['upstream_commit']==original['dstack_upstream_commit']=='009e2916e335d4c9e02d961bc68f704951f5db20'\nassert value['original_sources']=={name:item['sha256'] for name,item in original['sources'].items()} and set(value['original_sources'])==paths\nassert all(hashlib.sha256((root/name).read_bytes()).hexdigest()==digest for name,digest in value['sources'].items())\nhelper=hashlib.sha256((root/'dstack/_internal/core/backends/vastai/sixnine_safety.py').read_bytes()).hexdigest()\nassert helper==value['helper_sha256']==hashlib.sha256((folder/'native_vast_safety.py').read_bytes()).hexdigest()\nprint(json.dumps({'installed':value,'helper_sha256':helper,\n 'installer_sha256':hashlib.sha256((folder/'patch_native_vast.py').read_bytes()).hexdigest(),\n 'source_provenance_sha256':hashlib.sha256((folder/'native-vast-provenance.json').read_bytes()).hexdigest()},sort_keys=True))\n"
 MANIFEST = "migration-manifest.json"
 SHARED = ("dstack", "hatchet", "dispatch", "controller")
 PATH_FIELDS = frozenset({"SIXNINE_EXECUTION_PROFILES_SECRET_FILE", "SIXNINE_GRAFANA_CONFIG_FILE",
@@ -80,19 +96,47 @@ def approved(root, directory, commit):
                     "migration_independent_approval_missing")
 
 
+def artifact_files(value):
+    return FILES | DSTACK_FILES if "dstack" in value else FILES
+
+
+def file_limit(name):
+    return 2 * 1024**3 if name in {"dispatch-image.tar.gz", "dstack-server-image.tar.gz"} else 64 * 1024**2 if name == "source-set.tar.gz" else 1024**2
+
+
+def dstack_provenance(directory, value):
+    proof = json.loads((Path(directory) / "dstack-native-provenance.json").read_text())
+    fields = {"version", "commit", "base_image", "installed", "helper_sha256", "installer_sha256", "source_provenance_sha256"}
+    release.require(type(proof) is dict and set(proof) == fields and proof["version"] == 1
+        and proof["commit"] == value["commit"] and proof["base_image"] == DSTACK_BASE_IMAGE
+        and all(type(proof[k]) is str and release.DIGEST.fullmatch(proof[k])
+            for k in ("helper_sha256", "installer_sha256", "source_provenance_sha256")),
+        "migration_dstack_provenance_invalid")
+    installed = proof["installed"]
+    release.require(type(installed) is dict and set(installed) == {"patched_sources", "dstack_version", "upstream_commit", "original_sources", "helper_sha256", "sources"}
+        and installed["patched_sources"] == 6 and installed["helper_sha256"] == proof["helper_sha256"]
+        and installed["dstack_version"] == "0.22.3" and installed["upstream_commit"] == "009e2916e335d4c9e02d961bc68f704951f5db20"
+        and type(installed["original_sources"]) is dict and set(installed["original_sources"]) == DSTACK_SOURCE_PATHS
+        and all(type(digest) is str and release.DIGEST.fullmatch(digest) for digest in installed["original_sources"].values())
+        and type(installed["sources"]) is dict and set(installed["sources"]) == DSTACK_SOURCE_PATHS
+        and all(type(digest) is str and release.DIGEST.fullmatch(digest) for digest in installed["sources"].values()),
+        "migration_dstack_provenance_invalid")
+    return {k: proof[k] for k in ("installed", "helper_sha256", "installer_sha256", "source_provenance_sha256")}
+
+
 def manifest(directory, commit, *, platform_manifest_sha256=None):
     directory = Path(directory)
     release.require(release.SHA.fullmatch(commit) and directory.is_dir() and not directory.is_symlink(),
                     "migration_artifact_invalid")
-    release.require({p.name for p in directory.iterdir()} == FILES | {MANIFEST}, "migration_artifact_files_invalid")
     release.regular(directory / MANIFEST, maximum=32768)
     value = json.loads((directory / MANIFEST).read_text(encoding="utf-8"))
     fields = {"version", "commit", "platform_manifest_sha256", "dispatch", "source_index_sha256", "files"}
-    release.require(type(value) is dict and set(value) in (fields, fields | {"native_source_commits"})
+    release.require(type(value) is dict and fields <= set(value) <= fields | {"native_source_commits", "dstack"}
         and type(value["version"]) is int and value["version"] == 1 and value["commit"] == commit
         and type(value.get("platform_manifest_sha256")) is str and release.DIGEST.fullmatch(value["platform_manifest_sha256"])
         and type(value.get("source_index_sha256")) is str and release.DIGEST.fullmatch(value["source_index_sha256"])
-        and type(value["files"]) is dict and set(value["files"]) == FILES, "migration_manifest_invalid")
+        and type(value["files"]) is dict and set(value["files"]) == artifact_files(value), "migration_manifest_invalid")
+    release.require({p.name for p in directory.iterdir()} == artifact_files(value) | {MANIFEST}, "migration_artifact_files_invalid")
     if "native_source_commits" in value:
         source_commits = value["native_source_commits"]
         release.require(type(source_commits) is dict and 1 <= len(source_commits) <= 128
@@ -106,11 +150,20 @@ def manifest(directory, commit, *, platform_manifest_sha256=None):
     release.require(type(dispatch) is dict and set(dispatch) == {"image", "image_id"}
         and dispatch["image"] == "sixnine-dispatch:" + commit and type(dispatch["image_id"]) is str
         and re.fullmatch(r"sha256:[0-9a-f]{64}", dispatch["image_id"]), "migration_dispatch_binding_invalid")
+    if "dstack" in value:
+        server = value["dstack"]
+        release.require(type(server) is dict and set(server) == {"image", "image_id", "provenance_sha256"}
+            and server["image"] == "sixnine-dstack:" + commit
+            and type(server["image_id"]) is str and re.fullmatch(r"sha256:[0-9a-f]{64}", server["image_id"])
+            and server["provenance_sha256"] == value["files"]["dstack-native-provenance.json"],
+            "migration_dstack_binding_invalid")
     for name, digest in value["files"].items():
         release.require(type(digest) is str and release.DIGEST.fullmatch(digest), "migration_checksum_invalid")
-        maximum = 2 * 1024**3 if name == "dispatch-image.tar.gz" else 64 * 1024**2 if name == "source-set.tar.gz" else 1024**2
+        maximum = file_limit(name)
         release.regular(directory / name, maximum=maximum)
         release.require(release.checksum(directory / name) == digest, "migration_checksum_mismatch")
+    if "dstack" in value:
+        dstack_provenance(directory, value)
     return value
 
 
@@ -130,8 +183,9 @@ def fetch(root, commit, *, api=None):
         prefix = "migration/"
         fetch_release_s3.download(api, commit, prefix + MANIFEST, staging / MANIFEST, 32768)
         approved(root, staging, commit)  # Before transferring the large image.
-        for name in sorted(FILES):
-            maximum = 2 * 1024**3 if name == "dispatch-image.tar.gz" else 64 * 1024**2 if name == "source-set.tar.gz" else 1024**2
+        document = json.loads((staging / MANIFEST).read_text())
+        for name in sorted(artifact_files(document)):
+            maximum = file_limit(name)
             fetch_release_s3.download(api, commit, prefix + name, staging / name, maximum)
         value = manifest(staging, commit)
         approved(root, staging, commit)
@@ -144,7 +198,7 @@ def fetch(root, commit, *, api=None):
         return target
     finally:
         if staging.exists():
-            for name in FILES | {MANIFEST}:
+            for name in FILES | DSTACK_FILES | {MANIFEST}:
                 (staging / name).unlink(missing_ok=True)
             staging.rmdir()
 
@@ -238,12 +292,12 @@ def prepare(root, commit, platform_directory):
     staging = Path(tempfile.mkdtemp(prefix=".migration-release-", dir=parent))
     try:
         artifact = staging / "artifact"; artifact.mkdir(mode=0o700)
-        for name in FILES | {MANIFEST}:
+        for name in artifact_files(value) | {MANIFEST}:
             fd = os.open(incoming / name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
             with os.fdopen(fd, "rb") as source, (artifact / name).open("xb") as output:
                 info = os.fstat(source.fileno())
                 release.require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1, "migration_copy_input_changed")
-                maximum = 2 * 1024**3 if name == "dispatch-image.tar.gz" else 64 * 1024**2 if name == "source-set.tar.gz" else 1024**2
+                maximum = file_limit(name)
                 copied = 0
                 while chunk := source.read(1024 * 1024):
                     copied += len(chunk)
@@ -416,9 +470,14 @@ def installed_checker(artifact):
     checker_path = helper.with_name("migration_check.py")
     release.regular(helper, root_owned=True, maximum=1024**2)
     release.regular(checker_path, root_owned=True, maximum=1024**2)
-    release.require(release.checksum(helper) == release.checksum(artifact / "maintenance.py")
-        and release.checksum(checker_path) == release.checksum(artifact / "migration-check.py"),
-        "migration_root_helpers_need_reviewed_update")
+    installed = (release.checksum(helper), release.checksum(checker_path))
+    incoming = (release.checksum(artifact / "maintenance.py"), release.checksum(artifact / "migration-check.py"))
+    if installed != incoming:
+        release.regular(artifact / MANIFEST, maximum=32768)
+        value = json.loads((artifact / MANIFEST).read_text(encoding="utf-8"))
+        release.require(type(value) is dict and type(value.get("commit")) is str and "dstack" not in value
+            and LEGACY_HELPER_PAIRS.get(value.get("commit")) == incoming,
+            "migration_root_helpers_need_reviewed_update")
     spec = importlib.util.spec_from_file_location("sixnine_trusted_migration_checker", checker_path)
     module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
     return module
@@ -438,6 +497,19 @@ def pinned_loaded_image(expected, environment):
     raise release.ReleaseError("migration_loaded_image_digest_not_resolvable")
 
 
+def dstack_image(directory, migration, environment, *, load=False):
+    """Optional v1 extension; old approved artifacts keep their exact upstream."""
+    if "dstack" not in migration:
+        return None
+    expected = {"commit": migration["commit"], **migration["dstack"]}
+    archive = Path(directory) / "artifact" / "dstack-server-image.tar.gz"
+    expected["archive_image_ids"] = release.validate_image_archive(archive, expected)
+    expected["installed_provenance"] = dstack_provenance(Path(directory) / "artifact", migration)
+    if load:
+        release.command(["load", "--input", str(archive)], environment=environment, timeout=300)
+    return expected
+
+
 def compose(base, migration_directory, environment, *arguments, timeout=180):
     return release.command(["compose", "--env-file", "/dev/null", "--project-directory", str(base),
         "-f", str(base / "compose.yaml"), "-f", str(migration_directory / "overlay.yaml"), *arguments],
@@ -446,6 +518,9 @@ def compose(base, migration_directory, environment, *arguments, timeout=180):
 
 def verify_services(base, directory, environment, app, dispatch):
     expected = {"app": app, "dispatch": dispatch, "controller": dispatch}
+    server = dispatch.get("_dstack_server")
+    if server is not None:
+        expected["dstack"] = server
     values = {}
     for name in ("app", *SHARED, "hatchet-db"):
         identity = compose(base, directory, environment, "ps", "--all", "--quiet", name, timeout=20).decode().strip()
@@ -478,8 +553,15 @@ def verify_services(base, directory, environment, app, dispatch):
     for service, image in (("dstack", "dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc1682dc2169075c6210d2ec873146f1ad8"),
             ("hatchet", "ghcr.io/hatchet-dev/hatchet/hatchet-lite:v0.110.5@sha256:cc81f078a5285d7d2051ec4a4fa459d033e1face4ca5983d82612b00da6e3fa3"),
             ("hatchet-db", "postgres:15@sha256:c961aa287d8698297cb26cdfadfbe9fd2cbaf77e53cfffe9636e8d8a1e4d842c")):
+        if service == "dstack" and server is not None:
+            continue
         pinned = json.loads(release.command(["image", "inspect", image], environment=environment, timeout=20))[0]
         release.require(values[service].get("Image") == pinned.get("Id"), "migration_infrastructure_image_mismatch")
+    if server is not None:
+        observed = json.loads(release.command(["exec", "--user", "0:0", values["dstack"]["Id"],
+            "/root/.local/share/uv/tools/dstack/bin/python", "-B", "-c", DSTACK_IMAGE_CHECK],
+            environment=environment, timeout=30))
+        release.require(observed == server["installed_provenance"], "migration_dstack_installed_source_changed")
 
 
 def guard_legacy(root, *, commit=None, active=None):
@@ -535,8 +617,11 @@ def apply_locked(root, commit):
     dispatch = {"commit": commit, **migration["dispatch"]}
     dispatch["archive_image_ids"] = release.validate_image_archive(directory / "artifact" / "dispatch-image.tar.gz", dispatch)
     release.command(["load", "--input", str(directory / "artifact" / "dispatch-image.tar.gz")], environment=env, timeout=300)
+    server = dstack_image(directory, migration, env, load=True)
+    dispatch["_dstack_server"] = server
     env.update(config["environment"], SIXNINE_IMAGE=pinned_loaded_image(app, env),
-        SIXNINE_DISPATCH_IMAGE=pinned_loaded_image(dispatch, env), SIXNINE_DSTACK_SOURCE_DIR=str(directory / "sources"))
+        SIXNINE_DISPATCH_IMAGE=pinned_loaded_image(dispatch, env), SIXNINE_DSTACK_SOURCE_DIR=str(directory / "sources"),
+        SIXNINE_DSTACK_SERVER_IMAGE=pinned_loaded_image(server, env) if server else DSTACK_BASE_IMAGE)
     default_profile(directory, env)
     checker.check(base / "compose.yaml", directory / "overlay.yaml", environment=env,
         host_memory_mib=config["host_memory_mib"], check_inputs=True)
@@ -662,8 +747,11 @@ def _storyboard_context(root, commit, config):
     app = {**app, "archive_image_ids": release.validate_image_archive(base / "image.tar.gz", app)}
     dispatch = {"commit": commit, **migration["dispatch"]}
     dispatch["archive_image_ids"] = release.validate_image_archive(directory / "artifact" / "dispatch-image.tar.gz", dispatch)
+    server = dstack_image(directory, migration, environment)
+    dispatch["_dstack_server"] = server
     environment.update(config["environment"], SIXNINE_IMAGE=pinned_loaded_image(app, environment),
-        SIXNINE_DISPATCH_IMAGE=pinned_loaded_image(dispatch, environment), SIXNINE_DSTACK_SOURCE_DIR=str(directory / "sources"))
+        SIXNINE_DISPATCH_IMAGE=pinned_loaded_image(dispatch, environment), SIXNINE_DSTACK_SOURCE_DIR=str(directory / "sources"),
+        SIXNINE_DSTACK_SERVER_IMAGE=pinned_loaded_image(server, environment) if server else DSTACK_BASE_IMAGE)
     default_profile(directory, environment)
     checker.check(base / "compose.yaml", overlay, environment=environment,
         host_memory_mib=config["host_memory_mib"], check_inputs=True)

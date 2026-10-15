@@ -5,7 +5,8 @@
 name: sixnine-capacity
 services:
   dstack:
-    image: dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc1682dc2169075c6210d2ec873146f1ad8
+    image: ${SIXNINE_DSTACK_SERVER_IMAGE:?Exact reviewed CPU dstack image required}
+    pull_policy: never
     restart: unless-stopped
     ports:
       - "127.0.0.1:3000:3000"

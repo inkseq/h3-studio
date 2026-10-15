@@ -14,6 +14,26 @@ import tarfile
 import tempfile
 
 FILES = ("compose.yaml", "Caddyfile", "init_database.py", "check_config.py")
+DSTACK_IMAGE_CHECK = r'''import hashlib,json
+from pathlib import Path
+root=Path('/root/.local/share/uv/tools/dstack/lib/python3.11/site-packages')
+folder=Path('/opt/sixnine/native-vast')
+paths={'dstack/_internal/core/backends/vastai/api_client.py','dstack/_internal/core/backends/vastai/compute.py',
+ 'gpuhunt/providers/vastai.py','dstack/_internal/server/services/backends/__init__.py',
+ 'dstack/_internal/server/background/pipeline_tasks/jobs_submitted.py',
+ 'dstack/_internal/server/background/scheduled_tasks/offers_catalog.py'}
+value=json.loads((folder/'installed-provenance.json').read_text())
+assert set(value)=={'patched_sources','dstack_version','upstream_commit','original_sources','helper_sha256','sources'} and value['patched_sources']==6 and set(value['sources'])==paths
+original=json.loads((folder/'native-vast-provenance.json').read_text())
+assert value['dstack_version']==original['dstack_version']=='0.22.3' and value['upstream_commit']==original['dstack_upstream_commit']=='009e2916e335d4c9e02d961bc68f704951f5db20'
+assert value['original_sources']=={name:item['sha256'] for name,item in original['sources'].items()} and set(value['original_sources'])==paths
+assert all(hashlib.sha256((root/name).read_bytes()).hexdigest()==digest for name,digest in value['sources'].items())
+helper=hashlib.sha256((root/'dstack/_internal/core/backends/vastai/sixnine_safety.py').read_bytes()).hexdigest()
+assert helper==value['helper_sha256']==hashlib.sha256((folder/'native_vast_safety.py').read_bytes()).hexdigest()
+print(json.dumps({'installed':value,'helper_sha256':helper,
+ 'installer_sha256':hashlib.sha256((folder/'patch_native_vast.py').read_bytes()).hexdigest(),
+ 'source_provenance_sha256':hashlib.sha256((folder/'native-vast-provenance.json').read_bytes()).hexdigest()},sort_keys=True))
+'''
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -48,6 +68,31 @@ def build(commit, destination):
         {"commit": commit, "image": image, "image_id": inspected["Id"], "files": checksums,
          "contracts": build_contracts(ROOT)}, indent=2)+"\n", encoding="utf-8")
     print("Reviewable release manifest SHA-256: "+hashlib.sha256((destination / "release-manifest.json").read_bytes()).hexdigest())
+
+
+def bundle_dstack(commit, destination):
+    """Export only the tested, offline-verified CPU server derivative."""
+    server_image = "sixnine-dstack:" + commit
+    server = json.loads(subprocess.check_output(["docker", "image", "inspect", server_image], stderr=subprocess.DEVNULL))[0]
+    if (server.get("Config", {}).get("Labels", {}).get("org.opencontainers.image.revision") != commit
+            or server.get("Architecture") != "amd64" or server.get("Os") != "linux"):
+        raise ValueError("Migration dstack image is not the exact reviewed Linux source")
+    checked = json.loads(subprocess.check_output(["docker", "run", "--rm", "--network", "none", "--read-only",
+        "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--entrypoint",
+        "/root/.local/share/uv/tools/dstack/bin/python", server_image, "-B", "-c", DSTACK_IMAGE_CHECK], stderr=subprocess.DEVNULL))
+    for field, source in (("helper_sha256", "native_vast_safety.py"), ("installer_sha256", "patch_native_vast.py"),
+                          ("source_provenance_sha256", "native-vast-provenance.json")):
+        if checked.get(field) != hashlib.sha256((ROOT / "deploy/dstack" / source).read_bytes()).hexdigest():
+            raise ValueError("Migration dstack installed source differs")
+    proof = {"version": 1, "commit": commit, "base_image": json.loads(
+        (ROOT / "deploy/dstack/native-vast-provenance.json").read_text())["base_image"], **checked}
+    (destination / "dstack-native-provenance.json").write_text(json.dumps(proof, sort_keys=True, indent=2)+"\n", encoding="utf-8")
+    with subprocess.Popen(["docker", "save", server_image], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as process:
+        with gzip.open(destination / "dstack-server-image.tar.gz", "wb", compresslevel=1) as target:
+            shutil.copyfileobj(process.stdout, target, 1024 * 1024)
+        if process.wait() != 0:
+            raise RuntimeError("Could not export the reviewed CPU dstack image")
+    return {"image": server_image, "image_id": server["Id"]}
 
 
 def build_migration(commit, platform_directory, destination, selections, *,
@@ -93,6 +138,7 @@ def build_migration(commit, platform_directory, destination, selections, *,
         "hatchet-entrypoint.sh": "deploy/hatchet/entrypoint.sh", "migration-check.py": "tools/check_migration_deploy.py",
         "maintenance.py": "deploy/dstack/maintenance.py", "runtime-config.example.json": "deploy/dstack/runtime-config.example.json",
         "server-config.example.yml": "deploy/dstack/server-config.example.yml", "broker.example.json": "deploy/hatchet/broker.example.json"}
+    server = bundle_dstack(commit, destination)
     for name, source in paths.items():
         shutil.copyfile(ROOT / source, destination / name)
     with subprocess.Popen(["docker", "save", image], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as process:
@@ -116,7 +162,7 @@ def build_migration(commit, platform_directory, destination, selections, *,
                     if path.is_file() and not path.is_symlink():
                         archive.add(path, arcname=path.relative_to(sources).as_posix(), recursive=False)
             index_digest = hashlib.sha256((sources / "index.json").read_bytes()).hexdigest()
-    names = {*paths, "dispatch-image.tar.gz", "source-set.tar.gz"}
+    names = {*paths, "dispatch-image.tar.gz", "source-set.tar.gz", "dstack-server-image.tar.gz", "dstack-native-provenance.json"}
     checksums = {}
     for name in names:
         digest = hashlib.sha256()
@@ -127,6 +173,8 @@ def build_migration(commit, platform_directory, destination, selections, *,
     document = {"version": 1, "commit": commit,
         "platform_manifest_sha256": hashlib.sha256(platform.read_bytes()).hexdigest(),
         "dispatch": {"image": image, "image_id": inspected["Id"]},
+        "dstack": {"image": server["image"], "image_id": server["image_id"],
+                   "provenance_sha256": checksums["dstack-native-provenance.json"]},
         "source_index_sha256": index_digest, "files": checksums}
     if source_commits is not None:
         document["native_source_commits"] = source_commits
