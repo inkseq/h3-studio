@@ -352,6 +352,7 @@ class HatchetDispatchTests(LedgerCase):
 
     def test_broker_failure_reawakens_original_job_but_unknown_broker_status_does_not(self):
         job = self.make_job()
+        self.ready()
         publisher = Publisher()
         dispatcher = self.dispatcher(publisher)
         first = dispatcher.publish_once()
@@ -368,13 +369,142 @@ class HatchetDispatchTests(LedgerCase):
         dispatcher = self.dispatcher(publisher)
         for index in range(5):
             self.now += 1
-            self.make_job("paged-"+str(index))
+            job = self.make_job("paged-"+str(index))
             delivery = dispatcher.publish_once()
             if index == 4:
+                self.ready("last")
                 publisher.states[delivery["external_run_id"]] = "FAILED"
+            else:
+                worker = "prefix-"+str(index)
+                self.ready(worker)
+                self.runner(job, MemoryBackend(), worker=worker).run_once(worker, "hatchet-test")
+        self.now += 6  # Original running jobs have finished their poll backoff.
         self.assertEqual(dispatcher.recover_wakeups(limit=2)["wakeups"], 0)
         self.assertEqual(dispatcher.recover_wakeups(limit=2)["wakeups"], 0)
         self.assertEqual(dispatcher.recover_wakeups(limit=2)["wakeups"], 1)
+
+    def test_100_no_capacity_ticks_keep_one_run_then_ready_wakes_once(self):
+        job = self.make_job()
+        original_budget = self.repo.get_budget("owner-budget")
+        publisher = Publisher()
+        dispatcher = self.dispatcher(publisher)
+        initial = dispatcher.publish_once()
+        publisher.states[initial["external_run_id"]] = "COMPLETED"
+        for _ in range(100):
+            self.now += 30
+            self.assertEqual(dispatcher.recover_wakeups()["wakeups"], 0)
+            self.assertEqual(dispatcher.publish_once()["state"], "idle")
+        self.assertEqual(len(publisher.runs), 1)
+        self.assertEqual(len(publisher.calls), 1)
+        self.ready()
+        self.assertEqual(dispatcher.recover_wakeups()["wakeups"], 1)
+        self.assertEqual(dispatcher.recover_wakeups()["wakeups"], 0)
+        resumed = dispatcher.publish_once()
+        self.assertNotEqual(resumed["event_id"], initial["event_id"])
+        self.assertEqual(len(publisher.runs), 2)
+        self.assertEqual(self.repo.get_job(self.scope, job["id"])["attempt_no"], 0)
+        self.assertEqual(self.repo.get_budget("owner-budget"), original_budget)
+
+    def test_cancel_pending_never_publishes_or_emits_another_wakeup(self):
+        job = self.make_job()
+        self.ready()
+        claim = self.control.claim("worker", "hatchet-test")
+        queue = TaskQueue(self.repo)
+        queue.begin_submission(claim.lease)
+        queue.mark_submission_unknown(claim.lease)
+        original = self.repo.request_cancel(self.scope, job["id"])
+        self.assertEqual(original["status"], "cancel_requested")
+        budget = self.repo.get_budget("owner-budget")
+        publisher = Publisher()
+        dispatcher = self.dispatcher(publisher)
+        self.assertEqual(dispatcher.publish_once()["state"], "obsolete")
+        for _ in range(3):
+            with self.repo.transaction() as connection:
+                self.assertIsNone(self.repo._dispatch_wakeup(connection, job["id"]))
+            self.assertEqual(dispatcher.recover_wakeups()["wakeups"], 0)
+        self.assertEqual(publisher.calls, [])
+        current = self.repo.get_job(self.scope, job["id"])
+        self.assertEqual(current["status"], "cancel_requested")
+        self.assertEqual(current["current_attempt_id"], original["current_attempt_id"])
+        self.assertEqual(self.repo.get_budget("owner-budget"), budget)
+
+    def test_cancel_pending_retains_unknown_original_publication_without_repeating_it(self):
+        job = self.make_job()
+        publisher = Publisher(lose_first=True)
+        dispatcher = self.dispatcher(publisher)
+        original = dispatcher.publish_once()
+        self.assertEqual(original["state"], "unknown")
+        self.ready()
+        claim = self.control.claim("worker", "hatchet-test")
+        queue = TaskQueue(self.repo)
+        queue.begin_submission(claim.lease)
+        queue.mark_submission_unknown(claim.lease)
+        self.repo.request_cancel(self.scope, job["id"])
+        self.now += 31
+        self.assertEqual(dispatcher.publish_once()["state"], "obsolete")
+        with self.repo.engine.connect() as connection:
+            receipt = connection.execute(select(dispatch_receipts).where(
+                dispatch_receipts.c.event_id == original["event_id"])).mappings().one()
+        self.assertEqual(receipt["state"], "unknown")
+        self.assertEqual(receipt["publish_attempts"], 1)
+        self.assertEqual(receipt["error_code"], "dispatch_cancel_pending")
+        self.assertEqual(len(publisher.calls), 1)
+
+    def test_terminal_lower_priority_delivery_waits_for_actual_queue_order(self):
+        older = self.make_job("older")
+        self.now += 1
+        newer = self.make_job("newer")
+        self.ready()
+        publisher = Publisher()
+        dispatcher = self.dispatcher(publisher)
+        deliveries = [dispatcher.publish_once(), dispatcher.publish_once()]
+        new_delivery = next(row for row in deliveries if row["job_id"] == newer["id"])
+        publisher.states[new_delivery["external_run_id"]] = "COMPLETED"
+        for _ in range(10):
+            self.assertEqual(dispatcher.recover_wakeups()["wakeups"], 0)
+        self.assertEqual(len(publisher.runs), 2)
+        self.repo.request_cancel(self.scope, older["id"])
+        self.assertEqual(dispatcher.recover_wakeups()["wakeups"], 1)
+        self.assertEqual(dispatcher.publish_once()["job_id"], newer["id"])
+        self.assertEqual(self.repo.get_job(self.scope, newer["id"])["attempt_no"], 0)
+
+    def test_concurrent_recovery_of_terminal_run_publishes_only_one_successor(self):
+        self.make_job()
+        self.ready()
+        publisher = Publisher()
+        initial = self.dispatcher(publisher).publish_once()
+        barrier = threading.Barrier(2)
+        def terminal(_run):
+            barrier.wait(timeout=5)
+            return "COMPLETED"
+        publisher.status = terminal
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(lambda name: self.dispatcher(publisher, name).recover_wakeups(), ("one", "two")))
+        self.assertEqual(sum(result["wakeups"] for result in results), 1)
+        self.assertEqual(self.dispatcher(publisher).publish_once()["state"], "published")
+        self.assertEqual(len(publisher.runs), 2)
+        self.assertEqual(len({call.event_id for call in publisher.calls}), 2)
+
+    def test_cancel_during_broker_status_read_fences_successor_under_job_lock(self):
+        job = self.make_job()
+        self.ready()
+        publisher = Publisher()
+        dispatcher = self.dispatcher(publisher)
+        dispatcher.publish_once()
+        entered, resume = threading.Event(), threading.Event()
+        def terminal(_run):
+            entered.set()
+            self.assertTrue(resume.wait(5))
+            return "COMPLETED"
+        publisher.status = terminal
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(dispatcher.recover_wakeups)
+            self.assertTrue(entered.wait(5))
+            self.repo.request_cancel(self.scope, job["id"])
+            resume.set()
+            self.assertEqual(pending.result(timeout=5)["wakeups"], 0)
+        self.assertEqual(len(publisher.calls), 1)
+        self.assertEqual(self.repo.get_job(self.scope, job["id"])["status"], "cancelled")
 
     def test_upload_completed_database_commit_loss_reuses_artifact_receipt_and_original_generation(self):
         job = self.make_job(audio=True)

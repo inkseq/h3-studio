@@ -352,6 +352,105 @@ class WorkerControl:
         return (effective.get("model") == spec["model_id"]
                 and execution.get("configuration_id") == spec["configuration_id"])
 
+    def _claim_filter(self, connection, worker, pool, purpose, job_filter=None):
+        spec = worker["spec"]
+        bindings = [jobs.c.pool == pool,
+            func.coalesce(jobs.c.execution_plan["dispatch_backend"].as_string(), "legacy")
+                == spec.get("dispatch_backend", "legacy"),
+            jobs.c.execution_plan["backend"].as_string() == spec["backend"],
+            # JSON boolean extraction is text on PG and integer on SQLite.
+            # Avoid casting arbitrary legacy strings to PG BOOLEAN, which
+            # would fail the whole queue instead of excluding that job.
+            jobs.c.execution_plan["enabled"].as_string() == ("true" if self.repo.engine.dialect.name == "postgresql" else 1)]
+        if worker["current_job_id"]:
+            bindings.append(jobs.c.id == worker["current_job_id"])
+        if spec["recipe_ids"]:
+            bindings.append(jobs.c.request["recipe_id"].as_string().in_(spec["recipe_ids"]))
+        if spec["backend"] != "mock":
+            # Preserve nested request precedence rather than coalescing a
+            # missing nested model with an unrelated outer display field.
+            model = case((jobs.c.request["request"].as_string().is_not(None),
+                jobs.c.request["request"]["model"].as_string()), else_=jobs.c.request["model"].as_string())
+            bindings.extend((model == spec["model_id"],
+                jobs.c.execution_plan["configuration_id"].as_string() == spec["configuration_id"]))
+        if spec["backend"] == "wangp-worker":
+            bindings.append(jobs.c.execution_plan["engine_manifest_digest"].as_string() == spec["engine_manifest_digest"])
+        # Do not claim unsupported jobs then fail them: old slot identities
+        # cannot acquire native-delivery work, including collection/recovery.
+        bindings.append(func.coalesce(jobs.c.execution_plan["output_delivery"].as_string(), "")
+                        == spec.get("output_delivery", ""))
+        if purpose == "generate":
+            deadlines = list(connection.execute(select(instance_intents.c.hard_deadline).where(
+                instance_intents.c.provider == worker["provider"],
+                instance_intents.c.provider_instance_id == worker["instance_id"],
+                instance_intents.c.state != "destroyed",
+                instance_intents.c.hard_deadline.is_not(None))).scalars())
+            if deadlines:
+                # A shorter job may fit even when a long queued job does
+                # not. Existing attempts still reconcile/collect past this
+                # gate; this must never cause another paid submission.
+                from .worker_admission import COMPLETION_MARGIN_SECONDS
+                remaining = min(deadlines)-self.repo.clock()-COMPLETION_MARGIN_SECONDS
+                bindings.append(jobs.c.expected_runtime_s < remaining)
+        if job_filter is not None:
+            bindings.append(job_filter)
+        return and_(*bindings)
+
+    def claim_reason(self, connection, worker, job, *, purpose="generate"):
+        """Read-only actual slot gates; no lease, observation or budget mutation."""
+        if not self.matches(worker, job):
+            return "matching_worker_unavailable"
+        if worker["state"] in {"registered", "retired"}:
+            return "worker_readiness_unconfirmed"
+        if purpose != "generate":
+            return None if worker["current_job_id"] == job["id"] else "original_attempt_requires_reconciliation"
+        if (worker["expires_at"] <= self.repo.clock() or worker["state"] != "ready"
+                or worker["current_job_id"] or worker["drain_requested"]):
+            return "matching_worker_unavailable"
+        if connection.execute(select(instance_intents.c.id).where(
+                instance_intents.c.provider == worker["provider"],
+                instance_intents.c.provider_instance_id == worker["instance_id"],
+                instance_intents.c.state.in_(("draining", "destroying", "destroyed")))).first():
+            return "worker_capacity_stopping"
+        from .capacity import capacity_member_claim_allowed
+        if not capacity_member_claim_allowed(self.repo, connection, job, worker):
+            return "capacity_member_binding_unavailable"
+        from .worker_admission import worker_window_reason
+        return worker_window_reason(connection, worker, self.repo.clock(),
+            expected_runtime_s=job["expected_runtime_s"],
+            deployment_profile_id=job["request"].get("deployment_profile_id"))
+
+    def dispatch_reason(self, connection, job, *, worker_id=None):
+        """Advisory next-claim check; the actual transaction still fences races."""
+        if job["lease_worker_id"] is not None:
+            return "dispatch_job_leased"
+        if job["not_before"] > self.repo.clock():
+            return "queue_backoff"
+        purpose = {"queued": "generate", "collecting": "collect",
+                   "running": "reconcile", "submission_unknown": "reconcile"}.get(job["status"])
+        if purpose is None:
+            return "dispatch_job_unavailable"
+        statement = select(registered_workers).where(registered_workers.c.pool == job["pool"])
+        if worker_id is not None:
+            statement = statement.where(registered_workers.c.id == worker_id)
+        for worker in connection.execute(statement.order_by(registered_workers.c.id)).mappings():
+            if self.claim_reason(connection, worker, job, purpose=purpose) is not None:
+                continue
+            ordered, _ = self.queue.ordered_candidates(connection, job["pool"], purpose=purpose,
+                dispatch_backend=worker["spec"].get("dispatch_backend", "legacy"),
+                job_filter=self._claim_filter(connection, worker, job["pool"], purpose))
+            for candidate in ordered:
+                current = self.repo._job(connection, candidate["id"])
+                if self.claim_reason(connection, worker, current, purpose=purpose) is not None:
+                    continue
+                if (purpose == "generate" and current["current_attempt_id"]
+                        and not self._proven_unsubmitted_queue(connection, current)):
+                    continue  # A malformed requeue never earns another inference wakeup.
+                if current["id"] == job["id"]:
+                    return None
+                break  # Same fairness order as a real claim on this worker.
+        return "matching_capacity_unavailable"
+
     def claim(self, worker_id, pool, *, purpose="generate", lease_seconds=90, job_filter=None, job_allowed=None,
               selected_job_id=None, selected_job_allowed=None):
         """Claim and bind slot atomically in the same ledger transaction."""
@@ -378,57 +477,12 @@ class WorkerControl:
                 return None
             if purpose != "generate" and not worker["current_job_id"]:
                 return None
-            spec = worker["spec"]
-            bindings = [jobs.c.pool == pool,
-                func.coalesce(jobs.c.execution_plan["dispatch_backend"].as_string(), "legacy")
-                    == spec.get("dispatch_backend", "legacy"),
-                jobs.c.execution_plan["backend"].as_string() == spec["backend"],
-                # JSON boolean extraction is text on PG and integer on SQLite.
-                # Avoid casting arbitrary legacy strings to PG BOOLEAN, which
-                # would fail the whole queue instead of excluding that job.
-                jobs.c.execution_plan["enabled"].as_string() == ("true" if self.repo.engine.dialect.name == "postgresql" else 1)]
-            if worker["current_job_id"]:
-                bindings.append(jobs.c.id == worker["current_job_id"])
-            if spec["recipe_ids"]:
-                bindings.append(jobs.c.request["recipe_id"].as_string().in_(spec["recipe_ids"]))
-            if spec["backend"] != "mock":
-                # Preserve nested request precedence rather than coalescing a
-                # missing nested model with an unrelated outer display field.
-                model = case((jobs.c.request["request"].as_string().is_not(None),
-                    jobs.c.request["request"]["model"].as_string()), else_=jobs.c.request["model"].as_string())
-                bindings.extend((model == spec["model_id"],
-                    jobs.c.execution_plan["configuration_id"].as_string() == spec["configuration_id"]))
-            if spec["backend"] == "wangp-worker":
-                bindings.append(jobs.c.execution_plan["engine_manifest_digest"].as_string() == spec["engine_manifest_digest"])
-            # Do not claim unsupported jobs then fail them: old slot identities
-            # cannot acquire native-delivery work, including collection/recovery.
-            bindings.append(func.coalesce(jobs.c.execution_plan["output_delivery"].as_string(), "")
-                            == spec.get("output_delivery", ""))
-            if purpose == "generate":
-                deadlines = list(connection.execute(select(instance_intents.c.hard_deadline).where(
-                    instance_intents.c.provider == worker["provider"],
-                    instance_intents.c.provider_instance_id == worker["instance_id"],
-                    instance_intents.c.state != "destroyed",
-                    instance_intents.c.hard_deadline.is_not(None))).scalars())
-                if deadlines:
-                    # A shorter job may fit even when a long queued job does
-                    # not. Existing attempts still reconcile/collect past this
-                    # gate; this must never cause another paid submission.
-                    from .worker_admission import COMPLETION_MARGIN_SECONDS
-                    remaining = min(deadlines)-self.repo.clock()-COMPLETION_MARGIN_SECONDS
-                    bindings.append(jobs.c.expected_runtime_s < remaining)
-            if job_filter is not None:
-                bindings.append(job_filter)
-            from .capacity import capacity_member_claim_allowed
-            from .worker_admission import worker_window_reason
+            bindings = self._claim_filter(connection, worker, pool, purpose, job_filter)
             claim = self.queue.claim(worker_id, pool, purpose=purpose, lease_seconds=lease_seconds,
-                dispatch_backend=spec.get("dispatch_backend", "legacy"),
+                dispatch_backend=worker["spec"].get("dispatch_backend", "legacy"),
                 selected_job_id=selected_job_id, selected_validator=selected_job_allowed,
-                connection=connection, job_filter=and_(*bindings), validator=lambda job: self.matches(worker, job)
-                    and (purpose != "generate" or capacity_member_claim_allowed(self.repo, connection, job, worker))
-                    and (purpose != "generate" or worker_window_reason(connection, worker, self.repo.clock(),
-                        expected_runtime_s=job["expected_runtime_s"],
-                        deployment_profile_id=job["request"].get("deployment_profile_id")) is None)
+                connection=connection, job_filter=bindings,
+                validator=lambda job: self.claim_reason(connection, worker, job, purpose=purpose) is None
                     and (job_allowed is None or job_allowed(job) is True))
             if claim is None:
                 return None

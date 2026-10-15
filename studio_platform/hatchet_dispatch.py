@@ -36,7 +36,11 @@ from .worker import WorkerRunner
 ROUTE = "hatchet-v1"
 EVENT = "job.dispatch_requested"
 TERMINAL = frozenset({"succeeded", "failed", "cancelled"})
-RUNNABLE = frozenset({"queued", "running", "submission_unknown", "collecting", "cancel_requested"})
+RUNNABLE = frozenset({"queued", "running", "submission_unknown", "collecting"})
+
+
+class DispatchCancelled(ValueError):
+    """Fresh business read refused publication before any broker request."""
 
 
 class DispatchInput(BaseModel):
@@ -144,6 +148,26 @@ class OutboxDispatcher:
         self.repo, self.publisher = repository, publisher
         self.publisher_id, self.lease_seconds, self.retry_seconds = publisher_id, lease_seconds, retry_seconds
         self._recovery_cursor = None
+        self.control = WorkerControl(repository)
+
+    def _cancel_delivery(self, connection, row):
+        # A previous uncertain publication remains uncertain; suppressing more
+        # notifications does not prove its original broker/GPU execution stopped.
+        connection.execute(update(outbox).where(outbox.c.id == row["event_id"])
+            .values(delivered_at=self.repo.clock()))
+        connection.execute(update(dispatch_receipts).where(dispatch_receipts.c.event_id == row["event_id"])
+            .values(state="unknown" if row["publish_attempts"] else "obsolete", lease_expires_at=None,
+                error_code="dispatch_cancel_pending", updated_at=self.repo.clock()))
+
+    def _recovery_allowed(self, connection, job):
+        if (job["status"] not in RUNNABLE or job["lease_worker_id"] is not None
+                or job["not_before"] > self.repo.clock() or route(job) != ROUTE):
+            return False
+        try:
+            worker_id = _original_worker(connection, job)
+        except ValueError:
+            return False
+        return self.control.dispatch_reason(connection, job, worker_id=worker_id) is None
 
     def _claim_delivery(self):
         with self.repo.transaction() as connection:
@@ -166,6 +190,9 @@ class OutboxDispatcher:
                     .values(state="blocked", not_before=self.repo.clock()+3600,
                         error_code="dispatch_identity_mismatch", updated_at=self.repo.clock()))
                 return {"state": "blocked", "event_id": row["event_id"]}
+            if job["status"] == "cancel_requested":
+                self._cancel_delivery(connection, row)
+                return {"state": "obsolete", "event_id": row["event_id"]}
             if job["status"] in TERMINAL:
                 connection.execute(update(outbox).where(outbox.c.id == row["event_id"])
                     .values(delivered_at=self.repo.clock()))
@@ -189,6 +216,16 @@ class OutboxDispatcher:
         try:
             external_run_id = self.publisher.publish(message, item["job"])
             identifier(external_run_id)
+        except DispatchCancelled:
+            with self.repo.transaction() as connection:
+                receipt = self.repo._locked(connection, select(dispatch_receipts).where(
+                    dispatch_receipts.c.event_id == message.event_id))
+                if receipt["publisher_id"] != self.publisher_id or receipt["publish_attempts"] != item["attempt"]:
+                    return {"state": "delivery_lease_lost", "event_id": message.event_id}
+                # Discount only this positively refused request, retaining any
+                # earlier unknown attempt and its original idempotency key.
+                self._cancel_delivery(connection, {**receipt, "publish_attempts": item["attempt"]-1})
+            return {"state": "obsolete", "event_id": message.event_id}
         except Exception:
             # Never persist raw broker responses; they can contain credentials.
             with self.repo.transaction() as connection:
@@ -240,6 +277,8 @@ class OutboxDispatcher:
         count = 0
         for job_id in ids:
             with self.repo.engine.connect() as connection:
+                if not self._recovery_allowed(connection, self.repo._job(connection, job_id)):
+                    continue
                 latest = connection.execute(select(dispatch_receipts)
                     .where(dispatch_receipts.c.job_id == job_id)
                     .order_by(dispatch_receipts.c.sequence.desc())
@@ -256,15 +295,22 @@ class OutboxDispatcher:
                 if status not in {"COMPLETED", "FAILED", "CANCELLED"}:
                     continue
             with self.repo.transaction() as connection:
+                # Match publication's receipt-before-job lock order. Recheck
+                # the latest receipt after the network read, so competing
+                # dispatchers cannot replace the same terminal run twice.
+                current = self.repo._locked(connection, select(dispatch_receipts)
+                    .where(dispatch_receipts.c.job_id == job_id)
+                    .order_by(dispatch_receipts.c.sequence.desc()).limit(1))
+                if ((latest is None) != (current is None)
+                        or latest and (current["event_id"] != latest["event_id"] or current["state"] != "published")):
+                    continue
                 job = self.repo._job(connection, job_id, lock=True)
-                if (job["status"] in RUNNABLE and job["lease_worker_id"] is None
-                        and job["not_before"] <= self.repo.clock() and route(job) == ROUTE):
+                if self._recovery_allowed(connection, job):
                     if latest:
                         connection.execute(update(dispatch_receipts).where(
                             dispatch_receipts.c.event_id == latest["event_id"],
                             dispatch_receipts.c.state == "published").values(state="finished", updated_at=self.repo.clock()))
-                    self.repo._dispatch_wakeup(connection, job_id)
-                    count += 1
+                    count += bool(self.repo._dispatch_wakeup(connection, job_id))
         return {"state": "recovered", "wakeups": count}
 
 
@@ -380,6 +426,8 @@ class SDKPublisher:
             current = self.repo._job(connection, message.job_id)
             if not _input_matches(current, message):
                 raise ValueError("hatchet_dispatch_identity_mismatch")
+            if current["status"] == "cancel_requested" or current["status"] in TERMINAL:
+                raise DispatchCancelled("dispatch_cancel_pending")
             original_worker = _original_worker(connection, current)
         desired = worker_labels(binding(current), original_worker) if original_worker else labels(binding(current))
         stub = self.client.stubs.task(name=workflow_name(current), input_validator=DispatchInput)
@@ -527,6 +575,9 @@ class HatchetSlotRunner(WorkerRunner):
                     except ValueError:
                         return {"job_id": message.job_id, "state": "reconciliation_required",
                             "reason_code": "hatchet_original_binding_unconfirmed"}
+                    purpose = {"queued": "generate", "collecting": "collect", "running": "reconcile",
+                        "submission_unknown": "reconcile", "cancel_requested": "reconcile"}.get(job["status"])
+                    reason = self.control.claim_reason(connection, current_worker, job, purpose=purpose) if purpose else None
                 if (not self.control.matches(current_worker, job)
                         or original_worker not in (None, worker_id)):
                     return {"job_id": message.job_id, "state": "reconciliation_required",
@@ -534,6 +585,8 @@ class HatchetSlotRunner(WorkerRunner):
                 if current_worker["current_job_id"] not in (None, message.job_id):
                     return {"job_id": message.job_id, "state": "reconciliation_required",
                         "reason_code": "hatchet_worker_busy"}
+                if reason:
+                    return {"job_id": message.job_id, "state": "reconciliation_required", "reason_code": reason}
                 result = runner.run_once(worker_id, pool)
                 if result.get("state") in TERMINAL:
                     return {"job_id": message.job_id, "state": result["state"]}

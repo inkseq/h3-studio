@@ -86,6 +86,30 @@ class OperatorJobTests(LedgerCase):
             with self.assertRaises(OperatorError):
                 self.service.cancel(actor, {}, "denied")
 
+    def test_admin_stuck_diagnostic_projects_only_latest_closed_delivery_and_original_attempt(self):
+        from test_hatchet_dispatch import HatchetDispatchTests, Publisher
+        from studio_platform.hatchet_dispatch import OutboxDispatcher
+        original = HatchetDispatchTests.make_job(self)
+        publisher = Publisher(lose_first=True)
+        OutboxDispatcher(self.repo, publisher, publisher_id="admin-test").publish_once()
+        with self.repo.transaction() as connection:
+            connection.execute(update(jobs).where(jobs.c.id == original["id"]).values(
+                status="cancel_requested", error_code="private raw message must not escape"))
+        budget = self.repo.get_budget("owner-budget")
+        row = next(value for value in self.service.list(self.admin)["jobs"] if value["id"] == original["id"])
+        self.assertEqual(row["status"], "cancel_requested")
+        self.assertFalse(row["cancellable"])
+        diagnostic = row["diagnostic"]
+        self.assertEqual(diagnostic["reason_code"], "job_cancel_pending")
+        self.assertEqual(diagnostic["error_code"], "generation_failure_unclassified")
+        self.assertEqual(diagnostic["dispatch"]["state"], "unknown")
+        self.assertEqual(diagnostic["dispatch"]["reason_code"], "dispatch_response_unknown")
+        self.assertEqual(diagnostic["attempt_no"], 0)
+        self.assertIsNone(diagnostic["current_attempt_id"])
+        self.assertNotIn("private raw message", str(row))
+        self.assertNotIn("prompt", str(row))
+        self.assertEqual(self.repo.get_budget("owner-budget"), budget)
+
     def test_http_admin_pat_csrf_account_and_reason_validation(self):
         original = self.job()
         app = create_app(self.settings, repository=self.repo)
