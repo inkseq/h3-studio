@@ -76,20 +76,8 @@ class TaskQueue:
             self._scheduler_lock(connection, pool)
             # Prompt/source snapshots can be MiB each. Scheduling candidates
             # contain scalars only; load and lock one selected job at a time.
-            statement = select(jobs.c.id, jobs.c.tenant_id, jobs.c.owner_id, jobs.c.created_at).where(
-                jobs.c.pool == pool, jobs.c.status.in_(states[purpose]),
-                jobs.c.not_before <= repo.clock(), jobs.c.lease_worker_id.is_(None))
-            statement = statement.where(func.coalesce(
-                jobs.c.execution_plan["dispatch_backend"].as_string(), "legacy") == dispatch_backend)
-            if job_ids is not None:
-                statement = statement.where(jobs.c.id.in_(job_ids))
-            if job_filter is not None:
-                statement = statement.where(job_filter)
-            candidates = [dict(r) for r in connection.execute(statement
-                .order_by(jobs.c.created_at, jobs.c.id)).mappings()]
-            if not candidates:
-                return None
-            ordered, usage = self.schedule_order(connection, candidates, pool, purpose=purpose)
+            ordered, usage = self.ordered_candidates(connection, pool, purpose=purpose,
+                dispatch_backend=dispatch_backend, job_ids=job_ids, job_filter=job_filter)
             job = None
             for candidate in ordered:
                 selected = repo._job(connection, candidate["id"], lock=True)
@@ -150,6 +138,25 @@ class TaskQueue:
             repo._emit(connection, "job.leased", job["id"],
                        {"job_id": job["id"], "attempt_id": attempt_id, "fence": fence, "purpose": purpose})
             return Claim(repo._job(connection, job["id"]), Lease(job["id"], attempt_id, worker_id, fence, expires))
+
+    def ordered_candidates(self, connection, pool, *, purpose, dispatch_backend,
+                           job_ids=None, job_filter=None):
+        """Read the same candidate order for claims and advisory broker wakeups."""
+        states = {"generate": ("queued",), "collect": ("collecting",),
+                  "reconcile": ("submission_unknown", "running", "cancel_requested")}
+        statement = select(jobs.c.id, jobs.c.tenant_id, jobs.c.owner_id, jobs.c.created_at).where(
+            jobs.c.pool == pool, jobs.c.status.in_(states[purpose]),
+            jobs.c.not_before <= self.repository.clock(), jobs.c.lease_worker_id.is_(None),
+            func.coalesce(jobs.c.execution_plan["dispatch_backend"].as_string(), "legacy") == dispatch_backend)
+        if job_ids is not None:
+            statement = statement.where(jobs.c.id.in_(job_ids))
+        if job_filter is not None:
+            statement = statement.where(job_filter)
+        candidates = [dict(row) for row in connection.execute(statement
+            .order_by(jobs.c.created_at, jobs.c.id)).mappings()]
+        if not candidates:
+            return [], {}
+        return self.schedule_order(connection, candidates, pool, purpose=purpose)
 
     def schedule_order(self, connection, candidates, pool, *, purpose="generate"):
         """The shared business priority; reading it neither claims nor bills."""

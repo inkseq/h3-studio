@@ -33,6 +33,17 @@ class ReleaseTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+        # Only this synthetic host parent emulates root ownership; retain its
+        # real mode/type and all other filesystem checks on unprivileged CI.
+        lstat = Path.lstat
+        def fixture_lstat(path, *args, **kwargs):
+            info = lstat(path, *args, **kwargs)
+            if path == self.root:
+                fields = list(info); fields[4] = 0
+                return os.stat_result(fields)
+            return info
+        ownership = patch.object(Path, "lstat", fixture_lstat)
+        ownership.start(); self.addCleanup(ownership.stop)
         self.incoming = self.root / "incoming" / COMMIT
         self.incoming.mkdir(parents=True)
         (self.root / "releases").mkdir()
@@ -209,7 +220,7 @@ class ReleaseTests(unittest.TestCase):
             release.approved_configuration(self.incoming, environment)
         command.assert_called_once_with(["compose", "version", "--short"], environment=environment)
         compose.assert_called_once_with(self.incoming, environment, "config", "--format", "json")
-        validate.assert_called_once_with(rendered, deployment_directory=self.incoming, compose_version="v2.38.2")
+        validate.assert_called_once_with(rendered, deployment_directory=self.incoming, compose_version="v2.38.2", target='production')
         rendered["services"]["app"]["environment"] = {"PUBLIC_ORIGIN": "https://inkseq.com"}
         rendered["services"]["caddy"]["environment"] = {"INKSEQ_LEGACY_REDIRECT": "1"}
         with patch.object(release, "command", return_value=b"v2.38.2\n"), \

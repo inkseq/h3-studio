@@ -72,6 +72,22 @@ class DeploymentPolicyTests(unittest.TestCase):
     def test_rendered_compose_has_strict_production_policy(self):
         self.assertTrue(policy.validate(self.rendered, compose_version=self.compose_version))
 
+    def test_staging_has_its_own_exact_origin_and_proxy_profile(self):
+        candidate = copy.deepcopy(self.rendered)
+        candidate['services']['app']['environment'].update(PUBLIC_ORIGIN='https://staging.inkseq.com', PUBLIC_ORIGIN_ALIASES='')
+        candidate['services']['caddy']['environment'] = {'INKSEQ_LEGACY_REDIRECT': '0'}
+        candidate['services']['caddy']['volumes'][0]['source'] = str(DEPLOY/'Caddyfile.staging')
+        self.assertTrue(policy.validate(candidate, compose_version=self.compose_version, target='staging'))
+        with self.assertRaises(policy.ConfigurationError): policy.validate(candidate, compose_version=self.compose_version)
+        for mutate in (
+            lambda c: c['services']['app']['environment'].update(PUBLIC_ORIGIN_ALIASES='https://inkseq.com'),
+            lambda c: c['services']['caddy']['environment'].update(INKSEQ_LEGACY_REDIRECT='1'),
+            lambda c: c['services']['caddy']['volumes'][0].update(source=str(DEPLOY/'Caddyfile')),
+        ):
+            changed = copy.deepcopy(candidate); mutate(changed)
+            with self.assertRaises(policy.ConfigurationError):
+                policy.validate(changed, compose_version=self.compose_version, target='staging')
+
     def test_domain_phase_is_closed_and_retained_legacy_configuration_still_validates(self):
         self.assertEqual(self.rendered["services"]["app"]["environment"]["PUBLIC_ORIGIN"], "https://inkseq.com")
         for phase in ("0", "1"):

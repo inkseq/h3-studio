@@ -7,13 +7,13 @@ import uuid
 
 from fastapi import Header, Query, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import insert, select
+from sqlalchemy import func, insert, select
 
 from .auth import Principal
 from .job_cancellation import cancel_eligibility, cancel_snapshot, cancellation_columns
 from .dstack_operator import _actor
 from .operator_capacity import OperatorError, operator_commands
-from .repository import Conflict, jobs, request_hash
+from .repository import Conflict, dispatch_receipts, jobs, request_hash
 
 
 REASONS = (
@@ -53,12 +53,38 @@ class OperatorJobs:
                 jobs.c.request_hash, jobs.c.created_at, jobs.c.updated_at).where(jobs.c.tenant_id == self.settings.tenant_id,
                 jobs.c.status.in_(ACTIVE_STATUSES), jobs.c.id > after)
                 .order_by(jobs.c.id).limit(limit + 1)).mappings())
+            latest = {}
+            if rows:
+                sequences = select(dispatch_receipts.c.job_id, func.max(dispatch_receipts.c.sequence).label("sequence")).where(
+                    dispatch_receipts.c.job_id.in_([row["id"] for row in rows[:limit]])).group_by(dispatch_receipts.c.job_id).subquery()
+                latest = {receipt["job_id"]: receipt for receipt in connection.execute(select(dispatch_receipts).join(
+                    sequences, (sequences.c.job_id == dispatch_receipts.c.job_id) &
+                        (sequences.c.sequence == dispatch_receipts.c.sequence))).mappings()}
             values = [{"id": row["id"], "owner_id": row["owner_id"], "project_id": row["project_id"],
                 "status": row["status"], "created_at": row["created_at"], "updated_at": row["updated_at"],
-                "snapshot": cancel_snapshot(row), **cancel_eligibility(connection, row)} for row in rows[:limit]]
+                "snapshot": cancel_snapshot(row), "diagnostic": self._diagnostic(row, latest.get(row["id"])),
+                **cancel_eligibility(connection, row)} for row in rows[:limit]]
         return {"operator": {"account": principal.owner, "admin": True}, "jobs": values,
             "next_after_id": rows[limit-1]["id"] if len(rows) > limit else None,
             "reason_codes": list(REASONS), "observed_at": self.repo.clock()}
+
+    def _diagnostic(self, job, receipt):
+        """Existing admin view only; no prompts, broker responses or retry grant."""
+        from .generation_diagnostics import failure_reason
+        reason = {"cancel_requested": "job_cancel_pending", "recovery_hold": "original_attempt_requires_reconciliation",
+            "submission_unknown": "upstream_status_unknown", "collecting": "collection_pending",
+            "waiting_capacity": "matching_capacity_unavailable", "queued": "awaiting_worker_claim"}.get(job["status"])
+        delivery = None
+        if receipt is not None:
+            delivery = {"event_id": receipt["event_id"], "sequence": receipt["sequence"],
+                "state": receipt["state"] if receipt["state"] in {"pending", "publishing", "published", "unknown", "finished", "obsolete", "blocked"} else "unknown",
+                "publish_attempts": receipt["publish_attempts"], "updated_at": receipt["updated_at"],
+                "reason_code": receipt["error_code"] if receipt["error_code"] in {
+                    "dispatch_identity_mismatch", "dispatch_response_unknown", "dispatch_cancel_pending"} else None}
+        return {"reason_code": reason, "error_code": failure_reason(job["error_code"]) if job["error_code"] else None,
+            "age_seconds": max(0, self.repo.clock()-job["updated_at"]), "attempt_no": job["attempt_no"],
+            "current_attempt_id": job["current_attempt_id"], "lease_worker_id": job["lease_worker_id"],
+            "dispatch": delivery}
 
     def cancel(self, principal, body, key):
         self._admin(principal)

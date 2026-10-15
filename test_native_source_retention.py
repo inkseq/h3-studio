@@ -75,7 +75,8 @@ class Provenance(unittest.TestCase):
         containers = workflow.split("\n  containers:\n", 1)[1].split("\n  test:\n", 1)[0]
         self.assertIn("permissions:\n      contents: read\n      actions: read", containers)
         self.assertNotIn("actions: write", workflow)
-        self.assertIn("run-id: ${{ inputs.retain_native_sources_run }}", containers)
+        self.assertIn("run-id: ${{ inputs.retain_native_sources_run || vars.SIXNINE_NATIVE_SOURCE_RUN }}", containers)
+        self.assertIn("name: sixnine-migration-${{ inputs.retain_native_sources_commit || vars.SIXNINE_NATIVE_SOURCE_COMMIT }}", containers)
         self.assertIn("github-token: ${{ github.token }}", containers)
 
 

@@ -7,6 +7,7 @@ import time
 import bootstrap
 import release
 import runtime_secrets_aws
+import deployment_target
 
 # Fixed code, not credentials. Input is a private process pipe; output is static.
 ACCOUNT_CODE = '''
@@ -61,7 +62,9 @@ def bootstrap_locked(root, commit):
     status = bootstrap.management_status(directory, environment)
     missing = {'superdan', 'supervan'} - {row['username'] for row in status['accounts']}
     if missing:
-        credentials = runtime_secrets_aws.value(runtime_secrets_aws.client(), runtime_secrets_aws.ACCOUNTS)
+        target = deployment_target.host(root)['name']
+        credentials = runtime_secrets_aws.value(runtime_secrets_aws.client(),
+            deployment_target.profile(target)['secret_root']+'/bootstrap-accounts', target=target)
         payload = json.dumps({name: credentials[name] for name in sorted(missing)}).encode()
         try:
             release.command(['compose', '--project-directory', str(directory), '-f', str(directory/'compose.yaml'),

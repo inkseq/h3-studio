@@ -31,6 +31,10 @@ ENDPOINTS = {"vastai": "https://console.vast.ai/api", "runpod": "https://api.run
 INFRASTRUCTURE = frozenset({"dstack_admin_token", "dstack_database_url",
     "hatchet_database_password", "hatchet_administrator_password"})
 MAX_SECRET = 65536
+try:
+    from . import deployment_target
+except ImportError:
+    import deployment_target
 
 
 def client():
@@ -57,7 +61,7 @@ def _opaque(value, minimum=32, maximum=4096):
         and all(33 <= ord(c) <= 126 for c in value))
 
 
-def validate(payload, *, allow_uninitialized=False):
+def validate(payload, *, allow_uninitialized=False, target='production'):
     """Closed schema, exact endpoints and existing safe Cloud exporter contract."""
     if (type(payload) is not dict or not {"schema_version", "providers", "grafana_cloud"} <= set(payload)
             or set(payload) - {"schema_version", "providers", "grafana_cloud", "grafana_stage_query", "r2_storage", "infrastructure", "hatchet_api_token"}
@@ -66,6 +70,11 @@ def validate(payload, *, allow_uninitialized=False):
     providers = payload["providers"]
     if type(providers) is not dict or not providers or set(providers) - set(ENDPOINTS):
         raise ValueError("migration_provider_invalid")
+    selected = deployment_target.profile(target)
+    if target == 'staging' and (set(providers) != {'vastai'}
+            or type(providers['vastai']) is not dict
+            or providers['vastai'].get('profile_id') != selected['vast_profile']):
+        raise ValueError('staging_provider_identity_invalid')
     for name, config in providers.items():
         if (type(config) is not dict or set(config) != {"profile_id", "base_url", "api_key"}
                 or config["base_url"] != ENDPOINTS[name] or not _opaque(config["api_key"], 16)
@@ -100,7 +109,14 @@ def validate(payload, *, allow_uninitialized=False):
     if "grafana_stage_query" in payload:
         _validate_stage_query(payload["grafana_stage_query"])
     if "r2_storage" in payload:
-        _validate_r2_storage(payload["r2_storage"])
+        _validate_r2_storage(payload["r2_storage"], target=target)
+    if target == 'staging' and (cloud['enabled'] or cloud['endpoint'] or cloud['authorization']
+            or cloud['environment'] != 'staging'
+            or payload.get('grafana_stage_query', {}).get('enabled')
+            or payload.get('grafana_stage_query', {}).get('endpoint')
+            or payload.get('grafana_stage_query', {}).get('authorization')
+            or 'r2_storage' not in payload):
+        raise ValueError('staging_isolated_optional_credentials_required')
     if "infrastructure" not in payload:
         if not allow_uninitialized or "hatchet_api_token" in payload:
             raise ValueError("migration_infrastructure_recovery_required")
@@ -139,7 +155,7 @@ def _validate_stage_query(value):
         raise ValueError("migration_stage_query_configuration_invalid")
 
 
-def _validate_r2_storage(value):
+def _validate_r2_storage(value, *, target='production'):
     # Standalone host helper: mirror the protected runtime reader's closed
     # identity. Secrets stay in the managed payload/file, never Compose/env.
     required = {"schema_version", "service", "profile", "endpoint_url", "region",
@@ -147,7 +163,8 @@ def _validate_r2_storage(value):
     if (type(value) is not dict or not required <= set(value)
             or set(value) - required - {"session_token"}
             or type(value["schema_version"]) is not int or value["schema_version"] != 1
-            or value["service"] != "cloudflare-r2" or value["profile"] != "cloudflare-r2--rig-root"
+            or value["service"] != "cloudflare-r2" or value["profile"] != deployment_target.profile(target)['r2_profile']
+            or target == 'staging' and value.get('bucket') != deployment_target.profile(target)['r2_bucket']
             or value["region"] != "auto"
             or not isinstance(value["endpoint_url"], str)
             or not re.fullmatch(r"https://[0-9a-f]{32}(?:\.(?:eu|us|fedramp))?\.r2\.cloudflarestorage\.com", value["endpoint_url"])
@@ -178,9 +195,10 @@ def _validate_infrastructure(infrastructure):
         raise ValueError("migration_infrastructure_database_invalid")
 
 
-def _managed(api, *, version_id=None):
+def _managed(api, *, version_id=None, target='production'):
     try:
-        response = api.get_secret_value(SecretId=SECRET, **({"VersionId": version_id} if version_id else {}))
+        name = deployment_target.profile(target)['secret_root'] + '/migration'
+        response = api.get_secret_value(SecretId=name, **({"VersionId": version_id} if version_id else {}))
     except api.exceptions.ResourceNotFoundException:
         if version_id:
             return None, None
@@ -334,16 +352,16 @@ class ProtectedIntent:
         return self.read()
 
 
-def _reconcile_intent(api, record, current, current_version):
+def _reconcile_intent(api, record, current, current_version, *, target='production'):
     _validate_intent(record)
-    source, _ = _managed(api, version_id=record["source_version_id"])
+    source, _ = _managed(api, version_id=record["source_version_id"], target=target)
     if source is None or "infrastructure" in source:
         raise RuntimeError("migration_original_seed_recovery_required")
-    validate(source, allow_uninitialized=True)
+    validate(source, allow_uninitialized=True, target=target)
     expected = dict(source, infrastructure=record["infrastructure"])
-    validate(expected)
+    validate(expected, target=target)
     target_version = record["client_request_token"]
-    persisted, _ = _managed(api, version_id=target_version)
+    persisted, _ = _managed(api, version_id=target_version, target=target)
     if persisted is not None:
         if persisted != expected:
             raise RuntimeError("migration_initialization_identity_conflict")
@@ -353,21 +371,21 @@ def _reconcile_intent(api, record, current, current_version):
     try:
         # AWS RequestToken is also the exact version ID. Retrying this payload
         # with the same token cannot create another infrastructure identity.
-        api.put_secret_value(SecretId=SECRET, ClientRequestToken=target_version,
+        api.put_secret_value(SecretId=deployment_target.profile(target)['secret_root']+'/migration', ClientRequestToken=target_version,
             SecretString=json.dumps(expected, separators=(",", ":"), sort_keys=True))
     except Exception:
         pass  # Reconcile the exact durable version below; never mint again.
-    persisted, _ = _managed(api, version_id=target_version)
+    persisted, _ = _managed(api, version_id=target_version, target=target)
     if persisted != expected:
         raise RuntimeError("migration_initialization_unconfirmed") from None
     return persisted
 
 
-def load(api, *, initialize=False, bootstrap_checks=None, checker=check_fresh_bootstrap, intent_store=None):
+def load(api, *, initialize=False, bootstrap_checks=None, checker=check_fresh_bootstrap, intent_store=None, target='production'):
     store = intent_store if intent_store is not None else ProtectedIntent()
     intent = store.read()
-    payload, version = _managed(api)
-    validate(payload, allow_uninitialized=initialize or intent is not None)
+    payload, version = _managed(api, target=target)
+    validate(payload, allow_uninitialized=initialize or intent is not None, target=target)
     if "infrastructure" in payload:
         if intent is not None:
             _validate_intent(intent)
@@ -377,7 +395,7 @@ def load(api, *, initialize=False, bootstrap_checks=None, checker=check_fresh_bo
     if intent is not None:
         # Recovery never depends on a refreshed absence approval and never
         # generates a second credential set, even across host/process restarts.
-        return _reconcile_intent(api, intent, payload, version)
+        return _reconcile_intent(api, intent, payload, version, target=target)
     if not initialize or bootstrap_checks is None:
         raise RuntimeError("migration_explicit_bootstrap_checks_required")
     checker(bootstrap_checks)
@@ -385,7 +403,7 @@ def load(api, *, initialize=False, bootstrap_checks=None, checker=check_fresh_bo
         raise RuntimeError("migration_managed_version_required")
     # A host lock prevents local initialization races. Re-read before putting
     # so a concurrently updated managed version is not silently overwritten.
-    current, current_version = _managed(api)
+    current, current_version = _managed(api, target=target)
     if current_version != version or current != payload:
         raise RuntimeError("migration_managed_version_changed")
     infrastructure = {
@@ -396,12 +414,12 @@ def load(api, *, initialize=False, bootstrap_checks=None, checker=check_fresh_bo
     }
     intent = store.create({"schema_version": 1, "source_version_id": version,
         "client_request_token": str(uuid.uuid4()), "infrastructure": infrastructure})
-    return _reconcile_intent(api, intent, current, current_version)
+    return _reconcile_intent(api, intent, current, current_version, target=target)
 
 
-def outputs(payload):
+def outputs(payload, *, target='production'):
     """Return mount bytes/UID/GID/mode, never expose this through CLI output."""
-    validate(payload)
+    validate(payload, target=target)
     infrastructure = payload["infrastructure"]
     # JSON is YAML-compatible and avoids another host parser dependency. The
     # pinned server's WARNING log level remains in the reviewed Compose overlay.
@@ -409,7 +427,7 @@ def outputs(payload):
         for name, config in sorted(payload["providers"].items())]
     serialized = lambda value: json.dumps(value, separators=(",", ":"), sort_keys=True)+"\n"
     result = {
-        "dstack-server-config.yml": (serialized({"projects": [{"name": "sixnine", "backends": backends}]}), 0, 0, 0o600),
+        "dstack-server-config.yml": (serialized({"projects": [{"name": deployment_target.profile(target)['dstack_project'], "backends": backends}]}), 0, 0, 0o600),
         "grafana_cloud": (serialized(payload["grafana_cloud"]), 10001, 10001, 0o600),
         "dstack_api_token": (infrastructure["dstack_admin_token"]+"\n", 0, 10001, 0o640),
         "dstack_database_url": (infrastructure["dstack_database_url"]+"\n", 0, 0, 0o600),
@@ -501,8 +519,9 @@ def hydrate(*, initialize=False, bootstrap_checks=None):
     if os.name != "posix" or os.geteuid() != 0:
         raise RuntimeError("migration_host_root_required")
     with host_lock():
-        payload = load(client(), initialize=initialize, bootstrap_checks=bootstrap_checks)
-        write_outputs(outputs(payload))
+        target = deployment_target.host()['name']
+        payload = load(client(), initialize=initialize, bootstrap_checks=bootstrap_checks, target=target)
+        write_outputs(outputs(payload, target=target))
 
 
 class _Parser(argparse.ArgumentParser):

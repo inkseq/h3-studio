@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "2.2",
+  "description": "Inkseq: promote exact independently accepted staging artifacts; no rebuild",
+  "parameters": {
+    "Commit": {"type": "String", "allowedPattern": "^[0-9a-f]{40}$", "interpolationType": "ENV_VAR"}
+  },
+  "mainSteps": [{
+    "action": "aws:runShellScript", "name": "promoteAcceptedCommit",
+    "precondition": {"StringEquals": ["platformType", "Linux"]},
+    "inputs": {"timeoutSeconds": "1800", "runCommand": [
+      "set -eu", "test -n \"${SSM_Commit:-}\"",
+      "exec /usr/bin/python3 /opt/inkseq-release-staging-v1/environment_release.py production \"$SSM_Commit\""
+    ]}
+  }]
+}

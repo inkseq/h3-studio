@@ -1,9 +1,9 @@
 import React,{useEffect,useRef,useState} from 'react';
-import {cancellationReasons,canCancelJob,jobStatus,selectionCurrent} from './operator-jobs-model.js';
+import {cancellationReasons,canCancelJob,jobStatus,jobDiagnostics,selectionCurrent} from './operator-jobs-model.js';
 import {time} from './p4-operator-model.js';
 
 export function OperatorJobsTable({jobs=[],selected=[],disabled=false,onSelect=()=>{}}){
-  return <div className="p4-admin-jobs-table"><table><thead><tr><th>选择</th><th>账户 / 任务</th><th>状态</th><th>提交时间</th></tr></thead><tbody>{jobs.map(job=><tr key={job.id}><td><input type="checkbox" aria-label={'选择任务 '+job.id} checked={selected.some(row=>row.id===job.id)} disabled={disabled||!canCancelJob(job)||selected.length>=100&&!selected.some(row=>row.id===job.id)} onChange={event=>onSelect(job,event.target.checked)}/></td><td><b>{job.owner_id}</b><small>#{job.id.slice(0,8)}</small>{job.project_id&&<small>{job.project_id}</small>}</td><td>{jobStatus(job.status)}<small>{canCancelJob(job)?'可取消':job.cancellable_reason||'运行或不确定任务不能批量取消'}</small></td><td>{time(job.created_at)}</td></tr>)}</tbody></table></div>;
+  return <div className="p4-admin-jobs-table"><table><thead><tr><th>选择</th><th>账户 / 任务</th><th>状态 / 原执行</th><th>提交时间</th></tr></thead><tbody>{jobs.map(job=><tr key={job.id}><td><input type="checkbox" aria-label={'选择任务 '+job.id} checked={selected.some(row=>row.id===job.id)} disabled={disabled||!canCancelJob(job)||selected.length>=100&&!selected.some(row=>row.id===job.id)} onChange={event=>onSelect(job,event.target.checked)}/></td><td><b>{job.owner_id}</b><small>#{job.id.slice(0,8)}</small>{job.project_id&&<small>{job.project_id}</small>}</td><td>{jobStatus(job.status)}{jobDiagnostics(job).map((line,index)=><small key={index}>{line}</small>)}<small>{canCancelJob(job)?'可取消':job.cancellable_reason||'运行或不确定任务不能批量取消'}</small></td><td>{time(job.created_at)}</td></tr>)}</tbody></table></div>;
 }
 function CancelReview({jobs,reason,busy,current,onClose,onConfirm}){
   const ref=useRef(),opener=useRef(globalThis.document?.activeElement),label=cancellationReasons.find(item=>item.code===reason)?.label;

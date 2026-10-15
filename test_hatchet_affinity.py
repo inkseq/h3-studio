@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 from sqlalchemy import update
 
 from studio_platform.control import WorkerControl
-from studio_platform.hatchet_dispatch import BrokerConfig, ExactJobRunner, HatchetSlotRunner, SDKPublisher
+from studio_platform.hatchet_dispatch import BrokerConfig, DispatchCancelled, ExactJobRunner, HatchetSlotRunner, SDKPublisher
 from studio_platform.repository import jobs, registered_workers
 from studio_platform.storage import LocalObjectStore
 import test_hatchet_dispatch as fixtures
@@ -88,6 +88,23 @@ class HatchetAffinityTests(LedgerCase):
         self.ready("one")
         self.ready("two")
         self.assertNotIn("sixnine_worker", self.publish(job))
+        self.assertEqual(self.repo.get_job(self.scope, job["id"])["attempt_no"], 0)
+
+    def test_cancel_after_delivery_selection_refuses_sdk_request_and_stale_callback(self):
+        job = self.make_job()
+        message = self.message(job)
+        self.ready()
+        self.repo.request_cancel(self.scope, job["id"])
+        client = Mock()
+        with patch.dict("sys.modules", {"hatchet_sdk": self.sdk_module()}):
+            with self.assertRaises(DispatchCancelled):
+                SDKPublisher(client, self.repo).publish(message, job)
+        client.stubs.task.assert_not_called()
+        backend = Mock(wraps=MemoryBackend())
+        backend.kind, backend.slot_key = "mock", "cancelled-slot"
+        self.assertEqual(self.callback(job, backend, "worker")["state"], "cancelled")
+        backend.prepare.assert_not_called()
+        backend.submit.assert_not_called()
         self.assertEqual(self.repo.get_job(self.scope, job["id"])["attempt_no"], 0)
 
     def test_cleared_lease_recovery_uses_authoritative_attempt_worker(self):

@@ -1,5 +1,5 @@
 """Additive host release boundaries; synthetic artifacts/fake Docker only."""
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 import gzip
 import hashlib
 import importlib.util
@@ -35,10 +35,26 @@ from tools import publish_aws_release as publisher
 from botocore.exceptions import ClientError
 
 
+@contextmanager
+def synthetic_host_parent(root):
+    """Emulate only the fixture parent's UID; preserve real path/mode checks."""
+    lstat = Path.lstat
+    def fixture_lstat(path, *args, **kwargs):
+        info = lstat(path, *args, **kwargs)
+        if path == root:
+            fields = list(info); fields[4] = 0
+            return os.stat_result(fields)
+        return info
+    with patch.object(Path, "lstat", fixture_lstat):
+        yield
+
+
 class MigrationArtifacts(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        self.host_parent = synthetic_host_parent(self.root)
+        self.host_parent.__enter__(); self.addCleanup(self.host_parent.__exit__, None, None, None)
         # Synthetic host artifacts belong to the unprivileged test runner.
         # Inject host ownership only for this fixture, retaining the real
         # regular-file/link/size checks and every production ownership guard.
@@ -310,6 +326,28 @@ class MigrationArtifacts(unittest.TestCase):
                 maintenance.installed_checker(self.artifact)
             importer.assert_not_called()
 
+    def test_retained_current_previous_derivatives_use_only_exact_installed_checker_pairs(self):
+        expected_commits = {'c848dde8bf1d49044743ae1f497a148e50b84409', '6e6fe5ee14e82983161f7f2bf15cbfd6e8eb54f2'}
+        self.assertEqual(set(maintenance.RETAINED_DSTACK_HELPER_PAIRS), expected_commits)
+        trusted_path = Path(maintenance.__file__).resolve().with_name('migration_check.py')
+        for commit, pair in maintenance.RETAINED_DSTACK_HELPER_PAIRS.items():
+            (self.artifact/maintenance.MANIFEST).write_text(json.dumps({'commit': commit, 'dstack': {
+                'image': 'sixnine-dstack:'+commit, 'image_id': 'sha256:'+'c'*64}}))
+            spec, module = Mock(), types.ModuleType('trusted_checker')
+            with patch.object(release, 'regular'), \
+                    patch.object(release, 'checksum', side_effect=['a'*64, 'b'*64, *pair]), \
+                    patch.object(maintenance.importlib.util, 'spec_from_file_location', return_value=spec) as importer, \
+                    patch.object(maintenance.importlib.util, 'module_from_spec', return_value=module):
+                self.assertIs(maintenance.installed_checker(self.artifact), module)
+                importer.assert_called_once_with('sixnine_trusted_migration_checker', trusted_path)
+            for incoming in ((pair[0], 'f'*64), ('f'*64, pair[1])):
+                with patch.object(release, 'regular'), \
+                        patch.object(release, 'checksum', side_effect=['a'*64, 'b'*64, *incoming]), \
+                        patch.object(maintenance.importlib.util, 'spec_from_file_location') as importer, \
+                        self.assertRaisesRegex(release.ReleaseError, 'helpers_need_reviewed_update'):
+                    maintenance.installed_checker(self.artifact)
+                importer.assert_not_called()
+
     def test_publication_is_conditional_immutable_and_never_self_approves(self):
         class S3:
             def __init__(self): self.objects = {}
@@ -562,6 +600,8 @@ class StoryboardMaintenance(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        self.host_parent = synthetic_host_parent(self.root)
+        self.host_parent.__enter__(); self.addCleanup(self.host_parent.__exit__, None, None, None)
         directory = self.root / "migration"; directory.mkdir()
         environment = {key: str(self.root / "protected" / key.lower()) for key in maintenance.PATH_FIELDS}
         environment.update(SIXNINE_OPERATOR_CAPACITY_OWNERS="superdan,supervan",

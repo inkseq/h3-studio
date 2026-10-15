@@ -21,6 +21,10 @@ import tempfile
 import time
 
 import release
+try:
+    import deployment_target
+except ImportError:
+    from deploy.platform import deployment_target
 
 FILES = frozenset({"dispatch-image.tar.gz", "platform-overlay.yaml", "hatchet-entrypoint.sh",
     "source-set.tar.gz", "migration-check.py", "maintenance.py", "runtime-config.example.json",
@@ -34,6 +38,12 @@ LEGACY_HELPER_PAIRS = {commit: (
     "eb6a7d8cab5cbd161b70643f6f0fa193d75f206862e6ac62c61905ce7353f3e3") for commit in (
         "4f093976bed7cd89696127981cf22835a82d6d23",
         "07da40322559ee5a12829be6884c541c401d852a")}
+# Exact retained current/previous helper bytes before the staging upgrade.
+RETAINED_DSTACK_HELPER_PAIRS = {
+    'c848dde8bf1d49044743ae1f497a148e50b84409': ('9e324d663ec9fde10ee7fb9ad58bbca01203f64720de9e809b36a856fe8c1bb8', 'ff1efe4f384fd68c65067239fc8fdca96d1528f3c84aff495f3f18a2f9fa7c4a'),
+    '6e6fe5ee14e82983161f7f2bf15cbfd6e8eb54f2': ('9e324d663ec9fde10ee7fb9ad58bbca01203f64720de9e809b36a856fe8c1bb8', '3b885cdbb50e6cd373daf3952f0844a0be71e3010646d699cff8bb578a972c03'),
+}
+LEGACY_HELPER_PAIRS.update(RETAINED_DSTACK_HELPER_PAIRS)
 DSTACK_BASE_IMAGE = "dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc1682dc2169075c6210d2ec873146f1ad8"
 DSTACK_SOURCE_PATHS = frozenset({"dstack/_internal/core/backends/vastai/api_client.py",
     "dstack/_internal/core/backends/vastai/compute.py", "gpuhunt/providers/vastai.py",
@@ -55,7 +65,7 @@ OTHER_FIELDS = frozenset({"SIXNINE_OPERATOR_CAPACITY_OWNERS", "SIXNINE_HATCHET_P
 OPTIONAL_PATH_FIELDS = frozenset({"SIXNINE_STAGE_QUERY_CONFIG_FILE", "SIXNINE_STORAGE_CREDENTIAL_FILE"})
 STORAGE_FIELDS = frozenset({"SIXNINE_STORAGE_PROVIDER", "SIXNINE_STORAGE_ENDPOINT", "SIXNINE_STORAGE_REGION",
     "SIXNINE_STORAGE_BUCKET", "SIXNINE_STORAGE_PROFILE", "SIXNINE_STORAGE_CREDENTIAL_FILE"})
-OPTIONAL_FIELDS = frozenset({"SIXNINE_OPERATOR_ADMIN_OWNERS", "SIXNINE_STORYBOARD_OWNERS"}) | OPTIONAL_PATH_FIELDS | STORAGE_FIELDS
+OPTIONAL_FIELDS = frozenset({"SIXNINE_OPERATOR_ADMIN_OWNERS", "SIXNINE_STORYBOARD_OWNERS", 'INKSEQ_DEPLOYMENT_TARGET'}) | OPTIONAL_PATH_FIELDS | STORAGE_FIELDS
 LEGACY_MARKERS = ("operator-capacity/active.json", "gpu-acceptance/active.json", "gpu-scaler/active.json")
 STORYBOARD_FLAG = "SIXNINE_STORYBOARD_OWNERS"
 STORYBOARD_RECEIPT = "storyboard-maintenance.json"
@@ -330,6 +340,8 @@ def settings(root):
     path = directory / "paths.json"
     release.regular(path, root_owned=True, maximum=32768)
     value = json.loads(path.read_text())
+    release.require(deployment_target.environment(value.get('environment', {}))['name']
+        == deployment_target.host(root, legacy=True)['name'], 'migration_target_host_mismatch')
     return settings_document(value), release.checksum(directory / "paths.json")
 
 
@@ -372,6 +384,7 @@ def settings_document(value):
 
 def storage_settings(environment):
     """Closed nonsecret opt-in; existing local configurations need no changes."""
+    selected = deployment_target.environment(environment)
     provider = environment.get("SIXNINE_STORAGE_PROVIDER", "local") or "local"
     if provider == "local":
         release.require(not any(environment.get(key) for key in STORAGE_FIELDS - {"SIXNINE_STORAGE_PROVIDER"}),
@@ -379,7 +392,8 @@ def storage_settings(environment):
         return
     release.require(provider == "r2" and STORAGE_FIELDS <= set(environment)
         and all(environment.get(key) for key in STORAGE_FIELDS)
-        and environment["SIXNINE_STORAGE_PROFILE"] == "cloudflare-r2--rig-root"
+        and environment["SIXNINE_STORAGE_PROFILE"] == selected['r2_profile']
+        and (selected['name'] != 'staging' or environment['SIXNINE_STORAGE_BUCKET'] == selected['r2_bucket'])
         and environment["SIXNINE_STORAGE_REGION"] == "auto"
         and re.fullmatch(r"https://[0-9a-f]{32}(?:\.(?:eu|us|fedramp))?\.r2\.cloudflarestorage\.com",
             environment["SIXNINE_STORAGE_ENDPOINT"])
@@ -475,7 +489,8 @@ def installed_checker(artifact):
     if installed != incoming:
         release.regular(artifact / MANIFEST, maximum=32768)
         value = json.loads((artifact / MANIFEST).read_text(encoding="utf-8"))
-        release.require(type(value) is dict and type(value.get("commit")) is str and "dstack" not in value
+        release.require(type(value) is dict and type(value.get("commit")) is str
+            and ("dstack" not in value or RETAINED_DSTACK_HELPER_PAIRS.get(value['commit']) == incoming)
             and LEGACY_HELPER_PAIRS.get(value.get("commit")) == incoming,
             "migration_root_helpers_need_reviewed_update")
     spec = importlib.util.spec_from_file_location("sixnine_trusted_migration_checker", checker_path)

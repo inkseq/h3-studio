@@ -46,7 +46,10 @@ def fetch(commit, *, root=release.ROOT, api=None):
         download(api, commit, 'release-manifest.json', staging/'release-manifest.json', 16384)
         # Before the large image transfer, bind manifest to independent approval.
         release.approved_manifest(root, staging, commit)
-        for name in sorted(release.FILES):
+        document = json.loads((staging/'release-manifest.json').read_text())
+        names = set(document.get('files', {}))
+        release.require(names in (release.FILES, release.TARGET_FILES), 'invalid_release_manifest')
+        for name in sorted(names):
             download(api, commit, name, staging/name, 2*1024**3 if name == 'image.tar.gz' else 1024**2)
         expected = release.manifest(staging, commit)
         release.approved_manifest(root, staging, commit)
@@ -60,7 +63,7 @@ def fetch(commit, *, root=release.ROOT, api=None):
     finally:
         if staging.exists():
             # Fresh flat private directory only; never remove other releases.
-            for name in release.FILES | {'release-manifest.json'}:
+            for name in release.TARGET_FILES | {'release-manifest.json'}:
                 (staging/name).unlink(missing_ok=True)
             staging.rmdir()
 

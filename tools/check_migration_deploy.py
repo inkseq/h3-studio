@@ -15,6 +15,12 @@ import re
 import stat
 import subprocess
 import tempfile
+try:
+    import deployment_target
+except ImportError:
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from deploy.platform import deployment_target
 
 ROOT = Path(__file__).resolve().parents[1]
 DSTACK_IMAGE = "dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc1682dc2169075c6210d2ec873146f1ad8"
@@ -63,8 +69,9 @@ def secret_names(service):
     return {item if isinstance(item, str) else item["source"] for item in service.get("secrets", [])}
 
 
-def validate_storage(document):
+def validate_storage(document, *, target='production'):
     """One provider identity for API/worker; credentials never enter env/queue."""
+    identity = deployment_target.profile(target)
     fields = {"SIXNINE_STORAGE_PROVIDER", "SIXNINE_STORAGE_ENDPOINT", "SIXNINE_STORAGE_REGION",
         "SIXNINE_STORAGE_BUCKET", "SIXNINE_STORAGE_PROFILE"}
     services = document["services"]
@@ -93,7 +100,8 @@ def validate_storage(document):
             "migration_storage_local_configuration_invalid")
         return
     require(selected["SIXNINE_STORAGE_PROVIDER"] == "r2"
-        and selected["SIXNINE_STORAGE_PROFILE"] == "cloudflare-r2--rig-root"
+        and selected["SIXNINE_STORAGE_PROFILE"] == identity['r2_profile']
+        and (target != 'staging' or selected['SIXNINE_STORAGE_BUCKET'] == identity['r2_bucket'])
         and selected["SIXNINE_STORAGE_REGION"] == "auto"
         and re.fullmatch(r"https://[0-9a-f]{32}(?:\.(?:eu|us|fedramp))?\.r2\.cloudflarestorage\.com",
             selected["SIXNINE_STORAGE_ENDPOINT"])
@@ -104,22 +112,30 @@ def validate_storage(document):
         "migration_storage_r2_configuration_invalid")
 
 
-def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE):
+def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, target='production'):
+    identity = deployment_target.profile(target)
     require(type(document) is dict and type(document.get("services")) is dict, "migration_compose_invalid")
     services = document["services"]
     require({"app", "db", "db-init", "caddy", "hatchet-db", *CPU_SHARED} <= set(services), "migration_services_missing")
     public = services["app"].get("environment", {})
     if "PUBLIC_ORIGIN" in public:
-        require(public.get("PUBLIC_ORIGIN") == "https://inkseq.com"
-            and public.get("PUBLIC_ORIGIN_ALIASES") == "https://www.sixnine.art,https://sixnine.art"
+        require(public.get("PUBLIC_ORIGIN") == identity['origin']
+            and public.get("PUBLIC_ORIGIN_ALIASES") == identity['aliases']
             and "SIXNINE_PUBLIC_ORIGIN" not in public
-            and all(services[name].get("environment", {}).get("PUBLIC_ORIGIN") == "https://inkseq.com"
+            and all(services[name].get("environment", {}).get("PUBLIC_ORIGIN") == identity['origin']
                 and "SIXNINE_PUBLIC_ORIGIN" not in services[name].get("environment", {})
                 and "PUBLIC_ORIGIN_ALIASES" not in services[name].get("environment", {})
                 for name in ("controller", "dispatch")), "migration_public_origin_split")
         require(services["caddy"].get("environment") in
             ({"INKSEQ_LEGACY_REDIRECT": "0"}, {"INKSEQ_LEGACY_REDIRECT": "1"}), "migration_domain_redirect_phase_invalid")
+        require(target != 'staging' or services['caddy']['environment']['INKSEQ_LEGACY_REDIRECT'] == '0',
+            'migration_staging_redirect_forbidden')
+        if target == 'staging':
+            mounts = [item for item in services['caddy'].get('volumes', []) if item.get('target') == '/etc/caddy/Caddyfile']
+            require(len(mounts) == 1 and mounts[0].get('read_only') is True
+                and Path(mounts[0].get('source', '')).name == identity['caddy'], 'migration_staging_proxy_profile_invalid')
     else:
+        require(target == 'production', 'migration_staging_origin_required')
         require(public.get("SIXNINE_PUBLIC_ORIGIN") == "https://www.sixnine.art"
             and "PUBLIC_ORIGIN_ALIASES" not in public
             and all(not {"PUBLIC_ORIGIN", "PUBLIC_ORIGIN_ALIASES"} & set(services[name].get("environment", {}))
@@ -165,7 +181,7 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE):
         require(any(volume.get("source") == "/srv/sixnine/platform-data" and volume.get("target") == "/data"
             and not volume.get("read_only") for volume in service.get("volumes", [])), "migration_assets_split")
         require(env.get("SIXNINE_TELEMETRY_CONFIG_FILE") == "/run/secrets/grafana_cloud", "migration_cloud_telemetry_missing")
-    validate_storage(document)
+    validate_storage(document, target=target)
     controller = services["controller"]
     targets = {volume["target"] for volume in controller.get("volumes", [])}
     require({"/dstack-runtime", "/dstack-sources"} <= targets and
@@ -230,6 +246,7 @@ def local_inputs(document):
 
 def check(base, overlay, *, environment=None, runner=subprocess.run, host_memory_mib=3840,
           check_inputs=False, probe=False):
+    effective_environment = environment if environment is not None else os.environ
     # An explicit empty env file suppresses automatic project .env discovery.
     with tempfile.TemporaryDirectory(prefix="sixnine-compose-check-") as directory:
         empty = Path(directory) / "empty.env"
@@ -243,10 +260,11 @@ def check(base, overlay, *, environment=None, runner=subprocess.run, host_memory
         except ValueError:
             raise ValueError("migration_compose_render_invalid") from None
         receipt = validate(document, host_memory_mib=host_memory_mib,
-            dstack_image=(environment or {}).get("SIXNINE_DSTACK_SERVER_IMAGE", DSTACK_IMAGE))
+            dstack_image=effective_environment.get("SIXNINE_DSTACK_SERVER_IMAGE", DSTACK_IMAGE),
+            target=deployment_target.environment(effective_environment)['name'])
         if "PUBLIC_ORIGIN" in document["services"]["app"]["environment"]:
             require(document["services"]["caddy"]["environment"]["INKSEQ_LEGACY_REDIRECT"]
-                == (environment if environment is not None else os.environ).get("INKSEQ_LEGACY_REDIRECT", "0"),
+                == effective_environment.get("INKSEQ_LEGACY_REDIRECT", "0"),
                 "migration_domain_redirect_phase_unbound")
         if check_inputs:
             local_inputs(document)

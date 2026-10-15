@@ -528,7 +528,7 @@ class Repository:
         if job is None:
             raise NotFound("job_not_found")
         if (job["dispatch_backend"] != "hatchet-v1"
-                or job["status"] not in {"queued", "running", "submission_unknown", "collecting", "cancel_requested"}
+                or job["status"] not in {"queued", "running", "submission_unknown", "collecting"}
                 or job["lease_worker_id"] is not None):
             return
         # Keep one undelivered wakeup per job. Published wakeups may be followed
@@ -557,6 +557,7 @@ class Repository:
             not_before=job["not_before"], updated_at=self.clock()))
         from .demand_wakeup import notify_demand
         notify_demand(connection)
+        return event_id
 
     def put_document(self, scope, kind, document_id, payload, *, expected_version=None):
         kind, document_id, payload = identifier(kind), identifier(document_id), canonical(payload)

@@ -14,7 +14,7 @@ from botocore.exceptions import ClientError
 
 BUCKET = "sixnine-platform-releases-829135631045-ap-southeast-1"
 REGION = "ap-southeast-1"
-FILES = ("image.tar.gz", "compose.yaml", "Caddyfile", "init_database.py", "check_config.py", "release-manifest.json")
+FILES = ("image.tar.gz", "compose.yaml", "Caddyfile", "Caddyfile.staging", "deployment_target.py", "init_database.py", "check_config.py", "release-manifest.json")
 
 
 def checksum(path):
@@ -30,10 +30,12 @@ def publish(commit, directory):
         raise ValueError("An exact commit is required")
     directory = Path(directory)
     manifest = json.loads((directory / "release-manifest.json").read_text(encoding="utf-8"))
-    if manifest["commit"] != commit or set(manifest["files"]) != set(FILES)-{"release-manifest.json"}:
+    legacy = set(FILES) - {'Caddyfile.staging', 'deployment_target.py'}
+    files = set(manifest['files']) | {'release-manifest.json'}
+    if manifest["commit"] != commit or files not in (set(FILES), legacy):
         raise ValueError("Invalid release manifest")
     hashes = {}
-    for name in FILES:
+    for name in sorted(files):
         path = directory / name
         if path.is_symlink() or not path.is_file() or path.stat().st_size > 4*1024**3:
             raise ValueError("Unexpected bundle file or size")
@@ -43,7 +45,7 @@ def publish(commit, directory):
     s3 = boto3.client("s3", region_name=REGION, endpoint_url="https://s3.ap-southeast-1.amazonaws.com",
         config=Config(connect_timeout=15, read_timeout=300, retries={"mode": "standard", "max_attempts": 2}))
     # Conditional writes make retries/reruns unable to replace an approved object.
-    for name in FILES:
+    for name in sorted(files):
         key = "releases/" + commit + "/" + name
         try:
             with (directory / name).open("rb") as body:
