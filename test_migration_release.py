@@ -310,6 +310,28 @@ class MigrationArtifacts(unittest.TestCase):
                 maintenance.installed_checker(self.artifact)
             importer.assert_not_called()
 
+    def test_retained_current_previous_derivatives_use_only_exact_installed_checker_pairs(self):
+        expected_commits = {'c848dde8bf1d49044743ae1f497a148e50b84409', '6e6fe5ee14e82983161f7f2bf15cbfd6e8eb54f2'}
+        self.assertEqual(set(maintenance.RETAINED_DSTACK_HELPER_PAIRS), expected_commits)
+        trusted_path = Path(maintenance.__file__).resolve().with_name('migration_check.py')
+        for commit, pair in maintenance.RETAINED_DSTACK_HELPER_PAIRS.items():
+            (self.artifact/maintenance.MANIFEST).write_text(json.dumps({'commit': commit, 'dstack': {
+                'image': 'sixnine-dstack:'+commit, 'image_id': 'sha256:'+'c'*64}}))
+            spec, module = Mock(), types.ModuleType('trusted_checker')
+            with patch.object(release, 'regular'), \
+                    patch.object(release, 'checksum', side_effect=['a'*64, 'b'*64, *pair]), \
+                    patch.object(maintenance.importlib.util, 'spec_from_file_location', return_value=spec) as importer, \
+                    patch.object(maintenance.importlib.util, 'module_from_spec', return_value=module):
+                self.assertIs(maintenance.installed_checker(self.artifact), module)
+                importer.assert_called_once_with('sixnine_trusted_migration_checker', trusted_path)
+            for incoming in ((pair[0], 'f'*64), ('f'*64, pair[1])):
+                with patch.object(release, 'regular'), \
+                        patch.object(release, 'checksum', side_effect=['a'*64, 'b'*64, *incoming]), \
+                        patch.object(maintenance.importlib.util, 'spec_from_file_location') as importer, \
+                        self.assertRaisesRegex(release.ReleaseError, 'helpers_need_reviewed_update'):
+                    maintenance.installed_checker(self.artifact)
+                importer.assert_not_called()
+
     def test_publication_is_conditional_immutable_and_never_self_approves(self):
         class S3:
             def __init__(self): self.objects = {}

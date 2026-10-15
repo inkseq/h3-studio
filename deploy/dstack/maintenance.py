@@ -21,7 +21,10 @@ import tempfile
 import time
 
 import release
-import deployment_target
+try:
+    import deployment_target
+except ImportError:
+    from deploy.platform import deployment_target
 
 FILES = frozenset({"dispatch-image.tar.gz", "platform-overlay.yaml", "hatchet-entrypoint.sh",
     "source-set.tar.gz", "migration-check.py", "maintenance.py", "runtime-config.example.json",
@@ -36,10 +39,11 @@ LEGACY_HELPER_PAIRS = {commit: (
         "4f093976bed7cd89696127981cf22835a82d6d23",
         "07da40322559ee5a12829be6884c541c401d852a")}
 # Exact retained current/previous helper bytes before the staging upgrade.
-LEGACY_HELPER_PAIRS.update({
+RETAINED_DSTACK_HELPER_PAIRS = {
     'c848dde8bf1d49044743ae1f497a148e50b84409': ('9e324d663ec9fde10ee7fb9ad58bbca01203f64720de9e809b36a856fe8c1bb8', 'ff1efe4f384fd68c65067239fc8fdca96d1528f3c84aff495f3f18a2f9fa7c4a'),
     '6e6fe5ee14e82983161f7f2bf15cbfd6e8eb54f2': ('9e324d663ec9fde10ee7fb9ad58bbca01203f64720de9e809b36a856fe8c1bb8', '3b885cdbb50e6cd373daf3952f0844a0be71e3010646d699cff8bb578a972c03'),
-})
+}
+LEGACY_HELPER_PAIRS.update(RETAINED_DSTACK_HELPER_PAIRS)
 DSTACK_BASE_IMAGE = "dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc1682dc2169075c6210d2ec873146f1ad8"
 DSTACK_SOURCE_PATHS = frozenset({"dstack/_internal/core/backends/vastai/api_client.py",
     "dstack/_internal/core/backends/vastai/compute.py", "gpuhunt/providers/vastai.py",
@@ -485,7 +489,8 @@ def installed_checker(artifact):
     if installed != incoming:
         release.regular(artifact / MANIFEST, maximum=32768)
         value = json.loads((artifact / MANIFEST).read_text(encoding="utf-8"))
-        release.require(type(value) is dict and type(value.get("commit")) is str and "dstack" not in value
+        release.require(type(value) is dict and type(value.get("commit")) is str
+            and ("dstack" not in value or RETAINED_DSTACK_HELPER_PAIRS.get(value['commit']) == incoming)
             and LEGACY_HELPER_PAIRS.get(value.get("commit")) == incoming,
             "migration_root_helpers_need_reviewed_update")
     spec = importlib.util.spec_from_file_location("sixnine_trusted_migration_checker", checker_path)
