@@ -99,6 +99,33 @@ _BASE_FL_LOCATOR_FILES = (
            or row[0] in {"MiniMax-H3-audio_vae_fp32.safetensors",
                          "minimax_h3/minimax_h3_latent_upscaler_3d_bf16.safetensors"}),
 )
+# All seventeen files used by the published full-controls catalog match the
+# official immutable _LOCATOR_REVISION metadata (sizes + LFS SHA256/Git blob ID).
+# Metadata-only response SHA256, not downloaded-weight or inference evidence:
+# 3ab00f8274e8f72538845415e28523556006f218eee430e35f9b54723ff9aebc
+_BASE_COMMON_LOCATOR_FILES = tuple(row for row in _BASE_FL_LOCATOR_FILES
+    if row[0] != "MiniMax-H3-FL2VA_int8_convrot.safetensors")
+_BASE_REF_LOCATOR_FILES = (
+    ("MiniMax-H3-Ref2VA_int8_convrot.safetensors", 34038903008, "sha256",
+     "d9ba725b2920bb5ffb4ab8e2514f77264df59a5f05513613513f6fb5d9d6f749"),
+    *_BASE_COMMON_LOCATOR_FILES,
+)
+_BF16_FL_LOCATOR_FILES = (
+    ("MiniMax-H3-FL2VA_bf16.safetensors", 66280486944, "sha256",
+     "f10704606e376815298cb6bd9d94ea721346b62cd840177cd3723971edd83367"),
+    *_BASE_COMMON_LOCATOR_FILES,
+)
+_BF16_REF_LOCATOR_FILES = (
+    ("MiniMax-H3-Ref2VA_bf16.safetensors", 66280486944, "sha256",
+     "ca877ed2b1bf72cfda76fe38117832544d6c0530abcfb9463e114cd767a39516"),
+    *_BASE_COMMON_LOCATOR_FILES,
+)
+_FULL_CONTROL_LOCATOR_FILES = {
+    "fl": (tuple(row for row in _LOCATOR_FILES if row[0] != _LOCATOR_TRANSFORMERS["ref"]),
+           _BASE_FL_LOCATOR_FILES, _BF16_FL_LOCATOR_FILES),
+    "ref": (tuple(row for row in _LOCATOR_FILES if row[0] != _LOCATOR_TRANSFORMERS["fl"]),
+            _BASE_REF_LOCATOR_FILES, _BF16_REF_LOCATOR_FILES),
+}
 SAFE_ERRORS = frozenset({"model_download_manifest_invalid", "model_download_manifest_changed",
     "model_download_locator_invalid",
     "model_download_path_invalid", "model_download_size_mismatch", "model_download_disk_headroom",
@@ -192,9 +219,21 @@ def safe_error(error):
 def _content_preserving_revision(document, expected_digest, records):
     """Use one approved locator without changing the immutable model contract."""
     manifests = _LOCATOR_PROFILES.get(document.get("deployment_profile_id"))
-    if manifests is None:
-        return None
     mode = document.get("mode")
+    full_controls = False
+    if manifests is None:
+        from ..runtime_catalog import engine_manifest, get_profile
+        try:
+            native = get_profile(document.get("deployment_profile_id"))
+        except ValueError:
+            return None
+        if native.get("compiler_epoch") != "full-controls-v2":
+            return None
+        try:
+            manifests = {mode: engine_manifest(native["id"], mode).digest}
+        except ValueError:
+            raise ValueError("model_download_locator_invalid") from None
+        full_controls = True
     if (manifests.get(mode) != expected_digest
             or any(repo != _LOCATOR_REPOSITORY or revision != _LOCATOR_ORIGINAL
                    for _, repo, revision, _, _ in records)):
@@ -204,14 +243,16 @@ def _content_preserving_revision(document, expected_digest, records):
         for item in component["files"]:
             kind = "sha256" if "sha256" in item else "git_blob_sha1"
             files.append((item["path"], item["size_bytes"], kind, item[kind]))
-    if document.get("deployment_profile_id") in {
+    if full_controls:
+        expected_sets = _FULL_CONTROL_LOCATOR_FILES[mode]
+    elif document.get("deployment_profile_id") in {
             "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2",
             "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-fl-r2-v3"}:
-        expected_files = _BASE_FL_LOCATOR_FILES
+        expected_sets = (_BASE_FL_LOCATOR_FILES,)
     else:
         omitted = _LOCATOR_TRANSFORMERS["ref" if mode == "fl" else "fl"]
-        expected_files = tuple(row for row in _LOCATOR_FILES if row[0] != omitted)
-    if sorted(files) != sorted(expected_files):
+        expected_sets = (tuple(row for row in _LOCATOR_FILES if row[0] != omitted),)
+    if not any(sorted(files) == sorted(expected_files) for expected_files in expected_sets):
         raise ValueError("model_download_locator_invalid")
     return _LOCATOR_REVISION
 
