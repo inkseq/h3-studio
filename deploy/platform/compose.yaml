@@ -99,8 +99,8 @@ services:
     environment:
       SIXNINE_DATA: /data
       SIXNINE_DATABASE_URL_FILE: /run/secrets/app_database_url
-      PUBLIC_ORIGIN: https://inkseq.com
-      PUBLIC_ORIGIN_ALIASES: https://www.sixnine.art,https://sixnine.art
+      PUBLIC_ORIGIN: ${INKSEQ_PUBLIC_ORIGIN:-https://inkseq.com}
+      PUBLIC_ORIGIN_ALIASES: ${INKSEQ_PUBLIC_ORIGIN_ALIASES-https://www.sixnine.art,https://sixnine.art}
       SIXNINE_AUTH_MODE: password
       SIXNINE_GENERATION_ENABLED: "0"
       SIXNINE_RENDER_ENABLED: "0"
@@ -158,7 +158,7 @@ services:
     ports: ["80:80", "443:443", "443:443/udp"]
     volumes:
       - type: bind
-        source: ./Caddyfile
+        source: ./${INKSEQ_CADDY_PROFILE:-Caddyfile}
         target: /etc/caddy/Caddyfile
         read_only: true
         bind: {create_host_path: false}

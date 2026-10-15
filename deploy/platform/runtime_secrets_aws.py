@@ -13,6 +13,10 @@ from urllib.parse import urlsplit
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
+try:
+    from . import deployment_target
+except ImportError:
+    import deployment_target
 
 REGION = "ap-southeast-1"
 DATABASE = "/sixnine/platform/database"
@@ -27,7 +31,11 @@ def client():
         config=Config(connect_timeout=5, read_timeout=20, retries={"mode": "standard", "max_attempts": 3}))
 
 
-def value(api, name, initialize=False):
+def value(api, name, initialize=False, *, target='production'):
+    prefix = deployment_target.profile(target)['secret_root']
+    database, accounts = prefix+'/database', prefix+'/bootstrap-accounts'
+    if name not in {database, accounts}:
+        raise RuntimeError('Secret source differs from the protected deployment target')
     try:
         result = json.loads(api.get_secret_value(SecretId=name)["SecretString"])
     except ClientError as error:
@@ -38,20 +46,20 @@ def value(api, name, initialize=False):
         api.describe_secret(SecretId=name)
         if Path("/srv/sixnine/postgres/pgdata/PG_VERSION").exists():
             raise RuntimeError("Existing database requires recovery of original secrets")
-        if name == DATABASE:
+        if name == database:
             result = {"db_admin_password": secrets.token_urlsafe(48),
                 "app_database_url": "postgresql+psycopg://sixnine_app:"+secrets.token_urlsafe(48)+"@db:5432/sixnine"}
-        elif name == ACCOUNTS:
+        elif name == accounts:
             result = {user: secrets.token_urlsafe(30) for user in ("superdan", "supervan")}
         else:
             raise RuntimeError("Unknown secret source")
         api.put_secret_value(SecretId=name, ClientRequestToken=str(uuid.uuid4()),
             SecretString=json.dumps(result))
-    expected = {"db_admin_password", "app_database_url"} if name == DATABASE else {"superdan", "supervan"}
+    expected = {"db_admin_password", "app_database_url"} if name == database else {"superdan", "supervan"}
     if not isinstance(result, dict) or set(result) != expected or any(
             not isinstance(v, str) or not 32 <= len(v) <= 512 or any(c in v for c in "\n\r\0") for v in result.values()):
         raise RuntimeError("Managed secret structure is invalid")
-    if name == DATABASE:
+    if name == database:
         parsed = urlsplit(result['app_database_url'])
         if (parsed.scheme != 'postgresql+psycopg' or parsed.hostname != 'db'
                 or parsed.port != 5432 or parsed.path != '/sixnine'
@@ -94,12 +102,14 @@ def write_runtime(name, content):
         os.close(fd)
 
 
-def hydrate_titles(api):
+def hydrate_titles(api, *, target='production'):
     # The host installs this dependency-free validator alongside this helper.
     # Unlike DB credentials, optional title config may be disabled/rotated at an
     # app restart. Atomic replacement preserves any existing mounted inode.
     from studio_platform.google_title_config import validate_config, unique_pairs
     try:
+        if target == 'staging':
+            raise RuntimeError('Staging title integration remains disabled')
         response = api.get_secret_value(SecretId=GOOGLE_TITLES)
         payload = json.loads(response["SecretString"], object_pairs_hook=unique_pairs)
         validate_config(payload)
@@ -139,12 +149,14 @@ def hydrate(initialize=False):
     with Path('/opt/sixnine-release/secret-hydration.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         api = client()
-        database = value(api, DATABASE, initialize)
+        target = deployment_target.host()['name']
+        prefix = deployment_target.profile(target)['secret_root']
+        database = value(api, prefix+'/database', initialize, target=target)
         if initialize:
-            value(api, ACCOUNTS, True)
+            value(api, prefix+'/bootstrap-accounts', True, target=target)
         for name, content in database.items():
             write_runtime(name, content)
-        hydrate_titles(api)
+        hydrate_titles(api, target=target)
 
 
 if __name__ == "__main__":

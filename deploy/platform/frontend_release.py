@@ -10,6 +10,7 @@ import tempfile
 
 import frontend_bundle
 import release
+import deployment_target
 
 
 def protected_directory(path, *, create=False):
@@ -79,7 +80,9 @@ def app_snapshot(directory, environment):
     script = (
         "import json,os,urllib.request; from urllib.parse import urlsplit; "
         "origin=os.environ.get('PUBLIC_ORIGIN',os.environ.get('SIXNINE_PUBLIC_ORIGIN','')); "
-        "assert origin in ('https://inkseq.com','https://www.sixnine.art'); "
+        "assert origin in " + repr((deployment_target.environment(environment)['origin'],)
+            if deployment_target.environment(environment)['name'] == 'staging'
+            else ('https://inkseq.com', 'https://www.sixnine.art')) + "; "
         "assert not os.environ.get('SIXNINE_PUBLIC_ORIGIN') or os.environ['SIXNINE_PUBLIC_ORIGIN']==origin; "
         "h=json.load(urllib.request.urlopen('http://127.0.0.1:8845/healthz',timeout=5)); "
         "r=urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8845/',"

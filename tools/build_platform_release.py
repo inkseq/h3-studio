@@ -13,7 +13,7 @@ import sys
 import tarfile
 import tempfile
 
-FILES = ("compose.yaml", "Caddyfile", "init_database.py", "check_config.py")
+FILES = ("compose.yaml", "Caddyfile", "Caddyfile.staging", "deployment_target.py", "init_database.py", "check_config.py")
 DSTACK_IMAGE_CHECK = r'''import hashlib,json
 from pathlib import Path
 root=Path('/root/.local/share/uv/tools/dstack/lib/python3.11/site-packages')

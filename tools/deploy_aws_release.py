@@ -12,16 +12,30 @@ from botocore.exceptions import ClientError
 REGION = 'ap-southeast-1'
 INSTANCE = 'i-03d81d2d153b5e2fd'
 DOCUMENT = 'Sixnine-DeployApprovedRelease'
+STAGING_INSTANCE = None  # Bound to the separately provisioned, reviewed host before enabling CI.
 COMMIT = re.compile(r'[0-9a-f]{40}\Z')
 COMMAND_ID = re.compile(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\Z')
 
 
-def deploy(commit, *, resume_command=None, frontend=False, timeout=1900, api=None, clock=time.monotonic, sleep=time.sleep):
+def deploy(commit, *, resume_command=None, frontend=False, target='production', promote=False,
+        timeout=1900, api=None, clock=time.monotonic, sleep=time.sleep):
     if not COMMIT.fullmatch(commit) or resume_command is not None and not COMMAND_ID.fullmatch(resume_command):
         raise ValueError('Exact commit and valid optional command ID required')
     document = 'Sixnine-DeployApprovedFrontend' if frontend else DOCUMENT
     plugin = 'deployApprovedFrontend' if frontend else 'deployApprovedCommit'
     receipt_state = 'approved_frontend_release_healthy' if frontend else 'approved_application_release_healthy'
+    if target not in {'production', 'staging'} or promote and (target != 'production' or frontend):
+        raise ValueError('Invalid closed deployment target/action')
+    instance = INSTANCE
+    environment_action = target == 'staging' or promote
+    document_version = '1' if environment_action else '2'
+    if target == 'staging':
+        if frontend or not isinstance(STAGING_INSTANCE, str) or not re.fullmatch(r'i-[0-9a-f]{17}', STAGING_INSTANCE):
+            raise ValueError('Dedicated staging target is not bound')
+        instance, document, plugin, receipt_state = (STAGING_INSTANCE, 'Inkseq-DeployStagingRelease',
+            'deployStagingCommit', 'staging_release_healthy')
+    elif promote:
+        document, plugin, receipt_state = ('Inkseq-PromoteAcceptedRelease', 'promoteAcceptedCommit', 'accepted_artifacts_promoted')
     api = api or boto3.client('ssm', region_name=REGION, endpoint_url='https://ssm.ap-southeast-1.amazonaws.com',
         config=Config(connect_timeout=10, read_timeout=30, retries={'mode': 'standard', 'total_max_attempts': 1}))
     command_id = resume_command
@@ -29,7 +43,7 @@ def deploy(commit, *, resume_command=None, frontend=False, timeout=1900, api=Non
         # SendCommand has no idempotency token. Do not retry a lost response
         # automatically: the same approved commit is idempotent at the host.
         try:
-            response = api.send_command(InstanceIds=[INSTANCE], DocumentName=document, DocumentVersion='2',
+            response = api.send_command(InstanceIds=[instance], DocumentName=document, DocumentVersion=document_version,
                 Parameters={'Commit': [commit]}, TimeoutSeconds=120, MaxConcurrency='1', MaxErrors='0',
                 Comment='Deploy independently approved Sixnine commit '+commit)
             command_id = response['Command']['CommandId']
@@ -41,7 +55,7 @@ def deploy(commit, *, resume_command=None, frontend=False, timeout=1900, api=Non
     deadline = clock()+timeout
     while clock() < deadline:
         try:
-            invocation = api.get_command_invocation(CommandId=command_id, InstanceId=INSTANCE,
+            invocation = api.get_command_invocation(CommandId=command_id, InstanceId=instance,
                                                     PluginName=plugin)
         except ClientError as error:
             if error.response.get('Error', {}).get('Code') != 'InvocationDoesNotExist':
@@ -52,13 +66,16 @@ def deploy(commit, *, resume_command=None, frontend=False, timeout=1900, api=Non
         if status == 'Success':
             # Never print arbitrary SSM stdout/stderr. Validate the fixed receipt
             # so --resume-command cannot claim success for another commit/task.
-            if invocation.get('DocumentName') != document or invocation.get('DocumentVersion') != '2':
+            if invocation.get('DocumentName') != document or invocation.get('DocumentVersion') != document_version:
                 raise RuntimeError('Command is not the reviewed deployment document version')
             try:
                 receipt = json.loads(invocation.get('StandardOutputContent', ''))
             except ValueError:
                 raise RuntimeError('Deployment success receipt invalid') from None
-            if receipt != {'state': receipt_state, 'commit': commit}:
+            expected_keys = {'state', 'commit', 'candidate_sha256'} if environment_action else {'state', 'commit'}
+            if (type(receipt) is not dict or set(receipt) != expected_keys or receipt['state'] != receipt_state
+                    or receipt['commit'] != commit or environment_action
+                    and not re.fullmatch(r'[0-9a-f]{64}', str(receipt.get('candidate_sha256')))):
                 raise RuntimeError('Deployment success receipt does not match this commit')
             result = {'state': 'deployment_completed', 'commit': commit, 'command_id': command_id}
             print(json.dumps(result))
@@ -76,9 +93,11 @@ def main(argv=None):
     parser.add_argument('commit')
     parser.add_argument('--resume-command')
     parser.add_argument('--frontend', action='store_true', help='Deploy approved static frontend without restarting services')
+    parser.add_argument('--target', choices=('production', 'staging'), default='production')
+    parser.add_argument('--promote', action='store_true', help='Promote independently accepted staging artifact bytes; never build')
     args = parser.parse_args(argv)
     try:
-        deploy(args.commit, resume_command=args.resume_command, frontend=args.frontend)
+        deploy(args.commit, resume_command=args.resume_command, frontend=args.frontend, target=args.target, promote=args.promote)
         return 0
     except (ValueError, RuntimeError) as error:
         print(str(error), file=sys.stderr)

@@ -1,5 +1,5 @@
-"""Push one reviewed batch, cancel its duplicate push checks, prepare one artifact.
-No commit/sync/install/approval/deployment. An existing intent blocks all retries.
+"""Push one reviewed batch and observe its single automatic main staging run.
+Never cancel CI or dispatch duplicate preparation. A prior intent blocks replay.
 """
 import argparse
 import json
@@ -96,7 +96,7 @@ def prepare(kind, commit=None, *, root=ROOT, sleep=time.sleep, retain_native_sou
         retained = retention_binding(retain_native_sources or {})
     except ValueError:
         raise RuntimeError('Invalid explicit native source retention binding') from None
-    require(retained is None or kind == 'platform', 'Native source retention requires platform preparation')
+    require(retained is None, 'Automatic main staging uses the reviewed repository native-retention variables; do not dispatch another build')
     commit = local(root, commit)
     store = root / '.release-prepares'
     store.mkdir(exist_ok=True)
@@ -129,33 +129,12 @@ def prepare(kind, commit=None, *, root=ROOT, sleep=time.sleep, retain_native_sou
         if index < 6:
             sleep(2)  # GitHub run inventory is eventually consistent after push.
     require(push_runs, 'Push check is not visible yet; no dispatch sent. Inspect GitHub before continuing')
-    for candidate in push_runs:
-        if candidate.get('status') == 'completed':
-            continue
-        item = api(root, f'repos/{REPO}/actions/runs/{candidate["id"]}')
-        require(match(item, wid, commit, 'push'), 'Run identity changed; cancellation refused')
-        if item.get('status') == 'completed':
-            continue
-        require(item.get('status') in ('queued', 'in_progress', 'waiting', 'pending', 'requested'), 'Unknown run state; cancellation refused')
-        record('cancel_started', cancelling_run_id=item['id'])
-        api(root, f'repos/{REPO}/actions/runs/{item["id"]}/cancel', {})
-        record('cancel_acknowledged', cancelling_run_id=None, cancelled_run_ids=[*receipt['cancelled_run_ids'], item['id']])
-    before = {row['id'] for row in runs(root, wid, commit, 'workflow_dispatch')}
     local(root, commit); remote(root, commit)
-    record('dispatch_started', prior_dispatch_ids=sorted(before))
-    api(root, API + '/dispatches', {'ref': 'main', 'inputs': {'deploy': 'true', 'release_kind': kind, **(retained or {})}})
-    record('dispatch_acknowledged')
-    for index in range(10):  # Read-only observation, never resend the POST.
-        fresh = [row for row in runs(root, wid, commit, 'workflow_dispatch') if row['id'] not in before]
-        require(len(fresh) <= 1, 'Multiple new runs: inspect GitHub and receipt; never dispatch again')
-        if fresh:
-            item = api(root, f'repos/{REPO}/actions/runs/{fresh[0]["id"]}')
-            require(match(item, wid, commit, 'workflow_dispatch'), 'Observed run differs from intended SHA; reconcile without resubmission')
-            record('run_observed', run_id=item['id'], observed_head_sha=item['head_sha'])
-            return {**receipt, 'url': f'https://github.com/{REPO}/actions/runs/{item["id"]}', 'receipt': str(attempt / 'receipt.json'), 'completed': False, 'approved': False, 'deployed': False}
-        if index < 9:
-            sleep(3)
-    raise RuntimeError('Dispatch accepted but run not observed: inspect GitHub/receipt; never dispatch again')
+    item = max(push_runs, key=lambda value: value['id'])
+    record('automatic_main_run_observed', run_id=item['id'], observed_head_sha=item['head_sha'])
+    return {**receipt, 'url': f'https://github.com/{REPO}/actions/runs/{item["id"]}',
+        'receipt': str(attempt / 'receipt.json'), 'completed': False, 'approved': False,
+        'deployed': False, 'automatic_staging': True}
 
 
 def main(argv=None):

@@ -20,13 +20,18 @@ import tarfile
 import time
 
 from check_config import validate
+try:
+    import deployment_target
+except ImportError:
+    from deploy.platform import deployment_target
 
 ROOT = Path("/srv/sixnine")
 DOCKER = "/usr/bin/docker"
 FILES = {"image.tar.gz", "compose.yaml", "Caddyfile", "init_database.py", "check_config.py"}
+TARGET_FILES = FILES | {'Caddyfile.staging', 'deployment_target.py'}
 ENV_FIELDS = {"SIXNINE_IMAGE", "SIXNINE_POSTGRES_IMAGE", "SIXNINE_CADDY_IMAGE",
               "SIXNINE_DB_ADMIN_SECRET_FILE", "SIXNINE_APP_DSN_SECRET_FILE"}
-OPTIONAL_ENV_FIELDS = {"INKSEQ_LEGACY_REDIRECT"}
+OPTIONAL_ENV_FIELDS = {"INKSEQ_LEGACY_REDIRECT", 'INKSEQ_DEPLOYMENT_TARGET'}
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -69,7 +74,7 @@ def manifest(directory, commit):
             {"commit", "image", "image_id", "files", "contracts"})
             and value["commit"] == commit and value["image"] == "sixnine-platform:"+commit
             and isinstance(value["image_id"], str) and re.fullmatch(r"sha256:[0-9a-f]{64}", value["image_id"])
-            and isinstance(value["files"], dict) and set(value["files"]) == FILES, "invalid_release_manifest")
+            and isinstance(value["files"], dict) and set(value["files"]) in (FILES, TARGET_FILES), "invalid_release_manifest")
     if "contracts" in value:
         validate_contracts(value["contracts"])
     for name, expected in value["files"].items():
@@ -256,6 +261,10 @@ def deployment_environment(path, commit):
     require(ENV_FIELDS <= set(values) <= ENV_FIELDS | OPTIONAL_ENV_FIELDS, "incomplete_site_config")
     if "INKSEQ_LEGACY_REDIRECT" in values:
         require(values["INKSEQ_LEGACY_REDIRECT"] in {"0", "1"}, "invalid_domain_redirect_phase")
+    selected = deployment_target.site_environment(path.parent, values)
+    require(selected['INKSEQ_DEPLOYMENT_TARGET'] != 'staging'
+        or values.get('INKSEQ_LEGACY_REDIRECT', '0') == '0', 'staging_legacy_redirect_forbidden')
+    values.update(selected)
     for key in ("SIXNINE_POSTGRES_IMAGE", "SIXNINE_CADDY_IMAGE"):
         require(bool(re.fullmatch(r"[A-Za-z0-9./:_-]+@sha256:[0-9a-f]{64}", values[key])), "unapproved_dependency_image")
     for key, name in (("SIXNINE_DB_ADMIN_SECRET_FILE", "db_admin_password"), ("SIXNINE_APP_DSN_SECRET_FILE", "app_database_url")):
@@ -285,7 +294,8 @@ def approved_configuration(directory, environment):
     # root-controlled binary's version, never a field supplied by the bundle.
     version = command(["compose", "version", "--short"], environment=environment).decode("ascii").strip()
     config = json.loads(compose(directory, environment, "config", "--format", "json"))
-    validate(config, deployment_directory=directory, compose_version=version)
+    validate(config, deployment_directory=directory, compose_version=version,
+        target=deployment_target.environment(environment)['name'])
     if "PUBLIC_ORIGIN" in config["services"]["app"].get("environment", {}):
         require(config["services"]["caddy"]["environment"]["INKSEQ_LEGACY_REDIRECT"]
                 == environment.get("INKSEQ_LEGACY_REDIRECT", "0"), "domain_redirect_phase_differs_from_site_config")
@@ -633,7 +643,8 @@ def approved_application_configuration(directory, environment, *, gpu_context=No
     mounts.remove(expected["volumes"][0])
     require(app.get("healthcheck", {}).get("test") == expected["healthcheck"]["test"], "gpu_app_health_invalid")
     app["healthcheck"]["test"][3] = "import json,urllib.request; h=json.load(urllib.request.urlopen('http://127.0.0.1:8845/healthz',timeout=5)); assert h['auth_ready'] and not h['generation_enabled'] and not h['render_enabled'] and not h['cloud_creation_enabled'] and h['execution_backend']=='disabled'"
-    validate(config, deployment_directory=directory, compose_version=version)
+    validate(config, deployment_directory=directory, compose_version=version,
+        target=deployment_target.environment(environment)['name'])
     require(app["image"] == environment["SIXNINE_IMAGE"]
         and config["services"]["db"]["image"] == environment["SIXNINE_POSTGRES_IMAGE"]
         and config["services"]["caddy"]["image"] == environment["SIXNINE_CADDY_IMAGE"], "release_images_differ_from_trusted_site_config")
@@ -719,14 +730,14 @@ def prepare_bundle(root, commit):
     if target.exists():
         require(not target.is_symlink() and target.is_dir(), "invalid_existing_release")
         require(manifest(target, commit) == expected, "existing_release_differs")
-        for filename in FILES | {"release-manifest.json"}:
+        for filename in set(expected['files']) | {"release-manifest.json"}:
             regular(target / filename, root_owned=True)
         return target
     # Private staging prevents a interrupted/tampered incoming bundle from
     # publishing partial files or poisoning the final commit directory.
     staging = Path(tempfile.mkdtemp(prefix=".release-", dir=root / "releases"))
     try:
-        for name in FILES | {"release-manifest.json"}:
+        for name in set(expected['files']) | {"release-manifest.json"}:
             descriptor = os.open(incoming / name, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
             with os.fdopen(descriptor, "rb") as source, (staging / name).open("xb") as destination:
                 metadata = os.fstat(source.fileno())
@@ -753,7 +764,7 @@ def prepare_bundle(root, commit):
         # Only our fresh, flat temporary directory; never traverse a release,
         # persistent data, incoming upload or a symbolic link for cleanup.
         if staging.exists():
-            for name in FILES | {"release-manifest.json"}:
+            for name in TARGET_FILES | {"release-manifest.json"}:
                 (staging / name).unlink(missing_ok=True)
             staging.rmdir()
     return target

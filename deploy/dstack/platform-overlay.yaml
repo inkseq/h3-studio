@@ -6,7 +6,7 @@ x-migration-logs: &migration-logs
   options: {max-size: 5m, max-file: "2"}
 
 x-business-environment: &business-environment
-  PUBLIC_ORIGIN: https://inkseq.com
+  PUBLIC_ORIGIN: ${INKSEQ_PUBLIC_ORIGIN:-https://inkseq.com}
   SIXNINE_DATA: /data
   SIXNINE_DATABASE_URL_FILE: /run/secrets/app_database_url
   SIXNINE_AUTH_MODE: password

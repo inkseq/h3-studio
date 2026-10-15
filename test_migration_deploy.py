@@ -240,6 +240,27 @@ class MigrationDeployTests(unittest.TestCase):
             self.assertIsNone(credentials.call_args.kwargs["registry_root"])
             store.assert_called_once()
 
+    def test_staging_requires_exact_origin_bucket_profile_and_matching_workers(self):
+        document = self.render_r2()
+        for name in ('app', 'controller', 'dispatch'):
+            document['services'][name]['environment'].update(PUBLIC_ORIGIN='https://staging.inkseq.com',
+                SIXNINE_STORAGE_PROFILE='cloudflare-r2--sixnine-staging-20261015', SIXNINE_STORAGE_BUCKET='sixnine-staging-media')
+        document['services']['app']['environment']['PUBLIC_ORIGIN_ALIASES'] = ''
+        document['services']['caddy']['environment'] = {'INKSEQ_LEGACY_REDIRECT': '0'}
+        mount = next(item for item in document['services']['caddy']['volumes'] if item['target'] == '/etc/caddy/Caddyfile')
+        mount['source'] = str(ROOT/'deploy/platform/Caddyfile.staging')
+        validate(document, target='staging')
+        with self.assertRaises(ValueError): validate(document)
+        for change in ('profile', 'bucket', 'origin'):
+            broken = copy.deepcopy(document)
+            for name in ('app', 'controller', 'dispatch'):
+                broken['services'][name]['environment'].update({
+                    'profile': {'SIXNINE_STORAGE_PROFILE': 'cloudflare-r2--rig-root'},
+                    'bucket': {'SIXNINE_STORAGE_BUCKET': 'sixnine-media'},
+                    'origin': {'PUBLIC_ORIGIN': 'https://inkseq.com'},
+                }[change])
+            with self.assertRaises(ValueError): validate(broken, target='staging')
+
     def test_r2_split_missing_opt_in_fallback_and_environment_keys_are_rejected(self):
         baseline = self.render_r2()
         for mutate, code in (
