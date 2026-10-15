@@ -3,7 +3,7 @@
   "canonical_source": "../video-studio-design/studio-app",
   "direction": "canonical-to-release-only",
   "files": {
-    "index.html": "52f11734ebd81e7d16c6810ff311bbe5b69723c0c066b64759e44c4899dd3b16",
+    "index.html": "b99fa08993a4c9eb35e3a24dd55e1dde277dbe5304356953d3b9d67fc53e6320",
     "package-lock.json": "79e77b290b014be0f9e7bdbb941cf0c308d54bf4e9b7c2c72448c599580aab30",
     "package.json": "b38d61bbca60a86d8d1d94a443b2d85ba0608796f8a86227b3f0ed6c8df17ff9",
     "src/AccountPassword.jsx": "9fd22e68eca0f2c68eef476be352bb43d4634204211a673516e3a7cdfc193900",
@@ -69,7 +69,7 @@
     "src/activity-window.test.js": "cb7d2ceb604675761db5087cd8d5c5c4b8fb6599bf7042f98e3f649bc7f1bf18",
     "src/agent-candidate-merge.test.js": "feda4c7919070d9fc8978ffdf9f294f9c104323a8e0106a39174817e2f8fd6b9",
     "src/agent-connect-model.js": "efe66ce1d462e54e98e3003499dadc5a118be35cb9c522e5bb6fdd33c893437b",
-    "src/agent-connect-model.test.js": "7aa2f9197bf686700c2d3281d11e672ce623f60a7d306111e9f86ca60dc65f45",
+    "src/agent-connect-model.test.js": "4be96a798ed832bcc002a5cc3236d1da6b69604fd8e43f65ec72a6e5963fe1ed",
     "src/agent-connect.css": "2d91cb8d99533d15b679220d84394f94e94fbbd00c41dca11c83362f753d8200",
     "src/agent-integration.test.js": "6412a3a150603ef496c62ba0bdb1e326f16b37363d8d5b9680eb757ffd7ae57d",
     "src/agent-navigation.js": "d57c1d711007d85c0a4219911ce9c5c4f69505e87ec46d325596bd80f8e4754f",
