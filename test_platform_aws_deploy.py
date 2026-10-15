@@ -136,14 +136,17 @@ class HostAndDocumentTests(unittest.TestCase):
                 apply.assert_not_called()
 
     def test_document_has_one_env_commit_and_fixed_root_entry(self):
-        doc = json.loads((ROOT/'deploy/platform/ec2/ssm-deploy-document.json').read_text())
-        self.assertEqual(set(doc['parameters']), {'Commit'})
-        self.assertEqual(doc['parameters']['Commit']['allowedPattern'], '^[0-9a-f]{40}$')
-        self.assertEqual(doc['parameters']['Commit']['interpolationType'], 'ENV_VAR')
-        self.assertEqual(len(doc['mainSteps']), 1)
-        commands = doc['mainSteps'][0]['inputs']['runCommand']
-        self.assertNotIn('{{', '\n'.join(commands))
-        self.assertEqual(commands[-1], 'exec /usr/bin/python3 /opt/sixnine-release/deploy_approved.py "$SSM_Commit"')
+        for name, helper in (("ssm-deploy-document.json", "deploy_approved.py"),
+                             ("ssm-frontend-document.json", "deploy_frontend.py")):
+            with self.subTest(document=name):
+                doc = json.loads((ROOT/'deploy/platform/ec2'/name).read_text())
+                self.assertEqual(set(doc['parameters']), {'Commit'})
+                self.assertEqual(doc['parameters']['Commit']['allowedPattern'], '^[0-9a-f]{40}$')
+                self.assertEqual(doc['parameters']['Commit']['interpolationType'], 'ENV_VAR')
+                self.assertEqual(len(doc['mainSteps']), 1)
+                commands = doc['mainSteps'][0]['inputs']['runCommand']
+                self.assertNotIn('{{', '\n'.join(commands))
+                self.assertEqual(commands[-1], 'exec /usr/bin/python3 /opt/sixnine-release-origin-v1/' + helper + ' "$SSM_Commit"')
 
     def test_host_rejects_first_publication_and_preserves_existing_state(self):
         with tempfile.TemporaryDirectory() as directory:

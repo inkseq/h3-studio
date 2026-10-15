@@ -108,6 +108,23 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE):
     require(type(document) is dict and type(document.get("services")) is dict, "migration_compose_invalid")
     services = document["services"]
     require({"app", "db", "db-init", "caddy", "hatchet-db", *CPU_SHARED} <= set(services), "migration_services_missing")
+    public = services["app"].get("environment", {})
+    if "PUBLIC_ORIGIN" in public:
+        require(public.get("PUBLIC_ORIGIN") == "https://inkseq.com"
+            and public.get("PUBLIC_ORIGIN_ALIASES") == "https://www.sixnine.art,https://sixnine.art"
+            and "SIXNINE_PUBLIC_ORIGIN" not in public
+            and all(services[name].get("environment", {}).get("PUBLIC_ORIGIN") == "https://inkseq.com"
+                and "SIXNINE_PUBLIC_ORIGIN" not in services[name].get("environment", {})
+                and "PUBLIC_ORIGIN_ALIASES" not in services[name].get("environment", {})
+                for name in ("controller", "dispatch")), "migration_public_origin_split")
+        require(services["caddy"].get("environment") in
+            ({"INKSEQ_LEGACY_REDIRECT": "0"}, {"INKSEQ_LEGACY_REDIRECT": "1"}), "migration_domain_redirect_phase_invalid")
+    else:
+        require(public.get("SIXNINE_PUBLIC_ORIGIN") == "https://www.sixnine.art"
+            and "PUBLIC_ORIGIN_ALIASES" not in public
+            and all(not {"PUBLIC_ORIGIN", "PUBLIC_ORIGIN_ALIASES"} & set(services[name].get("environment", {}))
+                for name in ("controller", "dispatch")), "migration_public_origin_split")
+        require(not services["caddy"].get("environment"), "migration_domain_redirect_phase_invalid")
     require(dstack_image == DSTACK_IMAGE or re.fullmatch(r"sixnine-dstack:[0-9a-f]{40}@sha256:[0-9a-f]{64}", dstack_image),
             "migration_dstack_image_binding_invalid")
     require(services["dstack"]["image"] == dstack_image and services["hatchet"]["image"] == HATCHET_IMAGE,
@@ -118,6 +135,8 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE):
         require(not any(service.get(key) for key in ("gpus", "devices", "privileged", "env_file")), "migration_unsafe_service")
         environment = service.get("environment", {})
         require(type(environment) is dict, "migration_environment_invalid")
+        require(name == "caddy" or "INKSEQ_LEGACY_REDIRECT" not in environment,
+                "migration_domain_flag_outside_proxy")
         require(not any(key.startswith("DSTACK_OTEL_") and key.endswith("_ENABLED") for key in environment),
                 "migration_raw_dstack_telemetry_enabled")
         require(not any(key in environment for key in ("DSTACK_SERVER_ADMIN_TOKEN", "DSTACK_DATABASE_URL",
@@ -225,6 +244,10 @@ def check(base, overlay, *, environment=None, runner=subprocess.run, host_memory
             raise ValueError("migration_compose_render_invalid") from None
         receipt = validate(document, host_memory_mib=host_memory_mib,
             dstack_image=(environment or {}).get("SIXNINE_DSTACK_SERVER_IMAGE", DSTACK_IMAGE))
+        if "PUBLIC_ORIGIN" in document["services"]["app"]["environment"]:
+            require(document["services"]["caddy"]["environment"]["INKSEQ_LEGACY_REDIRECT"]
+                == (environment if environment is not None else os.environ).get("INKSEQ_LEGACY_REDIRECT", "0"),
+                "migration_domain_redirect_phase_unbound")
         if check_inputs:
             local_inputs(document)
         if probe:

@@ -1,4 +1,4 @@
-# Sixnine：单台 Lightsail CPU 部署包
+# 映序 / Inkseq：单台 CPU 部署包
 
 这是离线部署产物。**尚未购买实例、分配公网 IP、修改 DNS、签发公网证书或配置正式秘密来源。** 默认本地私有素材存储，GPU生成、CPU粗剪、外部API和云创建均关闭；没有复制旧 H3 的媒体、数据库或中央凭据。旧 `deploy/` 主配置不变，本目录用于新的 `Dockerfile.platform`。
 
@@ -11,7 +11,7 @@
 | db | 仅私有 database | PostgreSQL 17，持久 PGDATA；仅SCRAM主机认证 | 无 |
 | db-init | 仅私有 database | 一次性DB管理员身份，建立/核对受限 app role | 无 |
 
-`www.sixnine.art` 是唯一应用入口。apex 308 到 www 并保留 URI；`h3.sixnine.art` 仅 308 到 `https://www.sixnine.art/freestyle`，不代理GPU或H3 API。API客户端使用 www 的 `/v1/...`。
+产品主入口为 `https://inkseq.com`，`www.inkseq.com` 308 到主域名。域名迁移阶段 A 同时服务新主域名和旧 `www.sixnine.art`，旧 apex 仍 308 到旧 www；新域名 HTTPS、登录和原有 PAT/Agent 验收后，受保护 `site.env` 中的 `INKSEQ_LEGACY_REDIRECT=1` 才让旧 apex/www 308 到新域名并保留路径、查询和 POST 方法。详细切换和配对回滚见 [域名迁移契约](DOMAIN-MIGRATION.zh-CN.md)。后端优先使用 `PUBLIC_ORIGIN`，旧 `SIXNINE_PUBLIC_ORIGIN` 仅作冲突检查的兼容别名；不改变租户、账户、Key 或媒体标识。
 
 已核对的主机模板起点是 2 vCPU、8 GiB RAM，见 [主机规格与费用依据](INFRASTRUCTURE.zh-CN.md)；这不是已租用配置或吞吐承诺。app CPU 配额固定2核，兼容这个起点；其内存上限3 GiB、数据库1 GiB、Caddy256 MiB。Compose显式固定 `SIXNINE_RENDER_ENABLED=0`，配置检查和健康检查都会拒绝意外开启；CPU粗剪需要先部署独立renderer、核定容量与配额，再单独评审启用，不能从主机总配额推断它已开启。HTTP上传暂存使用独立磁盘目录，避免把多个512 MiB文件全部放RAM；必须另外监控磁盘容量。单机不具备跨主机高可用，PG和媒体需要加密的离机备份与恢复演练。
 

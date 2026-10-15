@@ -68,7 +68,7 @@ def controller(image, backend='comfy-worker'):
         'mem_limit': 1024**3, 'cpus': .75, 'stop_grace_period': '4m',
         'environment': {'SIXNINE_DATA': '/data',
             'SIXNINE_DATABASE_URL_FILE': '/run/secrets/app_database_url',
-            'SIXNINE_PUBLIC_ORIGIN': 'https://www.sixnine.art',
+            'PUBLIC_ORIGIN': 'https://inkseq.com',
             'SIXNINE_AUTH_MODE': 'password', 'SIXNINE_GENERATION_ENABLED': '1',
             'SIXNINE_RENDER_ENABLED': '0', 'SIXNINE_EXECUTION_BACKEND': backend,
             'SIXNINE_CLOUD_CREATION_ENABLED': '0', 'SIXNINE_STORAGE_PROVIDER': 'local',

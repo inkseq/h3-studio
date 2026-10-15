@@ -96,7 +96,7 @@ class ComposeOverlayTests(unittest.TestCase):
         for mount in self.config['services']['gpu-worker']['volumes']:
             self.assertTrue(mount['source'].startswith('/srv/sixnine/'))
         env = self.config['services']['gpu-worker']['environment']
-        self.assertEqual(env['SIXNINE_PUBLIC_ORIGIN'], 'https://www.sixnine.art')
+        self.assertEqual(env['PUBLIC_ORIGIN'], 'https://inkseq.com')
         self.assertEqual(env['SIXNINE_CLOUD_CREATION_ENABLED'], '0')
 
     def test_worker_boundary_changes_fail_closed(self):

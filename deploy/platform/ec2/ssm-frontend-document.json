@@ -1,6 +1,6 @@
 {
   "schemaVersion": "2.2",
-  "description": "Sixnine: activate only an independently approved frontend; never restart API or GPU",
+  "description": "Inkseq: activate only an independently approved frontend; never restart API or GPU",
   "parameters": {
     "Commit": {
       "type": "String",
@@ -15,7 +15,7 @@
     "precondition": {"StringEquals": ["platformType", "Linux"]},
     "inputs": {
       "timeoutSeconds": "300",
-      "runCommand": ["set -eu", "test -n \"${SSM_Commit:-}\"", "exec /usr/bin/python3 /opt/sixnine-release/deploy_frontend.py \"$SSM_Commit\""]
+      "runCommand": ["set -eu", "test -n \"${SSM_Commit:-}\"", "exec /usr/bin/python3 /opt/sixnine-release-origin-v1/deploy_frontend.py \"$SSM_Commit\""]
     }
   }]
 }

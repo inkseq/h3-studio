@@ -72,6 +72,30 @@ class DeploymentPolicyTests(unittest.TestCase):
     def test_rendered_compose_has_strict_production_policy(self):
         self.assertTrue(policy.validate(self.rendered, compose_version=self.compose_version))
 
+    def test_domain_phase_is_closed_and_retained_legacy_configuration_still_validates(self):
+        self.assertEqual(self.rendered["services"]["app"]["environment"]["PUBLIC_ORIGIN"], "https://inkseq.com")
+        for phase in ("0", "1"):
+            candidate = copy.deepcopy(self.rendered)
+            candidate["services"]["caddy"]["environment"] = {"INKSEQ_LEGACY_REDIRECT": phase}
+            self.assertTrue(policy.validate(candidate, compose_version=self.compose_version))
+        legacy = copy.deepcopy(self.rendered)
+        environment = legacy["services"]["app"]["environment"]
+        environment.pop("PUBLIC_ORIGIN")
+        environment.pop("PUBLIC_ORIGIN_ALIASES")
+        environment["SIXNINE_PUBLIC_ORIGIN"] = "https://www.sixnine.art"
+        legacy["services"]["caddy"].pop("environment")
+        self.assertTrue(policy.validate(legacy, compose_version=self.compose_version))
+        for mutation in (
+                lambda c: c["services"]["app"]["environment"].update(PUBLIC_ORIGIN="https://staging.inkseq.com"),
+                lambda c: c["services"]["app"]["environment"].update(PUBLIC_ORIGIN_ALIASES="https://*.sixnine.art"),
+                lambda c: c["services"]["app"]["environment"].update(SIXNINE_PUBLIC_ORIGIN="https://www.sixnine.art"),
+                lambda c: c["services"]["caddy"]["environment"].update(INKSEQ_LEGACY_REDIRECT="true"),
+                lambda c: c["services"]["caddy"]["environment"].update(PUBLIC_ORIGIN="https://inkseq.com")):
+            changed = copy.deepcopy(self.rendered)
+            mutation(changed)
+            with self.assertRaises(policy.ConfigurationError):
+                policy.validate(changed, compose_version=self.compose_version)
+
     def test_title_secret_path_and_egress_are_a_complete_reviewed_pair(self):
         legacy=copy.deepcopy(self.rendered)
         app=legacy['services']['app']
@@ -209,12 +233,34 @@ class DeploymentPolicyTests(unittest.TestCase):
         image = "caddy:2.10.2-alpine"
         if docker("image", "inspect", image, check=False).returncode:
             self.skipTest("Reviewed local Caddy image not available; no pull performed")
-        result = docker("run", "--rm", "--pull=never", "--network", "none", "--read-only", "--cap-drop", "ALL",
-            "--cap-add", "NET_BIND_SERVICE",
-            "--mount", f"type=bind,source={DEPLOY / 'Caddyfile'},target=/etc/caddy/Caddyfile,readonly",
-            "--tmpfs", "/data", "--tmpfs", "/config", "--tmpfs", "/tmp",
-            image, "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile")
-        self.assertEqual(result.returncode, 0)
+        for phase in ("0", "1"):
+            result = docker("run", "--rm", "--pull=never", "--network", "none", "--read-only", "--cap-drop", "ALL",
+                "--cap-add", "NET_BIND_SERVICE", "--env", "INKSEQ_LEGACY_REDIRECT=" + phase,
+                "--mount", f"type=bind,source={DEPLOY / 'Caddyfile'},target=/etc/caddy/Caddyfile,readonly",
+                "--tmpfs", "/data", "--tmpfs", "/config", "--tmpfs", "/tmp",
+                image, "caddy", "adapt", "--validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile")
+            document = json.loads(result.stdout)
+            handlers = []
+            def walk(value):
+                if isinstance(value, dict):
+                    if "handler" in value:
+                        handlers.append(value)
+                    for child in value.values():
+                        walk(child)
+                elif isinstance(value, list):
+                    for child in value:
+                        walk(child)
+            walk(document)
+            redirects = [item for item in handlers if item["handler"] == "static_response" and "Location" in item.get("headers", {})]
+            # 308 is method/body preserving, and URI includes path plus query.
+            # No request rewrite handler may discard either before redirect.
+            self.assertTrue(redirects)
+            self.assertTrue(all(str(item["status_code"]) == "308" for item in redirects))
+            self.assertTrue(any(item["headers"]["Location"] == ["https://inkseq.com{http.request.uri}"] for item in redirects))
+            self.assertFalse(any(item["handler"] == "rewrite" for item in handlers))
+            # Redirects apply to POST as well as GET; no method matcher narrows
+            # them to a browser-only request or rewrites the submitted body.
+            self.assertNotIn('"method":', json.dumps(document))
 
 
 class BootstrapInputTests(unittest.TestCase):

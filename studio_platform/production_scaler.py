@@ -323,7 +323,7 @@ def stdin_loader(config, stream):
 def validate_settings(config, settings, *, require_policy=True):
     if (not settings.database_url.startswith("postgresql+psycopg:") or settings.tenant_id != config.tenant
             or settings.data_dir != config.data_dir.resolve() or settings.storage_provider != "local"
-            or settings.auth_mode != "password" or settings.public_origin != "https://www.sixnine.art"
+            or settings.auth_mode != "password" or settings.public_origin not in {"https://inkseq.com", "https://www.sixnine.art"}
             or not settings.generation_enabled or settings.execution_backend != config.execution_backend):
         raise ScalerError("finite_requires_same_production_postgres_and_local_store")
     if require_policy:
