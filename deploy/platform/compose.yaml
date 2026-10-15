@@ -99,7 +99,8 @@ services:
     environment:
       SIXNINE_DATA: /data
       SIXNINE_DATABASE_URL_FILE: /run/secrets/app_database_url
-      SIXNINE_PUBLIC_ORIGIN: https://www.sixnine.art
+      PUBLIC_ORIGIN: https://inkseq.com
+      PUBLIC_ORIGIN_ALIASES: https://www.sixnine.art,https://sixnine.art
       SIXNINE_AUTH_MODE: password
       SIXNINE_GENERATION_ENABLED: "0"
       SIXNINE_RENDER_ENABLED: "0"
@@ -146,6 +147,8 @@ services:
     image: ${SIXNINE_CADDY_IMAGE:?Set an approved Caddy image digest}
     pull_policy: never
     restart: unless-stopped
+    environment:
+      INKSEQ_LEGACY_REDIRECT: ${INKSEQ_LEGACY_REDIRECT:-0}
     read_only: true
     cap_drop: [ALL]
     cap_add: [NET_BIND_SERVICE]

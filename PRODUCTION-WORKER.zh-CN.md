@@ -38,7 +38,7 @@ python -m studio_platform.production_worker --config /worker-config/worker.json 
 
 字段模板在 `deploy/platform/production-worker.example.json`。其中IP、boot身份、GPU、证据、期限都是占位符，必须由已核验handoff元信息替换；模板 `enabled=false`，不能直接用于连接。严禁仅把它改成true尝试猜测机器。
 
-运行环境从 `Settings.from_environment` 读取，与API共用：`SIXNINE_DATA=/data`、同生产DSN_FILE、PUBLIC_ORIGIN=`https://www.sixnine.art`、AUTH_MODE=password、GENERATION_ENABLED=1、EXECUTION_BACKEND=comfy-worker、STORAGE_PROVIDER=local、EXECUTION_POLICY_FILE绝对只读路径。PG必须是postgresql+psycopg；不回退SQLite。policy需same pool/configuration/model/recipe/evidence，资格/费用expiry不得晚于safe_deadline。root应先明确设置有限capacity和superdan预算；worker不会自行扩大额度。
+此文记录历史 Comfy worker 契约；当前域名为 `https://inkseq.com`，当前存储与调度以已批准发布和配置为准。原版本运行环境从 `Settings.from_environment` 读取，与API共用：`SIXNINE_DATA=/data`、同生产DSN_FILE、PUBLIC_ORIGIN、AUTH_MODE=password、GENERATION_ENABLED=1、EXECUTION_BACKEND=comfy-worker、STORAGE_PROVIDER=local、EXECUTION_POLICY_FILE绝对只读路径。PG必须是postgresql+psycopg；不回退SQLite。policy需same pool/configuration/model/recipe/evidence，资格/费用expiry不得晚于safe_deadline。root应先明确设置有限capacity和superdan预算；worker不会自行扩大额度。
 
 ## 真正交接前置条件
 

@@ -32,7 +32,7 @@ python -m studio_platform.production_scaler --config /control-config/scaler.json
 - 完整 `scale_policy`、顺序明确的 `launches` 与一一对应 `manifests`：最多两个不同 executor，各单卡/单 slot；必须为完整 TTL 预留报价上限。供应商不提供原子价格上限时，只能承认预查报价限制，不能声称绝对最终账单封顶。
 - `secret_arn/secret_version_id` 仅为固定元信息。未知字段（包括 `api_key`）不能塞进配置。
 
-Settings 必须是生产 `postgresql+psycopg`、密码认证、同 `/data` local store、`https://www.sixnine.art`、comfy-worker。入口拒绝 SQLite；测试注入的 Repository 才可用 SQLite。此版本不实现在线改存储 provider 或跨 provider 双读。
+此文记录历史 Comfy scaler 契约；当前域名为 `https://inkseq.com`，当前存储与调度以已批准发布和配置为准。原版本要求生产 `postgresql+psycopg`、密码认证、同 `/data` local store、comfy-worker。入口拒绝 SQLite；测试注入的 Repository 才可用 SQLite。该历史版本不实现在线改存储 provider 或跨 provider 双读。
 
 ## 调度与资格
 

@@ -1,4 +1,4 @@
-"""Small authenticated Sixnine client. Requires httpx; never logs credentials."""
+"""Small authenticated Inkseq client. Requires httpx; never logs credentials."""
 from __future__ import annotations
 
 import argparse
@@ -46,10 +46,10 @@ def credential(args):
         spec = importlib.util.spec_from_file_location("sixnine_os_connection", Path(__file__).with_name("connect.py"))
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        state = module.SecureStore().load(args.base_url, args.connection)
-        if (not state or state.get("protocol") != module.PROTOCOL or state.get("status") != "connected"
-                or state.get("expected", {}).get("origin") != args.base_url):
+        effective_origin, state = module.resolve_connection(module.SecureStore(), args.base_url, args.connection)
+        if not state or state.get("protocol") != module.PROTOCOL or state.get("status") != "connected":
             raise ValueError("No activated OS-protected connection for this exact origin")
+        args.base_url = effective_origin
         value = state.get("api_key")
     elif args.profile:
         if not args.registry_root:

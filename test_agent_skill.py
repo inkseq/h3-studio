@@ -8,6 +8,7 @@ from pathlib import Path
 import socket
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -114,6 +115,50 @@ class AgentClientTests(unittest.TestCase):
                 skill.api_path(path)
         with self.assertRaises(ValueError):
             skill.origin("http://public.example")
+
+    def test_connection_alias_routes_old_and_new_cli_origins_without_copying_or_changing_the_key(self):
+        # Use the real helper resolver with an isolated, already activated alias.
+        from test_platform_agent_connect_helper import helper, MemoryStore
+        store = MemoryStore()
+        old, new, connection = "https://www.sixnine.art", helper.CANONICAL_ORIGIN, "connection-"+"1"*32
+        expected = {"origin": old, "connection_id": connection, "owner": "superdan", "tenant": "sixnine",
+            "profile_id": "creator-full", "profile_version": 1}
+        expiry = 4102444800
+        authorization = {**expected, "scopes": helper.CREATOR_V1_SCOPES, "all_projects": True,
+            "project_ids": [], "key_lifetime_days": 90, "key_expires_at": expiry}
+        expected["fingerprint"] = helper.digest(helper.canonical(authorization))
+        state = {"protocol": helper.PROTOCOL, "status": "connected", "expected": expected,
+            "api_key": "sxp_"+"s"*43, "key_id": "key-original", "expires_at": expiry}
+        store.save(old, connection, state)
+        store.save(new, connection, helper._route_alias(state, old, connection))
+        fake_module = SimpleNamespace(PROTOCOL=helper.PROTOCOL, SecureStore=lambda: store,
+            resolve_connection=helper.resolve_connection)
+        fake_spec = SimpleNamespace(loader=SimpleNamespace(exec_module=lambda module: None))
+        seen = []
+        def handler(request):
+            seen.append((request.url.host, request.method, request.url.path))
+            self.assertEqual(request.headers["Authorization"], "Bearer "+state["api_key"])
+            return httpx.Response(200, json={"id": "same-job"})
+        with patch.dict("os.environ", {}, clear=True), patch.object(importlib.util, "spec_from_file_location", return_value=fake_spec), \
+                patch.object(importlib.util, "module_from_spec", return_value=fake_module), contextlib.redirect_stdout(io.StringIO()):
+            for chosen in (old, new):
+                args = self.args(base_url=chosen, connection=connection, path="/v1/jobs/original")
+                skill.run(args, httpx.MockTransport(handler))
+                self.assertEqual(args.base_url, new)
+            with tempfile.TemporaryDirectory() as folder:
+                data = b"same original artifact"
+                destination = Path(folder)/"take.mp4"
+                args = self.args(base_url=old, connection=connection, command="download", path="/v1/artifacts/original/content",
+                    output=str(destination), sha256=hashlib.sha256(data).hexdigest(), max_bytes=100)
+                def content(request):
+                    self.assertEqual(request.url.host, "inkseq.com")
+                    self.assertEqual(request.headers["Authorization"], "Bearer "+state["api_key"])
+                    return httpx.Response(200, content=data)
+                skill.run(args, httpx.MockTransport(content))
+                self.assertEqual(destination.read_bytes(), data)
+        self.assertEqual(seen, [("inkseq.com", "GET", "/v1/jobs/original")]*2)
+        self.assertEqual(store.load(old, connection), state)
+        self.assertNotIn("api_key", store.load(new, connection))
 
     def test_download_signed_storage_hop_pins_ip_sni_and_drops_all_api_credentials(self):
         seen, data = [], b"verified-storage-bytes"

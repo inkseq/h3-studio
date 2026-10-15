@@ -51,13 +51,14 @@ def register_routes(app, *, service=None):
     settings = app.state.settings
 
     def origin(request):
-        return service.origin(settings.public_origin or str(request.base_url).rstrip("/"))
+        return service.origin(settings.public_origin_for_host(request.headers.get("host", ""))
+                              or settings.public_origin or str(request.base_url).rstrip("/"))
 
     def source_guard(request, *, browser=False):
         expected = origin(request)
         permitted = {expected, *settings.local_ui_origins}
         provided = request.headers.get("origin")
-        if provided is not None and provided.rstrip("/") not in permitted:
+        if provided is not None and provided not in permitted:
             raise ConnectError("connection_cross_site_rejected", 403)
         if request.headers.get("sec-fetch-site") == "cross-site":
             raise ConnectError("connection_cross_site_rejected", 403)

@@ -18,7 +18,7 @@ import zipfile
 
 import runtime_secrets_aws
 
-ORIGIN = 'https://www.sixnine.art'
+ORIGIN = 'https://inkseq.com'
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):

@@ -77,10 +77,13 @@ def compatible(candidate, backend):
 def app_snapshot(directory, environment):
     # Fixed, read-only commands. Never accept arbitrary code or URLs from bundle.
     script = (
-        "import json,urllib.request; "
+        "import json,os,urllib.request; from urllib.parse import urlsplit; "
+        "origin=os.environ.get('PUBLIC_ORIGIN',os.environ.get('SIXNINE_PUBLIC_ORIGIN','')); "
+        "assert origin in ('https://inkseq.com','https://www.sixnine.art'); "
+        "assert not os.environ.get('SIXNINE_PUBLIC_ORIGIN') or os.environ['SIXNINE_PUBLIC_ORIGIN']==origin; "
         "h=json.load(urllib.request.urlopen('http://127.0.0.1:8845/healthz',timeout=5)); "
         "r=urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:8845/',"
-        "headers={'Host':'www.sixnine.art'}),timeout=5); "
+        "headers={'Host':urlsplit(origin).netloc}),timeout=5); "
         "print(json.dumps({'contract':h.get('frontend_contract'),"
         "'commit':r.headers.get('X-Sixnine-Frontend-Commit'),"
         "'html_contract':r.headers.get('X-Sixnine-Frontend-Contract')}))"

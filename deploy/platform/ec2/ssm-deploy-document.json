@@ -1,6 +1,6 @@
 {
   "schemaVersion": "2.2",
-  "description": "Sixnine: only execute root-installed deployment of an independently approved commit; no arbitrary shell",
+  "description": "Inkseq: only execute root-installed deployment of an independently approved commit; no arbitrary shell",
   "parameters": {
     "Commit": {
       "type": "String",
@@ -19,7 +19,7 @@
         "runCommand": [
           "set -eu",
           "test -n \"${SSM_Commit:-}\"",
-          "exec /usr/bin/python3 /opt/sixnine-release/deploy_approved.py \"$SSM_Commit\""
+          "exec /usr/bin/python3 /opt/sixnine-release-origin-v1/deploy_approved.py \"$SSM_Commit\""
         ]
       }
     }

@@ -2,10 +2,41 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import ipaddress
 import os
 from pathlib import Path
 import stat
 from urllib.parse import urlsplit
+
+
+def public_origin_from_environment():
+    """Prefer the product-neutral name; a conflicting legacy alias is invalid."""
+    current = os.environ.get("PUBLIC_ORIGIN")
+    legacy = os.environ.get("SIXNINE_PUBLIC_ORIGIN")
+    if current is not None and legacy is not None and current.rstrip("/") != legacy.rstrip("/"):
+        raise ValueError("PUBLIC_ORIGIN conflicts with SIXNINE_PUBLIC_ORIGIN")
+    return (current if current is not None else legacy or "").rstrip("/")
+
+
+def _public_https_origin(value):
+    if not isinstance(value, str):
+        raise ValueError("PUBLIC_ORIGIN must be one exact public HTTPS origin")
+    try:
+        parsed = urlsplit(value)
+        parsed.port  # Reject malformed/out-of-range authorities before matching Host.
+    except ValueError:
+        raise ValueError("PUBLIC_ORIGIN must be one exact public HTTPS origin") from None
+    try:
+        address = ipaddress.ip_address(parsed.hostname or "")
+    except ValueError:
+        address = None
+    if (value != value.strip() or parsed.scheme != "https"
+            or not parsed.hostname or parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+            or address is not None and not address.is_global
+            or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment
+            or value != "https://" + parsed.netloc or "*" in value):
+        raise ValueError("PUBLIC_ORIGIN must be one exact public HTTPS origin")
+    return parsed
 
 
 def database_url_from_environment():
@@ -71,6 +102,7 @@ class Settings:
     recovery_backends: tuple[str, ...] = ()
     title_config_file: Path | None = None
     title_use_central: bool = False
+    public_origin_aliases: tuple[str, ...] = ()
 
     def __post_init__(self):
         object.__setattr__(self, "data_dir", Path(self.data_dir).resolve())
@@ -117,11 +149,16 @@ class Settings:
             object.__setattr__(self, "database_url", "sqlite:///" + (self.data_dir / "platform.sqlite3").as_posix())
         if self.auth_mode not in {"password", "local-test"}:
             raise ValueError("Use password or explicit local-test authentication")
+        if (not isinstance(self.public_origin_aliases, tuple)
+                or any(not isinstance(origin, str) for origin in self.public_origin_aliases)
+                or len(set(self.public_origin_aliases)) != len(self.public_origin_aliases)
+                or self.public_origin in self.public_origin_aliases
+                or self.public_origin_aliases and not self.public_origin):
+            raise ValueError("Public origin aliases require distinct explicit origins and a canonical origin")
         if self.public_origin:
-            parsed = urlsplit(self.public_origin)
-            if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password
-                    or parsed.path or parsed.query or parsed.fragment or "*" in self.public_origin):
-                raise ValueError("PUBLIC_ORIGIN must be one exact HTTPS origin")
+            _public_https_origin(self.public_origin)
+            for alias in self.public_origin_aliases:
+                _public_https_origin(alias)
             if self.auth_mode != "password":
                 raise ValueError("Public deployments require password authentication")
             if self.execution_backend == "mock":
@@ -149,13 +186,19 @@ class Settings:
         if self.max_upload_bytes < 1 or self.max_project_bytes < 1024:
             raise ValueError("Invalid request limits")
 
+    def public_origin_for_host(self, host):
+        """Resolve only a configured exact authority, never a forwarded header."""
+        return next((origin for origin in (self.public_origin, *self.public_origin_aliases)
+                     if origin and urlsplit(origin).netloc.lower() == host.lower()), None)
+
     @classmethod
     def from_environment(cls):
         default = Path(__file__).resolve().parents[1] / ".platform-data"
         return cls(
             data_dir=Path(os.environ.get("SIXNINE_DATA", str(default))),
             database_url=database_url_from_environment(),
-            public_origin=os.environ.get("SIXNINE_PUBLIC_ORIGIN", "").rstrip("/"),
+            public_origin=public_origin_from_environment(),
+            public_origin_aliases=tuple(os.environ["PUBLIC_ORIGIN_ALIASES"].split(",")) if os.environ.get("PUBLIC_ORIGIN_ALIASES") else (),
             local_ui_origins=tuple(x.strip() for x in os.environ.get("SIXNINE_LOCAL_UI_ORIGINS", "").split(",") if x.strip()),
             auth_mode=os.environ.get("SIXNINE_AUTH_MODE", "password"),
             generation_enabled=os.environ.get("SIXNINE_GENERATION_ENABLED", "0") == "1",

@@ -29,11 +29,11 @@ def validate(config, *, deployment_directory=None, compose_version=None):
     services = config.get("services", {})
     require(set(services) == {"app", "db", "db-init", "caddy"}, "Unexpected service set")
     allowed_env = {
-        "app": {"SIXNINE_DATA", "SIXNINE_DATABASE_URL_FILE", "SIXNINE_PUBLIC_ORIGIN", "SIXNINE_AUTH_MODE",
+        "app": {"SIXNINE_DATA", "SIXNINE_DATABASE_URL_FILE", "SIXNINE_PUBLIC_ORIGIN", "PUBLIC_ORIGIN", "PUBLIC_ORIGIN_ALIASES", "SIXNINE_AUTH_MODE",
                 "SIXNINE_GENERATION_ENABLED", "SIXNINE_RENDER_ENABLED", "SIXNINE_EXECUTION_BACKEND", "SIXNINE_CLOUD_CREATION_ENABLED",
                 "SIXNINE_STORAGE_PROVIDER", "SIXNINE_FRONTEND_DIR", "SIXNINE_FRONTEND_RELEASE_DIR", "SIXNINE_TITLE_CONFIG_FILE"},
         "db": {"POSTGRES_USER", "POSTGRES_DB", "POSTGRES_PASSWORD_FILE", "POSTGRES_INITDB_ARGS",
-               "POSTGRES_HOST_AUTH_METHOD", "PGDATA"}, "db-init": set(), "caddy": set()}
+               "POSTGRES_HOST_AUTH_METHOD", "PGDATA"}, "db-init": set(), "caddy": {"INKSEQ_LEGACY_REDIRECT"}}
     allowed_caps = {"app": set(), "db-init": set(), "caddy": {"NET_BIND_SERVICE"},
                     "db": {"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"}}
     common_fields = {"image", "pull_policy", "restart", "read_only", "cap_drop", "cap_add", "security_opt",
@@ -78,9 +78,19 @@ def validate(config, *, deployment_directory=None, compose_version=None):
     require(str(db.get("shm_size")) == str(256*1024**2), "Database shared-memory bound differs")
     required = {"SIXNINE_GENERATION_ENABLED": "0", "SIXNINE_RENDER_ENABLED": "0", "SIXNINE_EXECUTION_BACKEND": "disabled",
                 "SIXNINE_CLOUD_CREATION_ENABLED": "0", "SIXNINE_AUTH_MODE": "password",
-                "SIXNINE_STORAGE_PROVIDER": "local", "SIXNINE_PUBLIC_ORIGIN": "https://www.sixnine.art",
+                "SIXNINE_STORAGE_PROVIDER": "local",
                 "SIXNINE_DATABASE_URL_FILE": "/run/secrets/app_database_url", "SIXNINE_DATA": "/data",
                 "SIXNINE_FRONTEND_DIR": "/app/yingxu-dist"}
+    # Accept retained old release bytes or this exact dual-origin successor,
+    # never an arbitrary public host, alias list or mixed legacy/new setting.
+    if "PUBLIC_ORIGIN" in app.get("environment", {}):
+        required.update(PUBLIC_ORIGIN="https://inkseq.com",
+            PUBLIC_ORIGIN_ALIASES="https://www.sixnine.art,https://sixnine.art")
+        require(caddy.get("environment") in ({"INKSEQ_LEGACY_REDIRECT": "0"}, {"INKSEQ_LEGACY_REDIRECT": "1"}),
+                "Domain redirect phase must be the explicit reviewed value")
+    else:
+        required["SIXNINE_PUBLIC_ORIGIN"] = "https://www.sixnine.art"
+        require(not caddy.get("environment"), "Legacy proxy must not inherit new domain settings")
     # Only the exact legacy baseline or the complete reviewed frontend pair is
     # accepted; this preserves rollback without permitting arbitrary mounts.
     independent_frontend = "SIXNINE_FRONTEND_RELEASE_DIR" in app.get("environment", {})

@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import re
 import time
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote
 import uuid
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
@@ -147,9 +147,9 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
     @app.middleware("http")
     async def guard(request: Request, call_next):
         host = request.headers.get("host", "").lower()
+        request_public_origin = settings.public_origin_for_host(host)
         if settings.public_origin:
-            expected = urlsplit(settings.public_origin).netloc.lower()
-            if host != expected and not (request.url.path == "/healthz" and host.split(":")[0] in {"localhost", "127.0.0.1"}):
+            if request_public_origin is None and not (request.url.path == "/healthz" and host.split(":")[0] in {"localhost", "127.0.0.1"}):
                 return JSONResponse({"detail": "无效访问域名"}, status_code=400)
         elif host.split(":")[0] not in {"localhost", "127.0.0.1", "testserver"}:
             return JSONResponse({"detail": "本地服务仅支持loopback入口"}, status_code=400)
@@ -202,9 +202,9 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
                 headers={"Cache-Control": "no-store", "X-Authenticated-Account": principal.owner})
         if request.method not in {"GET", "HEAD", "OPTIONS"} and not (principal and principal.machine):
             origin = request.headers.get("origin")
-            expected = settings.public_origin or str(request.base_url).rstrip("/")
+            expected = request_public_origin or str(request.base_url).rstrip("/")
             allowed_origins = {expected, *settings.local_ui_origins}
-            if origin and origin.rstrip("/") not in allowed_origins:
+            if origin and origin not in allowed_origins:
                 return JSONResponse({"detail": "跨站写入请求被拒绝"}, status_code=403)
             if request.headers.get("sec-fetch-site") == "cross-site":
                 return JSONResponse({"detail": "跨站写入请求被拒绝"}, status_code=403)

@@ -174,6 +174,16 @@ class ReleaseTests(unittest.TestCase):
         self.assertNotIn("AWS_SECRET_ACCESS_KEY", env)
         self.assertEqual(env["PATH"], "/usr/sbin:/usr/bin:/sbin:/bin")
         self.assertEqual(env["SIXNINE_IMAGE"], "sixnine-platform:"+COMMIT)
+        original = site.read_text(encoding="utf-8")
+        for phase in ("0", "1"):
+            site.write_text(original + "\nINKSEQ_LEGACY_REDIRECT=" + phase, encoding="utf-8")
+            with patch.object(release, "regular"):
+                self.assertEqual(release.deployment_environment(site, COMMIT)["INKSEQ_LEGACY_REDIRECT"], phase)
+        for phase in ("true", "2", "", "0\nINKSEQ_LEGACY_REDIRECT=1"):
+            site.write_text(original + "\nINKSEQ_LEGACY_REDIRECT=" + phase, encoding="utf-8")
+            with patch.object(release, "regular"), self.assertRaises(release.ReleaseError):
+                release.deployment_environment(site, COMMIT)
+        site.write_text(original, encoding="utf-8")
         with site.open("a", encoding="utf-8") as output:
             output.write("\nAWS_SECRET_ACCESS_KEY=synthetic-only")
         with patch.object(release, "regular"), self.assertRaises(release.ReleaseError):
@@ -200,6 +210,13 @@ class ReleaseTests(unittest.TestCase):
         command.assert_called_once_with(["compose", "version", "--short"], environment=environment)
         compose.assert_called_once_with(self.incoming, environment, "config", "--format", "json")
         validate.assert_called_once_with(rendered, deployment_directory=self.incoming, compose_version="v2.38.2")
+        rendered["services"]["app"]["environment"] = {"PUBLIC_ORIGIN": "https://inkseq.com"}
+        rendered["services"]["caddy"]["environment"] = {"INKSEQ_LEGACY_REDIRECT": "1"}
+        with patch.object(release, "command", return_value=b"v2.38.2\n"), \
+             patch.object(release, "compose", return_value=json.dumps(rendered)), patch.object(release, "validate"):
+            with self.assertRaisesRegex(release.ReleaseError, "domain_redirect_phase_differs_from_site_config"):
+                release.approved_configuration(self.incoming, environment)
+            release.approved_configuration(self.incoming, {**environment, "INKSEQ_LEGACY_REDIRECT": "1"})
 
     def archive(self, *, extra=False, unsafe=None):
         filename = self.root / "test-image.tar.gz"

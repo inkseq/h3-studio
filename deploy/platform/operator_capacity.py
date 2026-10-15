@@ -219,7 +219,7 @@ def controller(image, runtime=None):
         'read_only':True,'cap_drop':['ALL'],'security_opt':['no-new-privileges:true'],
         'pids_limit':192,'mem_limit':1024**3,'cpus':.75,
         'environment':{'SIXNINE_DATA':'/data','SIXNINE_DATABASE_URL_FILE':'/run/secrets/app_database_url',
-            'SIXNINE_PUBLIC_ORIGIN':'https://www.sixnine.art','SIXNINE_AUTH_MODE':'password',
+            'PUBLIC_ORIGIN':'https://inkseq.com','SIXNINE_AUTH_MODE':'password',
             'SIXNINE_GENERATION_ENABLED':'1','SIXNINE_RENDER_ENABLED':'0',
             'SIXNINE_EXECUTION_BACKEND':'wangp-worker','SIXNINE_CLOUD_CREATION_ENABLED':'0',
             'SIXNINE_STORAGE_PROVIDER':'local','SIXNINE_EXECUTION_PROFILES_FILE':PROFILES.as_posix(),

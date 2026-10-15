@@ -27,7 +27,7 @@ class RunnerTests(unittest.TestCase):
         return api
 
     def success(self, commit=COMMIT):
-        return {'Status': 'Success', 'DocumentName': runner.DOCUMENT, 'DocumentVersion': '1',
+        return {'Status': 'Success', 'DocumentName': runner.DOCUMENT, 'DocumentVersion': '2',
                 'StandardOutputContent': json.dumps({
             'state': 'approved_application_release_healthy', 'commit': commit})}
 
@@ -38,7 +38,7 @@ class RunnerTests(unittest.TestCase):
         params = api.send_command.call_args.kwargs
         self.assertEqual(params['InstanceIds'], [runner.INSTANCE])
         self.assertEqual(params['DocumentName'], 'Sixnine-DeployApprovedRelease')
-        self.assertEqual(params['DocumentVersion'], '1')
+        self.assertEqual(params['DocumentVersion'], '2')
         self.assertEqual(params['Parameters'], {'Commit': [COMMIT]})
         self.assertNotIn('ServiceRoleArn', params)
         self.assertEqual(result['state'], 'deployment_completed')
@@ -48,6 +48,13 @@ class RunnerTests(unittest.TestCase):
         for value in ('main', COMMIT+';touch /tmp/x', '$HOME', '../'+COMMIT):
             with self.assertRaises(ValueError):
                 runner.deploy(value, api=api)
+        api.send_command.assert_not_called()
+
+    def test_old_document_receipt_cannot_confirm_new_helper_deployment(self):
+        receipt = {**self.success(), 'DocumentVersion': '1'}
+        api = self.api([receipt])
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaisesRegex(RuntimeError, 'document version'):
+            runner.deploy(COMMIT, resume_command=COMMAND, api=api)
         api.send_command.assert_not_called()
 
     def test_resume_does_not_submit_again_or_accept_another_receipt(self):
@@ -136,14 +143,17 @@ class HostAndDocumentTests(unittest.TestCase):
                 apply.assert_not_called()
 
     def test_document_has_one_env_commit_and_fixed_root_entry(self):
-        doc = json.loads((ROOT/'deploy/platform/ec2/ssm-deploy-document.json').read_text())
-        self.assertEqual(set(doc['parameters']), {'Commit'})
-        self.assertEqual(doc['parameters']['Commit']['allowedPattern'], '^[0-9a-f]{40}$')
-        self.assertEqual(doc['parameters']['Commit']['interpolationType'], 'ENV_VAR')
-        self.assertEqual(len(doc['mainSteps']), 1)
-        commands = doc['mainSteps'][0]['inputs']['runCommand']
-        self.assertNotIn('{{', '\n'.join(commands))
-        self.assertEqual(commands[-1], 'exec /usr/bin/python3 /opt/sixnine-release/deploy_approved.py "$SSM_Commit"')
+        for name, helper in (("ssm-deploy-document.json", "deploy_approved.py"),
+                             ("ssm-frontend-document.json", "deploy_frontend.py")):
+            with self.subTest(document=name):
+                doc = json.loads((ROOT/'deploy/platform/ec2'/name).read_text())
+                self.assertEqual(set(doc['parameters']), {'Commit'})
+                self.assertEqual(doc['parameters']['Commit']['allowedPattern'], '^[0-9a-f]{40}$')
+                self.assertEqual(doc['parameters']['Commit']['interpolationType'], 'ENV_VAR')
+                self.assertEqual(len(doc['mainSteps']), 1)
+                commands = doc['mainSteps'][0]['inputs']['runCommand']
+                self.assertNotIn('{{', '\n'.join(commands))
+                self.assertEqual(commands[-1], 'exec /usr/bin/python3 /opt/sixnine-release-origin-v1/' + helper + ' "$SSM_Commit"')
 
     def test_host_rejects_first_publication_and_preserves_existing_state(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -152,7 +152,7 @@ def save(path, value):
 def validate_settings(config, settings):
     if (settings.tenant_id != config.tenant or settings.auth_mode != "password"
             or settings.execution_backend != "comfy-worker" or not settings.generation_enabled
-            or settings.storage_provider != "local" or settings.public_origin != "https://www.sixnine.art"
+            or settings.storage_provider != "local" or settings.public_origin not in {"https://inkseq.com", "https://www.sixnine.art"}
             or not settings.database_url.startswith("postgresql+psycopg:") or settings.execution_policy_file is None):
         raise AcceptanceError("acceptance_requires_exact_production_settings")
     from .execution_policy import read_policy

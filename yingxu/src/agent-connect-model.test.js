@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {agentHandoff,agentKeySuggestion,agentOrigin} from './agent-connect-model.js';
 
-const ready={origin:'https://www.sixnine.art/?api_key=do-not-copy#private',account:'owner',workspace:{mode:'cloud',account:'owner',serverVersion:3,dirty:false},projectId:'story-1',entityId:'shot-2'};
+const ready={origin:'https://inkseq.com/?api_key=do-not-copy#private',account:'owner',workspace:{mode:'cloud',account:'owner',serverVersion:3,dirty:false},projectId:'story-1',entityId:'shot-2'};
 
 test('quick handoff returns to the same saved shot in freestyle with the same scoped key suggestion',()=>{
   const value=agentHandoff({...ready,view:'/freestyle'});
-  assert.equal(value.workUrl,'https://www.sixnine.art/freestyle?project=story-1&entity=shot-2');
+  assert.equal(value.workUrl,'https://inkseq.com/freestyle?project=story-1&entity=shot-2');
   assert.match(value.brief,/\/freestyle\?project=story-1&entity=shot-2/);
   assert.deepEqual(agentKeySuggestion(value.cloudProject).projectIds,['story-1']);
   assert.equal(agentHandoff({...ready,view:'https://other.example/'}).workUrl,null);
@@ -16,11 +16,11 @@ test('quick handoff returns to the same saved shot in freestyle with the same sc
 
 test('handoff links point to the saved cloud scope and never carry page query or private document content',()=>{
   const value=agentHandoff({...ready,projectTitle:'Private title',project:{script:'Private script'},api_key:'synthetic-secret'});
-  assert.equal(value.workUrl,'https://www.sixnine.art/?project=story-1&entity=shot-2');
+  assert.equal(value.workUrl,'https://inkseq.com/?project=story-1&entity=shot-2');
   for(const excluded of ['api_key=','do-not-copy','#private','Private title','Private script','synthetic-secret'])assert.ok(!value.brief.includes(excluded));
   assert.equal(value.ready,true);assert.match(value.brief,/for-agents\/SKILL\.md/);assert.match(value.brief,/不自动替换已采用/);
-  assert.ok(value.brief.includes('完整纯文本指南（无需登录）：https://www.sixnine.art/for-agents/guide.md'));
-  assert.ok(value.brief.includes('离线说明与工具包：https://www.sixnine.art/for-agents/skill.zip'));
+  assert.ok(value.brief.includes('完整纯文本指南（无需登录）：https://inkseq.com/for-agents/guide.md'));
+  assert.ok(value.brief.includes('离线说明与工具包：https://inkseq.com/for-agents/skill.zip'));
 });
 
 test('an unsaved draft, another account, or a local workspace cannot leak a handoff to inaccessible or unpublished contents',()=>{

@@ -10,7 +10,14 @@
     }
 }
 
-www.sixnine.art {
+inkseq.com, www.sixnine.art {
+    # Phase A serves the old www and new apex. Switch only after new TLS/login
+    # acceptance; the host-side validator permits exactly 0 or 1.
+    @retired_www {
+        host www.sixnine.art
+        expression `"{$INKSEQ_LEGACY_REDIRECT:0}" == "1"`
+    }
+    redir @retired_www https://inkseq.com{uri} 308
     encode zstd gzip
     header {
         X-Content-Type-Options nosniff
@@ -25,7 +32,7 @@ www.sixnine.art {
     reverse_proxy app:8845 {
         header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto https
-        header_up X-Forwarded-Host www.sixnine.art
+        header_up X-Forwarded-Host {host}
         transport http {
             dial_timeout 5s
             response_header_timeout 15m
@@ -36,10 +43,18 @@ www.sixnine.art {
 }
 
 sixnine.art {
+    @retired_apex expression `"{$INKSEQ_LEGACY_REDIRECT:0}" == "1"`
+    redir @retired_apex https://inkseq.com{uri} 308
     redir https://www.sixnine.art{uri} 308
+}
+
+www.inkseq.com {
+    redir https://inkseq.com{uri} 308
 }
 
 h3.sixnine.art {
     # A UI redirect only; this hostname does not proxy API requests to H3/GPU.
+    @retired_h3 expression `"{$INKSEQ_LEGACY_REDIRECT:0}" == "1"`
+    redir @retired_h3 https://inkseq.com/freestyle 308
     redir https://www.sixnine.art/freestyle 308
 }

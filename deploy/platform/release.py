@@ -26,6 +26,7 @@ DOCKER = "/usr/bin/docker"
 FILES = {"image.tar.gz", "compose.yaml", "Caddyfile", "init_database.py", "check_config.py"}
 ENV_FIELDS = {"SIXNINE_IMAGE", "SIXNINE_POSTGRES_IMAGE", "SIXNINE_CADDY_IMAGE",
               "SIXNINE_DB_ADMIN_SECRET_FILE", "SIXNINE_APP_DSN_SECRET_FILE"}
+OPTIONAL_ENV_FIELDS = {"INKSEQ_LEGACY_REDIRECT"}
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -249,10 +250,12 @@ def deployment_environment(path, commit):
         if not line or line.startswith("#"):
             continue
         key, separator, value = line.partition("=")
-        require(separator == "=" and key in ENV_FIELDS and key not in values, "invalid_nonsecret_site_config")
+        require(separator == "=" and key in ENV_FIELDS | OPTIONAL_ENV_FIELDS and key not in values, "invalid_nonsecret_site_config")
         require(value == value.strip() and "\x00" not in value, "invalid_nonsecret_site_config")
         values[key] = value
-    require(set(values) == ENV_FIELDS, "incomplete_site_config")
+    require(ENV_FIELDS <= set(values) <= ENV_FIELDS | OPTIONAL_ENV_FIELDS, "incomplete_site_config")
+    if "INKSEQ_LEGACY_REDIRECT" in values:
+        require(values["INKSEQ_LEGACY_REDIRECT"] in {"0", "1"}, "invalid_domain_redirect_phase")
     for key in ("SIXNINE_POSTGRES_IMAGE", "SIXNINE_CADDY_IMAGE"):
         require(bool(re.fullmatch(r"[A-Za-z0-9./:_-]+@sha256:[0-9a-f]{64}", values[key])), "unapproved_dependency_image")
     for key, name in (("SIXNINE_DB_ADMIN_SECRET_FILE", "db_admin_password"), ("SIXNINE_APP_DSN_SECRET_FILE", "app_database_url")):
@@ -283,6 +286,9 @@ def approved_configuration(directory, environment):
     version = command(["compose", "version", "--short"], environment=environment).decode("ascii").strip()
     config = json.loads(compose(directory, environment, "config", "--format", "json"))
     validate(config, deployment_directory=directory, compose_version=version)
+    if "PUBLIC_ORIGIN" in config["services"]["app"].get("environment", {}):
+        require(config["services"]["caddy"]["environment"]["INKSEQ_LEGACY_REDIRECT"]
+                == environment.get("INKSEQ_LEGACY_REDIRECT", "0"), "domain_redirect_phase_differs_from_site_config")
     require(config["services"]["app"]["image"] == environment["SIXNINE_IMAGE"]
             and config["services"]["db"]["image"] == environment["SIXNINE_POSTGRES_IMAGE"]
             and config["services"]["caddy"]["image"] == environment["SIXNINE_CADDY_IMAGE"],

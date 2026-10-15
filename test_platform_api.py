@@ -394,6 +394,91 @@ class ApiTests(unittest.TestCase):
             Settings(Path(self.tmp.name), public_origin="https://www.sixnine.art", execution_backend="mock")
 
 
+class DomainOriginTests(unittest.TestCase):
+    """Dual-domain transition uses exact hosts and separate host-only cookies."""
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.settings = Settings(Path(self.tmp.name), public_origin="https://inkseq.com",
+            public_origin_aliases=("https://www.sixnine.art", "https://sixnine.art"))
+        self.app = create_app(self.settings)
+        self.password = secrets.token_urlsafe(24)
+        for owner in ("superdan", "supervan"):
+            self.app.state.auth.set_password(owner, self.password)
+        self.client = TestClient(self.app, base_url="https://inkseq.com")
+        self.client.__enter__()
+        self.addCleanup(self.client.__exit__, None, None, None)
+
+    def login(self, origin, owner="superdan"):
+        response = self.client.post(origin + "/api/auth/login", headers={"Origin": origin},
+            json={"username": owner, "password": self.password})
+        self.assertEqual(response.status_code, 200, response.text)
+        return response
+
+    def test_exact_old_and_new_hosts_login_with_separate_secure_host_only_cookies(self):
+        new = self.login("https://inkseq.com")
+        self.assertIn("Secure", new.headers["set-cookie"])
+        self.assertIn("HttpOnly", new.headers["set-cookie"])
+        self.assertIn("SameSite=lax", new.headers["set-cookie"])
+        self.assertNotIn("domain=", new.headers["set-cookie"].lower())
+        self.assertEqual(self.client.get("https://www.sixnine.art/api/auth/me").status_code, 401)
+        self.login("https://www.sixnine.art", "supervan")
+        self.assertEqual(self.client.get("https://inkseq.com/api/auth/me").json()["username"], "superdan")
+        self.assertEqual(self.client.get("https://www.sixnine.art/api/auth/me").json()["username"], "supervan")
+        self.assertEqual(self.client.get("https://sixnine.art/api/auth/config").status_code, 200)
+        for host in ("evil.example", "staging.inkseq.com", "inkseq.com.evil.example", "127.0.0.1"):
+            response = self.client.get("/api/auth/config", headers={"Host": host, "X-Forwarded-Host": "inkseq.com"})
+            self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.client.get("/healthz", headers={"Host": "127.0.0.1"}).status_code, 200)
+
+    def test_browser_write_origin_must_match_this_host_not_another_trusted_alias(self):
+        for host in ("https://inkseq.com", "https://www.sixnine.art"):
+            for wrong in ("https://evil.example", "http://127.0.0.1:8870", "https://inkseq.com/",
+                          "https://www.sixnine.art" if host == "https://inkseq.com" else "https://inkseq.com"):
+                response = self.client.post(host + "/api/auth/login", headers={"Origin": wrong},
+                    json={"username": "superdan", "password": self.password})
+                self.assertEqual(response.status_code, 403)
+
+    def test_existing_machine_key_authenticates_on_both_hosts_without_owner_or_scope_changes(self):
+        token = secrets.token_urlsafe(32)
+        self.app.state.auth.register_client("domain-continuity", token, "superdan", ["owned-project"], ["projects:read"])
+        original = self.app.state.auth.bearer(token)
+        for origin in ("https://inkseq.com", "https://www.sixnine.art"):
+            response = self.client.get(origin + "/api/auth/me", headers={"Authorization": "Bearer " + token})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json()["username"], "superdan")
+            self.assertTrue(response.json()["machine"])
+        self.assertEqual(self.app.state.auth.bearer(token), original)
+
+    def test_connection_grant_binds_to_current_exact_host_during_transition(self):
+        for index, origin in enumerate(("https://inkseq.com", "https://www.sixnine.art")):
+            self.login(origin)
+            response = self.client.post(origin + "/v1/account/agent-connections",
+                headers={"Origin": origin, "Idempotency-Key": "domain-grant-" + str(index)},
+                json={"authorization_profile_id": "creator-full", "authorization_profile_version": 1})
+            self.assertEqual(response.status_code, 201, response.text)
+            self.assertEqual(response.json()["connection"]["authorization"]["origin"], origin)
+
+    def test_public_origin_environment_alias_is_explicit_and_conflict_checked(self):
+        for environment, expected in (({"PUBLIC_ORIGIN": "https://inkseq.com"}, "https://inkseq.com"),
+                ({"SIXNINE_PUBLIC_ORIGIN": "https://www.sixnine.art"}, "https://www.sixnine.art"),
+                ({"PUBLIC_ORIGIN": "https://inkseq.com", "SIXNINE_PUBLIC_ORIGIN": "https://inkseq.com"}, "https://inkseq.com")):
+            with mock.patch.dict(os.environ, {"SIXNINE_DATA": self.tmp.name, **environment}, clear=True):
+                self.assertEqual(Settings.from_environment().public_origin, expected)
+        for current in ("https://inkseq.com", ""):
+            with mock.patch.dict(os.environ, {"PUBLIC_ORIGIN": current,
+                    "SIXNINE_PUBLIC_ORIGIN": "https://www.sixnine.art"}, clear=True), self.assertRaises(ValueError):
+                Settings.from_environment()
+        for aliases in (("https://inkseq.com",), ("https://www.sixnine.art",)*2,
+                        ("https://*.sixnine.art",), ("http://localhost:8870",), ("https://127.0.0.1",),
+                        ("https://127.0.0.2",), ("https://0.0.0.0",), ("https://inkseq.com:bad",),
+                        ("https://www.sixnine.art/",), ("https://name:password@www.sixnine.art",)):
+            with self.subTest(aliases=aliases), self.assertRaises(ValueError):
+                replace(self.settings, public_origin_aliases=aliases)
+        with self.assertRaises(ValueError):
+            replace(self.settings, local_ui_origins=("http://127.0.0.1:8870",))
+
+
 class NativeMediaAccountTests(unittest.TestCase):
     """Native browser content keeps the same cookie/owner boundary as fetch."""
     setUp = ApiTests.setUp

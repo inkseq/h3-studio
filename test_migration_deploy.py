@@ -139,6 +139,26 @@ class MigrationDeployTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "^"+code+"$"):
             validate(value)
 
+    def test_public_origin_and_proxy_only_phase_are_closed_and_consistent(self):
+        self.assertEqual(self.document["services"]["app"]["environment"]["PUBLIC_ORIGIN"], "https://inkseq.com")
+        legacy = copy.deepcopy(self.document)
+        for name in ("app", "controller", "dispatch"):
+            legacy["services"][name]["environment"].pop("PUBLIC_ORIGIN")
+        legacy["services"]["app"]["environment"].pop("PUBLIC_ORIGIN_ALIASES")
+        legacy["services"]["app"]["environment"]["SIXNINE_PUBLIC_ORIGIN"] = "https://www.sixnine.art"
+        legacy["services"]["caddy"].pop("environment")
+        validate(legacy)
+        self.assert_rejected(lambda d: d["services"]["app"]["environment"].pop("PUBLIC_ORIGIN"),
+            "migration_public_origin_split")
+        self.assert_rejected(lambda d: d["services"]["controller"]["environment"].update(PUBLIC_ORIGIN="https://www.sixnine.art"),
+            "migration_public_origin_split")
+        self.assert_rejected(lambda d: d["services"]["app"]["environment"].update(PUBLIC_ORIGIN_ALIASES="https://staging.inkseq.com"),
+            "migration_public_origin_split")
+        self.assert_rejected(lambda d: d["services"]["app"]["environment"].update(INKSEQ_LEGACY_REDIRECT="1"),
+            "migration_domain_flag_outside_proxy")
+        self.assert_rejected(lambda d: d["services"]["caddy"]["environment"].update(INKSEQ_LEGACY_REDIRECT="true"),
+            "migration_domain_redirect_phase_invalid")
+
     def test_derivative_requires_the_explicit_immutable_artifact_binding(self):
         value = copy.deepcopy(self.document)
         reference = "sixnine-dstack:"+"b"*40+"@sha256:"+"c"*64
