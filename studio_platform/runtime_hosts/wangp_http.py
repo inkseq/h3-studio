@@ -195,6 +195,132 @@ class StagedInputs:
         if audio_seconds>15:
             raise ValueError('wangp_ref_total_audio_duration_exceeded')
 
+    @staticmethod
+    def _full_profile(deployment_profile_id):
+        from ..runtime_catalog import get_profile
+        if get_profile(deployment_profile_id).get('compiler_epoch')!='full-controls-v2':
+            raise ValueError('wangp_full_profile_required')
+
+    @staticmethod
+    def _full_probe(path, kind):
+        """Local normalized-container probe; never accepts URLs or demuxer lists."""
+        args=['ffprobe','-v','error','-protocol_whitelist','file,pipe','-f','mov' if kind=='video' else 'wav']
+        if kind=='video': args+=['-enable_drefs','0','-use_absolute_path','0','-count_frames']
+        args+=['-max_streams','4','-show_entries',
+            'stream=codec_type,codec_name,width,height,avg_frame_rate,r_frame_rate,nb_read_frames,duration,sample_rate,channels:format=duration',
+            '-of','json',str(path)]
+        try:
+            result=run_media_process(args,check=True,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
+                timeout=20,memory_bytes=512*1024**2)
+            if len(result.stdout)>16384: raise ValueError()
+            data=json.loads(result.stdout)
+            if not isinstance(data,dict) or not isinstance(data.get('streams'),list): raise ValueError()
+            return data
+        except (subprocess.SubprocessError,OSError,ValueError,KeyError,TypeError):
+            raise ValueError('wangp_ref_media_probe_rejected') from None
+
+    def reference_metadata(self,descriptor,*,deployment_profile_id):
+        """Facts from the actual staged hash-bound bytes for the additive epoch."""
+        self._full_profile(deployment_profile_id)
+        path=self.resolve(descriptor)
+        kind=descriptor.kind
+        try:
+            if kind=='image':
+                from PIL import Image
+                from .wangp_receipts import checked_reader
+                with checked_reader(path,self.root) as source,Image.open(source) as image:
+                    if image.format!='PNG' or getattr(image,'n_frames',1)!=1: raise ValueError()
+                    width,height=image.size
+                    self._reference_dimensions(width,height,deployment_profile_id)
+                    image.verify()
+                return {'kind':'image','model_ready':True,'width':width,'height':height}
+            data=self._full_probe(path,kind); streams=data['streams']
+            audio=[s for s in streams if s.get('codec_type')=='audio']
+            video=[s for s in streams if s.get('codec_type')=='video']
+            if kind=='audio':
+                if len(streams)!=1 or len(audio)!=1: raise ValueError()
+                track=audio[0]; duration=float(data['format']['duration'])
+                if (track['codec_name']!='pcm_s16le' or int(track['sample_rate'])!=32000
+                        or track['channels']!=2 or not math.isfinite(duration) or not 2<=duration<=15): raise ValueError()
+                return {'kind':'audio','model_ready':True,'duration':duration,'sample_rate':32000,'channels':2}
+            if kind!='video' or len(video)!=1 or len(audio)>1 or len(streams)!=len(video)+len(audio): raise ValueError()
+            track=video[0]; width,height=track['width'],track['height']; count=int(track['nb_read_frames'])
+            duration=float(track['duration'])
+            self._reference_dimensions(width,height,deployment_profile_id)
+            if (track['codec_name']!='h264' or count not in range(56,363,17)
+                    or Fraction(track['avg_frame_rate'])!=24 or Fraction(track['r_frame_rate'])!=24
+                    or not math.isfinite(duration) or abs(duration-count/24)>.00001): raise ValueError()
+            if audio:
+                a=audio[0]; audio_duration=float(a['duration'])
+                if (a['codec_name']!='aac' or int(a['sample_rate'])!=32000 or a['channels']!=2
+                        or not math.isfinite(audio_duration) or audio_duration<=0 or abs(audio_duration-duration)>.1): raise ValueError()
+            return {'kind':'video','model_ready':True,'width':width,'height':height,
+                'frame_count':count,'fps':24,'duration':duration,'has_audio':bool(audio)}
+        except (subprocess.SubprocessError,OSError,ValueError,KeyError,TypeError,ZeroDivisionError,OverflowError):
+            raise ValueError('wangp_full_normalized_media_required') from None
+
+    def full_input(self,descriptor,*,deployment_profile_id):
+        metadata=self.reference_metadata(descriptor,deployment_profile_id=deployment_profile_id)
+        plural,extension={'image':('images','.png'),'video':('videos','.mp4'),'audio':('audios','.wav')}[descriptor.kind]
+        return self._typed_copy(descriptor,plural,extension),metadata
+
+    def audio_from_video_path(self,descriptor,*,deployment_profile_id):
+        """Extract one selected track locally; never alter the staged video.
+
+        Source SHA and derived SHA both bind the private filename. Repeated
+        resolution verifies the newly extracted bytes against an existing copy;
+        it never overwrites that copy or creates an owner asset/upload.
+        """
+        from .wangp_receipts import checked_directory,checked_reader,sync_directory
+        metadata=self.reference_metadata(descriptor,deployment_profile_id=deployment_profile_id)
+        if descriptor.kind!='video' or not metadata['has_audio']:
+            raise ValueError('wangp_selected_video_has_no_audio')
+        source=self.resolve(descriptor)
+        folder=checked_directory(self.root/'typed-video-audio',create=True)
+        temporary=folder/(uuid.uuid4().hex+'.pending.wav')
+        created=False
+        try:
+            with temporary.open('xb'): pass
+            created=True; os.chmod(temporary,0o600)
+            args=['ffmpeg','-v','error','-nostdin','-y','-threads','1','-protocol_whitelist','file,pipe',
+                '-f','mov','-enable_drefs','0','-use_absolute_path','0','-i',str(source),
+                '-map','0:a:0','-vn','-ar','32000','-ac','2','-c:a','pcm_s16le','-f','wav',
+                '-fs',str(min(self.max_bytes,4*1024**2)+1),str(temporary)]
+            run_media_process(args,timeout=30,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+                memory_bytes=512*1024**2)
+            data=self._full_probe(temporary,'audio'); streams=data['streams']
+            if len(streams)!=1: raise ValueError()
+            track=streams[0]; duration=float(data['format']['duration'])
+            if (track['codec_type']!='audio' or track['codec_name']!='pcm_s16le' or int(track['sample_rate'])!=32000
+                    or track['channels']!=2 or not math.isfinite(duration) or abs(duration-metadata['duration'])>.1): raise ValueError()
+            checksum,size=hashlib.sha256(),0
+            with checked_reader(temporary,self.root) as stream:
+                while chunk:=stream.read(1024*1024):
+                    size+=len(chunk)
+                    if size>min(self.max_bytes,4*1024**2): raise ValueError()
+                    checksum.update(chunk)
+            # Windows rejects fsync on a read-only descriptor; reopen only this
+            # freshly created private temporary, without modifying its bytes.
+            with temporary.open('r+b') as stream: os.fsync(stream.fileno())
+            final=folder/(descriptor.sha256+'-'+checksum.hexdigest()+'.wav')
+            try:
+                os.link(temporary,final)
+            except FileExistsError:
+                pass
+            temporary.unlink(); created=False
+            digest,total=hashlib.sha256(),0
+            with checked_reader(final,self.root) as stream:
+                while chunk:=stream.read(1024*1024):
+                    digest.update(chunk); total+=len(chunk)
+                    if total>size: raise ValueError()
+            if total!=size or digest.hexdigest()!=checksum.hexdigest(): raise ValueError()
+            sync_directory(folder)
+            return final
+        except (subprocess.SubprocessError,OSError,ValueError,KeyError,TypeError,OverflowError):
+            raise ValueError('wangp_video_audio_extraction_rejected') from None
+        finally:
+            if created and temporary.exists(): temporary.unlink()
+
     def _typed_copy(self, descriptor, plural, extension):
         from .wangp_receipts import checked_directory, checked_reader, sync_directory
         key = self.key(descriptor)

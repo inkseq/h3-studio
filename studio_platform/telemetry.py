@@ -113,6 +113,8 @@ def _context(value):
         item = source.get(name)
         if isinstance(item, str) and re.fullmatch(r"(?:sha256:)?[0-9a-f]{12,64}", item):
             result[name] = item
+    from .generation_diagnostics import safe_failure_log_fields
+    result.update(safe_failure_log_fields(source))
     return result
 
 

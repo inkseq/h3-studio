@@ -100,12 +100,14 @@ def validate_policy(value):
         limits = envelope["input_limits"]
         if not isinstance(limits, dict) or set(limits) != INPUT_LIMITS:
             raise ValueError("Explicit per-kind input limits required")
-        for field, maximum in (("max_images", 9), ("max_videos", 3), ("max_audios", 3)):
+        from .h3_profile_support import full_controls
+        full_native = bool(value.get('deployment_profile_id') and full_controls(value['deployment_profile_id']))
+        for field, maximum in (("max_images", 17 if full_native else 9), ("max_videos", 3), ("max_audios", 3)):
             if type(limits[field]) is not int or not 0 <= limits[field] <= maximum:
                 raise ValueError("Invalid per-kind input count")
         for field, maximum in (("max_image_pixels", 5760**2), ("max_video_pixels", 5760**2),
                 ("max_video_duration_seconds", 362/24 if 'deployment_profile_id' in value else 15),
-                ("max_audio_duration_seconds", 15), ("max_guide_time_seconds", 15)):
+                ("max_audio_duration_seconds", 15), ("max_guide_time_seconds", 362/24 if full_native else 15)):
             if not positive(limits[field], maximum):
                 raise ValueError("Invalid per-kind input size or duration")
         for field, allowed in (("guide_kinds", {"image", "video", "audio"}), ("guide_recipe_ids", set(recipes))):
@@ -162,8 +164,8 @@ def validate_policy(value):
                 or envelope["max_steps"] > supported['max_steps']
                 or envelope["max_duration_seconds"] > supported['max_duration_seconds'] + 1e-6
                 or envelope["max_reference_files"] > supported['max_reference_files']
-                or envelope["max_guides"] != 0
-                or mode == "ref" and envelope["allow_first_last"]):
+                or envelope["max_guides"] > supported['max_guides']
+                or envelope["allow_first_last"] and not supported['allow_first_last']):
             raise ValueError("Deployment profile policy exceeds implemented model support")
         for field,options in controls.items():
             if not set(options) <= set(supported['controls'][field]):
@@ -173,7 +175,7 @@ def validate_policy(value):
             raise ValueError('Deployment profile requires explicit input limits')
         # FL policies historically carry unused REF-limit fields. Preserve their
         # serialized identity; the compiler rejects every actual REF input in FL.
-        for field,maximum in supported['input_limits'].items() if mode=='ref' else ():
+        for field,maximum in supported['input_limits'].items() if (mode=='ref' or profile.get('compiler_epoch')=='full-controls-v2') else ():
             current = limits[field]
             outside = not set(current)<=set(maximum) if isinstance(maximum,list) else (
                 current and not maximum if isinstance(maximum,bool) else current>maximum)
@@ -416,6 +418,13 @@ class ExecutionPolicies:
             blockers.append("参考模式需要独立绑定的 Ref2VA 执行配置；不能沿用首尾帧执行池")
         request, output = compiled["request"], compiled["output_spec"]
         refs = len(set(a for a in compiled["assets"]))
+        profile_id = compiled.get('deployment_profile_id')
+        if profile_id:
+            from .h3_profile_support import full_controls
+            if full_controls(profile_id):
+                from .inference.wangp_full_compiler import reference_usage
+                refs = reference_usage(request, {key:item['metadata'] for key,item in compiled['assets'].items()},
+                    output, profile_id)['reference_rows']
         if output["width"]*output["height"] > envelope["max_pixels"]:
             blockers.append(f"当前画面 {output['width']}×{output['height']} 超出执行池的 {envelope['max_pixels']} 像素上限")
         if output["actual_duration"] > envelope["max_duration_seconds"]:

@@ -152,7 +152,7 @@ class NoRuntimeImports:
             raise AssertionError('runtime or network dependency imported')
 sys.meta_path.insert(0,NoRuntimeImports())
 from studio_platform.runtime_catalog import PROFILE_IDS,get_profile,engine_manifest
-from studio_platform.inference.wangp_profile_compiler import H3ProfileCompiler,validate_prepared
+from studio_platform.inference.wangp_profile_dispatch import H3ProfileCompiler,validate_prepared
 from comfy_workflow import native_output_spec
 import comfy_workflow
 assert Path(comfy_workflow.__file__).resolve().is_relative_to(root)

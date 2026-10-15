@@ -9,7 +9,7 @@ import copy
 import math
 import uuid
 
-from .capabilities import RECIPES, LIMITS, control_schema
+from .capabilities import RECIPES, LIMITS, control_schema as base_control_schema
 from .repository import Conflict, NotFound
 
 SLOTS = {"images": "image", "videos": "video", "audios": "audio",
@@ -18,6 +18,19 @@ ROLES = {"images": {"reference", "identity"}, "videos": {"reference", "motion"},
          "audios": {"reference", "audio"}, "first_frame": {"firstFrame"}, "last_frame": {"lastFrame"}}
 DEFAULT_ROLE = {"images": "reference", "videos": "motion", "audios": "audio",
                 "first_frame": "firstFrame", "last_frame": "lastFrame"}
+
+
+def control_schema():
+    """Editable union only; the selected immutable compiler validates execution."""
+    from .inference.wangp_profile_dispatch import control_schema as profile_schema
+    result = base_control_schema()
+    native = profile_schema('h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6','ref')
+    result.update({key:copy.deepcopy(value) for key,value in native.items() if key not in result})
+    for key, schema in native.items():
+        if 'enum' in schema and 'enum' in result[key]:
+            result[key]['enum'] = list(dict.fromkeys([*result[key]['enum'],*schema['enum']]))
+    result['shift_video']['maximum'] = max(result['shift_video']['maximum'],native['shift_video']['maximum'])
+    return result
 
 
 def fields(value, allowed, label):
@@ -47,7 +60,8 @@ def validate_controls_patch(controls):
         valid = (("string" in types and isinstance(value, str)) or
                  ("integer" in types and type(value) is int) or
                  ("number" in types and type(value) in (int, float) and math.isfinite(value)) or
-                 ("boolean" in types and type(value) is bool))
+                 ("boolean" in types and type(value) is bool) or
+                 ("array" in types and isinstance(value,list)))
         if not valid or "enum" in schema and value not in schema["enum"]:
             raise ValueError(key + "格式或取值无效")
         if type(value) in (int, float) and (value < schema.get("minimum", -math.inf)
@@ -56,6 +70,14 @@ def validate_controls_patch(controls):
         if key == "seed" and (not value.isascii() or not value.isdecimal() or len(value) > 20
                 or int(value) > 18446744073709551615):
             raise ValueError("seed须为uint64十进制字符串或null")
+        if key in {'video_excerpts','audio_excerpts'}:
+            if len(value)>3:
+                raise ValueError('wangp_invalid_excerpts')
+            for entry in value:
+                if (not isinstance(entry,dict) or set(entry)!={'time_seconds','duration_seconds'}
+                        or any(type(v) not in (int,float) or not math.isfinite(v) for v in entry.values())
+                        or entry['time_seconds']<0 or not 2<=entry['duration_seconds']<=15):
+                    raise ValueError('wangp_invalid_excerpts')
 
 
 def validate_range(value, source=None):
@@ -374,7 +396,7 @@ def plan_body(project, shot_id, capabilities, derive, *, validate_frame=None):
         raise ValueError("草稿配方已不可用，请明确选择后重新预检")
     if draft.get("deployment_profile_id") is not None:
         from .runtime_catalog import get_profile
-        from .inference.wangp_profile_compiler import control_schema as profile_schema
+        from .inference.wangp_profile_dispatch import control_schema as profile_schema
         get_profile(draft["deployment_profile_id"])
         recipe = {**recipe, "controls": profile_schema(draft["deployment_profile_id"], recipe["mode"]),
                   "deployment_preset": {}}
@@ -382,7 +404,9 @@ def plan_body(project, shot_id, capabilities, derive, *, validate_frame=None):
         raise ValueError("先写清这个镜头的画面与动作")
     shot = shot_entity(project, shot_id)
     storyboard = shot["data"].get("storyboard")
-    if storyboard and storyboard["mode"] == "fl" and storyboard.get("continuePrevious"):
+    from .h3_profile_support import full_controls
+    native_anchors = bool(draft.get("deployment_profile_id") and full_controls(draft["deployment_profile_id"]))
+    if storyboard and (storyboard["mode"] == "fl" or native_anchors) and storyboard.get("continuePrevious"):
         from .storyboard import previous_shot
         previous = previous_shot(project, shot)
         lookup = {entity["id"]: entity for entity in project["entities"]}
@@ -414,11 +438,16 @@ def plan_body(project, shot_id, capabilities, derive, *, validate_frame=None):
     validate_controls_patch(controls)
     inputs = copy.deepcopy(draft["inputs"])
     input_entries(inputs, allow_duplicates=True)
-    if recipe["mode"] == "fl" and any(inputs[k] for k in ("images", "videos", "audios")):
+    full_native = False
+    if draft.get('deployment_profile_id'):
+        from .h3_profile_support import full_controls
+        full_native = full_controls(draft['deployment_profile_id'])
+    if not full_native and recipe["mode"] == "fl" and any(inputs[k] for k in ("images", "videos", "audios")):
         raise ValueError("首尾帧配方不能混用全能参考；请明确切换配方或解除关联")
-    if recipe["mode"] == "ref" and (inputs["first_frame"] or inputs["last_frame"]):
+    if not full_native and recipe["mode"] == "ref" and (inputs["first_frame"] or inputs["last_frame"]):
         raise ValueError("全能参考配方不接受首尾帧约束；原素材仍保留，请明确更改关联")
-    if recipe["mode"] == "ref" and not any(inputs[k] for k in ("images", "videos", "audios")):
+    if recipe["mode"] == "ref" and not any(inputs[k] for k in ("images", "videos", "audios")) and not (
+            full_native and (inputs['first_frame'] or inputs['last_frame'] or inputs.get('guides'))):
         raise ValueError("全能参考至少需要一份参考素材")
     cache = {}
     for slot, entries in inputs.items():

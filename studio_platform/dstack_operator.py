@@ -774,6 +774,10 @@ class DstackOperator:
                     "max_price_microusd": price["max_price_microusd"],
                     "price_ceiling_microusd": price["price_ceiling_microusd"],
                     "price_policy_snapshot": price["snapshot"]})
+        # New starts follow the configured authoring default; retained profiles
+        # remain explicit choices and existing nodes are never rebound.
+        default = getattr(self.settings, "default_deployment_profile_id", None)
+        profiles.sort(key=lambda item: item["runtime_profile_id"] != default)
         return {"capacity_backend": BACKEND_MARKER, "enabled": self.policy.get("enabled") is True,
             "lifecycle_version": self.policy.get("lifecycle_version", 1),
             "operator": {"account": owner},

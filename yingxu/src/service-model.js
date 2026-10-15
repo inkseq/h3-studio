@@ -1,3 +1,4 @@
+import {roleSupported} from './quick-chat-model.js';
 import {referenceSpecs} from './cloud-model.js';
 export function executionStatus(capabilities){if(!capabilities)return {kind:'unknown',title:'执行能力尚未读取',detail:'先检查云服务连接。能登录或编辑，不代表生成容量已可用。'};if(!capabilities.execution_enabled)return {kind:'offline',title:'真实生成尚未启用',detail:'项目、素材与预检可继续使用；不会为你创建模型生成任务。'};if(capabilities.simulation)return {kind:'simulation',title:'当前为 CPU 模拟生成',detail:'只验证上传、排队与回填流程，产物带 SIMULATION 水印，不代表 H3 画质或速度。'};return {kind:'enabled',title:'真实生成任务通道已启用',detail:'具体GPU容量、等待时间与费用以本次服务预检和任务状态为准；启用不等于已验证所有配置。'};}
 export function inputUsage(project,shotId,recipe){const shot=project.entities.find(e=>e.id===shotId),limits=recipe?.limits||{},spec=referenceSpecs(project,shotId,{mode:recipe?.mode}),frames=spec.references.filter(ref=>['firstFrame','lastFrame'].includes(ref.purpose)),items=new Map(),issues=[...spec.issues];
@@ -5,8 +6,8 @@ export function inputUsage(project,shotId,recipe){const shot=project.entities.fi
  const groups=Object.fromEntries(['image','video','audio'].map(kind=>{const entries=[...items.values()].filter(item=>item.kind===kind),duration=entries.reduce((n,e)=>n+(e.duration||0),0),unknown=kind!=='image'?entries.filter(e=>e.duration===null).length:0;return [kind,{count:entries.length,duration,unknown,entries}];}));
  for(const [kind,key]of [['image','images'],['video','videos'],['audio','audios']]){const group=groups[kind],name={image:'图片',video:'视频',audio:'音频'}[kind];if(Number.isFinite(limits['max_'+key])&&group.count>limits['max_'+key])issues.push(`${name}已选${group.count}份，超过${limits['max_'+key]}份；解除多余关联，原文件仍会保留。`);if(kind!=='image'){for(const item of group.entries)if(item.duration!==null&&(item.duration<limits.min_clip_duration||item.duration>limits.max_clip_duration))issues.push(`「${item.title}」当前${Number(item.duration.toFixed(3))}秒；请保存${limits.min_clip_duration}–${limits.max_clip_duration}秒的有效选段。`);const max=limits['max_total_'+kind+'_duration'];if(Number.isFinite(max)&&group.duration>max)issues.push(`${name}参考已知时长合计${Number(group.duration.toFixed(3))}秒，超过${max}秒；请缩短选段或解除关联。`);}}
  if(Number.isFinite(limits.max_total_files)&&items.size>limits.max_total_files)issues.push(`普通参考共${items.size}份，超过${limits.max_total_files}份；请减少关联。`);
- if(recipe?.mode==='ref'&&frames.length)issues.push('全能参考不能同时使用首尾帧；请切换生成方式或明确移除首尾帧关联。');
- if(recipe?.mode==='fl'&&items.size)issues.push('首尾帧/文生模式不能同时使用普通参考；请切换全能参考或明确移除这些关联。');
+ if(recipe?.mode==='ref'&&frames.length&&!roleSupported(recipe,'first_frame','image'))issues.push('全能参考不能同时使用首尾帧；请切换生成方式或明确移除首尾帧关联。');
+ if(recipe?.mode==='fl'&&[...items.values()].some(item=>!roleSupported(recipe,{image:'images',video:'videos',audio:'audios'}[item.kind],item.kind)))issues.push('首尾帧/文生模式不能同时使用普通参考；请切换全能参考或明确移除这些关联。');
  const guides=shot?.data.h3?.guides||[];if(Number.isFinite(limits.max_guides)&&guides.length>limits.max_guides)issues.push(`时间锚点超过${limits.max_guides}个。`);
  return {frames:frames.length,groups,total:items.size,guides:guides.length,issues:[...new Set(issues)],unknownDurations:groups.video.unknown+groups.audio.unknown};
 }

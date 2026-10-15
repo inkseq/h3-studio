@@ -19,7 +19,7 @@ from studio_platform.capabilities import compile_request
 from studio_platform.inference.protocol import BackendError
 from studio_platform.inference.wangp_compiler import H3FL2VACompiler, MAX_SEED
 from studio_platform.inference.wangp_contract import EngineManifest, canonical_json
-from studio_platform.inference.wangp_profile_compiler import H3ProfileCompiler, validate_prepared
+from studio_platform.inference.wangp_profile_dispatch import H3ProfileCompiler, validate_prepared
 from studio_platform.quick_chat import DEFAULT_SETTINGS, EMPTY_INPUTS, QuickChatError, objects
 from studio_platform.repository import jobs
 from studio_platform.runtime_catalog import PROFILE_IDS, engine_manifest

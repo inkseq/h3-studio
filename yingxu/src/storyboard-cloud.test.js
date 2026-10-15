@@ -45,6 +45,16 @@ test('storyboard preflight uses saved server compilation, then confirms the same
     assert.equal(h.store.exportProject().jobs[0].id,'accepted-job');assert.equal(!!h.store.exportProject().entities.find(e=>e.id===h.shot).data.selectedAssetId,false);
   }finally{h.controller.destroy();}
 });
+test('capable REF continuation extracts and binds the chosen previous tail frame before saved-draft preflight',async()=>{
+  const h=await harness();try{
+    const currentCapabilities=clone(capabilities);currentCapabilities.deployment_profiles[0].generation_support.ref.input_support={first_frame:true,last_frame:true,reference_images:true,reference_video:true,reference_audio:true};currentCapabilities.deployment_profiles[0].generation_support.ref.limits.input_count_semantics='native_roles_v2';h.api.capabilities=async()=>currentCapabilities;
+    const previous=h.store.addEntity('shot',h.scene,{data:{seconds:5,prompt:'Previous action'}}),chosen=h.store.addEntity('video',null,{data:{fileId:'cloud_artifact_previous',cloudArtifactId:'previous',sourceJobId:'previous-job'}});
+    h.store.editProject(project=>{project.entities.find(entity=>entity.id===previous).order=0;project.entities.find(entity=>entity.id===previous).data.selectedAssetId=chosen;const current=project.entities.find(entity=>entity.id===h.shot);current.order=1;current.data.storyboard.continuePrevious=true;});
+    await h.controller.prepareStoryboard(h.shot);const frameCall=h.calls.find(call=>call[0]==='frame');assert.equal(frameCall[2],'previous');assert.deepEqual(frameCall[3],{position:'last'});
+    const savedShot=h.store.exportProject().entities.find(entity=>entity.id===h.shot),binding=savedShot.data.storyboard.previousFrame;assert.equal(binding.shotId,previous);assert.equal(binding.selectedAssetId,chosen);assert.ok(binding.frameAssetId);assert.equal(savedShot.data.storyboard.mode,'ref');
+    assert.equal(h.calls.some(call=>call[0]==='savedPlan'),true);assert.equal(h.calls.some(call=>call[0]==='submit'),false);
+  }finally{h.controller.destroy();}
+});
 
 test('failed re-preflight cannot leave an older ready plan available for confirmation',async()=>{
   const h=await harness();try{

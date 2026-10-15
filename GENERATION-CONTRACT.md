@@ -62,7 +62,9 @@ not enable a protected profile or prove GPU qualification.
 
 ## Current authoring and admission refinements
 
-As clarified in [#126](https://github.com/inkseq/h3-studio/issues/126), historic measurements are not a parameter whitelist. The pinned adapter implements text-only, first-only, last-only and paired first/last FL inputs; REF inputs remain a separate mapped mode. Capability discovery describes implemented model/API support and explicit adapter gaps. Preflight separately checks ownership, valid parameters, configured resource ceilings and budget. A supported but unmeasured combination requires no extra confirmation; a historical timing hint is optional. Static diagnostic codes identify invalid/unmapped inputs without exposing raw exception text, credentials, prompts or media paths. Source support does not upgrade a running worker bundle or widen a protected policy implicitly.
+As clarified in [#126](https://github.com/inkseq/h3-studio/issues/126), historic measurements are not a parameter whitelist. Input compatibility follows the explicitly selected deployment profile and immutable compiler epoch. Retained profiles preserve their existing FL first/last and REF reference-only mappings. Additive `full-controls-v2` profiles map first/last anchors in both modes, timed image injections, REF images/video/audio, video soundtrack selection, explicit control-video/soundtrack conditioning and source-clip excerpts. They never silently drop inputs or reinterpret an accepted legacy request. Capability discovery describes these exact controls, native role counts and adapter gaps; a recipe name alone is not an input-compatibility rule.
+
+Preflight checks ownership, parameter/media validity, actual mode incompatibilities, configured resource ceilings and budget. Native reference rows exclude timeline anchors and injected images; effective video/audio excerpts still consume their corresponding reference slots. Clip selections and native image-frame times are normalized before the plan is frozen, and aggregate bounds prevent upstream trimming. Supported unmeasured combinations require no qualification run or extra confirmation. Runtime failures retain the original job/attempt, safe control/input summary and stage/reason; a deliberate retry requires fresh preflight and authorization, never an automatic paid retry. Diagnostics do not expose credentials, prompts or private media paths. Source support does not upgrade a running worker bundle or widen a protected policy implicitly.
 
 As clarified in [#122](https://github.com/inkseq/h3-studio/issues/122), durable generation acceptance clears the submitted round's prompt and material selection, not persistent model/resolution preferences, stored assets, cards or accepted jobs. New card revisions retain an immutable composer snapshot. The shared browser/Agent confirmation records a reset receipt and clears only unchanged matching binding versions; later edits, including remove/re-add ABA changes, survive. The browser independently fences prompt clearing with the submitted origin/edit token. Rejection preserves the draft; an unknown response reconciles the original submission/key before clearing or retrying. Following rounds reuse assets explicitly. For legacy cards, a newly prepared preflight or explicit new card revision freezes only current bindings that exactly match the submitted inputs and their role/range/audio metadata. Already-existing originless preflights/submissions remain unchanged and preserve material selections rather than guessing or retroactively associating newer edits.
 
@@ -522,8 +524,8 @@ normalized bytes; they do not transcode or shorten inputs.
 
 The manifest/profile, model-specific pristine Session defaults and owned
 launcher are bound together; legacy FL manifests and accepted jobs stay on
-their original route. Public `h3-base-ref2va-v1` requests use the strict REF
-compiler. Execution requires a separate explicit singleton REF policy,
+their original route. Requests without an additive deployment profile retain
+this strict REF compiler. Execution requires a separate explicit singleton REF policy,
 `native-frames-v1`, the bounded envelope above, and a matching manifest/worker
 or approved cold capacity. The controller opt-in is
 `execution_recipe_id: h3-base-ref2va-v1`; absence keeps the historical FL recipe

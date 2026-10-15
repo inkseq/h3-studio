@@ -99,6 +99,15 @@ class GenerationRead:
                 {job["id"]: job["project_id"]}, expected_states={job["id"]:
                     {key: job[key] for key in ("status", "updated_at", "error_code")}})[job["id"]]
         visible.update(cancellation)
+        if job.get("error_code") is not None:
+            from .generation_diagnostics import safe_failure_summary
+            result = job.get("result") if isinstance(job.get("result"), dict) else {}
+            diagnostic = result.get("failure_diagnostic")
+            visible["failure_diagnostic"] = diagnostic if isinstance(diagnostic, dict) else safe_failure_summary(job)
+            if isinstance(diagnostic, dict) and diagnostic.get("notice_id"):
+                # Clients coalesce by this stable identity. The event feed
+                # carries the authoritative first-committed new_kind flag.
+                visible["failure_notice"] = {"id": diagnostic["notice_id"]}
         if stored_request.get("content_deleted"):
             visible["content_deleted"] = True
             visible["retry_advice"] = {**visible["retry_advice"], "safe_to_retry": False}

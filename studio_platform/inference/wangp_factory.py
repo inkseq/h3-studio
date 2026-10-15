@@ -52,7 +52,7 @@ the transport; they are never serialized into fleet/config/manifest identities.
     if profile_id is not None:
         from ..runtime_catalog import validate_manifest
         expected_model_id = validate_manifest(manifest)["model_id"]
-        from .wangp_profile_compiler import H3ProfileCompiler
+        from .wangp_profile_dispatch import H3ProfileCompiler
         compiler = H3ProfileCompiler
     else:
         expected_model_id = MODEL_ID

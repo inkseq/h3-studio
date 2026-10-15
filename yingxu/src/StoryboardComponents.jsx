@@ -519,7 +519,7 @@ export function ShotEditor({shotId, onClose, inline}) {
             <b>{MODE_LABEL[k]}</b><small>{k === 'FL' ? '人物场景只用文字 · 可设开头 / 结尾画面' : '人物场景用照片和声音 · 可加动作视频'}</small></button>))}
       </div>
       <div className={'modepanel ' + info.mode.toLowerCase()}>
-        {info.mode === 'FL' ? <>
+        {info.frameInputs && <>
           <div className="slots">
             <Slot onFiles={files=>dispatch({type:'uploadFiles',files,target:{kind:'shot',shot:shot.id,slot:'start'}})} id={'slot:start:'+shot.id} label="开头画面" hint="可留空" onPick={openPicker('start')}
               onClear={shot.start || shot.continuePrev ? () => upd({start: null, continuePrev: false}) : null}>
@@ -533,8 +533,9 @@ export function ShotEditor({shotId, onClose, inline}) {
             onChange={e => upd({continuePrev: e.target.checked, start: e.target.checked ? null : shot.start})} />
             接上一镜：用「{state.shots[index - 1].title}」选定版本的最后一帧作为开头</label>}
           <label className="field"><span>时长 {shot.duration} 秒</span><input type="number" min={durationRange?.minimum} max={durationRange?.maximum} step={durationRange?.step||'any'} value={shot.duration} disabled={!durationRange} onChange={event=>{const n=Number(event.target.value);if(Number.isFinite(n)&&n>0)upd({duration:n});}}/>{!durationRange&&<small>时长范围等待服务能力确认。</small>}</label>
-        </> : <>
-          <Slot onFiles={files=>dispatch({type:'uploadFiles',files,target:{kind:'shot',shot:shot.id,slot:'refs'}})} id={'slot:refs:'+shot.id} label="附加素材（动作视频、额外的图或声音）" hint="可留空 · 人物和场景已经在上面了" onPick={openPicker('refs')}>
+        </>}
+        {(info.mode==='REF'||info.controlInputs)&&<>
+          <Slot onFiles={files=>dispatch({type:'uploadFiles',files,target:{kind:'shot',shot:shot.id,slot:'refs'}})} id={'slot:refs:'+shot.id} label={info.mode==='FL'?'控制视频 / 保留的声音':'附加素材（动作视频、额外的图或声音）'} hint={info.mode==='FL'?'在全部控制中明确视频和声音用途':'可留空 · 人物和场景已经在上面了'} onPick={openPicker('refs')}>
             {shot.refs.length > 0 && <div className="refs">{shot.refs.map(id => db.asset(id)).filter(Boolean).map(a => (
               <span key={a.id} className="ref"><AssetThumb asset={a} size={28} />{a.name}
                 <button className="x" onClick={() => dispatch({type: 'unref', shot: shot.id, asset: a.id})}>×</button></span>))}</div>}

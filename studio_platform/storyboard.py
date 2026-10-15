@@ -283,6 +283,11 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
         issues.append("分镜模式与保存配方不一致，请明确选择后重新预检")
     lookup = {entity["id"]: entity for entity in project["entities"]}
     profile_id = h3.get("deploymentProfileId")
+    from .h3_profile_support import full_controls
+    try:
+        native_roles = bool(profile_id and full_controls(profile_id))
+    except ValueError:
+        native_roles = False  # The unresolved selected profile is reported below.
     limits = _limits(capabilities, recipe or {}, profile_id, mode)
     if mode == "ref" and limits is None:
         issues.append("当前参考输入范围尚未读取，请刷新生成能力")
@@ -326,25 +331,71 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
         issues.append("组装后的提示词超过12000字符，请缩短档案或动作描述")
     inputs = {"images": [], "videos": [], "audios": [], "first_frame": None, "last_frame": None, "guides": []}
 
-    def add(ident, why, *, start=None, slot=None):
+    def add(ident, why, *, start=None, slot=None, guide=None, clip_seconds=3):
         entity = lookup.get(ident)
         if not entity:
             issues.append("参考素材不存在，请重新选择")
             return
         target = slot or {"image": "images", "video": "videos", "audio": "audios"}.get(entity["type"])
-        entry = {"asset_id": entity["data"].get("cloudAssetId")}
-        ref = {"entity_id": ident, "asset_id": entry["asset_id"], "slot": target, "why": why, "sent": False, "reason": ""}
+        receipt = entity['data'].get('cloudAssetId')
+        entry = {"media_id" if target=='guides' else "asset_id": receipt}
+        ref = {"entity_id": ident, "asset_id": receipt, "slot": target, "why": why, "sent": False, "reason": ""}
+        if guide is not None:
+            entry.update(time_seconds=guide.get('time_seconds'),use_audio=guide.get('use_audio',False))
+            selected = guide.get('source_range')
+            if selected is not None:
+                from .generation_draft import validate_range
+                if not isinstance(selected, dict):
+                    ref['reason'] = '参考选段格式无效'
+                else:
+                    if selected.get('fileId') != entity['data'].get('fileId'):
+                        ref['reason'] = '原素材文件已改变，请重新确认选段'
+                    selected = {key: selected.get(key) for key in ('start', 'end')}
+                    try:
+                        validate_range(selected)
+                    except ValueError as error:
+                        ref['reason'] = str(error)
+                    entry['source_range'] = selected
+                    ref['source_range'] = copy.deepcopy(selected)
         if start is not None:
-            entry["source_range"] = {"start": start, "end": start + 3}
+            entry["source_range"] = {"start": start, "end": start + clip_seconds}
             ref["source_range"] = copy.deepcopy(entry["source_range"])
         if target == "videos":
-            entry["include_audio"] = False
-        if not entry["asset_id"] or not entity["data"].get("fileId") or entity["data"].get("missingFile"):
+            entry["include_audio"] = h3.get('video_audio',{}).get(ident,False) if native_roles else False
+        if not receipt or not entity["data"].get("fileId") or entity["data"].get("missingFile"):
             ref["reason"] = "素材尚未同步为可用的云端输入"
         references.append((ref, entry))
 
+    def extra_reference(item):
+        entity=lookup[item['entityId']]
+        seconds=3
+        if (native_roles and entity['type']=='video'
+                and h3.get('controls',{}).get('video_conditioning') in {'denoise','in_context'}):
+            selected=h3.get('controls',{}).get('duration')
+            seconds=selected if selected is not None else shot['data'].get('seconds',5)
+            if type(seconds) is not int or not 4<=seconds<=15:
+                issues.append('控制视频需要明确的4–15秒生成时长')
+                return
+            metadata=entity['data'].get('metadata',{})
+            available=metadata.get('source_duration') if isinstance(metadata,dict) else None
+            if available is None and isinstance(metadata,dict):
+                available=metadata.get('duration')
+            if available is None:
+                available=entity['data'].get('duration')
+            if type(available) not in (int,float) or not math.isfinite(available):
+                issues.append('控制视频缺少已核验的原素材时长，请刷新素材')
+                return
+            if item.get('clipStart',0)+seconds>available+.01:
+                issues.append('控制视频选段超出原素材，请调整起点、生成时长或视频')
+                return
+        # The source selection remains within 2–15 seconds. Existing media
+        # normalization then pads its tail onto the same native output grid;
+        # 5 selected seconds become 124 frames, 15 become 362 frames.
+        add(entity['id'],'附加素材',start=item.get('clipStart',0) if entity['type'] in {'video','audio'} else None,
+            clip_seconds=seconds)
+
     previous = previous_shot(project, shot)
-    if mode == "fl":
+    if mode == "fl" or native_roles:
         first = value.get("firstFrameId")
         if value.get("continuePrevious"):
             bound = value.get("previousFrame")
@@ -364,9 +415,14 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
             add(first, "上一镜最后一帧" if value.get("continuePrevious") else "开头画面", slot="first_frame")
         if value.get("lastFrameId"):
             add(value["lastFrameId"], "结尾画面", slot="last_frame")
+    if mode == "fl":
         if cast or location or value.get("propIds"):
             notes.append("首尾帧模式的人物、场景和道具只用文字描述")
-        if value.get("extraRefs"):
+        for item in value.get('extraRefs',[]) if native_roles else []:
+            if lookup[item['entityId']]['type'] in {'video','audio'}:
+                extra_reference(item)
+        if any(lookup[item['entityId']]['type']=='image' for item in value.get('extraRefs',[])) or (
+                value.get('extraRefs') and not native_roles):
             notes.append("全能参考的附加素材已保留，当前不发送")
     else:
         for character, look in cast:
@@ -388,36 +444,54 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
             if prop["data"].get("imageIds"):
                 add(prop["data"]["imageIds"][0], "道具 · " + prop["title"])
         for ref in value.get("extraRefs", []):
-            entity = lookup[ref["entityId"]]
-            add(entity["id"], "附加素材", start=ref.get("clipStart", 0) if entity["type"] in {"video", "audio"} else None)
+            extra_reference(ref)
         if location and location["data"].get("ambient"):
             ambient = location["data"]["ambient"]
             add(ambient["assetId"], "场景环境声", start=ambient.get("clipStart", 0))
-        if value.get("firstFrameId") or value.get("lastFrameId") or value.get("continuePrevious"):
+        if not native_roles and (value.get("firstFrameId") or value.get("lastFrameId") or value.get("continuePrevious")):
             notes.append("首尾帧输入已保留，全能参考模式不发送")
+    if native_roles:
+        # These are the existing shot.configure_generation guide associations,
+        # not inferred guide roles for character photos or storyboard extras.
+        for guide in h3.get('guides',[]):
+            if not isinstance(guide,dict):
+                issues.append('时间锚点格式无效')
+                continue
+            add(guide.get('media_id'),'时间锚点',slot='guides',guide=guide)
     counters, total, seen = {}, 0, set()
     durations = {"videos": 0., "audios": 0.}
     for ref, entry in references:
-        slot, identity = ref["slot"], entry["asset_id"]
+        slot, identity = ref["slot"], ref["asset_id"]
         selected = entry.get("source_range", {})
-        reference_identity = (slot, identity, selected.get("start"), selected.get("end"))
+        reference_identity = (slot, identity, selected.get("start"), selected.get("end"),
+            entry.get('time_seconds') if slot=='guides' else None)
         if reference_identity in seen:
             ref["reason"] = "同一输入区域的素材已发送，不重复发送"
             continue
-        if mode == "ref":
+        anchor = slot in {"first_frame", "last_frame"}
+        guide = slot=='guides'
+        if guide and counters.get(slot,0)>=8:
+            ref['reason']='时间锚点最多8个'
+        if mode == "ref" and not (native_roles and (anchor or guide)):
             maximum = (limits or {}).get("max_" + slot)
             all_max = (limits or {}).get("max_total_files")
             if type(maximum) is not int or type(all_max) is not int:
                 ref["reason"] = "当前参考输入范围尚未读取"
+                if native_roles:
+                    issues.append(ref['reason'] + '：' + ref['entity_id'])
                 continue
             if counters.get(slot, 0) >= maximum or total >= all_max:
                 ref["reason"] = "当前能力数量上限；按人物、场景、道具、附加素材优先级未发送"
+                if native_roles:
+                    issues.append('参考素材超过当前能力数量上限，请调整素材后重新预检：' + ref['entity_id'])
                 continue
             duration = entry.get("source_range", {}).get("end", 0) - entry.get("source_range", {}).get("start", 0)
             if slot in durations:
                 maximum_seconds = limits.get("max_total_" + {"videos": "video", "audios": "audio"}[slot] + "_duration")
                 if type(maximum_seconds) in (int, float) and durations[slot] + duration > maximum_seconds + .01:
                     ref["reason"] = "当前能力总参考时长上限；按优先级未发送"
+                    if native_roles:
+                        issues.append('参考素材超过当前能力总时长上限，请调整选段后重新预检：' + ref['entity_id'])
                     continue
                 durations[slot] += duration
         if ref["reason"]:
@@ -425,12 +499,15 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
             continue
         ref["sent"] = True
         seen.add(reference_identity)
-        counters[slot], total = counters.get(slot, 0) + 1, total + 1
+        counters[slot] = counters.get(slot, 0) + 1
+        if not anchor and not guide:
+            total += 1
         if slot in {"first_frame", "last_frame"}:
             inputs[slot] = entry
         else:
             inputs[slot].append(entry)
-    if mode == "ref" and not any(inputs[key] for key in ("images", "videos", "audios")):
+    if mode == "ref" and not (any(inputs[key] for key in ("images", "videos", "audios"))
+            or native_roles and (inputs['first_frame'] or inputs['last_frame'] or inputs['guides'])):
         issues.append("全能参考至少需要一份当前可发送的素材")
     draft = {"recipe_id": recipe["id"] if recipe else chosen, "prompt": prompt,
         "controls": copy.deepcopy(h3.get("controls", {})), "inputs": inputs,

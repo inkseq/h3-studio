@@ -14,6 +14,10 @@ PHASES = frozenset({"runtime_imports", "runtime_manifest", "runtime_token", "run
 TYPES = frozenset({"ValueError", "TypeError", "OSError", "FileNotFoundError", "PermissionError",
     "RuntimeError", "ImportError", "ModuleNotFoundError", "JSONDecodeError", "BackendError", "NotReady"})
 CODES = frozenset({"wangp_runtime_dependency_missing", "wangp_startup_stage_failed",
+    "wangp_media_tools_missing","wangp_media_tools_probe_failed","wangp_media_tools_probe_timeout",
+    "wangp_media_tools_version_unconfirmed","wangp_media_tools_version_unsupported",
+    "wangp_media_tools_fps_mode_unsupported","wangp_media_tools_output_invalid",
+    "wangp_media_tools_binary_invalid","wangp_media_tools_binary_changed","wangp_media_tools_invalid",
     "wangp_synthetic_manifest_forbidden", "wangp_verified_manifest_changed", "wangp_token_permissions",
     "wangp_invalid_token", "wangp_invalid_token_file", "wangp_configuration_permissions",
     "wangp_absolute_configuration_required", "wangp_configuration_limit", "wangp_configuration_object_required",

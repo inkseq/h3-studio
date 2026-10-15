@@ -3,16 +3,12 @@ import {X,Settings2} from 'lucide-react';
 import {DeploymentProfileSelect} from './DeploymentProfile.jsx';
 import GenerationAvailability from './GenerationAvailability.jsx';
 import {modeAvailability,requireModeAvailable} from './generation-availability.js';
-import {CONTROL_LABELS,CONTROL_GROUPS,clone,defaultsFor,effectiveControlSchema,recipeFor,settingsProblems,bindingParticipates} from './quick-chat-model.js';
+import {CONTROL_GROUPS,clone,defaultsFor,effectiveControlSchema,recipeFor,settingsProblems,bindingParticipates,automaticInputMode} from './quick-chat-model.js';
+import Control from './GenerationControl.jsx';
 export function ChatDialog({title,onClose,children,wide=false,className='',eyebrow=''}){
   const ref=useRef(),opener=useRef(globalThis.document?.activeElement);
   useEffect(()=>{const dialog=ref.current;dialog.showModal();dialog.querySelector('button,input,textarea,select')?.focus();return()=>{dialog.close();if(opener.current?.isConnected)opener.current.focus();};},[]);
   return <dialog className={'qc-dialog '+(wide?'qc-dialog-wide ':'')+className} ref={ref} aria-label={title} onCancel={e=>{e.preventDefault();onClose();}}><div className="qc-dialog-head"><div>{eyebrow&&<span className="qc-eyebrow">{eyebrow}</span>}<h2>{title}</h2></div><button type="button" aria-label="关闭窗口" onClick={onClose}><X size={18}/></button></div>{children}</dialog>;
-}
-function Control({field,schema,value,onChange}){
-  const type=Array.isArray(schema.type)?schema.type.find(t=>t!=='null'):schema.type,nullable=Array.isArray(schema.type)&&schema.type.includes('null'),disabled=schema.available===false;
-  if(['array','object'].includes(type))return null;
-  return <label className={'qc-field '+(disabled?'qc-disabled':'')}><span>{CONTROL_LABELS[field]||field}{schema.experimental?' · 实验项':''}</span>{schema.enum?<select aria-label={CONTROL_LABELS[field]||field} value={value??schema.default??schema.enum[0]??''} disabled={disabled} onChange={e=>onChange(schema.enum.find(option=>String(option)===e.target.value))}>{schema.enum.map(option=><option key={option} value={option}>{option}</option>)}</select>:type==='boolean'?<input aria-label={CONTROL_LABELS[field]||field} type="checkbox" checked={value??schema.default??false} disabled={disabled} onChange={e=>onChange(e.target.checked)}/>:<input aria-label={CONTROL_LABELS[field]||field} type={field==='seed'||type==='string'?'text':'number'} inputMode={field==='seed'?'numeric':undefined} disabled={disabled} value={value??''} min={schema.minimum} max={schema.maximum} step={schema.multipleOf||(type==='integer'?1:'any')} placeholder={nullable||field==='seed'?'留空自动':''} onChange={e=>onChange(e.target.value===''?null:type==='string'||field==='seed'?e.target.value:Number(e.target.value))}/>}<small>{schema.reason||schema.description||(field==='denoise'?'控制去噪范围，不是参考强度。':field==='shift_video'?'留空使用原生默认 12。':field==='shift_audio'?'留空使用原生默认 3。':[schema.minimum===undefined?'':`最低 ${schema.minimum}`,schema.maximum===undefined?'':`最高 ${schema.maximum}`].filter(Boolean).join(' · '))}</small></label>;
 }
 function ProfileInputBoundary({support}){
   const roles={first_frame:'首帧',last_frame:'尾帧',image:'图片参考',video:'视频参考',audio:'音频参考'};
@@ -23,9 +19,9 @@ export default function QuickChatControls({capabilities,settings,bindings=[],car
   const [draft,setDraft]=useState(()=>clone(settings)),[prompt,setPrompt]=useState(cardPrompt||''),[error,setError]=useState(''),[pendingMode,setPendingMode]=useState(null);
   const recipe=recipeFor(capabilities,draft),schema=effectiveControlSchema(recipe);
   const [mode,setMode]=useState(modeIntent||recipe?.mode||'auto');
-  const set=(field,value)=>setDraft(current=>({...current,controls:{...current.controls,[field]:value}}));
+  const set=(field,value)=>setDraft(current=>{const controls={...current.controls};if(value===undefined)delete controls[field];else controls[field]=value;return {...current,controls};});
   const fields=names=>names.filter(name=>schema[name]).map(name=><Control key={name} field={name} schema={schema[name]} value={draft.controls?.[name]} onChange={value=>set(name,value)}/>);
-  function effectiveMode(intent){if(intent!=='auto')return intent;return bindings.some(b=>b.enabled!==false&&['first_frame','last_frame'].includes(b.slot))?'fl':bindings.some(b=>b.enabled!==false&&b.slot!=='guides')?'ref':'fl';}
+  function effectiveMode(intent){return intent==='auto'?automaticInputMode(bindings,recipe,recipeFor(capabilities,{...draft,recipe_id:capabilities?.recipes?.find(item=>item.mode==='ref')?.id})):intent;}
   function target(intent){const base=capabilities?.recipes?.find(item=>item.mode===effectiveMode(intent));return base?recipeFor(capabilities,{...draft,recipe_id:base.id}):null;}
   function applyMode(intent){
     const next=target(intent);if(!next){setError('服务尚未开放这种生成方式。');return;}
@@ -59,7 +55,7 @@ export default function QuickChatControls({capabilities,settings,bindings=[],car
           <option value="auto" disabled={effectiveMode('auto')!==recipe.mode&&!modeAvailability(availability,capabilities,draft,effectiveMode('auto')).available}>自动匹配素材</option>{['fl','ref'].filter(value=>capabilities.recipes.some(item=>item.mode===value)).map(value=>{const status=modeAvailability(availability,capabilities,draft,value);return <option key={value} value={value} disabled={!status.available}>{value==='fl'?'首尾帧':'全能参考'} · {status.label}</option>;})}
         </select></label>
         <GenerationAvailability snapshot={availability} capabilities={capabilities} settings={draft} operator={operator} onRefresh={onRefreshAvailability} checking={availabilityChecking}/>
-        <p className="qc-muted">首尾帧与全能参考互斥。切换后不兼容的素材会保留，但不会加入任务。{mode==='auto'?`当前匹配：${recipe.mode==='fl'?'文生 / 首尾帧':'全能参考'}。`:''}</p>
+        <p className="qc-muted">按所选模型核对输入用途。切换后不兼容的素材会保留，但不会加入任务。{mode==='auto'?`当前匹配：${recipe.mode==='fl'?'文生 / 首尾帧':'全能参考'}。`:''}</p>
         {pendingMode&&<section className="qc-warning" role="alert"><p>切换后 {pendingMode.count} 份当前素材不再参与，原素材和历史卡片保留。</p><button type="button" onClick={()=>applyMode(pendingMode.intent)}>切换并保留素材</button><button type="button" onClick={()=>setPendingMode(null)}>保持原方式</button></section>}
         {scope==='card'&&<label className="qc-field"><span>完整视频提示词</span><textarea aria-label="完整视频提示词" rows={4} maxLength={12000} value={prompt} onChange={e=>setPrompt(e.target.value)} required/></label>}
         <div className="qc-form-grid">

@@ -799,7 +799,14 @@ def create_session(runtime_root, config_path, output_dir, *, manifest=None):
         from ..runtime_catalog import model_for
     model_progress = ModelLoadProgress(loaded_probe)
     if profile:
-        audit = lambda loaded=False: _audit_profile_runtime(session, manifest, config, loaded=loaded)
+        def audit(loaded=False):
+            _audit_profile_runtime(session, manifest, config, loaded=loaded)
+            if profile.get('compiler_epoch')=='full-controls-v2':
+                # Upstream initialization can select bundled tools and change
+                # its own environment. Check that exact selection before Ready
+                # and before work, never the CPU host's unrelated ffmpeg.
+                from .wangp_media_tools import verify_media_tools
+                verify_media_tools(root,dict(os.environ),cwd=Path.cwd())
         audit()
         return PinnedWanGPSession(session, output, quiesce=torch.cuda.synchronize, manifest=manifest,
             before_submit=audit, result_audit=lambda: audit(loaded=True), device_lock=device_lock,

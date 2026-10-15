@@ -84,6 +84,10 @@ class JobEvents:
                 "status": state["status"], "error_code": state.get("error_code"),
                 "cancelled_by": state.get("cancelled_by"), "reason_code": state.get("reason_code"),
                 "message": state.get("message"), "retry_advice": _advice(state.get("retry_advice"))})
+            if isinstance(state.get("failure_diagnostic"), dict):
+                values[-1]["failure_diagnostic"] = state["failure_diagnostic"]
+            if isinstance(state.get("failure_notice"), dict):
+                values[-1]["failure_notice"] = state["failure_notice"]
         return {"events": values, "next_cursor": values[-1]["cursor"] if values else since,
             "has_more": len(records) > limit, "poll_after_seconds": 5,
             "history": "post_activation", "observed_at": self.repo.clock()}

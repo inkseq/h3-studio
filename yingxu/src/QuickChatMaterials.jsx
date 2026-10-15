@@ -1,7 +1,7 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {Image,Video,Music,X,Check,Upload} from 'lucide-react';
 import {ChatDialog} from './QuickChatControls.jsx';
-import {bindingParticipates,bindingPayload,effectiveLimits,clipLimits,displaySeconds,mediaDuration,hasOriginalAudio} from './quick-chat-model.js';
+import {bindingParticipates,bindingPayload,effectiveLimits,clipLimits,displaySeconds,mediaDuration,hasOriginalAudio,roleSupported} from './quick-chat-model.js';
 export function PrivateMedia({client,path,kind,name='',compact=false}){
   const [url,setUrl]=useState(''),[error,setError]=useState('');
   useEffect(()=>{let active=true,created='';setUrl('');setError('');if(!path||compact&&kind!=='image')return;client.download(path).then(blob=>{if(!active)return;created=URL.createObjectURL(blob);setUrl(created);}).catch(()=>{if(active)setError('预览未载入，可刷新或下载原文件。');});return()=>{active=false;if(created)URL.revokeObjectURL(created);};},[client,path,compact,kind]);
@@ -21,14 +21,14 @@ function AnchorTime({binding,busy,onSave}){
 }
 export default function QuickChatMaterials({bindings,recipe,client,busy,onChange,onUpload,onRemove,onResume,onRoleChange,compact=false,showDisabled=false,availableModes}){
   const limits=effectiveLimits(recipe),[clip,setClip]=useState(null),[error,setError]=useState('');
-  const roleUnavailable=slot=>{const mode=['first_frame','last_frame'].includes(slot)?'fl':['images','videos','audios'].includes(slot)?'ref':null;return mode&&mode!==recipe?.mode&&availableModes?.[mode]===false;};
+  const roleUnavailable=(slot,kind)=>{if(roleSupported(recipe,slot,kind))return false;const mode=['first_frame','last_frame'].includes(slot)?'fl':['images','videos','audios'].includes(slot)?'ref':null;return mode&&mode!==recipe?.mode&&availableModes?.[mode]===false;};
   const visible=bindings.filter(binding=>showDisabled||binding.enabled!==false||binding.version===0);
   function change(binding,patch){return onChange(bindings.map(item=>item.binding_id===binding.binding_id?{...bindingPayload(item),...patch}:bindingPayload(item)));}
   async function act(fn){setError('');try{await fn();}catch(err){setError(err.message||'素材修改尚未保存。');}}
   function role(binding,slot){
     const first=['first_frame','last_frame'].includes(slot);
     if(first&&bindings.some(other=>other.binding_id!==binding.binding_id&&other.enabled!==false&&other.slot===slot)){setError('同一个首帧或尾帧只能选择一张，请先调整原素材。');return;}
-    const patch={slot,enabled:true,purpose:first?{first_frame:'firstFrame',last_frame:'lastFrame'}[slot]:{images:'reference',videos:'motion',audios:'audio',guides:'reference'}[slot],...(slot==='guides'?{time_seconds:binding.time_seconds??0,use_audio:binding.kind==='audio'||binding.kind==='video'&&hasOriginalAudio(binding.asset)&&limits.allow_video_audio}:{})};
+    const patch={slot,enabled:true,purpose:first?{first_frame:'firstFrame',last_frame:'lastFrame'}[slot]:{images:'reference',videos:'motion',audios:'audio',guides:'reference'}[slot],...(slot==='guides'?{time_seconds:binding.time_seconds??0,use_audio:binding.kind==='video'&&hasOriginalAudio(binding.asset)&&limits.allow_video_audio}:{})};
     act(()=>onRoleChange?onRoleChange(binding,patch):change(binding,patch));
   }
   return <><div className={'qc-materials '+(compact?'qc-materials-compact':'')}>{visible.map(binding=>{
@@ -38,9 +38,9 @@ export default function QuickChatMaterials({bindings,recipe,client,busy,onChange
       <div className="qc-material-info"><b title={asset.file_name}>{asset.file_name||'已上传素材'}</b>
         {!ready&&<small className="qc-warning">{({processing:'原文件正在校验',uploading:'原上传收据等待核对',failed:'素材校验失败',unknown:'原上传结果待核对'})[asset.status]||'素材尚未完成校验'}{asset.error_code?` · ${asset.error_code}`:''}</small>}
         {!ready&&onResume&&<button disabled={busy} onClick={()=>act(()=>onResume(binding.asset_id))}>核对并恢复原素材</button>}
-        <select aria-label={`${asset.file_name||'素材'}的用途`} disabled={busy||!ready} value={binding.slot} onChange={e=>role(binding,e.target.value)}>{slots.map(slot=><option key={slot} value={slot} disabled={roleUnavailable(slot)||slot==='guides'&&(!limits.guide_kinds.includes(binding.kind)||limits.guide_recipe_ids&&!limits.guide_recipe_ids.includes(recipe?.id))||['first_frame','last_frame'].includes(slot)&&bindings.some(other=>other.binding_id!==binding.binding_id&&other.enabled!==false&&other.slot===slot)}>{({images:'参考图片',videos:'视频 / 动作参考',audios:'声音参考',first_frame:'首帧',last_frame:'尾帧',guides:'时间锚点'})[slot]}</option>)}</select>
+        <select aria-label={`${asset.file_name||'素材'}的用途`} disabled={busy||!ready} value={binding.slot} onChange={e=>role(binding,e.target.value)}>{slots.map(slot=><option key={slot} value={slot} disabled={roleUnavailable(slot,binding.kind)||slot==='guides'&&(!limits.guide_kinds.includes(binding.kind)||limits.guide_recipe_ids&&!limits.guide_recipe_ids.includes(recipe?.id))||['first_frame','last_frame'].includes(slot)&&bindings.some(other=>other.binding_id!==binding.binding_id&&other.enabled!==false&&other.slot===slot)}>{({images:'参考图片',videos:'视频 / 动作参考',audios:'声音参考',first_frame:'首帧',last_frame:'尾帧',guides:'时间锚点'})[slot]}</option>)}</select>
         {binding.kind!=='image'&&<button disabled={busy||!ready} className="qc-clip-button" onClick={()=>setClip(binding)}>片段 {Number(binding.source_range?binding.source_range.end-binding.source_range.start:mediaDuration(asset)||0).toFixed(2)} 秒 · 调整</button>}
-        {(binding.kind==='video'||binding.slot==='guides'&&binding.kind==='audio')&&<label className="qc-small-check"><input type="checkbox" checked={hasAudio&&(binding.slot==='guides'?binding.use_audio===true:binding.include_audio!==false)} disabled={busy||!ready||!hasAudio||binding.kind==='video'&&!limits.allow_video_audio} onChange={e=>act(()=>change(binding,{[binding.slot==='guides'?'use_audio':'include_audio']:e.target.checked}))}/>{hasAudio?'使用原声':'原文件无音轨'}</label>}
+        {binding.kind==='video'&&<label className="qc-small-check"><input type="checkbox" checked={hasAudio&&(binding.slot==='guides'?binding.use_audio===true:binding.include_audio!==false)} disabled={busy||!ready||!hasAudio||!limits.allow_video_audio} onChange={e=>act(()=>change(binding,{[binding.slot==='guides'?'use_audio':'include_audio']:e.target.checked}))}/>{hasAudio?'使用原声':'原文件无音轨'}</label>}
         {binding.slot==='guides'&&<AnchorTime binding={binding} busy={busy||!ready} onSave={time_seconds=>change(binding,{time_seconds})}/>}
         {!active&&<small>保留 · 本轮不使用</small>}
         {binding.enabled===false&&ready&&<button disabled={busy} className="qc-clip-button" onClick={()=>role(binding,binding.slot)}>加入本轮</button>}

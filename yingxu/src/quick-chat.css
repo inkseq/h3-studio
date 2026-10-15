@@ -122,6 +122,14 @@
 .qc-field input[type=checkbox]{width:17px;height:17px;margin:8px 0}
 .qc-field textarea{resize:vertical}
 .qc-field small{display:block;font-size:10px;color:#89967c;margin-top:4px}
+.qc-excerpts{grid-column:1/-1;min-width:0;border:1px solid #e0e6d7;border-radius:7px;padding:12px}
+.qc-excerpt-row{display:flex;align-items:flex-end;gap:10px;margin:10px 0}
+.qc-excerpt-row label{min-width:0;flex:1}
+.qc-excerpt-row input{width:100%;box-sizing:border-box}
+.qc-excerpt-row button{flex-shrink:0}
+.qc-generation-failure{font-size:12px;overflow-wrap:anywhere;margin:10px 0}
+.qc-generation-failure dl{display:grid;grid-template-columns:minmax(80px,auto) minmax(0,1fr);gap:5px 12px}
+.qc-generation-failure dd{margin:0;white-space:normal}
 .qc-disabled{opacity:.55}
 .qc-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 20px}
 .qc-dialog details,.qc-turn details{border-top:1px solid #e2e7da;margin-top:13px;padding-top:13px;font-size:12px}

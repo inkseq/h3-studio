@@ -98,6 +98,19 @@ test('mode changes preserve both inactive frame choices and reference clip metad
   patchStoryboardShot(p,'shot',{mode:'FL'});const fl=expanded(p);assert.deepEqual(fl.items.filter(i=>i.sent).map(i=>i.a.id),['first','last']);assert.match(fl.notes.join(' '),/参考保留/);
   patchStoryboardShot(p,'shot',{mode:'REF'});assert.deepEqual(s.data.storyboard.extraRefs,[{entityId:'voice',clipStart:2}]);assert.equal(s.data.storyboard.firstFrameId,'first');assert.equal(s.data.storyboard.lastFrameId,'last');const ref=expanded(p);assert.equal(ref.items.some(i=>['first','last'].includes(i.a.id)&&i.sent),false);assert.equal(ref.items.find(i=>i.a.id==='voice').clipStart,2);
 });
+test('full-control REF previews first/last anchors and FI separately from ordinary reference limits',()=>{
+  const p=fixture(),cap=capabilities({images:1,total:1});p.entities.push(image('first'),image('last'),image('reference'),image('injection'));
+  shotOf(p).data.storyboard={...shotOf(p).data.storyboard,firstFrameId:'first',lastFrameId:'last',extraRefs:[{entityId:'reference'}]};shotOf(p).data.h3={deploymentProfileId:'draft',guides:[{media_id:'injection',time_seconds:2,use_audio:false}]};
+  const support=cap.deployment_profiles[0].generation_support.ref;support.input_support={first_frame:true,last_frame:true,reference_images:true,reference_video:true,reference_audio:true};support.limits={...support.limits,input_count_semantics:'native_roles_v2',max_guides:8};
+  const info=expanded(p,cap);assert.equal(info.frameInputs,true);assert.deepEqual(info.items.filter(item=>item.sent).map(item=>item.a.id),['reference','first','last','injection']);assert.equal(info.items.find(item=>item.a.id==='injection').slot,'guides');assert.equal(info.notes.some(note=>note.includes('不发送')),false);
+  assert.equal(shotOf(p).data.storyboard.firstFrameId,'first');assert.equal(shotOf(p).data.h3.guides[0].media_id,'injection');
+});
+test('full-control FL sync includes explicit video/soundtrack and image guides without promoting ordinary images',()=>{
+  const p=fixture(),cap=capabilities();p.entities.push(image('first'),image('unused'),image('injection'),audio('soundtrack'),entity('control','video',{fileId:'local-control'}));
+  shotOf(p).data.storyboard={...shotOf(p).data.storyboard,mode:'fl',firstFrameId:'first',extraRefs:[{entityId:'control',clipStart:1},{entityId:'soundtrack',clipStart:2},{entityId:'unused'}]};shotOf(p).data.h3={deploymentProfileId:'draft',guides:[{media_id:'injection',time_seconds:2,use_audio:false}]};
+  const support=cap.deployment_profiles[0].generation_support.fl;support.input_support={first_frame:true,last_frame:true,reference_images:false,reference_video:false,reference_audio:false,video_conditioning:true,kept_soundtrack:true};support.limits={...support.limits,input_count_semantics:'native_roles_v2',max_guides:8};
+  const state=view(p,cap),info=expandStoryboard(state.shots[0],state,{forSync:true});assert.equal(info.controlInputs,true);assert.deepEqual(info.items.filter(item=>item.sent).map(item=>item.a.id),['first','control','soundtrack','injection']);assert.equal(info.items.find(item=>item.a.id==='control').clipStart,1);assert.equal(info.items.find(item=>item.a.id==='unused').sent,false);assert.match(info.items.find(item=>item.a.id==='unused').reason,/普通参考图片/);
+});
 test('explicitly cleared storyboard frames do not revive old guide/canvas links',()=>{
   const p=fixture();p.entities.push(image('old-first'),image('old-last'));p.links.push({id:'first-link',source:'old-first',target:'shot',role:'firstFrame'},{id:'last-link',source:'old-last',target:'shot',role:'lastFrame'});
   const s=view(p).shots[0];assert.equal(s.start,'');assert.equal(s.end,'');

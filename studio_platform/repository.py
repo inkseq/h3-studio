@@ -425,8 +425,25 @@ class Repository:
         if sequence + len(ids) > 9_000_000_000_000_000_000:
             raise Conflict("job_event_sequence_exhausted")
         for offset, event_id in enumerate(ids, 1):
+            record = connection.execute(select(outbox.c.event_type, outbox.c.payload)
+                .where(outbox.c.id == event_id)).mappings().one()
+            changes = {"job_event_seq": sequence + offset}
+            if record["event_type"] == "job.failed":
+                payload = record["payload"]
+                state = payload.get("public_state", {})
+                diagnostic = state.get("failure_diagnostic", {})
+                notice_id = diagnostic.get("notice_id")
+                if isinstance(notice_id, str) and str(uuid.UUID(notice_id)) == notice_id:
+                    # Indexed lookup under the SAME commit-order lock. Only an
+                    # unpublished first event gets the stable owner/kind ID.
+                    # Every later failure remains an independent durable event.
+                    prior = connection.execute(select(outbox.c.id).where(outbox.c.id == notice_id)).first()
+                    state = {**state, "failure_notice": {"id": notice_id, "new_kind": prior is None}}
+                    changes["payload"] = canonical({**payload, "public_state": state})
+                    if prior is None:
+                        changes["id"] = notice_id
             result = connection.execute(update(outbox).where(outbox.c.id == event_id,
-                outbox.c.job_event_seq.is_(None)).values(job_event_seq=sequence + offset))
+                outbox.c.job_event_seq.is_(None)).values(**changes))
             if result.rowcount != 1:
                 raise Conflict("job_event_sequence_unconfirmed")
 
@@ -463,9 +480,12 @@ class Repository:
             if "job_event_ids" not in connection.info:
                 raise Conflict("job_event_transaction_required")
             from .job_cancellation import cancellation_fields, failure_metadata
-            state = connection.execute(select(jobs.c.id, jobs.c.status, jobs.c.error_code, jobs.c.cancellation,
+            columns = [jobs.c.id, jobs.c.status, jobs.c.error_code, jobs.c.cancellation,
                 jobs.c.attempt_no, jobs.c.current_attempt_id, jobs.c.fence, jobs.c.lease_worker_id,
-                jobs.c.lease_expires_at, jobs.c.result["actual_cost_microusd"].label("_actual_cost_microusd"))
+                jobs.c.lease_expires_at, jobs.c.result["actual_cost_microusd"].label("_actual_cost_microusd")]
+            if event_type == "job.failed":
+                columns += [jobs.c.tenant_id, jobs.c.owner_id, jobs.c.request, jobs.c.execution_plan, jobs.c.result]
+            state = connection.execute(select(*columns)
                 .where(jobs.c.id == aggregate_id)).mappings().one()
             state = dict(state)
             if state["status"] == "failed" and state["cancellation"] is None:
@@ -477,6 +497,14 @@ class Repository:
                 error = "job_error_unclassified"
             payload = {**payload, "public_state": {"status": state["status"], "error_code": error,
                 **cancellation_fields(connection, state)}}
+            if event_type == "job.failed":
+                from .generation_diagnostics import safe_failure_summary, failure_notice_id
+                diagnostic = safe_failure_summary(state, payload.pop("failure_context", None))
+                diagnostic["notice_id"] = failure_notice_id(state, diagnostic)
+                original_result = state["result"] if isinstance(state["result"], dict) else {}
+                connection.execute(update(jobs).where(jobs.c.id == aggregate_id).values(
+                    result=canonical({**original_result, "failure_diagnostic": diagnostic})))
+                payload["public_state"]["failure_diagnostic"] = diagnostic
         connection.execute(insert(outbox).values(id=event_id, event_type=event_type,
             aggregate_id=aggregate_id, payload=canonical(payload), created_at=self.clock()))
         if event_type.startswith(("job.", "dstack.")) or event_type == "instance.reserved":
