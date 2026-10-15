@@ -85,6 +85,14 @@ export function createCloudClient({fetcher=(...args)=>fetch(...args),onUnauthori
     }catch(error){if(error instanceof CloudError)throw error;if(timedOut)throw new CloudError(multipart?'上传等待超时。请先到“素材状态与存储用量”核对是否已收到文件，再决定恢复；未自动重新上传。':method==='GET'?(blob?'媒体读取等待超时。请重试预览或下载原文件；不会重新提交生成。':'云端内容读取等待超时。请刷新原记录；不会重新提交生成。'):'请求等待超时，作品已保留。提交是否成功仍需核对；不会自动重投，请刷新原任务或使用原标识恢复。');if(error.name==='AbortError')throw new CloudError('操作已结束；未确认的提交请从任务列表恢复。');throw new CloudError('无法连接云工作室。作品仍保留，请检查连接后重试；不会自动重新提交生成。');}
     finally{clearTimeout(timer);signal?.removeEventListener('abort',cancelRead);inflight.delete(controller);if(releaseRead)releaseRead();}
   }
+  function nativeContentURL(path,{download=false}={}){
+    if(!account)throw new CloudError('请先核对登录账户，再读取私有媒体。');
+    if(typeof path!=='string'||!/^\/v1\/(?:assets|artifacts)\/[A-Za-z0-9_-]{1,200}\/content$/.test(path.split('?')[0])||typeof download!=='boolean')throw new CloudError('私有媒体地址不在工作室内容接口范围内。');
+    const parsed=new URL(safeCloudPath(path),'https://studio.invalid'),entries=[...parsed.searchParams];
+    if(entries.length>1||entries.some(([key,value])=>key!=='download'||value!=='1'))throw new CloudError('私有媒体地址包含不支持的查询参数。');
+    const query=new URLSearchParams({expected_account:account,...(download||entries.length?{download:'1'}:{})});
+    return parsed.pathname+'?'+query;
+  }
   const id=value=>encodeURIComponent(value);
   return {request,reset,setAccount(value){const next=typeof value==='string'&&value?value:null;if(next!==account){account=next;reset();}},
     authConfig:()=>request('/api/auth/config',{anonymous:true}),me:()=>request('/api/auth/me',{anonymous:true}),
@@ -116,6 +124,7 @@ export function createCloudClient({fetcher=(...args)=>fetch(...args),onUnauthori
     batches:(projectId,{limit=10,offset=0}={})=>request(`/v1/batches?client_project_id=${id(projectId)}&limit=${limit}&offset=${offset}`),
     getBatch:batchId=>request(`/v1/batches/${id(batchId)}`),cancelBatch:batchId=>request(`/v1/batches/${id(batchId)}/cancel`,{method:'POST'}),
     artifacts:jobId=>request(`/v1/jobs/${id(jobId)}/artifacts`),
+    nativeContentURL,
     download:(path,{signal}={})=>request(path,{blob:true,signal}),
   };
 }

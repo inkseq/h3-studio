@@ -5,6 +5,21 @@ import {createCloudClient} from './cloud-client.js';
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const busy=(headers={})=>new Response('{"detail":"busy"}',{status:429,headers:{'Retry-After':'0',...headers}});
 
+test('native private content URLs freeze the original owner and use only authenticated content routes without fetching',()=>{
+  let calls=0;const api=createCloudClient({fetcher:async()=>{calls++;throw Error('native URL construction must not fetch');}});
+  assert.throws(()=>api.nativeContentURL('/v1/artifacts/original/content'),/核对登录账户/);api.setAccount('original-owner');
+  const preview=api.nativeContentURL('/v1/artifacts/original/content'),attachment=api.nativeContentURL('/v1/artifacts/original/content',{download:true});
+  assert.equal(preview,'/v1/artifacts/original/content?expected_account=original-owner');assert.equal(attachment,preview+'&download=1');assert.equal(api.nativeContentURL('/v1/assets/source/content?download=1'),'/v1/assets/source/content?expected_account=original-owner&download=1');
+  api.setAccount('new-owner');assert.equal(new URL(preview,'https://studio.invalid').searchParams.get('expected_account'),'original-owner');assert.equal(new URL(attachment,'https://studio.invalid').searchParams.get('expected_account'),'original-owner');assert.equal(api.nativeContentURL('/v1/artifacts/original/content'),'/v1/artifacts/original/content?expected_account=new-owner');
+  api.setAccount('账户 name');assert.equal(new URL(api.nativeContentURL('/v1/assets/source/content'),'https://studio.invalid').searchParams.get('expected_account'),'账户 name');assert.equal(calls,0);
+});
+
+test('native private content URLs reject arbitrary API routes, normalized paths and query authority overrides',()=>{
+  const api=createCloudClient();api.setAccount('supervan');
+  for(const path of ['https://store.invalid/video?signature=secret','//store.invalid/video','/v1/jobs/original','/api/auth/me','/v1/artifacts/original/content/extra','/v1/artifacts/../assets/original/content','/v1/artifacts/%61/content','/v1/artifacts/original/content#fragment','/v1/artifacts/original/content?token=secret','/v1/artifacts/original/content?expected_account=supervan','/v1/artifacts/original/content?expected_account=foreign','/v1/artifacts/original/content?download=1&download=1','/v1/artifacts/original/content?download=0','/v1/artifacts/original/content?download=1&signature=secret'])assert.throws(()=>api.nativeContentURL(path));
+  assert.throws(()=>api.nativeContentURL('/v1/artifacts/original/content',{download:'false'}));
+});
+
 test('media reads run two at a time with room for bounded control requests',async()=>{
   const calls=[],pending=[];let active=0,downloads=0,maxActive=0,maxDownloads=0;
   const api=createCloudClient({fetcher:(path)=>{
