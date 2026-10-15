@@ -1,5 +1,20 @@
 import {safeCloudPath} from './cloud-client.js';
 
+// Capture the source context once with the URL; an old link cannot adopt a new login.
+export function nativeArtifactAttachment(client,artifact,{account,sessionId}={}){
+  if(!account||!sessionId)throw Error('请先核对登录账户和当前创作，再下载原文件。');
+  if(!artifact||typeof artifact.id!=='string'||! /^[A-Za-z0-9_-]+$/.test(artifact.id))throw Error('产物标识无效，请刷新原任务后下载。');
+  const expected=`/v1/artifacts/${artifact.id}/content`,path=artifact.download_url||artifact.content_url||expected;
+  if(![expected,expected+'?download=1'].includes(safeCloudPath(path)))throw Error('产物下载地址与原任务不一致，请刷新原记录。');
+  const href=client.nativeContentURL(path,{download:true});
+  if(new URL(href,'https://studio.invalid').searchParams.get('expected_account')!==account)throw Error('账户已经改变，请从当前创作重新下载原文件。');
+  return Object.freeze({href,account,sessionId});
+}
+export function assertArtifactAttachmentTarget(source,live){
+  if(!source||live.account!==source.account||live.session?.id!==source.sessionId)throw Error('账户或创作已经改变，请从当前创作重新下载原文件。');
+  if(live.busy)throw Error('当前操作正在核对，请稍后下载原文件。');
+}
+
 // Keep only authenticated application URLs. Never persist a redirected storage URL.
 export function artifactMedia(artifact,job,{title='章节'}={}){
   if(!artifact||typeof artifact.id!=='string'||! /^[A-Za-z0-9_-]+$/.test(artifact.id))return null;
