@@ -154,6 +154,65 @@ class NativeVastSafetyTests(unittest.TestCase):
                 self.assertFalse(safety.safe_for_fallback(safety.closed_error(123, caught.exception)))
                 self.assertNotIn("secret", str(caught.exception))
 
+    def test_invalid_args_diagnostic_accepts_only_closed_documented_details(self):
+        for message, expected in [
+                ("error 400/3471: Invalid args: len(args) > 4096", (3471, "args", "length_limit")),
+                ("error 400/3467: Invalid args: 'id' is required and must be a valid offer ID", (3467, "id", "required_or_invalid")),
+                ("error 400/3499: Invalid args: env contains Bearer PRIVATE", (3499, "unknown", "unspecified")),
+                ("error 400/3499: PRIVATE nonstandard provider detail", (3499, "unknown", "unspecified")),
+                ("error 400/3471: Invalid args: len(args) > 4096 https://private.invalid/secret", (3471, "unknown", "unspecified")),
+                ("error 400/3471: Invalid args: len(args) > 4096\nBearer PRIVATE", (None, "unknown", "unspecified")),
+                ("Bearer PRIVATE error 400/3471: Invalid args: len(args) > 4096", (None, "unknown", "unspecified")),
+                ("error 404/3471: Invalid args: len(args) > 4096", (None, "unknown", "unspecified")),
+                ("error 400/347100000000000: Invalid args: len(args) > 4096", (None, "unknown", "unspecified")),
+                ("error 400/3471: Invalid args: " + "PRIVATE" * 400, (None, "unknown", "unspecified")),
+                ({"msg": "PRIVATE"}, (None, "unknown", "unspecified")),
+                (None, (None, "unknown", "unspecified"))]:
+            with self.subTest(expected=expected):
+                self.assertEqual(safety._invalid_args_diagnostic(message), expected)
+
+    def test_rejected_create_logs_no_body_or_payload_and_preserves_original_proof(self):
+        for message, expected in [
+                ("error 400/3471: Invalid args: len(args) > 4096", "provider_subcode=3471 field=args reason=length_limit"),
+                ("error 400/3499: Invalid args: PRIVATE https://private.invalid/secret", "provider_subcode=3499 field=unknown reason=unspecified")]:
+            data = {"success": False, "error": "invalid_args", "ask_id": 123,
+                    "msg": message, "echoed_payload": {"env": "PRIVATE"}}
+            received = response(400, data)
+            session = NS(put=Mock(return_value=received), delete=Mock())
+            with self.subTest(message=expected), self.assertLogs(safety._logger, level="WARNING") as logs:
+                with self.assertRaises(safety.VastSafeReject) as caught:
+                    safety.create_instance_once(session, 123, {"image_login": "PRIVATE", "args": ["PRIVATE"]})
+            self.assertNotIsInstance(caught.exception, safety.VastAllocationUnknown)
+            self.assertEqual(caught.exception.outcome, {"ask_id": "123", "http_status": 400,
+                "code": "invalid_args", "outcome": "rejected", "contract_id": None})
+            self.assertEqual(proof([attempt(123, caught.exception)])["outcome"], "no_allocation")
+            self.assertEqual(set(caught.exception.outcome), safety.OUTCOME_KEYS)
+            self.assertEqual(len(logs.output), 1)
+            self.assertIn(expected, logs.output[0])
+            for secret in ("PRIVATE", "https://", "echoed_payload", "image_login"):
+                self.assertNotIn(secret, logs.output[0])
+                self.assertNotIn(secret, str(caught.exception))
+            session.put.assert_called_once()
+            session.delete.assert_not_called()
+            received.close.assert_called_once()
+
+    def test_logging_failure_and_ambiguous_errors_cannot_change_allocation_classification(self):
+        data = {"success": False, "error": "invalid_args", "ask_id": 123,
+                "msg": "error 400/3471: Invalid args: len(args) > 4096"}
+        with patch.object(safety._logger, "warning", side_effect=RuntimeError("PRIVATE")):
+            with self.assertRaises(safety.VastSafeReject) as caught:
+                safety.create_instance_once(NS(put=Mock(return_value=response(400, data))), 123, {})
+        self.assertNotIsInstance(caught.exception, safety.VastAllocationUnknown)
+        self.assertEqual(proof([attempt(123, caught.exception)])["outcome"], "no_allocation")
+        for change in ({"new_contract": 555}, {"ask_id": 124}, {"success": True}):
+            with self.subTest(change=change), patch.object(safety._logger, "warning") as log:
+                session = NS(put=Mock(return_value=response(400, {**data, **change})))
+                with self.assertRaises(safety.VastAllocationUnknown) as unknown:
+                    safety.create_instance_once(session, 123, {})
+                log.assert_not_called()
+                self.assertFalse(safety.safe_for_fallback(safety.closed_error(123, unknown.exception)))
+                session.put.assert_called_once()
+
     def test_success_contract_is_original_even_when_connection_close_fails(self):
         received = response(200, {"success": True, "new_contract": 555})
         received.close.side_effect = OSError("closed")

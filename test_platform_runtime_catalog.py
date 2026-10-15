@@ -183,7 +183,7 @@ class RuntimeCatalogTests(unittest.TestCase):
 
     def test_catalog_is_detached_public_and_unqualified(self):
         catalog = public_catalog()
-        self.assertEqual(len(catalog['profiles']), 14)
+        self.assertEqual(len(catalog['profiles']), 16)
         for profile in catalog['profiles']:
             self.assertNotIn('runtime', profile)
             self.assertIs(profile['validation']['production_adapter_verified'], False)
@@ -217,7 +217,7 @@ class RuntimeCatalogTests(unittest.TestCase):
                         self.assertIn('/blob/ff2fa85678e77ba195380b148acc23a4c47ef347/', sample['evidence'])
 
     def test_failed_bf16_and_trimmed_reference_samples_are_excluded(self):
-        self.assertEqual([len(get_profile(p)['verified_cases']) for p in PROFILE_IDS], [8, 7, 7, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+        self.assertEqual([len(get_profile(p)['verified_cases']) for p in PROFILE_IDS], [8, 7, 7, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
         self.assertEqual(get_profile(PROFILE_IDS[2])['runtime']['task_config'], 'bf16,bf16')
         self.assertTrue(get_profile(PROFILE_IDS[2])['runtime']['qkv_splitting'])
         self.assertEqual(get_profile(PROFILE_IDS[0])['model_id'], 'MiniMax-H3-Pruned-Rank8-INT8')

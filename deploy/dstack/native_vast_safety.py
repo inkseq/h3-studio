@@ -4,6 +4,7 @@ The native allocator owns offers, submissions and persistence. This module has
 no clients, background threads, provider configuration or import-time effects.
 """
 import json
+import logging
 import random
 import re
 import time
@@ -20,6 +21,7 @@ SAFE_REJECTIONS = {(400, "invalid_args"), (404, "no_such_ask"), (410, "no_such_a
 SAFE_CODES = {code for _, code in SAFE_REJECTIONS}
 _cooldown_lock = threading.Lock()
 _cooldown_until = 0.
+_logger = logging.getLogger(__name__)
 
 
 class VastReadRateLimited(Exception):
@@ -75,6 +77,41 @@ def _rejection_code(status, data, ask_id):
     if status == 410 and error == "no_such_ask":
         return "no_such_ask"
     return None
+
+
+def _invalid_args_diagnostic(message):
+    """Extract closed diagnostics, never provider text, from documented errors.
+
+    These values explain an already-proven rejection; they cannot authorize
+    fallback or change the five-field non-allocation proof.
+    """
+    unspecified = (None, "unknown", "unspecified")
+    if not isinstance(message, str) or len(message) > 2048:
+        return unspecified
+    match = re.fullmatch(r"error 400/([1-9][0-9]{0,8}): ([^\r\n]{1,1900})", message)
+    if match is None:
+        return unspecified
+    subcode, detail = int(match[1]), match[2]
+    if not detail.startswith("Invalid args: "):
+        return subcode, "unknown", "unspecified"
+    detail = detail[len("Invalid args: "):]
+    if re.fullmatch(r"len\(args\) > [1-9][0-9]{0,8}", detail):
+        return subcode, "args", "length_limit"
+    if detail == "'id' is required and must be a valid offer ID":
+        return subcode, "id", "required_or_invalid"
+    return subcode, "unknown", "unspecified"
+
+
+def _log_invalid_args(ask_id, data):
+    try:
+        subcode, field, reason = _invalid_args_diagnostic(data.get("msg"))
+        _logger.warning(
+            "sixnine_vast_create_rejected ask_id=%s http_status=400 "
+            "error_code=invalid_args provider_subcode=%s field=%s reason=%s",
+            ask_id, subcode, field, reason,
+        )
+    except Exception:
+        pass  # Logging cannot turn a proven rejection into an unknown mutation.
 
 
 def _rate_limit_detail(data):
@@ -182,6 +219,8 @@ def create_instance_once(session, bundle_id, payload):
         code = _rejection_code(status, data, ask_id)
         if code is not None:
             outcome = {**unknown, "code": code, "outcome": "rejected"}
+            if status == 400 and code == "invalid_args":
+                _log_invalid_args(ask_id, data)
             if status == 429:
                 delay = _delay(response)
                 _record_rate_limit(response, delay)

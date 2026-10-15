@@ -91,6 +91,11 @@ export function createQuickChatController({client=createQuickChatClient(),storag
     // Timeline holds durable creation references; current job state is read
     // separately even when its sequence has not changed.
     const cardIds=new Set(events.map(event=>event.record?.card_id||event.card_id).filter(Boolean));
+    // The cursor may advance before card/revision reads finish. Recover only
+    // missing data referenced by loaded history, at most 20 cards per poll.
+    const loadedCardIds=new Set([...Object.keys(state.cards),...state.timeline.map(event=>event.record?.card_id||event.card_id).filter(Boolean)]);
+    let recovering=0;
+    for(const cardId of loadedCardIds){const card=state.cards[cardId],current=card?.current_revision_id||card?.current_revision?.id;if(!cardIds.has(cardId)&&(!card||current&&!state.revisions[current])){cardIds.add(cardId);if(++recovering>=20)break;}}
     for(const revisionId of new Set(events.map(event=>event.record?.revision_id).filter(Boolean))){const revision=record(await client.revision(id,revisionId),'revision');guard(ctx);emit({revisions:{...state.revisions,[revision.id]:revision}});if(revision.card_id)cardIds.add(revision.card_id);}
     const eventPreflights=Object.fromEntries(events.filter(event=>event.type==='preflight.completed'&&event.record?.id).map(event=>[event.record.id,event.record]));
     if(Object.keys(eventPreflights).length)emit({preflights:{...state.preflights,...eventPreflights}});
