@@ -12,17 +12,19 @@ from pathlib import Path
 import time
 import uuid
 
-from sqlalchemy import Column, Float, MetaData, String, Table, Text, select
+from sqlalchemy import Column, Float, MetaData, String, Table, Text, delete, select
 
 from . import media
 from .storage import (IntegrityError, LocalObjectStore, ObjectAlreadyExists, ObjectInfo, S3ObjectStore,
     StorageWriteUncertain, UnsupportedStorageOperation, _check_ancestors, _copy,
     _no_links, _part, _sync_directory, make_object_key)
-from .storage_asset_journal import AssetUploadJournal, AssetConflict, AssetQuotaExceeded, validate_client_asset_id
+from .storage_asset_journal import (AssetUploadJournal, AssetConflict, AssetQuotaExceeded,
+    artifact_accounting, artifact_identity, receipts, validate_client_asset_id)
 from .storage_multipart import MultipartJournal, MultipartOutcomeUnknown, MultipartUploadManager
 from .storage_schema import create_storage_schema
 from .asset_operation import asset_operation_lock
 from . import scratch_retention
+from .content_lifecycle import content_is_deleted, owner_reference_gate
 
 MIB = 1024 * 1024
 metadata = MetaData()
@@ -72,6 +74,9 @@ class AssetService:
         else:
             raise UnsupportedStorageOperation("素材存储适配器尚未提供可验证的持久身份绑定")
         self.storage_binding = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+        # Preserve both original binding formats; old receipts are not rewritten.
+        self.artifact_storage_binding = hashlib.sha256(json.dumps(identity, sort_keys=True,
+            separators=(",", ":"), allow_nan=False).encode()).hexdigest()
         root = Path(data_dir)
         if not root.is_absolute():
             raise ValueError("素材数据根必须为绝对路径")
@@ -472,15 +477,88 @@ class AssetService:
             clauses.append(asset_table.c.project_id == project_id)
         with self.engine.connect() as conn:
             value = conn.execute(select(asset_table.c.record).where(*clauses)).scalar_one_or_none()
-        if value is None:
-            raise AssetNotFound("素材不存在")
-        return json.loads(value)
+            if value is None:
+                raise AssetNotFound("素材不存在")
+            record = json.loads(value)
+            self.journal._available(conn, owner, record, acquire_gate=False)
+            return record
 
     def list(self, owner, project_id):
         with self.engine.connect() as conn:
             rows = conn.execute(select(asset_table.c.record).where(asset_table.c.tenant == self.tenant,
                 asset_table.c.owner == owner, asset_table.c.project_id == project_id, asset_table.c.status != "duplicate").order_by(asset_table.c.created.desc()).limit(500)).scalars()
-            return [self.public(json.loads(row)) for row in rows]
+            result = []
+            for raw in rows:
+                record = json.loads(raw)
+                keys = [record[role]["key"] for role in ("original", "model") if record.get(role, {}).get("key")]
+                if (content_is_deleted(conn, self.tenant, owner, asset_id=record["id"])
+                        or any(content_is_deleted(conn, self.tenant, owner, object_key=key) for key in keys)):
+                    continue
+                result.append(self.public(record))
+            return result
+
+    def finalize_purge(self, connection, owner, *, asset_ids, artifact_specs, now):
+        """Release proven-absent originals in the lifecycle final transaction.
+
+        The caller owns the purge action/tombstones and marks accounting_released
+        in this SAME transaction. No storage IO, schema initialization, nested
+        connection, scratch deletion, financial settlement, or receipt deletion.
+        """
+        owner_reference_gate(connection, self.tenant, owner)
+        if len(set(asset_ids)) != len(asset_ids):
+            raise AssetConflict("purge_asset_identity_duplicate")
+        physical = {}
+        def add(key, size, sha):
+            ident, size, sha = artifact_identity(dict(object_key=key, size_bytes=size,
+                sha256=sha, validated=True), owner)
+            if key in physical and physical[key] != (size, sha):
+                raise AssetConflict("purge_object_identity_conflict")
+            physical[key] = (size, sha)
+            return ident
+        for asset_id in sorted(asset_ids):
+            row = connection.execute(select(asset_table).where(asset_table.c.id == asset_id,
+                asset_table.c.tenant == self.tenant, asset_table.c.owner == owner).with_for_update()).mappings().first()
+            upload = connection.execute(select(receipts).where(receipts.c.id == asset_id,
+                receipts.c.tenant == self.tenant, receipts.c.owner == owner).with_for_update()).mappings().first()
+            if row is None or upload is None:
+                raise AssetConflict("purge_original_asset_unconfirmed")
+            asset, receipt = json.loads(row["record"]), json.loads(upload["record"])
+            if (row["status"] != "ready" or receipt.get("busy") is not False
+                    or receipt.get("asset") != asset or receipt.get("storage_binding") != self.storage_binding
+                    or not receipt.get("prepared") or not receipt.get("objects")
+                    or not content_is_deleted(connection, self.tenant, owner, asset_id=asset_id)):
+                raise AssetConflict("purge_original_upload_unconfirmed")
+            remote = 0
+            for role, spec in receipt["objects"].items():
+                original = asset.get(role, {})
+                if (role not in {"original", "model"} or spec.get("phase") != "verified"
+                        or any(original.get(k) != spec.get(k) for k in ("key", "size_bytes", "sha256", "content_type"))
+                        or not content_is_deleted(connection, self.tenant, owner,
+                            object_key=spec["key"], storage_binding=self.storage_binding)):
+                    raise AssetConflict("purge_original_upload_unconfirmed")
+                add(spec["key"], spec["size_bytes"], spec["sha256"])
+                remote += spec["size_bytes"]
+            if type(receipt.get("reserved")) is not int or receipt["reserved"] < remote:
+                raise AssetConflict("purge_upload_accounting_unconfirmed")
+        for spec in artifact_specs:
+            if (spec.get("storage_binding") != self.artifact_storage_binding
+                    or not content_is_deleted(connection, self.tenant, owner,
+                        object_key=spec.get("object_key"), storage_binding=self.artifact_storage_binding)):
+                raise AssetConflict("purge_artifact_binding_unconfirmed")
+            ident = add(spec.get("object_key"), spec.get("size_bytes"), spec.get("sha256"))
+            for scope, _, _ in self.journal._scopes(owner):
+                marker = connection.execute(select(artifact_accounting).where(
+                    artifact_accounting.c.scope == scope, artifact_accounting.c.object_id == ident)
+                    .with_for_update()).mappings().first()
+                if marker is None or (marker["size_bytes"], marker["sha256"]) != (spec["size_bytes"], spec["sha256"]):
+                    raise AssetConflict("purge_artifact_accounting_unconfirmed")
+        released = sum(size for size, _ in physical.values())
+        if released:
+            self.journal._change(connection, owner, -released, 0)
+        for asset_id in sorted(asset_ids):
+            connection.execute(delete(asset_table).where(asset_table.c.id == asset_id,
+                asset_table.c.tenant == self.tenant, asset_table.c.owner == owner))
+        return {"removed_asset_ids": sorted(asset_ids), "released_bytes": released}
 
     def model_snapshot(self, owner, project_id, asset_id):
         record = self.get(owner, asset_id, project_id)

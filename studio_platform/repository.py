@@ -436,6 +436,15 @@ class Repository:
     def _locked(self, connection, statement):
         return connection.execute(statement.with_for_update()).mappings().first()
 
+    @staticmethod
+    def _content_write_guard(connection, scope, value=None, *, project_id=None):
+        from .content_lifecycle import owner_reference_gate, assert_project_writable, assert_reference_payload
+        owner_reference_gate(connection, scope.tenant_id, scope.owner_id)
+        assert_project_writable(connection, scope.tenant_id, scope.owner_id,
+            scope.project_id if project_id is None else project_id)
+        if value is not None:
+            assert_reference_payload(connection, scope.tenant_id, scope.owner_id, value)
+
     def _job(self, connection, job_id, scope=None, *, lock=False):
         statement = select(jobs).where(jobs.c.id == job_id)
         if scope is not None:
@@ -520,6 +529,8 @@ class Repository:
                      documents.c.document_id == document_id)
         try:
             with self.transaction() as connection:
+                self._content_write_guard(connection, scope, payload,
+                    project_id=document_id if scope.project_id == "__projects" and kind == "project" else scope.project_id)
                 row = self._locked(connection, select(documents).where(where))
                 if row is None:
                     if expected_version not in (None, 0):
@@ -589,6 +600,7 @@ class Repository:
             estimated_cost_microusd=money(estimated_cost_microusd),
             created_at=self.clock(), expires_at=float(expires_at))
         with self.transaction() as connection:
+            self._content_write_guard(connection, scope, request)
             connection.execute(insert(plans).values(**row))
         return row
 
@@ -934,6 +946,7 @@ class Repository:
                          jobs.c.idempotency_key == idempotency_key)
         try:
             with self.transaction() as connection:
+                self._content_write_guard(connection, scope)
                 # Same lock as approvals/registration and idle shutdown. Even
                 # planned jobs preserve a frozen configuration identity that
                 # must not race a first cold approval with different delivery.
@@ -943,6 +956,7 @@ class Repository:
                     self._scope(plans, scope)))
                 if plan is None:
                     raise NotFound("plan_not_found")
+                self._content_write_guard(connection, scope, plan["request"])
                 # Creation semantics include the immutable chosen plan, not just the prompt.
                 digest = request_hash({"request_hash": plan["request_hash"], "plan_hash": plan["plan_hash"],
                                        "estimated_cost_microusd": plan["estimated_cost_microusd"]})
@@ -992,11 +1006,13 @@ class Repository:
 
     def enqueue(self, scope, job_id, *, budget_account_ids=()):
         with self.transaction() as connection:
+            self._content_write_guard(connection, scope)
             self._locked(connection, select(capacity_gate).where(capacity_gate.c.id == "global"))
             job = self._job(connection, job_id, scope, lock=True)
             if job["status"] not in ("planned", "blocked") or job["attempt_no"]:
                 raise InvalidTransition("job_not_admissible")
             plan = connection.execute(select(plans).where(plans.c.id == job["plan_id"])).mappings().one()
+            self._content_write_guard(connection, scope, plan["request"])
             if plan["expires_at"] <= self.clock():
                 raise Conflict("plan_expired")
             execution = plan["execution_plan"]
@@ -1022,6 +1038,7 @@ class Repository:
         exist. The original job ID/key remains; this does not perform admission.
         """
         with self.transaction() as connection:
+            self._content_write_guard(connection, scope)
             # Match create/enqueue lock order before changing a frozen plan binding.
             self._locked(connection, select(capacity_gate).where(capacity_gate.c.id == "global"))
             job = self._job(connection, job_id, scope, lock=True)
@@ -1047,6 +1064,7 @@ class Repository:
             if plan["expires_at"] <= self.clock():
                 raise Conflict("plan_expired")
             old, new = job["request"], plan["request"]
+            self._content_write_guard(connection, scope, new)
             if (old.get("server_source_hash") != new.get("server_source_hash")
                     or old.get("client_ref") != new.get("client_ref")
                     or old.get("recipe_id") != new.get("recipe_id")):

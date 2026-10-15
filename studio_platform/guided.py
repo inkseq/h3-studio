@@ -28,6 +28,7 @@ from .project_validation import ID, TYPES, ROLES, validate_project
 from .project_activity import append_activity, metadata as activity_metadata, register_routes as register_activity_routes
 from .render_plans import ordered_chapter
 from .repository import Conflict, NotFound, Scope, canonical, documents, request_hash, artifacts, jobs
+from .content_lifecycle import owner_reference_gate, assert_project_writable, assert_reference_payload
 
 metadata = MetaData()
 receipts = Table("platform_edit_receipts", metadata,
@@ -224,6 +225,9 @@ class Guided:
         document_scope = Scope(self.settings.tenant_id, principal.owner, "__projects", principal.actor_id)
         where = (self.repo._scope(documents, document_scope), documents.c.kind == "project", documents.c.document_id == project_id)
         with self.repo.transaction() as conn:
+            owner_reference_gate(conn, self.settings.tenant_id, principal.owner)
+            assert_project_writable(conn, self.settings.tenant_id, principal.owner, project_id)
+            assert_reference_payload(conn, self.settings.tenant_id, principal.owner, project)
             row = self.repo._locked(conn, select(documents).where(*where))
             if row is None:
                 raise NotFound("document_not_found")
@@ -264,6 +268,8 @@ class Guided:
                         {"op": "asset.attach", "asset_id": ident}))
         try:
             with self.repo.transaction() as conn:
+                owner_reference_gate(conn, self.settings.tenant_id, principal.owner)
+                assert_project_writable(conn, self.settings.tenant_id, principal.owner, project_id)
                 # The project row serializes concurrent edits. A unique receipt
                 # also protects first creation where the project row is absent.
                 row = self.repo._locked(conn, select(documents).where(*where))
@@ -272,6 +278,7 @@ class Guided:
                     if receipt:
                         if receipt["fingerprint"] != fingerprint:
                             raise Conflict("edit_idempotency_conflict")
+                        assert_reference_payload(conn, self.settings.tenant_id, principal.owner, receipt["response"])
                         return receipt["response"]
                 if create:
                     if row:
@@ -289,6 +296,7 @@ class Guided:
                     version = row["version"]+1
                 project["updatedAt"] = now_iso()
                 validate_project(project, self.settings.max_project_bytes)
+                assert_reference_payload(conn, self.settings.tenant_id, principal.owner, project)
                 values = dict(payload=canonical(project), version=version, updated_at=self.repo.clock())
                 if create:
                     conn.execute(insert(documents).values(tenant_id=self.settings.tenant_id, owner_id=principal.owner,

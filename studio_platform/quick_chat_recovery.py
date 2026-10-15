@@ -1,4 +1,9 @@
-"""SQL-only stale assistant reconciliation; never resubmits an upstream call."""
+"""Original assistant recovery and consented history retention maintenance.
+
+Assistant/title recovery never resubmits a model call. History cleanup resumes
+only durable original purge intents or expired consented trash; it never owns
+generation, GPU capacity or billing reconciliation.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -16,8 +21,10 @@ class QuickChatRecovery:
         self.task = None
         self.last_count = 0
         self.last_error_code = None
+        self.last_history_cleanup = None
+        self.last_history_error_code = None
 
-    async def reconcile(self):
+    async def reconcile(self, *, include_history=True):
         try:
             self.last_count = await run_in_threadpool(self.service.recover_assistant_runs,
                                                       older_than_s=self.older_than_s)
@@ -28,6 +35,17 @@ class QuickChatRecovery:
             # Database/driver exception text may contain private values.
             # No supplier request or automatic creation/retry occurs here.
             self.last_error_code = "quick_chat_recovery_failed"
+        # Keep storage outcomes separate from assistant recovery diagnostics.
+        # Cleanup commits its deletion intent before external object-store IO.
+        if not include_history:
+            return
+        cleanup = getattr(self.service, "process_history_cleanup", None)
+        if cleanup is not None:
+            try:
+                self.last_history_cleanup = await run_in_threadpool(cleanup, limit=10, max_objects=10)
+                self.last_history_error_code = None
+            except Exception:
+                self.last_history_error_code = "quick_chat_history_cleanup_failed"
 
     async def _run(self):
         while not self.stop.is_set():
@@ -37,7 +55,9 @@ class QuickChatRecovery:
                 await self.reconcile()
 
     async def start(self):
-        await self.reconcile()
+        # Readiness must not wait on object-store streaming or deletion. The
+        # existing background tick resumes consented original cleanup work.
+        await self.reconcile(include_history=False)
         self.task = asyncio.create_task(self._run())
 
     async def close(self):

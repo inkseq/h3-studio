@@ -49,6 +49,11 @@ class GenerationAccess:
         if not row:
             raise NotFound("artifact_not_found")
         self.job(principal, row["job_id"])
+        if row["metadata"].get("content_deleted"):
+            raise NotFound("artifact_not_found")
+        from .content_lifecycle import assert_content_available
+        with self.repo.engine.connect() as connection:
+            assert_content_available(connection, self.tenant_id, principal.owner, artifact_ids=(artifact_id,))
         return row
 
 
@@ -94,6 +99,9 @@ class GenerationRead:
                 {job["id"]: job["project_id"]}, expected_states={job["id"]:
                     {key: job[key] for key in ("status", "updated_at", "error_code")}})[job["id"]]
         visible.update(cancellation)
+        if stored_request.get("content_deleted"):
+            visible["content_deleted"] = True
+            visible["retry_advice"] = {**visible["retry_advice"], "safe_to_retry": False}
         if stored_request.get("deployment_profile_id"):
             visible["deployment_profile_id"] = stored_request["deployment_profile_id"]
         if "delivery_spec" in job["execution_plan"]:
@@ -102,7 +110,8 @@ class GenerationRead:
             if artifact_records is None:
                 artifact_records = self.repo.list_artifacts(Scope(self.access.tenant_id, job["owner_id"], job["project_id"]), job["id"])
             for art in artifact_records:
-                visible["artifacts"].append(self.artifact(art))
+                if not art["metadata"].get("content_deleted"):
+                    visible["artifacts"].append(self.artifact(art))
         return visible
 
     def job(self, principal, job_id):

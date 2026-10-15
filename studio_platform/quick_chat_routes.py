@@ -47,6 +47,27 @@ def agent_contract():
         "history_titles": "Omit title when creating a session to allow optional Gemma 4 short history naming from the first meaningful accepted description. Any explicit title is manual, even the default label. Naming is independent of the conversational assistant and video engine; consult schema.history_titles.enabled. It sends only bounded first text, never media/full history, and failure keeps the original label without automatic retry.",
         "deployment_profiles": "Read capabilities.deployment_profiles and the session's complete next_settings. Preserve the user's selected deployment_profile_id and use that profile's generation_support[fl|ref] controls, input_support, limits, supported_constraints and execution_policy_constraints. Historical joint_cases are timing examples, never an admission allowlist; supported unmeasured combinations need no extra qualification confirmation. Turn-to-card inherits next_settings. Direct card creation/revision does not inherit an omitted profile: include top-level deployment_profile_id and explicit controls, copied from session next_settings for a new card or from the current revision when revising. Null or omission retains legacy routing; never drop a selected profile to bypass a blocker. Explicit session changes use PATCH with expected_version and complete next_settings. Catalog measurements are historical; preflight checks current matching workers. Ordinary generation keys do not grant operator rental access.",
         "composer_reset": "Only durable accepted submission clears the submitted composer snapshot. Inspect composer_reset; newer selections, persistent settings, stored assets and earlier revisions remain. Rejections and unknown outcomes preserve the draft.",
+        "creation_history": {
+            "list": {"method": "GET", "path": PREFIX,
+                "query": {"view": "active|trash", "hide_tests": "boolean", "limit": "1..50", "cursor": "{next_cursor}"}},
+            "preview": {"method": "POST", "path": PREFIX+"/history/preview",
+                "body": {"action": "trash|restore|purge|empty_trash",
+                    "sessions": [{"id": "{session_id}", "expected_version": "{session.version}"}]}},
+            "empty_trash_preview": {"method": "POST", "path": PREFIX+"/history/preview",
+                "body": {"action": "empty_trash", "sessions": []},
+                "require": "Review the returned complete target set. Do not send selected session IDs for empty_trash."},
+            "confirm": {"method": "POST", "path": PREFIX+"/history/actions",
+                "body": {"preview_id": "{fresh_preview_id}", "confirmed": True},
+                "require": "Read the exact target list, removed/kept counts, shared/chosen-shot warnings and eligibility before confirming. Retain the exact body and Idempotency-Key. A stale preview needs a fresh preview, never a force flag."},
+            "observe": {"method": "GET", "path": PREFIX+"/history/actions/{action_id}"},
+            "retention": "Trash hides a session and retains all content for five days. Restore is unavailable once irreversible purge intent exists. Curated older acceptance records marked review_hold are not automatically purged; explicit purge preview and confirmation are required. Other restorable trash remains a reference.",
+            "guards": "Queued, running, collecting, uncertain admission/collection and unfinished authoring operations block deletion. Shared assets and storyboard-chosen versions stay. Job/attempt identities, receipts and billing are retained; deletion does not cancel generation or imply a refund.",
+            "unknown": "A pending/unknown action is not a completed deletion. Poll its original action_id or replay its original identical confirmation key/body; never issue a replacement destructive action. Permanent deletion may finish over several maintenance passes.",
+            "test_records": "Create acceptance sessions with is_test=true. After verifying results, PATCH the same session with expected_version and test_accepted=true to request safe archival. Active/uncertain work still blocks archival. hide_tests affects only the history view; it does not delete anything.",
+            "scopes": {"list": ["projects:read"], "trash_restore": ["projects:read", "projects:write"],
+                "purge": ["projects:read", "projects:write", "assets:read", "assets:write", "jobs:read", "jobs:write"]},
+            "cleanup_consent": "Automatic five-day cleanup is enabled only when the original trash actor had the required purge scopes. A limited-scope PAT can hide/restore a record but does not acquire deletion authority by waiting. Inspect auto_purge_enabled and purge_blocked_reason; review_hold also disables automatic purge.",
+            "visibility": "Reference checks cover saved server records, not unsaved browser drafts. Empty-trash preview captures the complete authorized trash set, including review-held entries, and confirmation rechecks it."},
         "card_revisions": "Read the current card and its current_revision_id revision before editing that same card. Revisions require expected_card_version from card.version, not session expected_version. Preserve the explicit deployment_profile_id, recipe_id, controls, inputs and copies from that revision. source_revision_id is optional same-session provenance and does not select the card, enforce concurrency or inherit inputs; omit it when no lineage is wanted. title is optional and defaults to 我的视频; include the prior title to preserve it. A new revision preserves old snapshots and submissions and does not generate. Missing/invalid fields return HTTP422 invalid_request with safe field_errors; only a genuinely stale card version returns HTTP409 version_conflict. Reconcile stale edits and use a new key for a changed body. An uncertain response is recovered with the original identical key/body.",
         "replay": "Persist each write body and Idempotency-Key. Replaying the same revision's initial confirmation across Agents returns its original submission/items/jobs, not new variations.",
         "job_changes": {
@@ -144,8 +165,23 @@ def register_routes(app, *, hooks=None, assistant=None, assistant_enabled=False,
             "timeline": {"events": "creation_commands_only", "execution_polling": "active_submissions"}}
 
     @app.get(PREFIX)
-    def sessions(request: Request, limit: int = Query(20, ge=1, le=50), cursor: str | None = None):
-        return service.list_sessions(request.state.principal, limit=limit, cursor=cursor)
+    def sessions(request: Request, limit: int = Query(20, ge=1, le=50), cursor: str | None = None,
+                 view: str = Query("active", pattern="^(active|trash)$"), hide_tests: bool = False):
+        return service.list_sessions(request.state.principal, limit=limit, cursor=cursor,
+                                     view=view, hide_tests=hide_tests)
+
+    @app.post(PREFIX+"/history/preview")
+    def history_preview(request: Request, body: dict):
+        return service.preview_history(request.state.principal, body)
+
+    @app.post(PREFIX+"/history/actions")
+    def history_action(request: Request, body: dict, key: str = Header(..., alias="Idempotency-Key")):
+        value = service.apply_history(request.state.principal, body, key)
+        return JSONResponse(value, status_code=202 if value["state"] == "pending" else 200)
+
+    @app.get(PREFIX+"/history/actions/{action_id}")
+    def history_action_status(action_id: str, request: Request):
+        return service.get_history_action(request.state.principal, action_id)
 
     @app.post(PREFIX, status_code=201)
     def create_session(request: Request, body: dict, key: str = Header(..., alias="Idempotency-Key")):

@@ -37,6 +37,17 @@ class QuickAdmissionTests(LedgerCase):
         self.repo.put_document(Scope("sixnine", "superdan", "__projects"), "project", "story-one",
                                 payload, expected_version=row["version"])
         self.principal = Principal("superdan", "agent-one", True, (), tuple(API_SCOPES), True)
+        # Managed admission must have its original session authority. A marker
+        # without that binding is deliberately fail-closed after lifecycle
+        # cleanup, rather than an alternate route around a trashed session.
+        from studio_platform.quick_chat import DEFAULT_MODEL, default_next_settings
+        with self.repo.transaction() as connection:
+            self.app.state.quick_chat._new(connection, self.principal, "session-admission-fixture", "session",
+                {"project_id": "story-one", "title": "Original admission fixture", "model_id": DEFAULT_MODEL,
+                 "next_settings": default_next_settings(self.app.state.quick_chat.settings), "bindings": [],
+                 "latest_seq": 0, "active_turn_id": None,
+                 "title_generation": self.app.state.quick_chat._initial_title_state(title_supplied=True)},
+                ident="session-admission-fixture")
 
     def test_different_agents_resolve_one_execution_and_cannot_bypass_legacy(self):
         admission = self.app.state.generation_admission

@@ -136,6 +136,16 @@ Keep IDs stable. A material reversal receives a new decision ID and a `supersede
 - **Revisit when:** The user changes priority, or measured failures require revising the proposed memory/control envelope. Hardware/recipe changes remain explicit; existing jobs and cumulative costs survive.
 - **Evidence / proposal:** [User-direction planning claim](https://github.com/apedintensor/h3-studio/issues/22#issuecomment-6056468134); [5090 pilot and panel proposal](docs/research/h3-economics-20261008/5090-test-plan.md). No GPU, image build, model download or production change is authorized by this record.
 
+## DEC-014 — Use restorable creation trash before reference-aware content removal
+
+- **Status / scope:** Accepted owner direction in [#182](https://github.com/inkseq/h3-studio/issues/182); recorded 2026-10-15 (Australia/Sydney). Covers Quick Chat sessions, not story-project deletion or #154's separate never-submitted-card action.
+- **Decision:** Move creations to lossless five-day trash before permanent cleanup. Use the original authoring/operation authority, a shared reference-write fence and durable irreversible object intents. Saved references elsewhere, storyboard-chosen versions, job/attempt identities, receipts and financial obligations survive. Active or uncertain work blocks deletion; restore is unavailable once a delete may have begun. Missing object-store acknowledgement resumes the same intent, never a replacement plan.
+- **Consent and review:** Automatic cleanup requires the original trash actor's project/asset/job cleanup authority; time does not expand a limited PAT. Curated existing acceptance records remain review-held until explicit owner purge preview/confirmation. Newly tagged test sessions may request safe archival after acceptance. Unsaved browser drafts are outside server reference visibility.
+- **Why:** Acceptance records must not bury real work, while deleting one creation must not remove another creation's media or erase accounting and recovery evidence.
+- **Preservation boundary:** This does not remove DEC-009's retained migration originals, database backups or current/previous rollback releases, and does not settle any unknown invoice. Reference removal is an explicit content lifecycle operation, not generation cancellation or financial reconciliation.
+- **Revisit when:** Sharing, backup-erasure requirements or measured scale require different retention. Preserve already accepted cleanup intent, ownership and shared-object proof when changing implementation.
+- **Contract:** [Creation history lifecycle](GENERATION-CONTRACT.md#11-creation-history-lifecycle-and-content-retention), public `quick_chat.creation_history` and the existing owner Project/issue acceptance.
+
 [P-platform]: https://github.com/apedintensor/h3-studio/blob/704202541a51be542bd39c7f931ae8b5c86ff528/PROJECT-PLAN.md#L39-L76
 [P-engine]: https://github.com/apedintensor/h3-studio/blob/704202541a51be542bd39c7f931ae8b5c86ff528/PROJECT-PLAN.md#L107-L134
 [P-recipe]: https://github.com/apedintensor/h3-studio/blob/704202541a51be542bd39c7f931ae8b5c86ff528/deploy/wangp/README.md

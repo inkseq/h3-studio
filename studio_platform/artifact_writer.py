@@ -23,6 +23,7 @@ from .storage_asset_journal import (AssetConflict, AssetUploadJournal, artifact_
 from .storage_multipart import MultipartJournal, MultipartUploadManager
 from .storage_schema import create_storage_schema
 from . import scratch_retention
+from .content_lifecycle import assert_content_available, assert_project_writable, owner_reference_gate
 
 MIB = 1024*1024
 _schema = MetaData()
@@ -81,13 +82,37 @@ class ArtifactWriter:
             fingerprint.append(delivery)
         return _hash([self.tenant, job["owner_id"], job["id"], attempt_id]), _hash(fingerprint)
 
+    def _available(self, conn, record, *, job=None, writable=False, acquire_gate=True):
+        if acquire_gate:
+            owner_reference_gate(conn, self.tenant, record["owner"])
+        if record.get("binding") != self.binding:
+            raise ArtifactWritePending("artifact_receipt_identity_mismatch")
+        if job is None:
+            from .repository import jobs
+            job = conn.execute(select(jobs.c.id, jobs.c.tenant_id, jobs.c.owner_id, jobs.c.project_id)
+                .select_from(write_receipts.join(jobs, write_receipts.c.job_id == jobs.c.id)).where(
+                    write_receipts.c.id == record["id"], write_receipts.c.tenant == self.tenant,
+                    write_receipts.c.owner == record["owner"])).mappings().first()
+        if job is None or job["tenant_id"] != self.tenant or job["owner_id"] != record["owner"]:
+            raise ArtifactWritePending("artifact_receipt_identity_mismatch")
+        assert_content_available(conn, self.tenant, record["owner"],
+            object_keys=[role["key"] for role in record["roles"].values()], storage_binding=self.binding)
+        if writable:
+            assert_project_writable(conn, self.tenant, record["owner"], job["project_id"])
+
+    def _check_available(self, record):
+        # No transaction is kept open while reading/signing/writing storage.
+        with self.engine.begin() as conn:
+            self._available(conn, record, writable=record["phase"] != "settled")
+
     def get(self, job, attempt_id, tag):
         ident, fingerprint = self._identity(job, attempt_id, tag)
         with self.engine.connect() as conn:
             row = conn.execute(select(write_receipts).where(write_receipts.c.id == ident)).first()
-        if row is None:
-            return None
-        record = json.loads(row.record)
+            if row is None:
+                return None
+            record = json.loads(row.record)
+            self._available(conn, record, job=job, acquire_gate=False)
         if (record["fingerprint"] != fingerprint or record["binding"] != self.binding
                 or record["staging_root"] != str(self.work_dir)):
             raise ArtifactWritePending("artifact_receipt_identity_mismatch")
@@ -145,6 +170,7 @@ class ArtifactWriter:
         self.quota._ensure(record["owner"])
         try:
             with self.engine.begin() as conn:
+                self._available(conn, record, job=job, writable=True)
                 self.quota._change(conn, record["owner"], record["reserved_bytes"], 0)
                 conn.execute(insert(write_receipts).values(id=ident, tenant=self.tenant, owner=record["owner"],
                     job_id=job["id"], attempt_id=attempt_id, version=0, record=json.dumps(record)))
@@ -193,6 +219,7 @@ class ArtifactWriter:
         self.quota._ensure(record["owner"])
         try:
             with self.engine.begin() as conn:
+                self._available(conn, record, job=job, writable=True)
                 self.quota._change(conn, record["owner"], record["reserved_bytes"], 0)
                 conn.execute(insert(write_receipts).values(id=ident, tenant=self.tenant, owner=record["owner"],
                     job_id=job["id"], attempt_id=attempt_id, version=0, record=json.dumps(record)))
@@ -258,6 +285,7 @@ class ArtifactWriter:
         Only the bound GPU delivery receipt can positively fence a new attempt.
         """
         self._remote_route(record=record)
+        self._check_available(record)
         if record["phase"] != "reserved" or not record["roles"]:
             raise ArtifactWritePending("artifact_not_ready_for_storage")
         pending = []
@@ -299,6 +327,7 @@ class ArtifactWriter:
     def verify_remote(self, record, heartbeat=lambda: None):
         """HEAD and bounded streaming SHA only; never download to CPU disk."""
         self._remote_route(record=record)
+        self._check_available(record)
         if record["phase"] not in {"reserved", "settled"} or not record["roles"]:
             raise ArtifactWritePending("artifact_not_ready_for_storage")
         if record["phase"] == "settled" and any(role["status"] != "verified" for role in record["roles"].values()):
@@ -391,6 +420,7 @@ class ArtifactWriter:
         self.quota._ensure(record["owner"])
         if existing is not None:
             with self.engine.begin() as conn:
+                self._available(conn, record, job=job, writable=True)
                 self.quota._change(conn, record["owner"], record["reserved_bytes"]-existing["reserved_bytes"], 0)
                 changed = conn.execute(update(write_receipts).where(write_receipts.c.id == ident,
                     write_receipts.c.version == existing["version"]).values(
@@ -400,6 +430,7 @@ class ArtifactWriter:
             return dict(record, version=existing["version"]+1)
         try:
             with self.engine.begin() as conn:
+                self._available(conn, record, job=job, writable=True)
                 self.quota._change(conn, record["owner"], record["reserved_bytes"], 0)
                 conn.execute(insert(write_receipts).values(id=ident, tenant=self.tenant, owner=record["owner"],
                     job_id=job["id"], attempt_id=attempt_id, version=0, record=json.dumps(record)))
@@ -411,6 +442,7 @@ class ArtifactWriter:
         value = {k: v for k, v in record.items() if k != "version"}
         value["updated_at"] = time.time()
         with self.engine.begin() as conn:
+            self._available(conn, record, writable=True)
             if byte_delta:
                 self.quota._change(conn, record["owner"], byte_delta, 0)
             result = conn.execute(update(write_receipts).where(write_receipts.c.id == record["id"],
@@ -440,6 +472,7 @@ class ArtifactWriter:
         Never derive this flag from a client request or lease expiry. Without it,
         crashed in-flight MPU intents stay reserved for manual reconciliation.
         """
+        self._check_available(record)
         if record["phase"] == "settled" and record["roles"]:
             # A post-commit replay needs original remote bytes, not scratch that
             # was successfully removed. It never publishes/settles again.
@@ -538,6 +571,8 @@ class ArtifactWriter:
     def settlement(self, record):
         """Callback for queue.complete's existing DB transaction (no storage IO)."""
         def settle(conn, specs):
+            # queue.complete acquires the same owner gate before its job lock.
+            self._available(conn, record, writable=True)
             row = conn.execute(select(write_receipts).where(write_receipts.c.id == record["id"]).with_for_update()).one()
             current = json.loads(row.record)
             if (row.version != record["version"] or current["phase"] != "reserved"

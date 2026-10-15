@@ -588,3 +588,58 @@ its original command before current-policy checks, without renting again.
 Lost admin write responses are resolved by exact readback, never blind replay.
 Monetary exhaustion is reported as `budget_exceeded` / “额度不足”; it does not
 silently add a queued job or change existing accepted jobs or invoices.
+
+## 11. Creation history lifecycle and content retention
+
+Permanent cleanup is disabled until a protected post-release activation records
+that the complete deployed application/execution set is tombstone-aware. Trash
+and restore remain reversible before activation. Explicit purge, automatic due
+cleanup and pending deletion/finalization all require that immutable activation.
+This prevents the first rollout's automatic fallback from running old writers
+after a purge. After activation, a manual downgrade to pre-lifecycle binaries is
+unsupported; retain their installed rollback files, but use a tombstone-aware
+roll-forward or independently reviewed compatible rollback. This is not a promise
+that permanent deletion can be undone from retained local migration backups.
+
+Quick Chat session history remains in its original owner/project-scoped authoring
+and operation tables. Missing lifecycle metadata means active; it never means
+expired or disposable. The public `quick_chat.creation_history` contract defines
+the list, exact-version preview, confirmation and original-action readback APIs.
+This is separate from story-project deletion and #154's stricter unsubmitted-card
+action. The original hidden project is not a second editing or deletion API.
+
+Trash/restore is an atomic metadata batch. Ordinary authorized trash preserves
+all saved content for five days. Automatic expiry requires cleanup consent from
+an actor with project, asset and job read/write authority. A limited PAT may hide
+or restore metadata without scheduling privileged storage deletion. Curated older
+acceptance records are tagged and review-held; they wait for fresh explicit owner
+purge preview/confirmation rather than expiring before review. New test sessions
+can request safe archival after verified acceptance; unresolved work still blocks it.
+
+Purge preview reports exact targets, removals, retained shared/chosen references
+and ledger preservation. Confirmation rechecks ownership, project authority,
+versions, preview expiry, the complete captured set and current obligations.
+Queued/running/collecting jobs, uncertain submission or recovery, unfinished
+admission/import/upload/assistant work and unsafe original attempts cannot be
+hidden by a terminal-looking card. Existing generic rejection of managed Quick
+Chat plans remains in force; internal admission and completion also honor the fence.
+
+The reference proof covers all saved relevant records, including restorable
+trash, historical immutable card revisions, project entity references, character
+looks/voice, locations/props/inbox, chosen video and independent audio, derivatives,
+plans and original job/collection receipts. Default UI pagination limits are not
+reference-scan limits. Unsaved browser drafts cannot be claimed as saved references.
+
+All original reference writers share a database gate and revalidate irreversible
+content tombstones after acquiring it. Purge commits its exact per-object intent
+under that same gate before object-store IO; no database transaction spans R2 IO.
+Stale uploads/imports/collection and idempotent receipt recovery cannot republish
+purged IDs or keys. Shared objects are retained rather than force-deleted.
+
+Once any irreversible intent exists, restore is unavailable, even if deletion is
+pending or its acknowledgement was lost. Resume and observe the original action
+and exact object identities; pending is not deleted. Quota changes require the
+original absence/completion proof and occur once. Content can become unavailable
+without deleting job/attempt IDs, timestamps, immutable hashes, receipts, money
+or unresolved billing. This does not clean migration originals, backups or rollback
+releases and never grants retry, cancellation, rental or refund authority.

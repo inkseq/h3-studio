@@ -136,7 +136,8 @@ class QuickChatTitleMixin:
         with self.repo.transaction() as conn:
             rows = [dict(r) for r in conn.execute(select(objects).where(objects.c.tenant == self.tenant,
                 objects.c.kind == "session", objects.c.payload["title_generation"]["status"].as_string().in_(["pending", "running"]),
-                objects.c.payload["title_generation"]["queued_at"].as_float() < cutoff).limit(100)).mappings()]
+                objects.c.payload["title_generation"]["queued_at"].as_float() < cutoff)
+                .order_by(objects.c.owner, objects.c.id).limit(100)).mappings()]
             recovered = 0
             for row in rows:
                 principal = Principal(row["owner"], "quick-chat-title-recovery")

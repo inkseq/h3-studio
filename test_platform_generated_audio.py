@@ -246,6 +246,14 @@ class GeneratedAudioApiTests(unittest.TestCase):
         for scope in (Scope("sixnine", "supervan", "story-one"), Scope("sixnine", "superdan", "other-project"),
                       Scope("foreign-tenant", "superdan", "story-one")):
             self.bind(*self.pair(scope))
+            if scope.tenant_id != self.scope.tenant_id or scope.owner_id != self.scope.owner_id:
+                # New foreign identities cannot be saved across the cleanup
+                # owner fence; same-owner project reuse still reaches render.
+                response = (self.client.post("/v1/projects", json={"project": self.project}) if not self.version else
+                    self.client.put("/v1/projects/story-one", json={"project": self.project, "expected_version": self.version}))
+                self.assertEqual(response.status_code, 409, response.text)
+                self.assertIn("foreign_content_reference", response.text)
+                continue
             self.assertEqual(self.plan()["status"], "blocked")
 
     def test_unverified_wrong_kind_or_unsucceeded_job_are_rejected(self):

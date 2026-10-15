@@ -14,7 +14,7 @@ import json
 import secrets
 import uuid
 
-from sqlalchemy import Column, Float, Integer, JSON, MetaData, String, Table, UniqueConstraint, insert, select, update
+from sqlalchemy import Column, Float, Integer, JSON, MetaData, String, Table, UniqueConstraint, insert, select, update, func
 
 from .auth import Principal
 from .capabilities import RECIPES, VERSION
@@ -24,6 +24,8 @@ from .project_validation import ID, validate_project
 from .project_activity import append_activity
 from .repository import Conflict, NotFound, Scope, BudgetExceeded, canonical, request_hash, documents, jobs, attempts, artifacts
 from .quick_chat_titles import DEFAULT_TITLE, TITLE_MODEL, QuickChatTitleMixin, public_title_state
+from .quick_chat_history import QuickChatHistoryMixin, CLEANUP_SCOPES, RETENTION_SECONDS
+from .content_lifecycle import owner_reference_gate, assert_project_writable, assert_reference_payload
 
 
 MODELS = {"gemini-3.8-flash": "Gemini 3.8 Flash", "gemma-4-31b-it": "Gemma 4 31B IT"}
@@ -130,7 +132,7 @@ def cursor_decode(value, principal, session_id, direction):
         raise QuickChatError("invalid_cursor", "分页位置无效，请重新加载记录。", 422) from None
 
 
-class QuickChatService(QuickChatTitleMixin):
+class QuickChatService(QuickChatHistoryMixin, QuickChatTitleMixin):
     def __init__(self, repository, assets, settings, storage, *, hooks=None, assistant=None, assistant_enabled=False,
                  title_generator=None):
         self.repo, self.assets, self.settings, self.storage = repository, assets, settings, storage
@@ -151,6 +153,8 @@ class QuickChatService(QuickChatTitleMixin):
         return clauses
 
     def _get(self, conn, principal, ident, session_id=None, kind=None, *, lock=False):
+        if lock:
+            owner_reference_gate(conn, self.tenant, principal.owner)
         statement = select(objects).where(*self._where(principal, ident, session_id, kind))
         row = self.repo._locked(conn, statement) if lock else conn.execute(statement).mappings().first()
         if row is None:
@@ -158,6 +162,11 @@ class QuickChatService(QuickChatTitleMixin):
         return dict(row)
 
     def _new(self, conn, principal, session_id, kind, payload, *, ident=None, parent=None, business=None):
+        owner_reference_gate(conn, self.tenant, principal.owner)
+        if kind not in {"session", "history_preview", "history_action", "content_tombstone"}:
+            session = self._get(conn, principal, session_id, session_id, "session")
+            assert_project_writable(conn, self.tenant, principal.owner, session["payload"]["project_id"])
+            assert_reference_payload(conn, self.tenant, principal.owner, payload)
         now = self.repo.clock()
         row = dict(id=ident or kind+"-"+uuid.uuid4().hex, tenant=self.tenant, owner=principal.owner,
             session_id=session_id, kind=kind, parent_id=parent, business_key=business, version=1,
@@ -165,7 +174,14 @@ class QuickChatService(QuickChatTitleMixin):
         conn.execute(insert(objects).values(**row))
         return row
 
-    def _put(self, conn, row, payload, *, bump=False):
+    def _put(self, conn, row, payload, *, bump=False, allow_history=False):
+        owner_reference_gate(conn, self.tenant, row["owner"])
+        if row["kind"] not in {"history_preview", "history_action", "content_tombstone"} and not allow_history:
+            session = row if row["kind"] == "session" else conn.execute(select(objects).where(
+                objects.c.id == row["session_id"], objects.c.tenant == self.tenant,
+                objects.c.owner == row["owner"], objects.c.kind == "session")).mappings().one()
+            assert_project_writable(conn, self.tenant, row["owner"], session["payload"]["project_id"])
+            assert_reference_payload(conn, self.tenant, row["owner"], payload)
         values = dict(payload=canonical(payload), updated_at=self.repo.clock(), version=row["version"]+int(bump))
         conn.execute(update(objects).where(objects.c.id == row["id"]).values(**values))
         row.update(values)
@@ -175,9 +191,17 @@ class QuickChatService(QuickChatTitleMixin):
         if conn is None:
             with self.repo.engine.connect() as read:
                 return self._access(principal, session_id, *scopes, conn=read)
+        mutating = any(scope.endswith(":write") for scope in scopes)
+        if lock or mutating:
+            owner_reference_gate(conn, self.tenant, principal.owner)
         row = self._get(conn, principal, session_id, session_id, "session", lock=lock)
         if any(not principal.allows(row["payload"]["project_id"], scope) for scope in scopes):
             raise NotFound("quick_chat_session_not_found")
+        state = self._history(row)["trash_state"]
+        if state == "purged":
+            raise QuickChatError("session_purged", "创作记录已永久删除，原账本记录保留。", 410)
+        if mutating and state != "active":
+            raise QuickChatError("session_not_active", "请先从回收站恢复创作。")
         return row
 
     def _replay(self, conn, principal, namespace, key, body):
@@ -199,7 +223,7 @@ class QuickChatService(QuickChatTitleMixin):
         conn.execute(insert(events).values(id="event-"+uuid.uuid4().hex, tenant=self.tenant, owner=principal.owner,
             session_id=session["id"], seq=payload["latest_seq"], type=event_type, resource_id=resource_id,
             actor_id=principal.actor_id, created_at=self.repo.clock()))
-        self._put(conn, session, payload)
+        self._put(conn, session, payload, allow_history=event_type.startswith("history."))
         return payload["latest_seq"]
 
     @staticmethod
@@ -246,6 +270,7 @@ class QuickChatService(QuickChatTitleMixin):
     def _session_public(self, row):
         p = row["payload"]
         return {"id": row["id"], "title": p["title"], "version": row["version"], "model_id": p["model_id"],
+            **self._history_public(row),
             "title_generation": public_title_state(p),
             "composer_reset": p.get("composer_reset"),
             "next_settings": p["next_settings"], "input_refs": self._inputs(p["bindings"], p["next_settings"]["recipe_id"]),
@@ -253,8 +278,10 @@ class QuickChatService(QuickChatTitleMixin):
             "created_at": row["created_at"], "updated_at": row["updated_at"]}
 
     def create_session(self, principal, body, key):
-        fields(body, {"title", "model_id"})
+        fields(body, {"title", "model_id", "is_test"})
         key_check(key)
+        if "is_test" in body and type(body["is_test"]) is not bool:
+            raise QuickChatError("invalid_request", "测试标记需要布尔值。", 422)
         if principal.machine and not (principal.all_projects and all(s in principal.scopes
                 for s in ("projects:create", "projects:read", "projects:write"))):
             raise QuickChatError("insufficient_scope", "创建会话需要本人全部项目的创作权限。", 403)
@@ -263,8 +290,7 @@ class QuickChatService(QuickChatTitleMixin):
             raise QuickChatError("invalid_title", "会话标题须为1–160字符。", 422)
         model = model_check(body.get("model_id", DEFAULT_MODEL))
         with self.repo.transaction() as conn:
-            if self.repo.engine.dialect.name == "postgresql":
-                conn.exec_driver_sql("SELECT pg_advisory_xact_lock(685939796868749722)")
+            owner_reference_gate(conn, self.tenant, principal.owner)
             prior = self._replay(conn, principal, "session-create", key, body)
             if prior:
                 return {"session": self._session_public(self._access(principal, prior, "projects:read", conn=conn))}
@@ -279,18 +305,26 @@ class QuickChatService(QuickChatTitleMixin):
                 occurred_at=self.repo.clock(), before=None, after=project, event_type="project.created")
             session = self._new(conn, principal, ident, "session", {"title": title, "model_id": model,
                 "project_id": project["id"], "next_settings": default_next_settings(self.settings), "bindings": [], "latest_seq": 0,
-                "active_turn_id": None, "title_generation": self._initial_title_state(title_supplied="title" in body)}, ident=ident)
+                "active_turn_id": None, "history": {"is_test": body.get("is_test", False)},
+                "title_generation": self._initial_title_state(title_supplied="title" in body)}, ident=ident)
             self._remember(conn, principal, "session-create", key, body, ident)
             return {"session": self._session_public(session)}
 
     def get_session(self, principal, session_id):
         return {"session": self._session_public(self._access(principal, session_id, "projects:read"))}
 
-    def list_sessions(self, principal, *, limit=20, cursor=None):
+    def list_sessions(self, principal, *, limit=20, cursor=None, view="active", hide_tests=False):
+        if view not in {"active", "trash"} or type(hide_tests) is not bool:
+            raise QuickChatError("invalid_request", "创作记录视图无效。", 422)
         if type(limit) is not int or not 1 <= limit <= 50:
             raise QuickChatError("invalid_limit", "分页大小须为1–50。", 422)
-        boundary = cursor_decode(cursor, principal, "__sessions", "older") if cursor else None
+        cursor_scope = "__sessions" if view == "active" and not hide_tests else "__sessions:"+view+":"+str(hide_tests)
+        boundary = cursor_decode(cursor, principal, cursor_scope, "older") if cursor else None
         stmt = select(objects).where(objects.c.tenant == self.tenant, objects.c.owner == principal.owner, objects.c.kind == "session")
+        state = func.coalesce(objects.c.payload["history"]["trash_state"].as_string(), "active")
+        stmt = stmt.where(state == "active" if view == "active" else state.in_(("trashed", "purging")))
+        if hide_tests:
+            stmt = stmt.where(func.coalesce(objects.c.payload["history"]["is_test"].as_boolean(), False) == False)
         if boundary:
             if not isinstance(boundary, list) or len(boundary) != 2:
                 raise QuickChatError("invalid_cursor", "分页位置无效。", 422)
@@ -304,17 +338,23 @@ class QuickChatService(QuickChatTitleMixin):
                 stmt = stmt.where(objects.c.payload["project_id"].as_string().in_(principal.project_ids))
         with self.repo.engine.connect() as conn:
             rows = [dict(r) for r in conn.execute(stmt.order_by(objects.c.created_at.desc(), objects.c.id.desc()).limit(limit+1)).mappings()]
-        values = [{k: v for k, v in self._session_public(row).items() if k not in {"input_refs", "next_settings"}} for row in rows[:limit]]
-        return {"sessions": values, "limit": limit, "has_more": len(rows)>limit,
-            "next_cursor": cursor_encode(principal, "__sessions", [rows[limit-1]["created_at"], rows[limit-1]["id"]], "older") if len(rows)>limit else None}
+            values = [{**{k: v for k, v in self._session_public(row).items() if k not in {"input_refs", "next_settings"}},
+                **self._history_public(row, principal, conn)} for row in rows[:limit]]
+        return {"sessions": values, "limit": limit, "has_more": len(rows)>limit, "as_of": self.repo.clock(),
+            "next_cursor": cursor_encode(principal, cursor_scope, [rows[limit-1]["created_at"], rows[limit-1]["id"]], "older") if len(rows)>limit else None}
 
     def patch_session(self, principal, session_id, body, key):
-        fields(body, {"expected_version", "title", "model_id", "next_settings"}, {"expected_version"})
+        fields(body, {"expected_version", "title", "model_id", "next_settings", "is_test", "test_accepted", "review_hold"}, {"expected_version"})
         with self.repo.transaction() as conn:
-            session = self._access(principal, session_id, "projects:read", "projects:write", conn=conn, lock=True)
+            owner_reference_gate(conn, self.tenant, principal.owner)
+            session = self._get(conn, principal, session_id, session_id, "session", lock=True)
+            self._history_authorize(principal, session)
             prior = self._replay(conn, principal, "session-patch:"+session_id, key, body)
             if prior:
+                if self._history(session)["trash_state"] == "purged":
+                    raise QuickChatError("session_purged", "创作记录已永久删除，原账本记录保留。", 410)
                 return {"session": self._session_public(session)}
+            session = self._access(principal, session_id, "projects:read", "projects:write", conn=conn, lock=True)
             self._version(session, body["expected_version"])
             p = copy.deepcopy(session["payload"])
             if "title" in body:
@@ -329,6 +369,22 @@ class QuickChatService(QuickChatTitleMixin):
                 p["model_id"] = model_check(body["model_id"])
             if "next_settings" in body:
                 p["next_settings"] = settings_check(body["next_settings"])
+            if any(name in body for name in ("is_test", "test_accepted", "review_hold")):
+                if any(type(body[name]) is not bool for name in ("is_test", "test_accepted", "review_hold") if name in body):
+                    raise QuickChatError("invalid_request", "测试标记需要布尔值。", 422)
+                history = self._history(session)
+                if "is_test" in body:
+                    history["is_test"] = body["is_test"]
+                if "review_hold" in body:
+                    if body["review_hold"] is not True:
+                        raise QuickChatError("review_hold_requires_purge_confirmation", "审核保留只能在明确永久删除确认时解除。")
+                    history["review_hold"] = True
+                if body.get("test_accepted"):
+                    if not history["is_test"]:
+                        raise QuickChatError("test_tag_required", "请先标记测试记录。")
+                    history.update(archive_pending=True, acceptance_actor=principal.actor_id, cleanup_consent=all(principal.allows(
+                        p["project_id"], scope) for scope in CLEANUP_SCOPES))
+                p["history"] = history
             self._put(conn, session, p, bump=True)
             self._event(conn, principal, session, "session.updated", session_id)
             self._remember(conn, principal, "session-patch:"+session_id, key, body, session_id)
@@ -476,6 +532,9 @@ class QuickChatService(QuickChatTitleMixin):
         return {"bindings": values}
 
     def _create_revision(self, conn, principal, session, card, snapshot, sources, source_revision=None):
+        owner_reference_gate(conn, self.tenant, principal.owner)
+        assert_project_writable(conn, self.tenant, principal.owner, session["payload"]["project_id"])
+        assert_reference_payload(conn, self.tenant, principal.owner, (snapshot, sources))
         # The composer is mutable; capture its origin separately from the
         # immutable generation inputs. Delayed assistant replies must never
         # capture material edits made after the original turn.
@@ -1241,7 +1300,7 @@ class QuickChatService(QuickChatTitleMixin):
         with self.repo.transaction() as conn:
             rows = [dict(r) for r in conn.execute(select(objects).where(objects.c.tenant == self.tenant,
                 objects.c.kind == "turn", objects.c.payload["status"].as_string().in_(["running", "pending"]),
-                objects.c.updated_at < self.repo.clock()-older_than_s).order_by(objects.c.updated_at, objects.c.id).limit(100)).mappings()]
+                objects.c.updated_at < self.repo.clock()-older_than_s).order_by(objects.c.owner, objects.c.id).limit(100)).mappings()]
             recovered = 0
             for row in rows:
                 principal = Principal(row["owner"], "quick-chat-recovery")
