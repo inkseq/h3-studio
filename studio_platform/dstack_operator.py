@@ -932,8 +932,9 @@ class DstackOperator:
         WorkerControl holds the original capacity lock while this read runs.
         Terminal owned runs plus complete, fresh same-account absence are the
         existing live_capacity_usage evidence; they are NOT destruction or
-        settlement. Missing identity, legacy intents and unreleased physical
-        devices keep counting. No row, reservation or provider is mutated.
+        settlement. Unaccounted provider identities, legacy intents and
+        unreleased physical devices keep counting. No row, reservation or
+        provider is mutated.
         """
         nodes = [dict(node) for node in connection.execute(select(operator_nodes)).mappings()
             if node["payload"].get("capacity_backend") == BACKEND_MARKER]
@@ -996,7 +997,8 @@ class DstackOperator:
                 # account absence. Two null journals are consistent with that
                 # proof; conflicting identities remain conservative.
                 excluded.add(intent["id"])
-            elif (observation["reason_code"] == "dstack_terminal_no_allocation"
+            elif (observation["reason_code"] in {"dstack_terminal_no_allocation",
+                    "dstack_terminal_provider_accounted"}
                     and intent["provider_instance_id"] is None
                     and original.get("provider_instance_id") is None):
                 excluded.add(intent["id"])

@@ -661,14 +661,8 @@ def _resources(value):
         "gpu_count": _range(gpu.get("count")), "gpu_memory": _range(gpu.get("memory"))}
 
 
-def terminal_no_allocation(run, binding):
-    """Pinned no-capacity failure, not missing-identity or billing evidence.
-
-    A task has one job and retry is disabled. Require its complete original
-    submission as well as explicit null allocation/runtime fields. Historical
-    allocation, omitted fields or another submission cannot use this exemption.
-    Call only after the exact owned run/spec has been validated.
-    """
+def _terminal_no_allocation_shape(run, binding):
+    """Complete failed singleton without runtime identity; not financial proof."""
     if (run.get("status") != "failed" or run.get("termination_reason") != "job_failed"
             or any(binding.get(key) is not None for key in (
                 "provider_instance_id", "runtime_incarnation", "first_runtime_ready_at"))
@@ -687,17 +681,30 @@ def terminal_no_allocation(run, binding):
         _uuid(latest.get("id"))
     except DstackError:
         return False
-    terminal = (latest.get("status") == "failed"
+    return (latest.get("status") == "failed"
         and latest.get("termination_reason") == "failed_to_start_due_to_no_capacity"
         and all(key in latest and latest[key] is None for key in (
             "job_provisioning_data", "job_runtime_data")))
+
+
+def terminal_no_allocation(run, binding):
+    """Pinned no-capacity failure, not missing-identity or billing evidence.
+
+    A task has one job and retry is disabled. Require its complete original
+    submission as well as explicit null allocation/runtime fields. Historical
+    allocation, omitted fields or another submission cannot use this exemption.
+    Call only after the exact owned run/spec has been validated.
+    """
+    if not _terminal_no_allocation_shape(run, binding):
+        return False
+    latest = run["latest_job_submission"]
     message = latest.get("termination_reason_message")
-    if terminal and isinstance(message, str) and message.startswith("sixnine_vast_attempts_v1:"):
+    if isinstance(message, str) and message.startswith("sixnine_vast_attempts_v1:"):
         # New native outcomes distinguish explicit rejection from an unknown
-        # PUT/returned contract. Unknown must keep capacity and money held.
+        # PUT/returned contract. Unknown never establishes a zero-charge proof.
         from .dstack_allocation_proof import from_terminal_run
         return from_terminal_run(run, binding) is not None
-    return terminal
+    return True
 
 
 def live_capacity_usage(client, nodes, *, provider_inventory=None, clock=time.time,
@@ -720,7 +727,7 @@ def live_capacity_usage(client, nodes, *, provider_inventory=None, clock=time.ti
         "dstack_capacity_rows_invalid")
     _require(type(fresh_seconds) in (int, float) and math.isfinite(fresh_seconds)
         and 0 < fresh_seconds <= 120, "dstack_capacity_freshness_invalid")
-    inventories, counted, seen, resources, observations, projections = {}, [], set(), {}, [], []
+    inventories, counted, seen, resources, observations, projections, accounted = {}, [], set(), {}, [], [], {}
     hourly = 0
 
     def provider_absent(backend, identity):
@@ -782,6 +789,18 @@ def live_capacity_usage(client, nodes, *, provider_inventory=None, clock=time.ti
                     projections.append((intent_id, cost, resource_key, physical_gpus,
                         included, reason, status, binding.get("backend")))
                     continue
+                if (_terminal_no_allocation_shape(run, binding)
+                        and binding.get("host_observation") is None and binding.get("host_failure") is None):
+                    backend = binding.get("backend")
+                    _require(backend in BACKENDS, "dstack_backend_binding_mismatch")
+                    # Fetch at most once for this backend. The final pass checks
+                    # every current account ID against OTHER exact owned runs.
+                    # An unknown PUT remains an unchanged accounting obligation.
+                    provider_absent(backend, None)
+                    reason = "dstack_terminal_provider_accounted"
+                    projections.append((intent_id, cost, resource_key, physical_gpus,
+                        included, reason, status, backend))
+                    continue
                 provisioning = (run.get("latest_job_submission") or {}).get("job_provisioning_data") or {}
                 identity = provisioning.get("instance_id")
                 backend = binding.get("backend")
@@ -798,6 +817,7 @@ def live_capacity_usage(client, nodes, *, provider_inventory=None, clock=time.ti
                         included, reason = False, "dstack_terminal_provider_absent"
                     else:
                         reason = "dstack_terminal_provider_unconfirmed"
+                accounted.setdefault(backend, {}).setdefault(identity, set()).add(intent_id)
             except Exception:
                 reason = "dstack_capacity_unconfirmed"
         projections.append((intent_id, cost, resource_key, physical_gpus, included,
@@ -808,10 +828,15 @@ def live_capacity_usage(client, nodes, *, provider_inventory=None, clock=time.ti
     _require(type(now) in (int, float) and math.isfinite(now) and now > 0,
         "dstack_capacity_clock_invalid")
     for intent_id, cost, resource_key, physical_gpus, included, reason, status, backend in projections:
-        if reason == "dstack_terminal_provider_absent":
+        if reason in {"dstack_terminal_provider_absent", "dstack_terminal_provider_accounted"}:
             inventory = inventories.get(backend)
-            if not inventory or not 0 <= now - inventory[0] <= fresh_seconds:
+            known = {identity for identity, owners in accounted.get(backend, {}).items()
+                if len(owners) == 1 and intent_id not in owners}
+            if (not inventory or not 0 <= now - inventory[0] <= fresh_seconds or
+                    reason == "dstack_terminal_provider_accounted" and not inventory[1].issubset(known)):
                 included, reason = True, "dstack_terminal_provider_unconfirmed"
+            elif reason == "dstack_terminal_provider_accounted":
+                included = False
         if included:
             _require(type(cost) is int and cost > 0, "dstack_active_cost_unconfirmed")
             counted.append(intent_id)
