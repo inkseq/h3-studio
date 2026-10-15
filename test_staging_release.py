@@ -42,7 +42,14 @@ class TargetTests(unittest.TestCase):
     def test_stage_site_is_sealed_and_missing_record_never_becomes_production(self):
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)
-            with self.assertRaisesRegex(ValueError, 'record_required'):
+            lstat = Path.lstat
+            def fixture_lstat(path, *args, **kwargs):
+                info = lstat(path, *args, **kwargs)
+                if path == root:
+                    fields = list(info); fields[4] = 0
+                    return os.stat_result(fields)
+                return info
+            with patch.object(Path, 'lstat', fixture_lstat), self.assertRaisesRegex(ValueError, 'record_required'):
                 target.site_environment(root, {'INKSEQ_DEPLOYMENT_TARGET': 'staging'})
             with patch.object(target, 'host', return_value=target.profile('staging')):
                 value = target.site_environment(root, {'INKSEQ_DEPLOYMENT_TARGET': 'staging'})
@@ -51,6 +58,24 @@ class TargetTests(unittest.TestCase):
                 self.assertEqual(value['INKSEQ_CADDY_PROFILE'], 'Caddyfile.staging')
                 with self.assertRaisesRegex(ValueError, 'site_mismatch'):
                     target.site_environment(root, {'INKSEQ_DEPLOYMENT_TARGET': 'production'})
+
+    def test_unprotected_host_parent_is_rejected_before_legacy_fallback(self):
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            lstat = Path.lstat
+            for uid, mode in ((1000, 0o700), (0, 0o770)):
+                def unprotected_parent(path, *args, **kwargs):
+                    info = lstat(path, *args, **kwargs)
+                    if path == root:
+                        fields = list(info); fields[4] = uid
+                        fields[0] = info.st_mode & ~0o777 | mode
+                        return os.stat_result(fields)
+                    return info
+                with self.subTest(uid=uid, mode=mode), \
+                        patch.object(target, 'os', types.SimpleNamespace(name='posix')), \
+                        patch.object(Path, 'lstat', unprotected_parent), \
+                        self.assertRaisesRegex(ValueError, 'parent_not_protected'):
+                    target.host(root, legacy=True)
 
     def test_record_rejects_links_extra_fields_and_duplicate_identity(self):
         with tempfile.TemporaryDirectory() as name:

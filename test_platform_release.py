@@ -33,6 +33,17 @@ class ReleaseTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
+        # Only this synthetic host parent emulates root ownership; retain its
+        # real mode/type and all other filesystem checks on unprivileged CI.
+        lstat = Path.lstat
+        def fixture_lstat(path, *args, **kwargs):
+            info = lstat(path, *args, **kwargs)
+            if path == self.root:
+                fields = list(info); fields[4] = 0
+                return os.stat_result(fields)
+            return info
+        ownership = patch.object(Path, "lstat", fixture_lstat)
+        ownership.start(); self.addCleanup(ownership.stop)
         self.incoming = self.root / "incoming" / COMMIT
         self.incoming.mkdir(parents=True)
         (self.root / "releases").mkdir()

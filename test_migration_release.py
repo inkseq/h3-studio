@@ -1,5 +1,5 @@
 """Additive host release boundaries; synthetic artifacts/fake Docker only."""
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 import gzip
 import hashlib
 import importlib.util
@@ -35,10 +35,26 @@ from tools import publish_aws_release as publisher
 from botocore.exceptions import ClientError
 
 
+@contextmanager
+def synthetic_host_parent(root):
+    """Emulate only the fixture parent's UID; preserve real path/mode checks."""
+    lstat = Path.lstat
+    def fixture_lstat(path, *args, **kwargs):
+        info = lstat(path, *args, **kwargs)
+        if path == root:
+            fields = list(info); fields[4] = 0
+            return os.stat_result(fields)
+        return info
+    with patch.object(Path, "lstat", fixture_lstat):
+        yield
+
+
 class MigrationArtifacts(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        self.host_parent = synthetic_host_parent(self.root)
+        self.host_parent.__enter__(); self.addCleanup(self.host_parent.__exit__, None, None, None)
         # Synthetic host artifacts belong to the unprivileged test runner.
         # Inject host ownership only for this fixture, retaining the real
         # regular-file/link/size checks and every production ownership guard.
@@ -584,6 +600,8 @@ class StoryboardMaintenance(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        self.host_parent = synthetic_host_parent(self.root)
+        self.host_parent.__enter__(); self.addCleanup(self.host_parent.__exit__, None, None, None)
         directory = self.root / "migration"; directory.mkdir()
         environment = {key: str(self.root / "protected" / key.lower()) for key in maintenance.PATH_FIELDS}
         environment.update(SIXNINE_OPERATOR_CAPACITY_OWNERS="superdan,supervan",

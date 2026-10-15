@@ -51,8 +51,9 @@ class ReleaseAccountTests(unittest.TestCase):
         jobs = dict(re.findall(r"(?ms)^  ([a-z][a-z0-9-]*):\n(.*?)(?=^  [a-z][a-z0-9-]*:\n|\Z)", source))
         expected = {"publish-aws": "tools/publish_aws_release.py",
             "publish-frontend-aws": "tools/publish_frontend_release.py",
-            "deploy-approved-aws": "tools/deploy_aws_release.py",
-            "deploy-approved-frontend-aws": "tools/deploy_aws_release.py"}
+            "publish-staging-candidate": "tools/publish_staging_candidate.py",
+            "deploy-staging-aws": "tools/deploy_aws_release.py",
+            "promote-accepted-aws": "tools/deploy_aws_release.py"}
         guarded = {name for name, body in jobs.items() if "configure-aws-credentials@" in body}
         self.assertEqual(guarded, set(expected))
         for name, tool in expected.items():
