@@ -27,7 +27,7 @@ class RunnerTests(unittest.TestCase):
         return api
 
     def success(self, commit=COMMIT):
-        return {'Status': 'Success', 'DocumentName': runner.DOCUMENT, 'DocumentVersion': '1',
+        return {'Status': 'Success', 'DocumentName': runner.DOCUMENT, 'DocumentVersion': '2',
                 'StandardOutputContent': json.dumps({
             'state': 'approved_application_release_healthy', 'commit': commit})}
 
@@ -38,7 +38,7 @@ class RunnerTests(unittest.TestCase):
         params = api.send_command.call_args.kwargs
         self.assertEqual(params['InstanceIds'], [runner.INSTANCE])
         self.assertEqual(params['DocumentName'], 'Sixnine-DeployApprovedRelease')
-        self.assertEqual(params['DocumentVersion'], '1')
+        self.assertEqual(params['DocumentVersion'], '2')
         self.assertEqual(params['Parameters'], {'Commit': [COMMIT]})
         self.assertNotIn('ServiceRoleArn', params)
         self.assertEqual(result['state'], 'deployment_completed')
@@ -48,6 +48,13 @@ class RunnerTests(unittest.TestCase):
         for value in ('main', COMMIT+';touch /tmp/x', '$HOME', '../'+COMMIT):
             with self.assertRaises(ValueError):
                 runner.deploy(value, api=api)
+        api.send_command.assert_not_called()
+
+    def test_old_document_receipt_cannot_confirm_new_helper_deployment(self):
+        receipt = {**self.success(), 'DocumentVersion': '1'}
+        api = self.api([receipt])
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaisesRegex(RuntimeError, 'document version'):
+            runner.deploy(COMMIT, resume_command=COMMAND, api=api)
         api.send_command.assert_not_called()
 
     def test_resume_does_not_submit_again_or_accept_another_receipt(self):

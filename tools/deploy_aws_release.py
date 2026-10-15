@@ -29,7 +29,7 @@ def deploy(commit, *, resume_command=None, frontend=False, timeout=1900, api=Non
         # SendCommand has no idempotency token. Do not retry a lost response
         # automatically: the same approved commit is idempotent at the host.
         try:
-            response = api.send_command(InstanceIds=[INSTANCE], DocumentName=document, DocumentVersion='1',
+            response = api.send_command(InstanceIds=[INSTANCE], DocumentName=document, DocumentVersion='2',
                 Parameters={'Commit': [commit]}, TimeoutSeconds=120, MaxConcurrency='1', MaxErrors='0',
                 Comment='Deploy independently approved Sixnine commit '+commit)
             command_id = response['Command']['CommandId']
@@ -52,7 +52,7 @@ def deploy(commit, *, resume_command=None, frontend=False, timeout=1900, api=Non
         if status == 'Success':
             # Never print arbitrary SSM stdout/stderr. Validate the fixed receipt
             # so --resume-command cannot claim success for another commit/task.
-            if invocation.get('DocumentName') != document or invocation.get('DocumentVersion') != '1':
+            if invocation.get('DocumentName') != document or invocation.get('DocumentVersion') != '2':
                 raise RuntimeError('Command is not the reviewed deployment document version')
             try:
                 receipt = json.loads(invocation.get('StandardOutputContent', ''))

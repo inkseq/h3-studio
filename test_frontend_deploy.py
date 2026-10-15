@@ -125,11 +125,12 @@ class FrontendDeploymentDocument(unittest.TestCase):
         command = 'a1234567-1234-1234-1234-123456789abc'
         api.send_command.return_value = {'Command': {'CommandId': command}}
         api.get_command_invocation.return_value = {'Status': 'Success',
-            'DocumentName': 'Sixnine-DeployApprovedFrontend', 'DocumentVersion': '1',
+            'DocumentName': 'Sixnine-DeployApprovedFrontend', 'DocumentVersion': '2',
             'StandardOutputContent': json.dumps({'state': 'approved_frontend_release_healthy', 'commit': COMMIT})}
         with contextlib.redirect_stdout(io.StringIO()):
             runner.deploy(COMMIT, frontend=True, api=api)
         self.assertEqual(api.send_command.call_args.kwargs['DocumentName'], 'Sixnine-DeployApprovedFrontend')
+        self.assertEqual(api.send_command.call_args.kwargs['DocumentVersion'], '2')
         self.assertEqual(api.get_command_invocation.call_args.kwargs['PluginName'], 'deployApprovedFrontend')
         with contextlib.redirect_stdout(io.StringIO()), self.assertRaisesRegex(RuntimeError, 'document version'):
             runner.deploy(COMMIT, resume_command=command, api=api)
