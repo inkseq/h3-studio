@@ -1,6 +1,7 @@
 """Client-held PAT and recoverable local state; all API calls stay in process."""
 from importlib.util import module_from_spec, spec_from_file_location
 import io
+import copy
 import json
 import os
 from pathlib import Path
@@ -63,7 +64,8 @@ class InProcessHTTP:
         principal = self.service.auth.bearer(token)
         if not principal:
             raise helper.HelperError("http_request_failed")
-        return {"username": principal.owner, "machine": principal.machine}
+        return {"username": principal.owner, "machine": principal.machine, "actor_id": principal.actor_id,
+            "scopes": list(principal.scopes), "all_projects": principal.all_projects, "project_ids": list(principal.project_ids)}
     @staticmethod
     def assert_no_raw_pat(body):
         if "api_key" in body:
@@ -170,6 +172,158 @@ class AgentConnectHelperTests(unittest.TestCase):
                 patch.object(helper.shutil, "which", return_value=None):
             with self.assertRaisesRegex(helper.HelperError, "os_credential_storage_unavailable"):
                 helper.SecureStore()
+
+    def legacy_connection(self, origin="https://www.sixnine.art"):
+        self.origin = origin
+        self.grant = self.service.issue(self.auth.session(self.auth.login("superdan", "", source="migration")),
+            authorization_profile_id=PROFILE_ID, authorization_profile_version=PROFILE_VERSION,
+            idempotency_key="migration-create", origin=self.origin)
+        self.connection_id = self.grant["connection"]["id"]
+        self.http = InProcessHTTP(self.service, self.origin, self.store)
+        self.target_http = InProcessHTTP(self.service, helper.CANONICAL_ORIGIN, self.store)
+        def target(origin):
+            self.assertEqual(origin, helper.CANONICAL_ORIGIN)
+            return self.target_http
+        self.client = helper.AgentClient(self.origin, store=self.store, http=self.http, http_factory=target)
+        self.connect()
+        return copy.deepcopy(self.store.values[(self.origin, self.connection_id)])
+
+    def test_explicit_origin_migration_checks_original_authority_and_only_adds_a_secret_free_alias(self):
+        original = self.legacy_connection()
+        before = self.store.writes
+        result = self.client.migrate_origin(self.connection_id, helper.CANONICAL_ORIGIN)
+        self.assertEqual(self.store.writes, before + 1)
+
+        self.assertEqual(self.store.values[(self.origin, self.connection_id)], original)
+        alias = self.store.load(helper.CANONICAL_ORIGIN, self.connection_id)
+        self.assertEqual(alias["protocol"], helper.ROUTE_PROTOCOL)
+        for secret in (original["api_key"], original["verifier"], original["code"]):
+            self.assertNotIn(secret, json.dumps(alias))
+            self.assertNotIn(secret, json.dumps(result))
+        self.assertEqual(alias["source_reference"], helper.SecureStore.reference(self.origin, self.connection_id))
+        self.assertEqual(result["expires_at"], original["expires_at"])
+        self.assertEqual([(call["method"], call["path"]) for call in self.target_http.calls], [("GET", "/api/auth/me")])
+        with patch.object(self.target_http, "request", wraps=self.target_http.request) as request:
+            self.client.request(self.connection_id, "/v1/projects", method="POST", body={"title": "kept"}, idempotency_key="same-write")
+            self.assertEqual(request.call_args.kwargs["body"], {"title": "kept"})
+            self.assertEqual(request.call_args.kwargs["method"], "POST")
+        self.assertEqual(self.target_http.calls[-1]["idempotency_key"], "same-write")
+        new_client = helper.AgentClient(helper.CANONICAL_ORIGIN, store=self.store, http=self.target_http)
+        self.assertEqual(new_client.request(self.connection_id, "/api/auth/me")["actor_id"], "key:" + original["key_id"])
+        self.assertEqual(self.client.resume(self.connection_id)["origin"], helper.CANONICAL_ORIGIN)
+        self.assertEqual(new_client.resume(self.connection_id)["origin"], helper.CANONICAL_ORIGIN)
+        self.assertEqual(self.client.migrate_origin(self.connection_id, helper.CANONICAL_ORIGIN)["status"], "origin_migrated")
+        self.assertEqual(self.store.writes, before + 1)
+
+    def test_exact_legacy_apex_can_migrate_without_accepting_the_other_legacy_origin(self):
+        original = self.legacy_connection("https://sixnine.art")
+        self.client.migrate_origin(self.connection_id, helper.CANONICAL_ORIGIN)
+        self.assertEqual(helper.resolve_connection(self.store, self.origin, self.connection_id), (helper.CANONICAL_ORIGIN, original))
+        with self.assertRaisesRegex(helper.HelperError, "origin_migration_route_mismatch"):
+            helper.resolve_connection(self.store, "https://www.sixnine.art", self.connection_id)
+
+    def test_origin_migration_rejects_changed_remote_authority_and_redirects_before_saving(self):
+        original = self.legacy_connection()
+        identity = self.target_http.request("/api/auth/me", token=original["api_key"])
+        for patch_value in ({"username": "supervan"}, {"machine": False}, {"actor_id": "key:other"},
+                {"scopes": identity["scopes"] + ["new:scope"]}, {"scopes": identity["scopes"][:-1]},
+                {"all_projects": False}, {"project_ids": ["other"]}):
+            with self.subTest(patch_value=patch_value), patch.object(self.target_http, "request", return_value={**identity, **patch_value}):
+                with self.assertRaisesRegex(helper.HelperError, "origin_migration_identity_mismatch"):
+                    self.client.migrate_origin(self.connection_id, helper.CANONICAL_ORIGIN)
+                self.assertIsNone(self.store.load(helper.CANONICAL_ORIGIN, self.connection_id))
+        with patch.object(self.target_http, "request", side_effect=helper.HelperError("redirect_rejected")):
+            with self.assertRaisesRegex(helper.HelperError, "redirect_rejected"):
+                self.client.migrate_origin(self.connection_id, helper.CANONICAL_ORIGIN)
+        self.assertEqual(self.store.values[(self.origin, self.connection_id)], original)
+
+        self.assertIsNone(self.store.load(helper.CANONICAL_ORIGIN, self.connection_id))
+
+    @unittest.skipUnless(os.name == "nt", "Windows DPAPI only")
+    def test_origin_alias_uses_existing_encrypted_store_without_rewriting_source_bytes(self):
+        original = self.legacy_connection()
+        with patch.dict(os.environ, {"LOCALAPPDATA": self.temp.name}):
+            store = helper.SecureStore()
+            store.save(self.origin, self.connection_id, original)
+            source_path = store.directory / (store.reference(self.origin, self.connection_id) + ".dpapi")
+            before = source_path.read_bytes()
+            client = helper.AgentClient(self.origin, store=store, http=self.http, http_factory=lambda _: self.target_http)
+            client.migrate_origin(self.connection_id, helper.CANONICAL_ORIGIN)
+            self.assertEqual(source_path.read_bytes(), before)
+            alias_path = store.directory / (store.reference(helper.CANONICAL_ORIGIN, self.connection_id) + ".dpapi")
+            self.assertNotIn(original["api_key"].encode(), alias_path.read_bytes())
+            self.assertNotIn(b"source_origin", alias_path.read_bytes())
+            self.assertNotIn("api_key", store.load(helper.CANONICAL_ORIGIN, self.connection_id))
+            self.assertEqual(helper.resolve_connection(store, helper.CANONICAL_ORIGIN, self.connection_id), (helper.CANONICAL_ORIGIN, original))
+
+    def test_origin_migration_rejects_pending_expired_unknown_or_tampered_original_grants_without_http(self):
+        original = self.legacy_connection()
+        for change in ({"status": "pending"}, {"status": "unknown"}, {"status": "revoked"},
+                {"expires_at": time.time()-1}, {"expires_at": float("nan")}, {"expires_at": float("inf")},
+                {"expires_at": True}, {"expires_at": original["expires_at"]+1},
+                {"expected": {**original["expected"], "profile_version": 2}},
+                {"expected": {**original["expected"], "owner": "supervan"}},
+                {"expected": {**original["expected"], "fingerprint": "0"*64}}):
+            with self.subTest(change=change):
+                self.store.values[(self.origin, self.connection_id)] = {**original, **change}
+                with self.assertRaises(helper.HelperError):
+                    self.client.migrate_origin(self.connection_id, helper.CANONICAL_ORIGIN)
+        self.assertEqual(self.target_http.calls, [])
+        self.assertIsNone(self.store.load(helper.CANONICAL_ORIGIN, self.connection_id))
+
+    def test_routing_alias_has_no_fallback_chain_overwrite_or_arbitrary_origin(self):
+        original = self.legacy_connection()
+        for target in ("http://inkseq.com", "https://inkseq.com:443", "https://staging.inkseq.com", "https://inkseq.com.evil.test", self.origin):
+            with self.subTest(target=target), self.assertRaises(helper.HelperError):
+                self.client.migrate_origin(self.connection_id, target)
+        self.assertEqual(self.target_http.calls, [])
+        self.store.values[(helper.CANONICAL_ORIGIN, self.connection_id)] = copy.deepcopy(original)
+        with self.assertRaisesRegex(helper.HelperError, "origin_migration_target_conflict"):
+            self.client.migrate_origin(self.connection_id, helper.CANONICAL_ORIGIN)
+        with self.assertRaisesRegex(helper.HelperError, "saved_authorization_mismatch"):
+            helper.resolve_connection(self.store, helper.CANONICAL_ORIGIN, self.connection_id)
+        del self.store.values[(helper.CANONICAL_ORIGIN, self.connection_id)]
+        self.client.migrate_origin(self.connection_id, helper.CANONICAL_ORIGIN)
+        alias = self.store.load(helper.CANONICAL_ORIGIN, self.connection_id)
+        with self.assertRaisesRegex(helper.HelperError, "origin_migration_route_mismatch"):
+            helper.resolve_connection(self.store, "https://sixnine.art", self.connection_id)
+        for change in ({"source_origin": helper.CANONICAL_ORIGIN}, {"source_binding": "0"*64},
+                {"expires_at": alias["expires_at"]+1}, {"api_key": original["api_key"]}):
+            with self.subTest(change=change):
+                self.store.values[(helper.CANONICAL_ORIGIN, self.connection_id)] = {**alias, **change}
+                with self.assertRaises(helper.HelperError):
+                    self.client.request(self.connection_id, "/v1/projects", method="POST")
+        self.store.values[(helper.CANONICAL_ORIGIN, self.connection_id)] = alias
+        for change in ({"key_id": "other"}, {"api_key": "sxp_"+"z"*43}):
+            self.store.values[(self.origin, self.connection_id)] = {**original, **change}
+            with self.assertRaisesRegex(helper.HelperError, "origin_migration_binding_mismatch"):
+                helper.resolve_connection(self.store, helper.CANONICAL_ORIGIN, self.connection_id)
+
+    def test_source_change_during_target_check_prevents_alias_creation(self):
+        original = self.legacy_connection()
+        identity = self.target_http.request("/api/auth/me", token=original["api_key"])
+        def changed(*args, **kwargs):
+            self.store.values[(self.origin, self.connection_id)] = {**original, "key_id": "changed"}
+            return identity
+        with patch.object(self.target_http, "request", side_effect=changed), self.assertRaisesRegex(helper.HelperError, "origin_migration_source_changed"):
+            self.client.migrate_origin(self.connection_id, helper.CANONICAL_ORIGIN)
+        self.assertIsNone(self.store.load(helper.CANONICAL_ORIGIN, self.connection_id))
+
+    def test_source_remains_exact_origin_bound_until_explicit_migration_and_racing_target_is_not_overwritten(self):
+        original = self.legacy_connection()
+        effective, saved = helper.resolve_connection(self.store, self.origin, self.connection_id)
+        self.assertEqual(effective, self.origin)
+        self.assertEqual(saved, original)
+        self.assertEqual(helper.resolve_connection(self.store, helper.CANONICAL_ORIGIN, self.connection_id), (helper.CANONICAL_ORIGIN, None))
+        with patch.object(self.target_http, "request", wraps=self.target_http.request) as request:
+            def racing_save(origin, connection_id, record, *, replace=False):
+                self.store.values[(origin, connection_id)] = {"protocol": "foreign"}
+                raise helper.HelperError("connection_already_saved")
+            with patch.object(self.store, "save", side_effect=racing_save), self.assertRaisesRegex(helper.HelperError, "connection_already_saved"):
+                self.client.migrate_origin(self.connection_id, helper.CANONICAL_ORIGIN)
+        self.assertEqual(request.call_count, 1)
+        self.assertEqual(self.store.load(helper.CANONICAL_ORIGIN, self.connection_id), {"protocol": "foreign"})
+        self.assertEqual(self.store.values[(self.origin, self.connection_id)], original)
 
     @unittest.skipUnless(os.name == "nt", "Windows DPAPI only")
     def test_windows_dpapi_temp_file_is_encrypted_and_roundtrips(self):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Public Sixnine connection helper; standard library, no private AI Registry.
+"""Public Inkseq connection helper; standard library, no private AI Registry.
 
 Read this file before running it.  A one-time code is supplied through a hidden
 prompt or stdin, never a command argument.  A PAT is generated and saved in the
@@ -13,7 +13,9 @@ from contextlib import contextmanager
 import ctypes
 import getpass
 import hashlib
+import hmac
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -30,6 +32,12 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 PROTOCOL = "client-held-pat-v1"
+ROUTE_PROTOCOL = "client-held-pat-route-alias-v1"
+CANONICAL_ORIGIN = "https://inkseq.com"
+LEGACY_ORIGINS = frozenset({"https://sixnine.art", "https://www.sixnine.art"})
+# Immutable creator-full version 1, not a live discovery policy or a new grant.
+CREATOR_V1_SCOPES = sorted({"projects:read", "projects:create", "projects:write", "assets:read",
+    "assets:write", "jobs:read", "jobs:write", "assistant:run"})
 MAX_RECORD_BYTES = 32768
 MAX_RESPONSE_BYTES = 1024 * 1024
 ID = re.compile(r"^connection-[0-9a-f]{32}$")
@@ -63,6 +71,59 @@ def checked_origin(value):
     except ValueError:
         raise HelperError("invalid_origin") from None
     return parsed.scheme + "://" + parsed.netloc.lower()
+
+
+def _migration_source(state, origin, connection_id):
+    expected = state.get("expected") if isinstance(state, dict) else None
+    if (origin not in LEGACY_ORIGINS or not isinstance(expected, dict)
+            or set(expected) != {"origin", "connection_id", "owner", "tenant", "profile_id", "profile_version", "fingerprint"}
+            or state.get("protocol") != PROTOCOL or state.get("status") != "connected"
+            or expected.get("origin") != origin or expected.get("connection_id") != connection_id
+            or expected.get("tenant") != "sixnine" or not isinstance(expected.get("owner"), str) or not expected["owner"]
+            or expected.get("profile_id") != "creator-full" or type(expected.get("profile_version")) is not int
+            or expected["profile_version"] != 1 or not isinstance(expected.get("fingerprint"), str)
+            or not HEX.fullmatch(expected["fingerprint"])
+            or not isinstance(state.get("api_key"), str) or not re.fullmatch(r"sxp_[A-Za-z0-9_-]{43}", state["api_key"])
+            or not isinstance(state.get("key_id"), str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,200}", state["key_id"])
+            or type(state.get("expires_at")) not in {int, float} or not math.isfinite(state["expires_at"])
+            or state["expires_at"] <= time.time()):
+        raise HelperError("origin_migration_source_invalid")
+    authorization = {key: value for key, value in expected.items() if key != "fingerprint"}
+    authorization.update(scopes=CREATOR_V1_SCOPES, all_projects=True, project_ids=[],
+        key_lifetime_days=90, key_expires_at=state["expires_at"])
+    if not hmac.compare_digest(digest(canonical(authorization)), expected["fingerprint"]):
+        raise HelperError("origin_migration_authorization_mismatch")
+    return digest(canonical({"expected": expected, "key_id": state["key_id"],
+        "expires_at": state["expires_at"], "token_hash": digest(state["api_key"])}))
+
+
+def _route_alias(state, origin, connection_id):
+    binding = _migration_source(state, origin, connection_id)
+    return {"protocol": ROUTE_PROTOCOL, "status": "active", "origin": CANONICAL_ORIGIN,
+        "connection_id": connection_id, "source_origin": origin,
+        "source_reference": SecureStore.reference(origin, connection_id), "source_binding": binding,
+        "authorization_fingerprint": state["expected"]["fingerprint"],
+        "key_id": state["key_id"], "expires_at": state["expires_at"]}
+
+
+def resolve_connection(store, origin, connection_id):
+    """Resolve only a previously verified one-hop alias; never follow HTTP redirects."""
+    origin = checked_origin(origin)
+    SecureStore.reference(origin, connection_id)
+    state = store.load(origin, connection_id)
+    alias = state if origin == CANONICAL_ORIGIN else store.load(CANONICAL_ORIGIN, connection_id) if origin in LEGACY_ORIGINS else None
+    if not isinstance(alias, dict) or alias.get("protocol") != ROUTE_PROTOCOL:
+        if (isinstance(state, dict) and state.get("protocol") == PROTOCOL
+                and (not isinstance(state.get("expected"), dict) or state["expected"].get("origin") != origin)):
+            raise HelperError("saved_authorization_mismatch")
+        return origin, state
+    source_origin = alias.get("source_origin")
+    if source_origin not in LEGACY_ORIGINS or origin not in {source_origin, CANONICAL_ORIGIN}:
+        raise HelperError("origin_migration_route_mismatch")
+    source = store.load(source_origin, connection_id)
+    if alias != _route_alias(source, source_origin, connection_id):
+        raise HelperError("origin_migration_binding_mismatch")
+    return CANONICAL_ORIGIN, source
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -646,10 +707,41 @@ class SecureStore:
 
 
 class AgentClient:
-    def __init__(self, origin, *, store=None, http=None):
+    def __init__(self, origin, *, store=None, http=None, http_factory=JsonHTTP):
         self.origin = checked_origin(origin)
         self.store = store if store is not None else SecureStore()
-        self.http = http if http is not None else JsonHTTP(self.origin)
+        self.http_factory = http_factory
+        self.http = http if http is not None else http_factory(self.origin)
+
+    def migrate_origin(self, connection_id, target_origin):
+        if self.origin not in LEGACY_ORIGINS or checked_origin(target_origin) != CANONICAL_ORIGIN:
+            raise HelperError("origin_migration_route_not_allowed")
+        SecureStore.reference(self.origin, connection_id)
+        state = self.store.load(self.origin, connection_id)
+        alias = _route_alias(state, self.origin, connection_id)
+        existing = self.store.load(CANONICAL_ORIGIN, connection_id)
+        if existing is not None and existing != alias:
+            raise HelperError("origin_migration_target_conflict")
+        # Same PAT, direct exact HTTPS target, no grant exchange or redirect.
+        identity = self.http_factory(CANONICAL_ORIGIN).request("/api/auth/me", token=state["api_key"])
+        if (not isinstance(identity, dict) or identity.get("username") != state["expected"]["owner"] or identity.get("machine") is not True
+                or identity.get("actor_id") != "key:" + state["key_id"]
+                or identity.get("scopes") != CREATOR_V1_SCOPES or identity.get("all_projects") is not True
+                or identity.get("project_ids") != []):
+            raise HelperError("origin_migration_identity_mismatch")
+        if _route_alias(self.store.load(self.origin, connection_id), self.origin, connection_id) != alias:
+            raise HelperError("origin_migration_source_changed")
+        if existing is None:
+            try:
+                self.store.save(CANONICAL_ORIGIN, connection_id, alias)
+            except HelperError as error:
+                if str(error) != "connection_already_saved" or self.store.load(CANONICAL_ORIGIN, connection_id) != alias:
+                    raise
+        if self.store.load(CANONICAL_ORIGIN, connection_id) != alias:
+            raise HelperError("origin_migration_binding_mismatch")
+        return {"status": "origin_migrated", "connection_id": connection_id, "owner": state["expected"]["owner"],
+            "origin": CANONICAL_ORIGIN, "source_origin": self.origin,
+            "key_id": state["key_id"], "expires_at": state["expires_at"], "online_verified": True}
 
     def connect(self, *, code, connection_id, owner, tenant, fingerprint,
                 profile_id="creator-full", profile_version=1):
@@ -705,6 +797,12 @@ class AgentClient:
             "key_id": key["id"], "expires_at": key["expires_at"], "recovered": bool(result.get("recovered"))}
 
     def resume(self, connection_id):
+        effective_origin, active = resolve_connection(self.store, self.origin, connection_id)
+        if effective_origin != self.origin or active and active.get("expected", {}).get("origin") != self.origin:
+            if not active or active.get("status") != "connected" or active.get("protocol") != PROTOCOL:
+                raise HelperError("saved_connection_not_active")
+            return {"status": "connected_locally", "connection_id": connection_id, "owner": active["expected"]["owner"],
+                "origin": effective_origin, "key_id": active["key_id"], "online_verified": False}
         state = self.store.load(self.origin, connection_id)
         if not state or state.get("protocol") != PROTOCOL or state.get("expected", {}).get("origin") != self.origin:
             raise HelperError("saved_connection_unavailable")
@@ -721,18 +819,19 @@ class AgentClient:
             return self._exchange(state, recovery=False)
 
     def request(self, connection_id, path, *, method="GET", body=None, idempotency_key=None):
-        state = self.store.load(self.origin, connection_id)
-        if (not state or state.get("status") != "connected" or state.get("protocol") != PROTOCOL
-                or state.get("expected", {}).get("origin") != self.origin):
+        effective_origin, state = resolve_connection(self.store, self.origin, connection_id)
+        if not state or state.get("status") != "connected" or state.get("protocol") != PROTOCOL:
             raise HelperError("saved_connection_not_active")
-        return self.http.request(path, method=method, body=body, token=state["api_key"], idempotency_key=idempotency_key)
+        http = self.http if effective_origin == self.origin else self.http_factory(effective_origin)
+        return http.request(path, method=method, body=body, token=state["api_key"], idempotency_key=idempotency_key)
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Connect Sixnine without printing or exporting API credentials")
-    parser.add_argument("command", choices=("connect", "resume", "whoami", "request"))
+    parser = argparse.ArgumentParser(description="Connect Inkseq without printing or exporting API credentials")
+    parser.add_argument("command", choices=("connect", "resume", "whoami", "request", "migrate-origin"))
     parser.add_argument("--server", required=True, help="Exact HTTPS origin; loopback HTTP only for local preview")
     parser.add_argument("--connection", required=True, help="Public connection ID from the website")
+    parser.add_argument("--to-server", help="Explicit canonical Inkseq origin for verified legacy-origin routing")
     parser.add_argument("--account", help="Expected account from the website")
     parser.add_argument("--tenant", default="sixnine")
     parser.add_argument("--fingerprint", help="Public authorization fingerprint from the website")
@@ -752,6 +851,10 @@ def main(argv=None):
             code = sys.stdin.read(256).strip() if args.code_stdin else getpass.getpass("One-time connection code: ")
             result = client.connect(code=code, connection_id=args.connection, owner=args.account, tenant=args.tenant,
                 fingerprint=args.fingerprint, profile_id=args.profile, profile_version=args.profile_version)
+        elif args.command == "migrate-origin":
+            if not args.to_server:
+                raise HelperError("origin_migration_target_required")
+            result = client.migrate_origin(args.connection, args.to_server)
         elif args.command == "resume":
             result = client.resume(args.connection)
         elif args.command == "whoami":

@@ -70,7 +70,7 @@ def public_guide():
     """Relative URLs deliberately keep discovery and credentials on one origin."""
     from .quick_chat_routes import agent_contract
     return {
-        "name": "Sixnine / 映序", "version": 2, "api_version": "v1",
+        "name": "Inkseq / 映序", "version": 2, "api_version": "v1",
         "description": "Create one quick H3 clip or edit a multi-chapter story; save the same prompt, separate references and controls visible on the website, plan generation and adopt results without replacing prior takes.",
         "discovery_is_authorization": False,
         "quick_chat": agent_contract(),
@@ -113,6 +113,11 @@ def public_guide():
             "verification_checklist": list(CONNECTION_VERIFICATION_CHECKLIST),
             "verification_limits": CONNECTION_VERIFICATION_LIMITS,
             "recovery": "After a lost response, resume the same connection and locally saved verifier/token. Do not generate replacement material or request another grant. Code consumption is atomic; scopes, owner, origin and key expiry remain frozen.",
+            "origin_migration": {
+                "target": "https://inkseq.com", "legacy_origins": ["https://sixnine.art", "https://www.sixnine.art"],
+                "activation": "Explicit connect.py migrate-origin from the exact saved old origin. Verify the immutable creator-full-v1 grant and the same PAT's direct target /api/auth/me identity before saving an encrypted one-hop route reference.",
+                "preserved": "Original encrypted credential, owner, key ID, tenant, scopes, authorization fingerprint and expiry. No token copy, exchange, redirect following or new grant. Both helpers resolve only this verified alias; no alias means no automatic migration.",
+            },
             "authorization": "Connection grants broad access only to the owner's resources. It does not authorize a particular paid task, remove budgets, enable the website conversation assistant or qualify unsupported model controls. Revocation denies further calls without deleting existing work.",
             "publication": "The API/helper contract and the approved Connect UI have separate release gates. If this deployment does not serve the connection UI, use the explicit manual PAT fallback; do not assume a button is present.",
         },
@@ -237,7 +242,7 @@ def skill_bundle():
 
 
 def llms_text():
-    return """# Sixnine / 映序 — Agent integration
+    return """# Inkseq / 映序 — Agent integration
 
 > Use the authenticated API for one quick H3 clip or a multi-chapter story. Save the same prompt, separate media inputs and controls the user can edit on the website; plan generation and adopt candidates.
 
@@ -276,6 +281,8 @@ A URL is a discovery link, not permission to edit or spend. The owner explicitly
 
 For macOS, use an existing default file-based user Keychain, already unlocked and accessible to the calling process. Native operations bind to that same Keychain and suppress authentication UI; locked, denied or interaction-required access stops the helper. Any unlock/access authorization must happen separately through trusted system UI. Retry the original connection/grant; if material was already saved, resume with that same material within the recovery window. The helper never collects a Keychain password, changes access controls, auto-unlocks/creates a Keychain or passes secrets through command arguments. The manifest includes per-OS storage requirements and a verification checklist. Fake OS tests do not prove native store access or live external onboarding; actual OS access and frontend/production publication need separate evidence.
 
+The production origin is https://inkseq.com. Browser users sign in there once because cookies are host-bound. Existing PATs and Agent permissions/expiry remain unchanged. For an existing connected creator-full-v1 record at its exact old origin, explicitly run `python scripts/connect.py migrate-origin --server https://www.sixnine.art --to-server https://inkseq.com --connection CONNECTION_ID` (use the old apex instead only if that is the saved origin). The reviewed helper checks the original fingerprint and the same PAT's direct canonical identity, then saves only an encrypted reference to the unchanged old record. It never follows a redirect, exchanges another code, copies the key or extends authority. Subsequent old/new-origin helper commands use that verified route. Conflicting, pending or expired records are refused. Keep the original encrypted credential. The skill folder, tenant and SIXNINE_API_KEY names remain compatibility identifiers.
+
 After authorization, read GET /v1/agent-guide, /v1/guided-schema, /v1/capabilities and /openapi.json. Static documentation is not proof that generation is enabled. An actual plan may be blocked; do not invent successful media.
 
 Before choosing FL/REF, preflight and a new submission, GET authenticated /v1/generation-availability (PAT jobs:read or jobs:write; the helper's availability command performs only this read). Match the exact profiles[].deployment_profile_id and modes.fl/ref recipe, not any other ready profile. An omitted/null legacy profile matches only the explicit deployment_profile_id:null row, never the named default; a missing null row is unknown. Observe expires_at and poll_after_seconds; expired/missing observations are unknown. ready/busy have available=true but remain subject to capabilities and preflight; busy may queue. starting waits without starting another machine. unavailable/disabled means preserve the draft and ask an administrator to start or configure that exact profile/mode. unknown means refresh, not assume offline. Do not rent, silently change model/precision/mode, or submit blindly to wake a GPU. Existing uncertain jobs still use their original receipt/key. Public discovery contains no live availability.
@@ -303,8 +310,8 @@ Optional `source_revision_id` names an authorized revision in this same session 
 Example using the downloaded helper (replace IDs with returned IDs; `CURRENT_REVISION_ID` comes from the first GET). These commands only read and save the revised draft:
 
 ```sh
-python scripts/sixnine.py --base-url https://www.sixnine.art --connection CONNECTION_ID request GET /v1/quick-chat/sessions/SESSION_ID/cards/CARD_ID --output card-current.json
-python scripts/sixnine.py --base-url https://www.sixnine.art --connection CONNECTION_ID request GET /v1/quick-chat/sessions/SESSION_ID/revisions/CURRENT_REVISION_ID --output revision-current.json
+python scripts/sixnine.py --base-url https://inkseq.com --connection CONNECTION_ID request GET /v1/quick-chat/sessions/SESSION_ID/cards/CARD_ID --output card-current.json
+python scripts/sixnine.py --base-url https://inkseq.com --connection CONNECTION_ID request GET /v1/quick-chat/sessions/SESSION_ID/revisions/CURRENT_REVISION_ID --output revision-current.json
 ```
 
 Build the complete request from those two responses; the JSON values remain their actual object/integer types, not strings containing JSON:
@@ -336,7 +343,7 @@ with Path("revision-request.json").open("x", encoding="utf-8") as target:
 Persist one unique logical-write key with that exact body before sending it:
 
 ```sh
-python scripts/sixnine.py --base-url https://www.sixnine.art --connection CONNECTION_ID request POST /v1/quick-chat/sessions/SESSION_ID/cards/CARD_ID/revisions --json-file revision-request.json --idempotency-key UNIQUE-CARD-REVISION-001 --output revision-saved.json
+python scripts/sixnine.py --base-url https://inkseq.com --connection CONNECTION_ID request POST /v1/quick-chat/sessions/SESSION_ID/cards/CARD_ID/revisions --json-file revision-request.json --idempotency-key UNIQUE-CARD-REVISION-001 --output revision-saved.json
 ```
 
 HTTP 201 returns `card` and `revision`; read the saved card's `version`/`current_revision_id` and the new revision's `id`/`input_hash`. Existing snapshots, submissions and jobs remain attached to their original revision. Session `expected_version` is used only by its own session/turn operations; card `expected_card_version` is used here.
@@ -376,7 +383,7 @@ def landing_html():
 <nav><a href="/">← 回到映序</a><a href="/llms.txt">llms.txt</a><a href="/for-agents/guide.json">机器可读指南</a><a href="/for-agents/SKILL.md">Skill 指令</a></nav>
 <p class="tag">FOR AI AGENTS · API V1</p><h1>让 AI 创作，<br>让你随时接手。</h1>
 <p>把这个网站链接发给 Codex 或其他支持 API 的 Agent。一个短片可以直接用快速创作：提示词、图片、动作视频、音频和设置都保存到同一份网页草稿。需要改编剧本时，也能整理故事、章节和分镜。</p>
-<div class="links"><a href="/for-agents/guide.md">给 Agent 阅读的指南</a><a href="/for-agents/guide.md?download=true" download="sixnine-agent-guide.md">下载完整指南 .md</a><a href="/for-agents/skill.zip">下载 Skill 包 .zip</a><a href="/">登录并连接 Agent</a></div>
+<div class="links"><a href="/for-agents/guide.md">给 Agent 阅读的指南</a><a href="/for-agents/guide.md?download=true" download="inkseq-agent-guide.md">下载完整指南 .md</a><a href="/for-agents/skill.zip">下载 Skill 包 .zip</a><a href="/">登录并连接 Agent</a></div>
 <p><small>指南和下载公开可用，不需要登录或 API Key。可把 Markdown 文件直接发给 Codex；若网页读取工具打不开，使用同站 HTTPS 直接下载即可。连接账户、读取作品和提交任务时才需要授权。</small></p>
 <section class="panel"><h2 style="margin-top:0">三步开始</h2><ol><li><strong>先把链接和创作要求给 Agent。</strong>这页、Skill 和机器指南公开可读，无需登录。</li><li><strong>登录网站，明确授权一次连接。</strong>连接界面上线后，复制短时有效的连接说明给 Agent。辅助脚本在本机生成正式 Key，并通过系统凭据存储保存；无需安装我们的 AI Registry。正式 Key 不进入聊天或链接。当前页面是否提供连接按钮以实际前端发布为准；手动 API Key 是高级备用方式。</li><li><strong>回网站看结果，再继续调整。</strong>打开同一云故事，查看活动和任务；定位章节、角色或镜头，修改要求后只重做需要的部分。旧候选保留，选中哪一版由你决定。</li></ol>
 <small>分享链接只用于发现功能。写入需要账户授权；生成还取决于当前服务是否启用、输入是否合格和可用预算。此页不代表 GPU 已上线。</small></section>
@@ -407,7 +414,7 @@ def register_routes(app):
 
     @app.api_route("/for-agents/guide.md", methods=["GET", "HEAD"], include_in_schema=False)
     def agent_markdown(download: bool = False):
-        headers = {"Content-Disposition": 'attachment; filename="sixnine-agent-guide.md"'} if download else {}
+        headers = {"Content-Disposition": 'attachment; filename="inkseq-agent-guide.md"'} if download else {}
         return Response(guide_markdown(), media_type="text/markdown", headers=headers)
 
     @app.api_route(HELPER_PATH, methods=["GET", "HEAD"], include_in_schema=False)
@@ -425,4 +432,4 @@ def register_routes(app):
     @app.api_route("/for-agents/skill.zip", methods=["GET", "HEAD"], include_in_schema=False)
     def agent_skill_zip():
         return Response(skill_bundle(), media_type="application/zip", headers={
-            "Content-Disposition": 'attachment; filename="sixnine-yingxu-agent-skill.zip"'})
+            "Content-Disposition": 'attachment; filename="inkseq-agent-skill.zip"'})

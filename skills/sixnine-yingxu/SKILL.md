@@ -1,11 +1,11 @@
 ---
 name: sixnine-yingxu
-description: Use a Sixnine or Yingxu website link to create a quick H3 video or edit an authorized story through its API, upload references, and return the same editable draft and results to the website.
+description: Use an Inkseq or Yingxu website link to create a quick H3 video or edit an authorized story through its API, upload references, and return the same editable draft and results to the website.
 ---
 
-# Sixnine / 映序
+# Inkseq / 映序
 
-Use the user's exact Sixnine origin and scoped API key. The production origin is `https://www.sixnine.art`; HTTPS is required except loopback. A shared URL permits discovery, not editing, spending or GPU rental. Check current capabilities and the actual plan before promising generation.
+Use the user's exact Inkseq origin and scoped API key. The production origin is `https://inkseq.com`; HTTPS is required except loopback. A shared URL permits discovery, not editing, spending or GPU rental. Check current capabilities and the actual plan before promising generation.
 
 ## Connect and choose the workflow
 
@@ -16,9 +16,9 @@ For conversation history and editable generation cards, use **Quick Chat** below
 Prefer the owner's explicit **Connect Codex** grant when that UI is released. The signed-in owner creates a connection in `/v1/account/agent-connections`; a machine key cannot create another connection. The returned instructions include a five-minute one-time code, exact origin, account, connection ID and authorization fingerprint. Read the helper before executing it and compare its SHA-256 with same-origin `/for-agents/connect-manifest.json`. A matching digest checks release consistency, not independent trust in the website. Pass the code through the hidden prompt or `--code-stdin`, never argv. Never paste a permanent API key into chat.
 
 ```sh
-python scripts/connect.py connect --server https://www.sixnine.art --connection CONNECTION_ID --account ACCOUNT --tenant sixnine --fingerprint AUTHORIZATION_FINGERPRINT
-python scripts/connect.py whoami --server https://www.sixnine.art --connection CONNECTION_ID
-python scripts/sixnine.py --base-url https://www.sixnine.art --connection CONNECTION_ID request GET /v1/agent-guide
+python scripts/connect.py connect --server https://inkseq.com --connection CONNECTION_ID --account ACCOUNT --tenant sixnine --fingerprint AUTHORIZATION_FINGERPRINT
+python scripts/connect.py whoami --server https://inkseq.com --connection CONNECTION_ID
+python scripts/sixnine.py --base-url https://inkseq.com --connection CONNECTION_ID request GET /v1/agent-guide
 ```
 
 The helper generates the permanent key locally and saves it **before exchange** in Windows current-user DPAPI, Linux Secret Service or the native macOS user Keychain. Linux requires existing `secret-tool` and a working user Secret Service. macOS requires an existing default file-based user Keychain that is already unlocked and accessible to this process; the helper binds reads and writes to that same Keychain. Native macOS operations suppress authentication UI, so a lock or denied/interaction-required access stops the helper. Any unlock or access authorization is a separate user action through trusted system UI; retry the original connection/grant, using resume with the same material if it was already saved. The helper does not collect a Keychain password, auto-unlock/create a Keychain, change access controls or pass credentials to a command argument. Unsupported/missing storage stops before exchange, without installing software or writing plaintext credentials. External users do not need our AI Registry.
@@ -27,6 +27,19 @@ Read the manifest's storage requirements and verification checklist. A helper di
 
 The `creator-full` version 1 grant covers the owner's projects, assets, jobs and assistant calls for 90 days from authorization. It does not grant access to other accounts, enable disabled services, remove budgets or authorize a particular paid action. The connection UI has a separate publication gate; do not claim a button exists solely because discovery is readable.
 
+### Existing connections from the old product domain
+
+Browser cookies are host-bound: sign in once at `https://inkseq.com`. Existing PAT bytes, Agent grants and expiry do not change. The installed skill name, OS credential-store names, `--tenant sixnine` and `SIXNINE_API_KEY` remain compatible identifiers, not the public product domain.
+
+For an already connected creator-full-v1 record at **its exact saved old origin**, explicitly activate the verified route once with the reviewed new helper:
+
+```sh
+python scripts/connect.py migrate-origin --server https://www.sixnine.art --to-server https://inkseq.com --connection CONNECTION_ID
+python scripts/connect.py whoami --server https://inkseq.com --connection CONNECTION_ID
+```
+
+Use `https://sixnine.art` instead only if that is the original record's origin. Migration reconstructs the original authorization fingerprint, directly checks the same PAT's owner/key actor/scopes on Inkseq without following redirects, and creates an encrypted one-hop reference to the unchanged original record. It neither copies a PAT nor exchanges another code, changes authority or extends expiry. Unknown/pending/expired grants, conflicting target records and unrelated domains stop without mutation. After activation, both old-origin and canonical-origin helper commands resolve this exact route; without it redirects remain rejected. Keep the original encrypted record. Manual PAT use can select the new origin directly; an internal registry profile must still match its explicit configured endpoint.
+
 Manual PAT creation remains an advanced fallback in the website's API key panel. New projects require `projects:create`, `projects:read`, `projects:write` and access to all of that owner's projects. A key limited to selected projects can edit those projects but cannot create another one. Upload also needs `assets:read/write`; generation needs `jobs:read/write`; adoption needs `projects:write` and `jobs:read`. Existing PAT permissions do not expand.
 
 Use `--connection ID` to load the connected key only in the requesting process. Manual fallback reads process-only `SIXNINE_API_KEY`. An already configured internal registry remains optional through `--registry-root PATH --profile PROFILE`; do not combine credential sources. Never put a key in a command argument, URL, chat, ordinary project file or log. Resource/profile IDs are not upstream model IDs.
@@ -34,7 +47,7 @@ Use `--connection ID` to load the connected key only in the requesting process. 
 Read authenticated `/v1/agent-guide`, `/v1/guided-schema` and `/v1/capabilities`. `/openapi.json` is also authenticated (use a direct same-origin HTTP client for that path). Python and `httpx` are required by the helper:
 
 ```sh
-python scripts/sixnine.py --base-url https://www.sixnine.art request GET /v1/agent-guide
+python scripts/sixnine.py --base-url https://inkseq.com request GET /v1/agent-guide
 ```
 
 ## Check the selected mode's current availability
@@ -42,7 +55,7 @@ python scripts/sixnine.py --base-url https://www.sixnine.art request GET /v1/age
 Before choosing FL/REF, and again before preflight and a new generation submission, read authenticated `GET /v1/generation-availability` (browser session or PAT with `jobs:read` or `jobs:write`):
 
 ```sh
-python scripts/sixnine.py --base-url https://www.sixnine.art --connection CONNECTION_ID availability
+python scripts/sixnine.py --base-url https://inkseq.com --connection CONNECTION_ID availability
 ```
 
 Match the **exact** `deployment_profile_id` in `profiles[]`, then `modes.fl` or `modes.ref` and its `recipe_id`. Another profile's ready GPU cannot satisfy this selection. Preserve the user's model, precision, mode and references; never change them to obtain capacity. A legacy draft/plan with an omitted or null profile uses only the explicit `deployment_profile_id:null` row. That row describes the actual legacy policy; never substitute the named default profile. If the null row is absent, availability is unknown.
@@ -85,8 +98,8 @@ Optional `source_revision_id` is provenance pointing to an authorized revision i
 The following read/save example uses the existing helper. Replace IDs with actual returned IDs; `CURRENT_REVISION_ID` comes from the first GET:
 
 ```sh
-python scripts/sixnine.py --base-url https://www.sixnine.art --connection CONNECTION_ID request GET /v1/quick-chat/sessions/SESSION_ID/cards/CARD_ID --output card-current.json
-python scripts/sixnine.py --base-url https://www.sixnine.art --connection CONNECTION_ID request GET /v1/quick-chat/sessions/SESSION_ID/revisions/CURRENT_REVISION_ID --output revision-current.json
+python scripts/sixnine.py --base-url https://inkseq.com --connection CONNECTION_ID request GET /v1/quick-chat/sessions/SESSION_ID/cards/CARD_ID --output card-current.json
+python scripts/sixnine.py --base-url https://inkseq.com --connection CONNECTION_ID request GET /v1/quick-chat/sessions/SESSION_ID/revisions/CURRENT_REVISION_ID --output revision-current.json
 ```
 
 Build `revision-request.json` from those responses, preserving the values' actual JSON types:
@@ -118,7 +131,7 @@ with Path("revision-request.json").open("x", encoding="utf-8") as target:
 Persist one unique logical-write key with that body, then save the revision:
 
 ```sh
-python scripts/sixnine.py --base-url https://www.sixnine.art --connection CONNECTION_ID request POST /v1/quick-chat/sessions/SESSION_ID/cards/CARD_ID/revisions --json-file revision-request.json --idempotency-key UNIQUE-CARD-REVISION-001 --output revision-saved.json
+python scripts/sixnine.py --base-url https://inkseq.com --connection CONNECTION_ID request POST /v1/quick-chat/sessions/SESSION_ID/cards/CARD_ID/revisions --json-file revision-request.json --idempotency-key UNIQUE-CARD-REVISION-001 --output revision-saved.json
 ```
 
 HTTP 201 returns `card` and `revision`; inspect the saved card's `version`/`current_revision_id` and revision's `id`/`input_hash`. This remains draft-only. Earlier accepted work stays on its original revision.
@@ -245,11 +258,11 @@ Preflight items expose static `error_code`, `error_stage` and safe `error_messag
 The helper has GET-only `availability`, generic `request` (including PATCH), `upload`, `resume-upload`, bounded GET-only `poll`, and `download`; none chains generation or adoption automatically. Examples below use returned IDs and files containing non-secret request JSON:
 
 ```sh
-python scripts/sixnine.py --base-url https://www.sixnine.art request POST /v1/projects --json-file create.json --idempotency-key UNIQUE-QUICK-CREATE --output created.json
-python scripts/sixnine.py --base-url https://www.sixnine.art upload --project PROJECT_ID --asset-id UNIQUE-INPUT-ID --file portrait.png --output upload.json
-python scripts/sixnine.py --base-url https://www.sixnine.art resume-upload --project PROJECT_ID --asset-id UNIQUE-INPUT-ID --output recovered-upload.json
-python scripts/sixnine.py --base-url https://www.sixnine.art poll --job JOB_ID --max-wait 600 --output poll.json
-python scripts/sixnine.py --base-url https://www.sixnine.art download /v1/artifacts/ARTIFACT_ID/content --output take.mp4 --sha256 MANIFEST_SHA256
+python scripts/sixnine.py --base-url https://inkseq.com request POST /v1/projects --json-file create.json --idempotency-key UNIQUE-QUICK-CREATE --output created.json
+python scripts/sixnine.py --base-url https://inkseq.com upload --project PROJECT_ID --asset-id UNIQUE-INPUT-ID --file portrait.png --output upload.json
+python scripts/sixnine.py --base-url https://inkseq.com resume-upload --project PROJECT_ID --asset-id UNIQUE-INPUT-ID --output recovered-upload.json
+python scripts/sixnine.py --base-url https://inkseq.com poll --job JOB_ID --max-wait 600 --output poll.json
+python scripts/sixnine.py --base-url https://inkseq.com download /v1/artifacts/ARTIFACT_ID/content --output take.mp4 --sha256 MANIFEST_SHA256
 ```
 
 `resume-upload` locates exactly one original client ID and makes at most one resume request; it does not send file bytes again. `poll` respects Retry-After, stops on terminal or reconciliation states, and returns `poll_status=waiting` when its bounded wait ends. Continue GET polling that same job later. No success is implied by a zero exit code; inspect the returned state.

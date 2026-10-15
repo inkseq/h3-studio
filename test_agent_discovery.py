@@ -45,6 +45,11 @@ class AgentDiscoveryTests(unittest.TestCase):
 
     def test_discovery_only_links_authenticated_availability_without_live_observations(self):
         guide = self.client.get("/for-agents/guide.json").json()
+        self.assertEqual(guide["name"], "Inkseq / 映序")
+        self.assertEqual(guide["connection"]["origin_migration"]["target"], "https://inkseq.com")
+        document = self.client.get("/for-agents/guide.md").text
+        self.assertIn("--base-url https://inkseq.com", document)
+        self.assertIn("migrate-origin --server https://www.sixnine.art --to-server https://inkseq.com", document)
         contract = guide["generation_availability"]
         self.assertEqual(contract["path"], guide["authenticated_resources"]["generation_availability"])
         self.assertEqual(contract["method"], "GET")
@@ -135,7 +140,7 @@ class AgentDiscoveryTests(unittest.TestCase):
         self.assertEqual(download.status_code, 200)
         self.assertEqual(read.headers["content-type"], "text/markdown; charset=utf-8")
         self.assertNotIn("content-disposition", read.headers)
-        self.assertEqual(download.headers["content-disposition"], 'attachment; filename="sixnine-agent-guide.md"')
+        self.assertEqual(download.headers["content-disposition"], 'attachment; filename="inkseq-agent-guide.md"')
         self.assertEqual(download.content, read.content)
         embedded = read.text.split("```json\n", 1)[1].rsplit("\n```", 1)[0]
         self.assertEqual(json.loads(embedded), guide)
