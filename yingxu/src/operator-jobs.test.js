@@ -8,7 +8,7 @@ import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {createP4OperatorClient} from './p4-operator-client.js';
 import {createP4OperatorController} from './p4-operator-controller.js';
-import {cancellationBody,cancellationReceipt,canCancelJob,selectionCurrent,validAdminJobs} from './operator-jobs-model.js';
+import {cancellationBody,cancellationReceipt,canCancelJob,jobDiagnostics,jobStatus,selectionCurrent,validAdminJobs} from './operator-jobs-model.js';
 
 const memory=()=>{const data=new Map();return {getItem:key=>data.get(key)||null,setItem:(key,value)=>data.set(key,value),removeItem:key=>data.delete(key)};};
 const job=(id='one',extra={})=>({id,owner_id:'supervan',project_id:'original-project',status:'queued',created_at:100,updated_at:101,cancellable:true,snapshot:'a'.repeat(64),...extra});
@@ -98,4 +98,13 @@ test('task row renders any-owner queued selection while disabling running and un
   const module=new Module(path);module.filename=path;module.paths=Module._nodeModulePaths(path.replace(/[/\\][^/\\]+$/,''));module._compile(bundled.outputFiles[0].text,path);
   const html=renderToStaticMarkup(React.createElement(module.exports.OperatorJobsTable,{jobs:[job('queue'),job('wait',{owner_id:'superdan',status:'waiting_capacity'}),job('running',{status:'running'}),job('uncertain',{status:'reconciling'})]}));
   assert.match(html,/supervan/);assert.match(html,/superdan/);assert.match(html,/aria-label="选择任务 queue"\/>/);assert.match(html,/aria-label="选择任务 wait"\/>/);assert.match(html,/aria-label="选择任务 running" disabled=""/);assert.match(html,/aria-label="选择任务 uncertain" disabled=""/);assert.doesNotMatch(html,/生成|重新提交|启动机器/);
+});
+
+test('admin diagnostics retain original execution and notification identities without exposing raw errors',()=>{
+  const row=job('held',{status:'recovery_hold',cancellable:false,diagnostic:{reason_code:'original_attempt_requires_reconciliation',age_seconds:185,attempt_no:2,current_attempt_id:'12345678-abcd',dispatch:{event_id:'abcdef12-abcd',state:'unknown'},error_code:'private raw response'}});
+  assert.equal(jobStatus(row.status),'原执行待核对');assert.equal(jobStatus('submission_unknown'),'提交结果待核对');
+  assert.deepEqual(jobDiagnostics(row),['保留原执行，等待核对','距最近任务更新 3 分钟','原执行 #2 · 12345678','派发 abcdef12 · 通知结果待核对']);
+  assert.deepEqual(jobDiagnostics(job()),[]); // Compatible with an older server during rollout.
+  assert.deepEqual(jobDiagnostics({diagnostic:{reason_code:'secret raw reason',age_seconds:-1,attempt_no:2,current_attempt_id:'https://private',dispatch:{event_id:'token',state:'secret'}}}),[]);
+  assert.equal(canCancelJob(row),false);
 });
