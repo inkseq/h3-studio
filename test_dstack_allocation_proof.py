@@ -93,6 +93,18 @@ class AllocationProofTests(LedgerCase):
         self.capacity.observe(node)
         self.assertEqual(self.reservation(node), before)
 
+    def test_documented_rejections_release_only_the_original_hold(self):
+        for status, code in ((400, "invalid_args"), (410, "no_such_ask")):
+            with self.subTest(status=status):
+                node, bound, run = self.failed(marker(code=code, status=status), key="documented-"+str(status))
+                original = self.reservation(node)
+                self.assertTrue(terminal_no_allocation(run, bound))
+                self.capacity.observe(node)
+                result = self.reservation(node)
+                self.assertEqual((result["id"], result["amount_microusd"]),
+                    (original["id"], original["amount_microusd"]))
+                self.assertEqual((result["state"], result["actual_cost_microusd"]), ("released", 0))
+
     def test_changed_history_foreign_offer_and_extra_fields_never_prove_zero(self):
         _, bound, run = self.failed(marker())
         self.assertIsNotNone(from_terminal_run(run, bound))
