@@ -203,7 +203,8 @@ def validate(authority, config, paths, raw, *, now):
     keys = {"version", "purpose", "resume_id", "slot_key", "run_id", "instance_id",
             "hard_deadline", "issued_at", "expires_at", "input_sha256", "recovery_sha256", "parent_metadata"}
     version = authority.get("version")
-    additions = {1: set(), 2: {"previous_intent_sha256", "download_alias"}, 3: {"completed_download"}}
+    additions = {1: set(), 2: {"previous_intent_sha256", "download_alias"},
+                 3: {"completed_download"}, 4: {"download_alias"}}
     require(type(version) is int and version in additions
             and set(authority) == keys | additions[version]
             and authority["purpose"] == "resume-original-model-download-v" + str(version),
@@ -252,7 +253,7 @@ def validate(authority, config, paths, raw, *, now):
     require(not any(path.exists() or path.is_symlink() for path in forbidden)
             and not list(base.glob("runtime-startup-*.json")), "runtime_already_started")
     source_matches(paths["package"], base / "platform", expected_parents=expected_parents)
-    if version == 2:
+    if version in (2, 4):
         # A separately staged recovery executable has no checkout on sys.path.
         # Resolve the pure manifest contract only from the original source whose
         # archive and extracted bytes were verified above.
@@ -433,7 +434,7 @@ def execute(config, paths, authority, attempt):
     require(manifest.digest == json.loads(read_input("identity", paths["identity"], expected_parents))["engine_manifest_digest"], "manifest_changed")
     runtime, python, environment = prepare(config, manifest, source, lambda *args, **kwargs: None)
     alias_path = None
-    if authority["version"] == 2:
+    if authority["version"] in (2, 4):
         validate_alias(authority["download_alias"], manifest.document)
         alias_path = Path(__file__).parent / ("download-alias-" + authority["resume_id"] + ".json")
         save(alias_path, authority["download_alias"], exclusive=True)
@@ -485,6 +486,9 @@ def resume(config_path, token_file, authority_path, *, effect=execute):
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         previous = list(base.glob("resume-original-download-*.json"))
         if previous:
+            # A first-alias continuation never consumes or invents a previous
+            # continuation outcome. Any earlier intent requires reconciliation.
+            require(authority.get("version") != 4, "first_alias_requires_no_prior_intent")
             require(len(previous) <= 2, "intent_requires_reconciliation")
             prior_raw = [read(path, expected_parents=expected_parents) for path in previous]
             if any(json.loads(value).get("authority_sha256") == sha(authority_raw) for value in prior_raw):

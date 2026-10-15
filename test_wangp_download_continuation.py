@@ -72,9 +72,9 @@ class Fixture:
         self.authority_path.write_text(json.dumps(self.authority))
         self.authority_path.chmod(0o600)
 
-    def bind_manifest(self):
+    def bind_manifest(self, profile="h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3"):
         from studio_platform.runtime_catalog import engine_manifest
-        manifest = engine_manifest("h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3", "ref")
+        manifest = engine_manifest(profile, "ref")
         self.raw["manifest"] = manifest.document_json.encode()
         identity = json.loads(self.raw["identity"])
         identity["engine_manifest_digest"] = manifest.digest
@@ -281,6 +281,96 @@ class ContinuationTests(unittest.TestCase):
             (f.source / "studio_platform/extra.py").unlink()
             self.assertEqual(self.invoke(lambda *args: {"state": "ready"})["state"], "ready")
         self.assertEqual(validated, [True])
+
+    def first_alias(self, fixture=None):
+        f = fixture or self.fixture
+        manifest = f.bind_manifest("h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6")
+        f.authority.update(version=4, purpose="resume-original-model-download-v4",
+                           download_alias=alias_for(manifest))
+        f.write_authority()
+        return manifest
+
+    def test_first_alias_continues_once_with_original_identity_and_no_prior_intent(self):
+        f = self.fixture
+        self.first_alias()
+        called = []
+        def effect(config, paths, authority, attempt):
+            journal = json.loads(next(f.base.glob("resume-original-download-*.json")).read_bytes())
+            self.assertEqual(journal["status"], "continuation_started")
+            self.assertEqual(journal["input_sha256"], authority["input_sha256"])
+            self.assertNotIn("previous_intent_sha256", authority)
+            called.append(attempt)
+            paths["status"].write_text('{"state":"ready"}')
+            return {"state": "ready"}
+        self.assertEqual(self.invoke(effect)["state"], "ready")
+        self.assertEqual(len(called), 1)
+        for name in r.INPUTS - {"status"}:
+            self.assertEqual(f.paths[name].read_bytes(), f.raw[name])
+        with self.assertRaisesRegex(ValueError, "first_alias_requires_no_prior_intent"):
+            self.invoke(lambda *args: self.fail("first alias must not replay"))
+
+    def test_first_alias_refuses_any_prior_intent_and_v2_still_requires_one(self):
+        f = self.fixture
+        self.first_alias()
+        prior = f.base / ("resume-original-download-" + "b" * 32 + ".json")
+        prior.write_bytes(b'{"status":"continuation_started"}')
+        prior.chmod(0o600)
+        with self.assertRaisesRegex(ValueError, "first_alias_requires_no_prior_intent"):
+            self.invoke(lambda *args: self.fail("must not reuse a prior intent"))
+        prior.unlink()
+        f.authority.update(version=2, purpose="resume-original-model-download-v2",
+                           previous_intent_sha256="0" * 64)
+        f.write_authority()
+        with self.assertRaisesRegex(ValueError, "previous_intent_missing"):
+            self.invoke(lambda *args: self.fail("v2 still requires confirmed prior continuation"))
+
+    def test_first_alias_reuses_stop_identity_source_and_runtime_guards(self):
+        for case in ("stop", "run", "source", "alias", "runtime"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory(dir="/root") as directory:
+                f = Fixture(Path(directory)); self.first_alias(f)
+                if case in {"stop", "run"}:
+                    name = "failure" if case == "stop" else "identity"
+                    value = json.loads(f.raw[name])
+                    if case == "stop": value["download_failure"]["stop_status"] = "unconfirmed"
+                    else: value["dstack_run_id"] = "foreign-run"
+                    f.paths[name].write_text(json.dumps(value))
+                    f.authority["input_sha256"][name] = r.sha(f.paths[name].read_bytes())
+                elif case == "source":
+                    f.paths["bootstrap"].write_bytes(BOOTSTRAP + b"\n")
+                    f.authority["input_sha256"]["bootstrap"] = r.sha(f.paths["bootstrap"].read_bytes())
+                elif case == "alias": f.authority["download_alias"]["files"][0]["size_bytes"] += 1
+                else: Path(f.config["config_path"]).write_text("{}")
+                f.write_authority()
+                with self.assertRaises(ValueError):
+                    r.resume(f.paths["config"], f.paths["token"], f.authority_path,
+                             effect=lambda *args: self.fail("unsafe continuation"))
+                self.assertFalse(list(f.base.glob("resume-original-download-*.json")))
+
+    def test_first_alias_execution_passes_exact_alias_to_separate_download_child(self):
+        f = self.fixture; self.first_alias()
+        Path(f.config["model_root"]).mkdir()
+        recovery = f.remote / "reviewed-recovery.py"
+        recovery.write_bytes(Path(r.__file__).read_bytes()); recovery.chmod(0o600)
+        from studio_platform.runtime_hosts import wangp_profile_bootstrap, wangp_download
+        commands = []
+        def download(*args, **kwargs):
+            kwargs["popen"]([sys.executable, "-m", "studio_platform.runtime_hosts.wangp_download", "--manifest", str(f.paths["manifest"])])
+        def tail(*args):
+            args[-1](lambda *args, **kwargs: None)
+            return {"state": "ready"}
+        with patch.object(r, "__file__", str(recovery)), \
+                patch.object(wangp_profile_bootstrap, "prepare", return_value=(f.root / "prepared", sys.executable, {})), \
+                patch.object(wangp_profile_bootstrap, "_acquire_cache_lock"), \
+                patch.object(wangp_download, "run_download", side_effect=download), \
+                patch.object(r, "original_tail", return_value=tail), \
+                patch.object(r.subprocess, "Popen", side_effect=lambda command, **kwargs: commands.append(command)):
+            self.assertEqual(self.invoke(r.execute)["state"], "ready")
+        self.assertEqual(len(commands), 1)
+        self.assertEqual(commands[0][:4], [sys.executable, str(recovery), "--download-child", "--download-alias-file"])
+        self.assertEqual(json.loads(Path(commands[0][4]).read_bytes()), f.authority["download_alias"])
+        self.assertEqual(commands[0][5:], ["--manifest", str(f.paths["manifest"])])
+        for name in r.INPUTS:
+            self.assertEqual(f.paths[name].read_bytes(), f.raw[name])
 
     def test_stop_identity_phase_and_hash_guards_precede_any_effect(self):
         f = self.fixture

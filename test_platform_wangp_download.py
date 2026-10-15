@@ -150,6 +150,85 @@ class DownloadTests(unittest.TestCase):
                                       self.models, self.progress, downloader=sdk)
                 sdk.assert_not_called()
 
+    def test_every_published_full_controls_selection_uses_verified_locator_before_sdk_retry(self):
+        from studio_platform.runtime_catalog import PROFILE_IDS, engine_manifest, get_profile
+        profiles = [identity for identity in PROFILE_IDS
+                    if get_profile(identity).get('compiler_epoch') == 'full-controls-v2']
+        self.assertTrue(profiles)
+        for profile in profiles:
+            for mode in ('fl', 'ref'):
+                with self.subTest(profile=profile, mode=mode):
+                    manifest = engine_manifest(profile, mode)
+                    original = copy.deepcopy(manifest.document)
+                    records = fetch.selected_files(original, manifest.digest)
+                    self.assertEqual(len(records), 10)
+                    self.assertEqual(fetch._content_preserving_revision(original, manifest.digest, records),
+                                     fetch._LOCATOR_REVISION)
+                    self.assertTrue(all(row[1:3] == (fetch._LOCATOR_REPOSITORY, fetch._LOCATOR_ORIGINAL)
+                                        for row in records))
+                    sdk = Mock(side_effect=RuntimeError('public transfer unavailable'))
+                    with self.assertRaisesRegex(ValueError, '^model_download_failed$'):
+                        fetch.fetch_files(manifest.document, manifest.digest, self.models, self.progress,
+                                          downloader=sdk, workers=1, sleep=lambda _: None)
+                    self.assertEqual(sdk.call_count, 2)
+                    for call in sdk.call_args_list:
+                        self.assertEqual(call.kwargs['revision'], fetch._LOCATOR_REVISION)
+                        self.assertEqual(call.kwargs['repo_id'], records[0][1])
+                        self.assertEqual(call.kwargs['filename'], records[0][3])
+                        self.assertIs(call.kwargs['token'], False)
+                    self.assertEqual(manifest.document, original)
+
+    def test_full_controls_changed_content_or_manifest_rejects_before_sdk(self):
+        from studio_platform.runtime_catalog import PROFILE_IDS, engine_manifest, get_profile
+        profiles = [identity for identity in PROFILE_IDS
+                    if get_profile(identity).get('compiler_epoch') == 'full-controls-v2']
+        sdk = Mock()
+        for profile in profiles:
+            for mode in ('fl', 'ref'):
+                manifest = engine_manifest(profile, mode)
+                for change in ('missing', 'size', 'sha256', 'git_blob_sha1', 'repository', 'revision', 'runtime'):
+                    document = copy.deepcopy(manifest.document)
+                    transformer = document['components']['transformer']
+                    text_files = document['components']['text_encoder']['files']
+                    if change == 'missing': text_files.pop()
+                    elif change == 'size': transformer['files'][0]['size_bytes'] += 1
+                    elif change == 'sha256': transformer['files'][0]['sha256'] = '0' * 64
+                    elif change == 'git_blob_sha1': text_files[1]['git_blob_sha1'] = '0' * 40
+                    elif change == 'repository': transformer['repository'] = 'other/repository'
+                    elif change == 'revision': transformer['revision'] = 'b' * 40
+                    else: document['runtime_digest'] = '0' * 64
+                    digest = EngineManifest.from_dict(document).digest
+                    with self.subTest(profile=profile, mode=mode, change=change), self.assertRaisesRegex(
+                            ValueError, 'model_download_locator_invalid'):
+                        fetch.fetch_files(document, digest, self.models, self.progress, downloader=sdk)
+        sdk.assert_not_called()
+
+    def test_full_controls_alias_requires_catalog_and_complete_verified_file_identity(self):
+        from studio_platform import runtime_catalog as catalog
+        profile = catalog.get_profile('h3-unpruned33b-int8-sdpa-p3-144gib-single-controls-v4')
+        alias = 'h3-test-full-controls-content-alias'
+        unknown = copy.deepcopy(catalog.engine_manifest(profile['id'], 'ref').document)
+        unknown.update(profile_id=alias, deployment_profile_id=alias)
+        digest = EngineManifest.from_dict(unknown).digest
+        self.assertIsNone(fetch._content_preserving_revision(
+            unknown, digest, fetch.selected_files(unknown, digest)))
+        profile['id'] = alias
+        metadata = self.root / (alias + '.json')
+        metadata.write_text(json.dumps(profile))
+        with patch.object(catalog, 'PROFILE_IDS', (*catalog.PROFILE_IDS, alias)), \
+                patch.object(catalog, 'PROFILE_DIRECTORY', self.root):
+            manifest = catalog.engine_manifest(alias, 'ref')
+            self.assertEqual(fetch._content_preserving_revision(manifest.document, manifest.digest,
+                fetch.selected_files(manifest.document, manifest.digest)), fetch._LOCATOR_REVISION)
+            # A trusted catalog identity alone cannot redirect unreviewed bytes.
+            profile['components']['transformer_ref']['files'][0]['sha256'] = '0' * 64
+            metadata.write_text(json.dumps(profile))
+            changed = catalog.engine_manifest(alias, 'ref')
+            sdk = Mock()
+            with self.assertRaisesRegex(ValueError, 'model_download_locator_invalid'):
+                fetch.fetch_files(changed.document, changed.digest, self.models, self.progress, downloader=sdk)
+            sdk.assert_not_called()
+
     def test_v3_changed_content_or_revision_refuses_before_sdk(self):
         from studio_platform.runtime_catalog import engine_manifest
         manifest = engine_manifest("h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3", "ref")
