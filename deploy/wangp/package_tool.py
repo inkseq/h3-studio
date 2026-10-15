@@ -58,6 +58,8 @@ PRIVATE_FILES = (
     "deploy/wangp/profiles/h3-pruned-rank8-int8-pro6000-sdpa-p4-controls-v2.json",
     "deploy/wangp/profiles/h3-unpruned33b-int8-sdpa-p3-controls-v2.json",
     "deploy/wangp/profiles/h3-unpruned33b-bf16-sdpa-p3-controls-v3.json",
+    "deploy/wangp/profiles/h3-unpruned33b-int8-sdpa-p3-144gib-single-controls-v4.json",
+    "deploy/wangp/profiles/h3-unpruned33b-bf16-sdpa-p3-256gib-single-controls-v4.json",
     "deploy/wangp/targon_prepare.py",
     "deploy/wangp/probe_gpu.py",
 )
