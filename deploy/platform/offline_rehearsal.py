@@ -26,7 +26,7 @@ def commands(commit, postgres_image, nonce):
     data, socket = name+'-data', name+'-socket'
     return {
         'name': name, 'volumes': [data, socket],
-        'database': ['run', '--detach', '--name', name, '--network', 'none', '--read-only',
+        'database': ['run', '--pull', 'never', '--detach', '--name', name, '--network', 'none', '--read-only',
             '--cap-drop', 'ALL', '--cap-add', 'CHOWN', '--cap-add', 'DAC_OVERRIDE', '--cap-add', 'FOWNER',
             '--cap-add', 'SETGID', '--cap-add', 'SETUID', '--security-opt', 'no-new-privileges:true',
             '--memory', '512m', '--pids-limit', '128', '--tmpfs', '/tmp:size=67108864',
@@ -36,7 +36,7 @@ def commands(commit, postgres_image, nonce):
             postgres_image],
         'restore': ['exec', '-i', name, 'pg_restore', '--exit-on-error', '--no-owner', '--no-acl',
             '--username', 'postgres', '--dbname', 'rehearsal'],
-        'migrate': ['run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL',
+        'migrate': ['run', '--pull', 'never', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL',
             '--security-opt', 'no-new-privileges:true', '--memory', '1g', '--pids-limit', '256',
             '--tmpfs', '/data:size=67108864,uid=10001,gid=10001,mode=0700',
             '--tmpfs', '/tmp:size=67108864,mode=1777',

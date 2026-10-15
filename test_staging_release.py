@@ -176,6 +176,7 @@ class MainAndRehearsalTests(unittest.TestCase):
         for name in ('database', 'migrate'):
             args = plan[name]
             self.assertEqual(args[args.index('--network')+1], 'none')
+            self.assertEqual(args[args.index('--pull')+1], 'never')
             self.assertNotIn('--publish', args)
             self.assertNotIn('--privileged', args)
             self.assertFalse(any('/srv/sixnine' in value or '/run/sixnine-secrets' in value for value in args))
