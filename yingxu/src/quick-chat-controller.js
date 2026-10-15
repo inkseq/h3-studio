@@ -102,7 +102,12 @@ export function createQuickChatController({client=createQuickChatClient(),storag
     for(const cardId of cardIds){await loadCard(cardId,ctx);}
     const pendingTurns=new Map(state.timeline.map(event=>event.record).filter(turn=>turn?.text!==undefined&&['pending','running'].includes(turn.status)).map(turn=>[turn.id,turn]));
     for(const turnId of pendingTurns.keys()){const turn=record(await client.getTurn(id,turnId),'turn');guard(ctx);emit({timeline:state.timeline.map(event=>event.record?.id===turnId?{...event,record:turn}:event)});}
-    const submissionIds=new Set([...Object.keys(state.submissions),...events.filter(event=>(event.type.startsWith('submission.')||event.type.startsWith('item.'))).map(event=>event.record?.id).filter(Boolean)]);
+    const submissionRefs=values=>values.filter(event=>(event.type.startsWith('submission.')||event.type.startsWith('item.'))).map(event=>event.record?.id).filter(Boolean);
+    const submissionIds=new Set([...Object.keys(state.submissions),...submissionRefs(events)]);
+    // A failed dependent GET must not lose the durable submission reference
+    // after the forward cursor advances. Recover only loaded history.
+    let recoveringSubmissions=0;
+    for(const submissionId of submissionRefs(state.timeline))if(!state.submissions[submissionId]&&!submissionIds.has(submissionId)){submissionIds.add(submissionId);if(++recoveringSubmissions>=20)break;}
     for(const submissionId of submissionIds){const value=record(await client.submission(id,submissionId),'submission');guard(ctx);const cleared=clearAcceptedDraft(storage,state.account,id,value.composer_reset);emit({submissions:{...state.submissions,[value.id]:value},...(cleared?{draftReset:{account:state.account,sessionId:id,submissionId:value.id}}:{})});}
     const importIds=new Set([...Object.keys(state.imports),...events.filter(event=>event.type.startsWith('result_import.')).map(event=>event.record?.id).filter(Boolean)]);
     for(const importId of importIds){const value=record(await client.getResultImport(id,importId),'import');guard(ctx);emit({imports:{...state.imports,[value.id]:value}});}

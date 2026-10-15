@@ -98,6 +98,39 @@ test('unknown upload recovery reads original receipt and never reuploads bytes',
 test('active submission status refreshes when timeline sequence has not changed',async()=>{
   let status='running',timelineCalls=0;const client=fakeClient({timeline:async()=>({events:timelineCalls++===0?[{id:'e',seq:1,type:'submission.confirmed',record:{id:'submission',revision_id:'r'}}]:[],after_cursor:'cursor'}),revision:async()=>({id:'r',card_id:'c'}),card:async()=>({id:'c',current_revision_id:'r'}),submission:async()=>({id:'submission',revision_id:'r',items:[{id:'i',status}],status})}),controller=createQuickChatController({client,storage:memory()});await controller.setAccount('qc-review');await controller.open('s');assert.equal(controller.getState().submissions.submission.status,'running');status='succeeded';await controller.poll();assert.equal(controller.getState().submissions.submission.status,'succeeded');
 });
+test('a failed initial revision or submission GET recovers completed results from loaded timeline references without writes',async()=>{
+  for(const failedResource of ['revision','submission']){
+    let revisionReads=0,submissionReads=0,writes=0;const timelineReads=[],storage=memory(),pending={account:'supervan',sessionId:'s',method:'submit',key:'original-unknown-key',body:{confirmed:true}};
+    storage.setItem('yingxu:quick-chat:operation:supervan',JSON.stringify(pending));
+    const revision={id:'revision',card_id:'card',version:1,input_hash:'original-input-hash',controls:{duration:4,steps:20,seed:'42'},inputs:{images:[{asset_id:'image'}],first_frame:{asset_id:'image'}}},card={id:'card',current_revision_id:'revision'},submission={id:'submission',revision_id:'revision',status:'completed',items:[{id:'item',submission_id:'submission',status:'succeeded',job_id:'original-job',job:{id:'original-job',status:'succeeded',artifacts:[{id:'video',kind:'video'},{id:'audio',kind:'audio'}]}}]};
+    const events=[{id:'created',seq:1,type:'card.created',record:revision},{id:'checked',seq:2,type:'preflight.completed',record:{id:'preflight',revision_id:'revision',status:'ready'}},{id:'confirmed',seq:3,type:'submission.confirmed',record:submission},{id:'reset',seq:4,type:'submission.composer_reset',record:submission}];
+    const forbidden=async()=>{writes++;throw Error('result recovery must remain GET-only');},client=fakeClient({
+      timeline:async(_id,options)=>{timelineReads.push(options);return {events:options.after_cursor?[]:structuredClone(events),after_cursor:'forward'};},
+      revision:async()=>{if(++revisionReads===1&&failedResource==='revision')throw Error('initial revision GET timeout');return structuredClone(revision);},card:async()=>structuredClone(card),
+      submission:async(_id,id)=>{assert.equal(id,'submission');if(++submissionReads===1&&failedResource==='submission')throw Error('initial submission GET timeout');return structuredClone(submission);},
+      submit:forbidden,preflight:forbidden,retryItem:forbidden,cancelSubmission:forbidden,reviseCard:forbidden,
+    }),controller=createQuickChatController({client,storage});await controller.setAccount('supervan');
+    await assert.rejects(controller.open('s',{submissionId:'submission'}),new RegExp('initial '+failedResource+' GET timeout'));
+    assert.equal(controller.getState().forwardCursor,'forward');assert.deepEqual(controller.getState().submissions,{});
+    await controller.poll();const state=controller.getState();assert.deepEqual(state.submissions.submission,submission);assert.deepEqual(state.revisions.revision,revision);assert.deepEqual(state.cards.card,card);assert.equal(state.error,'');assert.deepEqual(state.pending,pending);
+    assert.equal(submissionReads,failedResource==='submission'?2:1);assert.equal(timelineReads[1].after_cursor,'forward');assert.equal(writes,0);controller.destroy();
+  }
+});
+test('missing submission recovery stays bounded to loaded history while known jobs keep refreshing',async()=>{
+  let submissionReads=0;const timelineReads=[],events=Array.from({length:30},(_,index)=>({id:'event-'+index,seq:index+1,type:'submission.confirmed',record:{id:'submission-'+index}}));
+  const client=fakeClient({timeline:async(_id,options)=>{timelineReads.push(options);return {events:options.after_cursor?[]:events,after_cursor:'forward'};},submission:async(_id,id)=>{if(++submissionReads===1)throw Error('initial submission GET timeout');return {id,status:'completed',items:[]};}}),controller=createQuickChatController({client,storage:memory()});await controller.setAccount('supervan');
+  await assert.rejects(controller.open('s'),/initial submission GET timeout/);await controller.poll();assert.equal(Object.keys(controller.getState().submissions).length,20);
+  await controller.poll();assert.equal(Object.keys(controller.getState().submissions).length,30);assert.ok(timelineReads.slice(1).every(options=>options.after_cursor==='forward'&&!options.before_cursor));assert.equal(controller.getState().pending,null);controller.destroy();
+});
+test('late missing submission reads respect account, session and read-generation fences',async()=>{
+  for(const boundary of ['account','session','authoring']){
+    let reads=0,finish,started;const waiting=new Promise(resolve=>{started=resolve;}),submission={id:'submission',revision_id:'revision',status:'completed',items:[{id:'item',status:'succeeded'}]};
+    const client=fakeClient({timeline:async(id,options)=>({events:id==='s'&&!options.after_cursor?[{id:'event',seq:1,type:'submission.confirmed',record:{id:'submission'}}]:[],after_cursor:'forward'}),submission:async()=>{if(++reads===1)throw Error('initial submission GET timeout');return new Promise(resolve=>{finish=resolve;started();});},patchSession:async()=>({session:{id:'s',version:2,title:'Newer authored title'}})}),controller=createQuickChatController({client,storage:memory()});await controller.setAccount('supervan');await assert.rejects(controller.open('s'),/initial submission GET timeout/);
+    const oldPoll=assert.rejects(controller.poll(),/工作账户、会话或内容已经改变/);await waiting;
+    if(boundary==='account')await controller.setAccount('other-owner');else if(boundary==='session')await controller.open('other-session');else await controller.patch({title:'Newer authored title'});
+    finish(submission);await oldPoll;assert.deepEqual(controller.getState().submissions,{});if(boundary==='authoring')assert.equal(controller.getState().session.version,2);controller.destroy();
+  }
+});
 test('pending assistant reads its original run when no new timeline event arrives',async()=>{
   let reads=0;const client=fakeClient({timeline:async()=>({events:[{id:'e',seq:1,type:'turn.created',record:{id:'t',seq:1,text:'离线验收',status:'running'}}],after_cursor:'cursor'}),getTurn:async()=>{reads++;return {id:'t',seq:1,text:'离线验收',status:'completed',reply:'隔离 HTTP 测试收据'};}}),controller=createQuickChatController({client,storage:memory()});await controller.setAccount('qc-review');await controller.open('s');assert.equal(reads,1);assert.equal(mergeTimelineTurns(controller.getState().timeline)[0].status,'completed');
 });
