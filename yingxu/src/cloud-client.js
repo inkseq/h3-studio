@@ -46,8 +46,10 @@ function retryDelay(response){
 export function createCloudClient({fetcher=(...args)=>fetch(...args),onUnauthorized=()=>{},timeoutMs=30000,uploadTimeoutMs=900000,downloadTimeoutMs=300000}={}){
   let epoch=0,account=null;const inflight=new Set(),admitRead=readAdmission();
   function reset(){epoch++;for(const controller of inflight)controller.abort();inflight.clear();}
-  async function request(path,{method='GET',body,key,blob=false,anonymous=false}={}){
+  async function request(path,{method='GET',body,key,blob=false,anonymous=false,signal}={}){
     const target=safeCloudPath(path),current=epoch,expectedAccount=account,controller=new AbortController();inflight.add(controller);
+    const cancelRead=()=>controller.abort();
+    if(signal?.aborted)controller.abort();else signal?.addEventListener('abort',cancelRead,{once:true});
     const multipart=typeof FormData!=='undefined'&&body instanceof FormData;
     const headers={...(body!==undefined&&!multipart?{'Content-Type':'application/json'}:{}),...(key?{'Idempotency-Key':key}:{}),...(expectedAccount&&!anonymous?{'X-Expected-Account':expectedAccount}:{})};
     let timedOut=false,releaseRead=null;const duration=blob?downloadTimeoutMs:multipart?uploadTimeoutMs:timeoutMs,deadline=Date.now()+duration;
@@ -80,8 +82,8 @@ export function createCloudClient({fetcher=(...args)=>fetch(...args),onUnauthori
       if(current!==epoch)throw new CloudError('登录账户已改变，请重新打开项目。');
       return result;
       }
-    }catch(error){if(error instanceof CloudError)throw error;if(timedOut)throw new CloudError(multipart?'上传等待超时。请先到“素材状态与存储用量”核对是否已收到文件，再决定恢复；未自动重新上传。':'请求等待超时，作品已保留。提交是否成功仍需核对；不会自动重投，请刷新原任务或使用原标识恢复。');if(error.name==='AbortError')throw new CloudError('操作已结束；未确认的提交请从任务列表恢复。');throw new CloudError('无法连接云工作室。作品仍保留，请检查连接后重试；不会自动重新提交生成。');}
-    finally{clearTimeout(timer);inflight.delete(controller);if(releaseRead)releaseRead();}
+    }catch(error){if(error instanceof CloudError)throw error;if(timedOut)throw new CloudError(multipart?'上传等待超时。请先到“素材状态与存储用量”核对是否已收到文件，再决定恢复；未自动重新上传。':method==='GET'?(blob?'媒体读取等待超时。请重试预览或下载原文件；不会重新提交生成。':'云端内容读取等待超时。请刷新原记录；不会重新提交生成。'):'请求等待超时，作品已保留。提交是否成功仍需核对；不会自动重投，请刷新原任务或使用原标识恢复。');if(error.name==='AbortError')throw new CloudError('操作已结束；未确认的提交请从任务列表恢复。');throw new CloudError('无法连接云工作室。作品仍保留，请检查连接后重试；不会自动重新提交生成。');}
+    finally{clearTimeout(timer);signal?.removeEventListener('abort',cancelRead);inflight.delete(controller);if(releaseRead)releaseRead();}
   }
   const id=value=>encodeURIComponent(value);
   return {request,reset,setAccount(value){const next=typeof value==='string'&&value?value:null;if(next!==account){account=next;reset();}},
@@ -114,6 +116,6 @@ export function createCloudClient({fetcher=(...args)=>fetch(...args),onUnauthori
     batches:(projectId,{limit=10,offset=0}={})=>request(`/v1/batches?client_project_id=${id(projectId)}&limit=${limit}&offset=${offset}`),
     getBatch:batchId=>request(`/v1/batches/${id(batchId)}`),cancelBatch:batchId=>request(`/v1/batches/${id(batchId)}/cancel`,{method:'POST'}),
     artifacts:jobId=>request(`/v1/jobs/${id(jobId)}/artifacts`),
-    download:path=>request(path,{blob:true}),
+    download:(path,{signal}={})=>request(path,{blob:true,signal}),
   };
 }

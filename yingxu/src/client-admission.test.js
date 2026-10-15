@@ -33,6 +33,45 @@ test('account reset aborts active and queued reads without fetching old queued p
   assert.equal(calls.length,2);
 });
 
+test('disposing active and queued previews releases their slots without cancelling an explicit download',async()=>{
+  const calls=[],pending=new Map(),api=createCloudClient({fetcher:(path,{signal,headers})=>{
+    calls.push(path);assert.equal(headers['X-Expected-Account'],'supervan');
+    return new Promise((resolve,reject)=>{pending.set(path,()=>resolve(new Response('original media')));signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError')),{once:true});});
+  }});api.setAccount('supervan');
+  const first=new AbortController(),second=new AbortController(),queued=new AbortController();
+  const old=[api.download('/v1/artifacts/old-first/content',{signal:first.signal}),api.download('/v1/artifacts/old-second/content',{signal:second.signal}),api.download('/v1/artifacts/old-queued/content',{signal:queued.signal})],settled=Promise.allSettled(old);
+  const current=api.download('/v1/artifacts/current/content');assert.equal(calls.length,2);
+  queued.abort();first.abort();await tick();assert.ok(calls.includes('/v1/artifacts/current/content'));assert.ok(!calls.includes('/v1/artifacts/old-queued/content'));
+  second.abort();pending.get('/v1/artifacts/current/content')();assert.equal(await(await current).text(),'original media');
+  assert.ok((await settled).every(result=>result.status==='rejected'));assert.equal(calls.length,3);
+});
+
+test('cancelled preview body reads release admission and their late bodies cannot cross an account reset',async()=>{
+  const bodies=[],calls=[],api=createCloudClient({fetcher:async(path,{signal})=>{
+    calls.push(path);return new Response(new ReadableStream({start(controller){bodies.push(controller);signal.addEventListener('abort',()=>controller.error(new DOMException('aborted','AbortError')),{once:true});}}));
+  }});api.setAccount('supervan');
+  const first=new AbortController(),second=new AbortController();
+  const old=[api.download('/v1/artifacts/body-first/content',{signal:first.signal}),api.download('/v1/artifacts/body-second/content',{signal:second.signal})],settled=Promise.allSettled(old);await tick();
+  const current=api.download('/v1/artifacts/current/content'),currentRejected=assert.rejects(current);assert.equal(calls.length,2);
+  first.abort();await tick();assert.equal(calls.length,3);second.abort();api.setAccount('other-owner');await currentRejected;
+  assert.ok((await settled).every(result=>result.status==='rejected'));assert.equal(calls.length,3);
+});
+
+test('an already cancelled preview never fetches and completed reads detach the caller cancellation listener',async()=>{
+  let calls=0,requestSignal;const api=createCloudClient({fetcher:async(_path,{signal})=>{calls++;requestSignal=signal;return new Response('media');}}),cancelled=new AbortController();cancelled.abort();
+  await assert.rejects(api.download('/v1/artifacts/never/content',{signal:cancelled.signal}));assert.equal(calls,0);
+  const completed=new AbortController();assert.equal(await(await api.download('/v1/artifacts/done/content',{signal:completed.signal})).text(),'media');completed.abort();assert.equal(requestSignal.aborted,false);assert.equal(calls,1);
+});
+
+test('GET and media timeouts describe reads while a submit timeout keeps its original uncertainty warning',async()=>{
+  const calls=[],api=createCloudClient({timeoutMs:5,downloadTimeoutMs:5,fetcher:(path,{signal})=>{
+    calls.push(path);return new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError')),{once:true}));
+  }});
+  await assert.rejects(api.projects(),error=>error.message.includes('云端内容读取等待超时')&&!error.message.includes('提交是否成功'));
+  await assert.rejects(api.download('/v1/artifacts/original/content'),error=>error.message.includes('媒体读取等待超时')&&!error.message.includes('提交是否成功'));
+  await assert.rejects(api.submit('original-plan','original-key'),/提交是否成功仍需核对/);assert.equal(calls.length,3);
+});
+
 test('429 GET retry keeps exact path and owner and stops after three attempts',async()=>{
   const calls=[];const api=createCloudClient({fetcher:async(path,options)=>{calls.push([path,options.headers['X-Expected-Account']]);return calls.length===1?busy():new Response('{"projects":[]}');}});
   api.setAccount('superdan');await api.projects();
