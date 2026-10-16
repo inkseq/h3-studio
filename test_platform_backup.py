@@ -67,7 +67,7 @@ class BackupTests(unittest.TestCase):
         self.assertEqual(result["state"], "backed_up")
         return destination
 
-    def remote_backup(self, *, corrupt=False, wrong_provider=False):
+    def remote_backup(self, *, corrupt=False, wrong_provider=False, missing_sha=False, wrong_sha=False, receipt=False):
         from dataclasses import replace
         from studio_platform.backup import backup_postgres_engine, _snapshot, _export_business_db
         # Synthetic R2-only records: Local is a fixture byte source, never a
@@ -79,16 +79,51 @@ class BackupTests(unittest.TestCase):
                     record[role]["provider"] = "r2"
                 db.execute("UPDATE platform_assets SET record=? WHERE id=?", (json.dumps(record), ident))
         local = self.store
+        from types import SimpleNamespace
+        config = SimpleNamespace(provider="r2", endpoint_url="https://example.invalid", region="auto",
+            bucket="backup-test", service="r2", profile="fixture")
+        if receipt:
+            from studio_platform.repository import artifacts
+            from studio_platform.artifact_writer import write_receipts, _hash
+            lease = TaskQueue(self.repo).claim("backup-test-worker", "test-pool").lease
+            info = local.write_new("superdan", str(uuid.uuid4()), io.BytesIO(b"video"), content_type="video/mp4")
+            spec = dict(object_key=info.key, size_bytes=info.size_bytes, sha256=info.sha256,
+                content_type=info.content_type, kind="video", validated=True)
+            tenant = self.job["tenant_id"]
+            ident = _hash([tenant, "superdan", self.job["id"], lease.attempt_id])
+            record = dict(id=ident, owner="superdan", collection_route="gpu-r2-v1", binding=_hash(vars(config)),
+                roles={"video": dict(key=info.key, status="verified", **{k:spec[k] for k in ("size_bytes","sha256","content_type")})})
+            if isinstance(receipt, str):
+                if receipt == "binding": record["binding"] = "0"*64
+                elif receipt == "owner": record["owner"] = "supervan"
+                elif receipt == "sha": record["roles"]["video"]["sha256"] = "0"*64
+                elif receipt == "route": record["collection_route"] = "unknown"
+                elif receipt == "tenant": tenant = "other"
+                elif receipt == "cpu": record.pop("collection_route")
+                elif receipt == "cpu_binding":
+                    record.pop("collection_route")
+                    record["binding"] = "0"*64
+                elif receipt == "local":
+                    record.pop("collection_route")
+                    record["binding"] = _hash({"provider":"local", "root":str(local.root)})
+            write_receipts.metadata.create_all(self.repo.engine)
+            with self.repo.engine.begin() as conn:
+                conn.execute(insert(artifacts).values(id=str(uuid.uuid4()), job_id=self.job["id"],
+                    attempt_id=lease.attempt_id, created_at=1, metadata=spec))
+                conn.execute(insert(write_receipts).values(id=ident, tenant=tenant, owner="superdan",
+                    job_id=self.job["id"], attempt_id=lease.attempt_id, version=1, record=json.dumps(record)))
         class ReadOnlyR2:
             def stat(self, key):
-                return replace(local.stat(key), provider="local" if wrong_provider else "r2")
+                return replace(local.stat(key), provider="local" if wrong_provider else "r2",
+                    sha256=None if missing_sha else "0"*64 if wrong_sha else local.stat(key).sha256)
             def open(self, key):
                 return io.BytesIO(b"corrupt") if corrupt else local.open(key)
+        ReadOnlyR2.config = config
         def export(engine, destination, **kwargs):
             with closing(_snapshot(self.database)) as snapshot:
                 return _export_business_db(snapshot, destination)
         with mock.patch("studio_platform.backup._export_postgres_business_db", side_effect=export):
-            backup_postgres_engine(object(), None, self.root/"remote-backup", stores={"r2": ReadOnlyR2()})
+            backup_postgres_engine(object(), None, self.root/"remote-backup", stores={"r2": ReadOnlyR2(), "local": local})
         return self.root/"remote-backup"
 
     def test_r2_only_media_manifest_and_isolated_restore_preserve_original_evidence(self):
@@ -124,6 +159,53 @@ class BackupTests(unittest.TestCase):
             specs = [json.loads(row[0]) for row in db.execute("SELECT metadata FROM platform_artifacts")]
             self.assertEqual({s["kind"] for s in specs}, {"video", "audio"})
             self.assertTrue(all(s["provider"] == "local" for s in specs))
+
+    def test_historical_gpu_receipt_without_provider_or_head_sha_restores_locally(self):
+        source = self.remote_backup(receipt=True, missing_sha=True)
+        manifest = verify_local(source)
+        self.assertEqual(sum("storage_binding" in o for o in manifest["objects"]), 1)
+        restore_local(source, self.root/"recovered")
+        with closing(sqlite3.connect(self.root/"recovered"/"platform.sqlite3")) as db:
+            spec = json.loads(db.execute("SELECT metadata FROM platform_artifacts").fetchone()[0])
+            self.assertEqual(spec["provider"], "local")
+        with closing(sqlite3.connect(source/"database.sqlite3")) as db:
+            self.assertNotIn("provider", json.loads(db.execute("SELECT metadata FROM platform_artifacts").fetchone()[0]))
+
+    def test_cpu_r2_receipt_binding_without_route_or_provider_is_preserved(self):
+        source = self.remote_backup(receipt="cpu")
+        manifest = verify_local(source)
+        self.assertEqual(sum("storage_binding" in o for o in manifest["objects"]), 1)
+        self.assertTrue(all(o["provider"] == "r2" for o in manifest["objects"]))
+
+    def test_original_local_receipt_keeps_original_manifest_format(self):
+        source = self.remote_backup(receipt="local")
+        manifest = verify_local(source)
+        artifacts = [o for o in manifest["objects"] if any(r["table"] == "artifacts" for r in o["references"])]
+        self.assertEqual(len(artifacts), 1)
+        self.assertNotIn("provider", artifacts[0])
+        self.assertNotIn("storage_binding", artifacts[0])
+
+    def test_missing_head_sha_never_accepts_wrong_body(self):
+        with self.assertRaises(BackupError):
+            self.remote_backup(missing_sha=True, corrupt=True)
+        self.assertFalse((self.root/"remote-backup"/"manifest.json").exists())
+
+    def test_present_wrong_head_sha_rejected(self):
+        with self.assertRaises(BackupError):
+            self.remote_backup(wrong_sha=True)
+        self.assertFalse((self.root/"remote-backup"/"manifest.json").exists())
+
+    def test_gpu_receipt_identity_mismatches_rejected(self):
+        # Each fresh fixture protects a distinct original provenance boundary.
+        for field in ("binding", "owner", "sha", "route", "tenant", "cpu_binding"):
+            case = type(self)("runTest")
+            case.setUp()
+            try:
+                with self.subTest(field=field), self.assertRaises(BackupError):
+                    case.remote_backup(receipt=field, missing_sha=True)
+                self.assertFalse((case.root/"remote-backup"/"manifest.json").exists())
+            finally:
+                case.doCleanups()
 
     def test_r2_changed_bytes_never_publish_completion_manifest(self):
         with self.assertRaises(BackupError):

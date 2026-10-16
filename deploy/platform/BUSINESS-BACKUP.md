@@ -132,3 +132,20 @@ logging/monitoring. There is no expiration to bound growing storage
 automatically. Use current Singapore pricing and actual usage; no numeric price
 or monthly ceiling is asserted here. [S3 pricing](https://aws.amazon.com/s3/pricing/),
 [KMS pricing](https://aws.amazon.com/kms/pricing/).
+
+### Historical R2 output provenance
+
+Historical output metadata may omit `provider`. The backup resolves GPU and CPU
+R2 outputs only through the original artifact-write receipt: tenant, owner, job,
+attempt-derived receipt ID, verified role, key, byte count, SHA-256 and MIME must
+match. CPU receipts without a route must match an explicitly configured storage
+identity hash; unknown bindings fail closed. GPU receipts additionally require
+`gpu-r2-v1`. No failed read selects another provider. Original Local manifest
+layout remains supported.
+
+Presigned GPU uploads can lack optional HEAD SHA metadata. Missing metadata is
+accepted only with matching provider/key/size/MIME and a complete body read that
+matches the original SHA-256 and length. A present mismatching HEAD SHA fails.
+The isolated recovery copy maps verified remote media to Local while retaining
+original remote receipts and budget history; it stays on execution hold and is
+not an automatically deployable replacement database.

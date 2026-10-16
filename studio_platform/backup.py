@@ -205,7 +205,20 @@ def _export_business_db(snapshot, destination):
     return counts
 
 
-def _media_references(db):
+def _store_binding(store, provider):
+    if provider == "local":
+        identity = {"provider": "local", "root": str(store.root)}
+    else:
+        config = getattr(store, "config", None)
+        identity = {k: getattr(config, k, None) for k in
+            ("provider", "endpoint_url", "region", "bucket", "service", "profile")}
+        if identity["provider"] != provider:
+            raise BackupError("backup_artifact_storage_binding_mismatch")
+    return hashlib.sha256(json.dumps(identity, sort_keys=True,
+        separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+
+
+def _media_references(db, provider_bindings=None, *, offline=False):
     found, pending = {}, 0
     def add(owner, info, reference):
         key, size, sha, mime = info.get("key", info.get("object_key")), info.get("size_bytes"), info.get("sha256"), info.get("content_type")
@@ -218,8 +231,14 @@ def _media_references(db):
         # identity is bound into new manifests and checked against the DB copy.
         if info.get("provider", "local") != "local":
             item["provider"] = info["provider"]
-        if key in found and any(found[key][k] != value for k, value in item.items()):
-            raise BackupError("backup_media_reference_conflict")
+        if "storage_binding" in info:
+            item["storage_binding"] = info["storage_binding"]
+        if key in found:
+            prior = found[key]
+            if (any(prior.get(k) != value for k, value in item.items())
+                    or prior.get("provider", "local") != item.get("provider", "local")
+                    or prior.get("storage_binding") != item.get("storage_binding")):
+                raise BackupError("backup_media_reference_conflict")
         entry = found.setdefault(key, dict(item, references=[]))
         entry["references"].append(reference)
     for ident, owner, project, status, raw in db.execute("SELECT id,owner,project_id,status,record FROM platform_assets"):
@@ -229,10 +248,47 @@ def _media_references(db):
         for role in ("original", "model"):
             if record.get(role):
                 add(owner, record[role], {"table": "assets", "id": ident, "project_id": project, "role": role})
-    for ident, owner, project, raw in db.execute("SELECT a.id,j.owner_id,j.project_id,a.metadata FROM platform_artifacts a JOIN platform_jobs j ON j.id=a.job_id"):
+    receipt_table = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='platform_artifact_write_receipts'").fetchone()
+    for ident, owner, project, tenant, job, attempt, raw in db.execute(
+            "SELECT a.id,j.owner_id,j.project_id,j.tenant_id,a.job_id,a.attempt_id,a.metadata "
+            "FROM platform_artifacts a JOIN platform_jobs j ON j.id=a.job_id"):
         spec = json.loads(raw)
         if spec.get("validated") is not True:
             raise BackupError("backup_artifact_not_validated")
+        # Historic GPU uploads omit provider in artifact metadata. Only their
+        # original immutable receipt can identify R2; configuration is no proof.
+        rows = db.execute("SELECT id,tenant,owner,record FROM platform_artifact_write_receipts "
+            "WHERE job_id=? AND attempt_id=?", (job, attempt)).fetchall() if receipt_table else []
+        if not rows and "provider" not in spec and provider_bindings and "r2" in provider_bindings.values() and not offline:
+            raise BackupError("backup_artifact_provider_requires_review")
+        remote = []
+        for receipt_id, receipt_tenant, receipt_owner, record_raw in rows:
+            record = json.loads(record_raw)
+            route = record.get("collection_route")
+            if route is None and (provider_bindings is None or offline and record.get("binding") not in provider_bindings):
+                continue  # Original Local manifests predate provider evidence.
+            if route not in (None, "gpu-r2-v1"):
+                raise BackupError("backup_artifact_provider_requires_review")
+            role = record.get("roles", {}).get(spec["kind"], {})
+            expected_id = hashlib.sha256(json.dumps([tenant, owner, job, attempt],
+                sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+            if (receipt_tenant != tenant or receipt_owner != owner or receipt_id != expected_id
+                    or record.get("id") != receipt_id or record.get("owner") != owner
+                    or role.get("status") != "verified"
+                    or role.get("key") != spec.get("object_key")
+                    or any(role.get(k) != spec.get(k) for k in ("size_bytes", "sha256", "content_type"))
+                    or not isinstance(record.get("binding"), str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", record["binding"])):
+                raise BackupError("backup_artifact_receipt_mismatch")
+            provider = "r2" if route == "gpu-r2-v1" else (provider_bindings or {}).get(record["binding"])
+            if provider not in {"local", "r2"} or spec.get("provider", provider) != provider:
+                raise BackupError("backup_artifact_storage_binding_mismatch")
+            if provider == "r2":
+                remote.append(record["binding"])
+        if remote:
+            if len(remote) != 1 or spec.get("provider", "r2") != "r2":
+                raise BackupError("backup_artifact_receipt_mismatch")
+            spec = dict(spec, provider="r2", storage_binding=remote[0])
         add(owner, spec, {"table": "artifacts", "id": ident, "project_id": project, "role": spec["kind"]})
     return found, pending
 
@@ -247,8 +303,15 @@ def _publish_media_backup(output, object_root, references, pending, counts, *, s
         if provider not in stores:
             raise BackupError("backup_source_provider_not_configured")
         store = stores[provider]
+        if "storage_binding" in item:
+            if _store_binding(store, provider) != item["storage_binding"]:
+                raise BackupError("backup_artifact_storage_binding_mismatch")
         info = store.stat(key)
-        if info.provider != provider or (info.size_bytes, info.sha256, info.content_type) != (item["size_bytes"], item["sha256"], item["content_type"]):
+        # Presigned GPU PUTs lack optional HEAD SHA metadata. Every body still
+        # must match the original DB/receipt SHA and size before publication.
+        if (info.provider != provider or info.key != key
+                or (info.size_bytes, info.content_type) != (item["size_bytes"], item["content_type"])
+                or info.sha256 is not None and info.sha256 != item["sha256"]):
             raise BackupError("backup_object_metadata_mismatch")
         filename = hashlib.sha256(key.encode("ascii")).hexdigest()+".bin"
         with store.open(key) as source, (media/filename).open("xb") as target:
@@ -283,7 +346,7 @@ def backup_local(database, object_root, destination, *, max_media_bytes=40*1024*
         raise BackupError("backup_destination_overlaps_live_storage")
     snapshot = _snapshot(database)
     try:
-        references, pending = _media_references(snapshot)
+        references, pending = _media_references(snapshot, {_store_binding(LocalObjectStore(object_root), "local"): "local"})
         total = sum(item["size_bytes"] for item in references.values())
         if len(references) > 100000 or total > max_media_bytes:
             raise BackupError("backup_media_limit_exceeded")
@@ -394,7 +457,8 @@ def backup_postgres_engine(engine, object_root, destination, *, schema="public",
     try:
         counts = _export_postgres_business_db(engine, output/"database.sqlite3", schema=schema)
         with closing(_open_sqlite_readonly(output/"database.sqlite3")) as db:
-            references, pending = _media_references(db)
+            references, pending = _media_references(db, {_store_binding(store, provider): provider
+                for provider, store in (stores or {"local": LocalObjectStore(object_root)}).items()})
         if len(references) > 100000 or sum(item["size_bytes"] for item in references.values()) > max_media_bytes:
             raise BackupError("backup_media_limit_exceeded")
         result = _publish_media_backup(output, object_root, references, pending, counts, source_database="postgresql", stores=stores)
@@ -449,7 +513,12 @@ def verify_local(directory):
             existing = _check_db(db, published=True)
             if db.execute("PRAGMA foreign_key_check").fetchone() is not None:
                 raise BackupError("backup_database_reference_integrity_failed")
-            references, pending = _media_references(db)
+            bindings = {item["storage_binding"]: item.get("provider") for item in manifest["objects"]
+                if "storage_binding" in item}
+            if any(not isinstance(k, str) or not re.fullmatch(r"[0-9a-f]{64}", k) or v != "r2"
+                    for k, v in bindings.items()):
+                raise BackupError("backup_manifest_reference_mismatch")
+            references, pending = _media_references(db, bindings or None, offline=True)
             # An older trusted backup may precede newly added optional tables.
             # Verify its original table set, then create safe empty additions
             # only inside the NEW restoration target.
@@ -573,7 +642,7 @@ def _restore_local_provider_metadata(path, manifest):
     if not remote:
         return
     def convert(info):
-        if info.get("key", info.get("object_key")) in remote and info.get("provider") == "r2":
+        if info.get("key", info.get("object_key")) in remote and info.get("provider", "r2") == "r2":
             info["provider"] = "local"
             for name in ("etag", "version_id"):
                 if name in info:
