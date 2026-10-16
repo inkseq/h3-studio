@@ -159,7 +159,7 @@ class ShardTests(unittest.TestCase):
                           "test_operator_extensions", "test_managed_worker_admission",
                           "test_dstack_operator", "test_dstack_controller", "test_dstack_runtime",
                           "test_dstack_factory", "test_dstack_budget_window", "test_postgres_dispatch", "test_dispatch_telemetry",
-                          "test_dstack_wakeups", "test_dstack_prices", "test_operator_budgets",
+                          "test_dstack_passive_review", "test_dstack_prices", "test_operator_budgets",
                          "test_job_cancellation_ledger", "test_job_events", "test_operator_jobs",
                          "test_host_policy", "test_host_scorecard", "test_dstack_host_selection", "test_operator_host_routes",
                          "test_quick_chat_history", "test_creation_history_storage", "test_creation_history_routes",
