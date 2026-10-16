@@ -1,16 +1,13 @@
+import {microsToDollars,dollarsToMicros} from './money.js';
+import AssistantConnections from './AssistantConnections.jsx';
 import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {createCloudClient} from './cloud-client.js';
 import {LanguageSwitcher,useI18n} from './i18n/I18nProvider.jsx';
 import './spending-settings.css';
 
-const dollars=value=>String(value/1_000_000);
-function micros(value){
-  if(!/^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/.test(value))throw Error('settings.invalid');
-  const [whole,fraction='']=value.split('.'),result=Number(whole)*1_000_000+Number(fraction.padEnd(6,'0'));
-  if(!Number.isSafeInteger(result)||result>9_000_000_000_000_000)throw Error('settings.invalid');
-  return result;
-}
-const money=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:6}).format(value/1_000_000);
+const dollars=microsToDollars;
+function micros(value){try{return dollarsToMicros(value);}catch{throw Error('settings.invalid');}}
+const money=value=>'$'+microsToDollars(value);
 
 export default function SpendingSettings({account}){
   const {t}=useI18n(),api=useMemo(()=>{const client=createCloudClient();client.setAccount(account);return client;},[account]);
@@ -56,13 +53,9 @@ export default function SpendingSettings({account}){
         {field('settings.daily',draft.daily,value=>setDraft(previous=>({...previous,daily:value})))}
         {field('settings.ask',draft.ask,value=>setDraft(previous=>({...previous,ask:value})))}
         <p>{t('settings.zero')}</p><p>{t('settings.day')}</p><p>{t('settings.usage',{amount:money(user.usage.projected_microusd)})}</p>
-      </section><section aria-labelledby="assistant-settings-title"><h2 id="assistant-settings-title">{t('settings.assistants')}</h2>
-        {!user.connections.length&&<p>{t('settings.noAssistants')}</p>}{user.connections.map(row=><article key={row.actor_id}><h3>{row.name} {row.revoked&&<small>{t('settings.revoked')}</small>}</h3>
-          {field('settings.cap',draft.connections[row.actor_id],value=>setDraft(previous=>({...previous,connections:{...previous.connections,[row.actor_id]:value}})))}
-        </article>)}
       </section><button disabled={busy}>{t(busy?'settings.saving':'settings.save')}</button></form>
       {admin&&adminDraft&&<form onSubmit={event=>{event.preventDefault();void save(true);}}><section aria-labelledby="admin-settings-title"><h2 id="admin-settings-title">{t('settings.admin')}</h2>
         {[['settings.testDaily','testDaily'],['settings.hourly','hourly'],['settings.fleetHourly','fleetHourly'],['settings.idle','idle'],['settings.runtime','runtime']].map(([label,key])=><React.Fragment key={key}>{field(label,adminDraft[key],value=>setAdminDraft(previous=>({...previous,[key]:value})))}</React.Fragment>)}
         <p>{t('settings.adminHelp')}</p></section><button disabled={busy}>{t(busy?'settings.saving':'settings.save')}</button></form>}
-    </>}<button disabled={busy} onClick={()=>void load()}>{t('settings.reload')}</button></main>;
+    </>}<AssistantConnections account={account} onLogin={()=>{window.location.href='/quick-chat';}}/><button disabled={busy} onClick={()=>void load()}>{t('settings.reload')}</button></main>;
 }

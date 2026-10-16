@@ -168,7 +168,7 @@
 @media(max-width:760px){.qc-sidebar{transform:translateX(-100%);width:234px;box-shadow:20px 0 100px #23392f20;transition:transform .15s}
 .qc-sidebar-open{transform:none}
 .qc-main{margin-left:0}
-.qc-composer-wrap{padding:10px;max-height:65dvh}
+.qc-composer-wrap{padding:10px;max-height:45dvh}
 .qc-header{height:60px;padding:0 13px}
 .qc-mobile-menu{display:inline-flex!important}
 .qc-connection-state{display:none}
