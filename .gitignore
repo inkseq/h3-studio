@@ -526,3 +526,19 @@ inventory.json
 !studio_platform/dispatch_telemetry.py
 !test_postgres_dispatch.py
 !test_dispatch_telemetry.py
+
+# Lightweight host alert monitor.
+!deploy/platform/alert_monitor.py
+!deploy/platform/inkseq-alert-monitor.service
+!deploy/platform/inkseq-alert-monitor.timer
+!deploy/platform/ALERTS.md
+!test_alert_monitor.py
+
+# Lightweight original-ledger alert projection and closed counters (#218).
+!studio_platform/alert_snapshot.py
+!studio_platform/alert_conditions.py
+!studio_platform/alert_http.py
+!test_alert_snapshot.py
+!test_alert_conditions.py
+!test_alert_http.py
+!test_alert_monitor_posix.py

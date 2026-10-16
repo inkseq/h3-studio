@@ -665,4 +665,6 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
     register_frontend_routes(app)
     # Last-added middleware is outermost, including the authentication guard.
     app.add_middleware(RequestAdmissionMiddleware, admission=request_admission)
+    from .alert_http import AlertCountersMiddleware
+    app.add_middleware(AlertCountersMiddleware)
     return app

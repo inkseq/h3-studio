@@ -1,0 +1,12 @@
+[Unit]
+Description=Observe Inkseq operator conditions every minute
+
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=60s
+AccuracySec=1s
+RandomizedDelaySec=3s
+Unit=inkseq-alert-monitor.service
+
+[Install]
+WantedBy=timers.target
