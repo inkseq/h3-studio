@@ -173,6 +173,11 @@ def dispatch_action(inputs: dict, ref: str) -> str:
         raise ValueError("release_actions_require_main")
     if binding(inputs) is not None and not (prepare and kind == "platform" and not approved and not frontend and not promoted):
         raise ValueError("native_retention_requires_platform_preparation")
+    transport = inputs.get("retain_native_sources_transport") or "github"
+    if transport not in {"github", "s3"}:
+        raise ValueError("native_retention_transport_invalid")
+    if transport == "s3" and (binding(inputs) is None or not prepare or kind != "platform"):
+        raise ValueError("native_retention_s3_requires_explicit_binding")
     if approved:
         raise ValueError('production_requires_staging_accepted_promotion')
     if frontend:

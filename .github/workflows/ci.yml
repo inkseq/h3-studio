@@ -35,6 +35,11 @@ on:
         description: Optional exact successful main preparation run whose unchanged native source bytes must be retained
         type: string
         default: ''
+      retain_native_sources_transport:
+        description: Explicit retained-source transport (S3 requires the reviewed checked-in binding)
+        type: choice
+        options: [github, s3]
+        default: github
       retain_native_sources_commit:
         description: Full source commit of that explicitly selected prior preparation run
         type: string
@@ -264,9 +269,61 @@ jobs:
       - name: Frontend packaging, compatibility and host boundary tests only
         run: python -m unittest test_yingxu_snapshot test_frontend_release test_frontend_deploy test_release_contract test_platform_frontend -v
 
-  containers:
+  restore-native:
     needs: changes
-    if: needs.changes.outputs.containers == 'true'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (needs.changes.outputs.action == 'stage-platform' || (needs.changes.outputs.action == 'prepare-platform' && inputs.retain_native_sources_transport == 's3'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      RETAIN_RUN: ${{ inputs.retain_native_sources_run || vars.SIXNINE_NATIVE_SOURCE_RUN }}
+      RETAIN_COMMIT: ${{ inputs.retain_native_sources_commit || vars.SIXNINE_NATIVE_SOURCE_COMMIT }}
+      RETAIN_INDEX: ${{ inputs.retain_native_sources_index_sha256 || vars.SIXNINE_NATIVE_SOURCE_INDEX_SHA256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate explicit binding and generate read-only session policy
+        id: binding
+        run: |
+          policy=$(python -m tools.restore_native_sources --binding deploy/dstack/native-retention.json \
+            --run "$RETAIN_RUN" --commit "$RETAIN_COMMIT" --index-sha256 "$RETAIN_INDEX" --policy-only)
+          echo "policy=$policy" >> "$GITHUB_OUTPUT"
+      - name: Verify original preparation and publication metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/inkseq/h3-studio/actions/runs/$RETAIN_RUN" > retained-run.json
+          gh api "repos/inkseq/h3-studio/actions/runs/$RETAIN_RUN/jobs?per_page=100" > retained-jobs.json
+      - name: Assume existing identity restricted to two original object versions
+        uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
+        with:
+          role-to-assume: ${{ vars.SIXNINE_AWS_PUBLISH_ROLE }}
+          aws-region: ap-southeast-1
+          inline-session-policy: ${{ steps.binding.outputs.policy }}
+      - run: python -m pip install --require-hashes -r requirements.dispatch.lock.txt
+      - run: python tools/check_aws_release_account.py
+      - name: Restore exact original source bytes without extraction or execution
+        run: |
+          python -m tools.restore_native_sources --binding deploy/dstack/native-retention.json \
+            --run "$RETAIN_RUN" --commit "$RETAIN_COMMIT" --index-sha256 "$RETAIN_INDEX" \
+            --run-json retained-run.json --jobs-json retained-jobs.json --destination retained-migration
+      - uses: actions/upload-artifact@v4
+        with:
+          name: retained-native-${{ github.sha }}
+          path: retained-migration/
+          if-no-files-found: error
+          retention-days: 1
+
+  containers:
+    needs: [changes, restore-native]
+    if: ${{ !cancelled() && needs.changes.outputs.containers == 'true' && (needs.restore-native.result == 'success' || needs.restore-native.result == 'skipped') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     permissions:
@@ -359,7 +416,7 @@ jobs:
             -t "sixnine-dstack:$GITHUB_SHA" .
           python -m unittest deploy.dstack.test_native_vast_safety -v
       - name: Verify explicitly selected prior native source preparation
-        if: (needs.changes.outputs.action == 'prepare-platform' && inputs.retain_native_sources_run != '') || needs.changes.outputs.action == 'stage-platform'
+        if: needs.changes.outputs.action == 'prepare-platform' && inputs.retain_native_sources_run != '' && inputs.retain_native_sources_transport != 's3'
         env:
           GH_TOKEN: ${{ github.token }}
           RETAIN_RUN: ${{ inputs.retain_native_sources_run || vars.SIXNINE_NATIVE_SOURCE_RUN }}
@@ -371,12 +428,18 @@ jobs:
           python tools/native_source_retention.py --run-json retained-run.json --artifacts-json retained-artifacts.json \
             --run "$RETAIN_RUN" --commit "$RETAIN_COMMIT" --index-sha256 "$RETAIN_INDEX"
       - name: Download only that verified prior migration artifact
-        if: (needs.changes.outputs.action == 'prepare-platform' && inputs.retain_native_sources_run != '') || needs.changes.outputs.action == 'stage-platform'
+        if: needs.changes.outputs.action == 'prepare-platform' && inputs.retain_native_sources_run != '' && inputs.retain_native_sources_transport != 's3'
         uses: actions/download-artifact@v4
         with:
           name: sixnine-migration-${{ inputs.retain_native_sources_commit || vars.SIXNINE_NATIVE_SOURCE_COMMIT }}
           run-id: ${{ inputs.retain_native_sources_run || vars.SIXNINE_NATIVE_SOURCE_RUN }}
           github-token: ${{ github.token }}
+          path: retained-migration
+      - name: Receive verified durable source transport from this run
+        if: needs.restore-native.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: retained-native-${{ github.sha }}
           path: retained-migration
       - name: Package platform candidate (publication waits for every required gate)
         if: needs.changes.outputs.action == 'prepare-platform' || (github.event_name == 'push' && github.ref == 'refs/heads/main')

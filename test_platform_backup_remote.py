@@ -354,5 +354,13 @@ class RemoteBackupTests(unittest.TestCase):
             self.assertNotIn('private.invalid',output.getvalue())
             self.assertNotIn('must-not-log',output.getvalue())
 
+    def test_scheduled_transport_rejects_static_and_container_credentials_before_api(self):
+        for method in ('env', 'shared-credentials-file', 'container-role', 'assume-role'):
+            client = lambda *a, **k: self.fail('No AWS API before host-role check')
+            with patch('boto3.Session', return_value=SimpleNamespace(client=client,
+                    get_credentials=lambda:SimpleNamespace(method=method))):
+                with self.assertRaisesRegex(remote.RemoteBackupError, '^backup_instance_role_required$'):
+                    aws_client(self.target(), instance_role_only=True)
+
 
 if __name__=='__main__':unittest.main()

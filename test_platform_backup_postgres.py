@@ -186,6 +186,32 @@ class PostgresPortableBackupTests(LedgerCase):
             value = db.execute("SELECT last_observation,last_observation IS NULL FROM platform_scaler_actions").fetchone()
             self.assertEqual(value, ("null", 0))
 
+    def test_r2_snapshot_restoration_retains_unknown_budget_and_source_identity(self):
+        from dataclasses import replace
+        from studio_platform.assets import asset_table
+        local = self.store
+        with self.repo.engine.begin() as conn:
+            raw = conn.execute(select(asset_table.c.record)).scalar_one()
+            record = json.loads(raw)
+            for role in ("original", "model"):
+                record[role]["provider"] = "r2"
+            conn.execute(update(asset_table).values(record=json.dumps(record)))
+        class ReadOnlyR2:
+            def stat(self, key): return replace(local.stat(key), provider="r2")
+            def open(self, key): return local.open(key)
+        target = self.root/"r2-backup"
+        backup_postgres_engine(self.repo.engine, None, target, schema=self.schema, stores={"r2": ReadOnlyR2()})
+        manifest = verify_local(target)
+        self.assertEqual({x.get("provider") for x in manifest["objects"]}, {"r2"})
+        restored = self.root/"r2-restored"
+        restore_local(target, restored)
+        with closing(sqlite3.connect(restored/"platform.sqlite3")) as db:
+            self.assertEqual(db.execute("SELECT reserved_microusd FROM platform_budget_accounts WHERE id='owner-budget'").fetchone()[0], 123)
+            value = json.loads(db.execute("SELECT record FROM platform_assets").fetchone()[0])
+            self.assertEqual(value["original"]["provider"], "local")
+            self.assertEqual(db.execute("SELECT status FROM platform_jobs WHERE id=?", (self.job_row["id"],)).fetchone()[0], "recovery_hold")
+        self.assertEqual(self.assets.get("superdan", self.asset["id"])["original"]["provider"], "r2")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,25 @@
+[Unit]
+Description=Inkseq private business snapshot and conditional off-device copy
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/bin/python3 -B /opt/inkseq-business-backup-v1/business_backup.py
+WorkingDirectory=/opt/inkseq-business-backup-v1
+Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8
+UnsetEnvironment=PYTHONPATH PYTHONHOME AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE AWS_DEFAULT_PROFILE AWS_ENDPOINT_URL
+UMask=0077
+TimeoutStartSec=3900
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/inkseq-business-backup /srv/sixnine/release.lock
+
+[Install]
+WantedBy=multi-user.target

@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import re
 import unittest
+from unittest.mock import patch
 
 
 TEMPLATE = json.loads((Path(__file__).parent / "deploy/platform/business-backup.json").read_text())
@@ -23,6 +24,7 @@ VALUES = {
     "BackupRole": "generated-backup-role",
     "BackupRole.Arn": "arn:aws:iam::123456789012:role/generated-backup-role",
     "SourceInstanceRoleName": "sixnine-platform-ec2",
+    "SourceInstanceRolePath": "",
     "ExpectedAccountId": "123456789012", "ExpectedRegion": "ap-southeast-1",
 }
 
@@ -225,6 +227,15 @@ class BusinessBackupTemplateTests(unittest.TestCase):
             ready = {name for name, dependencies in graph.items() if not dependencies}
             self.assertTrue(ready, "Resource dependency cycle: " + str(graph))
             graph = {name: dependencies - ready for name, dependencies in graph.items() if name not in ready}
+
+    def test_staging_role_path_does_not_expand_production_trust(self):
+        role = TEMPLATE['Resources']['BackupRole']['Properties']['AssumeRolePolicyDocument']
+        production = resolve(role)['Statement'][0]['Principal']['AWS']
+        self.assertEqual(production, 'arn:aws:iam::123456789012:role/sixnine-platform-ec2')
+        with patch.dict(VALUES, SourceInstanceRoleName='sixnine-staging-ec2', SourceInstanceRolePath='inkseq/staging/'):
+            staging = resolve(role)['Statement'][0]['Principal']['AWS']
+            self.assertEqual(staging, 'arn:aws:iam::123456789012:role/inkseq/staging/sixnine-staging-ec2')
+            self.assertNotIn(production, json.dumps(resolve(role)))
 
 
 if __name__ == "__main__":

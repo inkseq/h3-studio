@@ -13,13 +13,18 @@
       "Type": "String",
       "MinLength": 25,
       "MaxLength": 63,
-      "AllowedPattern": "sixnine-business-backup-[a-z0-9][a-z0-9-]*[a-z0-9]",
+      "AllowedPattern": "(sixnine|inkseq)-business-backup-[a-z0-9][a-z0-9-]*[a-z0-9]",
       "Description": "A new globally unique dedicated bucket name. Existing buckets are not adopted by this template."
     },
     "SourceInstanceRoleName": {
       "Type": "String",
-      "AllowedValues": ["sixnine-platform-ec2"],
+      "AllowedValues": ["sixnine-platform-ec2", "sixnine-staging-ec2"],
       "Description": "Exact existing EC2 role confirmed through GetInstanceProfile; supply explicitly. The role and its other policies are not replaced."
+    },
+    "SourceInstanceRolePath": {
+      "Type": "String",
+      "AllowedValues": ["", "inkseq/staging/"],
+      "Description": "Observed role path; staging uses inkseq/staging/. Production remains unchanged."
     },
     "ExpectedAccountId": {
       "Type": "String",
@@ -35,7 +40,11 @@
   "Rules": {
     "ReviewedTargetOnly": {"Assertions": [
       {"Assert": {"Fn::Equals": [{"Ref": "AWS::AccountId"}, {"Ref": "ExpectedAccountId"}]}, "AssertDescription": "Account must match the independently reviewed target."},
-      {"Assert": {"Fn::Equals": [{"Ref": "AWS::Region"}, {"Ref": "ExpectedRegion"}]}, "AssertDescription": "Region must match the independently reviewed target."}
+      {"Assert": {"Fn::Equals": [{"Ref": "AWS::Region"}, {"Ref": "ExpectedRegion"}]}, "AssertDescription": "Region must match the independently reviewed target."},
+      {"Assert": {"Fn::Or": [
+        {"Fn::And": [{"Fn::Equals": [{"Ref": "SourceInstanceRoleName"}, "sixnine-platform-ec2"]}, {"Fn::Equals": [{"Ref": "SourceInstanceRolePath"}, ""]}]},
+        {"Fn::And": [{"Fn::Equals": [{"Ref": "SourceInstanceRoleName"}, "sixnine-staging-ec2"]}, {"Fn::Equals": [{"Ref": "SourceInstanceRolePath"}, "inkseq/staging/"]}]}
+      ]}, "AssertDescription": "Only the exact independently observed production or staging role identity is accepted."}
     ]}
   },
   "Resources": {
@@ -56,7 +65,7 @@
           "Statement": [{
             "Sid": "OnlyReviewedHostBackupSession",
             "Effect": "Allow",
-            "Principal": {"AWS": {"Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${SourceInstanceRoleName}"}},
+            "Principal": {"AWS": {"Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${SourceInstanceRolePath}${SourceInstanceRoleName}"}},
             "Action": "sts:AssumeRole",
             "Condition": {"StringEquals": {"sts:RoleSessionName": "sixnine-backup-copy"}}
           }]

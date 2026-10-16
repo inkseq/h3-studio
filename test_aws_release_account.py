@@ -49,7 +49,8 @@ class ReleaseAccountTests(unittest.TestCase):
         source = (Path(__file__).parent/".github/workflows/ci.yml").read_text()
         self.assertNotIn("allowed-account-ids:", source)
         jobs = dict(re.findall(r"(?ms)^  ([a-z][a-z0-9-]*):\n(.*?)(?=^  [a-z][a-z0-9-]*:\n|\Z)", source))
-        expected = {"publish-aws": "tools/publish_aws_release.py",
+        expected = {"restore-native": "          python -m tools.restore_native_sources",
+            "publish-aws": "tools/publish_aws_release.py",
             "publish-frontend-aws": "tools/publish_frontend_release.py",
             "publish-staging-candidate": "tools/publish_staging_candidate.py",
             "deploy-staging-aws": "tools/deploy_aws_release.py",
