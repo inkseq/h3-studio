@@ -33,7 +33,8 @@ FIXED = (
     'deploy/wangp/profiles/h3-pruned-rank8-int8-sdpa-p4-29gib-fl-r2-v5.json',
     'deploy/wangp/profiles/h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-fl-r2-v3.json',
 )
-AGENT_FILES = ('skills/sixnine-yingxu/SKILL.md', 'skills/sixnine-yingxu/scripts/sixnine.py')
+AGENT_FILES = ('skills/sixnine-yingxu/SKILL.md', 'skills/sixnine-yingxu/scripts/sixnine.py',
+    'skills/sixnine-yingxu/reference/api.md', 'skills/sixnine-yingxu/reference/recovery.md')
 # These modules serve static files or describe Agent discovery; neither runs
 # worker code or owns database/job schemas. api.py remains deliberately included.
 WORKER_EXCLUSIONS = frozenset(('studio_platform/frontend.py', 'studio_platform/agent_discovery.py', *AGENT_FILES))
