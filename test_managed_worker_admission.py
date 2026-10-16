@@ -131,6 +131,30 @@ class ManagedAdmissionTests(OperatorCase):
         self.assertEqual(collection.job["id"], self.job["id"])
         self.assertEqual(len(self.provider.creates), 1)
 
+    def test_consumer_shutdown_withdraws_only_exact_fence_incarnation_observation(self):
+        import copy
+        from types import SimpleNamespace
+        from studio_platform.postgres_dispatch import withdraw_consumer
+        self.prepare_dstack_lifetime()
+        def read():
+            with self.repo.engine.connect() as c:
+                return dict(c.execute(select(operator_nodes)).mappings().one())
+        node=read()
+        proof=copy.deepcopy(node["payload"]["dstack"]["consumer_observation"])
+        backend=SimpleNamespace(kind="wangp-worker",slot_key=node["intent_id"])
+        # A newer consumer proof must not be withdrawn by the departing process.
+        payload=copy.deepcopy(node["payload"])
+        payload["dstack"]["consumer_observation"]["observed_at"]+=1
+        with self.repo.transaction() as c:
+            c.execute(update(operator_nodes).where(operator_nodes.c.intent_id==node["intent_id"]).values(payload=payload))
+        withdraw_consumer(self.repo,self.control,backend,self.worker["id"],proof)
+        self.assertTrue(read()["payload"]["dstack"]["consumer_observation"]["ready"])
+        fresh=copy.deepcopy(read()["payload"]["dstack"]["consumer_observation"])
+        before=self.control.get(self.worker["id"])
+        withdraw_consumer(self.repo,self.control,backend,self.worker["id"],fresh)
+        self.assertFalse(read()["payload"]["dstack"]["consumer_observation"]["ready"])
+        self.assertEqual(self.control.get(self.worker["id"]),before)
+
     def prepare_dstack_lifetime(self, *, keep_on="idle", hold_until=0):
         # New-path delivery is an explicit catalog-profile capability. Keep
         # this synthetic lifecycle fixture on the retained CPU-delivery profile.
