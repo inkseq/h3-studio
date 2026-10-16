@@ -318,3 +318,54 @@ not a promised completion time; cost/admission remain the original preflight.
 中文：份数上限和折叠数量可在设置中修改；旧候选、旧种子及已接收任务不变。
 “再生成”创建同组新版本并重新预检确认，“转入故事”只复制完整配方和素材、不启动生成。
 未知结果保留原操作和Key，显式核对后续办，不自动重试或清理资产。
+
+
+Use the existing generic helper; no additional wrapper or credential is needed.
+The following PowerShell example assumes `$origin`, `$connection`, `$session`,
+`$card`, `$item`, `$revision` and `$transfer` are **actual returned values**, and
+`$helper` is the installed `scripts/sixnine.py` path. Preserve each JSON file and
+key before writing. Replace the JSON placeholders below with returned values,
+keeping numbers as JSON integers and booleans as booleans.
+
+```powershell
+$base = "/v1/quick-chat/sessions/$session"
+python $helper --base-url $origin --connection $connection request GET "$base/cards/$card/takes?limit=20" --output takes.json
+# star.json: {"expected_version":0,"starred":true}; use the actual annotation version.
+python $helper --base-url $origin --connection $connection request PATCH "$base/takes/$item" --json-file star.json --idempotency-key take-star-001
+# again.json: {"expected_card_version":<card.version>,"source_revision_id":"<revision.id>","item_id":"<take.id>","copies":1}
+python $helper --base-url $origin --connection $connection request POST "$base/cards/$card/again" --json-file again.json --idempotency-key take-again-001 --output again-result.json
+# Read returned revision.id/input_hash; assign $revision to that new ID.
+# preflight.json: {"revision_hash":"<new input_hash>","capabilities_version":"<current version>"}
+python $helper --base-url $origin --connection $connection request POST "$base/revisions/$revision/preflights" --json-file preflight.json --idempotency-key take-preflight-001 --output preflight-result.json
+```
+
+**Stop here and inspect the original preflight, quote, readiness and any required
+spending confirmation.** Run the next separate command only with explicit user
+generation authorization and the returned ready preflight. There is no auto-chain.
+
+```powershell
+# confirm.json: {"revision_hash":"<new input_hash>","preflight_id":"<ready preflight.id>","confirmed":true}
+python $helper --base-url $origin --connection $connection request POST "$base/revisions/$revision/submissions" --json-file confirm.json --idempotency-key take-submit-001 --output submission-result.json
+```
+
+Story transfer is separate from generation. Select an existing owned project and
+scene from the original project API. Save `story.json` with
+`{"target_project_id":"<project.id>","expected_project_version":<project.version>,"parent_id":"<scene.id>}`.
+
+```powershell
+python $helper --base-url $origin --connection $connection request POST "$base/takes/$item/story" --json-file story.json --idempotency-key take-story-001 --output transfer-result.json
+# Set $transfer to the returned id. Read only while outcome is unresolved:
+python $helper --base-url $origin --connection $connection request GET "$base/story-transfers/$transfer" --output transfer-status.json
+# Explicit reconciliation only, if needed: same file, same key, same endpoint.
+python $helper --base-url $origin --connection $connection request POST "$base/takes/$item/story" --json-file story.json --idempotency-key take-story-001 --output transfer-resumed.json
+```
+
+
+A transfer receipt with `status:"blocked"`, `no_shot_committed:true` and
+`error_code:"target_version_conflict"` is a closed no-shot result. Retain that
+receipt/key and all copied assets; the user may explicitly acknowledge it and
+choose a fresh destination/version as a **new** intent. Do not automatically
+retarget. Original-key replay returns the same blocked receipt. This proof is
+never inferred from HTTP 4xx: unresolved storage journals and unknown outcomes
+remain on the original operation. 中文：只有明确“未创建镜头”的封闭回执才可重新选择；
+未知存储结果仍须核对原操作，不能自动换Key或清理资产。

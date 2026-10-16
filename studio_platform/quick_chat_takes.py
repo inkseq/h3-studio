@@ -14,6 +14,10 @@ from .content_lifecycle import owner_reference_gate, assert_project_writable, as
 INTEGER_MAX = 2147483647
 PREFERENCE_DEFAULTS = {"copies_max": 4, "takes_fold_count": 8}
 
+class TransferTargetChanged(Exception):
+    """The project transaction committed no shot; upload truth is checked separately."""
+
+
 class QuickChatTakesMixin:
     def preferences(self, principal, *, conn=None):
         if conn is None:
@@ -215,7 +219,6 @@ class QuickChatTakesMixin:
             prior=self._replay(conn,principal,'story-transfer:'+item_id,key,body)
             if prior:record=self._get(conn,principal,prior,session_id,'import')
             else:
-                if target['version']!=body['expected_project_version']:raise Conflict('document_version_conflict')
                 if not any(e['id']==body['parent_id'] and e['type']=='scene' for e in target['payload']['entities']):raise NotFound('scene_not_found')
                 revision,item=self._take(conn,principal,session_id,item_id)
                 recipe=self._take_recipe(revision['payload'],item)
@@ -226,8 +229,10 @@ class QuickChatTakesMixin:
                     'source_revision_id':revision['id'],'item_id':item_id,'recipe':recipe,'request':copy.deepcopy(body),
                     'sources':{ident:{'sha256':value['original']['sha256'],'size_bytes':value['original']['size_bytes']} for ident,value in sources.items()},
                     'asset_map':{},'shot_id':'shot-'+uuid.uuid4().hex,'error_code':None})
+                if target['version']!=body['expected_project_version']:
+                    record=self._put(conn,record,{**record['payload'],'status':'blocked','no_shot_committed':True,'error_code':'target_version_conflict'})
                 self._remember(conn,principal,'story-transfer:'+item_id,key,body,record['id'])
-        if record['payload']['status']=='completed':return self.get_transfer(principal,session_id,record['id'])
+        if record['payload']['status'] in {'completed','blocked'}:return self.get_transfer(principal,session_id,record['id'])
         from .asset_operation import asset_operation_lock
         lock_id=uuid.uuid5(uuid.NAMESPACE_URL,record['id']).hex
         with asset_operation_lock(self.assets.operation_dir,lock_id) as acquired:
@@ -237,10 +242,25 @@ class QuickChatTakesMixin:
                 # Never discard uploaded originals or silently replace an uncertain receipt.
                 with self.repo.transaction() as conn:
                     current=self._get(conn,principal,record['id'],session_id,'import',lock=True)
-                    if current['payload']['status']!='completed':
-                        self._put(conn,current,{**current['payload'],'status':'unknown',
-                            'error_code':error.code if isinstance(error,QuickChatError) else 'story_transfer_requires_reconciliation'})
+                    if current['payload']['status'] not in {'completed','blocked'}:
+                        closed=isinstance(error,TransferTargetChanged) and self._transfer_uploads_settled(conn,principal,current)
+                        self._put(conn,current,{**current['payload'],'status':'blocked' if closed else 'unknown',
+                            'no_shot_committed':closed,'error_code':'target_version_conflict' if closed else
+                            error.code if isinstance(error,QuickChatError) else 'story_transfer_requires_reconciliation'})
         return self.get_transfer(principal,session_id,record['id'])
+
+    def _transfer_uploads_settled(self, conn, principal, record):
+        from .storage_asset_journal import receipts
+        p=record['payload']
+        for asset_id in p['sources']:
+            client_id='take-'+uuid.uuid5(uuid.NAMESPACE_URL,record['id']+':'+asset_id).hex
+            raw=conn.execute(select(receipts.c.record).where(receipts.c.tenant==self.tenant,
+                receipts.c.owner==principal.owner,receipts.c.project_id==p['request']['target_project_id'],
+                receipts.c.client_key==client_id)).scalar_one_or_none()
+            # Original uploader journals before any storage write. Absent means
+            # never started; anything other than ready must retain reconciliation.
+            if raw is not None and json.loads(raw).get('asset',{}).get('status')!='ready':return False
+        return True
 
     def _finish_transfer(self, principal, session_id, record_id):
         from .generation_draft import input_entries, configure
@@ -250,9 +270,9 @@ class QuickChatTakesMixin:
         with self.repo.engine.connect() as conn:
             session=self._access(principal,session_id,'projects:write','assets:read',conn=conn)
             row=self._get(conn,principal,record_id,session_id,'import');payload=copy.deepcopy(row['payload'])
-            if payload['status']=='completed':return
+            if payload['status'] in {'completed','blocked'}:return
             target=self._story_target(conn,principal,payload['request']['target_project_id'])
-            if target['version']!=payload['request']['expected_project_version']:raise Conflict('document_version_conflict')
+            if target['version']!=payload['request']['expected_project_version']:raise TransferTargetChanged()
         project_id=payload['request']['target_project_id']
         for original_id,pin in payload['sources'].items():
             source=self._asset(principal,session,original_id)
@@ -287,9 +307,9 @@ class QuickChatTakesMixin:
         with self.repo.transaction() as conn:
             self._access(principal,session_id,'projects:write','assets:read',conn=conn,lock=True)
             current=self._get(conn,principal,record_id,session_id,'import',lock=True)
-            if current['payload']['status']=='completed':return
+            if current['payload']['status'] in {'completed','blocked'}:return
             p=current['payload'];target=self._story_target(conn,principal,project_id,lock=True)
-            if target['version']!=p['request']['expected_project_version']:raise Conflict('document_version_conflict')
+            if target['version']!=p['request']['expected_project_version']:raise TransferTargetChanged()
             recipe=copy.deepcopy(p['recipe']);sources={}
             for slot,entry,ident in input_entries(recipe['inputs']):
                 copied_id=p['asset_map'][ident];entry['media_id' if slot=='guides' else 'asset_id']=copied_id
@@ -318,6 +338,8 @@ class QuickChatTakesMixin:
             if p.get('purpose')!='take_to_story':raise NotFound('transfer_not_found')
             self._story_target(conn,principal,p['request']['target_project_id'])
         from urllib.parse import urlencode
-        return {'id':record_id,'status':p['status'],'project_id':p['request']['target_project_id'],
+        return {'id':record_id,'status':p['status'],'source_session_id':session_id,'item_id':p['item_id'],
+            'expected_project_version':p['request']['expected_project_version'],'parent_id':p['request']['parent_id'],
+            'project_id':p['request']['target_project_id'],
             'project_version':p.get('project_version'),'shot_id':p['shot_id'],'seed':p['recipe']['controls']['seed'],
-            'seed_locked':True,'error_code':p.get('error_code'),'web_url':'/?'+urlencode({'project':p['request']['target_project_id'],'entity':p['shot_id']}) if p['status']=='completed' else None}
+            'seed_locked':True,'no_shot_committed':p.get('no_shot_committed',False),'error_code':p.get('error_code'),'web_url':'/?'+urlencode({'project':p['request']['target_project_id'],'entity':p['shot_id']}) if p['status']=='completed' else None}

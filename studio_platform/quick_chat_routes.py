@@ -9,7 +9,7 @@ from .quick_chat_assistant import QuickChatAssistant, model_schema
 from .quick_chat_titles import TITLE_MODEL
 from .capabilities import capabilities
 from .upload_route import QuickChatAssetUploadRoute
-from .quick_chat_schema import CreateCardRequest, ReviseCardRequest, safe_field_errors
+from .quick_chat_schema import CreateCardRequest, ReviseCardRequest, safe_field_errors, TakePreferencesRequest, TakeStarRequest, TakeAgainRequest, TakeStoryRequest
 from .quick_chat_response_schema import AUTHORING_ERRORS, CardAuthoringResponse
 
 PREFIX = "/v1/quick-chat/sessions"
@@ -58,7 +58,7 @@ def agent_contract():
             "story": {"method":"POST","path":PREFIX+"/{session_id}/takes/{item_id}/story",
                 "body":{"target_project_id":"{owned_project_id}","expected_project_version":"{project.version}","parent_id":"{scene.id}"},
                 "status":PREFIX+"/{session_id}/story-transfers/{transfer_id}",
-                "require":"Both source and destination scopes/ownership are required before copying original bytes. This creates an editable shot with complete roles/ranges/audio/profile/controls and selected seed lock; never enqueues generation. Preserve key/body for unknown status, read original operation, and only explicitly resume that same POST. Copied assets are retained on a destination CAS conflict; never clean them automatically."},
+                "require":"Both source and destination scopes/ownership are required before copying original bytes. This creates an editable shot with complete roles/ranges/audio/profile/controls and selected seed lock; never enqueues generation. Preserve key/body for unknown status, read original operation, and only explicitly resume that same POST. A blocked receipt with no_shot_committed=true and target_version_conflict proves no shot was committed; retain it and copied assets, then only explicit user selection may create a new intent. Unknown storage remains on the original key. Never clean copied assets automatically."},
             "queue": "/v1/generations/queue-position?job_id={owned_job_id}",
             "estimates": "Queue position is advisory original-pool fairness, never another owner's identity or an ETA. estimate.machine_seconds is the saved known planned machine allowance or null; cost readiness is the original preflight truth."},
         "composer_reset": "Only durable accepted submission clears the submitted composer snapshot. Inspect composer_reset; newer selections, persistent settings, stored assets and earlier revisions remain. Rejections and unknown outcomes preserve the draft.",
@@ -155,9 +155,11 @@ def register_routes(app, *, hooks=None, assistant=None, assistant_enabled=False,
     def take_preferences(request: Request):
         return service.preferences(request.state.principal)
 
-    @app.patch("/v1/quick-chat/preferences")
-    def update_take_preferences(request: Request, body: dict, key: str = Header(..., alias="Idempotency-Key")):
-        return service.set_preferences(request.state.principal, body, key)
+    def update_take_preferences(request: Request, body: TakePreferencesRequest, key: str = Header(..., alias="Idempotency-Key")):
+        return service.set_preferences(request.state.principal, body.model_dump(exclude_unset=True), key)
+
+    app.router.add_api_route("/v1/quick-chat/preferences", update_take_preferences, methods=["PATCH"], status_code=200,
+        route_class_override=QuickChatAuthoringRoute, responses=AUTHORING_ERRORS)
 
     @app.get("/v1/generations/queue-position")
     def queue_position(request: Request, job_id: str):
@@ -167,17 +169,23 @@ def register_routes(app, *, hooks=None, assistant=None, assistant_enabled=False,
     def takes(session_id: str, card_id: str, request: Request, limit: int = 20, before_cursor: str | None = None):
         return service.group_takes(request.state.principal, session_id, card_id, limit=limit, before_cursor=before_cursor)
 
-    @app.patch(PREFIX+"/{session_id}/takes/{item_id}")
-    def star(session_id: str, item_id: str, request: Request, body: dict, key: str = Header(..., alias="Idempotency-Key")):
-        return service.star_take(request.state.principal, session_id, item_id, body, key)
+    def star(session_id: str, item_id: str, request: Request, body: TakeStarRequest, key: str = Header(..., alias="Idempotency-Key")):
+        return service.star_take(request.state.principal, session_id, item_id, body.model_dump(exclude_unset=True), key)
 
-    @app.post(PREFIX+"/{session_id}/cards/{card_id}/again", status_code=201)
-    def again(session_id: str, card_id: str, request: Request, body: dict, key: str = Header(..., alias="Idempotency-Key")):
-        return service.again(request.state.principal, session_id, card_id, body, key)
+    app.router.add_api_route(PREFIX+"/{session_id}/takes/{item_id}", star, methods=["PATCH"], status_code=200,
+        route_class_override=QuickChatAuthoringRoute, responses=AUTHORING_ERRORS)
 
-    @app.post(PREFIX+"/{session_id}/takes/{item_id}/story", status_code=201)
-    def to_story(session_id: str, item_id: str, request: Request, body: dict, key: str = Header(..., alias="Idempotency-Key")):
-        return service.transfer_take(request.state.principal, session_id, item_id, body, key)
+    def again(session_id: str, card_id: str, request: Request, body: TakeAgainRequest, key: str = Header(..., alias="Idempotency-Key")):
+        return service.again(request.state.principal, session_id, card_id, body.model_dump(exclude_unset=True), key)
+
+    app.router.add_api_route(PREFIX+"/{session_id}/cards/{card_id}/again", again, methods=["POST"], status_code=201,
+        route_class_override=QuickChatAuthoringRoute, responses=AUTHORING_ERRORS)
+
+    def to_story(session_id: str, item_id: str, request: Request, body: TakeStoryRequest, key: str = Header(..., alias="Idempotency-Key")):
+        return service.transfer_take(request.state.principal, session_id, item_id, body.model_dump(exclude_unset=True), key)
+
+    app.router.add_api_route(PREFIX+"/{session_id}/takes/{item_id}/story", to_story, methods=["POST"], status_code=201,
+        route_class_override=QuickChatAuthoringRoute, responses=AUTHORING_ERRORS)
 
     @app.get(PREFIX+"/{session_id}/story-transfers/{transfer_id}")
     def transfer_status(session_id: str, transfer_id: str, request: Request):

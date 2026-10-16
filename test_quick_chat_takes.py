@@ -106,7 +106,10 @@ class TakeTests(ledger.LedgerCase):
         self.assertEqual(self.service.get_transfer(self.principal,self.sid,uncertain['id'])['status'],'unknown')
         completed=self.service.transfer_take(self.principal,self.sid,item,self.transfer_body(),'unknown')
         self.assertEqual(completed['id'],uncertain['id']);self.assertEqual(completed['status'],'completed')
-        with self.assertRaises(Conflict):self.service.transfer_take(self.principal,self.sid,item,self.transfer_body(),'stale')
+        stale=self.service.transfer_take(self.principal,self.sid,item,self.transfer_body(),'stale')
+        self.assertEqual(stale['status'],'blocked');self.assertTrue(stale['no_shot_committed'])
+        self.assertEqual({k:stale[k] for k in ('source_session_id','item_id','project_id','expected_project_version','parent_id')},
+            {'source_session_id':self.sid,'item_id':item,'project_id':'target-story','expected_project_version':1,'parent_id':'scene'})
         with self.assertRaises(NotFound):self.service.transfer_take(Principal('other','browser'),self.sid,item,self.transfer_body(),'foreign')
 
     def test_queue_matches_original_scheduler_and_no_foreign_identity(self):
@@ -206,13 +209,17 @@ class TakeTests(ledger.LedgerCase):
         item=value['revision']['items'][0]['id']
         with patch.object(self.app.state.assets,'upload',side_effect=concurrent_edit):
             receipt=self.service.transfer_take(self.principal,self.sid,item,self.transfer_body(),'cas-transfer')
-        self.assertEqual(receipt['status'],'unknown');self.assertEqual(len(copied),1)
+        self.assertEqual(receipt['status'],'blocked');self.assertTrue(receipt['no_shot_committed']);self.assertEqual(len(copied),1)
         self.assertEqual(self.app.state.assets.get(self.principal.owner,copied[0],'target-story')['status'],'ready')
         with patch.object(self.app.state.assets,'upload',side_effect=AssertionError('must not recopy')):
             replay=self.service.transfer_take(self.principal,self.sid,item,self.transfer_body(),'cas-transfer')
         self.assertEqual(receipt,replay)
         target=self.repo.get_document(Scope(self.scope.tenant_id,self.scope.owner_id,'__projects'),'project','target-story')
         self.assertFalse(any(e['id']==receipt['shot_id'] for e in target['payload']['entities']))
+        fresh={**self.transfer_body(),'expected_project_version':target['version']}
+        selected=self.service.transfer_take(self.principal,self.sid,item,fresh,'explicit-new-selection')
+        self.assertEqual(selected['status'],'completed');self.assertNotEqual(selected['id'],receipt['id'])
+        self.assertEqual(self.service.get_transfer(self.principal,self.sid,receipt['id'])['status'],'blocked')
 
     def test_preferences_parallel_cas_and_same_transfer_key_single_shot(self):
         def preferences(index):
@@ -227,3 +234,43 @@ class TakeTests(ledger.LedgerCase):
         self.assertEqual(receipt['status'],'completed')
         target=self.repo.get_document(Scope(self.scope.tenant_id,self.scope.owner_id,'__projects'),'project','target-story')
         self.assertEqual(sum(e['type']=='shot' for e in target['payload']['entities']),1)
+
+    def test_openapi_take_dtos_and_safe_strict_write_errors(self):
+        from fastapi.testclient import TestClient
+        value=self.card();item=value['revision']['items'][0]['id']
+        with TestClient(self.app) as client:
+            client.post('/api/auth/login',json={'username':self.principal.owner}).raise_for_status()
+            schemas=client.get('/openapi.json').json()['components']['schemas']
+            self.assertEqual(schemas['TakeAgainRequest']['properties']['copies']['type'],'integer')
+            self.assertFalse(schemas['TakeAgainRequest']['additionalProperties'])
+            for path,body in [('/v1/quick-chat/preferences',{'expected_version':'private-value','copies_max':6}),
+                    ('/v1/quick-chat/sessions/'+self.sid+'/takes/'+item,{'expected_version':0,'starred':'private-value'})]:
+                result=client.patch(path,json=body,headers={'Idempotency-Key':'invalid-key'})
+                self.assertEqual(result.status_code,422);self.assertNotIn('private-value',result.text)
+                self.assertEqual(result.json()['code'],'invalid_request')
+
+    def test_target_change_does_not_close_unresolved_upload_journal(self):
+        import json
+        from sqlalchemy import update
+        from studio_platform.storage_asset_journal import receipts
+        self.story();png=io.BytesIO();Image.new('RGB',(512,512),'green').save(png,'PNG');png.seek(0)
+        uploaded=self.service.upload(self.principal,self.sid,png,'source.png','unknown-source')
+        value=self.service.save_card(self.principal,self.sid,{**DEFAULT_SETTINGS,'prompt':'Preserve unknown',
+            'inputs':{**copy.deepcopy(EMPTY_INPUTS),'first_frame':{'asset_id':uploaded['asset_id']}}},'unknown-card')
+        original_upload=self.app.state.assets.upload
+        def uncertain(*args,**kwargs):
+            result=original_upload(*args,**kwargs)
+            with self.repo.transaction() as conn:
+                row=conn.execute(select(receipts).where(receipts.c.id==result['asset_id'])).mappings().one()
+                record=json.loads(row['record']);record['asset']['status']='unknown'
+                conn.execute(update(receipts).where(receipts.c.id==result['asset_id']).values(record=json.dumps(record)))
+            scope=Scope(self.scope.tenant_id,self.scope.owner_id,'__projects')
+            target=self.repo.get_document(scope,'project','target-story')
+            self.repo.put_document(scope,'project','target-story',target['payload'],expected_version=target['version'])
+            raise RuntimeError('upload acknowledgement lost')
+        item=value['revision']['items'][0]['id']
+        with patch.object(self.app.state.assets,'upload',side_effect=uncertain):
+            receipt=self.service.transfer_take(self.principal,self.sid,item,self.transfer_body(),'unknown-upload')
+        replay=self.service.transfer_take(self.principal,self.sid,item,self.transfer_body(),'unknown-upload')
+        self.assertEqual(receipt['id'],replay['id']);self.assertEqual(replay['status'],'unknown')
+        self.assertFalse(replay['no_shot_committed'])

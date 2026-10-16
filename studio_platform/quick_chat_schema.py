@@ -229,3 +229,28 @@ def validate_card_request(body, *, revising=False):
         raise QuickChatError("invalid_request", "请求字段不符合创作契约；请按字段提示修正。", 422,
             field_errors=safe_field_errors(error.errors(include_url=False, include_context=False, include_input=False))) from None
     return body
+
+
+class TakePreferencesRequest(AuthoringObject):
+    expected_version: Annotated[StrictInt, Field(ge=0)]
+    copies_max: Annotated[StrictInt, Field(ge=1, le=2147483647)] = None
+    takes_fold_count: Annotated[StrictInt, Field(ge=1, le=2147483647)] = None
+
+
+class TakeStarRequest(AuthoringObject):
+    expected_version: Annotated[StrictInt, Field(ge=0)]
+    starred: StrictBool
+
+
+class TakeAgainRequest(AuthoringObject):
+    expected_card_version: Annotated[StrictInt, Field(ge=1)]
+    source_revision_id: AssetId
+    item_id: AssetId
+    copies: Annotated[StrictInt, Field(ge=1, le=2147483647)]
+
+
+class TakeStoryRequest(AuthoringObject):
+    target_project_id: AssetId
+    expected_project_version: Annotated[StrictInt, Field(ge=1)]
+    parent_id: AssetId
+    title: Annotated[StrictStr, Field(min_length=1, max_length=160)] = None
