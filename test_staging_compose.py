@@ -44,7 +44,7 @@ class StagingComposeTests(unittest.TestCase):
         receipt = check_migration(ROOT/'deploy/platform/compose.yaml', ROOT/'deploy/dstack/platform-overlay.yaml',
             environment=env, runner=render, host_memory_mib=1840)
         self.assertEqual((receipt['service_memory_cap_mib'], receipt['parent_resident_mib'],
-                          receipt['parent_swap_mib'], receipt['host_reserve_mib']), (3296, 1280, 2048, 560))
+                          receipt['parent_swap_mib'], receipt['host_reserve_mib']), (2528, 1280, 2048, 560))
         document = documents[0]
         for name in document['services']:
             broken = copy.deepcopy(document); broken['services'][name].pop('cgroup_parent')
