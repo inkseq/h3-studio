@@ -110,6 +110,8 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
     async def conflict(_request, error):
         code = str(error)
         guidance = {
+            "historical_recipe_unknown": {"en": "This historical version has no immutable authoring recipe. Keep the current draft; do not reconstruct it from today's profiles.", "zh": "此历史版本没有不可变配方快照，请保留当前草稿，不要从当前档案猜测旧配方。"},
+            "storyboard_defaults_changed": {"en": "Generation defaults changed after preflight. Review the draft and explicitly preflight again; accepted work is unchanged.", "zh": "生成默认设置在预检后已改变，请核对草稿并明确重新预检；已接收任务不变。"},
             "connection_paused": {"en": "This assistant is paused. Ask the owner to resume it; accepted work is preserved.", "zh": "此 AI 助手已暂停，请让所有者恢复连接；已接收任务保持不变。"},
             "connection_unavailable": {"en": "This connection is expired or revoked. Ask the owner to review access; do not retry paid work with a new key automatically.", "zh": "连接已过期或撤销，请让所有者检查授权；不要自动换新密钥重试付费操作。"},
             "connection_permission_denied": {"en": "This connection can organise drafts but cannot perform paid work. Ask the owner for a generation grant.", "zh": "此连接可整理草稿，但不能执行付费操作；如需生成，请让所有者授予生成权限。"},

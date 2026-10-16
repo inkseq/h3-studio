@@ -100,9 +100,12 @@ class GenerationAdmission:
         if body.get("deployment_profile_id"):
             recipe["deployment_profile_id"] = body["deployment_profile_id"]
         shot = next(e for e in project["entities"] if e["id"] == shot_id)
+        from .source_snapshot import source_components
+        dependencies = source_components(project, shot_id)
         context = {"shot": copy.deepcopy(shot), "scene": next((copy.deepcopy(e) for e in project["entities"] if e["id"] == shot.get("parentId")), None),
             "storyboard": copy.deepcopy(project.get("journey", {}).get("storyboard", {})),
-            "profiles": [copy.deepcopy(e) for e in project["entities"] if e["type"] in {"character", "location", "prop"}]}
+            "profiles": [copy.deepcopy(e) for e in dependencies["entities"] if e["type"] in {"character", "location", "prop"}],
+            "links": copy.deepcopy(dependencies["links"]), "global_defaults": copy.deepcopy(setting["defaults"])}
         return self.planning.create(principal, body, latest["payload"], plan_id=plan_id,
             authoring_recipe=recipe, authoring_context=context, defaults_version=defaults_version)
 

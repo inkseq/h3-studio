@@ -16,10 +16,11 @@ SHOT_FIELDS = {"version", "mode", "quality", "place", "propIds", "firstFrameId",
 
 def contract():
     """Discoverable additive fields; existing document/action APIs remain used."""
+    from .storyboard_versions import contract as versions_contract
     ident = {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,160}$"}
     ids = {"type": "array", "maxItems": 100, "uniqueItems": True, "items": ident}
     start = {"type": "number", "minimum": 0, "maximum": 360000, "default": 0}
-    return {"version": 1, "entity_id_semantics": "All profile/shot image, voice and frame IDs are existing same-project document entity IDs, not upload receipt IDs.",
+    return {"version": 1, "version_workflow": versions_contract(), "entity_id_semantics": "All profile/shot image, voice and frame IDs are existing same-project document entity IDs, not upload receipt IDs.",
         "fields": {"character.data": {"defaultLookId": ident, "mainVoiceId": ident,
             "voices": {"type": "array", "maxItems": 100, "items": {"type": "object", "additionalProperties": False,
                 "required": ["id", "assetId"], "properties": {"id": ident, "assetId": ident, "clipStart": start}}}},

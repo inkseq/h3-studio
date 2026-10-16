@@ -9,10 +9,41 @@ import secrets
 import uuid
 
 from sqlalchemy import insert, select, update
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 
 from .repository import Scope, Conflict, NotFound, documents, jobs, artifacts, plans, request_hash
 from .content_lifecycle import owner_reference_gate, assert_project_writable
 from .generation_draft import shot_entity, validate_controls_patch
+
+
+class StoryboardPreflightRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: StrictInt = Field(ge=1)
+    shot_ids: list[StrictStr] = Field(min_length=1)
+    copies: StrictInt = Field(ge=1)
+    capabilities_version: StrictStr | None = None
+
+
+class StoryboardPreferencesRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: StrictInt = Field(ge=0)
+    defaults: dict
+
+
+def contract():
+    return {"versions": "/v1/projects/{project_id}/shots/{shot_id}/versions?limit=20&offset=0",
+        "profile_usage": "/v1/projects/{project_id}/storyboard/profiles",
+        "defaults": {"account": "/v1/storyboard/preferences", "story": "storyboard.defaults action",
+            "precedence": ["global", "story", "shot"], "shot_only": ["duration", "seed"],
+            "copies_limit": "Original /v1/quick-chat/preferences copies_max; default 4, owner editable."},
+        "preflight": {"method": "POST", "path": "/v1/projects/{project_id}/storyboard/preflights",
+            "body": {"expected_version": 1, "shot_ids": ["SHOT"], "copies": 2},
+            "header": "Idempotency-Key", "read": "/v1/projects/{project_id}/storyboard/preflights/{id}",
+            "admission": "No job is submitted. Explicitly send ready original plan_ids to POST /v1/batches after whole-batch confirmation.",
+            "recovery": "Same key/body returns original seeds and plan IDs; GET observes without advancing. Pending/unknown never starts a replacement. closed_preflight=true permits explicit abandonment of this unpaid operation only."},
+        "recipes": "New server preflights retain immutable authoring_recipe and authoring_context in original plans/jobs. Old versions without evidence return recipe_status=unknown. Restoring uses exact effective inputs and separately preserves original profile provenance; no mutable-profile reconstruction.",
+        "actions": ["storyboard.bulk", "storyboard.defaults", "storyboard.restore", "storyboard.star", "storyboard.select", "storyboard.fork_profile"],
+        "limits": "Original scope/pause, editable spending, model controls, byte quotas and accounting apply. Quality labels do not override a selected model. Profile usage is project-local; global search is #238. Restorable deletion/undo is #236."}
 
 
 def validate_defaults(value):
@@ -45,7 +76,11 @@ def effective_project(project, shot_id, defaults):
     value = copy.deepcopy(project)
     shot = shot_entity(value, shot_id)
     h3 = shot["data"].setdefault("h3", {})
+    shot_defaults = {**({"recipe_id": h3["recipeId"]} if "recipeId" in h3 else {}),
+        **({"deployment_profile_id": h3["deploymentProfileId"]} if "deploymentProfileId" in h3 else {}),
+        "controls": copy.deepcopy(h3.get("controls", {}))}
     story = project.get("journey", {}).get("storyboard", {}).get("defaults", {})
+    stored = {"global": copy.deepcopy(defaults), "story": copy.deepcopy(story), "shot": shot_defaults}
     if h3.get("explicitReferences"):
         defaults, story = {}, {}
     inherited, provenance = {}, {}
@@ -70,7 +105,26 @@ def effective_project(project, shot_id, defaults):
         provenance["controls." + field] = "shot"
     h3["controls"] = copy.deepcopy(inherited.get("controls", {}))
     provenance["controls.duration"] = provenance["controls.seed"] = "shot"
-    return value, {"effective": inherited, "provenance": provenance}
+    return value, {"effective": inherited, "provenance": provenance, **stored}
+
+
+def check_admission_source(conn, repo, scope, compiled):
+    """Final fence under the existing owner write gate, before any reservation.
+
+Only new server-snapshotted plans opt in. Original accepted job replay occurs
+before this check; neither old plans nor accepted jobs are rewritten.
+"""
+    if "authoring_defaults_version" not in compiled:
+        return
+    if preferences(repo, scope.tenant_id, scope.owner_id, conn=conn)["version"] != compiled["authoring_defaults_version"]:
+        raise Conflict("storyboard_defaults_changed")
+    row = conn.execute(select(documents).where(repo._scope(documents,
+        Scope(scope.tenant_id, scope.owner_id, "__projects")), documents.c.kind == "project",
+        documents.c.document_id == scope.project_id)).mappings().first()
+    from .source_snapshot import source_snapshot, validate_source_ref
+    ref = compiled["client_ref"]
+    if not row or not validate_source_ref(row["payload"], ref) or source_snapshot(row["payload"], ref["shot_id"]) != compiled["server_source_hash"]:
+        raise Conflict("shot_version_conflict")
 
 
 def apply_action(project, action, resolved=None):
@@ -202,7 +256,8 @@ class StoryboardVersions:
         if type(limit) is not int or not 1 <= limit <= 100 or type(offset) is not int or offset < 0:
             raise ValueError("Invalid page / 分页无效")
         where = (jobs.c.tenant_id == self.tenant, jobs.c.owner_id == principal.owner, jobs.c.project_id == project_id,
-            jobs.c.request["client_ref"]["shot_id"].as_string() == shot_id, jobs.c.status == "succeeded")
+            jobs.c.request["client_ref"]["shot_id"].as_string() == shot_id, jobs.c.status == "succeeded",
+            artifacts.c.metadata["kind"].as_string().in_(("video", "image")))
         with self.repo.engine.connect() as conn:
             rows = list(conn.execute(select(artifacts.c.id, artifacts.c.job_id, artifacts.c.metadata,
                 jobs.c.request, jobs.c.created_at).join(jobs, artifacts.c.job_id == jobs.c.id).where(*where)
@@ -223,7 +278,7 @@ class StoryboardVersions:
         setting = preferences(self.repo, self.tenant, principal.owner)
         _, defaults = effective_project(project, shot_id, setting["defaults"])
         return {"project_id": project_id, "shot_id": shot_id, "project_version": record["version"],
-            "versions": values, "next_offset": offset + limit if len(rows) > limit else None, "defaults": defaults}
+            "versions": values, "ordering": "newest_first", "next_offset": offset + limit if len(rows) > limit else None, "defaults": defaults}
 
     def get_preferences(self, principal):
         if not principal.allows("__preferences", "projects:read"):
@@ -312,7 +367,7 @@ class StoryboardVersions:
             "status": "blocked" if value.get("blocked") else "completed" if complete else "pending", "items": items,
             "request_hash": value["fingerprint"], "no_generation_submitted": True,
             **({"blocked": value["blocked"], "closed_preflight": True} if value.get("blocked") else {}),
-            "ready": complete and all(item["plan"]["status"] == "ready" for item in items),
+            "ready": not value.get("blocked", False) and complete and all(item["plan"]["status"] == "ready" for item in items),
             "estimate": {"cost_microusd": sum(costs) if complete and all(type(c) is int for c in costs) else None,
                 "machine_seconds": sum(runtimes) if complete and all(type(v) in (int, float) for v in runtimes) else None,
                 "kind": "budget_reservation", "final_bill": False, "runtime_kind": "planned_machine_allowance", "eta_seconds": None}}
@@ -353,9 +408,10 @@ class StoryboardVersions:
                 setting = preferences(self.repo, self.tenant, principal.owner, conn=conn)
                 # Bound materialization using the existing configured byte quota,
                 # not a second hidden business copies limit.
-                total = len(body["shot_ids"]) * body["copies"]
-                minimum = len(json.dumps(project, ensure_ascii=False).encode("utf-8")) + 256
-                if total * minimum > self.settings.max_project_bytes:
+                minimum = sum(len(json.dumps({"shot_id": ident, "index": 0, "seed": "0",
+                    "plan_id": "0" * 36, "plan": None}, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+                    for ident in body["shot_ids"])
+                if body["copies"] * minimum > self.settings.max_project_bytes:
                     raise ValueError("Preflight exceeds configured document byte quota / 预检超出配置的文档字节限额")
                 from .generation_draft import read_draft
                 items = []
@@ -389,6 +445,8 @@ class StoryboardVersions:
                             "plan_id": str(uuid.uuid5(uuid.NAMESPACE_URL, ident + ":" + shot_id + ":" + str(index))), "plan": None})
                 value = {"id": ident, "project_id": project_id, "project_version": project_row["version"],
                     "fingerprint": request_hash(body), "settings_version": setting["version"], "items": items}
+                if len(json.dumps(value, ensure_ascii=False).encode("utf-8")) > self.settings.max_project_bytes:
+                    raise ValueError("Preflight exceeds configured document byte quota / 预检超出配置的文档字节限额")
                 self._put(conn, scope, "storyboard_preflight", ident, value)
         # Each plan is authoritative in the original plan table. A crash between
         # plan commit and projection commit recovers that exact ID, never redraws.
@@ -409,6 +467,8 @@ class StoryboardVersions:
                     # Only deterministic validation/source conflicts close an
                     # unpaid preflight. Storage/network/runtime unknowns retain
                     # their original operation for explicit reconciliation.
+                    if isinstance(error, Conflict) and str(error) not in {"storyboard_defaults_changed", "document_version_conflict", "shot_version_conflict"}:
+                        raise
                     with self.repo.transaction() as conn:
                         owner_reference_gate(conn, self.tenant, principal.owner)
                         latest = self._document(conn, scope, "storyboard_preflight", ident)
@@ -424,7 +484,12 @@ class StoryboardVersions:
                 payload = copy.deepcopy(latest["payload"])
                 target = next(v for v in payload["items"] if v["plan_id"] == item["plan_id"])
                 target.update(plan=result, machine_seconds=runtime)
+                if len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) > self.settings.max_project_bytes:
+                    payload = copy.deepcopy(latest["payload"])
+                    payload["blocked"] = "preflight_document_size_exceeded"
                 self._put(conn, scope, "storyboard_preflight", ident, payload, latest["version"] + 1, True)
+                if payload.get("blocked"):
+                    return self._public_preflight(payload)
         return self.get_preflight(principal, project_id, ident)
 
 
@@ -438,8 +503,17 @@ def register_routes(app):
         return service.get_preferences(request.state.principal)
 
     @app.patch("/v1/storyboard/preferences")
-    def set_preferences(request: Request, body: dict, idempotency_key: str = Header(...)):
-        return service.set_preferences(request.state.principal, body, idempotency_key)
+    def set_preferences(request: Request, body: StoryboardPreferencesRequest, idempotency_key: str = Header(...)):
+        value = body.model_dump(exclude_unset=True)
+        try:
+            return service.set_preferences(request.state.principal, value, idempotency_key)
+        except Conflict as error:
+            if str(error) == "document_version_conflict":
+                from fastapi.responses import JSONResponse
+                return JSONResponse({"detail": {"code": "document_version_conflict", "resource": "storyboard_preferences",
+                    "no_mutation_committed": True, "request_hash": request_hash(value),
+                    "message": "Defaults changed; reload before editing. / 默认设置已改变，请刷新后编辑。"}}, status_code=409)
+            raise
 
     @app.get("/v1/projects/{project_id}/shots/{shot_id}/versions")
     def versions(project_id: str, shot_id: str, request: Request, limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)):
@@ -450,7 +524,8 @@ def register_routes(app):
         return service.profiles(request.state.principal, project_id)
 
     @app.post("/v1/projects/{project_id}/storyboard/preflights")
-    def preflight(project_id: str, request: Request, body: dict, idempotency_key: str = Header(...)):
+    def preflight(project_id: str, request: Request, body: StoryboardPreflightRequest, idempotency_key: str = Header(...)):
+        body = body.model_dump(exclude_unset=True)
         try:
             return service.preflight(request.state.principal, project_id, body, idempotency_key)
         except Conflict as error:

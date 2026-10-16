@@ -268,6 +268,9 @@ class Guided:
                         {"op": "asset.attach", "asset_id": ident}))
                 elif action.get("op") in {"storyboard.restore", "storyboard.star"}:
                     resolved[index] = self.app.state.storyboard_versions.resolve_action(principal, project_id, action)
+                elif action.get("op") == "storyboard.select":
+                    self.app.state.storyboard_versions.artifact_recipe(principal, project_id, action["shot_id"], action["artifact_id"])
+                    resolved[index] = self.resolve(principal, project_id, {**action, "op": "artifact.adopt", "select": True})
         try:
             with self.repo.transaction() as conn:
                 owner_reference_gate(conn, self.settings.tenant_id, principal.owner)
@@ -370,7 +373,9 @@ class Guided:
     def apply(self, project, action, resolved=None):
         validate_action_fields(action)
         op = action.get("op")
-        if op.startswith("storyboard."):
+        if op == "storyboard.select":
+            self.apply(project, {**action, "op": "artifact.adopt", "select": True}, resolved)
+        elif op.startswith("storyboard."):
             from .storyboard_versions import apply_action
             apply_action(project, action, resolved)
         elif op == "entity.create":
@@ -659,8 +664,9 @@ def register_routes(app):
         try:
             return service.mutate(p, project_id, body, idempotency_key)
         except Conflict as error:
-            if str(error) == "document_version_conflict" and body.get("actions") and all(
-                    isinstance(a, dict) and str(a.get("op", "")).startswith("storyboard.") for a in body["actions"]):
+            if str(error) == "document_version_conflict" and body.get("actions") and any(
+                    isinstance(a, dict) and str(a.get("op", "")).startswith("storyboard.") for a in body["actions"]) and all(
+                    isinstance(a, dict) and (str(a.get("op", "")).startswith("storyboard.") or a.get("op") == "shot.configure_generation") for a in body["actions"]):
                 from fastapi.responses import JSONResponse
                 return JSONResponse({"detail": {"code": "document_version_conflict", "project_id": project_id,
                     "no_mutation_committed": True, "request_hash": request_hash(body),

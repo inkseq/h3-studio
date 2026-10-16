@@ -8,6 +8,7 @@ ACTION_FIELDS = {
     "storyboard.defaults": {"value"},
     "storyboard.restore": {"shot_id", "artifact_id"},
     "storyboard.star": {"shot_id", "artifact_id", "starred"},
+    "storyboard.select": {"shot_id", "artifact_id"},
     "storyboard.fork_profile": {"profile_id", "shot_ids", "new_profile_id", "title"},
     "entity.create": {"entity"}, "entity.update": {"entity_id", "patch"},
     "entity.delete": {"entity_id", "cascade"}, "link.create": {"link"}, "link.delete": {"link_id"},
@@ -24,6 +25,7 @@ ACTION_REQUIRED = {
     "storyboard.defaults": {"value"},
     "storyboard.restore": {"shot_id", "artifact_id"},
     "storyboard.star": {"shot_id", "artifact_id", "starred"},
+    "storyboard.select": {"shot_id", "artifact_id"},
     "storyboard.fork_profile": {"profile_id", "shot_ids", "new_profile_id"},
     "entity.create": {"entity"}, "entity.update": {"entity_id", "patch"},
     "entity.delete": {"entity_id"}, "link.create": {"link"}, "link.delete": {"link_id"},
@@ -103,6 +105,7 @@ def operation_schemas():
                 "properties": {k: v for k, v in editable_controls.items() if k not in {"duration", "seed"}}}}}},
         "storyboard.restore": {"shot_id": ID_SCHEMA, "artifact_id": ID_SCHEMA},
         "storyboard.star": {"shot_id": ID_SCHEMA, "artifact_id": ID_SCHEMA, "starred": {"type": "boolean"}},
+        "storyboard.select": {"shot_id": ID_SCHEMA, "artifact_id": ID_SCHEMA},
         "storyboard.fork_profile": {"profile_id": ID_SCHEMA, "new_profile_id": ID_SCHEMA, "title": TITLE,
             "shot_ids": {"type": "array", "minItems": 1, "uniqueItems": True, "items": ID_SCHEMA}},
         "entity.create": {"entity": {"type": "object", "additionalProperties": False, "required": ["type"], "properties": ENTITY_PROPERTIES}},
@@ -148,6 +151,7 @@ def operation_schemas():
         "storyboard.defaults": ["Replace story defaults; omitted shot overrides keep inheriting. Duration and seed remain per shot."],
         "storyboard.restore": ["Only an original server-snapshotted recipe is restorable. Unknown history is refused. Exact effective inputs replace implicit current profile compilation; source assets, context and accepted jobs remain retained."],
         "storyboard.star": ["Owner project annotation only; never changes the immutable generation recipe."],
+        "storyboard.select": ["Uses original artifact.adopt(select=true) with succeeded same-owner/project receipt checks. Does not generate or replace any accepted job."],
         "storyboard.fork_profile": ["Copies an existing project-local character/location/prop and rewires selected shots in one CAS. Other stories, original profile and unselected shots are unchanged. Cross-story usage is not claimed."],
         "entity.create": ["chapter has no parent; scene requires an existing chapter parent; shot requires an existing scene parent. Other entities may be project-wide or children of chapter/scene/shot.", "Creation/ready status only edits the document; no model runs."],
         "entity.update": ["id/type/version cannot be patched. Final hierarchy and media bindings must validate."],
@@ -172,7 +176,7 @@ def operation_schemas():
     }
     return {op: {"type": "object", "additionalProperties": False,
         "required": ["op", *sorted(ACTION_REQUIRED[op])], "properties": {"op": {"const": op}, **deepcopy(props[op])},
-        "required_scopes": ["projects:read", "projects:write", *(["assets:read"] if op in {"asset.attach", "shot.configure_generation"} else ["jobs:read"] if op == "artifact.adopt" else [])],
+        "required_scopes": ["projects:read", "projects:write", *(["assets:read", "jobs:read"] if op == "storyboard.restore" else ["assets:read"] if op in {"asset.attach", "shot.configure_generation"} else ["jobs:read"] if op in {"artifact.adopt", "storyboard.select", "storyboard.star"} else [])],
         "constraints": rules[op]} for op in ACTION_FIELDS}
 
 

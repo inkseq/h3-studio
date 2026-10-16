@@ -2,11 +2,13 @@
 import copy
 import unittest
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 from sqlalchemy import select, func, insert, update
 
 import test_platform_generation_draft as fixtures
-from studio_platform.repository import jobs, plans, artifacts, attempts
+from studio_platform.repository import jobs, plans, artifacts, attempts, budget_reservations, Scope, Conflict
+from studio_platform.auth import Principal
 from studio_platform.source_snapshot import source_snapshot
 
 
@@ -18,6 +20,43 @@ class StoryboardVersionTests(unittest.TestCase):
     edit = fixtures.GenerationDraftTests.edit
     source = fixtures.GenerationDraftTests.source
     configure = fixtures.GenerationDraftTests.configure
+
+    def test_shared_copies_stale_cas_has_exact_no_write_proof_and_original_replay(self):
+        from studio_platform.repository import request_hash
+        self.login()
+        first = {"expected_version": 0, "copies_max": 6}
+        accepted = self.client.patch('/v1/quick-chat/preferences', headers={'Idempotency-Key':'copies-first'}, json=first)
+        self.assertEqual(accepted.status_code, 200, accepted.text)
+        stale = {"expected_version": 0, "copies_max": 2}
+        rejected = self.client.patch('/v1/quick-chat/preferences', headers={'Idempotency-Key':'copies-stale'}, json=stale)
+        self.assertEqual(rejected.status_code, 409, rejected.text)
+        self.assertEqual(rejected.json()['resource'], 'quick_chat_preferences')
+        self.assertTrue(rejected.json()['no_mutation_committed'])
+        self.assertEqual(rejected.json()['request_hash'], request_hash(stale))
+        self.assertEqual(self.client.get('/v1/quick-chat/preferences').json()['copies_max'], 6)
+        replay = self.client.patch('/v1/quick-chat/preferences', headers={'Idempotency-Key':'copies-first'}, json=first)
+        self.assertEqual(replay.json(), accepted.json())
+        conflict = self.client.patch('/v1/quick-chat/preferences', headers={'Idempotency-Key':'copies-first'}, json=stale)
+        self.assertNotIn('no_mutation_committed', conflict.json())
+
+    def test_select_original_receipt_is_cas_idempotent_and_never_generates(self):
+        self.prepare()
+        plan_id = self.preflight(copies=1).json()['items'][0]['plan_id']
+        job_id, artifact = self.completed(plan_id)
+        body = {'expected_version':self.current()['version'], 'actions':[
+            {'op':'storyboard.select','shot_id':'shot-one','artifact_id':artifact}]}
+        headers = {'Idempotency-Key':'select-original-result'}
+        selected = self.client.post('/v1/projects/story-one/actions', headers=headers, json=body)
+        self.assertEqual(selected.status_code, 200, selected.text)
+        shot = next(e for e in selected.json()['project']['entities'] if e['id']=='shot-one')
+        self.assertEqual(shot['data']['selectedAssetId'], 'result-'+artifact)
+        self.assertEqual(self.client.post('/v1/projects/story-one/actions', headers=headers, json=body).json(), selected.json())
+        stale = self.client.post('/v1/projects/story-one/actions', headers={'Idempotency-Key':'select-stale'}, json=body)
+        self.assertEqual(stale.status_code, 409, stale.text)
+        self.assertTrue(stale.json()['detail']['no_mutation_committed'])
+        with self.app.state.repository.engine.connect() as conn:
+            self.assertEqual(conn.execute(select(func.count()).select_from(jobs)).scalar_one(), 1)
+            self.assertEqual(conn.execute(select(func.count()).select_from(budget_reservations)).scalar_one(), 0)
 
     def current(self):
         return self.client.get('/v1/projects/story-one').json()
@@ -99,6 +138,29 @@ class StoryboardVersionTests(unittest.TestCase):
         response = self.edit([{'op':'storyboard.restore','shot_id':'shot-one','artifact_id':artifact}], version=before['version'])
         self.assertEqual(response.status_code, 409)
         self.assertEqual(self.current(), before)
+
+    def test_restore_retains_original_ranges_roles_video_sound_and_guide_settings(self):
+        self.prepare()
+        for ident, kind in (('audio','audio'),('clip','video'),('audio-cut','audio'),('clip-cut','video')):
+            self.source(ident,kind)
+        self.configure(recipe_id='h3-base-ref2va-v1',
+            inputs={'first_frame':None,'images':[{'asset_id':'frame','purpose':'identity'}],
+                'videos':[{'asset_id':'clip','purpose':'motion','source_range':{'start':1,'end':4},'include_audio':False}],
+                'audios':[{'asset_id':'audio','purpose':'audio','source_range':{'start':2,'end':5}}]}).raise_for_status()
+        with patch.object(self.app.state.assets,'derive',side_effect=lambda owner,ident,start,end:{'status':'ready','asset_id':ident+'-cut'}):
+            first = self.preflight(copies=1).json()
+        self.assertEqual(first['status'],'completed',first)
+        _, artifact = self.completed(first['items'][0]['plan_id'])
+        recipe = self.client.get('/v1/projects/story-one/shots/shot-one/versions').json()['versions'][0]['recipe']
+        self.assertEqual(recipe['inputs']['videos'][0]['source_range'],{'start':1,'end':4})
+        self.assertFalse(recipe['inputs']['videos'][0]['include_audio'])
+        self.configure(inputs={'images':[],'videos':[],'audios':[]},controls={'seed':'999'}).raise_for_status()
+        self.edit([{'op':'storyboard.restore','shot_id':'shot-one','artifact_id':artifact}],
+            version=self.current()['version']).raise_for_status()
+        with patch.object(self.app.state.assets,'derive',side_effect=lambda owner,ident,start,end:{'status':'ready','asset_id':ident+'-cut'}):
+            restored = self.preflight('restored-ranges',copies=1).json()
+        self.assertEqual(restored['status'],'completed',restored)
+        self.assertEqual(restored['items'][0]['plan']['effective_request'],first['items'][0]['plan']['effective_request'])
 
     def test_profile_fork_rewires_only_selected_shot_with_one_project_cas(self):
         self.prepare()
@@ -212,6 +274,87 @@ class StoryboardVersionTests(unittest.TestCase):
         self.assertEqual(self.client.get('/v1/projects/story-one/storyboard/preflights/' + value['id']).status_code, 404)
         self.assertEqual(self.client.get('/v1/projects/story-one/shots/shot-one/versions').status_code, 404)
         self.assertEqual(self.client.get('/v1/storyboard/preferences').json()['version'], 0)
+
+    def test_same_key_and_shot_ids_in_distinct_projects_never_share_plan_identity(self):
+        self.prepare()
+        first = self.preflight(copies=1).json()
+        self.setup_project('story-two')
+        self.edit([{'op':'shot.configure_generation','shot_id':'shot-one','prompt':'Other project'}],
+            ident='story-two', version=1).raise_for_status()
+        second = self.client.post('/v1/projects/story-two/storyboard/preflights', headers={'Idempotency-Key':'preflight-one'},
+            json={'expected_version':2,'shot_ids':['shot-one'],'copies':1})
+        second.raise_for_status()
+        value = second.json()
+        self.assertEqual(value['status'], 'completed', value)
+        self.assertNotEqual(first['id'], value['id'])
+        self.assertNotEqual(first['items'][0]['plan_id'], value['items'][0]['plan_id'])
+        self.assertEqual(self.client.get('/v1/projects/story-two/storyboard/preflights/' + first['id']).status_code, 404)
+        _, scoped = self.key(all_projects=False, project_ids=['story-one'], scopes=['projects:read','projects:write','jobs:read','jobs:write'])
+        self.assertEqual(self.client.get('/v1/projects/story-two/storyboard/preflights/' + value['id'], headers=scoped).status_code, 404)
+
+    def test_concurrent_same_preflight_recovers_one_set_of_plans(self):
+        self.prepare()
+        service = self.app.state.storyboard_versions
+        p = Principal('superdan', 'browser:superdan')
+        body = {'expected_version':self.current()['version'],'shot_ids':['shot-one'],'copies':2}
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            results = list(executor.map(lambda _: service.preflight(p,'story-one',body,'concurrent'),range(4)))
+        self.assertTrue(all(value == results[0] for value in results))
+        with self.app.state.repository.engine.connect() as conn:
+            self.assertEqual(conn.scalar(select(func.count()).select_from(plans)), 2)
+            self.assertEqual(conn.scalar(select(func.count()).select_from(jobs)), 0)
+
+    def test_last_transaction_fence_blocks_defaults_edit_between_outer_check_and_job_write(self):
+        self.prepare()
+        plan_id = self.preflight(copies=1).json()['items'][0]['plan_id']
+        repo = self.app.state.repository
+        original = repo.create_job
+        def interleaved(*args, **kwargs):
+            self.app.state.storyboard_versions.set_preferences(Principal('superdan','browser:superdan'),
+                {'expected_version':0,'defaults':{'controls':{'steps':19}}},'between-check-and-write')
+            return original(*args, **kwargs)
+        with patch.object(repo,'create_job',side_effect=interleaved):
+            response = self.client.post('/v1/jobs',headers={'Idempotency-Key':'stale-create'},json={'plan_id':plan_id})
+        self.assertEqual(response.status_code,409,response.text)
+        self.assertIn('storyboard_defaults_changed',response.text)
+        with repo.engine.connect() as conn:
+            self.assertEqual(conn.scalar(select(func.count()).select_from(jobs)),0)
+            self.assertEqual(conn.scalar(select(func.count()).select_from(budget_reservations)),0)
+
+    def test_enqueue_final_fence_and_original_accepted_replay(self):
+        self.prepare()
+        plan_id = self.preflight(copies=1).json()['items'][0]['plan_id']
+        repo = self.app.state.repository
+        scope = Scope(self.settings.tenant_id,'superdan','story-one','browser:superdan')
+        # An inert job is not acceptance; it must pass the final fence when queued.
+        inert = repo.create_job(scope,plan_id,'inert',initial_status='planned')
+        accepted = self.client.post('/v1/jobs',headers={'Idempotency-Key':'accepted'},json={'plan_id':plan_id})
+        accepted.raise_for_status()
+        self.app.state.storyboard_versions.set_preferences(Principal('superdan','browser:superdan'),
+            {'expected_version':0,'defaults':{'controls':{'steps':19}}},'change-after-create')
+        with self.assertRaisesRegex(Conflict,'storyboard_defaults_changed'):
+            repo.enqueue(scope,inert['id'])
+        replay = self.client.post('/v1/jobs',headers={'Idempotency-Key':'accepted'},json={'plan_id':plan_id})
+        self.assertEqual(replay.status_code,202,replay.text)
+        self.assertEqual(replay.json()['id'],accepted.json()['id'])
+        with repo.engine.connect() as conn:
+            self.assertEqual(conn.scalar(select(jobs.c.status).where(jobs.c.id==inert['id'])),'planned')
+            self.assertEqual(conn.scalar(select(func.count()).select_from(budget_reservations)),0)
+
+    def test_legacy_string_profile_binding_and_inherited_unselected_are_preserved(self):
+        self.prepare()
+        self.edit([{'op':'entity.create','entity':{'id':'legacy-hero','type':'character','data':{'looks':[]}}},
+            {'op':'entity.update','entity_id':'scene-one','patch':{'data':{'cast':['legacy-hero']}}},
+            {'op':'entity.create','entity':{'id':'other-shot','type':'shot','parentId':'scene-one','data':{'seconds':5}}}],
+            version=self.current()['version']).raise_for_status()
+        before = self.current()
+        result = self.edit([{'op':'storyboard.fork_profile','profile_id':'legacy-hero',
+            'new_profile_id':'forked','shot_ids':['shot-one']}],version=before['version'])
+        result.raise_for_status()
+        data = {e['id']:e for e in result.json()['project']['entities']}
+        self.assertEqual(data['shot-one']['data']['cast'],['forked'])
+        self.assertNotIn('cast',data['other-shot']['data'])
+        self.assertEqual(data['scene-one']['data']['cast'],['legacy-hero'])
 
 
 if __name__ == '__main__':

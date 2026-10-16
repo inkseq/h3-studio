@@ -47,7 +47,7 @@ Example response projection: `{"card":{"id":"CARD"},"revision":{"id":"NEW_REVISI
 1. Read the owned project/version and guided schema. Preserve unrelated content; use project actions instead of replacing the document.
 2. Create/edit chapters, scenes, shots, characters, places and props. Characters support multiple `looks`; shot cast can select `{characterId,lookId}`. Use ready owned assets and preserve user names.
 3. Configure saved shot drafts, then inspect effective inputs/defaults before planning. Preserve omitted fields; never trim references or change profiles to bypass blockers.
-4. For authorized multi-shot work, preflight explicit shot plans, inspect aggregate cost, then use the existing explicit-plan batch API. Do not invent scene-generation endpoints or future #235 UI/defaults behavior.
+4. For authorized multi-shot work, POST the story's `/storyboard/preflights` with `{expected_version,shot_ids,copies}` and one saved key. Inspect aggregate cost and retained per-copy plans before using the explicit-plan batch API. Copies share the owner's editable limit; only the first uses a fixed seed.
 5. Inspect results; adopt with `select:false` to retain the current choice. Use `shot.select` only when choosing that version is intended. Return original receipts and story/shot links.
 
 ```http
@@ -58,6 +58,8 @@ Idempotency-Key: saved-scene-batch-key
 ```
 
 Example response projection: `{"batch_id":"BATCH","status":"active"}`; inspect its actual per-item list. HTTP 202 means admission, not inference success. Observe the original batch/per-item jobs; partial admission retains its original identity.
+
+Read a shot's `/versions` for immutable recipes; old missing recipes stay unknown. `storyboard.restore` restores known effective settings without generating. `storyboard.star`, atomic bulk draft/final/move, account→story→shot defaults and project-local profile forks use the [story contract](reference/api.md#storyboard-versions-and-bulk-work). Duration/seed stay per shot; no automatic deletion or global usage search.
 
 ## Upload and organise references
 

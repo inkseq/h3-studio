@@ -998,6 +998,8 @@ class Repository:
                     if existing["request_hash"] != digest:
                         raise Conflict("idempotency_conflict")
                     return {**dict(existing), "created": False}
+                from .storyboard_versions import check_admission_source
+                check_admission_source(connection, self, scope, plan["request"])
                 if plan["expires_at"] <= self.clock():
                     raise Conflict("plan_expired")
                 execution = plan["execution_plan"]
@@ -1047,6 +1049,8 @@ class Repository:
                 raise InvalidTransition("job_not_admissible")
             plan = connection.execute(select(plans).where(plans.c.id == job["plan_id"])).mappings().one()
             self._content_write_guard(connection, scope, plan["request"])
+            from .storyboard_versions import check_admission_source
+            check_admission_source(connection, self, scope, plan["request"])
             if plan["expires_at"] <= self.clock():
                 raise Conflict("plan_expired")
             execution = plan["execution_plan"]
