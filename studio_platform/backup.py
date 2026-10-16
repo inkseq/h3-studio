@@ -390,7 +390,12 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
                     if name not in inventory:
                         counts[name] = 0
                         continue
-                    if columns.get(name) != [column.name for column in table.columns]:
+                    actual_columns = columns.get(name, [])
+                    expected_columns = [column.name for column in table.columns]
+                    # Additive historical migrations can change physical order.
+                    # Both queries below explicitly use canonical column names.
+                    if (len(actual_columns) != len(expected_columns)
+                            or set(actual_columns) != set(expected_columns)):
                         raise BackupError("backup_database_version_mismatch")
                     relation = '"'+schema+'"."'+name+'"'
                     # Bound a row before fetching it into client memory. The

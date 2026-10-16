@@ -13,13 +13,13 @@ import sqlite3
 import unittest
 from unittest.mock import patch
 
-from sqlalchemy import event, insert, select, update, null, JSON
+from sqlalchemy import event, insert, select, update, null, JSON, text
 
 from studio_platform.assets import AssetService, AssetNotFound
 from studio_platform.auth import Auth, accounts, sessions, clients
 from studio_platform.backup import backup_postgres_engine, backup_postgres_local, verify_local, restore_local, BackupError
 from studio_platform.queue import TaskQueue
-from studio_platform.repository import Repository, Scope, capacity_approvals, capacity_waiters, capacity_cycles, budget_accounts, scaler_actions
+from studio_platform.repository import Repository, Scope, capacity_approvals, capacity_waiters, capacity_cycles, budget_accounts, scaler_actions, jobs
 from studio_platform.storage import LocalObjectStore
 from studio_platform.project_activity import activity, metadata as activity_metadata, append_activity
 from studio_platform.auth import Principal
@@ -73,6 +73,48 @@ class PostgresPortableBackupTests(LedgerCase):
 
     def tearDown(self):
         pass  # Registered cleanup above runs exactly once even after setUp fails.
+
+    def test_historical_column_order_preserves_named_json_and_sql_nulls(self):
+        cancellation = {"reason": "synthetic", "nested": [1, {"retain": True}]}
+        # Reproduce production's additive migration: cancellation physically
+        # follows result, while trusted metadata puts cancellation first.
+        relation = '"'+self.schema+'"."platform_jobs"'
+        with self.repo.engine.begin() as conn:
+            conn.exec_driver_sql('ALTER TABLE '+relation+' DROP COLUMN cancellation')
+            conn.exec_driver_sql('ALTER TABLE '+relation+' ADD COLUMN cancellation JSON')
+            conn.execute(update(jobs).values(cancellation=cancellation, result=JSON.NULL))
+            actual = list(conn.execute(text("SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema=:schema AND table_name='platform_jobs' ORDER BY ordinal_position"),
+                {"schema": self.schema}).scalars())
+            expected = [column.name for column in jobs.columns]
+            self.assertNotEqual(actual, expected)
+            self.assertEqual(set(actual), set(expected))
+        target = self.root/"reordered-columns"
+        backup_postgres_engine(self.repo.engine, self.store.root, target, schema=self.schema)
+        verify_local(target)
+        with closing(sqlite3.connect(target/"database.sqlite3")) as db:
+            saved = db.execute("SELECT cancellation,result,result IS NULL FROM platform_jobs WHERE id=?",
+                (self.job_row["id"],)).fetchone()
+            self.assertEqual(json.loads(saved[0]), cancellation)
+            self.assertEqual(saved[1:], ("null", 0))
+            self.assertEqual(db.execute("SELECT last_observation,last_observation IS NULL "
+                "FROM platform_scaler_actions").fetchone(), (None, 1))
+
+    def test_missing_column_still_refuses_before_manifest(self):
+        with self.repo.engine.begin() as conn:
+            conn.exec_driver_sql('ALTER TABLE "'+self.schema+'"."platform_jobs" DROP COLUMN cancellation')
+        target = self.root/"missing-column"
+        with self.assertRaisesRegex(BackupError, '^backup_database_version_mismatch$'):
+            backup_postgres_engine(self.repo.engine, self.store.root, target, schema=self.schema)
+        self.assertFalse((target/"manifest.json").exists())
+
+    def test_extra_column_still_refuses_before_manifest(self):
+        with self.repo.engine.begin() as conn:
+            conn.exec_driver_sql('ALTER TABLE "'+self.schema+'"."platform_jobs" ADD COLUMN unexpected_column JSON')
+        target = self.root/"extra-column"
+        with self.assertRaisesRegex(BackupError, '^backup_database_version_mismatch$'):
+            backup_postgres_engine(self.repo.engine, self.store.root, target, schema=self.schema)
+        self.assertFalse((target/"manifest.json").exists())
 
     def test_concurrent_commit_does_not_split_business_and_media_snapshot(self):
         evidence, late = [], []
