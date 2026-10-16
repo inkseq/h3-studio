@@ -323,11 +323,14 @@ class DstackController:
                     intent = self.repo._locked(connection, select(instance_intents).where(instance_intents.c.id == intent_id))
                     if current["desired_state"] == "running":
                         self.service.fund_window(connection, intent, current, self.repo.clock())
-            except BudgetExceeded:
+            except BudgetExceeded as error:
                 # The failed transaction rolled back all funding mutations.
                 # Preserve any running task/result and request normal drain.
                 funded = False
-                self._request_stop(node, reason_code="dstack_spend_limit_reached")
+                reason = error.args[0] if error.args and error.args[0] in {
+                    "dstack_test_daily_limit_reached", "dstack_test_runtime_limit_reached",
+                    "dstack_test_budget_unconfirmed", "dstack_test_guard_unconfirmed"} else "dstack_spend_limit_reached"
+                self._request_stop(node, reason_code=reason)
             with self.repo.engine.connect() as connection:
                 node = dict(connection.execute(select(operator_nodes).where(operator_nodes.c.intent_id == intent_id)).mappings().one())
         if not binding.get("apply_started"):

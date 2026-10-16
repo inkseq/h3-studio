@@ -191,6 +191,9 @@ class LedgerDstackStore:
                 row["amount_microusd"] == intent["reserved_cost_microusd"] for row in reservations),
                 "dstack_budget_reservation_missing")
             now = self.repo.clock()
+            from .dstack_test_budget import budget_reason
+            reason = budget_reason(connection, intent, node, now)
+            require(reason is None, reason or "dstack_test_budget_unconfirmed")
             stored.update(apply_started=True, apply_started_at=now)
             payload["dstack"] = stored
             self.repo.update_instance(intent_id, "creating", connection=connection)
@@ -634,6 +637,20 @@ class DstackOperator:
             profile = self._validate_profile(value)
             require(profile["id"] not in self.profiles, "dstack_profile_duplicate", 422)
             self.profiles[profile["id"]] = profile
+        if "test_gpu_guard" in self.policy:
+            from .dstack_test_budget import ACCOUNT, POOLS, PROJECTS, validate_guard
+            try:
+                validate_guard(self.policy["test_gpu_guard"])
+            except ValueError:
+                raise OperatorError("dstack_test_guard_invalid", 422) from None
+            require(getattr(settings, "public_origin", None) == "https://staging.inkseq.com"
+                and self.config.get("project") == "sixnine-staging"
+                and self.policy.get("lifecycle_version") == 2
+                and self.policy.get("max_instances") == self.policy.get("max_physical_gpus") == 1
+                and self.policy["idle_shutdown_seconds"] == 600
+                and all(profile["pool"] in POOLS and profile["project_id"] in PROJECTS
+                    and ACCOUNT in profile["budget_account_ids"] and profile["extra_reservation_microusd"] > 0
+                    for profile in self.profiles.values()), "dstack_test_guard_binding_invalid", 422)
         self.fingerprint = request_hash(self.config)
 
     def _validate_profile(self, value):
@@ -701,7 +718,9 @@ class DstackOperator:
             cpu_count=profile["cpu_count"], max_price_microusd=profile["max_price_microusd"],
             created_at=created_at, hard_deadline=deadline, max_duration_s=duration,
             regions=tuple(profile.get("regions", [])), min_reliability=profile.get("min_reliability", .9),
-            lifecycle_version=lifecycle_version)
+            lifecycle_version=lifecycle_version,
+            test_max_duration_s=(self.policy.get("test_gpu_guard", {}).get("max_runtime_seconds")
+                if lifecycle_version == 2 else None))
 
     def _expected_runtime(self, profile):
         """Use the original protected execution quote, never an HTTP estimate."""
@@ -735,14 +754,24 @@ class DstackOperator:
             and _integer(hold, 0, 86400) and _integer(idle, 1, 86400)
             and (keep == "until" and hold > 0 or keep != "until" and hold == 0),
             "dstack_lifecycle_policy_invalid", 422)
-        return {"version": 2, "keep_on": keep, "hold_until": now + hold if hold else 0,
+        guard = self.policy.get("test_gpu_guard")
+        require(guard is None or keep == "idle" and idle <= 600,
+            "dstack_test_idle_policy_required", 422)
+        result = {"version": 2, "keep_on": keep, "hold_until": now + hold if hold else 0,
             "idle_shutdown_seconds": idle, "reservation_seconds": self.policy["reservation_seconds"],
             "expected_runtime_s": expected_runtime}
+        if guard is not None:
+            result["test_gpu_guard"] = copy.deepcopy(guard)
+        return result
 
     def fund_window(self, connection, intent, node, now):
         """Fund preparation, elapsed paid time and a full safe execution runway."""
         from .worker_admission import COMPLETION_MARGIN_SECONDS
         payload, lifecycle = node["payload"], node["payload"]["lifecycle"]
+        from .dstack_test_budget import budget_reason
+        reason = budget_reason(connection, intent, node, now)
+        if reason:
+            raise BudgetExceeded(reason)
         require(_window_open(intent, node, now), "dstack_continuing_policy_unconfirmed")
         started = connection.execute(select(scaler_actions.c.create_started_at).where(
             scaler_actions.c.intent_id == intent["id"])).scalar_one_or_none()
@@ -756,6 +785,9 @@ class DstackOperator:
         # Admission requires strictly more funding than the complete runway.
         seconds = math.ceil((paid + 1) / chunk) * chunk + 300
         minimum = math.ceil(hourly * seconds / 3600) + extra
+        reason = budget_reason(connection, intent, node, now, minimum_reserved=minimum)
+        if reason:
+            raise BudgetExceeded(reason)
         return self.repo.fund_instance_window(connection, intent["id"], minimum, lifecycle["budget_account_ids"])
 
     def catalog(self, principal):
@@ -1068,8 +1100,13 @@ class DstackOperator:
             if value.get("group_id") is not None:
                 from .dstack_workspace import owned_group
                 owned_group(connection, self.settings, owner, value["group_id"])
-            usage = self._limits(connection, profile["max_price_microusd"])
             now = self.repo.clock()
+            guard = value.get("lifecycle", {}).get("test_gpu_guard")
+            if guard is not None:
+                from .dstack_test_budget import projected_cost
+                require(projected_cost(connection, guard, now) + value["reservation_microusd"]
+                    < guard["daily_limit_microusd"], "dstack_test_daily_limit_reached")
+            usage = self._limits(connection, profile["max_price_microusd"])
             original = value["request"]
             host_selection = original.get("host_selection")
             if profile["backend"] == "vastai":
@@ -1279,6 +1316,8 @@ class DstackOperator:
                     candidate["hold_until"] = original_policy["hold_until"]
                 for field in ("reservation_seconds", "budget_account_ids"):
                     candidate[field] = copy.deepcopy(original_policy[field])
+                if "test_gpu_guard" in original_policy:
+                    candidate["test_gpu_guard"] = copy.deepcopy(original_policy["test_gpu_guard"])
                 payload.update(lifecycle=candidate, hold_until=candidate["hold_until"])
                 connection.execute(update(operator_nodes).where(operator_nodes.c.intent_id == node_id)
                     .values(payload=payload, updated_at=now))

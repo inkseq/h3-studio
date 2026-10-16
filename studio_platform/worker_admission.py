@@ -56,6 +56,10 @@ def dstack_policy_reason(intent, node, now, *, last_business_activity=None,
         return "managed_dstack_lifecycle_unconfirmed"
     if node.get("desired_state") != "running" or intent.get("state") not in {"reserved", "creating", "creation_unknown", "starting", "ready", "busy"}:
         return "worker_capacity_stopping"
+    from .dstack_test_budget import runtime_reason
+    reason = runtime_reason(intent, node, now)
+    if reason:
+        return reason
     if keep_on == "until_stopped" or has_obligations or last_business_activity is None:
         return None
     if not _finite(last_business_activity) or last_business_activity > now:
@@ -86,6 +90,10 @@ def dstack_budget_reason(connection, intent, node, now, *, expected_runtime_s=No
     duration = 0 if expected_runtime_s is None else expected_runtime_s
     if not _finite(duration) or duration < 0 or expected_runtime_s is not None and duration <= 0:
         return "job_runtime_unconfirmed"
+    from .dstack_test_budget import budget_reason
+    reason = budget_reason(connection, intent, node, now, expected_runtime_s=duration)
+    if reason:
+        return reason
     rows = list(connection.execute(select(budget_reservations).where(
         budget_reservations.c.reference_type == "instance",
         budget_reservations.c.reference_id == intent["id"])).mappings())
@@ -123,6 +131,11 @@ def managed_window_reason(intent, node, now, *, expected_runtime_s=None,
         intent.get("hard_deadline") is None or isinstance(lifecycle, dict) and lifecycle.get("version") == 2)
     if policy_lifetime:
         reason = dstack_policy_reason(intent, node, now)
+        if reason:
+            return reason
+        from .dstack_test_budget import runtime_reason
+        reason = runtime_reason(intent, node, now,
+            expected_runtime_s=expected_runtime_s if expected_runtime_s is not None else 0)
         if reason:
             return reason
         deadline = None

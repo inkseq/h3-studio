@@ -155,6 +155,7 @@ class CapacityRequest:
     regions: tuple[str, ...] = ()
     lifecycle_version: int = 1
     host_selection: dict | None = None
+    test_max_duration_s: int | None = None
 
     def __post_init__(self):
         _uuid(self.intent_id)
@@ -172,6 +173,9 @@ class CapacityRequest:
             _require(type(count) is int and count > 0, "dstack_resource_limit_invalid")
         _require(type(self.lifecycle_version) is int and self.lifecycle_version in {1, 2},
             "dstack_lifecycle_invalid")
+        _require(self.test_max_duration_s is None or self.lifecycle_version == 2
+            and type(self.test_max_duration_s) is int and 600 <= self.test_max_duration_s <= 7200,
+            "dstack_test_duration_invalid")
         _require(type(self.created_at) in (int, float) and math.isfinite(self.created_at)
             and self.created_at > 0, "dstack_deadline_invalid")
         if self.lifecycle_version == 2:
@@ -217,7 +221,7 @@ class CapacityRequest:
             # Pinned 0.22.3 null means inherit the profile; "off" explicitly
             # disables only the new intent's fixed running-duration limit.
             "max_price": self.max_price_microusd / 1_000_000,
-            "max_duration": "off" if self.lifecycle_version == 2 else self.max_duration_s,
+            "max_duration": (self.test_max_duration_s or "off") if self.lifecycle_version == 2 else self.max_duration_s,
             "retry": False, "spot_policy": "on-demand", "dstack": False,
             "env": {}, "ports": [], "stop_duration": 300,
             "regions": list(self.regions) if self.regions else None, "tags": {"sixnine_owner": OWNER,
