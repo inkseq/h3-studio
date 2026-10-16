@@ -748,3 +748,8 @@ map separately from the editable project body. No immutable recipe is rewritten.
 中文：连接可限定本次创作、当前故事或全部作品；“整理”允许编辑草稿但不付费。
 一次性代码默认10分钟，时效和连接上限可配置；改设置不扩大旧授权。暂停/撤销不取消
 已接收任务。费用为含未知预留的保守占用，0表示不限额；未知结果只核对原操作。
+
+Global spending-settings edits invalidate the affected connection `state_version`
+when its effective cap changes, including removal to zero/unlimited. Unchanged
+caps and daily/ask-only changes preserve connection control versions and pause
+state; either writer therefore rejects a stale edit from the other surface.

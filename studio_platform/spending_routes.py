@@ -50,6 +50,10 @@ def register_routes(app):
                 connection.execute(update(spending_settings).where(*condition).values(**values))
             else:
                 connection.execute(insert(spending_settings).values(tenant_id=settings.tenant_id, owner_id=owner, **values))
+            if not admin:
+                from .agent_management import synchronize_cap_versions
+                synchronize_cap_versions(connection,settings.tenant_id,owner,
+                    old['value']['connection_limits'],value['connection_limits'],repo.clock())
             repo._emit(connection, "spending.settings_updated", owner,
                 {"tenant_id": settings.tenant_id, "owner_id": owner, "actor_id": principal.actor_id,
                  "old": old, "new": {"version": values["version"], "value": value}})

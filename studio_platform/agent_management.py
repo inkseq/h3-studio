@@ -79,6 +79,24 @@ def record_refusal(engine,tenant,principal,code,now):
             connection_id=row['id'],owner=principal.owner,event=code,created_at=now))
 
 
+def synchronize_cap_versions(conn,tenant,owner,before,after,now):
+    """Called within the original owner lock and global settings transaction.
+
+    A removed map entry means zero/unlimited. Only actual effective cap changes
+    invalidate a connection editor; pause state and unrelated controls survive.
+    """
+    changed={actor for actor in set(before)|set(after) if before.get(actor,0)!=after.get(actor,0)}
+    for actor in sorted(changed):
+        row=connection_for_actor(conn,tenant,owner,actor)
+        if row is None:continue
+        state=read_doc(conn,tenant,owner,'connection_state',row['id'])
+        put_doc(conn,tenant,owner,'connection_state',row['id'],
+            copy.deepcopy(state['payload']) if state else {'paused':False},now)
+        from .agent_connect import audit
+        conn.execute(insert(audit).values(tenant=tenant,id='audit-'+uuid.uuid4().hex,
+            connection_id=row['id'],owner=owner,event='cap.updated',created_at=now))
+
+
 class AgentManagementMixin:
     def _settings(self,conn,owner):
         row=read_doc(conn,self.tenant,owner,'connection_settings','settings')

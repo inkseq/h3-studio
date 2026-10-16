@@ -155,3 +155,55 @@ class ManagementTests(ledger.LedgerCase):
         else:self.assertEqual(values[1],'connection_paused')
         with self.assertRaisesRegex(Conflict,'connection_paused'):
             self.repo.create_job(self.scope,self.plan()['id'],'after-race',budget_account_ids=('owner-budget',),spending_actor=agent.actor_id)
+
+    def global_settings(self,body=None):
+        from types import SimpleNamespace
+        request=SimpleNamespace(state=SimpleNamespace(principal=self.principal))
+        method='GET' if body is None else 'PUT'
+        endpoint=next(r.endpoint for r in self.app.routes if getattr(r,'path',None)=='/v1/account/spending-settings' and method in r.methods)
+        response=endpoint(request) if body is None else endpoint(request,body)
+        return json.loads(response.body)
+
+    def test_global_cap_edit_invalidates_row_cas_and_removal_preserves_pause(self):
+        grant,_,agent,_,_,_=self.connect(cap=100_000);ident=grant['connection']['id']
+        self.service.change_connection(self.principal,ident,{'expected_version':0,'paused':True},'paused-global')
+        before=self.global_settings();value=copy.deepcopy(before['value'])
+        value['connection_limits'][agent.actor_id]=200_000
+        self.global_settings({'expected_version':before['version'],'value':value})
+        stale=self.service.change_connection(self.principal,ident,{'expected_version':1,'daily_limit_microusd':300_000},'stale-cap')
+        self.assertTrue(stale['no_mutation_committed']);self.assertEqual(stale['daily_limit_microusd'],200_000)
+        self.assertTrue(stale['paused']);self.assertEqual(stale['state_version'],2)
+        current=self.global_settings();value=copy.deepcopy(current['value']);value['connection_limits'].pop(agent.actor_id)
+        self.global_settings({'expected_version':current['version'],'value':value})
+        current=self.service.get(self.principal,ident)
+        self.assertEqual(current['daily_limit_microusd'],0);self.assertEqual(current['state_version'],3);self.assertTrue(current['paused'])
+        global_before=self.global_settings();value=copy.deepcopy(global_before['value']);value['daily_limit_microusd']=900_000;value['ask_above_microusd']=50_000
+        self.global_settings({'expected_version':global_before['version'],'value':value})
+        self.assertEqual(self.service.get(self.principal,ident)['state_version'],3)
+        self.assertTrue(self.service.get(self.principal,ident)['paused'])
+
+    def test_row_cap_edit_invalidates_global_cas_preserving_unrelated_caps(self):
+        grant,_,agent,_,_,_=self.connect(cap=100_000);other,_,other_agent,_,_,_=self.connect(cap=70_000)
+        old=self.global_settings();value=copy.deepcopy(old['value']);value['connection_limits'][agent.actor_id]=300_000
+        self.service.change_connection(self.principal,grant['connection']['id'],{'expected_version':0,'daily_limit_microusd':200_000},'row-first')
+        with self.assertRaisesRegex(Conflict,'spending_settings_changed'):
+            self.global_settings({'expected_version':old['version'],'value':value})
+        after=self.global_settings();self.assertEqual(after['value']['connection_limits'][agent.actor_id],200_000)
+        self.assertEqual(after['value']['connection_limits'][other_agent.actor_id],70_000)
+        self.assertEqual(self.service.get(self.principal,other['connection']['id'])['state_version'],0)
+
+    def test_two_channel_cap_race_has_one_authoritative_winner(self):
+        grant,_,agent,_,_,_=self.connect(cap=100_000);old=self.global_settings()
+        value=copy.deepcopy(old['value']);value['connection_limits'][agent.actor_id]=200_000
+        def action(index):
+            if index==0:
+                try:return self.global_settings({'expected_version':old['version'],'value':value})
+                except Conflict as error:return str(error)
+            return self.service.change_connection(self.principal,grant['connection']['id'],{'expected_version':0,'daily_limit_microusd':300_000},'channel-race')
+        values=self.parallel(action,2);current=self.service.get(self.principal,grant['connection']['id'])
+        if isinstance(values[0],str):
+            self.assertEqual(values[0],'spending_settings_changed');self.assertEqual(current['daily_limit_microusd'],300_000)
+            self.assertFalse(values[1].get('no_mutation_committed',False))
+        else:
+            self.assertTrue(values[1]['no_mutation_committed']);self.assertEqual(current['daily_limit_microusd'],200_000)
+        self.assertEqual(current['state_version'],1)
