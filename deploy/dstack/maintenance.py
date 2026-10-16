@@ -40,6 +40,7 @@ LEGACY_HELPER_PAIRS = {commit: (
         "07da40322559ee5a12829be6884c541c401d852a")}
 # Exact retained current/previous helper bytes before the staging upgrade.
 RETAINED_DSTACK_HELPER_PAIRS = {
+    'b5902a1cf9bf2b32fe2de7ea35ca1cc7bbde3524': ('a4d0c782ab523b30c7f4db0b958b785480e17bb5ac0578edb93c47055d80c080', '0d8db5801395b3ecbf3ceea9109c187fb9e39f1de08473694c9ed45df0a23534'),
     'c848dde8bf1d49044743ae1f497a148e50b84409': ('9e324d663ec9fde10ee7fb9ad58bbca01203f64720de9e809b36a856fe8c1bb8', 'ff1efe4f384fd68c65067239fc8fdca96d1528f3c84aff495f3f18a2f9fa7c4a'),
     '6e6fe5ee14e82983161f7f2bf15cbfd6e8eb54f2': ('9e324d663ec9fde10ee7fb9ad58bbca01203f64720de9e809b36a856fe8c1bb8', '3b885cdbb50e6cd373daf3952f0844a0be71e3010646d699cff8bb578a972c03'),
 }
@@ -65,7 +66,8 @@ OTHER_FIELDS = frozenset({"SIXNINE_OPERATOR_CAPACITY_OWNERS", "SIXNINE_HATCHET_P
 OPTIONAL_PATH_FIELDS = frozenset({"SIXNINE_STAGE_QUERY_CONFIG_FILE", "SIXNINE_STORAGE_CREDENTIAL_FILE"})
 STORAGE_FIELDS = frozenset({"SIXNINE_STORAGE_PROVIDER", "SIXNINE_STORAGE_ENDPOINT", "SIXNINE_STORAGE_REGION",
     "SIXNINE_STORAGE_BUCKET", "SIXNINE_STORAGE_PROFILE", "SIXNINE_STORAGE_CREDENTIAL_FILE"})
-OPTIONAL_FIELDS = frozenset({"SIXNINE_OPERATOR_ADMIN_OWNERS", "SIXNINE_STORYBOARD_OWNERS", 'INKSEQ_DEPLOYMENT_TARGET'}) | OPTIONAL_PATH_FIELDS | STORAGE_FIELDS
+OPTIONAL_FIELDS = frozenset({"SIXNINE_OPERATOR_ADMIN_OWNERS", "SIXNINE_STORYBOARD_OWNERS", 'INKSEQ_DEPLOYMENT_TARGET',
+    'INKSEQ_RESOURCE_PROFILE', 'INKSEQ_CPU_CGROUP_PARENT'}) | OPTIONAL_PATH_FIELDS | STORAGE_FIELDS
 LEGACY_MARKERS = ("operator-capacity/active.json", "gpu-acceptance/active.json", "gpu-scaler/active.json")
 STORYBOARD_FLAG = "SIXNINE_STORYBOARD_OWNERS"
 STORYBOARD_RECEIPT = "storyboard-maintenance.json"
@@ -340,8 +342,19 @@ def settings(root):
     path = directory / "paths.json"
     release.regular(path, root_owned=True, maximum=32768)
     value = json.loads(path.read_text())
+    sealed = deployment_target.host(root, legacy=True)
     release.require(deployment_target.environment(value.get('environment', {}))['name']
-        == deployment_target.host(root, legacy=True)['name'], 'migration_target_host_mismatch')
+        == sealed['name'], 'migration_target_host_mismatch')
+    resource_env = deployment_target.resource_environment(sealed)
+    release.require(deployment_target.resources(value.get('environment', {})) == deployment_target.resources(
+        {'INKSEQ_DEPLOYMENT_TARGET': sealed['name'], **resource_env}), 'migration_resource_host_mismatch')
+    if resource_env:
+        operator = Path(value['environment']['SIXNINE_DSTACK_OPERATOR_CONFIG_FILE'])
+        release.regular(operator, root_owned=True, maximum=1024**2)
+        policy = json.loads(operator.read_text()).get('policy', {})
+        release.require(all(type(policy.get(key)) is int and policy[key] == 1
+                            for key in ('max_instances', 'max_physical_gpus')),
+                        'migration_compact_requires_single_gpu_capacity')
     return settings_document(value), release.checksum(directory / "paths.json")
 
 
@@ -364,6 +377,7 @@ def settings_document(value):
         elif key.endswith("_VOLUME"):
             release.require(re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", text), "migration_volume_reference_invalid")
     env = value["environment"]
+    deployment_target.resources(env)
     storage_settings(env)
     release.require((env["SIXNINE_MIGRATION_GENERATION_ENABLED"], env["SIXNINE_MIGRATION_EXECUTION_BACKEND"])
         in {("0", "disabled"), ("1", "wangp-worker")}, "migration_admission_reference_invalid")
@@ -532,12 +546,14 @@ def compose(base, migration_directory, environment, *arguments, timeout=180):
 
 
 def verify_services(base, directory, environment, app, dispatch):
+    resources = deployment_target.resources(environment)
+    compact = resources['name'] == deployment_target.COMPACT_RESOURCES
     expected = {"app": app, "dispatch": dispatch, "controller": dispatch}
     server = dispatch.get("_dstack_server")
     if server is not None:
         expected["dstack"] = server
     values = {}
-    for name in ("app", *SHARED, "hatchet-db"):
+    for name in ("app", *SHARED, "hatchet-db", *(("db", "caddy") if compact else ())):
         identity = compose(base, directory, environment, "ps", "--all", "--quiet", name, timeout=20).decode().strip()
         release.require(re.fullmatch(r"[0-9a-f]{12,64}", identity), "migration_cpu_service_not_unique")
         inspected = json.loads(release.command(["inspect", identity], environment=environment, timeout=20))
@@ -549,6 +565,17 @@ def verify_services(base, directory, environment, app, dispatch):
         values[name] = value
     app_id = values["app"]["Id"]
     for name, value in values.items():
+        if compact:
+            release.require(value.get('HostConfig', {}).get('CgroupParent') == resources['cgroup_parent'],
+                            'migration_compact_runtime_parent_changed')
+            pid = value.get('State', {}).get('Pid')
+            release.require(type(pid) is int and pid > 0, 'migration_compact_runtime_pid_missing')
+            membership = Path('/proc') / str(pid) / 'cgroup'
+            prefix = '0::' + str(deployment_target.COMPACT_CGROUP.relative_to('/sys/fs/cgroup'))
+            # Kernel records the hierarchy with a leading slash.
+            prefix = prefix.replace('0::', '0::/') + '/'
+            release.require(any(line.startswith(prefix) for line in membership.read_text().splitlines()),
+                            'migration_compact_runtime_outside_parent')
         release.require(value.get("State", {}).get("Running") is True
             and value.get("State", {}).get("Restarting") is not True, "migration_cpu_service_not_running")
         if name in expected:

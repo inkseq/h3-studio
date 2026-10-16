@@ -4,9 +4,10 @@ from dataclasses import replace
 import json
 import secrets
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-from sqlalchemy import insert, update, select
+from sqlalchemy import event, insert, update, select
 
 from studio_platform.api import create_app
 from studio_platform.control import WorkerControl, WorkerSpec
@@ -16,7 +17,7 @@ from studio_platform.generation_availability import generation_availability
 from studio_platform.operator_capacity import (DeploymentBinding, OperatorRegistry, operator_nodes,
     operator_commands, operator_heartbeats)
 from studio_platform.repository import Conflict, instance_intents, registered_workers, request_hash
-from studio_platform.runtime_catalog import engine_manifest
+from studio_platform.runtime_catalog import engine_manifest, profile_output_delivery, public_catalog
 from studio_platform.scaler import LaunchSpec
 import test_platform_execution_profiles as profile_tests
 from test_platform_execution_profiles import PRUNED, INT8
@@ -219,6 +220,72 @@ class AvailabilityTests(unittest.TestCase):
             client.post("/api/auth/login", json={"username":"supervan"}).raise_for_status()
             self.assertEqual(client.get("/v1/generation-availability").status_code, 200)
             self.assertEqual(client.get("/v1/operator/capacity/state").status_code, 403)
+
+    def test_one_request_batches_reads_across_all_actual_profile_modes(self):
+        def observed():
+            statements = []
+            def read(_connection, _cursor, statement, _parameters, _context, _many):
+                statements.append(statement)
+            event.listen(self.repo.engine, "before_cursor_execute", read)
+            try:
+                value = self.result()
+            finally:
+                event.remove(self.repo.engine, "before_cursor_execute", read)
+            self.assertTrue(all(statement.lstrip().upper().startswith("SELECT") for statement in statements))
+            return value, len(statements)
+
+        small, small_queries = observed()
+        template = copy.deepcopy(self.values[0])
+        self.values = []
+        for index, profile in enumerate(public_catalog()["profiles"]):
+            for model in profile["models"]:
+                identity, mode = profile["id"], model["mode"]
+                policy = copy.deepcopy(template)
+                policy.update(deployment_profile_id=identity, model_id=profile["model_id"],
+                    pool=f"bulk-{index}-{mode}", configuration_id=f"bulk-config-{index}-{mode}",
+                    recipe_ids=[model["generation_recipe_id"]],
+                    engine_manifest_digest=engine_manifest(identity, mode).digest,
+                    output_delivery=profile_output_delivery(identity), envelope=tested_envelope(identity, mode))
+                self.values.append(policy)
+        self.write()
+        large, large_queries = observed()
+        self.assertGreater(len(self.values), 20)
+        self.assertEqual(large_queries, small_queries)
+        self.assertLessEqual(large_queries, 6)
+        self.assertEqual(next(p for p in large["profiles"] if p["deployment_profile_id"] == PRUNED),
+                         next(p for p in small["profiles"] if p["deployment_profile_id"] == PRUNED))
+        self.assertTrue(all(not mode["available"] for profile in large["profiles"] for mode in profile["modes"].values()))
+
+    def test_batch_matches_individual_worker_status_and_next_request_is_fresh(self):
+        workers = [self.worker(0), self.worker(1, ready=False), self.worker(2)]
+        self.mutate_worker(workers[2], state="busy", current_job_id="private-running-job")
+        control = WorkerControl(self.repo)
+        def status(index, snapshot=None):
+            policy = self.values[index]
+            return control.pool_status(policy["pool"], model_id=policy["model_id"],
+                configuration_id=policy["configuration_id"], recipe_id=policy["recipe_ids"][0],
+                backend=policy["backend"], engine_manifest_digest=policy["engine_manifest_digest"],
+                output_delivery=policy["output_delivery"], expected_runtime_s=policy["reservation"]["expected_runtime_s"],
+                deployment_profile_id=policy["deployment_profile_id"], _snapshot=snapshot)
+        individual = [status(index) for index in range(3)]
+        with control.pool_status_snapshot() as snapshot:
+            self.assertEqual([status(index, snapshot) for index in range(3)], individual)
+        self.assertEqual((individual[0]["ready"], individual[1]["registered"], individual[2]["busy"]), (1, 1, 1))
+        with self.assertRaisesRegex(ValueError, "pool_status_snapshot_unavailable"):
+            status(0, snapshot)
+        self.mutate_worker(workers[0], expires_at=self.now-1)
+        self.assertEqual(self.modes()["fl"]["state"], "unknown")
+        self.mutate_worker(workers[0], expires_at=self.now+90, drain_requested=1)
+        self.assertEqual(self.modes()["fl"]["state"], "unavailable")
+
+    def test_disabled_or_invalid_configuration_does_not_open_a_read_snapshot(self):
+        self.settings = replace(self.settings, generation_enabled=False)
+        with patch.object(self.repo.engine, "connect", side_effect=AssertionError("unexpected_database_read")):
+            self.assertEqual(self.modes()["fl"]["state"], "disabled")
+        self.settings = replace(self.settings, generation_enabled=True)
+        self.path.write_text("invalid")
+        with patch.object(self.repo.engine, "connect", side_effect=AssertionError("unexpected_database_read")):
+            self.assertEqual(self.modes()["fl"]["state"], "unknown")
 
 
 if __name__ == "__main__":

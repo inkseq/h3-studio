@@ -12,6 +12,10 @@ from pathlib import Path, PurePosixPath
 import re
 import stat
 import subprocess
+try:
+    import deployment_target
+except ImportError:
+    from deploy.platform import deployment_target
 
 ROOT = Path("/srv/sixnine")
 SECRETS = Path("/run/sixnine-secrets")
@@ -134,8 +138,17 @@ def validate_snapshot(snapshot):
     # A nominal 4-GiB EC2 host reports less usable RAM after kernel reservation.
     # Reviewed steady containers: app 2 GiB + PG 512 MiB + Caddy 128 MiB.
     # No local generation/render worker is covered by this initial host profile.
-    require(type(docker.get("memory_bytes")) is int and docker["memory_bytes"] >= 3584*1024**2,
-            "preflight_docker_memory_below_reviewed_floor")
+    resource_env = snapshot.get('resource_environment', {})
+    try:
+        resources = deployment_target.resources(resource_env)
+        if resources['name'] == deployment_target.COMPACT_RESOURCES:
+            deployment_target.validate_resource_metadata(resource_env, snapshot.get('compact_resources'),
+                memory_bytes=docker.get('memory_bytes'))
+        else:
+            require(type(docker.get("memory_bytes")) is int and docker["memory_bytes"] >= 3584*1024**2,
+                    "preflight_docker_memory_below_reviewed_floor")
+    except ValueError as error:
+        raise PreflightError(str(error)) from None
     return {"state": "host_metadata_ready", "cpu_count": docker["cpus"],
             "secret_contents_checked": False, "services_started": False,
             "remaining": ["dependency_images_and_archive_identity", "subnet_and_port_conflicts",
@@ -199,6 +212,10 @@ def check_host(*, root=ROOT, secret_root=SECRETS, docker_config=DOCKER_CONFIG):
             text=True, timeout=15, check=True).stdout.strip().split()
         require(len(info) == 3, "preflight_docker_capacity_invalid")
         snapshot["docker"] = {"os": info[0], "cpus": int(info[1]), "memory_bytes": int(info[2])}
+        sealed = deployment_target.host(root, legacy=True)
+        resource_env = {'INKSEQ_DEPLOYMENT_TARGET': sealed['name'], **deployment_target.resource_environment(sealed)}
+        if deployment_target.resources(resource_env)['name'] == deployment_target.COMPACT_RESOURCES:
+            snapshot.update(resource_environment=resource_env, compact_resources=deployment_target.resource_metadata())
         return validate_snapshot(snapshot)
     except PreflightError:
         raise

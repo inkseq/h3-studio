@@ -327,8 +327,12 @@ class MigrationArtifacts(unittest.TestCase):
             importer.assert_not_called()
 
     def test_retained_current_previous_derivatives_use_only_exact_installed_checker_pairs(self):
-        expected_commits = {'c848dde8bf1d49044743ae1f497a148e50b84409', '6e6fe5ee14e82983161f7f2bf15cbfd6e8eb54f2'}
+        expected_commits = {'c848dde8bf1d49044743ae1f497a148e50b84409', '6e6fe5ee14e82983161f7f2bf15cbfd6e8eb54f2',
+                            'b5902a1cf9bf2b32fe2de7ea35ca1cc7bbde3524'}
         self.assertEqual(set(maintenance.RETAINED_DSTACK_HELPER_PAIRS), expected_commits)
+        self.assertEqual(maintenance.RETAINED_DSTACK_HELPER_PAIRS['b5902a1cf9bf2b32fe2de7ea35ca1cc7bbde3524'],
+                         ('a4d0c782ab523b30c7f4db0b958b785480e17bb5ac0578edb93c47055d80c080',
+                          '0d8db5801395b3ecbf3ceea9109c187fb9e39f1de08473694c9ed45df0a23534'))
         trusted_path = Path(maintenance.__file__).resolve().with_name('migration_check.py')
         for commit, pair in maintenance.RETAINED_DSTACK_HELPER_PAIRS.items():
             (self.artifact/maintenance.MANIFEST).write_text(json.dumps({'commit': commit, 'dstack': {

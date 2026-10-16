@@ -90,18 +90,22 @@ class TargetTests(unittest.TestCase):
                     path.write_text(raw)
                     with self.assertRaises(ValueError): target.host(root)
 
-    def test_stage_credentials_are_exact_and_production_cannot_fallback(self):
+    def test_stage_shares_only_authorized_vast_profile_and_keeps_other_secrets_isolated(self):
         value = initialized()
         value['providers']['vastai']['profile_id'] = target.profile('staging')['vast_profile']
         value['grafana_cloud'].update(enabled=False, endpoint='', authorization='', environment='staging')
         value['r2_storage'] = dict(r2_storage(), profile=target.profile('staging')['r2_profile'], bucket='sixnine-staging-media')
         secrets.validate(value, target='staging')
+        self.assertEqual(target.profile('staging')['vast_profile'], 'vastai--sixnine-dstack-20261011')
+        self.assertEqual(target.profile('staging')['vast_profile'], target.profile('production')['vast_profile'])
         output = secrets.outputs(value, target='staging')
         self.assertEqual(json.loads(output['dstack-server-config.yml'][0])['projects'][0]['name'], 'sixnine-staging')
         for mutate in (
             lambda v: v['r2_storage'].update(profile='cloudflare-r2--rig-root'),
             lambda v: v['r2_storage'].update(bucket='sixnine-media'),
-            lambda v: v['providers']['vastai'].update(profile_id='vastai--sixnine-dstack-20261011'),
+            lambda v: v['providers']['vastai'].update(profile_id='vastai--sixnine-staging-20261015'),
+            lambda v: v['providers']['vastai'].update(profile_id='vastai--rig-root'),
+            lambda v: v['providers']['vastai'].update(base_url='https://console.vast.ai/api/v0'),
             lambda v: v['grafana_cloud'].update(enabled=True),
             lambda v: v['grafana_cloud'].update(authorization='Basic copied-production-config'),
         ):

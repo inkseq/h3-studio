@@ -220,7 +220,8 @@ class ReleaseTests(unittest.TestCase):
             release.approved_configuration(self.incoming, environment)
         command.assert_called_once_with(["compose", "version", "--short"], environment=environment)
         compose.assert_called_once_with(self.incoming, environment, "config", "--format", "json")
-        validate.assert_called_once_with(rendered, deployment_directory=self.incoming, compose_version="v2.38.2", target='production')
+        validate.assert_called_once_with(rendered, deployment_directory=self.incoming, compose_version="v2.38.2",
+                                         target='production', resource_environment=environment)
         rendered["services"]["app"]["environment"] = {"PUBLIC_ORIGIN": "https://inkseq.com"}
         rendered["services"]["caddy"]["environment"] = {"INKSEQ_LEGACY_REDIRECT": "1"}
         with patch.object(release, "command", return_value=b"v2.38.2\n"), \

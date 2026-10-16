@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import argparse
+import os
 from pathlib import Path
 import re
 import sys
@@ -25,8 +26,9 @@ def require(condition, message):
         raise ConfigurationError(message)
 
 
-def validate(config, *, deployment_directory=None, compose_version=None, target='production'):
+def validate(config, *, deployment_directory=None, compose_version=None, target='production', resource_environment=None):
     selected = deployment_target.profile(target)
+    resources = deployment_target.resources({**(resource_environment or {}), 'INKSEQ_DEPLOYMENT_TARGET': target})
     require(compose_version is None or isinstance(compose_version, str), "Compose version must be trusted binary output")
     deployment = Path(deployment_directory) if deployment_directory is not None else Path(__file__).resolve().parent
     require(deployment.is_absolute(), "Deployment directory must be an explicit absolute trusted path")
@@ -43,7 +45,7 @@ def validate(config, *, deployment_directory=None, compose_version=None, target=
                     "db": {"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"}}
     common_fields = {"image", "pull_policy", "restart", "read_only", "cap_drop", "cap_add", "security_opt",
                      "pids_limit", "mem_limit", "environment", "command", "entrypoint", "secrets", "volumes",
-                     "tmpfs", "networks", "healthcheck", "logging", "depends_on", "user"}
+                     "tmpfs", "networks", "healthcheck", "logging", "depends_on", "user", "cgroup_parent"}
     extra_fields = {"app": {"cpus", "init", "stop_grace_period"}, "db": {"shm_size", "stop_grace_period"},
                     "db-init": set(), "caddy": {"ports"}}
     # Initial two-account control plane on a 4-GiB instance. Rendering/GPU
@@ -51,6 +53,7 @@ def validate(config, *, deployment_directory=None, compose_version=None, target=
     bounds = {"app": (2*1024**3, 256), "db": (512*1024**2, 256),
               "db-init": (256*1024**2, 32), "caddy": (128*1024**2, 128)}
     for name, service in services.items():
+        require(service.get('cgroup_parent', '') == resources['cgroup_parent'], 'Unreviewed CPU cgroup parent')
         require(set(service) <= common_fields | extra_fields[name], "Unreviewed container option is present")
         image = service.get("image", "")
         require(bool(re.fullmatch(r"[A-Za-z0-9./:_-]+@sha256:[0-9a-f]{64}", image)
@@ -211,6 +214,10 @@ def validate(config, *, deployment_directory=None, compose_version=None, target=
     for name, expected in {"app": [], "db": ["/tmp:size=67108864,mode=1777", "/var/run/postgresql:size=16777216,mode=3775"],
                            "db-init": ["/tmp:size=16777216,mode=1777"], "caddy": ["/tmp:size=16777216,mode=1777"]}.items():
         require(services[name].get("tmpfs", []) == expected, "Temporary filesystem mounts/bounds differ")
+    if resources['name'] == deployment_target.COMPACT_RESOURCES:
+        require(sum(int(service['mem_limit']) for service in services.values())
+                <= (resources['resident_mib']+resources['swap_mib'])*1024**2,
+                'Staging base services exceed the bounded parent RAM and swap')
     return True
 
 
@@ -220,7 +227,8 @@ def main(argv=None):
     parser.add_argument('--target', choices=('production', 'staging'), default='production')
     args = parser.parse_args(argv)
     try:
-        validate(json.load(sys.stdin), compose_version=args.compose_version, target=args.target)
+        validate(json.load(sys.stdin), compose_version=args.compose_version, target=args.target,
+                 resource_environment=os.environ)
         print("Production configuration policy passed; secret contents and online readiness were not checked")
         return 0
     except Exception:

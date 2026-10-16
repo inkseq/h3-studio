@@ -295,7 +295,7 @@ def approved_configuration(directory, environment):
     version = command(["compose", "version", "--short"], environment=environment).decode("ascii").strip()
     config = json.loads(compose(directory, environment, "config", "--format", "json"))
     validate(config, deployment_directory=directory, compose_version=version,
-        target=deployment_target.environment(environment)['name'])
+             target=deployment_target.environment(environment)['name'], resource_environment=environment)
     if "PUBLIC_ORIGIN" in config["services"]["app"].get("environment", {}):
         require(config["services"]["caddy"]["environment"]["INKSEQ_LEGACY_REDIRECT"]
                 == environment.get("INKSEQ_LEGACY_REDIRECT", "0"), "domain_redirect_phase_differs_from_site_config")

@@ -1,0 +1,11 @@
+[Unit]
+Description=Bound the isolated staging CPU workload
+Before=docker.service
+
+[Slice]
+MemoryAccounting=yes
+MemoryMax=1280M
+MemorySwapMax=2048M
+
+[Install]
+WantedBy=multi-user.target

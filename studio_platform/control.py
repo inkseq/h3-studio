@@ -4,6 +4,7 @@ Expiration means UNKNOWN, never idle. Device ownership is retained until an
 operator reconciles the current upstream attempt or confirms retirement. A TP2
 worker owns two physical devices but executes only one job at a time.
 """
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 import math
 import re
@@ -20,6 +21,16 @@ from .repository import (
 
 TERMINAL = {"succeeded", "failed", "cancelled"}
 REAL_GPU_BACKENDS = frozenset({"comfy-worker", "wangp-worker"})
+
+
+@dataclass(frozen=True)
+class _PoolStatusSnapshot:
+    repository: object
+    connection: object
+    now: float
+    stopping: frozenset
+    workers: dict
+    pools: frozenset | None
 
 
 @dataclass(frozen=True)
@@ -150,9 +161,43 @@ class WorkerControl:
                 and previous.upstream_task_id is None
                 and (not expired_lease_only or previous.status == "lease_expired"))
 
+    @contextmanager
+    def pool_status_snapshot(self, *, pools=None, now=None):
+        """One read-only observation for a caller's related advisory projections.
+
+        The view expires with this context; admission and later requests still
+        read the original ledger. Existing per-worker window checks are reused.
+        """
+        from .operator_capacity import operator_nodes
+        pools = frozenset(pools) if pools is not None else None
+        if pools is not None:
+            for pool in pools:
+                identifier(pool)
+        now = self.repo.clock() if now is None else now
+        with self.repo.engine.connect() as connection:
+            if connection.dialect.name == "postgresql":
+                connection = connection.execution_options(isolation_level="REPEATABLE READ", postgresql_readonly=True)
+            stopping = set(connection.execute(select(instance_intents.c.provider, instance_intents.c.provider_instance_id)
+                .where((instance_intents.c.state.in_(("draining", "destroying", "destroyed")))
+                    | (instance_intents.c.hard_deadline <= now),
+                    instance_intents.c.provider_instance_id.is_not(None))).tuples())
+            # Catalog enumeration stays SELECT-only on SQLite/PostgreSQL.
+            if operator_nodes.name in inspect(connection).get_table_names():
+                stopping.update(connection.execute(select(instance_intents.c.provider, instance_intents.c.provider_instance_id)
+                    .join(operator_nodes, operator_nodes.c.intent_id == instance_intents.c.id)
+                    .where(operator_nodes.c.desired_state != "running",
+                        instance_intents.c.provider_instance_id.is_not(None))).tuples())
+            statement = select(registered_workers)
+            if pools is not None:
+                statement = statement.where(registered_workers.c.pool.in_(pools))
+            workers = {}
+            for row in connection.execute(statement).mappings():
+                workers.setdefault(row["pool"], []).append(dict(row))
+            yield _PoolStatusSnapshot(self.repo, connection, now, frozenset(stopping), workers, pools)
+
     def pool_status(self, pool, *, model_id, configuration_id, recipe_id=None,
                     backend="comfy-worker", engine_manifest_digest=None, output_delivery="",
-                    expected_runtime_s=None, deployment_profile_id=None, dispatch_backend="legacy"):
+                    expected_runtime_s=None, deployment_profile_id=None, dispatch_backend="legacy", _snapshot=None):
         """Read-only readiness of exact operator-bound slots, not a GPU probe.
 
         An expired registration is reported as unknown without modifying its
@@ -171,55 +216,52 @@ class WorkerControl:
         if backend == "wangp-worker" and (not isinstance(engine_manifest_digest, str)
                 or not re.fullmatch(r"[0-9a-f]{64}", engine_manifest_digest)):
             raise ValueError("explicit_engine_manifest_required")
-        now = self.repo.clock()
+        if _snapshot is None:
+            with self.pool_status_snapshot(pools=(pool,)) as snapshot:
+                return self.pool_status(pool, model_id=model_id, configuration_id=configuration_id,
+                    recipe_id=recipe_id, backend=backend, engine_manifest_digest=engine_manifest_digest,
+                    output_delivery=output_delivery, expected_runtime_s=expected_runtime_s,
+                    deployment_profile_id=deployment_profile_id, dispatch_backend=dispatch_backend, _snapshot=snapshot)
+        if (not isinstance(_snapshot, _PoolStatusSnapshot) or _snapshot.repository is not self.repo
+                or _snapshot.connection.closed
+                or _snapshot.pools is not None and pool not in _snapshot.pools):
+            raise ValueError("pool_status_snapshot_unavailable")
+        now = _snapshot.now
         counts = {state: 0 for state in ("ready", "busy", "unknown", "registered", "draining", "retired")}
         matched = 0
         reasons = {}
-        with self.repo.engine.connect() as connection:
-            from .operator_capacity import operator_nodes
-            stopping = set(connection.execute(select(instance_intents.c.provider, instance_intents.c.provider_instance_id)
-                .where((instance_intents.c.state.in_(("draining", "destroying", "destroyed")))
-                    | (instance_intents.c.hard_deadline <= now),
-                    instance_intents.c.provider_instance_id.is_not(None))).tuples())
-            # Catalog enumeration stays SELECT-only on SQLite/PostgreSQL;
-            # has_table() uses SQLite PRAGMA, outside the dry-run read contract.
-            if operator_nodes.name in inspect(connection).get_table_names():
-                stopping.update(connection.execute(select(instance_intents.c.provider, instance_intents.c.provider_instance_id)
-                    .join(operator_nodes, operator_nodes.c.intent_id == instance_intents.c.id)
-                    .where(operator_nodes.c.desired_state != "running",
-                        instance_intents.c.provider_instance_id.is_not(None))).tuples())
-            rows = connection.execute(select(registered_workers).where(registered_workers.c.pool == pool)).mappings()
-            for row in rows:
-                spec = row["spec"]
-                if (spec["backend"] != backend or spec["model_id"] != model_id
+        connection, stopping = _snapshot.connection, _snapshot.stopping
+        for row in _snapshot.workers.get(pool, ()):
+            spec = row["spec"]
+            if (spec["backend"] != backend or spec["model_id"] != model_id
                     or spec.get("dispatch_backend", "legacy") != dispatch_backend
                     or spec["configuration_id"] != configuration_id
                     or backend == "wangp-worker" and spec.get("engine_manifest_digest") != engine_manifest_digest
                     or spec.get("output_delivery", "") != output_delivery
                     or recipe_id is not None and recipe_id not in spec["recipe_ids"]):
-                    continue
-                matched += 1
-                state = row["state"]
-                if state == "retired":
-                    observed = "retired"
-                elif row["drain_requested"] or (row["provider"], row["instance_id"]) in stopping:
-                    observed = "draining"
-                elif row["expires_at"] <= now or row["updated_at"] > now or row["spec_hash"] != request_hash(spec):
-                    observed = "unknown"
-                elif state == "ready" and row["current_job_id"] is None:
-                    observed = "ready"
-                elif state in ("registered", "draining", "unknown"):
-                    observed = state
-                else:
-                    observed = "busy"
-                if observed in {"ready", "busy"}:
-                    from .worker_admission import worker_window_reason
-                    reason = worker_window_reason(connection, row, now,
-                        expected_runtime_s=expected_runtime_s, deployment_profile_id=deployment_profile_id)
-                    if reason:
-                        observed = "unknown" if reason == "managed_provider_lifetime_unverified" else "draining"
-                        reasons[reason] = reasons.get(reason, 0) + 1
-                counts[observed] += 1
+                continue
+            matched += 1
+            state = row["state"]
+            if state == "retired":
+                observed = "retired"
+            elif row["drain_requested"] or (row["provider"], row["instance_id"]) in stopping:
+                observed = "draining"
+            elif row["expires_at"] <= now or row["updated_at"] > now or row["spec_hash"] != request_hash(spec):
+                observed = "unknown"
+            elif state == "ready" and row["current_job_id"] is None:
+                observed = "ready"
+            elif state in ("registered", "draining", "unknown"):
+                observed = state
+            else:
+                observed = "busy"
+            if observed in {"ready", "busy"}:
+                from .worker_admission import worker_window_reason
+                reason = worker_window_reason(connection, row, now,
+                    expected_runtime_s=expected_runtime_s, deployment_profile_id=deployment_profile_id)
+                if reason:
+                    observed = "unknown" if reason == "managed_provider_lifetime_unverified" else "draining"
+                    reasons[reason] = reasons.get(reason, 0) + 1
+            counts[observed] += 1
         return {"pool": pool, "model_id": model_id, "configuration_id": configuration_id,
                 "backend": backend, "recipe_id": recipe_id, "observed_at": now,
                 "matched_slots": matched, "reason_counts": reasons, **counts}
