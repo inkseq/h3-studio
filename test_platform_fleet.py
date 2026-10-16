@@ -54,6 +54,23 @@ class FleetTests(LedgerCase):
         return SlotConfig(WorkerSpec("chapter-cpu", "chapter", "local-cpu", "local-cpu-instance", (),
             ("chapter-roughcut-v1",), "sixnine-chapter-roughcut-v1", "cpu-render-v1", "cpu-render"), enabled=True)
 
+    def test_postgres_slot_startup_preserves_explicit_idle_worker_drain(self):
+        from studio_platform.control import WorkerControl
+        slot=self.mock_slot()
+        slot=replace(slot,spec=replace(slot.spec,dispatch_backend="hatchet-v1"))
+        control=WorkerControl(self.repo)
+        control.register(slot.spec)
+        control.mark_ready(slot.spec.worker_id,upstream_idle_confirmed=True)
+        original=control.drain(slot.spec.worker_id)
+        result=run_slot(self.config(slot),slot.spec.worker_id,
+            Settings(Path(self.temp.name),execution_backend="mock",generation_enabled=True),
+            once=True,repository=self.repo,
+            backend_factory=lambda slot,directory:MockBackend(directory,enabled=True))
+        current=control.get(slot.spec.worker_id)
+        self.assertEqual(result["state"],"idle")
+        self.assertEqual((current["drain_requested"],current["state"],current["fence"]),
+            (1,"draining",original["fence"]))
+
     def test_cpu_fleet_has_no_gpu_endpoint_or_capacity_reservation(self):
         cpu = self.cpu_slot()
         self.repo.configure_capacity()

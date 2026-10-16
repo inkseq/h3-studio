@@ -286,3 +286,56 @@ class PostgresDispatchTests(LedgerCase):
             self.assertEqual(len(backend.submissions),1)
         finally:
             wake.close()
+
+    def test_signal_restart_recovers_first_attempt_then_next_queued_job(self):
+        import signal
+        first=self.make_job("first")
+        self.now+=1
+        second=self.make_job("second")
+        self.ready()
+        backend=CountingMock(self.directory/"signal-backend",enabled=True)
+        original_poll=backend.poll
+        signalled=[]
+        def poll(tag, task_id):
+            if not signalled:
+                signalled.append(True)
+                signal.getsignal(signal.SIGTERM)(signal.SIGTERM,None)
+                return Outcome("running",task_id)
+            return original_poll(tag,task_id)
+        backend.poll=poll
+        runner=self.runner(backend)
+        runner.run_forever("worker","hatchet-test")
+        before=self.repo.get_job(self.scope,first["id"])
+        self.assertEqual(before["status"],"running")
+        self.assertEqual(self.control.get("worker")["drain_requested"],0)
+        self.assertEqual(self.repo.get_job(self.scope,second["id"])["attempt_no"],0)
+        restarted=self.runner(backend)
+        for _ in range(6):
+            self.now+=6
+            restarted.run_once("worker","hatchet-test")
+        after=self.repo.get_job(self.scope,first["id"])
+        next_job=self.repo.get_job(self.scope,second["id"])
+        self.assertEqual((after["status"],next_job["status"]),("succeeded","succeeded"))
+        self.assertEqual(after["current_attempt_id"],before["current_attempt_id"])
+        self.assertEqual((after["attempt_no"],next_job["attempt_no"],backend.submits),(1,1,2))
+        self.assertEqual(after["execution_plan"],first["execution_plan"])
+
+    def test_signal_does_not_clear_concurrent_owner_drain_or_directory_flag(self):
+        import signal
+        for source in ("owner","flag"):
+            worker="signal-"+source
+            self.ready(worker)
+            flag=self.directory/(source+".flag")
+            outer=self
+            class Wake:
+                def __init__(self,*args):pass
+                def subscribe(self):pass
+                def wait(self,seconds):
+                    if source=="owner": outer.control.drain(worker)
+                    else: flag.touch()
+                    signal.getsignal(signal.SIGTERM)(signal.SIGTERM,None)
+                def interrupt(self):pass
+                def close(self):pass
+            self.runner(MemoryBackend(),worker=worker,wakeup_factory=Wake,
+                stop_requested=flag.exists).run_forever(worker,"hatchet-test")
+            self.assertEqual(self.control.get(worker)["drain_requested"],1)

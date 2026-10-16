@@ -53,6 +53,30 @@ def record_consumer(repo, control, backend, worker_id):
         # A liveness write is not business demand; do not emit self-wake events.
         connection.execute(update(operator_nodes).where(operator_nodes.c.intent_id == node["intent_id"])
             .values(payload=payload))
+        return copy.deepcopy(binding["consumer_observation"])
+
+
+def withdraw_consumer(repo, control, backend, worker_id, observation):
+    """Withdraw only this process's last exact liveness proof, never worker drain."""
+    if backend.kind != "wangp-worker" or observation is None:
+        return
+    with repo.transaction() as connection:
+        repo._lock_capacity(connection)
+        worker = control._worker(connection, worker_id, lock=True)
+        node = repo._locked(connection, select(operator_nodes).where(
+            operator_nodes.c.intent_id == backend.slot_key))
+        if node is None:
+            return
+        payload = copy.deepcopy(node["payload"])
+        binding = payload.get("dstack", {})
+        if (binding.get("consumer_observation") != observation
+                or binding.get("runtime_incarnation") != observation["runtime_incarnation"]
+                or worker["fence"] != observation["worker_fence"]
+                or worker["instance_id"] != observation["instance_id"]):
+            return
+        binding["consumer_observation"]["ready"] = False
+        connection.execute(update(operator_nodes).where(operator_nodes.c.intent_id == node["intent_id"])
+            .values(payload=payload))
 
 
 class PostgresSlotRunner(WorkerRunner):
@@ -65,12 +89,13 @@ class PostgresSlotRunner(WorkerRunner):
             raise ValueError("absolute_shared_collection_lock_required")
         self.wakeup_factory = wakeup_factory
         self.worker_id = None
+        self._consumer_observation = None
 
     def _run_once(self, worker_id, pool):
         # WorkerRunner invokes this under the physical lock, after registration
         # renewal. Neither the parent supervisor nor a notification can attest it.
         self.worker_id = worker_id
-        record_consumer(self.repo, self.control, self.backend, worker_id)
+        self._consumer_observation = record_consumer(self.repo, self.control, self.backend, worker_id)
         return super()._run_once(worker_id, pool)
 
     def _claim(self, worker_id, pool, *, purpose):
@@ -78,11 +103,11 @@ class PostgresSlotRunner(WorkerRunner):
         if claim:
             # Claim advances the worker fence. Publish that exact new fence
             # before the original late submission guard checks eligibility.
-            record_consumer(self.repo, self.control, self.backend, worker_id)
+            self._consumer_observation = record_consumer(self.repo, self.control, self.backend, worker_id)
         return claim
 
     def _submission_allowed(self, job):
-        record_consumer(self.repo, self.control, self.backend, self.worker_id)
+        self._consumer_observation = record_consumer(self.repo, self.control, self.backend, self.worker_id)
         return super()._submission_allowed(job)
 
     def _telemetry_context(self, job, lease):
@@ -119,21 +144,34 @@ class PostgresSlotRunner(WorkerRunner):
     def run_forever(self, worker_id, pool, *, poll_interval_s=1):
         wakeup = self.wakeup_factory(self.repo, self._drain)
         prior = {}
+        process_shutdown = False
+        completed = False
+        def shutdown(*_):
+            nonlocal process_shutdown
+            process_shutdown = True
+            self.drain()
+            wakeup.interrupt()
         if threading.current_thread() is threading.main_thread():
             for signum in (signal.SIGTERM, signal.SIGINT):
                 prior[signum] = signal.getsignal(signum)
-                signal.signal(signum, lambda *_: (self.drain(), wakeup.interrupt()))
+                signal.signal(signum, shutdown)
         try:
             wakeup.subscribe()  # Scan after subscription, including after restart.
             while not self._drain.is_set():
                 self.run_once(worker_id, pool)
                 if not self._drain.is_set():
                     wakeup.wait(self.wait_seconds(worker_id, pool))
+            completed = True
             return {"state": "draining"}
         finally:
             try:
                 wakeup.close()
-                self.control.drain(worker_id)
+                # A CPU service restart is not an operator request to retire
+                # capacity. Explicit flags/errors retain durable draining.
+                explicit_stop = self.stop_requested is not None and self.stop_requested() is True
+                if not (completed and process_shutdown) or explicit_stop:
+                    self.control.drain(worker_id)
+                withdraw_consumer(self.repo, self.control, self.backend, worker_id, self._consumer_observation)
             finally:
                 for signum, handler in prior.items():
                     signal.signal(signum, handler)
