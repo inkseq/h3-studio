@@ -1,3 +1,0 @@
-# Hatchet is CPU dispatch only. Keep its gRPC dependencies out of the GPU image.
-# Full reproducible resolver output is generated for the dispatch service image.
-hatchet-sdk==1.42.1

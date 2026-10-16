@@ -70,7 +70,7 @@ class RegistrationCapacityTests(LedgerCase):
             def projection(self, slot):
                 return {"ready": True, "observed_at": outer.now, "heartbeat_at": outer.now,
                     "worker_id": slot.spec.worker_id, "reason_code": None}
-        return DstackController(self.service, Runtime(), broker_readiness=Broker())
+        return DstackController(self.service, Runtime())
 
     def snapshot(self):
         with self.repo.engine.connect() as connection:
@@ -333,6 +333,10 @@ class RegistrationCapacityTests(LedgerCase):
         self.service.provider_inventory = Mock(return_value={"backend": "vastai", "complete": True,
             "observed_at": self.now, "instance_ids": ["2000001"]})
         controller.tick()
+        from studio_platform.postgres_dispatch import record_consumer
+        from types import SimpleNamespace
+        record_consumer(self.repo, controller.control,
+            SimpleNamespace(kind="wangp-worker", slot_key=live, expected_incarnation="c"*32), self.spec(live).worker_id)
         node = next(row for row in self.service.state(self.owner)["nodes"] if row["node_id"] == live)
         self.assertIsNone(node["registration_reason_code"])
         self.assertTrue(node["ready"])

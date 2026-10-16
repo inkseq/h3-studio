@@ -40,6 +40,8 @@ LEGACY_HELPER_PAIRS = {commit: (
         "07da40322559ee5a12829be6884c541c401d852a")}
 # Exact retained current/previous helper bytes before the staging upgrade.
 RETAINED_DSTACK_HELPER_PAIRS = {
+    "46130d852459f12d81d09c7e23178a8544d1d4d4": ("2e52c10800c619de4b62ea4909e6865a34013886179bff30ea8af1ea79baf917", "03e056e4b56b471d2feb2709725c7974c1c301b929fa4b342f1a33e1a1e5ba9a"),
+    "02681cacaf98822b5072a028fa9b313976d1c0ca": ("2e52c10800c619de4b62ea4909e6865a34013886179bff30ea8af1ea79baf917", "03e056e4b56b471d2feb2709725c7974c1c301b929fa4b342f1a33e1a1e5ba9a"),
     'b5902a1cf9bf2b32fe2de7ea35ca1cc7bbde3524': ('a4d0c782ab523b30c7f4db0b958b785480e17bb5ac0578edb93c47055d80c080', '0d8db5801395b3ecbf3ceea9109c187fb9e39f1de08473694c9ed45df0a23534'),
     'c848dde8bf1d49044743ae1f497a148e50b84409': ('9e324d663ec9fde10ee7fb9ad58bbca01203f64720de9e809b36a856fe8c1bb8', 'ff1efe4f384fd68c65067239fc8fdca96d1528f3c84aff495f3f18a2f9fa7c4a'),
     '6e6fe5ee14e82983161f7f2bf15cbfd6e8eb54f2': ('9e324d663ec9fde10ee7fb9ad58bbca01203f64720de9e809b36a856fe8c1bb8', '3b885cdbb50e6cd373daf3952f0844a0be71e3010646d699cff8bb578a972c03'),
@@ -108,8 +110,21 @@ def approved(root, directory, commit):
                     "migration_independent_approval_missing")
 
 
+def notify_layout(value):
+    return value.get("version") == 2 and value.get("layout") == "postgres-notify-v1"
+
+
 def artifact_files(value):
-    return FILES | DSTACK_FILES if "dstack" in value else FILES
+    files = FILES - {"hatchet-entrypoint.sh", "broker.example.json"} if notify_layout(value) else FILES
+    return files | DSTACK_FILES if "dstack" in value else files
+
+
+def shared_services(value):
+    return ("dstack", "controller") if notify_layout(value) else SHARED
+
+
+def directory_manifest(directory):
+    return json.loads((Path(directory) / "artifact" / MANIFEST).read_text())
 
 
 def file_limit(name):
@@ -143,8 +158,11 @@ def manifest(directory, commit, *, platform_manifest_sha256=None):
     release.regular(directory / MANIFEST, maximum=32768)
     value = json.loads((directory / MANIFEST).read_text(encoding="utf-8"))
     fields = {"version", "commit", "platform_manifest_sha256", "dispatch", "source_index_sha256", "files"}
+    if type(value) is dict and value.get("version") == 2:
+        fields |= {"layout", "dstack"}
+        release.require(notify_layout(value), "migration_layout_invalid")
     release.require(type(value) is dict and fields <= set(value) <= fields | {"native_source_commits", "dstack"}
-        and type(value["version"]) is int and value["version"] == 1 and value["commit"] == commit
+        and type(value["version"]) is int and value["version"] in (1, 2) and value["commit"] == commit
         and type(value.get("platform_manifest_sha256")) is str and release.DIGEST.fullmatch(value["platform_manifest_sha256"])
         and type(value.get("source_index_sha256")) is str and release.DIGEST.fullmatch(value["source_index_sha256"])
         and type(value["files"]) is dict and set(value["files"]) == artifact_files(value), "migration_manifest_invalid")
@@ -323,7 +341,7 @@ def prepare(root, commit, platform_directory):
             source_commits=value.get("native_source_commits"))
         overlay = (artifact / "platform-overlay.yaml").read_text()
         needle = "source: ../hatchet/entrypoint.sh"
-        release.require(overlay.count(needle) == 1, "migration_entrypoint_binding_invalid")
+        release.require(overlay.count(needle) == (0 if notify_layout(value) else 1), "migration_entrypoint_binding_invalid")
         # Resolve only this reviewed relative bind; never interpolate credentials.
         overlay = overlay.replace(needle, "source: " + json.dumps(str(target / "artifact" / "hatchet-entrypoint.sh")))
         (staging / "overlay.yaml").write_text(overlay)
@@ -548,12 +566,17 @@ def compose(base, migration_directory, environment, *arguments, timeout=180):
 def verify_services(base, directory, environment, app, dispatch):
     resources = deployment_target.resources(environment)
     compact = resources['name'] == deployment_target.COMPACT_RESOURCES
-    expected = {"app": app, "dispatch": dispatch, "controller": dispatch}
+    migration = directory_manifest(directory)
+    modern = notify_layout(migration)
+    shared = shared_services(migration)
+    expected = {"app": app, "controller": dispatch}
+    if not modern:
+        expected["dispatch"] = dispatch
     server = dispatch.get("_dstack_server")
     if server is not None:
         expected["dstack"] = server
     values = {}
-    for name in ("app", *SHARED, "hatchet-db", *(("db", "caddy") if compact else ())):
+    for name in ("app", *shared, *(("hatchet-db",) if not modern else ()), *(("db", "caddy") if compact else ())):
         identity = compose(base, directory, environment, "ps", "--all", "--quiet", name, timeout=20).decode().strip()
         release.require(re.fullmatch(r"[0-9a-f]{12,64}", identity), "migration_cpu_service_not_unique")
         inspected = json.loads(release.command(["inspect", identity], environment=environment, timeout=20))
@@ -580,7 +603,7 @@ def verify_services(base, directory, environment, app, dispatch):
             and value.get("State", {}).get("Restarting") is not True, "migration_cpu_service_not_running")
         if name in expected:
             release.require(value.get("Image") in expected[name]["archive_image_ids"], "migration_cpu_image_mismatch")
-        if name in SHARED:
+        if name in shared:
             release.require(value.get("HostConfig", {}).get("NetworkMode") in {
                 "container:" + app_id, "container:" + values["app"].get("Name", "").lstrip("/")},
                 "migration_shared_namespace_stale")
@@ -589,13 +612,15 @@ def verify_services(base, directory, environment, app, dispatch):
                             "migration_cpu_service_not_healthy")
     for service, volume, destination in (("hatchet", "SIXNINE_HATCHET_CONFIG_VOLUME", "/config"),
             ("hatchet-db", "SIXNINE_HATCHET_POSTGRES_VOLUME", "/var/lib/postgresql/data")):
+        if modern:
+            continue
         mounts = [item for item in values[service].get("Mounts", []) if item.get("Destination") == destination]
         release.require(len(mounts) == 1 and mounts[0].get("Type") == "volume"
             and mounts[0].get("Name") == environment[volume], "migration_broker_volume_changed")
     for service, image in (("dstack", "dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc1682dc2169075c6210d2ec873146f1ad8"),
             ("hatchet", "ghcr.io/hatchet-dev/hatchet/hatchet-lite:v0.110.5@sha256:cc81f078a5285d7d2051ec4a4fa459d033e1face4ca5983d82612b00da6e3fa3"),
             ("hatchet-db", "postgres:15@sha256:c961aa287d8698297cb26cdfadfbe9fd2cbaf77e53cfffe9636e8d8a1e4d842c")):
-        if service == "dstack" and server is not None:
+        if service not in values or service == "dstack" and server is not None:
             continue
         pinned = json.loads(release.command(["image", "inspect", image], environment=environment, timeout=20))[0]
         release.require(values[service].get("Image") == pinned.get("Id"), "migration_infrastructure_image_mismatch")
@@ -636,6 +661,36 @@ def guard_legacy(root, *, commit=None, active=None):
     return digest
 
 
+def stop_superseded_cpu(environment, *, remove=False):
+    """Stop exact old Compose CPU containers; retain containers, volumes and secrets.
+
+    Collect and verify all identities before stopping any. Never use down,
+    remove-orphans, broad names or a provider/GPU operation.
+    """
+    identities = []
+    for service in ("dispatch", "hatchet", "hatchet-db"):
+        found = release.command(["ps", "--all", "--quiet", "--filter",
+            "label=com.docker.compose.project=sixnine-platform", "--filter",
+            "label=com.docker.compose.service=" + service], environment=environment, timeout=20).decode().split()
+        release.require(len(found) <= 1 and all(re.fullmatch(r"[0-9a-f]{12,64}", item) for item in found),
+                        "migration_retired_cpu_identity_ambiguous")
+        for identity in found:
+            rows = json.loads(release.command(["inspect", identity], environment=environment, timeout=20))
+            release.require(type(rows) is list and len(rows) == 1, "migration_retired_cpu_identity_invalid")
+            value = rows[0]
+            labels = value.get("Config", {}).get("Labels", {})
+            release.require(labels.get("com.docker.compose.project") == "sixnine-platform"
+                and labels.get("com.docker.compose.service") == service
+                and not value.get("HostConfig", {}).get("DeviceRequests")
+                and not value.get("HostConfig", {}).get("Devices")
+                and not value.get("HostConfig", {}).get("Privileged"), "migration_retired_cpu_identity_invalid")
+            identities.append(identity)
+    if identities:
+        release.command(["stop", "--time", "210", *identities], environment=environment, timeout=240)
+        if remove:
+            release.command(["rm", *identities], environment=environment, timeout=60)
+
+
 def apply_locked(root, commit):
     """Caller holds existing release lock. Reconnect every shared CPU member."""
     storyboard_maintenance_fence(root)
@@ -671,6 +726,8 @@ def apply_locked(root, commit):
         verify_services(base, directory, env, app, dispatch)
         checker.check(base / "compose.yaml", directory / "overlay.yaml", environment=env,
             host_memory_mib=config["host_memory_mib"], check_inputs=True, probe=True)
+        if notify_layout(migration):
+            stop_superseded_cpu(env, remove=True)
         return
     previous = state.get("current")
     release.write_state(root, {**state, "pending": commit, "status": "deploying_migration", "updated_at": time.time()})
@@ -678,11 +735,13 @@ def apply_locked(root, commit):
     try:
         # Stop only the four CPU members before replacing their shared namespace.
         # Broker volumes and native provider runs/attempts remain untouched.
-        compose(base, directory, env, "stop", *SHARED, timeout=240)
-        compose(base, directory, env, "up", "-d", "db", "hatchet-db", timeout=240)
+        if notify_layout(migration):
+            stop_superseded_cpu(env)
+        compose(base, directory, env, "stop", *shared_services(migration), timeout=240)
+        compose(base, directory, env, "up", "-d", "db", *(("hatchet-db",) if not notify_layout(migration) else ()), timeout=240)
         compose(base, directory, env, "run", "--rm", "db-init", timeout=120)
         release.retire_frontend_pointer(root)
-        compose(base, directory, env, "up", "-d", "--no-deps", "--force-recreate", "app", *SHARED, timeout=300)
+        compose(base, directory, env, "up", "-d", "--no-deps", "--force-recreate", "app", *shared_services(migration), timeout=300)
         release.wait_ready(base, env)
         deadline = time.monotonic() + 180
         while True:
@@ -697,6 +756,8 @@ def apply_locked(root, commit):
                 time.sleep(3)
         compose(base, directory, env, "up", "-d", "--no-deps", "caddy")
         release.wait_proxy_stable(base, env)
+        if notify_layout(migration):
+            stop_superseded_cpu(env, remove=True)
         atomic(active_path, {"version": 1, "active": True, "paths_sha256": config_digest,
             "current": commit, "pending": None,
             **({"legacy_cpu_handoff_sha256": handoff_digest} if handoff_digest else {})})
@@ -747,7 +808,7 @@ def storyboard_receipt(root):
         and all(type(value[key]) is dict and set(value[key]) == {"paths", "active"}
             and all(type(digest) is str and release.DIGEST.fullmatch(digest) for digest in value[key].values())
             for key in ("before", "after")) and type(value["runtime_before"]) is dict
-        and set(value["runtime_before"]) == set(STORYBOARD_SERVICES), "migration_storyboard_receipt_invalid")
+        and set(value["runtime_before"]) in (set(STORYBOARD_SERVICES), {"app", "dstack", "controller", "db"}), "migration_storyboard_receipt_invalid")
     for item in value["runtime_before"].values():
         release.require(type(item) is dict and set(item) == {"image_id", "environment_sha256", "mounts_sha256"}
             and type(item["image_id"]) is str and re.fullmatch(r"sha256:[0-9a-f]{64}", item["image_id"])
@@ -803,7 +864,8 @@ def _storyboard_context(root, commit, config):
 def _storyboard_runtime(base, directory, environment):
     """Nonsecret signatures; compare unchanged runtime settings and persistent mounts."""
     result = {}
-    for name in STORYBOARD_SERVICES:
+    migration = directory_manifest(directory)
+    for name in (("app", *shared_services(migration), "db") if notify_layout(migration) else STORYBOARD_SERVICES):
         identity = compose(base, directory, environment, "ps", "--all", "--quiet", name, timeout=20).decode().strip()
         release.require(re.fullmatch(r"[0-9a-f]{12,64}", identity), "migration_cpu_service_not_unique")
         values = json.loads(release.command(["inspect", identity], environment=environment, timeout=20))
@@ -834,10 +896,11 @@ def _storyboard_runtime(base, directory, environment):
 
 def _storyboard_refresh(context, config, runtime_before):
     base, directory, environment, app, dispatch, checker = context
+    migration = directory_manifest(directory)
     # These members share app's container network namespace. App-only recreate
     # would orphan them; reconnect current approved CPU images, never provider runs.
-    compose(base, directory, environment, "stop", *SHARED, timeout=240)
-    compose(base, directory, environment, "up", "-d", "--no-deps", "--force-recreate", "app", *SHARED, timeout=300)
+    compose(base, directory, environment, "stop", *shared_services(migration), timeout=240)
+    compose(base, directory, environment, "up", "-d", "--no-deps", "--force-recreate", "app", *shared_services(migration), timeout=300)
     release.wait_ready(base, environment)
     deadline = time.monotonic() + 180
     while True:

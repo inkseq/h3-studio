@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from sqlalchemy import select, update
 from studio_platform.control import WorkerSpec
 from studio_platform.dstack_controller import DstackController
-from studio_platform.dstack_controller import HatchetProcesses
+from studio_platform.dstack_controller import SlotProcesses
 from studio_platform.fleet import SlotConfig
 from studio_platform.operator_capacity import operator_nodes
 from studio_platform.repository import attempts, budget_reservations, instance_intents, jobs, registered_workers
@@ -20,18 +20,18 @@ from pathlib import Path
 import subprocess
 
 
-class HatchetProcessesTests(unittest.TestCase):
+class SlotProcessesTests(unittest.TestCase):
     def test_only_one_supervisor_owns_workers_and_release_allows_recovery(self):
         with tempfile.TemporaryDirectory() as directory:
             work=Path(directory)/"new-work-dir"
             broker=Path(directory)/"broker.json"
-            first=HatchetProcesses(work,broker).__enter__()
+            first=SlotProcesses(work).__enter__()
             try:
                 with self.assertRaisesRegex(ValueError,"already_active"):
-                    HatchetProcesses(work,broker).__enter__()
+                    SlotProcesses(work).__enter__()
             finally:
                 first.close()
-            with HatchetProcesses(work,broker):
+            with SlotProcesses(work):
                 pass
 
     def test_supervisor_reaps_its_cpu_children_without_provider_calls(self):
@@ -45,7 +45,7 @@ class HatchetProcessesTests(unittest.TestCase):
                 self.signals.append("reap"); return 0
         with tempfile.TemporaryDirectory() as directory:
             child=Child()
-            with HatchetProcesses(Path(directory),Path(directory)/"broker.json") as processes:
+            with SlotProcesses(Path(directory)) as processes:
                 processes.children["owned-slot"]=child
             self.assertEqual(child.signals,["terminate","kill","reap"])
             self.assertEqual(processes.children,{})
@@ -53,7 +53,7 @@ class HatchetProcessesTests(unittest.TestCase):
 
     def test_worker_spawn_requires_supervisor_ownership(self):
         with tempfile.TemporaryDirectory() as directory:
-            processes=HatchetProcesses(Path(directory),Path(directory)/"broker.json")
+            processes=SlotProcesses(Path(directory))
             with self.assertRaisesRegex(ValueError,"lock_required"):
                 processes.ensure("slot",None)
 
@@ -84,14 +84,21 @@ class DstackControllerTests(fixture.DstackOperatorTests):
             def projection(self,slot):
                 return {"ready":True,"observed_at":outer.now,"heartbeat_at":outer.now,
                     "worker_id":slot.spec.worker_id,"reason_code":None}
-        return DstackController(self.service,Runtime(),broker_readiness=Broker())
+        return DstackController(self.service,Runtime())
 
     def ready(self):
         node=self.start()["node_id"]
         self.running(node)
         controller=self.controller()
         self.assertEqual(controller.tick()["nodes"][0]["state"],"ready")
+        self.consumer(node, controller)
         return node,controller
+
+    def consumer(self, node, controller):
+        from studio_platform.postgres_dispatch import record_consumer
+        record_consumer(self.repo, controller.control,
+            SimpleNamespace(kind="wangp-worker", slot_key=node, expected_incarnation="c"*32),
+            controller.runtime.slot(node).spec.worker_id)
 
     def test_exact_ready_registers_hatchet_slot_without_second_apply(self):
         node,controller=self.ready()
@@ -102,6 +109,25 @@ class DstackControllerTests(fixture.DstackOperatorTests):
             self.assertEqual(worker["spec"]["dispatch_backend"],"hatchet-v1")
             self.assertIsNone(worker_window_reason(connection,worker,self.now,deployment_profile_id=fixture.PROFILE))
 
+    def test_consumer_fence_instance_and_incarnation_fail_closed(self):
+        node, controller = self.ready()
+        worker = controller.control.get(controller.runtime.slot(node).spec.worker_id)
+        for field, value in (("worker_fence", worker["fence"]+1),
+                             ("instance_id", "different"), ("runtime_incarnation", "d"*32)):
+            with self.subTest(field=field), self.repo.transaction() as connection:
+                original = connection.execute(select(operator_nodes).where(operator_nodes.c.intent_id == node)).mappings().one()
+                import copy
+                payload=copy.deepcopy(original["payload"])
+                payload["dstack"]["consumer_observation"][field]=value
+                connection.execute(update(operator_nodes).where(operator_nodes.c.intent_id == node).values(payload=payload))
+                self.assertEqual(worker_window_reason(connection,worker,self.now,deployment_profile_id=fixture.PROFILE),
+                    "managed_queue_consumer_unconfirmed")
+            self.consumer(node, controller)
+        from studio_platform.postgres_dispatch import record_consumer
+        with self.assertRaisesRegex(ValueError, "binding_changed"):
+            record_consumer(self.repo, controller.control,
+                SimpleNamespace(kind="wangp-worker", slot_key=node, expected_incarnation="d"*32),worker["id"])
+
     def test_stale_proof_and_wrong_dispatch_cannot_admit(self):
         node,_=self.ready()
         with self.repo.transaction() as connection:
@@ -109,20 +135,16 @@ class DstackControllerTests(fixture.DstackOperatorTests):
             worker["spec"]={**worker["spec"],"dispatch_backend":"legacy"}
             self.assertEqual(worker_window_reason(connection,worker,self.now,deployment_profile_id=fixture.PROFILE),"managed_dstack_binding_mismatch")
             worker["spec"]["dispatch_backend"]="hatchet-v1"
-            self.assertEqual(worker_window_reason(connection,worker,self.now+61,deployment_profile_id=fixture.PROFILE),"managed_hatchet_consumer_unconfirmed")
+            self.assertEqual(worker_window_reason(connection,worker,self.now+61,deployment_profile_id=fixture.PROFILE),"managed_queue_consumer_unconfirmed")
 
     def test_native_ready_without_broker_consumer_cannot_admit(self):
         node=self.start()["node_id"]
         self.running(node)
         controller=self.controller()
-        controller.broker_readiness=None
         controller.tick()
         with self.repo.engine.connect() as connection:
             worker=dict(connection.execute(select(registered_workers)).mappings().one())
-            self.assertEqual(worker_window_reason(connection,worker,self.now,deployment_profile_id=fixture.PROFILE),"managed_hatchet_consumer_unconfirmed")
-        controller.broker_readiness=SimpleNamespace(projection=lambda slot:{
-            "ready":False,"observed_at":self.now,"heartbeat_at":None,
-            "worker_id":slot.spec.worker_id,"reason_code":"worker_not_found"})
+            self.assertEqual(worker_window_reason(connection,worker,self.now,deployment_profile_id=fixture.PROFILE),"managed_queue_consumer_unconfirmed")
         controller.tick()
         state=self.service.state(self.owner)
         self.assertFalse(state["nodes"][0]["ready"])
@@ -135,7 +157,10 @@ class DstackControllerTests(fixture.DstackOperatorTests):
         controller.runtime.readiness=lambda binding,run:HostReadiness(binding["manifest_digest"],binding["intent_id"],"c"*32,False)
         self.capacity.readiness=controller.runtime.readiness
         self.assertEqual(controller.tick()["nodes"][0]["state"],"busy")
-        self.assertEqual(self.store.load(node)["broker_observation"]["observed_at"],self.now)
+        # Parent observations cannot fabricate consumer liveness.
+        self.assertEqual(self.store.load(node)["consumer_observation"]["observed_at"],self.now-45)
+        self.consumer(node, controller)
+        self.assertEqual(self.store.load(node)["consumer_observation"]["observed_at"],self.now)
         with self.repo.engine.connect() as connection:
             worker=dict(connection.execute(select(registered_workers)).mappings().one())
             self.assertIsNone(worker_window_reason(connection,worker,self.now,deployment_profile_id=fixture.PROFILE))

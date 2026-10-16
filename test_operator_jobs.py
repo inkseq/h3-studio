@@ -87,11 +87,19 @@ class OperatorJobTests(LedgerCase):
                 self.service.cancel(actor, {}, "denied")
 
     def test_admin_stuck_diagnostic_projects_only_latest_closed_delivery_and_original_attempt(self):
-        from test_hatchet_dispatch import HatchetDispatchTests, Publisher
-        from studio_platform.hatchet_dispatch import OutboxDispatcher
-        original = HatchetDispatchTests.make_job(self)
-        publisher = Publisher(lose_first=True)
-        OutboxDispatcher(self.repo, publisher, publisher_id="admin-test").publish_once()
+        from test_postgres_dispatch import PostgresDispatchTests
+        from studio_platform.repository import dispatch_receipts, outbox
+        from sqlalchemy import insert
+        import uuid
+        original = PostgresDispatchTests.make_job(self)
+        # Historical unknown delivery remains diagnosable after transport removal.
+        with self.repo.transaction() as connection:
+            event_id = str(uuid.uuid4())
+            connection.execute(insert(outbox).values(id=event_id, event_type="job.dispatch_requested",
+                aggregate_id=original["id"], payload={}, created_at=self.now))
+            connection.execute(insert(dispatch_receipts).values(event_id=event_id, job_id=original["id"],
+                sequence=1, state="unknown", publish_attempts=1, not_before=self.now,
+                error_code="dispatch_response_unknown", updated_at=self.now))
         with self.repo.transaction() as connection:
             connection.execute(update(jobs).where(jobs.c.id == original["id"]).values(
                 status="cancel_requested", error_code="private raw message must not escape"))

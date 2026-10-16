@@ -24,7 +24,7 @@ Source merge is not release. Use the existing exact-version release route approp
 
 ## Time and operating authority
 
-If an investigation or fix still has no clear direction after two hours, stop that investigation and ask with five lines: observed problem, evidence, tried approach, options, requested decision. Do not let documenting uncertainty replace fixing a clear issue. Finish, close or settle when evidence supports it; retain only genuinely uncertain money/data obligations.
+If an investigation or fix still has no clear direction after two hours, record a five-line checkpoint: observed problem, evidence, tried approach, options and the selected next bounded approach. Resolve the blocker autonomously under the latest owner authority; ask only for budget overrun, permanent user-data deletion or credential/provider-account changes. Do not let documenting uncertainty replace fixing a clear issue. Finish, close or settle when evidence supports it; retain only genuinely uncertain money/data obligations.
 
 Test GPU spend is pre-authorized up to **USD 20 per Australia/Sydney calendar day**, on test machines only, with `max_price` and idle stop; stop at test completion. Count the day's cumulative test spend and active reservations conservatively before starting another rental. Once #195 exists, tests use staging. Production machines/jobs started by supervan are never touched. Existing account budgets remain enforced; this cap does not increase them or authorize settlement of unknown invoices.
 

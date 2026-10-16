@@ -35,7 +35,7 @@ class PassiveReviewTests(LedgerCase):
         self.controller = DstackController(self.service, SimpleNamespace(readiness=Mock()),
             worker_process=self.processes)
 
-    def unknown(self):
+    def unknown(self, *, intent_state="creation_unknown"):
         node_id = self.start()["node_id"]
         binding = self.store.load(node_id)
         run = no_capacity_run(self.client.runs[binding["run_name"]])
@@ -46,6 +46,10 @@ class PassiveReviewTests(LedgerCase):
         run["jobs"][0]["job_submissions"][0] = copy.deepcopy(run["latest_job_submission"])
         self.client.runs[binding["run_name"]] = run
         self.service.node_command(self.owner, node_id, {}, "original-stop")
+        if intent_state != "creation_unknown":
+            with self.repo.transaction() as connection:
+                connection.execute(update(instance_intents).where(instance_intents.c.id == node_id)
+                    .values(state=intent_state))
         self.client.get.reset_mock()
         self.before_money = self.money()
         result = self.controller.tick()
@@ -208,6 +212,55 @@ class PassiveReviewTests(LedgerCase):
             changed["latest_job_submission"]["termination_reason_message"] = message
             changed["jobs"][0]["job_submissions"][0] = copy.deepcopy(changed["latest_job_submission"])
             self.assertFalse(_terminal_review_candidate(changed, binding, self.client.project))
+
+
+class DestroyingPassiveReviewTests(PassiveReviewTests):
+    """The exact staging historical shape retains every inherited safety gate."""
+    def unknown(self):
+        return super().unknown(intent_state="destroying")
+
+    def test_destroying_original_is_not_settled_or_stopped_by_passive_observation(self):
+        node_id = self.unknown()
+        with self.repo.engine.connect() as connection:
+            intent = connection.execute(select(instance_intents).where(instance_intents.c.id == node_id)).mappings().one()
+        self.assertEqual(intent["state"], "destroying")
+        self.assertIsNone(intent["provider_instance_id"])
+        before = self.ledger()
+        self.now += 900
+        self.controller.safety_sweep()
+        self.assertFalse(self.controller.has_demand())
+        self.assertEqual(self.ledger(), before)
+        self.assertEqual(self.client.stopped, [])
+
+    def test_original_provider_identity_blocks_passive_even_when_projection_is_empty(self):
+        node_id = self.unknown()
+        with self.repo.transaction() as connection:
+            connection.execute(update(instance_intents).where(instance_intents.c.id == node_id)
+                .values(provider_instance_id="already-allocated"))
+        self.assertTrue(self.controller.has_demand())
+        self.assertNotIn(node_id, self.controller._passive_unknown)
+
+    def test_even_terminal_stopped_submission_history_blocks_passive(self):
+        node_id = self.unknown()
+        job = self.job()
+        with self.repo.transaction() as connection:
+            connection.execute(update(jobs).where(jobs.c.id == job["id"]).values(status="succeeded"))
+            connection.execute(insert(attempts).values(id=str(uuid.uuid4()), job_id=job["id"],
+                worker_id="dstack-"+node_id.replace("-", ""), fence=1, number=1, status="succeeded",
+                created_at=self.now, updated_at=self.now, submission_started_at=self.now,
+                upstream_task_id="original-task", upstream_stopped=1))
+        self.assertTrue(self.controller.has_demand())
+        self.assertNotIn(node_id, self.controller._passive_unknown)
+
+    def test_even_retired_original_worker_blocks_passive(self):
+        node_id = self.unknown()
+        with self.repo.transaction() as connection:
+            connection.execute(insert(registered_workers).values(id="dstack-"+node_id.replace("-", ""),
+                pool="dstack-test", provider="vast", instance_id="previous-instance", spec={},
+                spec_hash="a"*64, state="retired", current_job_id=None, drain_requested=1,
+                fence=1, expires_at=self.now, updated_at=self.now))
+        self.assertTrue(self.controller.has_demand())
+        self.assertNotIn(node_id, self.controller._passive_unknown)
 
 
 if __name__ == "__main__":

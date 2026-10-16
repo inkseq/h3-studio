@@ -30,6 +30,7 @@ INTENT = Path("/var/lib/sixnine/migration-secret-initialization/intent.json")
 ENDPOINTS = {"vastai": "https://console.vast.ai/api", "runpod": "https://api.runpod.io/graphql"}
 INFRASTRUCTURE = frozenset({"dstack_admin_token", "dstack_database_url",
     "hatchet_database_password", "hatchet_administrator_password"})
+POSTGRES_INFRASTRUCTURE = frozenset({"dstack_admin_token", "dstack_database_url"})
 MAX_SECRET = 65536
 try:
     from . import deployment_target
@@ -65,7 +66,8 @@ def validate(payload, *, allow_uninitialized=False, target='production'):
     """Closed schema, exact endpoints and existing safe Cloud exporter contract."""
     if (type(payload) is not dict or not {"schema_version", "providers", "grafana_cloud"} <= set(payload)
             or set(payload) - {"schema_version", "providers", "grafana_cloud", "grafana_stage_query", "r2_storage", "infrastructure", "hatchet_api_token"}
-            or type(payload["schema_version"]) is not int or payload["schema_version"] != 1):
+            or type(payload["schema_version"]) is not int or payload["schema_version"] not in (1, 2)
+            or payload["schema_version"] == 2 and "hatchet_api_token" in payload):
         raise ValueError("migration_secret_structure_invalid")
     providers = payload["providers"]
     if type(providers) is not dict or not providers or set(providers) - set(ENDPOINTS):
@@ -118,11 +120,11 @@ def validate(payload, *, allow_uninitialized=False, target='production'):
             or 'r2_storage' not in payload):
         raise ValueError('staging_isolated_optional_credentials_required')
     if "infrastructure" not in payload:
-        if not allow_uninitialized or "hatchet_api_token" in payload:
+        if not allow_uninitialized or "hatchet_api_token" in payload or payload["schema_version"] == 2:
             raise ValueError("migration_infrastructure_recovery_required")
         return
     infrastructure = payload["infrastructure"]
-    _validate_infrastructure(infrastructure)
+    _validate_infrastructure(infrastructure, schema_version=payload["schema_version"])
     if "hatchet_api_token" in payload:
         token = payload["hatchet_api_token"]
         if not _opaque(token, 32, 8192) or not re.fullmatch(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", token):
@@ -179,13 +181,14 @@ def _validate_r2_storage(value, *, target='production'):
         raise ValueError("migration_r2_storage_configuration_invalid")
 
 
-def _validate_infrastructure(infrastructure):
-    if type(infrastructure) is not dict or set(infrastructure) != INFRASTRUCTURE:
+def _validate_infrastructure(infrastructure, *, schema_version=1):
+    fields = POSTGRES_INFRASTRUCTURE if schema_version == 2 else INFRASTRUCTURE
+    if type(infrastructure) is not dict or set(infrastructure) != fields:
         raise ValueError("migration_infrastructure_recovery_required")
     if any(not _opaque(value) for value in infrastructure.values()):
         raise ValueError("migration_infrastructure_invalid")
     for key in ("hatchet_database_password", "hatchet_administrator_password"):
-        if not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", infrastructure[key]):
+        if key in fields and not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", infrastructure[key]):
             raise ValueError("migration_infrastructure_invalid")
     parsed = urlsplit(infrastructure["dstack_database_url"])
     if ((parsed.scheme, parsed.hostname, parsed.port, parsed.username, parsed.path)
@@ -389,7 +392,10 @@ def load(api, *, initialize=False, bootstrap_checks=None, checker=check_fresh_bo
     if "infrastructure" in payload:
         if intent is not None:
             _validate_intent(intent)
-            if payload["infrastructure"] != intent["infrastructure"]:
+            original = intent["infrastructure"]
+            if payload["schema_version"] == 2:
+                original = {key: original[key] for key in POSTGRES_INFRASTRUCTURE}
+            if payload["infrastructure"] != original:
                 raise RuntimeError("migration_initialization_identity_conflict")
         return payload
     if intent is not None:
@@ -417,9 +423,13 @@ def load(api, *, initialize=False, bootstrap_checks=None, checker=check_fresh_bo
     return _reconcile_intent(api, intent, current, current_version, target=target)
 
 
-def outputs(payload, *, target='production'):
+def outputs(payload, *, target='production', transport=None):
     """Return mount bytes/UID/GID/mode, never expose this through CLI output."""
     validate(payload, target=target)
+    if transport is None:
+        transport = "postgres-notify" if payload["schema_version"] == 2 else "hatchet"
+    if transport not in {"hatchet", "postgres-notify"} or transport == "hatchet" and payload["schema_version"] != 1:
+        raise ValueError("migration_secret_transport_invalid")
     infrastructure = payload["infrastructure"]
     # JSON is YAML-compatible and avoids another host parser dependency. The
     # pinned server's WARNING log level remains in the reviewed Compose overlay.
@@ -431,10 +441,13 @@ def outputs(payload, *, target='production'):
         "grafana_cloud": (serialized(payload["grafana_cloud"]), 10001, 10001, 0o600),
         "dstack_api_token": (infrastructure["dstack_admin_token"]+"\n", 0, 10001, 0o640),
         "dstack_database_url": (infrastructure["dstack_database_url"]+"\n", 0, 0, 0o600),
-        "hatchet/database-password": (infrastructure["hatchet_database_password"]+"\n", 0, 0, 0o600),
-        "hatchet/administrator-password": (infrastructure["hatchet_administrator_password"]+"\n", 0, 0, 0o600),
     }
-    if "hatchet_api_token" in payload:
+    if transport == "hatchet":
+        result.update({
+            "hatchet/database-password": (infrastructure["hatchet_database_password"]+"\n", 0, 0, 0o600),
+            "hatchet/administrator-password": (infrastructure["hatchet_administrator_password"]+"\n", 0, 0, 0o600),
+        })
+    if transport == "hatchet" and "hatchet_api_token" in payload:
         result["hatchet_api_token"] = (payload["hatchet_api_token"]+"\n", 10001, 10001, 0o600)
     if "grafana_stage_query" in payload:
         result["grafana_stage_query"] = (serialized(payload["grafana_stage_query"]), 10001, 10001, 0o600)
@@ -458,7 +471,8 @@ def write_outputs(files):
             "dstack_database_url", "hatchet/database-password", "hatchet/administrator-password", "hatchet_api_token", "r2_storage"}:
         raise ValueError("migration_unexpected_runtime_file")
     root_present = _directory(ROOT)
-    if root_present:
+    broker_mounts = any(relative.startswith("hatchet/") for relative in files)
+    if root_present and broker_mounts:
         _directory(ROOT / "hatchet")
     for relative, (content, uid, gid, mode) in files.items():
         path = ROOT / relative
@@ -471,7 +485,8 @@ def write_outputs(files):
         finally:
             os.close(fd)
     _directory(ROOT, create=True)
-    _directory(ROOT / "hatchet", create=True)
+    if broker_mounts:
+        _directory(ROOT / "hatchet", create=True)
     for relative, (content, uid, gid, mode) in files.items():
         path = ROOT / relative
         try:
@@ -521,7 +536,25 @@ def hydrate(*, initialize=False, bootstrap_checks=None):
     with host_lock():
         target = deployment_target.host()['name']
         payload = load(client(), initialize=initialize, bootstrap_checks=bootstrap_checks, target=target)
-        write_outputs(outputs(payload, target=target))
+        write_outputs(outputs(payload, target=target, transport=hydration_transport()))
+
+
+def hydration_transport():
+    """The protected release layout selects mounts, never an ambient flag.
+
+    Existing managed v1 values and on-disk broker files remain available for
+    rollback. A v2 release stops consuming them without rotating any identity.
+    """
+    path = Path('/srv/sixnine/migration/paths.json')
+    try:
+        value = _protected_json(path)
+    except FileNotFoundError:
+        return None  # First bootstrap uses the managed schema's exact default.
+    if (type(value) is not dict or set(value) != {'version', 'environment', 'host_memory_mib'}
+            or type(value['version']) is not int or value['version'] not in (1, 2)
+            or type(value['environment']) is not dict):
+        raise ValueError('migration_secret_transport_invalid')
+    return 'postgres-notify' if value['version'] == 2 else 'hatchet'
 
 
 class _Parser(argparse.ArgumentParser):

@@ -1,4 +1,4 @@
-# Existing platform image and schema; Hatchet only adds CPU dispatch dependencies.
+# Existing platform image and schema; PostgreSQL workers add CPU telemetry dependencies.
 ARG PLATFORM_IMAGE
 FROM ${PLATFORM_IMAGE}
 USER root
@@ -6,5 +6,5 @@ COPY requirements.dispatch.lock.txt /app/requirements.dispatch.lock.txt
 RUN python -m pip install --no-cache-dir --require-hashes -r /app/requirements.dispatch.lock.txt \
     && python -m pip check
 USER 10001:10001
-# A protected compose sets the exact dispatcher or per-slot worker role.
-CMD ["python", "-m", "studio_platform.hatchet_dispatch", "--help"]
+# A protected compose sets the exact controller or per-slot worker role.
+CMD ["python", "-m", "studio_platform.postgres_dispatch", "--help"]

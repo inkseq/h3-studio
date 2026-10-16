@@ -1,4 +1,30 @@
-# dstack, Hatchet and Grafana Cloud migration
+## PostgreSQL queue wake migration (#217)
+
+New artifacts use manifest version 2, layout `postgres-notify-v1` and omit
+Hatchet templates, broker services, broker mounts and the dispatcher. The
+existing fenced PostgreSQL queue remains authoritative. Immutable `hatchet-v1`
+route values are historical identity, consumed by the new per-slot runner.
+
+Install the independently reviewed helper/checker closure first. Deploy with
+the existing approved activation path and retain paths.json version 1, its
+active hash and managed secret unchanged: old path references are unused by
+the new overlay. No manual marker edit or credential migration is required.
+Future version 2 paths omit broker references; secret hydration can project the
+old v1 secret without changing credentials. Preserve all old secret files.
+
+The protected release lock covers stopping exactly verified CPU containers
+(dispatch, hatchet, hatchet-db), then recreating app/dstack/controller and
+checking exact images, namespace, mounts, provenance and health. After health,
+remove only those verified old containers without volumes; ready retries finish
+cleanup idempotently. Failure retains pending state for reconciliation.
+Rollback requires the independently approved original v1 artifact with retained
+named volumes/secrets; no down/remove-orphans, new broker bootstrap or GPU
+operation. Jobs, attempts, leases, budgets and native runs remain unchanged.
+
+Accept on staging first, including queue wake/reconnect and idle CPU evidence;
+production promotes the same artifact bytes, without rebuild.
+
+# dstack, PostgreSQL queue and Grafana Cloud migration
 
 Accepted direction: 2026-10-11. Delivery and verification are tracked in
 [#132](https://github.com/inkseq/h3-studio/issues/132), on the existing Inkseq Project.
@@ -13,16 +39,16 @@ creation, availability, history and download contracts.
 
 | Component | Responsibility | Authority it does not acquire |
 |---|---|---|
-| Business API and ledger | Authentication, admission, immutable request/route, attempts, obligations, final output | Provider lifecycle or Hatchet's execution state |
-| Hatchet | Durable dispatch, worker assignment, dispatch concurrency, bounded step timeouts | Permission to regenerate an uncertain attempt |
+| Business API and ledger | Authentication, admission, immutable request/route, attempts, obligations, final output | Provider lifecycle |
+| PostgreSQL lease queue | Durable work, fenced worker assignment and wake hints | Permission to regenerate an uncertain attempt |
 | CPU execution worker | Atomic claim, original-attempt reconciliation, SSH WanGP calls, artifact validation/collection | Rental authority, budget increases, changing models |
 | dstack 0.22.3 | Provider offers, long-lived GPU runs, machine observations and stop requests | Native model readiness or final provider billing |
 | Thin capacity policy | Owned run binding, resource floors, readiness, idle/keep-on and funded spend runway | A parallel generation queue or account-wide cleanup |
 | Grafana Cloud | OTLP metrics, logs and traces; operator dashboards | Business state, accepted work or cost settlement |
 
-Hatchet and business PostgreSQL may share a server but use separate databases,
-roles and migrations. dstack's own state is subordinate provider-control state.
-No API tokens, business database credentials or Hatchet credentials go onto
+The existing business PostgreSQL lease queue is the sole work authority.
+dstack uses its separate infrastructure database, role and migrations.
+No API tokens or business database credentials go onto
 leased GPU hosts. Reuse the existing CPU-to-GPU authenticated SSH tunnel and
 private native runtime protocol.
 
@@ -53,32 +79,18 @@ operating flag affects future admission only. Both claim and recovery filter
 the original route, exact configuration, model, manifest and output policy.
 Business owners cannot supply an execution route.
 
-Publish a dedicated dispatch event transactionally with runnable business state
-through the existing outbox. Publish acknowledgements are transport receipts,
-not new jobs. A lost publish response can produce duplicate Hatchet deliveries;
-the existing atomic business claim, physical slot binding and fencing prevent
-duplicate inference. Never implement a check-then-submit lock in application
-memory. A dispatch consumer must not consume unrelated outbox events.
+Committed runnable state emits a PostgreSQL wake hint. A slot consumer listens
+before scanning and periodically rescans after reconnect or timeout, so a lost
+notification does not lose durable work. Notifications do not grant permission
+to claim or run a GPU task. The existing atomic claim, physical slot binding,
+fencing, owner fairness and FIFO aging select the eligible original job.
 
-Generation tasks set `retries=0` and explicit execution/schedule timeouts, rather
-than Hatchet's short defaults. Worker disappearance, task timeout or cancellation
-does not prove that GPU execution stopped. Preserve physical slot obligations
-and the original attempt. Reconcile the durable submission intent and upstream
-task identity before any further action. An uncertain submission stays unknown;
-do not create a new attempt to investigate it. Collection and conditional receipt
-writes can retry safely without regenerating video.
-
-Required worker labels express route, configuration/manifest and supported mode.
-An existing attempt's recovery additionally requires its original immutable
-physical worker identity, proven from the attempt and still-bound registration.
-Shared workflow defaults never pin unrelated new jobs to one replica. A busy,
-incompatible or non-winning callback promptly yields its broker slot. The original
-business scheduler chooses among all compatible jobs under its pool lock, retaining
-owner fairness and FIFO aging; an identity delivery can claim only if its exact job
-wins that choice. Yielding creates no attempt and never authorizes another inference.
-Do not claim that Hatchet sticky assignment batches unrelated jobs by mode; it
-addresses related workflow steps. Optional loaded-mode affinity must never defeat
-resource safety, fairness or the exact model request.
+Worker disappearance, timeout or cancellation does not prove GPU execution
+stopped. Preserve the physical slot obligation and original attempt. Reconcile
+the durable submission intent and upstream task identity before further action;
+uncertain submission stays unknown. Collection and conditional receipt writes
+can retry without regenerating video. Consumer readiness is a fresh observation
+from the actual slot loop bound to its worker fence and native incarnation.
 
 ## Long-lived GPU runs
 
@@ -275,7 +287,7 @@ headers, exception bodies or raw HTTP diagnostics.
 Stages include queue wait, provision, image, weights, runtime readiness, model
 load, mode switch, asset transfer, inference, collection/validation, result upload
 and final business commit. End-to-end latency ends when validated downloads are
-available. Correlate job/attempt/Hatchet/dstack identifiers in logs and traces;
+available. Correlate job/attempt/worker/dstack identifiers in logs and traces;
 never use per-job IDs as metric labels. Keep metric dimensions bounded to stage,
 provider, profile, mode, GPU, cold/warm and outcome. Compare width/height, native
 frames, steps, reference counts, actual memory limits and versions in structured
@@ -315,7 +327,7 @@ price excludes storage/download charges and is not a bill.
 Routine implementation proceeds under the user's autonomous authorization.
 Record unresolved blockers and acceptance gaps on #132 or linked bounded issues;
 do not declare deferred stability or unobserved production criteria complete.
-Rollback disables new-route admission only. Original Hatchet jobs continue on
+Rollback disables new-route admission only. Original queued jobs continue on
 their route through reconciliation/collection. Keep legacy code until P5;
 schema additions and receipt evidence are never destructively rolled back.
 
@@ -328,7 +340,7 @@ on a lifecycle-v1 rental stays inside its original absolute deadline. On a v2
 run, keep-on is idle, until a chosen time, or until manually stopped, with funding
 through the original reservation and owner spend cap. It creates no fixed deadline.
 Native-ready and admission-ready are separate fields. Admission also requires
-the exact authenticated Hatchet consumer, labels, workflow and fresh heartbeat.
+the exact slot consumer, worker fence, native incarnation and fresh heartbeat.
 Both website availability and atomic claim use the same original-ledger gate.
 
 ### Approved P4 workspace
@@ -422,7 +434,7 @@ still-running owned allocation and do not settle its invoice.
 Use [deploy/dstack/README.md](deploy/dstack/README.md) and the additive private
 CPU overlay. The read-only deployment checker validates isolation, memory caps,
 protected mounts and optional health/auth probes; it never starts services.
-The native CUDA image and CPU dispatcher are separate images. The native base
+The native CUDA image and CPU controller are separate images. The native base
 is about 24.5 GB uncompressed, so do not pull it onto the small AWS CPU disk.
 Build/import/fixture decoding is not a real H3 qualification. Versioned source,
 local simulation, Cloud readback, published image and live release receipts must

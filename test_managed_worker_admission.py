@@ -156,8 +156,9 @@ class ManagedAdmissionTests(OperatorCase):
                     "manifest_digest": self.binding.engine_manifest_digest,
                     "configuration_id": self.binding.configuration_id, "model_id": self.binding.model_id,
                     "first_runtime_ready_at": self.now,
-                    "broker_observation": {"ready": True, "worker_id": self.worker["id"],
-                        "observed_at": self.now, "heartbeat_at": self.now}},
+                    "consumer_observation": {"ready": True, "worker_id": self.worker["id"],
+                        "observed_at": self.now, "worker_fence": self.worker["fence"],
+                        "instance_id": self.worker["instance_id"], "runtime_incarnation": "c"*32}},
                 "dstack_observation": {"run_id": "original-run", "status": "running",
                     "instance_id": self.intent["provider_instance_id"], "observed_at": self.now}}
             conn.execute(update(operator_nodes).values(payload=payload))
@@ -177,7 +178,8 @@ class ManagedAdmissionTests(OperatorCase):
             node = dict(conn.execute(select(operator_nodes)).mappings().one())
             payload = node["payload"]
             payload["dstack_observation"]["observed_at"] = self.now
-            payload["dstack"]["broker_observation"].update(observed_at=self.now, heartbeat_at=self.now)
+            payload["dstack"]["consumer_observation"].update(observed_at=self.now,
+                worker_fence=self.control.get(self.worker["id"])["fence"])
             conn.execute(update(operator_nodes).values(payload=payload))
             conn.execute(update(registered_workers).values(updated_at=self.now, expires_at=self.now+90))
 

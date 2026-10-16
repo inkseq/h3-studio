@@ -162,7 +162,12 @@ class MigrationArtifacts(unittest.TestCase):
     def test_legacy_artifact_has_no_derivative_fallback_or_extra_file_acceptance(self):
         legacy = dict(self.value)
         legacy.pop("dstack")
+        legacy.pop("layout")
+        legacy["version"] = 1
         legacy["files"] = {name:digest for name,digest in self.value["files"].items() if name not in maintenance.DSTACK_FILES}
+        for name in ("hatchet-entrypoint.sh", "broker.example.json"):
+            (self.artifact/name).write_text("historical fixture")
+            legacy["files"][name] = release.checksum(self.artifact/name)
         for name in maintenance.DSTACK_FILES:
             (self.artifact/name).unlink()
         (self.artifact/maintenance.MANIFEST).write_text(json.dumps(legacy))
@@ -260,7 +265,7 @@ class MigrationArtifacts(unittest.TestCase):
     def test_tamper_wrong_platform_extra_file_and_hardlink_rejected(self):
         with self.assertRaisesRegex(release.ReleaseError, "platform_binding_changed"):
             maintenance.manifest(self.artifact, COMMIT, platform_manifest_sha256="b" * 64)
-        path = self.artifact / "broker.example.json"
+        path = self.artifact / "runtime-config.example.json"
         original = path.read_bytes(); path.write_bytes(b"changed")
         with self.assertRaisesRegex(release.ReleaseError, "checksum_mismatch"):
             maintenance.manifest(self.artifact, COMMIT)
@@ -327,7 +332,7 @@ class MigrationArtifacts(unittest.TestCase):
             importer.assert_not_called()
 
     def test_retained_current_previous_derivatives_use_only_exact_installed_checker_pairs(self):
-        expected_commits = {'c848dde8bf1d49044743ae1f497a148e50b84409', '6e6fe5ee14e82983161f7f2bf15cbfd6e8eb54f2',
+        expected_commits = {'46130d852459f12d81d09c7e23178a8544d1d4d4', '02681cacaf98822b5072a028fa9b313976d1c0ca', 'c848dde8bf1d49044743ae1f497a148e50b84409', '6e6fe5ee14e82983161f7f2bf15cbfd6e8eb54f2',
                             'b5902a1cf9bf2b32fe2de7ea35ca1cc7bbde3524'}
         self.assertEqual(set(maintenance.RETAINED_DSTACK_HELPER_PAIRS), expected_commits)
         self.assertEqual(maintenance.RETAINED_DSTACK_HELPER_PAIRS['b5902a1cf9bf2b32fe2de7ea35ca1cc7bbde3524'],
@@ -372,7 +377,7 @@ class MigrationArtifacts(unittest.TestCase):
         self.assertEqual(publisher.publish_migration(COMMIT, self.artifact, api=api), first)
         self.assertEqual(len(api.objects), len(maintenance.artifact_files(self.value)) + 1)
         self.assertFalse((self.root / "approved-migrations").exists())
-        key = "releases/" + COMMIT + "/migration/broker.example.json"
+        key = "releases/" + COMMIT + "/migration/runtime-config.example.json"
         data, metadata = api.objects[key]; api.objects[key] = (data + b"changed", metadata)
         with self.assertRaisesRegex(ValueError, "immutable migration artifact differs"):
             publisher.publish_migration(COMMIT, self.artifact, api=api)
@@ -410,13 +415,14 @@ class MigrationArtifacts(unittest.TestCase):
         self.assertEqual(list(parent.iterdir()), [])
         prepared, value = maintenance.prepare(self.root, COMMIT, self.platform)
         self.assertEqual(value, self.value)
-        self.assertIn(str(prepared / "artifact/hatchet-entrypoint.sh").replace("\\", "\\\\"),
-            (prepared / "overlay.yaml").read_text())
+        self.assertNotIn("hatchet-entrypoint", (prepared / "overlay.yaml").read_text())
         self.assertEqual(maintenance.prepare(self.root, COMMIT, self.platform), (prepared, value))
 
 
 class MigrationGuardAndDeployment(unittest.TestCase):
     def setUp(self):
+        layout = patch.object(maintenance, "directory_manifest", return_value={"version": 1})
+        layout.start(); self.addCleanup(layout.stop)
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name); (self.root / "migration").mkdir()
         self.marker = self.root / "migration/active.json"
@@ -602,6 +608,8 @@ class MigrationGuardAndDeployment(unittest.TestCase):
 class StoryboardMaintenance(unittest.TestCase):
     """Protected flag updates with fake CPU services; no network/provider clients."""
     def setUp(self):
+        layout = patch.object(maintenance, "directory_manifest", return_value={"version": 1})
+        layout.start(); self.addCleanup(layout.stop)
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.host_parent = synthetic_host_parent(self.root)
@@ -801,3 +809,45 @@ class StoryboardMaintenance(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NotifyUpgradeBoundaries(unittest.TestCase):
+    def test_only_exact_verified_cpu_containers_removed_without_volumes(self):
+        calls = []
+        ids = {name: digit * 64 for name, digit in (("dispatch", "1"), ("hatchet", "2"), ("hatchet-db", "3"))}
+        def command(args, **kwargs):
+            calls.append(args)
+            if args[0] == "ps":
+                return ids[args[-1].split("=")[-1]].encode()
+            if args[0] == "inspect":
+                service = next(key for key, identity in ids.items() if identity == args[1])
+                return json.dumps([{"Config": {"Labels": {"com.docker.compose.project": "sixnine-platform",
+                    "com.docker.compose.service": service}}, "HostConfig": {}}]).encode()
+            return b""
+        with patch.object(release, "command", side_effect=command):
+            maintenance.stop_superseded_cpu({}, remove=True)
+        self.assertEqual(calls[-2], ["stop", "--time", "210", *ids.values()])
+        self.assertEqual(calls[-1], ["rm", *ids.values()])
+        self.assertFalse(any("-v" in call or "down" in call for call in calls))
+
+    def test_foreign_or_gpu_identity_fails_before_any_stop(self):
+        for config in ({"Devices": [{"PathOnHost": "/dev/nvidia0"}]}, {"Privileged": True}):
+            calls = []
+            def command(args, **kwargs):
+                calls.append(args)
+                if args[0] == "ps": return b"aaaaaaaaaaaa"
+                return json.dumps([{"Config": {"Labels": {"com.docker.compose.project": "sixnine-platform",
+                    "com.docker.compose.service": "dispatch"}}, "HostConfig": config}]).encode()
+            with patch.object(release, "command", side_effect=command), self.assertRaisesRegex(
+                    release.ReleaseError, "retired_cpu_identity_invalid"):
+                maintenance.stop_superseded_cpu({}, remove=True)
+            self.assertFalse(any(call[0] in ("stop", "rm") for call in calls))
+
+    def test_new_manifest_layout_is_explicit_and_legacy_file_set_retained(self):
+        old = maintenance.artifact_files({"version": 1})
+        new = maintenance.artifact_files({"version": 2, "layout": "postgres-notify-v1", "dstack": {}})
+        self.assertIn("hatchet-entrypoint.sh", old)
+        self.assertNotIn("hatchet-entrypoint.sh", new)
+        self.assertNotIn("broker.example.json", new)
+        self.assertTrue(maintenance.DSTACK_FILES <= new)
+        self.assertFalse(maintenance.notify_layout({"version": 2, "layout": "unapproved"}))

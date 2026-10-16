@@ -142,7 +142,7 @@ class MigrationDeployTests(unittest.TestCase):
     def test_public_origin_and_proxy_only_phase_are_closed_and_consistent(self):
         self.assertEqual(self.document["services"]["app"]["environment"]["PUBLIC_ORIGIN"], "https://inkseq.com")
         legacy = copy.deepcopy(self.document)
-        for name in ("app", "controller", "dispatch"):
+        for name in ("app", "controller"):
             legacy["services"][name]["environment"].pop("PUBLIC_ORIGIN")
         legacy["services"]["app"]["environment"].pop("PUBLIC_ORIGIN_ALIASES")
         legacy["services"]["app"]["environment"]["SIXNINE_PUBLIC_ORIGIN"] = "https://www.sixnine.art"
@@ -211,13 +211,12 @@ class MigrationDeployTests(unittest.TestCase):
         from studio_platform.storage_config import S3Credentials
         document = self.render_r2()
         self.assertEqual(document["secrets"]["r2_storage"]["file"], "/run/sixnine-secrets/r2_storage")
-        app, controller, dispatch = (document["services"][name]["environment"]
-            for name in ("app", "controller", "dispatch"))
+        app, controller = (document["services"][name]["environment"]
+            for name in ("app", "controller"))
         fields = ("SIXNINE_STORAGE_PROVIDER", "SIXNINE_STORAGE_ENDPOINT", "SIXNINE_STORAGE_REGION",
             "SIXNINE_STORAGE_BUCKET", "SIXNINE_STORAGE_PROFILE")
         self.assertEqual({key: app[key] for key in fields}, {key: controller[key] for key in fields})
-        self.assertEqual({key: app[key] for key in fields}, {key: dispatch[key] for key in fields})
-        self.assertNotIn("SIXNINE_STORAGE_CREDENTIAL_FILE", dispatch)
+        self.assertNotIn("dispatch", document["services"])
         selected = {key: value for key, value in controller.items() if key.startswith("SIXNINE_STORAGE_")}
         self.assertEqual(selected["SIXNINE_STORAGE_CREDENTIAL_FILE"], "/run/secrets/r2_storage")
         if os.name == "nt":
@@ -242,7 +241,7 @@ class MigrationDeployTests(unittest.TestCase):
 
     def test_staging_requires_exact_origin_bucket_profile_and_matching_workers(self):
         document = self.render_r2()
-        for name in ('app', 'controller', 'dispatch'):
+        for name in ('app', 'controller'):
             document['services'][name]['environment'].update(PUBLIC_ORIGIN='https://staging.inkseq.com',
                 SIXNINE_STORAGE_PROFILE='cloudflare-r2--sixnine-staging-20261015', SIXNINE_STORAGE_BUCKET='sixnine-staging-media')
         document['services']['app']['environment']['PUBLIC_ORIGIN_ALIASES'] = ''
@@ -253,7 +252,7 @@ class MigrationDeployTests(unittest.TestCase):
         with self.assertRaises(ValueError): validate(document)
         for change in ('profile', 'bucket', 'origin'):
             broken = copy.deepcopy(document)
-            for name in ('app', 'controller', 'dispatch'):
+            for name in ('app', 'controller'):
                 broken['services'][name]['environment'].update({
                     'profile': {'SIXNINE_STORAGE_PROFILE': 'cloudflare-r2--rig-root'},
                     'bucket': {'SIXNINE_STORAGE_BUCKET': 'sixnine-media'},
@@ -263,7 +262,7 @@ class MigrationDeployTests(unittest.TestCase):
 
     def test_checker_inherits_stage_identity_from_the_render_environment(self):
         document = copy.deepcopy(self.document)
-        for name in ('app', 'controller', 'dispatch'):
+        for name in ('app', 'controller'):
             document['services'][name]['environment']['PUBLIC_ORIGIN'] = 'https://staging.inkseq.com'
         document['services']['app']['environment']['PUBLIC_ORIGIN_ALIASES'] = ''
         document['services']['caddy']['environment'] = {'INKSEQ_LEGACY_REDIRECT': '0'}
@@ -286,8 +285,6 @@ class MigrationDeployTests(unittest.TestCase):
                     "migration_storage_r2_configuration_invalid"),
                 (lambda d: d["secrets"]["r2_storage"].update(file=d["secrets"]["grafana_cloud"]["file"]),
                     "migration_storage_r2_configuration_invalid"),
-                (lambda d: d["services"]["dispatch"]["environment"].update(SIXNINE_STORAGE_CREDENTIAL_FILE="/run/secrets/r2_storage"),
-                    "migration_storage_dispatch_credential"),
                 (lambda d: d["services"]["controller"]["environment"].update(R2_SECRET_ACCESS_KEY="SYNTHETIC_PRIVATE"),
                     "migration_secret_value_in_compose"),
                 (lambda d: d["services"]["app"]["environment"].update(R2_TOKEN="SYNTHETIC_PRIVATE"),
@@ -301,21 +298,21 @@ class MigrationDeployTests(unittest.TestCase):
             "migration_storage_local_configuration_invalid")
 
     def test_real_compose_merge_shared_namespace_pins_and_memory(self):
-        self.assertEqual(self.receipt["service_memory_cap_mib"], 3296)
+        self.assertEqual(self.receipt["service_memory_cap_mib"], 2528)
         self.assertGreaterEqual(self.receipt["host_reserve_mib"], 512)
         self.assertEqual(self.receipt["gpu_operations"], 0)
         services = self.document["services"]
         self.assertEqual(memory_mib(services["dstack"]["mem_limit"]), 768)
-        self.assertEqual(memory_mib(services["hatchet"]["mem_limit"]), 384)
+        self.assertNotIn("hatchet", services)
         self.assertEqual(services["dstack"]["entrypoint"], ["python", "-c"])
-        self.assertEqual(services["hatchet-db"]["networks"], {"database": None})
+        self.assertNotIn("hatchet-db", services)
         self.assertEqual(services["controller"]["command"], ["python", "-m", "studio_platform.dstack_controller"])
         self.assertIn("app_database_url", {s["source"] for s in services["app"]["secrets"]})
         self.assertIn("google_titles", {s["source"] for s in services["app"]["secrets"]})
 
     def test_storyboard_rollout_reaches_only_app_and_preserves_disabled_default(self):
         self.assertEqual(self.document["services"]["app"]["environment"]["SIXNINE_STORYBOARD_OWNERS"], "")
-        for name in ("dstack", "hatchet", "controller", "dispatch"):
+        for name in ("dstack", "controller"):
             self.assertNotIn("SIXNINE_STORYBOARD_OWNERS", self.document["services"][name]["environment"])
         environment = fixture_environment()
         environment["SIXNINE_STORYBOARD_OWNERS"] = "superdan,supervan"
@@ -340,7 +337,7 @@ class MigrationDeployTests(unittest.TestCase):
 
     def test_rendered_controller_settings_reach_its_exact_cpu_slot_child(self):
         from studio_platform.control import WorkerSpec
-        from studio_platform.dstack_controller import HatchetProcesses
+        from studio_platform.dstack_controller import SlotProcesses
         from studio_platform.fleet import SlotConfig, read_config
         from studio_platform.runtime_catalog import engine_manifest, PROFILE_IDS
         from studio_platform.settings import Settings
@@ -383,13 +380,14 @@ class MigrationDeployTests(unittest.TestCase):
                     child_settings = Settings.from_environment()
                     self.assertEqual((child_settings.generation_enabled, child_settings.execution_backend),
                         (app_settings.generation_enabled, app_settings.execution_backend))
-                    self.assertEqual(command[1:4], ["-m", "studio_platform.hatchet_dispatch", "worker"])
-                    fleet = read_config(command[command.index("--fleet-config")+1])
+                    self.assertEqual(command[1:3], ["-m", "studio_platform.fleet"])
+                    self.assertEqual(command[command.index("--slot")+1], spec.worker_id)
+                    fleet = read_config(command[command.index("--config")+1])
                     self.assertEqual(fleet.slot(spec.worker_id).spec, spec)
                     children.append(child_settings)
                     return SimpleNamespace(poll=lambda:0, wait=lambda:0)
                 with patch.dict(os.environ, selected["controller"], clear=True), \
-                        HatchetProcesses(Path(temporary)/"supervisor", Path(temporary)/"broker.json", popen=spawn) as processes:
+                        SlotProcesses(Path(temporary)/"supervisor", popen=spawn) as processes:
                     processes.ensure("original-intent", slot)
                 self.assertEqual(len(children), 1)
 
@@ -406,11 +404,10 @@ class MigrationDeployTests(unittest.TestCase):
                              "migration_dstack_auth_invalid")
 
     def test_existing_broker_volumes_and_business_ledger_cannot_be_replaced(self):
-        self.assert_rejected(lambda d: d["volumes"]["hatchet-postgres"].update(external=False), "migration_blank_broker_volume")
+        self.assert_rejected(lambda d: d.setdefault("volumes", {}).update({"hatchet-postgres": {"external": True}}), "migration_retired_broker_mount")
         self.assert_rejected(lambda d: d["services"]["controller"]["environment"].update(SIXNINE_DATABASE_URL_FILE="/tmp/new.db"),
                              "migration_business_authority_split")
-        self.assert_rejected(lambda d: d["services"]["hatchet"]["environment"].update(SERVER_ALLOW_SIGNUP="true"),
-                             "migration_hatchet_auth_invalid")
+        self.assert_rejected(lambda d: d["secrets"].update(hatchet_broker={"file": "/tmp/retired"}), "migration_retired_broker_mount")
 
     def test_unpinned_images_gpu_access_and_memory_overcommit_rejected(self):
         self.assert_rejected(lambda d: d["services"]["controller"].update(image="test:latest"), "migration_image_unpinned")
@@ -421,7 +418,7 @@ class MigrationDeployTests(unittest.TestCase):
         self.assert_rejected(lambda d: d["services"]["controller"].update(volumes=[]), "migration_assets_split")
         self.assert_rejected(lambda d: d["services"]["controller"]["environment"].update(SIXNINE_TELEMETRY_CONFIG_FILE=""),
                              "migration_cloud_telemetry_missing")
-        self.assert_rejected(lambda d: d["services"]["dispatch"]["environment"].update(SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID="another-profile"),
+        self.assert_rejected(lambda d: d["services"]["controller"]["environment"].update(SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID="another-profile"),
                              "migration_default_profile_missing_or_split")
         self.assert_rejected(lambda d: d["services"]["controller"]["environment"].pop("SIXNINE_GENERATION_ENABLED"),
                              "migration_controller_execution_settings_split")

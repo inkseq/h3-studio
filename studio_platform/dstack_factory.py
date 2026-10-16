@@ -27,7 +27,7 @@ from .runtime_catalog import engine_manifest, get_profile
 from .wangp_bootstrap import SOURCE_NAMES, read_sources
 
 CONFIG_KEYS = {"version", "work_dir", "source_index_file", "ssh_key_file", "known_hosts_file",
-    "broker_config_file", "first_local_port", "last_local_port", "trust_first_host_key"}
+    "first_local_port", "last_local_port", "trust_first_host_key"}
 ENTRY_KEYS = {"runtime_profile_id", "mode", "gpu_count", "profile_slot_index", "directory",
     "engine_manifest_digest", "source_sha256"}
 PURPOSE = "local-unqualified-dstack-source-set"
@@ -129,7 +129,7 @@ class RuntimeFactory:
     def __init__(self, repo, store, configuration_path):
         self.repo, self.store = repo, store
         config = _json(configuration_path)
-        _require(set(config) == CONFIG_KEYS and type(config.get("version")) is int and config["version"] == 1
+        _require(set(config) in (CONFIG_KEYS, CONFIG_KEYS | {"broker_config_file"}) and type(config.get("version")) is int and config["version"] == 1
             and type(config.get("trust_first_host_key")) is bool, "dstack_runtime_config_invalid")
         first, last = config.get("first_local_port"), config.get("last_local_port")
         _require(type(first) is int and type(last) is int and 1024 <= first <= last <= 65535
@@ -140,7 +140,6 @@ class RuntimeFactory:
         self.ssh_key_file = _file(config["ssh_key_file"], maximum=65536, read=False)
         self.known_hosts_file = _path(config["known_hosts_file"])
         _directory_parent(self.known_hosts_file.parent)
-        self.broker_config_file = _file(config["broker_config_file"], read=False)
         self.trust_first_host_key = config["trust_first_host_key"]
         index_file = _path(config["source_index_file"])
         index = _json(index_file)
@@ -272,7 +271,7 @@ def create_runtime(repo, store, *, configuration_path=None):
         factory = RuntimeFactory(repo, store, filename)
         runtime = DstackNativeRuntime(store, factory.config_for_binding, coordinates_for_run,
             max_hosts=factory.last_port - factory.first_port + 1)
-        return runtime, factory.broker_config_file, factory.work_dir
+        return runtime, factory.work_dir
     except DstackError:
         raise
     except Exception:

@@ -1,3 +1,29 @@
+## PostgreSQL queue wake migration (#217)
+
+New artifacts use manifest version 2, layout `postgres-notify-v1` and omit
+Hatchet templates, broker services, broker mounts and the dispatcher. The
+existing fenced PostgreSQL queue remains authoritative. Immutable `hatchet-v1`
+route values are historical identity, consumed by the new per-slot runner.
+
+Install the independently reviewed helper/checker closure first. Deploy with
+the existing approved activation path and retain paths.json version 1, its
+active hash and managed secret unchanged: old path references are unused by
+the new overlay. No manual marker edit or credential migration is required.
+Future version 2 paths omit broker references; secret hydration can project the
+old v1 secret without changing credentials. Preserve all old secret files.
+
+The protected release lock covers stopping exactly verified CPU containers
+(dispatch, hatchet, hatchet-db), then recreating app/dstack/controller and
+checking exact images, namespace, mounts, provenance and health. After health,
+remove only those verified old containers without volumes; ready retries finish
+cleanup idempotently. Failure retains pending state for reconciliation.
+Rollback requires the independently approved original v1 artifact with retained
+named volumes/secrets; no down/remove-orphans, new broker bootstrap or GPU
+operation. Jobs, attempts, leases, budgets and native runs remain unchanged.
+
+Accept on staging first, including queue wake/reconnect and idle CPU evidence;
+production promotes the same artifact bytes, without rebuild.
+
 # dstack capacity boundary
 
 `studio_platform.dstack_capacity` targets dstack **0.22.3** using its REST API.
@@ -116,10 +142,10 @@ storage. The wider rollout/retirement gate is tracked in issue #132.
 Merge `platform-overlay.yaml` **after** `deploy/platform/compose.yaml`, in that
 order. Relative overlay paths resolve against the first Compose file's directory.
 It preserves the app, database, assets, frontend and Caddy ingress. CPU dstack,
-Hatchet, dispatch and controller join `network_mode: service:app`; their private
-loopback endpoints are `127.0.0.1:3000`, `127.0.0.1:8888` and `127.0.0.1:7077`.
+The controller and dstack server join `network_mode: service:app`; their private
+dstack loopback endpoint is `127.0.0.1:3000`.
 The controller creates the native SSH tunnels in this namespace, so its child
-Hatchet workers can use their original `127.0.0.1:19100...` endpoints. None of
+slot workers can use their original `127.0.0.1:19100...` endpoints. None of
 these management ports is published or added to Caddy. There is no GPU device
 request in this CPU deployment.
 
@@ -130,14 +156,10 @@ exact reviewed source and matching dispatch dependencies. This overlay uses
 `pull_policy: never`, so separate image verification must precede service startup.
 No image is built, pushed or deployed by the checker.
 
-All app/dispatcher/controller processes use the **same** mounted
-`app_database_url` and `/srv/sixnine/platform-data`. Hatchet retains its separate
-PostgreSQL database and existing signing/config volumes, selected explicitly by
-`SIXNINE_HATCHET_POSTGRES_VOLUME` and `SIXNINE_HATCHET_CONFIG_VOLUME`; the external
-volume requirement prevents silently starting an empty broker. Stop any previous
-standalone Hatchet PostgreSQL process before moving its volume; never attach two
-PostgreSQL servers to the same data directory. Do not run `down -v` or reset the
-engine to roll back a source release.
+All app/controller processes use the **same** mounted
+`app_database_url` and `/srv/sixnine/platform-data`. Historical Hatchet volumes
+and protected credentials remain untouched for approved v1 rollback; they are
+not mounted or started by the active overlay. Never run `down -v` or reset data.
 
 dstack uses an independently provisioned infrastructure database/role on the
 private original PostgreSQL server: the protected DSN must select driver
@@ -187,11 +209,10 @@ never belong in that four-file bundle. The example runtime JSON must use the
 container paths in this section rather than the standalone host paths.
 
 The aggregate service memory **cap**, including the one-off existing db-init,
-is 3296 MiB, leaving 544 MiB on a 3840 MiB host. This is a configuration budget,
+is 2528 MiB, leaving 1312 MiB on a 3840 MiB host. This is a configuration budget,
 not a measured resource guarantee. dstack receives 768 MiB for server startup;
 the 512 MiB cap caused repeated kernel OOM kills even when Docker's latest
-`State.OOMKilled` was false after a restart. Hatchet receives 384 MiB within the
-same aggregate budget. Check kernel OOM records and restart history as well as
+`State.OOMKilled` was false after a restart. Check kernel OOM records and restart history as well as
 current container state when qualifying these caps. The controller's 640 MiB
 includes its native CPU worker children; qualify at most two concurrent slots initially and measure
 actual RSS, swap/OOM and media collection before expanding. Existing services
@@ -212,10 +233,9 @@ and prints only a bounded structural receipt. It never prints resolved config,
 credentials or Docker stderr and never executes `up`, `pull`, `stop` or `create`.
 After the release owner starts the existing services, `--probe` executes only
 read-only private health/auth requests through app: dstack must reject an
-unauthenticated user read and accept the configured admin token; Hatchet's
-readiness endpoint must respond. Its health response alone is not native GPU,
-broker-worker registration or inference proof. Authenticated Hatchet execution
-qualification remains the separate pinned engine proof.
+unauthenticated user read and accept the configured admin token. Health alone
+is not native GPU or slot-consumer readiness; verify the actual consumer fence
+and heartbeat separately.
 
 An opt-in isolated CPU proof runs the exact rendered protected-file entrypoint
 against a fresh non-admin PostgreSQL database, with synthetic credentials and
