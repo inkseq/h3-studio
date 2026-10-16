@@ -836,13 +836,9 @@ class Repository:
     def _settle(self, connection, reference_type, reference_id, actual_cost):
         actual_cost = money(actual_cost)
         settled_at = self._budget_now()
-        from .spending_limits import lock_owner
-        owners = connection.execute(select(budget_accounts.c.tenant_id, budget_accounts.c.owner_id).join(
-            budget_reservations, budget_reservations.c.account_id == budget_accounts.c.id).where(
-            budget_reservations.c.reference_type == reference_type,
-            budget_reservations.c.reference_id == reference_id)).all()
-        for tenant, owner in sorted(set((tenant, owner) for tenant, owner in owners if owner is not None)):
-            lock_owner(connection, tenant, owner)
+        # Settlement records authoritative actuals under the original lock
+        # order. Admission caps must not add an owner/account lock inversion or
+        # prevent late costs from being recorded truthfully.
         rows = list(connection.execute(select(budget_reservations).where(
             budget_reservations.c.reference_type == reference_type,
             budget_reservations.c.reference_id == reference_id).order_by(

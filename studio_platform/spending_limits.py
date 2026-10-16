@@ -124,16 +124,33 @@ def daily_projection(connection, tenant, owner, now, *, actor_id=None):
 
 def admit_spending(repo, connection, scope, reference_type, reference_id, amount, *, actor_id, record_origin=True, confirmation_required=False, spending_settings_version=None):
     lock_owner(connection, scope.tenant_id, scope.owner_id)
+    origin = connection.execute(select(spending_origins).where(
+        spending_origins.c.reference_type == reference_type,
+        spending_origins.c.reference_id == reference_id)).mappings().first()
+    if origin:
+        if (origin['tenant_id'], origin['owner_id']) != (scope.tenant_id, scope.owner_id):
+            raise Conflict('spending_origin_changed')
+        actor_id = origin['actor_id']
+    increment = amount
+    if record_origin and origin:
+        # A new budget layer attributes the same obligation; it does not buy it
+        # again. Rolling instance funding passes a true increment separately.
+        previous = list(connection.execute(select(budget_reservations).where(
+            budget_reservations.c.reference_type == reference_type,
+            budget_reservations.c.reference_id == reference_id)).mappings())
+        if any(row['state'] != 'reserved' for row in previous):
+            raise Conflict('budget_already_settled')
+        increment = max(0, amount - max((money(row['amount_microusd']) for row in previous), default=0))
     settings = read_settings(connection, scope.tenant_id, scope.owner_id)
     if spending_settings_version is not None and settings["version"] != spending_settings_version:
         raise Conflict("spending_settings_changed")
     value, now = settings["value"], repo.clock()
-    if value["daily_limit_microusd"] and daily_projection(connection, scope.tenant_id, scope.owner_id, now) + amount > value["daily_limit_microusd"]:
+    if increment and value["daily_limit_microusd"] and daily_projection(connection, scope.tenant_id, scope.owner_id, now) + increment > value["daily_limit_microusd"]:
         raise BudgetExceeded("user_daily_limit_reached")
     cap = value["connection_limits"].get(actor_id, 0)
-    if cap and daily_projection(connection, scope.tenant_id, scope.owner_id, now, actor_id=actor_id) + amount > cap:
+    if increment and cap and daily_projection(connection, scope.tenant_id, scope.owner_id, now, actor_id=actor_id) + increment > cap:
         raise BudgetExceeded("connection_daily_limit_reached")
-    if reference_type == "job" and (confirmation_required or value["ask_above_microusd"]):
+    if reference_type == "job" and (not origin or increment) and (confirmation_required or value["ask_above_microusd"]):
         job = connection.execute(select(jobs).where(jobs.c.id == reference_id)).mappings().one()
         from .repository import plans
         plan = connection.execute(select(plans).where(plans.c.id == job["plan_id"])).mappings().one()
@@ -141,12 +158,12 @@ def admit_spending(repo, connection, scope, reference_type, reference_id, amount
             spending_confirmations.c.owner_id == scope.owner_id, spending_confirmations.c.actor_id == actor_id,
             spending_confirmations.c.plan_id == plan["id"])
         confirmation = connection.execute(select(spending_confirmations).where(condition).with_for_update()).mappings().first()
-        valid = confirmation and confirmation["plan_hash"] == plan["plan_hash"] and confirmation["settings_version"] == settings["version"] and confirmation["expires_at"] > now and not confirmation["consumed_reference"]
+        valid = confirmation and confirmation["plan_hash"] == plan["plan_hash"] and confirmation["settings_version"] == settings["version"] and confirmation["expires_at"] > now and confirmation["consumed_reference"] in (None, reference_id) and amount <= plan["estimated_cost_microusd"]
         if not valid and (confirmation_required or amount > value["ask_above_microusd"]):
             raise SpendingConfirmationRequired(plan["id"], amount)
         if valid:
             connection.execute(update(spending_confirmations).where(condition).values(consumed_reference=reference_id))
-    if record_origin:
+    if record_origin and not origin:
         connection.execute(insert(spending_origins).values(reference_type=reference_type,
             reference_id=reference_id, tenant_id=scope.tenant_id, owner_id=scope.owner_id,
             actor_id=actor_id, created_at=now))

@@ -6,7 +6,7 @@ import uuid
 
 from sqlalchemy import insert, select, update
 
-from studio_platform.repository import (BudgetExceeded, spending_settings, spending_confirmations,
+from studio_platform.repository import (BudgetExceeded, spending_settings, spending_confirmations, spending_origins,
     jobs, budget_reservations, Scope)
 from studio_platform.spending_limits import daily_projection, SpendingConfirmationRequired, check_submission_confirmation
 from studio_platform.auth import Principal
@@ -95,6 +95,63 @@ class SpendingLimitsTests(LedgerCase):
         self.assertTrue(self.submit(plan=plan,key="original")["created"])
         self.assertFalse(self.submit(plan=plan,key="original")["created"])
         with self.assertRaises(SpendingConfirmationRequired):self.submit(plan=plan,key="second")
+
+    def test_extra_budget_layer_preserves_original_actor_and_counts_the_same_charge_once(self):
+        self.settings(daily=100_000,ask=1,connections={'key:one':100_000,'key:two':1})
+        plan=self.plan()
+        with self.repo.transaction() as connection:
+            connection.execute(insert(spending_confirmations).values(tenant_id=self.scope.tenant_id,
+                owner_id=self.scope.owner_id,actor_id='key:one',plan_id=plan['id'],plan_hash=plan['plan_hash'],
+                settings_version=1,expires_at=self.now+100))
+        row=self.submit(plan=plan,actor='key:one')
+        self.repo.configure_budget('extra-layer',tenant_id=self.scope.tenant_id,limit_microusd=1_000_000)
+        # Lowering a cap does not erase or block attribution of the same already
+        # accepted obligation. A different caller cannot change its connection.
+        self.settings(daily=50_000,ask=1,connections={'key:one':50_000,'key:two':1})
+        with self.repo.transaction() as connection:
+            self.repo._reserve(connection,self.scope,('extra-layer',),'job',row['id'],100_000,
+                spending_actor='key:two',confirmation_required=True)
+        self.assertEqual(self.projection(),100_000)
+        self.assertEqual(self.projection('key:one'),100_000)
+        self.assertEqual(self.projection('key:two'),0)
+        with self.repo.engine.connect() as connection:
+            origin=connection.execute(select(spending_origins)).mappings().one()
+            self.assertEqual(origin['actor_id'],'key:one')
+            self.assertEqual(connection.execute(select(spending_confirmations.c.consumed_reference)).scalar_one(),row['id'])
+        self.assertEqual(self.repo.get_budget('extra-layer')['reserved_microusd'],100_000)
+
+    def test_extra_layer_cannot_turn_an_original_approval_into_a_larger_quote(self):
+        self.settings(ask=1)
+        plan=self.plan()
+        with self.repo.transaction() as connection:
+            connection.execute(insert(spending_confirmations).values(tenant_id=self.scope.tenant_id,
+                owner_id=self.scope.owner_id,actor_id='browser:superdan',plan_id=plan['id'],
+                plan_hash=plan['plan_hash'],settings_version=1,expires_at=self.now+100))
+        row=self.submit(plan=plan)
+        self.repo.configure_budget('extra-layer',tenant_id=self.scope.tenant_id,limit_microusd=1_000_000)
+        with self.assertRaises(SpendingConfirmationRequired):
+            with self.repo.transaction() as connection:
+                self.repo._reserve(connection,self.scope,('extra-layer',),'job',row['id'],150_000,
+                    spending_actor='browser:superdan',confirmation_required=True)
+        self.assertEqual(self.projection(),100_000)
+        self.assertEqual(self.repo.get_budget('extra-layer')['reserved_microusd'],0)
+
+    def test_postgres_settlement_does_not_take_the_admission_owner_lock(self):
+        if self.repo.engine.dialect.name!='postgresql':
+            self.skipTest('isolated PostgreSQL required for overlapping transactions')
+        from studio_platform.spending_limits import lock_owner
+        self.settings(daily=100_000)
+        row=self.submit()
+        def settle():
+            with self.repo.transaction() as connection:
+                self.repo._settle(connection,'job',row['id'],150_000)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            with self.repo.transaction() as holder:
+                lock_owner(holder,self.scope.tenant_id,self.scope.owner_id)
+                executor.submit(settle).result(timeout=3)
+        self.assertEqual(self.repo.get_budget('owner-budget')['spent_microusd'],150_000)
+        self.assertEqual(self.projection(),150_000)
+        with self.assertRaises(BudgetExceeded):self.submit()
 
     def test_settings_change_invalidates_old_confirmation_without_reset(self):
         self.settings(ask=1)
