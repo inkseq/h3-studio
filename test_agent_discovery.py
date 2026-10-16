@@ -127,7 +127,7 @@ class AgentDiscoveryTests(unittest.TestCase):
         self.assertEqual(connection["profile"]["key_lifetime_days"], 90)
         self.assertEqual(connection["profile"]["scopes"], ["assets:read", "assets:write", "assistant:run",
             "jobs:read", "jobs:write", "projects:create", "projects:read", "projects:write"])
-        self.assertEqual(connection["code_ttl_seconds"], 300)
+        self.assertEqual(connection["code_ttl_seconds"], 600)
         self.assertEqual(connection["recovery_ttl_seconds"], 300)
         self.assertNotIn("observed_at", manifest)
         self.assertNotIn("profiles", manifest)

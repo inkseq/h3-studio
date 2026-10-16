@@ -228,3 +228,20 @@ class ManagementTests(ledger.LedgerCase):
             record_created(conn,self.scope.tenant_id,agent_b,'shot','shot-1',self.now,'story-a')
             self.assertEqual(creator(conn,self.scope.tenant_id,agent_a.owner,'shot','shot-1','story-a')['connection_id'],first['connection']['id'])
             self.assertIsNone(creator(conn,self.scope.tenant_id,agent_a.owner,'shot','shot-1','unknown-story'))
+
+    def test_legacy_untyped_entities_keep_audit_without_invented_creator(self):
+        from studio_platform.project_activity import append_activity,activity
+        from studio_platform.agent_management import creator
+        grant,_,agent,_,_,_=self.connect()
+        payload={'entities':[{'id':'old','title':'Original retained title'},
+            {'id':'future','type':'unknown-kind'},{'id':'valid','type':'shot'}]}
+        original=copy.deepcopy(payload)
+        with self.repo.transaction() as conn:
+            append_activity(conn,tenant_id=self.scope.tenant_id,principal=agent,
+                project_id='legacy-story',version=1,occurred_at=self.now,before={'entities':[]},after=payload)
+            self.assertIsNone(creator(conn,self.scope.tenant_id,agent.owner,'unknown-kind','future','legacy-story'))
+            self.assertIsNone(creator(conn,self.scope.tenant_id,agent.owner,'shot','old','legacy-story'))
+            self.assertEqual(creator(conn,self.scope.tenant_id,agent.owner,'shot','valid','legacy-story')['connection_id'],grant['connection']['id'])
+            row=conn.execute(select(activity).where(activity.c.project_id=='legacy-story')).mappings().one()
+            self.assertEqual(set(row['target_entity_ids']),{'old','future','valid'})
+        self.assertEqual(payload,original)

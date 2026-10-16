@@ -377,7 +377,7 @@ def collect(root, state, browser, agent, headers, *, decoder=None):
     assert tracks[0]['generatedFrom']['videoArtifactId'] == video['id']
     assert tracks[0]['generatedFrom']['audioArtifactId'] == audio['id']
     assert tracks[0]['start'] == 0 and tracks[0]['end'] == 5 and not tracks[0]['muted']
-    assert public.request(browser, 'GET', '/v1/projects/'+PROJECT) == project
+    assert public.request(browser, 'GET', '/v1/projects/'+PROJECT) == {**project, 'created_by': {}}  # Ordinary PAT: no assistant attribution.
     state.update(adopted=True, browser_api_same_document=True, project_version=project['version'],
         completed_at=datetime.now(timezone.utc).isoformat())
     save(root, state)

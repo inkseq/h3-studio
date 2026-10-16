@@ -263,7 +263,7 @@ class GuidedTests(unittest.TestCase):
             {"op": "entity.create", "entity": {"type": "scene", "parentId": "missing"}}], version=2, headers=headers)
         self.assertEqual(invalid.status_code, 422)
         latest = self.client.get("/v1/projects/story-one").json()
-        self.assertEqual(latest, result.json())
+        self.assertEqual(latest, {**result.json(), "created_by": {}})
         self.assertEqual(self.client.get("/v1/projects/story-one/entities?type=shot", headers=headers).json()["entities"], [shot])
 
     def test_discovered_schema_examples_execute_without_generation(self):
@@ -345,7 +345,7 @@ class GuidedTests(unittest.TestCase):
             self.assertEqual(response.status_code, 422, response.text)
             self.assertIn(message, response.json()["detail"])
             self.assertIn("/v1/guided-schema", response.json()["detail"])
-            self.assertEqual(self.client.get("/v1/projects/story-one", headers=headers).json(), before)
+            self.assertEqual(self.client.get("/v1/projects/story-one", headers=headers).json(), {**before, "created_by": {}})
 
     def test_concurrent_actions_commit_once_and_replay_same_receipt(self):
         self.setup_project()
