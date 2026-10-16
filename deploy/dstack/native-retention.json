@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "repository": "inkseq/h3-studio",
+  "account": "829135631045",
+  "region": "ap-southeast-1",
+  "bucket": "sixnine-platform-releases-829135631045-ap-southeast-1",
+  "run": "38742702208",
+  "commit": "c848dde8bf1d49044743ae1f497a148e50b84409",
+  "index_sha256": "fcac7928646662cb07298661e620e32765e49ecd37a0afcc287eb706c853acac",
+  "objects": {
+    "migration-manifest.json": {
+      "version_id": "otC5SogduVFHypsKN4.WrLlqgxOUxDYd",
+      "sha256": "720ee1a27e6a9d0482bdc130d556f450a6e0b7bb5a76ef5009f9a89b2356e256",
+      "size": 1965
+    },
+    "source-set.tar.gz": {
+      "version_id": "eFH8aHwicA20CEIfIDn09yXIRMyAVAwQ",
+      "sha256": "93cc39a64ad21901a61e0b9f62fb4cdd38b71f81964eea1e1faf32574ba42e6d",
+      "size": 2932826
+    }
+  }
+}

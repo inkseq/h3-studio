@@ -549,3 +549,7 @@ inventory.json
 !deploy/platform/inkseq-business-backup.timer
 !test_business_backup_schedule.py
 !deploy/platform/DAILY-BACKUP.md
+# Explicit durable native-source retention (#227).
+!deploy/dstack/native-retention.json
+!tools/restore_native_sources.py
+!test_restore_native_sources.py

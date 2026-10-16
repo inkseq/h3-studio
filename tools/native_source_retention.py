@@ -37,7 +37,7 @@ def binding(inputs):
     return dict(zip(INPUTS, values))
 
 
-def verify_run(run, artifacts, inputs):
+def verify_run_identity(run, inputs):
     selected = binding(inputs)
     if selected is None:
         raise ValueError("native_retention_binding_required")
@@ -49,6 +49,12 @@ def verify_run(run, artifacts, inputs):
             or (run.get("repository") or {}).get("full_name") != REPOSITORY
             or (run.get("head_repository") or {}).get("full_name") != REPOSITORY):
         raise ValueError("native_retention_run_identity_invalid")
+    return selected
+
+
+def verify_run(run, artifacts, inputs):
+    selected = verify_run_identity(run, inputs)
+    run_id, commit, _ = (selected[key] for key in INPUTS)
     if (type(artifacts) is not dict or type(artifacts.get("total_count")) is not int
             or not 0 <= artifacts["total_count"] <= 100 or type(artifacts.get("artifacts")) is not list
             or len(artifacts["artifacts"]) != artifacts["total_count"]):
