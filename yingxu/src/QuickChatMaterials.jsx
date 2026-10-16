@@ -3,17 +3,16 @@ import {Image,Video,Music,X,Check,Upload} from 'lucide-react';
 import {ChatDialog} from './QuickChatControls.jsx';
 import {bindingParticipates,bindingPayload,effectiveLimits,clipLimits,displaySeconds,mediaDuration,hasOriginalAudio,roleSupported} from './quick-chat-model.js';
 export function PrivateMedia({client,path,kind,name='',compact=false}){
-  const [url,setUrl]=useState(''),[error,setError]=useState(''),player=useRef(null);
+  const [error,setError]=useState(''),player=useRef(null);
   // Freeze the originating account with this media source. A later cookie
   // change must reject this URL, not rebind an old source during a poll render.
-  const native=useMemo(()=>{if(!path||compact||!['video','audio'].includes(kind))return null;try{return {url:client.nativeContentURL(path)};}catch(error){return {error:error.message};}},[client,path,kind,compact]);
-  useEffect(()=>{let active=true,created='';setUrl('');setError('');if(!path||kind!=='image')return;const aborter=new AbortController();client.download(path,{signal:aborter.signal}).then(blob=>{if(!active)return;created=URL.createObjectURL(blob);setUrl(created);}).catch(()=>{if(active)setError('预览未载入，可刷新或下载原文件。');});return()=>{active=false;aborter.abort();if(created)URL.revokeObjectURL(created);};},[client,path,compact,kind]);
+  const native=useMemo(()=>{if(!path||compact&&kind!=='image'||!['image','video','audio'].includes(kind))return null;try{return {url:client.nativeContentURL(path)};}catch(error){return {error:error.message};}},[client,path,kind,compact]);
+  useEffect(()=>{setError('');},[client,path,compact,kind]);
   if(compact&&kind!=='image'){const Icon=kind==='audio'?Music:Video;return <div className="qc-media-placeholder qc-compact" aria-label={kind==='audio'?'音频素材':'视频素材'}><Icon size={22}/></div>;}
-  const source=kind==='image'?url:native?.url,issue=native?.error||error;
+  const source=native?.url,issue=native?.error||error;
   if(!source){const Icon={image:Image,video:Video,audio:Music}[kind]||Image;return <div className={'qc-media-placeholder '+(compact?'qc-compact':'')} title={issue||'正在读取私有素材'}><Icon size={22}/>{!compact&&<small>{issue||'正在载入预览…'}</small>}</div>;}
-  if(kind==='image')return <img className={compact?'qc-media-thumb':'qc-media-full'} src={source} alt={name}/>;
   const failed=()=>setError('媒体未能载入，请核对登录账户或重新读取原文件。');
-  return <>{kind==='video'?<video ref={player} className="qc-media-full" src={source} controls preload="metadata" onError={failed}/>:<audio ref={player} src={source} controls preload="metadata" onError={failed}/>} {issue&&<p className="qc-error" role="alert">{issue}<button onClick={()=>{setError('');player.current?.load();}}>重新读取</button></p>}</>;
+  return <>{kind==='image'?<img ref={player} className={compact?'qc-media-thumb':'qc-media-full'} src={source} alt={name} referrerPolicy="no-referrer" onError={failed}/>:kind==='video'?<video ref={player} className="qc-media-full" src={source} controls preload="metadata" onError={failed}/>:<audio ref={player} src={source} controls preload="metadata" onError={failed}/>} {issue&&<p className="qc-error" role="alert">{issue}<button onClick={()=>{setError('');if(kind==='image'&&player.current)player.current.src=source;else player.current?.load();}}>重新读取</button></p>}</>;
 }
 export function MaterialClip({binding,limits,client,onSave,onClose}){
   const clip=clipLimits(limits,binding.kind),source=mediaDuration(binding.asset),[start,setStart]=useState(binding.source_range?.start??0),[end,setEnd]=useState(binding.source_range?.end??source??0),[error,setError]=useState('');
