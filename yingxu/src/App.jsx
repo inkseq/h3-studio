@@ -160,6 +160,7 @@ function AppContent(){
  useEffect(()=>installPersistenceGuard(store),[]);
  const workspace=useSyncExternalStore(store.subscribe,store.getState,store.getState),workspaceKey=[workspace.workspace.mode,workspace.workspace.account||'',workspace.project.id,workspace.workspaceEpoch].join(':');
  const [path,setPath]=useState(window.location.pathname),[sidebarView,setSidebarView]=useState(storyPageFromUrl);
+ useEffect(()=>{if(path.replace(/\/$/,'')==='/settings')void cloud.initialize();},[path]);
  const changePage=(next,{selected=false}={})=>{const url=new URL(window.location.href);if(next==='library'){for(const key of ['view','project','entity','panel'])url.searchParams.delete(key);}else{url.searchParams.set('view','workspace');if(selected){const live=store.getState();url.searchParams.delete('entity');url.searchParams.delete('panel');if(live.workspace.mode==='cloud')url.searchParams.set('project',live.project.id);else url.searchParams.delete('project');}}window.history.pushState(null,'',url.pathname+url.search);setSidebarView(next);};
  useEffect(()=>{document.querySelector(sidebarView==='library'?'#story-library-heading':'.story-home-back')?.focus({preventScroll:true});},[sidebarView]);
  useEffect(()=>{const change=()=>{setPath(window.location.pathname);setSidebarView(storyPageFromUrl());};window.addEventListener('popstate',change);return()=>window.removeEventListener('popstate',change);},[]);
