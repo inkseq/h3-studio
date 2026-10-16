@@ -14,10 +14,12 @@ from .agent_connect_routes import (PUBLIC_GET_PATHS, HELPER_PATH, MANIFEST_PATH,
     CONNECTION_STORAGE_REQUIREMENTS, CONNECTION_VERIFICATION_CHECKLIST, CONNECTION_VERIFICATION_LIMITS)
 
 PUBLIC_PATHS = frozenset({"/for-agents", "/for-agents/", "/llms.txt",
+    "/for-agents/reference/api.md", "/for-agents/reference/recovery.md",
     "/for-agents/guide.json", "/for-agents/guide.md", "/for-agents/SKILL.md", "/for-agents/skill.zip"}) | PUBLIC_GET_PATHS
 DISCOVERY_LINK = '</for-agents>; rel="service-doc"; type="text/html", </llms.txt>; rel="alternate"; type="text/plain", </for-agents/guide.md>; rel="alternate"; type="text/markdown"'
 SKILL_ROOT = Path(__file__).resolve().parent.parent / "skills" / "sixnine-yingxu"
-SKILL_FILES = ("SKILL.md", "scripts/sixnine.py", "scripts/connect.py")
+SKILL_FILES = ("SKILL.md", "scripts/sixnine.py", "scripts/connect.py",
+    "reference/api.md", "reference/recovery.md")
 MAX_SKILL_BYTES = 512 * 1024
 
 
@@ -99,6 +101,7 @@ def public_guide():
         "public_resources": {"html": "/for-agents", "text": "/llms.txt", "manifest": "/for-agents/guide.json",
             "guide_markdown": "/for-agents/guide.md", "guide_download": "/for-agents/guide.md?download=true",
             "skill": "/for-agents/SKILL.md", "skill_download": "/for-agents/skill.zip",
+            "api_reference": "/for-agents/reference/api.md", "recovery_reference": "/for-agents/reference/recovery.md",
             "connection_helper": HELPER_PATH, "connection_manifest": MANIFEST_PATH},
         "connection": {
             "protocol": "client-held-pat-v1", "exchange": "/v1/agent-connect/exchange",
@@ -252,7 +255,9 @@ def llms_text():
 - [Download the Markdown guide](/for-agents/guide.md?download=true): Save one file to read offline or attach to Codex.
 - [Machine-readable guide](/for-agents/guide.json): Authentication, request examples and supported workflow.
 - [Skill instructions](/for-agents/SKILL.md): How to work safely on the user's story.
-- [Skill download](/for-agents/skill.zip): README.md, SKILL.md, scripts/sixnine.py and scripts/connect.py. The README contains the complete public guide and API examples. The connection helper uses the Python standard library; the API/media helper also requires httpx.
+- [API reference](/for-agents/reference/api.md): Exact task request fields and examples.
+- [Recovery reference](/for-agents/reference/recovery.md): Original-operation reconciliation and refusal handling.
+- [Skill download](/for-agents/skill.zip): README.md, SKILL.md, both reference files, scripts/sixnine.py and scripts/connect.py. The README contains the complete public guide and API examples. The connection helper uses the Python standard library; the API/media helper also requires httpx.
 
 If a browsing/search tool cannot open these public documents, retrieve them directly over HTTPS from the user's supplied website origin, or ask the user to attach the downloaded guide. A tool-specific reading failure is not evidence that the documents require login. Public reads need no cookie or API key; account/business API calls do require authentication. Resolve all / paths against the same user-supplied origin and never forward credentials through redirects.
 
@@ -277,7 +282,7 @@ This is an API workflow. Quick Chat frontend publication is a separate gate; a r
 For one clip, POST /v1/projects with title and workspace=freestyle. Use project.journey.reviewShotId, upload intended references, and save with shot.configure_generation. GET the shot's generation-draft; POST its generation-plans with the returned project_version as expected_version. Only a ready plan within the user's authorization can be confirmed through POST /v1/jobs with a stable Idempotency-Key. The guide JSON contains exact examples and partial-update rules. Return /freestyle?project={project_id}&entity={shot_id}; the same draft and candidates remain editable. Creating/editing a draft does not generate video.
 
 ## Authorization and live capabilities
-A URL is a discovery link, not permission to edit or spend. The owner explicitly authorizes a one-time connection. Read /for-agents/connect-manifest.json, inspect /for-agents/connect.py and verify its digest before executing. The five-minute code may be handed to the Agent; the permanent PAT is generated locally and stored before exchange in Windows user DPAPI, Linux Secret Service or the native macOS user Keychain. No internal AI Registry is required. Missing supported storage stops before exchange, without automatic installation or plaintext fallback. Resume uncertain exchanges with the same saved connection. Manual PATs remain an advanced fallback using a process-only credential. Never put permanent keys in chat, URLs, argv or ordinary files. The only anonymous POST is /v1/agent-connect/exchange; account/business APIs and OpenAPI require authentication. The connection UI has a separate publication gate. Use only the origin supplied by the user and do not forward its credential to other origins.
+A URL is a discovery link, not permission to edit or spend. The owner explicitly authorizes a one-time connection. Read /for-agents/connect-manifest.json, inspect /for-agents/connect.py and verify its digest before executing. The owner-configured short-lived code may be handed to the Agent; the permanent PAT is generated locally and stored before exchange in Windows user DPAPI, Linux Secret Service or the native macOS user Keychain. No internal AI Registry is required. Missing supported storage stops before exchange, without automatic installation or plaintext fallback. Resume uncertain exchanges with the same saved connection. Manual PATs remain an advanced fallback using a process-only credential. Never put permanent keys in chat, URLs, argv or ordinary files. The only anonymous POST is /v1/agent-connect/exchange; account/business APIs and OpenAPI require authentication. The connection UI has a separate publication gate. Use only the origin supplied by the user and do not forward its credential to other origins.
 
 For macOS, use an existing default file-based user Keychain, already unlocked and accessible to the calling process. Native operations bind to that same Keychain and suppress authentication UI; locked, denied or interaction-required access stops the helper. Any unlock/access authorization must happen separately through trusted system UI. Retry the original connection/grant; if material was already saved, resume with that same material within the recovery window. The helper never collects a Keychain password, changes access controls, auto-unlocks/creates a Keychain or passes secrets through command arguments. The manifest includes per-OS storage requirements and a verification checklist. Fake OS tests do not prove native store access or live external onboarding; actual OS access and frontend/production publication need separate evidence.
 
@@ -383,7 +388,7 @@ def landing_html():
 <nav><a href="/">← 回到映序</a><a href="/llms.txt">llms.txt</a><a href="/for-agents/guide.json">机器可读指南</a><a href="/for-agents/SKILL.md">Skill 指令</a></nav>
 <p class="tag">FOR AI AGENTS · API V1</p><h1>让 AI 创作，<br>让你随时接手。</h1>
 <p>把这个网站链接发给 Codex 或其他支持 API 的 Agent。一个短片可以直接用快速创作：提示词、图片、动作视频、音频和设置都保存到同一份网页草稿。需要改编剧本时，也能整理故事、章节和分镜。</p>
-<div class="links"><a href="/for-agents/guide.md">给 Agent 阅读的指南</a><a href="/for-agents/guide.md?download=true" download="inkseq-agent-guide.md">下载完整指南 .md</a><a href="/for-agents/skill.zip">下载 Skill 包 .zip</a><a href="/">登录并连接 Agent</a></div>
+<div class="links"><a href="/for-agents/guide.md">给 Agent 阅读的指南</a><a href="/for-agents/guide.md?download=true" download="inkseq-agent-guide.md">下载完整指南 .md</a><a href="/for-agents/skill.zip">下载 Skill 包 .zip</a><a href="/for-agents/reference/api.md">API reference</a><a href="/for-agents/reference/recovery.md">Recovery reference</a><a href="/">登录并连接 Agent</a></div>
 <p><small>指南和下载公开可用，不需要登录或 API Key。可把 Markdown 文件直接发给 Codex；若网页读取工具打不开，使用同站 HTTPS 直接下载即可。连接账户、读取作品和提交任务时才需要授权。</small></p>
 <section class="panel"><h2 style="margin-top:0">三步开始</h2><ol><li><strong>先把链接和创作要求给 Agent。</strong>这页、Skill 和机器指南公开可读，无需登录。</li><li><strong>登录网站，明确授权一次连接。</strong>连接界面上线后，复制短时有效的连接说明给 Agent。辅助脚本在本机生成正式 Key，并通过系统凭据存储保存；无需安装我们的 AI Registry。正式 Key 不进入聊天或链接。当前页面是否提供连接按钮以实际前端发布为准；手动 API Key 是高级备用方式。</li><li><strong>回网站看结果，再继续调整。</strong>打开同一云故事，查看活动和任务；定位章节、角色或镜头，修改要求后只重做需要的部分。旧候选保留，选中哪一版由你决定。</li></ol>
 <small>分享链接只用于发现功能。写入需要账户授权；生成还取决于当前服务是否启用、输入是否合格和可用预算。此页不代表 GPU 已上线。</small></section>
@@ -428,6 +433,14 @@ def register_routes(app):
     @app.api_route("/for-agents/SKILL.md", methods=["GET", "HEAD"], include_in_schema=False)
     def agent_skill():
         return Response(read_skill_file("SKILL.md"), media_type="text/plain; charset=utf-8")
+
+    @app.api_route("/for-agents/reference/api.md", methods=["GET", "HEAD"], include_in_schema=False)
+    def agent_api_reference():
+        return Response(read_skill_file("reference/api.md"), media_type="text/markdown; charset=utf-8")
+
+    @app.api_route("/for-agents/reference/recovery.md", methods=["GET", "HEAD"], include_in_schema=False)
+    def agent_recovery_reference():
+        return Response(read_skill_file("reference/recovery.md"), media_type="text/markdown; charset=utf-8")
 
     @app.api_route("/for-agents/skill.zip", methods=["GET", "HEAD"], include_in_schema=False)
     def agent_skill_zip():

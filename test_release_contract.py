@@ -33,6 +33,17 @@ class CompatibilityFingerprints(unittest.TestCase):
         self.assertNotEqual(middle['api_compatibility'], after['api_compatibility'])
         self.assertNotEqual(middle['worker_compatibility'], after['worker_compatibility'])
 
+    def test_reference_changes_are_in_api_source_identity(self):
+        before = build_contracts(self.root)
+        reference = self.root / 'skills/sixnine-yingxu/reference/api.md'
+        reference.write_text('changed supported task contract')
+        after = build_contracts(self.root)
+        self.assertNotEqual(before['api_compatibility'], after['api_compatibility'])
+        self.assertEqual(before['worker_compatibility'], after['worker_compatibility'])
+        reference.unlink()
+        with self.assertRaises(FileNotFoundError):
+            build_contracts(self.root)
+
     def test_unknown_modules_and_policy_are_conservative(self):
         before = build_contracts(self.root)
         (self.root / 'studio_platform/new_worker.py').write_text('new code')

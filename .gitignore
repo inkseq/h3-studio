@@ -574,3 +574,8 @@ inventory.json
 
 !studio_platform/agent_management.py
 !test_agent_management.py
+
+# Exact public Agent task references.
+!skills/sixnine-yingxu/reference/
+!skills/sixnine-yingxu/reference/api.md
+!skills/sixnine-yingxu/reference/recovery.md

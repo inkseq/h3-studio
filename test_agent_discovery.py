@@ -38,7 +38,8 @@ class AgentDiscoveryTests(unittest.TestCase):
             self.assertEqual(self.client.post(path, json={}).status_code, 401)
         for path in ("/for-agents/private", "/for-agents/key", "/v1/projects", "/v1/capabilities", "/v1/generation-availability",
                      "/v1/agent-guide", "/v1/guided-schema", "/v1/agent-skill.zip", "/openapi.json",
-                     "/v1/projects/nonexistent/activity"):
+                     "/v1/projects/nonexistent/activity", "/for-agents/reference/private.md",
+                     "/for-agents/reference/api.md/extra", "/for-agents/reference/%2e%2e/scripts/connect.py"):
             self.assertEqual(self.client.get(path).status_code, 401, path)
         self.assertEqual(self.client.get("/for-agents", headers={"Host": "attacker.example"}).status_code, 400)
         self.assertEqual(self.client.get("/for-agents", headers={"Authorization": "Bearer invalid"}).status_code, 401)
@@ -64,7 +65,8 @@ class AgentDiscoveryTests(unittest.TestCase):
 
     def test_public_content_does_not_change_after_private_edit(self):
         paths = ("/for-agents", "/llms.txt", "/for-agents/guide.json", "/for-agents/guide.md",
-                 "/for-agents/guide.md?download=true", "/for-agents/SKILL.md")
+                 "/for-agents/guide.md?download=true", "/for-agents/SKILL.md",
+                 "/for-agents/reference/api.md", "/for-agents/reference/recovery.md")
         anonymous = {path: self.client.get(path).content for path in paths}
         self.login()
         self.client.post("/v1/projects", json={"title": "PRIVATE PROJECT NEVER ADVERTISE",
@@ -81,7 +83,8 @@ class AgentDiscoveryTests(unittest.TestCase):
         self.assertEqual(response.headers["content-type"], "application/zip")
         with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
             self.assertEqual(set(archive.namelist()), {"sixnine-yingxu/SKILL.md", "sixnine-yingxu/README.md",
-                "sixnine-yingxu/scripts/sixnine.py", "sixnine-yingxu/scripts/connect.py"})
+                "sixnine-yingxu/scripts/sixnine.py", "sixnine-yingxu/scripts/connect.py",
+                "sixnine-yingxu/reference/api.md", "sixnine-yingxu/reference/recovery.md"})
             self.assertEqual(archive.read("sixnine-yingxu/SKILL.md"), self.client.get("/for-agents/SKILL.md").content)
             self.assertEqual(archive.read("sixnine-yingxu/README.md"), self.client.get("/for-agents/guide.md").content)
             for name in agent_discovery.SKILL_FILES:
@@ -98,6 +101,16 @@ class AgentDiscoveryTests(unittest.TestCase):
         guide = self.client.get("/for-agents/guide.json").json()
         self.assertFalse(manifest["raw_api_key_response"])
         self.assertTrue(guide["connection"]["profile"]["owner_only"])
+
+    def test_reference_http_zip_and_source_bytes_agree(self):
+        with zipfile.ZipFile(io.BytesIO(self.client.get("/for-agents/skill.zip").content)) as archive:
+            for name in ("api.md", "recovery.md"):
+                path = "reference/" + name
+                response = self.client.get("/for-agents/" + path)
+                self.assertEqual(response.headers["content-type"], "text/markdown; charset=utf-8")
+                self.assertEqual(response.content, (agent_discovery.SKILL_ROOT / path).read_bytes())
+                self.assertEqual(response.content, archive.read("sixnine-yingxu/" + path))
+        self.assertLessEqual(len(self.client.get("/for-agents/SKILL.md").content), 10 * 1024)
 
     def test_storage_manifest_is_additive_and_matches_full_public_connection_contract(self):
         manifest = self.client.get("/for-agents/connect-manifest.json").json()
@@ -165,7 +178,8 @@ class AgentDiscoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             with patch.object(agent_discovery, "SKILL_ROOT", root):
-                for path in ("/for-agents/skill.zip", "/for-agents/SKILL.md"):
+                for path in ("/for-agents/skill.zip", "/for-agents/SKILL.md",
+                             "/for-agents/reference/api.md", "/for-agents/reference/recovery.md"):
                     response = self.client.get(path)
                     self.assertEqual(response.status_code, 503)
                     self.assertNotIn(folder, response.text)
@@ -175,8 +189,18 @@ class AgentDiscoveryTests(unittest.TestCase):
     def test_linked_file_rejected_without_read(self):
         # Do not require Windows symlink privileges to test the rejection.
         with patch.object(Path, "is_symlink", return_value=True), patch.object(Path, "open") as opened:
-            response = self.client.get("/for-agents/SKILL.md")
-        self.assertEqual(response.status_code, 503)
+            for path in ("/for-agents/SKILL.md", "/for-agents/reference/api.md", "/for-agents/reference/recovery.md"):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 503)
+        opened.assert_not_called()
+
+    def test_linked_reference_directory_is_rejected_before_reading(self):
+        original = Path.is_symlink
+        def linked(path):
+            return path == agent_discovery.SKILL_ROOT / 'reference' or original(path)
+        with patch.object(Path, 'is_symlink', linked), patch.object(Path, 'open') as opened:
+            for path in ('/for-agents/reference/api.md', '/for-agents/reference/recovery.md'):
+                self.assertEqual(self.client.get(path).status_code, 503)
         opened.assert_not_called()
 
     def test_manifest_examples_produce_navigable_story_with_scoped_agent(self):
