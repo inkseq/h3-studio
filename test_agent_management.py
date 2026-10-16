@@ -125,7 +125,7 @@ class ManagementTests(ledger.LedgerCase):
         transferred=self.qc.transfer_take(agent,sid,row['id'],{'target_project_id':'story','expected_project_version':1,'parent_id':'scene'},'story')
         self.assertEqual(transferred['status'],'completed')
         from studio_platform.agent_management import creator
-        with self.repo.engine.connect() as conn:self.assertEqual(creator(conn,self.scope.tenant_id,agent.owner,'shot',transferred['shot_id'])['connection_id'],grant['connection']['id'])
+        with self.repo.engine.connect() as conn:self.assertEqual(creator(conn,self.scope.tenant_id,agent.owner,'shot',transferred['shot_id'],'story')['connection_id'],grant['connection']['id'])
         self.assertNotIn('Synthetic prompt',json.dumps(self.service.activity(self.principal,grant['connection']['id'])))
 
     def test_organise_title_and_expired_stale_principal_cannot_pay(self):
@@ -207,3 +207,24 @@ class ManagementTests(ledger.LedgerCase):
         else:
             self.assertTrue(values[1]['no_mutation_committed']);self.assertEqual(current['daily_limit_microusd'],200_000)
         self.assertEqual(current['state_version'],1)
+
+    def test_same_story_entity_id_has_project_scoped_immutable_creator(self):
+        from studio_platform.agent_management import creator
+        from types import SimpleNamespace
+        first,_,agent_a,_,_,_=self.connect();second,_,agent_b,_,_,_=self.connect()
+        for project_id,actor in [('story-a',agent_a),('story-b',agent_b),('story-human',self.principal)]:
+            payload=empty_project({'id':project_id,'title':'Synthetic story'})
+            new_entity(payload,{'id':'chapter','type':'chapter','title':'Chapter'})
+            new_entity(payload,{'id':'scene','type':'scene','title':'Scene','parentId':'chapter'})
+            new_entity(payload,{'id':'shot-1','type':'shot','title':'Shot','parentId':'scene'})
+            self.app.state.guided.mutate(actor,project_id,payload,'create-'+project_id,create=True)
+        get_project=next(r.endpoint for r in self.app.routes if getattr(r,'path',None)=='/v1/projects/{project_id}' and 'GET' in r.methods)
+        request=SimpleNamespace(state=SimpleNamespace(principal=self.principal))
+        self.assertEqual(get_project('story-a',request)['created_by']['shot-1']['connection_id'],first['connection']['id'])
+        self.assertEqual(get_project('story-b',request)['created_by']['shot-1']['connection_id'],second['connection']['id'])
+        self.assertEqual(get_project('story-human',request)['created_by'],{})
+        with self.repo.transaction() as conn:
+            from studio_platform.agent_management import record_created
+            record_created(conn,self.scope.tenant_id,agent_b,'shot','shot-1',self.now,'story-a')
+            self.assertEqual(creator(conn,self.scope.tenant_id,agent_a.owner,'shot','shot-1','story-a')['connection_id'],first['connection']['id'])
+            self.assertIsNone(creator(conn,self.scope.tenant_id,agent_a.owner,'shot','shot-1','unknown-story'))

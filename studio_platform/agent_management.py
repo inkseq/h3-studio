@@ -43,11 +43,16 @@ def connection_for_actor(conn,tenant,owner,actor_id):
         connections.c.key_id==actor_id[4:])).mappings().first()
 
 
+def attribution_identity(kind,ident,project_id=None):
+    # Story entity IDs are local to a project; QC resource UUIDs are global.
+    return kind+':'+ident if project_id is None else 'project:'+request_hash({'project_id':project_id,'kind':kind,'id':ident})
+
+
 def record_created(conn,tenant,principal,kind,ident,now,project_id=None):
     if not principal.machine:return
     row=connection_for_actor(conn,tenant,principal.owner,principal.actor_id)
     if row is None:return
-    key=kind+':'+ident
+    key=attribution_identity(kind,ident,project_id)
     if read_doc(conn,tenant,principal.owner,'created_by',key,ATTRIBUTION_PROJECT):return
     put_doc(conn,tenant,principal.owner,'created_by',key,{'kind':'agent','connection_id':row['id'],
         'name':row['name'],'resource_kind':kind,'resource_id':ident,'project_id':project_id},now,ATTRIBUTION_PROJECT)
@@ -56,8 +61,8 @@ def record_created(conn,tenant,principal,kind,ident,now,project_id=None):
         owner=principal.owner,event=kind+'.created',created_at=now))
 
 
-def creator(conn,tenant,owner,kind,ident):
-    row=read_doc(conn,tenant,owner,'created_by',kind+':'+ident,ATTRIBUTION_PROJECT)
+def creator(conn,tenant,owner,kind,ident,project_id=None):
+    row=read_doc(conn,tenant,owner,'created_by',attribution_identity(kind,ident,project_id),ATTRIBUTION_PROJECT)
     return {k:row['payload'][k] for k in ('kind','connection_id','name')} if row else None
 
 
