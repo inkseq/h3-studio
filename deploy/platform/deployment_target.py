@@ -44,7 +44,10 @@ PROFILES = {
         'caddy': 'Caddyfile.staging', 'secret_root': '/sixnine/staging',
         'r2_profile': 'cloudflare-r2--sixnine-staging-20261015',
         'r2_bucket': 'sixnine-staging-media',
-        'vast_profile': 'vastai--sixnine-staging-20261015',
+        # CR-20261016-18 explicitly shares the existing provider account/key.
+        # Stage project/DB/SSH and budgets remain separate; this is no longer
+        # a provider-account credential isolation boundary.
+        'vast_profile': 'vastai--sixnine-dstack-20261011',
         'dstack_project': 'sixnine-staging',
     },
 }
