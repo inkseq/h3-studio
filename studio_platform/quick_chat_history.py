@@ -1,4 +1,4 @@
-"""Five-day creation trash over the original Quick Chat authority.
+"""Non-expiring creation trash over the original Quick Chat authority.
 
 Metadata actions are atomic. Irreversible storage work is journaled first and
 reconciles only its original immutable keys, outside every database transaction.
@@ -8,7 +8,6 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-import math
 import uuid
 
 from sqlalchemy import delete, inspect, select, update
@@ -20,7 +19,6 @@ from .repository import Conflict, NotFound, artifacts, documents, jobs, plans, r
 from .storage import ObjectNotFound
 
 
-RETENTION_SECONDS = 5*86400
 CLEANUP_SCOPES = ("projects:read", "projects:write", "assets:read", "assets:write", "jobs:read", "jobs:write")
 ZERO = {key: 0 for key in ("sessions", "turns", "cards", "assets", "artifacts", "objects", "bytes")}
 
@@ -65,7 +63,8 @@ class QuickChatHistoryMixin:
             "archive_pending": bool(history.get("archive_pending", False)),
             "trashable": history["trash_state"] == "active" and reason is None,
             "blocked_reason": reason,
-            "auto_purge_enabled": bool(history["cleanup_consent"] and not history["review_hold"]),
+            "purge_at": None,  # Historical stored deadlines remain audit data only.
+            "auto_purge_enabled": False,
             "purge_blocked_reason": "owner_review_required" if history["review_hold"] else
                 "cleanup_scope_required" if not history["cleanup_consent"] else None}
 
@@ -203,7 +202,7 @@ class QuickChatHistoryMixin:
             for session in sessions:
                 history = self._history(session)
                 if action == "trash":
-                    history.update(trash_state="trashed", trashed_at=now, purge_at=now+RETENTION_SECONDS,
+                    history.update(trash_state="trashed", trashed_at=now, purge_at=None,
                         trashed_by=principal.actor_id,
                         cleanup_consent=all(principal.allows(session["payload"]["project_id"], scope) for scope in CLEANUP_SCOPES))
                 elif action == "restore":
@@ -383,7 +382,7 @@ class QuickChatHistoryMixin:
                         and history_blocker(connection, self, row["owner"], current) is None):
                     now = self.repo.clock()
                     history = {**self._history(current), "archive_pending": False, "trash_state": "trashed",
-                        "trashed_at": now, "purge_at": now+RETENTION_SECONDS}
+                        "trashed_at": now, "purge_at": None}
                     self._put(connection, current, {**current["payload"], "history": history}, bump=True, allow_history=True)
                     from .auth import Principal
                     self._event(connection, Principal(row["owner"], "history-test-archive"), current,
@@ -391,18 +390,8 @@ class QuickChatHistoryMixin:
         with self.repo.engine.connect() as connection:
             if not history_cleanup_activated(connection, self.tenant):
                 return {"actions_checked": 0, "objects_checked": 0}
-            due = [dict(row) for row in connection.execute(select(objects).where(objects.c.tenant == self.tenant,
-                objects.c.kind == "session").order_by(objects.c.id)).mappings()
-                if self._history(row)["trash_state"] == "trashed" and self._history(row)["cleanup_consent"]
-                and not self._history(row)["review_hold"] and isinstance(self._history(row)["purge_at"], (int, float))
-                and math.isfinite(self._history(row)["purge_at"])
-                and self._history(row)["purge_at"] <= self.repo.clock()][:limit]
-        from .auth import Principal
-        for row in due:
-            principal = Principal(row["owner"], "history-auto-purge", False)
-            preview = self.preview_history(principal, {"action": "purge", "sessions": [{"id": row["id"], "expected_version": row["version"]}]})
-            if all(item["eligible"] for item in preview["items"]):
-                self.apply_history(principal, {"preview_id": preview["preview_id"], "confirmed": True}, "auto-purge-"+row["id"]+"-"+str(row["version"]))
+        # Never create deletion intents from elapsed time or historical consent.
+        # Continue only previously confirmed durable actions below.
         with self.repo.engine.connect() as connection:
             pending = [dict(row) for row in connection.execute(select(objects).where(objects.c.tenant == self.tenant,
                 objects.c.kind == "history_action", objects.c.payload["state"].as_string() == "pending").order_by(objects.c.id).limit(limit)).mappings()]

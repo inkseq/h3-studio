@@ -24,7 +24,7 @@ from .project_validation import ID, validate_project
 from .project_activity import append_activity
 from .repository import Conflict, NotFound, Scope, BudgetExceeded, canonical, request_hash, documents, jobs, attempts, artifacts
 from .quick_chat_titles import DEFAULT_TITLE, TITLE_MODEL, QuickChatTitleMixin, public_title_state
-from .quick_chat_history import QuickChatHistoryMixin, CLEANUP_SCOPES, RETENTION_SECONDS
+from .quick_chat_history import QuickChatHistoryMixin, CLEANUP_SCOPES
 from .content_lifecycle import owner_reference_gate, assert_project_writable, assert_reference_payload
 
 
@@ -813,6 +813,27 @@ class QuickChatService(QuickChatHistoryMixin, QuickChatTitleMixin):
             items = [dict(r) for r in conn.execute(select(objects).where(objects.c.tenant == self.tenant,
                 objects.c.owner == principal.owner, objects.c.session_id == session_id, objects.c.kind == "item",
                 objects.c.parent_id == submission_id)).mappings()]
+            pending_plans = []
+            for item in items:
+                if selected is not None and item["id"] not in selected:
+                    continue
+                execution = self._get(conn, principal, item["payload"]["current_execution_id"], session_id, "execution")
+                if execution["payload"]["status"] in {"pending_admission", "admission_blocked"}:
+                    job_id = execution["payload"].get("job_id")
+                    if job_id:
+                        status = conn.execute(select(jobs.c.status).where(jobs.c.id == job_id,
+                            jobs.c.tenant_id == self.tenant, jobs.c.owner_id == principal.owner)).scalar_one()
+                        if status not in {"planned", "blocked"}:
+                            continue  # reconcile the accepted original, no new grant
+                    pending_plans.append(execution["payload"]["plan_id"])
+        from .spending_limits import check_submission_confirmation
+        check = check_submission_confirmation(self.repo, self.tenant, principal, [] if submission["payload"]["cancel_requested"] else pending_plans)
+        required = bool(check)
+        if required:
+            with self.repo.transaction() as conn:
+                current = self._get(conn, principal, submission_id, session_id, "submission", lock=True)
+                self._put(conn, current, {**current["payload"], "spending_confirmation_required": True})
+        required = required or submission["payload"].get("spending_confirmation_required", False)
         for item in items:
             if selected is not None and item["id"] not in selected:
                 continue
@@ -844,7 +865,7 @@ class QuickChatService(QuickChatHistoryMixin, QuickChatTitleMixin):
                     job = self.hooks.cancel(principal, job["id"])
                 elif job["status"] in {"planned", "blocked"}:
                     try:
-                        job = self.hooks.enqueue(principal, job)
+                        job = self.hooks.enqueue(principal, job, confirmation_required=required, spending_settings_version=check.version)
                     except Conflict:
                         job = self.repo.get_job_for_owner(self.tenant, principal.owner, job["id"])
                         if job["status"] in {"planned", "blocked"}:
@@ -853,7 +874,11 @@ class QuickChatService(QuickChatHistoryMixin, QuickChatTitleMixin):
                     current = self._get(conn, principal, execution["id"], session_id, "execution", lock=True)
                     self._put(conn, current, {**current["payload"], "status": "admitted", "error_code": None})
             except (Conflict, BudgetExceeded, ValueError, QuickChatError) as error:
-                code = error.code if isinstance(error, QuickChatError) else "budget_exceeded" if isinstance(error, BudgetExceeded) else "admission_blocked"
+                from .spending_limits import SpendingConfirmationRequired
+                if isinstance(error, SpendingConfirmationRequired):
+                    raise
+                spending_codes = {"user_daily_limit_reached", "connection_daily_limit_reached", "spending_usage_unconfirmed"}
+                code = error.code if isinstance(error, QuickChatError) else str(error) if str(error) in spending_codes else "budget_exceeded" if isinstance(error, BudgetExceeded) else "admission_blocked"
                 with self.repo.transaction() as conn:
                     current = self._get(conn, principal, execution["id"], session_id, "execution", lock=True)
                     self._put(conn, current, {**current["payload"], "status": "admission_blocked", "error_code": code})
@@ -1172,6 +1197,14 @@ class QuickChatService(QuickChatHistoryMixin, QuickChatTitleMixin):
             p = copy.deepcopy(turn["payload"])
             if not self.assistant_enabled or self.assistant is None:
                 p.update(status="failed", error_code="assistant_disabled")
+                p["assistant_run"]["status"] = "failed"
+                self._put(conn, turn, p)
+                self._put(conn, session, {**session["payload"], "active_turn_id": None})
+                self._event(conn, principal, session, "assistant.failed", turn_id)
+                return
+            from .spending_limits import unquoted_spend_blocked
+            if unquoted_spend_blocked(conn, self.tenant, principal):
+                p.update(status="failed", error_code="assistant_quote_unavailable")
                 p["assistant_run"]["status"] = "failed"
                 self._put(conn, turn, p)
                 self._put(conn, session, {**session["payload"], "active_turn_id": None})

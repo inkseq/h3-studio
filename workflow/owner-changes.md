@@ -25,6 +25,11 @@ These entries record owner decisions, not task status. The latest applicable CR 
 | CR-20261016-19 | 2026-10-16 | Continue from the CR18 handoff: #193 actual idle Vast HTTP frequency and safe idle suppression first, #217 replace Hatchet with PostgreSQL LISTEN/NOTIFY on the existing fenced queue second, #218 push alerts third. Diagnose idle CPU on the existing staging t3a.small. Finish and accept on staging before same-artifact production promotion. Resolve blockers autonomously; at most three simultaneous tasks and no Low-risk review subtask. Retain USD20/Sydney-day test-GPU ceiling and stop safeguards. | Owner continuation instruction; [#193](https://github.com/inkseq/h3-studio/issues/193), [#217](https://github.com/inkseq/h3-studio/issues/217), [#218](https://github.com/inkseq/h3-studio/issues/218) |
 | CR-20261016-20 | 2026-10-16 | Finish the current #217 step before interleaving additional operations work. Keep both repositories public; verify GitHub secret scanning/push protection and host public exposure limited to HTTP/HTTPS plus necessary management ports, with databases private. Enable daily EBS snapshots retained 7 days, verify scheduled database backups and rehearse restoration, address R2 object versioning in #147, bind staging to an Elastic IP and provide exact Namecheap records if owner action is needed. Close completed/superseded issues with one-line reasons (including #107/#132/#7/#20/#21 where justified); reconcile Vast and RunPod billing monthly under #28. At most three concurrent subtasks; no Low-risk review subtask; retain USD20/day GPU safeguards. | Owner supplemental instruction in this session; [#147](https://github.com/inkseq/h3-studio/issues/147), [#28](https://github.com/inkseq/h3-studio/issues/28) |
 
+## CR-20261017-21/22 — current v2 and backup scope
+
+- **CR-20261017-21:** Begin #239 code without waiting for the existing #241 pipeline. Return for staging backup acceptance and genuine #226 closeout once ready; #232 is observed by its existing daily task. Follow the v2 handoff in `inkseq/sixnine-design`: #239 → #233 → #234 → #242 → #235 → #236; #237 phone work accompanies each batch and #238 comes last. Verify no other deployment is running before publishing frontend to staging. Keep at most three simultaneous tasks and no Low-risk review subtask.
+- **CR-20261017-22:** The two #240 references are superdan test media normally removed through completed empty-trash cleanup. Classify this kind of provably completed permanent deletion as expected missing coverage and exclude it from unexplained-loss alerts, then close #240 after implementation/acceptance. Preserve original audit references, truthful missing-byte coverage and all existing superdan/supervan account data; no bulk cleanup is authorized.
+
 ## CR-20261015-14 — owner domain migration requirements (verbatim)
 
 域名迁移（owner 决定，记 CR）：项目整体改用 inkseq.com，sixnine.art 以后另作他用，不再作为本产品域名。
@@ -37,3 +42,8 @@ These entries record owner decisions, not task status. The latest applicable CR 
 低风险部分（文案、文档）直接做；域名切换按中风险处理：先确认新域名 HTTPS 和登录正常，再把旧域名改成跳转。
 
 Append a numbered entry for a new owner decision and update affected current wording in place. Do not copy operational receipts or routine implementation choices here.
+
+
+## CR-20261017-23 — #239: no automatic creation purge
+
+Owner v2 HANDOFF rule 4 supersedes the former five-day automatic trash expiry (DEC-014). Stop creating time-triggered purge intents, including old consented deadlines; public expiry is absent. Preserve original explicit durable purge/empty-trash reconciliation, irreversible guards, ledgers, tombstones and completed deletions. No historical rows are migrated and no live cleanup is invoked by this source change.

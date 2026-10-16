@@ -115,6 +115,12 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
         # Closed monetary vocabulary: capacity failures must not masquerade as
         # a depleted account, and exception strings must never expose secrets.
         code = str(error)
+        if code in {"user_daily_limit_reached", "connection_daily_limit_reached", "spending_usage_unconfirmed"}:
+            messages = {"user_daily_limit_reached": {"en": "Your daily spending limit has been reached.", "zh": "已达到你的每日消费上限。"},
+                "connection_daily_limit_reached": {"en": "This assistant's daily spending limit has been reached.", "zh": "已达到此 AI 助手的每日消费上限。"},
+                "spending_usage_unconfirmed": {"en": "Spending is not yet confirmed; reconcile the existing charge first.", "zh": "当前费用尚未确认，请先核对已有费用。"}}[code]
+            return JSONResponse({"code": code, "message_key": "errors." + code,
+                "messages": messages, "message": messages["en"]}, status_code=429)
         if code in {"budget_exceeded", "budget_below_committed", "budget_not_configured"}:
             messages = {"budget_exceeded": "额度不足；可用额度不足以预留本次操作，未新增付费执行。",
                 "budget_below_committed": "额度不能低于已花费用与当前预留之和。",
@@ -553,8 +559,8 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
         return generation_admission.create(principal, plan_id, idempotency_key,
                                            initial_status=initial_status)
 
-    def enqueue_planned(principal, job):
-        return generation_admission.enqueue(principal, job)
+    def enqueue_planned(principal, job, *, confirmation_required=False, spending_settings_version=None):
+        return generation_admission.enqueue(principal, job, confirmation_required=confirmation_required, spending_settings_version=spending_settings_version)
 
     @app.post("/v1/jobs", status_code=202)
     def create_job(request: Request, body: dict, idempotency_key: str = Header(..., alias="Idempotency-Key")):
@@ -634,7 +640,7 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
         return public_job(repo.request_cancel(scope(principal, job["project_id"]), job_id))
 
     hooks = quick_chat_hooks or QuickChatHooks(preflight=generation_admission.preflight,
-        create_planned=generation_admission.create_planned, enqueue=lambda p, j: generation_admission.enqueue(p, j, business=True),
+        create_planned=generation_admission.create_planned, enqueue=lambda p, j, confirmation_required=False, spending_settings_version=None: generation_admission.enqueue(p, j, business=True, confirmation_required=confirmation_required, spending_settings_version=spending_settings_version),
         public_job=generation_read.job, cancel=quick_cancel, refresh_planned=generation_admission.refresh_planned)
     register_quick_chat_routes(app, hooks=hooks, assistant=assistant,
         assistant_enabled=assistant_enabled, title_generator=title_generator)
@@ -657,6 +663,8 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
     register_dstack_routes(app, service=dstack_operator)
     from .operator_budget_routes import register_routes as register_budget_routes
     register_budget_routes(app)
+    from .spending_routes import register_routes as register_spending_routes
+    register_spending_routes(app)
     from .operator_jobs import register_routes as register_operator_jobs
     register_operator_jobs(app)
     from .operator_host_routes import register_routes as register_operator_host_routes

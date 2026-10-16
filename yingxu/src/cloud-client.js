@@ -1,11 +1,18 @@
 /* Same-origin application API only. This module never holds provider credentials. */
+import {readLocale,translate} from './i18n/locale.js';
+function uiLocale(account){try{return readLocale(globalThis.localStorage,account);}catch{return 'en';}}
+const ui=(key,account,values)=>translate(uiLocale(account),key,values);
+function defaultSpendingConfirmation(detail,account){
+  return typeof globalThis.confirm==='function'&&globalThis.confirm(translate(uiLocale(account),'errors.spendingConfirmationRequired',
+    {amount:new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:6}).format(detail.estimate_microusd/1_000_000)}));
+}
 export class CloudError extends Error {
   constructor(message,{status=0,detail=null}={}){super(message);this.name='CloudError';this.status=status;this.detail=detail;}
 }
 export function safeCloudPath(path){
-  if(typeof path!=='string'||!/^\/(?:v1\/|api\/auth\/)/.test(path)||path.includes('\\')||/[\r\n]/.test(path))throw new CloudError('服务返回的地址不在工作室 API 范围内。');
+  if(typeof path!=='string'||!/^\/(?:v1\/|api\/auth\/)/.test(path)||path.includes('\\')||/[\r\n]/.test(path))throw new CloudError(ui('client.pathScope'));
   const parsed=new URL(path,'https://studio.invalid');
-  if(parsed.origin!=='https://studio.invalid'||parsed.username||parsed.password||parsed.hash||!/^\/(?:v1\/|api\/auth\/)/.test(parsed.pathname))throw new CloudError('服务地址无效。');
+  if(parsed.origin!=='https://studio.invalid'||parsed.username||parsed.password||parsed.hash||!/^\/(?:v1\/|api\/auth\/)/.test(parsed.pathname))throw new CloudError(ui('client.pathInvalid'));
   return parsed.pathname+parsed.search;
 }
 
@@ -19,7 +26,7 @@ function waitForRetry(ms,signal){
   });
 }
 
-function readAdmission(){
+function readAdmission(getAccount=()=>null){
   let active=0,downloads=0;const waiting=[];
   const room=blob=>active<4&&(!blob||downloads<2);
   function begin(blob){active++;if(blob)downloads++;let released=false;return()=>{if(released)return;released=true;active--;if(blob)downloads--;drain();};}
@@ -27,7 +34,7 @@ function readAdmission(){
   return (blob,signal)=>{
     if(signal.aborted)throw abortError();
     if(room(blob))return begin(blob);
-    if(waiting.length>=128)throw new CloudError('待读取的素材过多，请等当前内容加载完再打开更多内容。',{status:429});
+    if(waiting.length>=128)throw new CloudError(ui('client.readQueue',getAccount()),{status:429});
     return new Promise((resolve,reject)=>{
       const entry={blob,signal,resolve,reject,cancel:()=>{const at=waiting.indexOf(entry);if(at>=0)waiting.splice(at,1);signal.removeEventListener('abort',entry.cancel);reject(abortError());}};
       waiting.push(entry);signal.addEventListener('abort',entry.cancel,{once:true});
@@ -43,14 +50,15 @@ function retryDelay(response){
   return Number.isFinite(delay)&&delay>=0&&delay<=30000?delay:null;
 }
 
-export function createCloudClient({fetcher=(...args)=>fetch(...args),onUnauthorized=()=>{},timeoutMs=30000,uploadTimeoutMs=900000,downloadTimeoutMs=300000}={}){
-  let epoch=0,account=null;const inflight=new Set(),admitRead=readAdmission();
+export function createCloudClient({fetcher=(...args)=>fetch(...args),onUnauthorized=()=>{},timeoutMs=30000,uploadTimeoutMs=900000,downloadTimeoutMs=300000,confirmSpending=defaultSpendingConfirmation}={}){
+  let epoch=0,account=null;const inflight=new Set(),admitRead=readAdmission(()=>account);
   function reset(){epoch++;for(const controller of inflight)controller.abort();inflight.clear();}
   async function request(path,{method='GET',body,key,blob=false,anonymous=false,signal}={}){
+    const multipart=typeof FormData!=='undefined'&&body instanceof FormData;
+    const encodedBody=body!==undefined&&!multipart?JSON.stringify(body):body;
     const target=safeCloudPath(path),current=epoch,expectedAccount=account,controller=new AbortController();inflight.add(controller);
     const cancelRead=()=>controller.abort();
     if(signal?.aborted)controller.abort();else signal?.addEventListener('abort',cancelRead,{once:true});
-    const multipart=typeof FormData!=='undefined'&&body instanceof FormData;
     const headers={...(body!==undefined&&!multipart?{'Content-Type':'application/json'}:{}),...(key?{'Idempotency-Key':key}:{}),...(expectedAccount&&!anonymous?{'X-Expected-Account':expectedAccount}:{})};
     let timedOut=false,releaseRead=null;const duration=blob?downloadTimeoutMs:multipart?uploadTimeoutMs:timeoutMs,deadline=Date.now()+duration;
     const timer=setTimeout(()=>{timedOut=true;controller.abort();},duration);
@@ -61,35 +69,50 @@ export function createCloudClient({fetcher=(...args)=>fetch(...args),onUnauthori
         const slot=admitRead(blob,controller.signal);
         releaseRead=typeof slot==='function'?slot:await slot;
       }
+      let spendingConfirmed=false;
       for(let attempt=0;;attempt++){
-      if(current!==epoch)throw new CloudError('登录账户已改变，请重新打开项目。');
+      if(current!==epoch)throw new CloudError(ui('client.accountChanged',expectedAccount));
       if(controller.signal.aborted)throw abortError();
-      const response=await fetcher(target,{method,headers,credentials:'same-origin',cache:'no-store',signal:controller.signal,...(body!==undefined?{body:multipart?body:JSON.stringify(body)}:{})});
-      if(current!==epoch)throw new CloudError('登录账户已改变，请重新打开项目。');
+      const response=await fetcher(target,{method,headers,credentials:'same-origin',cache:'no-store',signal:controller.signal,...(body!==undefined?{body:encodedBody}:{})});
+      if(current!==epoch)throw new CloudError(ui('client.accountChanged',expectedAccount));
       const responseAccount=response.headers.get('X-Authenticated-Account');
-      if(expectedAccount&&!anonymous&&responseAccount&&responseAccount!==expectedAccount){onUnauthorized();throw new CloudError('登录身份已改变。旧账户响应未展示或写入，请重新打开当前账户项目。',{status:401});}
+      if(expectedAccount&&!anonymous&&responseAccount&&responseAccount!==expectedAccount){onUnauthorized();throw new CloudError(ui('client.identityChanged',expectedAccount),{status:401});}
       if(!response.ok){let detail;try{detail=await response.json();}catch{detail=null;}
-        if(detail?.code==='account_context_changed'){onUnauthorized();throw new CloudError('登录身份已改变。请求被阻止，旧账户草稿仍保留。',{status:401});}
+        if(detail?.code==='account_context_changed'){onUnauthorized();throw new CloudError(ui('client.contextChanged',expectedAccount),{status:401});}
         if(response.status===401&&!anonymous)onUnauthorized();
+        // This closed response proves admission refused before a reservation.
+        // Only the human's explicit approval permits one exact-key retry.
+        if(method==='POST'&&response.status===409&&detail?.code==='spending_confirmation_required'&&!spendingConfirmed&&
+          typeof detail.plan_id==='string'&&Number.isSafeInteger(detail.estimate_microusd)&&detail.estimate_microusd>0){
+          if(await confirmSpending(detail,expectedAccount)){
+            if(current!==epoch)throw abortError();
+            if(controller.signal.aborted)throw abortError();
+            await request('/v1/account/spending-confirmations',{method:'POST',body:{plan_ids:detail.plan_ids||[detail.plan_id]},signal:controller.signal});
+            if(current!==epoch)throw abortError();
+            spendingConfirmed=true;continue;
+          }
+        }
         if(method==='GET'&&response.status===429&&attempt<2){
           const delay=retryDelay(response);
           if(delay!==null&&Date.now()+delay<deadline){await waitForRetry(delay,controller.signal);continue;}
         }
-        const reason=response.status===409&&detail?.detail==='capacity_drain_repreflight'?'GPU 正在休眠或切换，任务尚未提交。请重新检查后生成；作品和素材已保留。':typeof detail?.detail==='string'?detail.detail:typeof detail?.message==='string'?detail.message:response.status===409?'云端版本已改变。你的草稿已保留，请先比较新版本。':response.status===404?'此云功能尚未连接，或该内容不存在。':response.status===401?'请重新登录云工作室。':`服务暂未完成请求（${response.status}）。`;
-        throw new CloudError(reason,{status:response.status,detail});
+        const reason=response.status===409&&detail?.detail==='capacity_drain_repreflight'?ui('client.capacityDrain',expectedAccount):typeof detail?.detail==='string'?detail.detail:typeof detail?.message==='string'?detail.message:response.status===409?ui('client.versionChanged',expectedAccount):response.status===404?ui('client.notFound',expectedAccount):response.status===401?ui('client.login',expectedAccount):ui('client.status',expectedAccount,{status:response.status});
+        const budgetKey=['user_daily_limit_reached','connection_daily_limit_reached','spending_usage_unconfirmed','spending_settings_changed','spending_settings_invalid','admin_hourly_price_limit_reached','dstack_test_runtime_limit_reached','dstack_test_daily_limit_reached','assistant_quote_unavailable','spending_confirmation_consumed'].includes(detail?.code)?'errors.'+detail.code:null;
+        const localized=budgetKey?translate(uiLocale(expectedAccount),budgetKey):detail?.messages?.[uiLocale(expectedAccount)]||reason;
+        throw new CloudError(localized,{status:response.status,detail});
       }
       const result=blob?await response.blob():response.status===204?null:await response.json();
-      if(current!==epoch)throw new CloudError('登录账户已改变，请重新打开项目。');
+      if(current!==epoch)throw new CloudError(ui('client.accountChanged',expectedAccount));
       return result;
       }
-    }catch(error){if(error instanceof CloudError)throw error;if(timedOut)throw new CloudError(multipart?'上传等待超时。请先到“素材状态与存储用量”核对是否已收到文件，再决定恢复；未自动重新上传。':method==='GET'?(blob?'媒体读取等待超时。请重试预览或下载原文件；不会重新提交生成。':'云端内容读取等待超时。请刷新原记录；不会重新提交生成。'):'请求等待超时，作品已保留。提交是否成功仍需核对；不会自动重投，请刷新原任务或使用原标识恢复。');if(error.name==='AbortError')throw new CloudError('操作已结束；未确认的提交请从任务列表恢复。');throw new CloudError('无法连接云工作室。作品仍保留，请检查连接后重试；不会自动重新提交生成。');}
+    }catch(error){if(error instanceof CloudError)throw error;if(timedOut)throw new CloudError(ui(multipart?'client.uploadTimeout':method==='GET'?(blob?'client.mediaTimeout':'client.readTimeout'):'client.writeTimeout',expectedAccount));if(error.name==='AbortError')throw new CloudError(ui('client.aborted',expectedAccount));throw new CloudError(ui('client.offline',expectedAccount));}
     finally{clearTimeout(timer);signal?.removeEventListener('abort',cancelRead);inflight.delete(controller);if(releaseRead)releaseRead();}
   }
   function nativeContentURL(path,{download=false}={}){
-    if(!account)throw new CloudError('请先核对登录账户，再读取私有媒体。');
-    if(typeof path!=='string'||!/^\/v1\/(?:assets|artifacts)\/[A-Za-z0-9_-]{1,200}\/content$/.test(path.split('?')[0])||typeof download!=='boolean')throw new CloudError('私有媒体地址不在工作室内容接口范围内。');
+    if(!account)throw new CloudError(ui('client.mediaAccount',account));
+    if(typeof path!=='string'||!/^\/v1\/(?:assets|artifacts)\/[A-Za-z0-9_-]{1,200}\/content$/.test(path.split('?')[0])||typeof download!=='boolean')throw new CloudError(ui('client.mediaPath',account));
     const parsed=new URL(safeCloudPath(path),'https://studio.invalid'),entries=[...parsed.searchParams];
-    if(entries.length>1||entries.some(([key,value])=>key!=='download'||value!=='1'))throw new CloudError('私有媒体地址包含不支持的查询参数。');
+    if(entries.length>1||entries.some(([key,value])=>key!=='download'||value!=='1'))throw new CloudError(ui('client.mediaQuery',account));
     const query=new URLSearchParams({expected_account:account,...(download||entries.length?{download:'1'}:{})});
     return parsed.pathname+'?'+query;
   }

@@ -1,3 +1,4 @@
+import {useI18n} from './i18n/I18nProvider.jsx';
 import React,{useEffect,useRef,useState} from 'react';
 
 export function useStoryboardPanelSize(key,initial,min,max){
@@ -13,7 +14,7 @@ export function useStoryboardPanelSize(key,initial,min,max){
     window.addEventListener('pointermove',move);window.addEventListener('pointerup',done);window.addEventListener('pointercancel',done);document.body.classList.add(axis==='x'?'sb-resizing':'sb-resizing-y');cleanup.current=done;
   }};
 }
-export function StoryboardSplitter({panel,axis='x',sign=1,className='',label='调整面板大小'}){
-  return <div className={'splitter '+axis+' '+className} tabIndex={0} role="separator" aria-label={label} aria-orientation={axis==='x'?'vertical':'horizontal'} aria-valuemin={panel.min} aria-valuemax={panel.max} aria-valuenow={Math.round(panel.size)} title="拖动调整大小 · 双击恢复默认 · 方向键调整"
+export function StoryboardSplitter({panel,axis='x',sign=1,className='',label=null}){const {t,locale}=useI18n();
+  return <div className={'splitter '+axis+' '+className} tabIndex={0} role="separator" aria-label={label||t('storyboard.resize')} aria-orientation={axis==='x'?'vertical':'horizontal'} aria-valuemin={panel.min} aria-valuemax={panel.max} aria-valuenow={Math.round(panel.size)} title={t('storyboard.copy13')}
     onPointerDown={event=>panel.start(event,axis,sign)} onDoubleClick={panel.reset} onKeyDown={event=>{if(event.key==='Home'){event.preventDefault();panel.reset();}if((axis==='x'?['ArrowLeft','ArrowRight']:['ArrowUp','ArrowDown']).includes(event.key)){event.preventDefault();panel.adjust((['ArrowRight','ArrowDown'].includes(event.key)?1:-1)*sign*(event.shiftKey?40:10));}}}><i/></div>;
 }

@@ -1,3 +1,4 @@
+import {translate} from './i18n/locale.js';
 // Shared character identity stays on the entity; looks and casting are explicit references.
 export const gallerySlots = Object.freeze({front:'正面',side:'侧面',full:'全身'});
 const find=(p,id)=>p.entities.find(e=>e.id===id);
@@ -42,10 +43,10 @@ export function editLook(project,characterId,lookId,patch){
   Object.assign(look,updated,{version:look.version+1});character.version+=1;
   return recordImpact(project,characterId,lookShots(project,characterId,lookId).map(e=>e.id),`修改造型「${look.name}」`);
 }
-export function bindLook(project,targetId,characterId,lookId){
+export function bindLook(project,targetId,characterId,lookId,locale='zh'){
   const target=find(project,targetId),character=find(project,characterId);
-  if(!['scene','shot'].includes(target?.type)||character?.type!=='character')return {ok:false,error:'角色或场戏已被删除，请重新选择。'};
-  if(lookId&&!looksOf(character).some(l=>l.id===lookId))return {ok:false,error:'这个造型已被删除，请重新选择。'};
+  if(!['scene','shot'].includes(target?.type)||character?.type!=='character')return {ok:false,error:translate(locale,'h3more.bind.castMissing')};
+  if(lookId&&!looksOf(character).some(l=>l.id===lookId))return {ok:false,error:translate(locale,'h3more.bind.lookMissing')};
   const before=signatures(project,characterId),rest=castOf(target).filter(c=>c.characterId!==characterId);
   target.data.cast=lookId?[...rest,{characterId,lookId}]:rest;target.version+=1;
   return changes(project,characterId,before,`${target.type==='scene'?'调整场戏默认':'调整镜头覆盖'}「${target.title}」`);

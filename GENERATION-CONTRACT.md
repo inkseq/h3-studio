@@ -610,13 +610,15 @@ the list, exact-version preview, confirmation and original-action readback APIs.
 This is separate from story-project deletion and #154's stricter unsubmitted-card
 action. The original hidden project is not a second editing or deletion API.
 
-Trash/restore is an atomic metadata batch. Ordinary authorized trash preserves
-all saved content for five days. Automatic expiry requires cleanup consent from
-an actor with project, asset and job read/write authority. A limited PAT may hide
-or restore metadata without scheduling privileged storage deletion. Curated older
-acceptance records are tagged and review-held; they wait for fresh explicit owner
-purge preview/confirmation rather than expiring before review. New test sessions
-can request safe archival after verified acceptance; unresolved work still blocks it.
+Trash/restore is an atomic metadata batch. Trash retains saved content without
+an automatic deadline, including old consented records. Public `purge_at` is null
+and `auto_purge_enabled` is false; stored old deadlines remain audit metadata.
+Only explicit authorized purge/empty_trash preview and confirmation creates new
+deletion intent. Previously persisted irreversible intents still reconcile;
+completed deletions, tombstones and financial ledgers are not rewritten.
+Restore has no age limit but remains forbidden after irreversible purge intent.
+New test sessions may request safe archival after verified acceptance; unresolved
+work still blocks it, and archival does not authorize automatic deletion.
 
 Purge preview reports exact targets, removals, retained shared/chosen references
 and ledger preservation. Confirmation rechecks ownership, project authority,

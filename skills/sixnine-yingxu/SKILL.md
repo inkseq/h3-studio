@@ -27,6 +27,10 @@ Read the manifest's storage requirements and verification checklist. A helper di
 
 The `creator-full` version 1 grant covers the owner's projects, assets, jobs and assistant calls for 90 days from authorization. It does not grant access to other accounts, enable disabled services, remove budgets or authorize a particular paid action. The connection UI has a separate publication gate; do not claim a button exists solely because discovery is readable.
 
+The owner chooses a per-connection daily spending cap when connecting and can edit it later in **Settings → AI assistants**. A cap of `0` adds no connection limit; the owner's daily limit, original cumulative credit, reserved charges and infrastructure safeguards still apply. Daily limits follow **Australia/Sydney**, including daylight saving; unresolved charges from earlier days remain included until reconciled. The initial cap is part of a nonzero-cap connection's authorization fingerprint; later owner settings do not replace the original grant, reset spending or broaden scopes.
+
+Preserve the original request/key on a refusal. `connection_daily_limit_reached` means **this assistant's daily cap was reached / 已达到此助手的每日上限**; `user_daily_limit_reached` means **the owner's daily cap was reached / 已达到账户每日上限**. `spending_usage_unconfirmed` means **existing charges need reconciliation / 已有费用尚待核对**. `spending_settings_changed` means **reload settings and check the entire original submission / 设置已变化，须重新核对原批次**. `spending_confirmation_required` requires the signed-in human's explicit approval of the exact quoted plan or whole batch before payment; a machine key cannot issue that approval or change budget settings. `assistant_quote_unavailable` means **an unpriced text or automatic-title call was refused under an active limit / 有消费上限时，未报价的文本或自动命名调用被拒绝**. Do not automatically retry, replace jobs, raise caps or fabricate confirmed costs; return the reason and the same editable work link to the owner.
+
 ### Existing connections from the old product domain
 
 Browser cookies are host-bound: sign in once at `https://inkseq.com`. Existing PAT bytes, Agent grants and expiry do not change. The installed skill name, OS credential-store names, `--tenant sixnine` and `SIXNINE_API_KEY` remain compatible identifiers, not the public product domain.
@@ -214,11 +218,12 @@ GET the original `/history/actions/{action_id}`; never report it deleted or send
 a replacement purge. An uncertain confirmation uses its original identical
 key/body. No restore is allowed after irreversible purge intent.
 
-Ordinary full-scope trash preserves content and permits restoration for five
-days before automatic cleanup. Inspect `auto_purge_enabled`,
-`purge_blocked_reason` and `review_hold`: limited-scope keys do not gain R2
-deletion authority by waiting, and curated older acceptance records wait for
-explicit owner purge review. Metadata trash/restore requires project read/write;
+Trash preserves content without automatic expiry, even for historical consented
+deadlines. `auto_purge_enabled` is false and public `purge_at` is null; stored old
+deadlines remain audit data. Restore has no age limit before irreversible intent.
+Only explicit authorized purge/empty_trash confirmation starts new deletion;
+existing durable intents still reconcile without replacement plans.
+Metadata trash/restore requires project read/write;
 purge requires project, asset and job read/write scopes. Do not acquire or expand
 credentials to bypass missing authority.
 

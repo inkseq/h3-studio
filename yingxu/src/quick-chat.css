@@ -165,7 +165,7 @@
 .qc-welcome h1{font-size:31px}
 .qc-results{grid-template-columns:1fr}
 .qc-composer-bottom{gap:6px}}
-@media(max-width:650px){.qc-sidebar{transform:translateX(-100%);width:234px;box-shadow:20px 0 100px #23392f20;transition:transform .15s}
+@media(max-width:760px){.qc-sidebar{transform:translateX(-100%);width:234px;box-shadow:20px 0 100px #23392f20;transition:transform .15s}
 .qc-sidebar-open{transform:none}
 .qc-main{margin-left:0}
 .qc-composer-wrap{padding:10px;max-height:65dvh}
@@ -229,7 +229,7 @@
 @media(max-width:800px){.qc-settings-summary{display:none}
 .qc-composer-bottom{gap:10px}
 .qc-cost{max-width:220px}}
-@media(max-width:650px){.qc-header button.qc-connection-state{display:inline-flex;max-width:180px;font-size:8px}
+@media(max-width:760px){.qc-header button.qc-connection-state{display:inline-flex;max-width:180px;font-size:8px}
 .qc-header .qc-rename{margin-left:3px}
 .qc-composer-bottom{gap:8px}
 .qc-composer-bottom .qc-send{font-size:12px;padding:8px 12px}

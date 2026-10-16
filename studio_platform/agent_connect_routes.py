@@ -103,13 +103,14 @@ def register_routes(app, *, service=None):
     async def issue(request: Request):
         source_guard(request, browser=True)
         principal = browser(request)
-        value = await body(request, allowed={"name", "authorization_profile_id", "authorization_profile_version"},
+        value = await body(request, allowed={"name", "authorization_profile_id", "authorization_profile_version", "daily_limit_microusd"},
             required={"authorization_profile_id", "authorization_profile_version"})
         try:
             return await run_in_threadpool(service.issue, principal, name=value.get("name", "Codex"),
                 authorization_profile_id=value["authorization_profile_id"],
                 authorization_profile_version=value["authorization_profile_version"],
-                idempotency_key=request.headers.get("idempotency-key"), origin=origin(request))
+                idempotency_key=request.headers.get("idempotency-key"), origin=origin(request),
+                daily_limit_microusd=value.get("daily_limit_microusd", 0))
         except AuthenticationError:
             raise ConnectError("connection_login_required", 401) from None
 

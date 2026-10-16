@@ -95,6 +95,12 @@ class QuickChatTitleMixin:
                 state = session["payload"].get("title_generation")
                 if self.title_generator is None or not state or state["status"] != "pending":
                     return False
+                from .spending_limits import unquoted_spend_blocked
+                if unquoted_spend_blocked(conn, self.tenant, principal):
+                    payload = copy.deepcopy(session["payload"])
+                    payload["title_generation"].update(status="failed", error_code="assistant_quote_unavailable", completed_at=self.repo.clock())
+                    self._put(conn, session, payload)
+                    return False
                 source = self._get(conn, principal, state["source_id"], session_id, state["source_kind"])
                 text = source["payload"]["text" if state["source_kind"] == "turn" else "prompt"]
                 payload = copy.deepcopy(session["payload"])

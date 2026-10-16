@@ -99,6 +99,27 @@ class CreationHistoryTests(ledger.LedgerCase):
             if field not in {"history", "latest_seq"}:
                 self.assertEqual(actual[field], original[field])
 
+    def test_expired_consented_trash_never_creates_purge_and_can_restore(self):
+        self.activate()
+        self.upload()
+        self.trash()
+        self.assertIsNone(self.row()["payload"]["history"]["purge_at"])
+        with self.repo.transaction() as conn:
+            row = self.service._get(conn, self.principal, self.sid, kind="session")
+            payload = copy.deepcopy(row["payload"])
+            payload["history"].update(purge_at=self.now-1, cleanup_consent=True)
+            conn.execute(update(objects).where(objects.c.id == self.sid).values(payload=payload))
+        original = copy.deepcopy(self.row())
+        self.now += 6*86400
+        with patch.object(self.service, "preview_history", side_effect=AssertionError("automatic preview")):
+            self.assertEqual(self.service.process_history_cleanup(), {"actions_checked": 0, "objects_checked": 0})
+        self.assertEqual(self.row(), original)
+        visible = self.service.list_sessions(self.principal, view="trash")["sessions"][0]
+        self.assertIsNone(visible["purge_at"])
+        self.assertFalse(visible["auto_purge_enabled"])
+        restored = self.apply(self.preview("restore"), "restore-old-trash")
+        self.assertEqual(restored["items"][0]["trash_state"], "active")
+
     def test_malformed_history_shapes_are_closed_before_database_binding(self):
         for body in (None, [], {"action": []}, {"action": {}, "sessions": []}):
             with self.assertRaises(QuickChatError) as error:
@@ -281,7 +302,7 @@ class CreationHistoryTests(ledger.LedgerCase):
                     action_id="original-intent", now=self.now)
             self.assertEqual(future.result(timeout=10), "blocked")
 
-    def test_original_plan_admission_is_fenced_after_trash_and_expiry_requires_consent(self):
+    def test_original_plan_admission_is_fenced_after_trash_without_auto_expiry(self):
         project = self.row()["payload"]["project_id"]
         scope = Scope(self.scope.tenant_id, self.scope.owner_id, project)
         plan = self.repo.create_plan(scope, {"prompt": "original accepted inputs"},
@@ -292,7 +313,7 @@ class CreationHistoryTests(ledger.LedgerCase):
         self.activate()
         self.now += 5*86400+1
         self.service.process_history_cleanup()
-        self.assertEqual(self.row()["payload"]["history"]["trash_state"], "purged")
+        self.assertEqual(self.row()["payload"]["history"]["trash_state"], "trashed")
         with self.repo.engine.connect() as conn:
             self.assertIsNone(conn.execute(select(jobs.c.id).where(jobs.c.plan_id == plan["id"])).first())
 

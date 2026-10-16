@@ -556,5 +556,15 @@ inventory.json
 
 !test_backup_incomplete_coverage.py
 
+# Editable v2 admission settings; same ledger, no credential material.
+!studio_platform/spending_limits.py
+!studio_platform/spending_routes.py
+!test_spending_limits.py
 !studio_platform/backup_deletion.py
 !test_backup_expected_deletion.py
+
+# Canonical bilingual source modules and styles; no runtime data.
+!yingxu/src/i18n/
+!yingxu/src/i18n/*.js
+!yingxu/src/i18n/*.jsx
+!yingxu/src/i18n/*.css

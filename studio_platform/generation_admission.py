@@ -108,13 +108,13 @@ class GenerationAdmission:
             status = "blocked"
         budgets = self.policies.ensure_current(plan, task_scope) if ready else ()
         return self.repo.create_job(task_scope, plan_id, key, initial_status=status,
-                                    budget_account_ids=budgets)
+                                    budget_account_ids=budgets, spending_actor=principal.actor_id)
 
     def create_planned(self, principal, plan_id, business_identity):
         return self.create(principal, plan_id, business_identity, initial_status="planned",
                            business_identity=business_identity)
 
-    def enqueue(self, principal, job, *, business=False):
+    def enqueue(self, principal, job, *, business=False, confirmation_required=False, spending_settings_version=None):
         plan = self.access.plan(principal, job["plan_id"])
         project = self.access.project(principal, job["project_id"], "jobs:write")["payload"]
         if not business:
@@ -124,7 +124,9 @@ class GenerationAdmission:
         self.planning.check_source(project, plan["request"])
         task_scope = self.task_scope(principal, job["project_id"], job["id"] if business else None)
         budgets = self.policies.ensure_current(plan, task_scope)
-        return self.repo.enqueue(task_scope, job["id"], budget_account_ids=budgets)
+        return self.repo.enqueue(task_scope, job["id"], budget_account_ids=budgets,
+                                 spending_actor=principal.actor_id, confirmation_required=confirmation_required,
+                                 spending_settings_version=spending_settings_version)
 
     def refresh_planned(self, principal, job_id, plan_id):
         job = self.repo.get_job_for_owner(self.settings.tenant_id, principal.owner, job_id)
