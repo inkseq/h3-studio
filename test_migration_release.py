@@ -332,7 +332,7 @@ class MigrationArtifacts(unittest.TestCase):
             importer.assert_not_called()
 
     def test_retained_current_previous_derivatives_use_only_exact_installed_checker_pairs(self):
-        expected_commits = {'02681cacaf98822b5072a028fa9b313976d1c0ca', 'c848dde8bf1d49044743ae1f497a148e50b84409', '6e6fe5ee14e82983161f7f2bf15cbfd6e8eb54f2',
+        expected_commits = {'46130d852459f12d81d09c7e23178a8544d1d4d4', '02681cacaf98822b5072a028fa9b313976d1c0ca', 'c848dde8bf1d49044743ae1f497a148e50b84409', '6e6fe5ee14e82983161f7f2bf15cbfd6e8eb54f2',
                             'b5902a1cf9bf2b32fe2de7ea35ca1cc7bbde3524'}
         self.assertEqual(set(maintenance.RETAINED_DSTACK_HELPER_PAIRS), expected_commits)
         self.assertEqual(maintenance.RETAINED_DSTACK_HELPER_PAIRS['b5902a1cf9bf2b32fe2de7ea35ca1cc7bbde3524'],
