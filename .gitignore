@@ -560,3 +560,5 @@ inventory.json
 !studio_platform/spending_limits.py
 !studio_platform/spending_routes.py
 !test_spending_limits.py
+!studio_platform/backup_deletion.py
+!test_backup_expected_deletion.py

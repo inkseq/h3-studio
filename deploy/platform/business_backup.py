@@ -64,10 +64,12 @@ def docker(args, *, timeout=30):
     return r.stdout.decode()
 
 def validate_config(value, host):
-    require(type(value) is dict and type(value.get('version')) is int and value['version'] in (1, 2), 'backup_config_fields')
-    fields = {'version', 'environment', 'instance_id', 'target'} | ({'allow_missing_media'} if value['version'] == 2 else set())
+    require(type(value) is dict and type(value.get('version')) is int and value['version'] in (1, 2, 3), 'backup_config_fields')
+    fields = {'version', 'environment', 'instance_id', 'target'} | ({'allow_missing_media'} if value['version'] >= 2 else set())
+    if value['version'] == 3: fields.add('classify_expected_deletions')
+    require(value['version'] != 3 or value.get('classify_expected_deletions') is True, 'backup_config_fields')
     require(set(value) == fields and (value['version'] == 1 or value['allow_missing_media'] is True), 'backup_config_fields')
-    require(type(value['version']) is int and value['version'] in (1, 2) and value['environment'] in HOSTS
+    require(type(value['version']) is int and value['version'] in (1, 2, 3) and value['environment'] in HOSTS
         and value['instance_id'] == host == HOSTS[value['environment']], 'backup_host_mismatch')
     t = value['target']
     require(type(t) is dict and set(t) == {'account_id', 'region', 'bucket', 'kms_key_arn', 'role_arn'}, 'backup_target_fields')
@@ -82,10 +84,17 @@ def coverage(value):
     c = value.get('coverage')
     if value.get('version', 1) == 1 and value.get('format', 'sixnine-private-backup-copy-v1') == 'sixnine-private-backup-copy-v1':
         require(c is None, 'backup_coverage_invalid'); return {}
+    classified = value.get('version') == 3 or value.get('format') == 'sixnine-private-backup-copy-v3'
     fields = {'status','referenced_objects','available_objects','missing_objects','referenced_bytes','available_bytes','missing_bytes'}
-    require(type(c) is dict and set(c) == fields and all(type(c[k]) is int and c[k] >= 0 for k in fields-{'status'}), 'backup_coverage_invalid')
+    if classified: fields |= {'expected_missing_objects','expected_missing_bytes','unexpected_missing_objects','unexpected_missing_bytes','loss_alert_required'}
+    require(type(c) is dict and set(c) == fields and all(type(c[k]) is int and c[k] >= 0 for k in fields-{'status','loss_alert_required'}), 'backup_coverage_invalid')
     require(c['referenced_objects'] == c['available_objects']+c['missing_objects'] and c['referenced_bytes'] == c['available_bytes']+c['missing_bytes']
         and c['status'] == ('incomplete' if c['missing_objects'] else 'complete') and (c['missing_objects']==0)==(c['missing_bytes']==0), 'backup_coverage_invalid')
+    if classified:
+        require(type(c['loss_alert_required']) is bool and c['loss_alert_required'] == (c['unexpected_missing_objects'] > 0)
+            and c['missing_objects'] == c['expected_missing_objects']+c['unexpected_missing_objects']
+            and c['missing_bytes'] == c['expected_missing_bytes']+c['unexpected_missing_bytes']
+            and all((c[k+'_objects']==0)==(c[k+'_bytes']==0) for k in ('expected_missing','unexpected_missing')), 'backup_coverage_invalid')
     if 'objects' in value or 'bytes' in value:
         require(type(value.get('objects')) is int and type(value.get('bytes')) is int
             and c['available_objects'] == value['objects'] and c['available_bytes'] <= value['bytes'], 'backup_coverage_invalid')
@@ -104,10 +113,10 @@ def copy_receipt(path, target):
         value = json.loads(f.read(16385))
     require(set(value) == {'format', 'target', 'phase', 'completion_version_id', 'completion_sha256',
         'completion_bytes', 'snapshot_manifest_sha256', 'objects', 'bytes', 'restore_verified'} | set(coverage(value)), 'backup_receipt_fields')
-    require(value['target'] == target and value['format'] in ('sixnine-private-backup-copy-v1', 'sixnine-private-backup-copy-v2')
+    require(value['target'] == target and value['format'] in ('sixnine-private-backup-copy-v1', 'sixnine-private-backup-copy-v2', 'sixnine-private-backup-copy-v3')
         and value['phase'] == 'copied_not_restored' and value['restore_verified'] is False, 'backup_completion_mismatch')
     require(all(type(value[k]) is int and value[k] > 0 for k in ('bytes','completion_bytes'))
-        and type(value['objects']) is int and value['objects'] >= (0 if value['format'].endswith('-v2') else 1)
+        and type(value['objects']) is int and value['objects'] >= (0 if value['format'] != 'sixnine-private-backup-copy-v1' else 1)
         and all(isinstance(value[k],str) and re.fullmatch('[0-9a-f]{64}', value[k])
             for k in ('completion_sha256','snapshot_manifest_sha256'))
         and isinstance(value['completion_version_id'], str) and 1 <= len(value['completion_version_id']) <= 1024,
@@ -165,7 +174,7 @@ def check_history(directory, day):
         need = prior/'completed.json'
         require(need.exists(), 'backup_prior_outcome_requires_reconciliation')
         value = read(need)
-        require(type(value.get('version')) is int and value['version'] in (1, 2) and value.get('day') == prior.name
+        require(type(value.get('version')) is int and value['version'] in (1, 2, 3) and value.get('day') == prior.name
             and all(isinstance(value.get(k), str) and re.fullmatch('[0-9a-f]{64}', value[k])
                 for k in ('completion_sha256', 'receipt_sha256')),
             'backup_prior_receipt_invalid')
@@ -218,7 +227,7 @@ def run():
         docker(['exec', ids[0], 'python', '-B', '-c',
             "from pathlib import Path;p=Path('/data/business-backups');p.mkdir(mode=0o700,exist_ok=True);assert p.is_dir() and not p.is_symlink()"])
         docker(['exec', ids[0], 'python', '-B', '-m', 'studio_platform.backup_cli', 'configured',
-            '--destination', snapshot_container] + (['--allow-missing-media'] if cfg['version'] == 2 else []), timeout=900)
+            '--destination', snapshot_container] + (['--allow-missing-media'] if cfg['version'] >= 2 else []) + (['--classify-expected-deletions'] if cfg['version'] == 3 else []), timeout=900)
         # Private handoff: cp without -L retains symlinks, which are rejected.
         # The app cannot replace this root-controlled transport mount source.
         snapshot_host = operation/'snapshot'
@@ -235,7 +244,7 @@ def run():
         name = 'inkseq-backup-transfer-'+nonce
         docker(transport(image, name, [(snapshot_host, '/snapshot', True),
             (operation/'target.json', '/target.json', True), (transfer, '/output', False)],
-            ['copy', '--execute', '--target', '/target.json', '--backup', '/snapshot', '--receipts', '/output/transfer'] + (['--allow-incomplete'] if cfg['version'] == 2 else [])), timeout=1800)
+            ['copy', '--execute', '--target', '/target.json', '--backup', '/snapshot', '--receipts', '/output/transfer'] + (['--allow-incomplete'] if cfg['version'] >= 2 else [])), timeout=1800)
         receipt = copy_receipt(transfer/'transfer'/'completion.json', target)
         require(receipt['format'] == 'sixnine-private-backup-copy-v'+str(cfg['version']), 'backup_coverage_config_mismatch')
         record(operation/'receipt.json', receipt)
