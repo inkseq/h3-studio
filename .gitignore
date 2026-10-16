@@ -568,3 +568,6 @@ inventory.json
 !yingxu/src/i18n/*.js
 !yingxu/src/i18n/*.jsx
 !yingxu/src/i18n/*.css
+
+!studio_platform/quick_chat_takes.py
+!test_quick_chat_takes.py

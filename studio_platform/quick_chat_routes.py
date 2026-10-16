@@ -46,6 +46,21 @@ def agent_contract():
         "same_session": "Materials and next_settings are visible authoring state. Revisions freeze their own explicit inputs and seeds. Different sessions are isolated.",
         "history_titles": "Omit title when creating a session to allow optional Gemma 4 short history naming from the first meaningful accepted description. Any explicit title is manual, even the default label. Naming is independent of the conversational assistant and video engine; consult schema.history_titles.enabled. It sends only bounded first text, never media/full history, and failure keeps the original label without automatic retry.",
         "deployment_profiles": "Read capabilities.deployment_profiles and the session's complete next_settings. Preserve the user's selected deployment_profile_id and use that profile's generation_support[fl|ref] controls, input_support, limits, supported_constraints and execution_policy_constraints. Historical joint_cases are timing examples, never an admission allowlist; supported unmeasured combinations need no extra qualification confirmation. Turn-to-card inherits next_settings. Direct card creation/revision does not inherit an omitted profile: include top-level deployment_profile_id and explicit controls, copied from session next_settings for a new card or from the current revision when revising. Null or omission retains legacy routing; never drop a selected profile to bypass a blocker. Explicit session changes use PATCH with expected_version and complete next_settings. Catalog measurements are historical; preflight checks current matching workers. Ordinary generation keys do not grant operator rental access.",
+        "take_groups": {
+            "preferences_url": "/v1/quick-chat/preferences",
+            "preferences": "Owner CAS preferences default copies_max=4 and takes_fold_count=8. Both are editable positive integers; existing document byte and model limits still apply. Lowering the preference affects new revisions only, never historical reads or original submission replay.",
+            "list": PREFIX+"/{session_id}/cards/{card_id}/takes?limit=20&before_cursor={cursor}",
+            "labels": "group_number is a stable display ordinal across revisions; item.index and immutable hashes remain unchanged. Rows preserve original submission/job/execution actions and include full recipe and mutable annotation.",
+            "again": {"method":"POST", "path":PREFIX+"/{session_id}/cards/{card_id}/again",
+                "body":{"expected_card_version":"{card.version}","source_revision_id":"{revision.id}","item_id":"{take.id}","copies":1}},
+            "seeds": "A supplied fixed seed belongs only to the first new take; other takes receive distinct random seeds. Again creates a fresh revision in the original group and still requires the original paid preflight and confirmation. It is not execution retry.",
+            "star": {"method":"PATCH","path":PREFIX+"/{session_id}/takes/{item_id}","body":{"expected_version":"{annotation.version}","starred":True}},
+            "story": {"method":"POST","path":PREFIX+"/{session_id}/takes/{item_id}/story",
+                "body":{"target_project_id":"{owned_project_id}","expected_project_version":"{project.version}","parent_id":"{scene.id}"},
+                "status":PREFIX+"/{session_id}/story-transfers/{transfer_id}",
+                "require":"Both source and destination scopes/ownership are required before copying original bytes. This creates an editable shot with complete roles/ranges/audio/profile/controls and selected seed lock; never enqueues generation. Preserve key/body for unknown status, read original operation, and only explicitly resume that same POST. Copied assets are retained on a destination CAS conflict; never clean them automatically."},
+            "queue": "/v1/generations/queue-position?job_id={owned_job_id}",
+            "estimates": "Queue position is advisory original-pool fairness, never another owner's identity or an ETA. estimate.machine_seconds is the saved known planned machine allowance or null; cost readiness is the original preflight truth."},
         "composer_reset": "Only durable accepted submission clears the submitted composer snapshot. Inspect composer_reset; newer selections, persistent settings, stored assets and earlier revisions remain. Rejections and unknown outcomes preserve the draft.",
         "creation_history": {
             "list": {"method": "GET", "path": PREFIX,
@@ -136,11 +151,43 @@ def register_routes(app, *, hooks=None, assistant=None, assistant_enabled=False,
             body["field_errors"] = value.field_errors
         return JSONResponse(body, status_code=value.status)
 
+    @app.get("/v1/quick-chat/preferences")
+    def take_preferences(request: Request):
+        return service.preferences(request.state.principal)
+
+    @app.patch("/v1/quick-chat/preferences")
+    def update_take_preferences(request: Request, body: dict, key: str = Header(..., alias="Idempotency-Key")):
+        return service.set_preferences(request.state.principal, body, key)
+
+    @app.get("/v1/generations/queue-position")
+    def queue_position(request: Request, job_id: str):
+        return service.queue_position(request.state.principal, job_id)
+
+    @app.get(PREFIX+"/{session_id}/cards/{card_id}/takes")
+    def takes(session_id: str, card_id: str, request: Request, limit: int = 20, before_cursor: str | None = None):
+        return service.group_takes(request.state.principal, session_id, card_id, limit=limit, before_cursor=before_cursor)
+
+    @app.patch(PREFIX+"/{session_id}/takes/{item_id}")
+    def star(session_id: str, item_id: str, request: Request, body: dict, key: str = Header(..., alias="Idempotency-Key")):
+        return service.star_take(request.state.principal, session_id, item_id, body, key)
+
+    @app.post(PREFIX+"/{session_id}/cards/{card_id}/again", status_code=201)
+    def again(session_id: str, card_id: str, request: Request, body: dict, key: str = Header(..., alias="Idempotency-Key")):
+        return service.again(request.state.principal, session_id, card_id, body, key)
+
+    @app.post(PREFIX+"/{session_id}/takes/{item_id}/story", status_code=201)
+    def to_story(session_id: str, item_id: str, request: Request, body: dict, key: str = Header(..., alias="Idempotency-Key")):
+        return service.transfer_take(request.state.principal, session_id, item_id, body, key)
+
+    @app.get(PREFIX+"/{session_id}/story-transfers/{transfer_id}")
+    def transfer_status(session_id: str, transfer_id: str, request: Request):
+        return service.get_transfer(request.state.principal, session_id, transfer_id)
+
     @app.get("/v1/quick-chat/schema")
     def schema():
         return {"version": 1, "agent_contract": agent_contract(),
             "models": model_schema(enabled=assistant_enabled), "capabilities": capabilities(settings),
-            "assistant_enabled": assistant_enabled, "copies": {"minimum": 1, "maximum": 4},
+            "assistant_enabled": assistant_enabled, "copies": {"minimum": 1, "maximum": 2147483647, "default_maximum": 4, "preference_url": "/v1/quick-chat/preferences"},
             "history_titles": {"enabled": title_generator is not None, "model_id": TITLE_MODEL,
                 "input": "first meaningful accepted turn or card prompt; at most 2000 characters; no media or full history",
                 "timing": "background after authoring response", "maximum_calls_per_session": 1,

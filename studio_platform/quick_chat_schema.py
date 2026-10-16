@@ -137,7 +137,7 @@ class CreateCardRequest(AuthoringObject):
     recipe_id: Literal[tuple(RECIPES)]
     controls: CardControls
     inputs: CardInputs
-    copies: Annotated[StrictInt, Field(ge=1, le=4)]
+    copies: Annotated[StrictInt, Field(ge=1, le=2147483647)]
     title: Annotated[StrictStr, Field(min_length=1, max_length=160)] = "我的视频"
     deployment_profile_id: StrictStr | None = None
     turn_id: StrictStr | None = None

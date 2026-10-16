@@ -104,7 +104,9 @@ class QuickChatTests(unittest.TestCase):
              "expected_card_version": 1, "source_revision_id": old["id"]}, "revise", card_id=one["card"]["id"])
         self.assertEqual(two["revision"]["version"], 2)
         self.assertEqual(self.service.get_revision(self.principal, self.sid, old["id"]), old)
-        self.assertEqual([i["seed"] for i in old["items"]], ["18446744073709551615", "0"])
+        self.assertEqual(old["items"][0]["seed"], "18446744073709551615")
+        self.assertNotEqual(old["items"][1]["seed"], old["items"][0]["seed"])
+        self.assertTrue(0 <= int(old["items"][1]["seed"]) < 2**64)
         self.assertNotEqual(old["items"][0]["shot_id"], two["revision"]["items"][0]["shot_id"])
         with self.assertRaises(QuickChatError):
             self.service.save_card(self.principal, self.sid,
