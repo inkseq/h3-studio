@@ -16,6 +16,7 @@ import {storyboardCatalogs} from './storyboardCatalogs.js';
 import {legacyCatalogs} from './legacyCatalogs.js';
 export const catalogs = {
   en: {
+    'workspace.closeHistory': 'Close creation history',
     ...adjunctCatalogs.en,
     ...h3MoreCatalogs.en,
     ...operatorPanelCatalogs.en,
@@ -43,6 +44,7 @@ export const catalogs = {
     'locale.switchToEnglish': 'Switch to English',
   },
   zh: {
+    'workspace.closeHistory': '关闭创作记录',
     ...adjunctCatalogs.zh,
     ...h3MoreCatalogs.zh,
     ...operatorPanelCatalogs.zh,

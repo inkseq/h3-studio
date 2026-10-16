@@ -35,6 +35,7 @@ export default function QuickChatWorkspace(){
   const {t,locale}=useI18n();
   useEffect(()=>{document.title=t('workspace.copy117');},[locale]);
   const c=useCloud(),controller=useMemo(()=>createQuickChatController(),[]),state=useSyncExternalStore(controller.subscribe,controller.getState,controller.getState),[prompt,setPrompt]=useState(()=>readDraft(null,null)),[dialog,setDialog]=useState(null),[rename,setRename]=useState(''),[mobile,setMobile]=useState(false),[staged,setStaged]=useState([]),[localError,setLocalError]=useState(''),[notice,setNotice]=useState(''),[draftSettings,setDraftSettings]=useState(null),[model,setModel]=useState('gemini-3.8-flash'),[assistantMode,setAssistantMode]=useState('assist'),[modeIntent,setModeIntent]=useState(()=>readMode(null,null)),[confirmation,setConfirmation]=useState(null),[dragging,setDragging]=useState(false),[submitting,setSubmitting]=useState(false),input=useRef(),textarea=useRef(),uploading=useRef(false),alive=useRef(true),lastAccount=useRef(null),lastDraft=useRef({account:null,id:null}),lastSelected=useRef(null),carryDraft=useRef(false),needsFileReconfirm=useRef(false),stagedRef=useRef([]),textRef=useRef(prompt),confirmationRef=useRef(null),modeRef=useRef(modeIntent),materialOperation=useRef(false);
+  useEffect(()=>{if(!mobile)return;const opener=document.activeElement;const close=event=>{if(event.key==='Escape'&&!event.defaultPrevented&&!document.querySelector('dialog[open]')){event.preventDefault();setMobile(false);}};document.addEventListener('keydown',close);return()=>{document.removeEventListener('keydown',close);if(opener?.isConnected)opener.focus();};},[mobile]);
   const [hiddenAssetIds,setHiddenAssetIds]=useState([]),[toast,setToast]=useState(''),[renameError,setRenameError]=useState(''),controlsSnapshot=useRef(null),renameSnapshot=useRef(null);
   const newSettings=nextSettingsFor(state.capabilities,state.schema);
   const settings=nextSettingsFor(state.capabilities,state.schema,{draft:draftSettings,session:state.session?.next_settings}),recipe=recipeFor(state.capabilities,settings),limits=effectiveLimits(recipe),turns=mergeTimelineTurns(state.timeline),allCards=Object.values(state.cards),busy=state.busy||submitting,modelSchema=(state.schema?.models||state.schema?.assistant?.models||[]).find(item=>item.id===model),assistantEnabled=state.schema?.assistant_enabled===true&&modelSchema?.inputs?.text?.enabled===true;
@@ -123,7 +124,9 @@ export default function QuickChatWorkspace(){
   const renderCard=card=><QuickChatCard key={card.id} card={card} state={state} controller={controller} onContinue={continueRevision} onUseResult={useResult} onUseMaterial={reuseMaterial}/>;
   return <div className="qc-shell">
     <a className="skip" href="#quick-chat-main">{t('workspace.copy7')}</a>
+    {mobile&&<button className="qc-history-backdrop" aria-label={t('workspace.closeHistory')} onClick={()=>setMobile(false)}/>}
     <aside className={'qc-sidebar '+(mobile?'qc-sidebar-open':'')} aria-label={t('workspace.accessible1')}>
+      <button className="qc-history-close" aria-label={t('workspace.closeHistory')} onClick={()=>setMobile(false)}><X size={19}/></button>
       <a className="qc-brand" href="/" title={t('workspace.status67')}>Ⅱ <b>{t('workspace.copy8')}</b><small>STUDIO</small></a>
       <button className="qc-new" disabled={busy} onClick={newSession}><Plus size={16}/>{t('workspace.copy9')}</button>
       <CreationHistory state={state} controller={controller} busy={busy} onSelect={selectSession}/>
