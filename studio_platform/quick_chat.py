@@ -23,6 +23,7 @@ from .guided import empty_project, new_entity, now_iso
 from .project_validation import ID, validate_project
 from .project_activity import append_activity
 from .repository import Conflict, NotFound, Scope, BudgetExceeded, canonical, request_hash, documents, jobs, attempts, artifacts
+from .quick_chat_takes import QuickChatTakesMixin, INTEGER_MAX
 from .quick_chat_titles import DEFAULT_TITLE, TITLE_MODEL, QuickChatTitleMixin, public_title_state
 from .quick_chat_history import QuickChatHistoryMixin, CLEANUP_SCOPES
 from .content_lifecycle import owner_reference_gate, assert_project_writable, assert_reference_payload
@@ -103,7 +104,7 @@ def settings_check(value):
     if value.get("deployment_profile_id") is not None:
         from .runtime_catalog import get_profile
         get_profile(value["deployment_profile_id"])
-    if value["recipe_id"] not in RECIPES or type(value["copies"]) is not int or not 1 <= value["copies"] <= 4:
+    if value["recipe_id"] not in RECIPES or type(value["copies"]) is not int or not 1 <= value["copies"] <= INTEGER_MAX:
         raise QuickChatError("invalid_settings", "生成方式或份数无效。", 422)
     validate_controls_patch(value["controls"])
     return canonical(value)
@@ -133,7 +134,7 @@ def cursor_decode(value, principal, session_id, direction):
         raise QuickChatError("invalid_cursor", "分页位置无效，请重新加载记录。", 422) from None
 
 
-class QuickChatService(QuickChatHistoryMixin, QuickChatTitleMixin):
+class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitleMixin):
     def __init__(self, repository, assets, settings, storage, *, hooks=None, assistant=None, assistant_enabled=False,
                  title_generator=None):
         self.repo, self.assets, self.settings, self.storage = repository, assets, settings, storage
@@ -373,6 +374,7 @@ class QuickChatService(QuickChatHistoryMixin, QuickChatTitleMixin):
                 p["model_id"] = model_check(body["model_id"])
             if "next_settings" in body:
                 p["next_settings"] = settings_check(body["next_settings"])
+                self._copies_allowed(principal, p["next_settings"]["copies"], conn)
             if any(name in body for name in ("is_test", "test_accepted", "review_hold")):
                 if any(type(body[name]) is not bool for name in ("is_test", "test_accepted", "review_hold") if name in body):
                     raise QuickChatError("invalid_request", "测试标记需要布尔值。", 422)
@@ -540,6 +542,7 @@ class QuickChatService(QuickChatHistoryMixin, QuickChatTitleMixin):
 
     def _create_revision(self, conn, principal, session, card, snapshot, sources, source_revision=None):
         owner_reference_gate(conn, self.tenant, principal.owner)
+        self._copies_allowed(principal, snapshot["copies"], conn)
         assert_project_writable(conn, self.tenant, principal.owner, session["payload"]["project_id"])
         assert_reference_payload(conn, self.tenant, principal.owner, (snapshot, sources))
         # The composer is mutable; capture its origin separately from the
@@ -563,6 +566,14 @@ class QuickChatService(QuickChatHistoryMixin, QuickChatTitleMixin):
         project_row = self.repo._locked(conn, select(documents).where(*where))
         if project_row is None or project_row["payload"].get("integration_kind") != "quick_chat":
             raise QuickChatError("projection_changed", "内部执行容器身份不匹配，未创建任务。")
+        # Every projected shot necessarily retains these bytes. Reject an
+        # impossible document before allocating seeds/items proportional to copies.
+        # This is the existing configured document byte quota, not a copies cap.
+        minimum_shot_bytes = len(json.dumps({"id":"shot-"+"0"*32,"data":{"prompt":snapshot["prompt"]}},
+            ensure_ascii=False,separators=(",",":")).encode("utf-8"))
+        existing_bytes = len(json.dumps(project_row["payload"],ensure_ascii=False,separators=(",",":")).encode("utf-8"))
+        if existing_bytes + snapshot["copies"] * minimum_shot_bytes > self.settings.max_project_bytes:
+            raise QuickChatError("project_size_exceeded", "Copies exceed the configured project byte quota. / 份数超过配置的项目字节限额。", 422)
         project = copy.deepcopy(project_row["payload"])
         scene = next(e for e in project["entities"] if e["type"] == "scene")
         revision_id = "revision-"+uuid.uuid4().hex
@@ -575,8 +586,17 @@ class QuickChatService(QuickChatHistoryMixin, QuickChatTitleMixin):
         explicit = snapshot["controls"].get("seed")
         if explicit is not None and not 0 <= int(explicit) < (1 << seed_bits):
             raise QuickChatError("wangp_invalid_seed", "当前生成服务的种子须在0至4294967295之间。", 422)
-        seeds = [str((int(explicit)+i) % (1 << seed_bits)) if explicit is not None
-            else str(secrets.randbits(seed_bits)) for i in range(snapshot["copies"])]
+        previous_seeds = {int(item["seed"]) for value in conn.execute(select(objects.c.payload).where(
+            objects.c.tenant == self.tenant, objects.c.owner == principal.owner, objects.c.kind == "revision",
+            objects.c.parent_id == card["id"])).scalars() for item in value["items"]}
+        seeds, chosen = [], set(previous_seeds)
+        for index in range(snapshot["copies"]):
+            seed = int(explicit) if index == 0 and explicit is not None else secrets.randbits(seed_bits)
+            if index != 0 or explicit is None:
+                while seed in chosen:
+                    seed = (seed + 1) % (1 << seed_bits)
+            chosen.add(seed)
+            seeds.append(str(seed))
         digest = request_hash({"snapshot": snapshot, "seeds": seeds})
         items = []
         for index, seed in enumerate(seeds):
@@ -734,12 +754,21 @@ class QuickChatService(QuickChatHistoryMixin, QuickChatTitleMixin):
             if p["status"] == "checking":
                 plans = [i["plan"] for i in p["items"] if i["plan"]]
                 ready = len(plans) == len(p["items"]) and all(v["status"] == "ready" for v in plans)
+                runtime_values = []
+                from .repository import plans as saved_plans
+                for public_plan in plans:
+                    saved = conn.execute(select(saved_plans.c.execution_plan).where(saved_plans.c.id == public_plan["plan_id"],
+                        saved_plans.c.tenant_id == self.tenant, saved_plans.c.owner_id == principal.owner)).scalar_one_or_none()
+                    runtime = saved.get("expected_runtime_s") if saved and saved.get("quote_known") is True else None
+                    runtime_values.append(runtime if type(runtime) in (int, float) and 0 <= runtime < float("inf") else None)
+                machine_seconds = sum(runtime_values) if len(runtime_values) == len(p["items"]) and all(v is not None for v in runtime_values) else None
                 p = {**p, "status": "ready" if ready else "blocked",
                     "expires_at": min((v["expires_at"] for v in plans), default=self.repo.clock()),
                     "estimate_available": len(plans) == len(p["items"]) and all(
                         v.get("estimate", {}).get("cost_microusd") is not None for v in plans),
                     "estimate": {"currency": "USD", "cost_microusd": sum((v.get("estimate", {}).get("cost_microusd") or 0) for v in plans),
-                        "kind": "budget_reservation", "final_bill": False}}
+                        "kind": "budget_reservation", "final_bill": False, "machine_seconds": machine_seconds,
+                        "runtime_kind": "planned_machine_allowance", "eta_seconds": None}}
                 self._put(conn, current, p)
                 self._event(conn, principal, session, "preflight.completed", current["id"])
         return self.get_preflight(principal, session_id, record["id"])

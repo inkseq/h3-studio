@@ -1,16 +1,12 @@
+import {microsToDollars,dollarsToMicros} from './money.js';
 import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {createCloudClient} from './cloud-client.js';
 import {LanguageSwitcher,useI18n} from './i18n/I18nProvider.jsx';
 import './spending-settings.css';
 
-const dollars=value=>String(value/1_000_000);
-function micros(value){
-  if(!/^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/.test(value))throw Error('settings.invalid');
-  const [whole,fraction='']=value.split('.'),result=Number(whole)*1_000_000+Number(fraction.padEnd(6,'0'));
-  if(!Number.isSafeInteger(result)||result>9_000_000_000_000_000)throw Error('settings.invalid');
-  return result;
-}
-const money=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:6}).format(value/1_000_000);
+const dollars=microsToDollars;
+function micros(value){try{return dollarsToMicros(value);}catch{throw Error('settings.invalid');}}
+const money=value=>'$'+microsToDollars(value);
 
 export default function SpendingSettings({account}){
   const {t}=useI18n(),api=useMemo(()=>{const client=createCloudClient();client.setAccount(account);return client;},[account]);
@@ -18,6 +14,7 @@ export default function SpendingSettings({account}){
   const [user,setUser]=useState(null),[admin,setAdmin]=useState(null),[draft,setDraft]=useState(null),[adminDraft,setAdminDraft]=useState(null);
   const [busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[error,setError]=useState(''),epoch=useRef(0);
   const load=async()=>{
+    if(!account){setBusy(false);return;}
     const current=epoch.current;setBusy(true);setError('');
     try{
       const data=await api.request('/v1/account/spending-settings');
@@ -32,6 +29,7 @@ export default function SpendingSettings({account}){
   };
   useEffect(()=>{epoch.current++;setUser(null);setAdmin(null);setDraft(null);setNotice('');void load();return()=>{epoch.current++;api.reset();};},[api]);
   async function save(isAdmin=false){
+    if(!account)return;
     const current=epoch.current;setBusy(true);setError('');setNotice('');
     try{
       let body;
@@ -49,7 +47,7 @@ export default function SpendingSettings({account}){
     finally{if(current===epoch.current)setBusy(false);}
   }
   const field=(label,value,onChange)=><label className="spending-field"><span>{t(label)}</span><input inputMode="decimal" value={value} disabled={busy} onChange={event=>onChange(event.target.value)}/></label>;
-  return <main className="spending-page"><header><a href="/quick-chat">{t('settings.back')}</a><LanguageSwitcher/></header><h1>{t('settings.title')}</h1>
+  return <main className="spending-page"><header><a href="/quick-chat">{t('settings.back')}</a><LanguageSwitcher/></header><h1>{t('settings.title')}</h1><p><a href="/quick-chat?preferences=takes">{t('takes.preferences')}</a></p>
     {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{t(notice)}</p>}
     {!user||!draft?<p role="status">{busy?t('settings.loading'):t('settings.login')}</p>:<>
       <form onSubmit={event=>{event.preventDefault();void save();}}><section aria-labelledby="budget-settings-title"><h2 id="budget-settings-title">{t('settings.budget')}</h2>

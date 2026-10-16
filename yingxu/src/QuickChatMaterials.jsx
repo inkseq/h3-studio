@@ -4,7 +4,7 @@ import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {Image,Video,Music,X,Check,Upload} from 'lucide-react';
 import {ChatDialog} from './QuickChatControls.jsx';
 import {bindingParticipates,bindingPayload,effectiveLimits,clipLimits,displaySeconds,mediaDuration,hasOriginalAudio,roleSupported} from './quick-chat-model.js';
-export function PrivateMedia({client,path,kind,name='',compact=false}){
+export function PrivateMedia({client,path,kind,name='',compact=false,hoverPlay=false}){
   const {t:at}=useI18n();
   const {t,locale}=useI18n();
   const [error,setError]=useState(''),player=useRef(null);
@@ -16,7 +16,7 @@ export function PrivateMedia({client,path,kind,name='',compact=false}){
   const source=native?.url,issue=native?.error||error;
   if(!source){const Icon={image:Image,video:Video,audio:Music}[kind]||Image;return <div className={'qc-media-placeholder '+(compact?'qc-compact':'')} title={issue||at('adjunct.quickChatMaterials.copy219')}><Icon size={22}/>{!compact&&<small>{issue||at('adjunct.quickChatMaterials.copy220')}</small>}</div>;}
   const failed=()=>setError(at('adjunct.quickChatMaterials.copy221'));
-  return <>{kind==='image'?<img ref={player} className={compact?'qc-media-thumb':'qc-media-full'} src={source} alt={name} referrerPolicy="no-referrer" onError={failed}/>:kind==='video'?<video ref={player} className="qc-media-full" src={source} controls preload="metadata" onError={failed}/>:<audio ref={player} src={source} controls preload="metadata" onError={failed}/>} {issue&&<p className="qc-error" role="alert">{issue}<button onClick={()=>{setError('');if(kind==='image'&&player.current)player.current.src=source;else player.current?.load();}}>{t('workspace.copy60')}</button></p>}</>;
+  return <>{kind==='image'?<img ref={player} className={compact?'qc-media-thumb':'qc-media-full'} src={source} alt={name} referrerPolicy="no-referrer" onError={failed}/>:kind==='video'?<video ref={player} className="qc-media-full" src={source} controls={!hoverPlay} muted={hoverPlay} playsInline preload="metadata" onMouseEnter={hoverPlay?()=>{player.current?.play()?.catch(()=>{});}:undefined} onMouseLeave={hoverPlay?()=>player.current?.pause():undefined} onError={failed}/>:<audio ref={player} src={source} controls preload="metadata" onError={failed}/>} {issue&&<p className="qc-error" role="alert">{issue}<button onClick={()=>{setError('');if(kind==='image'&&player.current)player.current.src=source;else player.current?.load();}}>{t('workspace.copy60')}</button></p>}</>;
 }
 export function MaterialClip({binding,limits,client,onSave,onClose}){
   const {t:at}=useI18n();

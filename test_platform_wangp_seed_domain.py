@@ -60,17 +60,22 @@ class QuickChatSeedDomainTests(LedgerCase):
             original = self.service.save_card(self.principal, self.sid, body, "card")
             replay = self.service.save_card(self.principal, self.sid, body, "card")
         self.assertEqual([call.args for call in random.call_args_list], [(32,)]*4)
-        self.assertEqual([item["seed"] for item in original["revision"]["items"]], [str(MAX_SEED)]*4)
+        seeds = [int(item["seed"]) for item in original["revision"]["items"]]
+        self.assertEqual(seeds[0], MAX_SEED)
+        self.assertEqual(len(set(seeds)), 4)
+        self.assertTrue(all(0 <= seed <= MAX_SEED for seed in seeds))
         self.assertEqual(replay, original)
         with self.repo.engine.connect() as conn:
             self.assertEqual(conn.execute(select(jobs.c.id)).all(), [])
 
-    def test_explicit_wangp_batch_wraps_at_uint32_boundary_without_changing_control(self):
+    def test_explicit_wangp_boundary_seed_only_applies_to_first_take(self):
         for index, profile in enumerate((None, PROFILE_IDS[0], HISTORICAL_PRO6000_PROFILE)):
             body = self.body(seed=str(MAX_SEED), profile=profile, copies=3)
-            saved = self.service.save_card(self.principal, self.sid, body, "batch-"+str(index))["revision"]
+            with patch("studio_platform.quick_chat.secrets.randbits", side_effect=[17, 29]) as random:
+                saved = self.service.save_card(self.principal, self.sid, body, "batch-"+str(index))["revision"]
+            self.assertEqual([call.args for call in random.call_args_list], [(32,), (32,)])
             self.assertEqual(saved["controls"]["seed"], str(MAX_SEED))
-            self.assertEqual([item["seed"] for item in saved["items"]], [str(MAX_SEED), "0", "1"])
+            self.assertEqual([item["seed"] for item in saved["items"]], [str(MAX_SEED), "17", "29"])
 
     def test_explicit_out_of_domain_seed_rolls_back_card_and_projection(self):
         before = self.service.get_session(self.principal, self.sid)
@@ -87,16 +92,19 @@ class QuickChatSeedDomainTests(LedgerCase):
         self.service.settings = replace(self.settings, execution_backend="comfy-worker")
         maximum = (1 << 64)-1
         body = self.body(seed=str(maximum), copies=2)
-        original = self.service.save_card(self.principal, self.sid, body, "old-card")
+        with patch("studio_platform.quick_chat.secrets.randbits", return_value=maximum-7) as random:
+            original = self.service.save_card(self.principal, self.sid, body, "old-card")
+        random.assert_called_once_with(64)
         old = copy.deepcopy(original["revision"])
-        self.assertEqual([item["seed"] for item in old["items"]], [str(maximum), "0"])
+        self.assertEqual([item["seed"] for item in old["items"]], [str(maximum), str(maximum-7)])
         with patch("studio_platform.quick_chat.secrets.randbits", side_effect=lambda bits: (1 << bits)-1) as random:
             fresh = self.service.save_card(self.principal, self.sid, self.body(), "comfy-random")
         random.assert_called_once_with(64)
         self.assertEqual(fresh["revision"]["items"][0]["seed"], str(maximum))
         self.service.settings = self.settings
-        self.assertEqual(self.service.get_revision(self.principal, self.sid, old["id"]), old)
-        self.assertEqual(self.service.save_card(self.principal, self.sid, body, "old-card"), original)
+        with patch("studio_platform.quick_chat.secrets.randbits", side_effect=AssertionError("immutable replay must not redraw")):
+            self.assertEqual(self.service.get_revision(self.principal, self.sid, old["id"]), old)
+            self.assertEqual(self.service.save_card(self.principal, self.sid, body, "old-card"), original)
         revised = self.service.save_card(self.principal, self.sid,
             {**self.body(seed="42"), "expected_card_version": 1, "source_revision_id": old["id"]},
             "corrected-revision", card_id=original["card"]["id"])["revision"]

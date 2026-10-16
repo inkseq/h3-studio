@@ -121,7 +121,7 @@ class QuickChatRevisionContractTests(LedgerCase):
             ("prompt", " ", "invalid_value"), ("recipe_id", ["private-recipe-marker"], "invalid_value"),
             ("recipe_id", "private-recipe-marker", "invalid_value"), ("controls", "private-controls-marker", "type_mismatch"),
             ("inputs", [], "type_mismatch"), ("copies", True, "type_mismatch"),
-            ("copies", "2", "type_mismatch"), ("copies", 0, "invalid_value"), ("copies", 5, "invalid_value"))
+            ("copies", "2", "type_mismatch"), ("copies", 0, "invalid_value"), ("copies", 2147483648, "invalid_value"))
         for index, (field, value, reason) in enumerate(cases):
             with self.subTest(field=field, value=value):
                 response = self.rejected(self.revision_body(**{field: value}), "bad-field-"+str(index))
@@ -182,7 +182,8 @@ class QuickChatRevisionContractTests(LedgerCase):
         for field in ("deployment_profile_id", "recipe_id", "controls", "inputs", "copies", "title", "provenance"):
             self.assertEqual(revised["revision"][field], original[field], field)
         self.assertEqual(revised["revision"]["source_revision_id"], original["id"])
-        self.assertEqual([item["seed"] for item in revised["revision"]["items"]], ["7", "8"])
+        self.assertEqual(revised["revision"]["items"][0]["seed"], "7")
+        self.assertNotIn(revised["revision"]["items"][1]["seed"], {item["seed"] for item in original["items"]})
         self.assertEqual(self.client.get(self.base+"/revisions/"+original["id"]).json(), original)
         with self.repo.engine.connect() as conn:
             self.assertEqual(conn.execute(select(jobs.c.id)).all(), [])

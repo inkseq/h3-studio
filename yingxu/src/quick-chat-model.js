@@ -104,9 +104,9 @@ export function inputProblems(refs,assets,recipe,{requireReference=false,control
   }if(asset.kind==='video'&&!limits.allow_video_audio&&ref.use_audio!==false)errors.push('当前执行池未开放参考视频原声。');}
   return [...new Set(errors)];
 }
-export function settingsProblems(settings,recipe){
+export function settingsProblems(settings,recipe,copiesMax=4){
   const errors=[],schema=effectiveControlSchema(recipe),controls=settings.controls||{};
-  if(!Number.isInteger(settings.copies)||settings.copies<1||settings.copies>4)errors.push('生成份数须为 1–4。');
+  if(!Number.isInteger(settings.copies)||settings.copies<1||settings.copies>copiesMax)errors.push('takes.invalidPreferences');
   for(const [field,value]of Object.entries(controls)){const item=schema[field];if(!item){errors.push(`服务未声明控制：${field}`);continue;}if(value===undefined)continue;if(value===null&&(Array.isArray(item.type)&&item.type.includes('null')||field==='seed'))continue;if(item.available===false){if(value!==item.default)errors.push(item.reason||`${CONTROL_LABELS[field]||field}不可用。`);continue;}if(field==='seed'){if(typeof value!=='string'||!/^\d{1,20}$/.test(value)||BigInt(value)>18446744073709551615n)errors.push('随机种子须为完整 64 位十进制字符串。');continue;}if(!validControlValue(value,item))errors.push(`${CONTROL_LABELS[field]||field}超出服务声明的类型或范围。`);}
   if(controls.resolution==='custom'){const {width,height}=controls,constraints=recipe?.custom_canvas_constraints||{},envelope=recipe?.execution_support?.constraints||{},max=minimum(constraints.maximum_pixel_area,envelope.max_pixels);if(!Number.isFinite(width)||!Number.isFinite(height)||width%32||height%32||max&&width*height>max||width/height<(constraints.minimum_aspect_ratio??.4)||width/height>(constraints.maximum_aspect_ratio??2.5))errors.push('自定义宽高须为 32 的倍数，并满足面积、宽高比限制。');}
   if(controls.video_decode==='tiled'&&(controls.video_overlap>=controls.video_tile_size||controls.video_temporal_overlap>=controls.video_temporal_size))errors.push('解码重叠须小于对应块大小。');

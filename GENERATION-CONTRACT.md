@@ -647,3 +647,61 @@ original absence/completion proof and occur once. Content can become unavailable
 without deleting job/attempt IDs, timestamps, immutable hashes, receipts, money
 or unresolved billing. This does not clean migration originals, backups or rollback
 releases and never grants retry, cancellation, rental or refund authority.
+
+
+## Quick Chat take groups (additive #233 contract)
+
+The card ID is the group identity. Immutable revisions/items retain their original
+hashes, seeds and execution receipts. GET `/v1/quick-chat/sessions/{session_id}/cards/{card_id}/takes`
+returns paginated original submission/item/job/action fields, exact `recipe`,
+`annotation`, stable 1-based `group_number`, `total_count` and `before_cursor`.
+The original per-revision `index` is never rewritten. Star annotations are owner
+CAS metadata outside the generation hash: PATCH `.../takes/{item_id}` with integer
+`expected_version` and boolean `starred`, using one durable Idempotency-Key.
+
+GET/PATCH `/v1/quick-chat/preferences` exposes owner CAS `copies_max` (default 4)
+and `takes_fold_count` (default 8). Positive JSON integers are editable up to the
+integer representation bound; original configured project-byte/model limits
+remain authoritative. Preference changes apply to new revisions/Again, not to
+historical reads, accepted jobs or original submission replay. A fixed seed is
+used only for the first new take; other new takes use distinct random seeds.
+POST `.../cards/{card_id}/again` takes `expected_card_version`,
+`source_revision_id`, `item_id`, `copies` and creates a fresh revision in that
+same group. Original preflight, spending confirmation, admission and execution
+receipts remain the only paid authority. Again is not retry of a failed attempt.
+
+POST `.../takes/{item_id}/story` takes `target_project_id`, integer
+`expected_project_version`, scene `parent_id` and optional `title`. Both source
+and destination owner/scope checks precede media copying. The original asset
+journal copies and SHA-verifies exact bytes; roles, ranges, audio selections,
+profile, controls and the selected seed lock become a new editable shot. No job
+is enqueued. GET `.../story-transfers/{transfer_id}` reads the original operation.
+Unknown/pending results keep the same body/key and require explicit same-key
+resume; destination CAS conflicts preserve copied assets without cleanup.
+
+GET `/v1/generations/queue-position?job_id={owned_job_id}` projects original pool
+fairness only, revealing neither other owners nor an ETA. Preflight's nullable
+`estimate.machine_seconds` is a saved known planned machine allowance, not
+historical timing or promised completion. Original cost/admission truth is
+unchanged. Strict write DTOs and safe field diagnostics are published in OpenAPI
+and `/v1/quick-chat/schema`; runnable generic-helper examples are in
+[the public Skill](skills/sixnine-yingxu/SKILL.md#take-groups-and-explicit-recipe-transfer-233).
+
+中文：候选组沿用原任务、预检和计费权威。偏好修改不改历史；转入故事只复制完整配方与素材，
+不启动生成。未知结果保留原操作并显式续办，不自动重试、不清理复制资产。
+
+
+A transfer receipt with `status:"blocked"`, `no_shot_committed:true` and
+`error_code:"target_version_conflict"` is a closed no-shot result. Retain that
+receipt/key and all copied assets; the user may explicitly acknowledge it and
+choose a fresh destination/version as a **new** intent. Do not automatically
+retarget. Original-key replay returns the same blocked receipt. This proof is
+never inferred from HTTP 4xx: unresolved storage journals and unknown outcomes
+remain on the original operation. 中文：只有明确“未创建镜头”的封闭回执才可重新选择；
+未知存储结果仍须核对原操作，不能自动换Key或清理资产。
+
+The transfer DTO binds `source_session_id`, `item_id`, `project_id`, original
+`expected_project_version` and `parent_id` to the persisted command. A client must
+match all five before acknowledging any completed/blocked receipt, and must also
+match the known `id` on status reads or replay. `project_version` is the resulting
+version and must not replace the original expected-version identity check.

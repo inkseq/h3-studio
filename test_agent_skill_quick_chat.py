@@ -104,5 +104,30 @@ class QuickChatHelperTests(unittest.TestCase):
         self.assertEqual(seen, ["GET"])
 
 
+    def test_generic_take_requests_preserve_methods_bodies_keys_without_auto_chain(self):
+        base='/v1/quick-chat/sessions/session-1'
+        cases=[('GET',base+'/cards/card-1/takes?limit=20',None),
+            ('PATCH',base+'/takes/item-1',{'expected_version':0,'starred':True}),
+            ('POST',base+'/cards/card-1/again',{'expected_card_version':1,'source_revision_id':'revision-1','item_id':'item-1','copies':2}),
+            ('POST',base+'/revisions/revision-2/preflights',{'revision_hash':'hash','capabilities_version':'version'}),
+            ('POST',base+'/revisions/revision-2/submissions',{'preflight_id':'preflight-1','revision_hash':'hash','confirmed':True}),
+            ('GET',base+'/story-transfers/import-1',None),
+            ('POST',base+'/takes/item-1/story',{'target_project_id':'project-1','expected_project_version':3,'parent_id':'scene-1'})]
+        with tempfile.TemporaryDirectory() as folder:
+            for index,(method,path,body) in enumerate(cases):
+                seen=[];file=Path(folder)/'request.json'
+                if body is not None:file.write_text(json.dumps(body),encoding='utf-8')
+                def request(req):
+                    seen.append((req.method,str(req.url),json.loads(req.content) if req.content else None,req.headers.get('Idempotency-Key')))
+                    return httpx.Response(200,json={'id':'original','status':'unknown'})
+                self.run_helper(request,method=method,path=path,json_file=str(file) if body is not None else None,
+                    idempotency_key='original-key' if body is not None else None)
+                self.assertEqual(seen,[(method,self.origin+path,body,'original-key' if body is not None else None)])
+                # Explicit transfer resume uses the identical request, never an automatic retry.
+                if index==len(cases)-1:
+                    self.run_helper(request,method=method,path=path,json_file=str(file),idempotency_key='original-key')
+                    self.assertEqual(seen[0],seen[1]);self.assertEqual(len(seen),2)
+
+
 if __name__ == "__main__":
     unittest.main()
