@@ -1,3 +1,4 @@
+import {translate} from './i18n/locale.js';
 import React from 'react';
 import {store} from './store.js';
 
@@ -21,16 +22,17 @@ export function deferredPanel(load,label){
     };
     componentWillUnmount(){if(this.state.backupUrl)URL.revokeObjectURL(this.state.backupUrl);}
     render(){
+      const t=(key,values)=>translate(this.props.locale||'en',key,values),panelLabel=({'角色图集':t('workspace.deferredCharacter'),'交付与粗剪':t('legacy.panelDelivery'),'角色造型':t('legacy.panelCharacter'),'剧本拆分':t('legacy.panelScript'),'声音编辑器':t('legacy.panelSound'),'字幕编辑器':t('legacy.panelSubtitle'),'制作队列':t('legacy.panelProduction')})[label]||label;
       if(this.state.failed)return React.createElement('section',{className:'panel-load-error',role:'alert'},
-        React.createElement('b',null,`${label}暂时未能打开`),
-        React.createElement('p',null,'可继续使用其他步骤。检查连接后，先把当前草稿保存在此浏览器，再刷新页面重新打开。云草稿需用原账户打开项目并选择恢复；刷新不会提交生成或上传云版本。'),
-        React.createElement('button',{type:'button',onClick:this.reload},'保存草稿并刷新页面'),
-        this.state.saveFailed&&React.createElement('p',null,'当前或先前账户仍有未落盘草稿，已阻止刷新。请用原账户恢复后下载结构备份，并保留本页面；备份不含图片、视频、音频文件，素材仍留在原位置。'),
-        React.createElement('button',{type:'button',onClick:this.backup},'准备项目结构备份（不含媒体）'),
-        this.state.backupUrl&&React.createElement('a',{href:this.state.backupUrl,download:'映序项目结构备份.json'},'下载项目结构备份（不含媒体）'));
+        React.createElement('b',null,t('workspace.deferred0',{label:panelLabel})),
+        React.createElement('p',null,t('workspace.deferred2')),
+        React.createElement('button',{type:'button',onClick:this.reload},t('workspace.deferred3')),
+        this.state.saveFailed&&React.createElement('p',null,t('workspace.deferred4')),
+        React.createElement('button',{type:'button',onClick:this.backup},t('workspace.deferred5')),
+        this.state.backupUrl&&React.createElement('a',{href:this.state.backupUrl,download:'映序项目结构备份.json'},t('workspace.deferred6')));
       const fallback=React.createElement('section',{className:'panel-loading',role:'status','aria-live':'polite','aria-busy':true},
-        React.createElement('b',null,`正在打开${label}…`),
-        React.createElement('p',null,'首次打开需要读取这部分界面；作品未改变，仍可切换步骤。'));
+        React.createElement('b',null,t('workspace.deferred1',{label:panelLabel})),
+        React.createElement('p',null,t('workspace.deferred7')));
       return React.createElement(React.Suspense,{fallback},React.createElement(Initial,this.props));
     }
   }

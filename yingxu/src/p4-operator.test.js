@@ -17,7 +17,7 @@ const lifecycle=changes=>({version:2,keep_on:'idle',hold_until:0,idle_shutdown_s
 test('live workspace reads require identity and arrays instead of dummy zero machines',async()=>{
   const responses=[{nodes:[],groups:[],queue:[]},{capacity_backend:'dstack-v1',nodes:[],groups:[]},{capacity_backend:'dstack-v1',nodes:[{node_id:'original'}],groups:[],queue:[]}];
   const api=createP4OperatorClient({fetcher:async()=>new Response(JSON.stringify(responses.shift()),{headers:{'Content-Type':'application/json'}})});
-  await assert.rejects(api.state(),/尚未确认/);await assert.rejects(api.state(),/尚未确认/);assert.equal((await api.state()).nodes[0].id,'original');
+  await assert.rejects(api.state(),/console state could not be confirmed/);await assert.rejects(api.state(),/console state could not be confirmed/);assert.equal((await api.state()).nodes[0].id,'original');
 });
 
 test('workspace freshness tolerates bounded clock skew while preserving aged and invalid observations',async context=>{
@@ -178,11 +178,11 @@ test('missing queue estimates and costs are unavailable rather than zero or read
 
 test('actual detail and rows expose measured-only stats and never hide keep policy at intermediate widths',async()=>{
   const path=fileURLToPath(new URL('./P4OperatorConsole.jsx',import.meta.url)),contents=await readFile(path,'utf8');
-  const bundled=await build({stdin:{contents,resolveDir:path.replace(/[/\\][^/\\]+$/,''),loader:'jsx'},bundle:true,write:false,platform:'node',format:'cjs',packages:'external',loader:{'.css':'empty'}});const module=new Module(path);module.filename=path;module.paths=Module._nodeModulePaths(path.replace(/[/\\][^/\\]+$/,''));module._compile(bundled.outputFiles[0].text,path);
+  const bundled=await build({stdin:{contents:contents+"\nexport {I18nProvider as TestI18nProvider} from './i18n/I18nProvider.jsx';\n",resolveDir:path.replace(/[/\\][^/\\]+$/,''),loader:'jsx'},bundle:true,write:false,platform:'node',format:'cjs',packages:'external',loader:{'.css':'empty'}});const module=new Module(path);module.filename=path;module.paths=Module._nodeModulePaths(path.replace(/[/\\][^/\\]+$/,''));module._compile(bundled.outputFiles[0].text,path);
   const node={id:'original',runtime_profile_id:'runtime',provider:'vast',mode:'ref',state:'ready',ready:true,observation_fresh:true,hard_deadline:null,hold_until:0,lifecycle:lifecycle({keep_on:'until_stopped'}),usage:{today_cost_microusd:250000,today_cost_basis:'approved_ceiling_estimate',today_video_count:2,timezone:'Australia/Sydney'},metrics:{average_generate_seconds:null,average_generation_cost_microusd:null,average_completion_seconds:210,samples:2,basis:'ledger_submit_to_validated_result'}};
-  const row=renderToStaticMarkup(React.createElement(module.exports.MachineRow,{node,profiles:[],onDetail:()=>{}}));assert.match(row,/直到我手动停止/);assert.match(row,/p4-keep/);
-  const ended=renderToStaticMarkup(React.createElement(module.exports.MachineRow,{node:{...node,state:'stopped',lifecycle_phase:'stopped'},profiles:[],onDetail:()=>{}}));assert.match(ended,/已结束/);assert.doesNotMatch(ended,/等待准备完成/);
-  const details=renderToStaticMarkup(React.createElement(module.exports.MachineDetail,{node,profiles:[],groups:[],onClose:()=>{}}));assert.match(details,/平均生成耗时/);assert.match(details,/暂无样本/);assert.match(details,/平均提交至交付 210 秒/);assert.match(details,/今日总费用.*上限估算/);assert.match(details,/今日已生成视频/);assert.doesNotMatch(details,/热机.*相同设置/);
+  const row=renderWithLocale(module,React.createElement(module.exports.MachineRow,{node,profiles:[],onDetail:()=>{}}));assert.match(row,/直到我手动停止/);assert.match(row,/p4-keep/);
+  const ended=renderWithLocale(module,React.createElement(module.exports.MachineRow,{node:{...node,state:'stopped',lifecycle_phase:'stopped'},profiles:[],onDetail:()=>{}}));assert.match(ended,/已结束/);assert.doesNotMatch(ended,/等待准备完成/);
+  const details=renderWithLocale(module,React.createElement(module.exports.MachineDetail,{node,profiles:[],groups:[],onClose:()=>{}}));assert.match(details,/平均生成耗时/);assert.match(details,/暂无样本/);assert.match(details,/平均提交至交付 210 秒/);assert.match(details,/今日总费用.*上限估算/);assert.match(details,/今日已生成视频/);assert.doesNotMatch(details,/热机.*相同设置/);
   const css=await readFile(new URL('./p4-operator.css',import.meta.url),'utf8');assert.doesNotMatch(css,/\.p4-keep\s*\{[^}]*display\s*:\s*none/);
 });
 
@@ -234,23 +234,30 @@ test('stale and stalled progress remain observations rather than fabricated mach
 
 test('machine rows and detail share live amounts, elapsed, safe causes and distinct model loading',async()=>{
   const path=fileURLToPath(new URL('./P4OperatorConsole.jsx',import.meta.url)),contents=await readFile(path,'utf8');
-  const bundled=await build({stdin:{contents,resolveDir:path.replace(/[/\\][^/\\]+$/,''),loader:'jsx'},bundle:true,write:false,platform:'node',format:'cjs',packages:'external',loader:{'.css':'empty'}});
+  const bundled=await build({stdin:{contents:contents+"\nexport {I18nProvider as TestI18nProvider} from './i18n/I18nProvider.jsx';\n",resolveDir:path.replace(/[/\\][^/\\]+$/,''),loader:'jsx'},bundle:true,write:false,platform:'node',format:'cjs',packages:'external',loader:{'.css':'empty'}});
   const module=new Module(path);module.filename=path;module.paths=Module._nodeModulePaths(path.replace(/[/\\][^/\\]+$/,''));module._compile(bundled.outputFiles[0].text,path);
   const node={...base,preparation:progress({stalled:true,stale:true,reason_code:'weight_download_not_advancing',reason_text:'下载源暂未继续传输'})};
-  const row=renderToStaticMarkup(React.createElement(module.exports.MachineRow,{node,profiles:[],onDetail:()=>{}}));
+  const row=renderWithLocale(module,React.createElement(module.exports.MachineRow,{node,profiles:[],onDetail:()=>{}}));
   assert.match(row,/下载权重中/);assert.match(row,/1.00 GiB \/ 2.00 GiB/);assert.match(row,/1 \/ 3 个文件/);
   assert.match(row,/启动至今 10 分钟.*本阶段 5 分钟/);assert.match(row,/下载源暂未继续传输/);assert.match(row,/状态观测已过期/);
   assert.doesNotMatch(row,/等待准备完成|机器失败/);assert.match(row,/p4-keep/);
-  const detail=renderToStaticMarkup(React.createElement(module.exports.MachineDetail,{node,profiles:[],groups:[],onClose:()=>{}}));
+  const detail=renderWithLocale(module,React.createElement(module.exports.MachineDetail,{node,profiles:[],groups:[],onClose:()=>{}}));
   assert.match(detail,/准备进度/);assert.match(detail,/当前阶段耗时/);assert.match(detail,/weight_download_not_advancing/);
   assert.match(detail,/将在首个任务加载/);assert.match(detail,/progress aria-label="权重下载进度" max="100" value="50"/);
   const loading={...base,current_job:{job_id:'first-original-job'},preparation:progress({phase:'loading_model',model:{state:'loading'}})};
-  const loadingRow=renderToStaticMarkup(React.createElement(module.exports.MachineRow,{node:loading,profiles:[],onDetail:()=>{}}));
+  const loadingRow=renderWithLocale(module,React.createElement(module.exports.MachineRow,{node:loading,profiles:[],onDetail:()=>{}}));
   assert.match(loadingRow,/加载模型中/);assert.match(loadingRow,/正在加载模型到 GPU/);assert.match(loadingRow,/#first-or/);
-  const missing=renderToStaticMarkup(React.createElement(module.exports.MachinePreparation,{node:base,detail:true}));
+  const missing=renderWithLocale(module,React.createElement(module.exports.MachinePreparation,{node:base,detail:true}));
   assert.match(missing,/下载量尚未上报/);assert.match(missing,/尚未收到详细准备观测/);assert.doesNotMatch(missing,/<progress/);
-  const ended=renderToStaticMarkup(React.createElement(module.exports.MachinePreparation,{node:{...node,state:'stopped'},detail:true}));
+  const ended=renderWithLocale(module,React.createElement(module.exports.MachinePreparation,{node:{...node,state:'stopped'},detail:true}));
   assert.match(ended,/本次启动历时/);assert.doesNotMatch(ended,/累计运行|启动至今/);
-  const escaped=renderToStaticMarkup(React.createElement(module.exports.MachinePreparation,{node:{...base,preparation:progress({reason_text:'<script>unsafe</script>'})},detail:true}));
+  const escaped=renderWithLocale(module,React.createElement(module.exports.MachinePreparation,{node:{...base,preparation:progress({reason_text:'<script>unsafe</script>'})},detail:true}));
   assert.doesNotMatch(escaped,/<script>/);assert.match(escaped,/&lt;script&gt;/);
 });
+
+function renderWithLocale(module,element){
+  const descriptor=Object.getOwnPropertyDescriptor(globalThis,'localStorage');
+  Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:()=> 'zh'}});
+  try{return renderToStaticMarkup(React.createElement(module.exports.TestI18nProvider,null,element));}
+  finally{if(descriptor)Object.defineProperty(globalThis,'localStorage',descriptor);else delete globalThis.localStorage;}
+}

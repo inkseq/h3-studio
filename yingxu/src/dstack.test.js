@@ -29,7 +29,7 @@ test('dstack client uses authenticated same-origin endpoints and original comman
 
 test('dstack reads reject missing adapter identity rather than display dummy empty capacity',async()=>{
   const api=createDstackClient({fetcher:async()=>new Response(JSON.stringify({nodes:[]}),{headers:{'Content-Type':'application/json'}})});
-  await assert.rejects(api.state(),/状态尚未确认/);
+  await assert.rejects(api.state(),/dstack state could not be confirmed/);
 });
 
 test('dstack unknown start survives reload and replays only the same original request',async()=>{
@@ -210,19 +210,21 @@ test('all continuing keep-on choices use the original versioned hold journal and
 test('actual start/detail forms use v2 policy controls while old finite machines retain their deadline bounds',async()=>{
   const path=fileURLToPath(new URL('./DstackCapacity.jsx',import.meta.url));
   const source=await readFile(path,'utf8');
-  const bundled=await build({stdin:{contents:source+'\nexport {Start,NodeDialog};',resolveDir:path.replace(/[/\\][^/\\]+$/,''),loader:'jsx'},bundle:true,write:false,platform:'node',format:'cjs',packages:'external',loader:{'.css':'empty'}});
+  const bundled=await build({stdin:{contents:source+"\nexport {Start,NodeDialog}; export {I18nProvider as TestI18nProvider} from './i18n/I18nProvider.jsx';",resolveDir:path.replace(/[/\\][^/\\]+$/,''),loader:'jsx'},bundle:true,write:false,platform:'node',format:'cjs',packages:'external',loader:{'.css':'empty'}});
   const module=new Module(path);module.filename=path;module.paths=Module._nodeModulePaths(path.replace(/[/\\][^/\\]+$/,''));module._compile(bundled.outputFiles[0].text,path);
   const prior=globalThis.document;globalThis.document={activeElement:null};
+  const storage=Object.getOwnPropertyDescriptor(globalThis,'localStorage');Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:()=> 'zh'}});
+  const renderLocalized=element=>renderToStaticMarkup(React.createElement(module.exports.TestI18nProvider,null,element));
   try{
     const props={controller:{},busy:false,now:1000000,onClose:()=>{}},profile={id:'ref-profile',model_id:'pruned-int8',mode:'ref',backend:'vastai',gpu_names:['RTX5090'],memory_gib:29,disk_gib:200,gpu_memory_gib:32,max_ttl_seconds:3600};
-    const form=version=>renderToStaticMarkup(React.createElement(module.exports.Start,{...props,profiles:[profile],lifecycleVersion:version}));
+    const form=version=>renderLocalized(React.createElement(module.exports.Start,{...props,profiles:[profile],lifecycleVersion:version}));
     assert.match(form(2),/直到我手动关机/);assert.match(form(2),/没有固定运行截止时间/);assert.doesNotMatch(form(2),/最多运行多久/);
     assert.match(form(1),/最多运行多久/);assert.doesNotMatch(form(1),/直到我手动关机/);
     const node={id:'n',provider:'vast',runtime_profile_id:'ref-profile',mode:'ref',state:'ready',ready:true,desired_state:'running',observation_fresh:true,observed_at:1000,hard_deadline:null,hold_until:0,hourly_cost_microusd:850000,lifecycle:lifecycle()};
-    const details=value=>renderToStaticMarkup(React.createElement(module.exports.NodeDialog,{...props,node:value}));
+    const details=value=>renderLocalized(React.createElement(module.exports.NodeDialog,{...props,node:value}));
     assert.match(details(node),/确认待机策略/);assert.doesNotMatch(details(node),/原停止上限内|尚未确认<\/dd>|<button disabled/);
     assert.match(details({...node,lifecycle:lifecycle({keep_on:'until_stopped'})}),/保留至手动关机.*原预算限制/);
     const old=details({...node,lifecycle:undefined,hard_deadline:1600});
     assert.match(old,/原停止上限内/);assert.match(old,/max="10"/);assert.doesNotMatch(old,/直到我手动关机/);
-  }finally{if(prior===undefined)delete globalThis.document;else globalThis.document=prior;}
+  }finally{if(storage)Object.defineProperty(globalThis,'localStorage',storage);else delete globalThis.localStorage;if(prior===undefined)delete globalThis.document;else globalThis.document=prior;}
 });

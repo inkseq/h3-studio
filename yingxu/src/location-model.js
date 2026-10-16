@@ -1,3 +1,4 @@
+import {translate} from './i18n/locale.js';
 const find=(project,id)=>project.entities.find(entity=>entity.id===id);
 
 export function shotLocationIds(project,shot){
@@ -12,8 +13,8 @@ export function setLocationReferences(project,locationId,assetIds){
   const affected=locationShots(project,locationId);for(const shot of affected){shot.version++;shot.status='review';}
   return {ok:true,affected:affected.map(shot=>shot.id)};
 }
-export function bindLocation(project,entityId,locationId){
-  const entity=find(project,entityId);if(!['scene','shot'].includes(entity?.type)||locationId&&find(project,locationId)?.type!=='location')return {ok:false,error:'场戏或地点已经不存在，请重新选择。'};
+export function bindLocation(project,entityId,locationId,locale='zh'){
+  const entity=find(project,entityId);if(!['scene','shot'].includes(entity?.type)||locationId&&find(project,locationId)?.type!=='location')return {ok:false,error:translate(locale,'h3more.bind.locationMissing')};
   if((entity.data.locationId||'')===locationId)return {ok:true,affected:[]};
   const shots=entity.type==='shot'?[entity]:project.entities.filter(shot=>shot.type==='shot'&&shot.parentId===entity.id&&!shot.data.locationId),before=new Map(shots.map(shot=>[shot.id,JSON.stringify(shotLocationIds(project,shot))]));
   entity.data.locationId=locationId;entity.version++;entity.status='review';

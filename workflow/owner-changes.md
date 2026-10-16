@@ -42,3 +42,8 @@ These entries record owner decisions, not task status. The latest applicable CR 
 低风险部分（文案、文档）直接做；域名切换按中风险处理：先确认新域名 HTTPS 和登录正常，再把旧域名改成跳转。
 
 Append a numbered entry for a new owner decision and update affected current wording in place. Do not copy operational receipts or routine implementation choices here.
+
+
+## CR-20261017-23 — #239: no automatic creation purge
+
+Owner v2 HANDOFF rule 4 supersedes the former five-day automatic trash expiry (DEC-014). Stop creating time-triggered purge intents, including old consented deadlines; public expiry is absent. Preserve original explicit durable purge/empty-trash reconciliation, irreversible guards, ledgers, tombstones and completed deletions. No historical rows are migrated and no live cleanup is invoked by this source change.

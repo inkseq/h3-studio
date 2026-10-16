@@ -1,7 +1,7 @@
-"""Original assistant recovery and consented history retention maintenance.
+"""Original assistant recovery and explicit history purge reconciliation.
 
 Assistant/title recovery never resubmits a model call. History cleanup resumes
-only durable original purge intents or expired consented trash; it never owns
+only durable original purge intents, never elapsed-time expiry; it never owns
 generation, GPU capacity or billing reconciliation.
 """
 from __future__ import annotations

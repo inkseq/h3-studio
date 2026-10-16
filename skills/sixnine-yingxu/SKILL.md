@@ -218,11 +218,12 @@ GET the original `/history/actions/{action_id}`; never report it deleted or send
 a replacement purge. An uncertain confirmation uses its original identical
 key/body. No restore is allowed after irreversible purge intent.
 
-Ordinary full-scope trash preserves content and permits restoration for five
-days before automatic cleanup. Inspect `auto_purge_enabled`,
-`purge_blocked_reason` and `review_hold`: limited-scope keys do not gain R2
-deletion authority by waiting, and curated older acceptance records wait for
-explicit owner purge review. Metadata trash/restore requires project read/write;
+Trash preserves content without automatic expiry, even for historical consented
+deadlines. `auto_purge_enabled` is false and public `purge_at` is null; stored old
+deadlines remain audit data. Restore has no age limit before irreversible intent.
+Only explicit authorized purge/empty_trash confirmation starts new deletion;
+existing durable intents still reconcile without replacement plans.
+Metadata trash/restore requires project read/write;
 purge requires project, asset and job read/write scopes. Do not acquire or expand
 credentials to bypass missing authority.
 

@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
-import {renderToStaticMarkup} from 'react-dom/server';
+import {renderToStaticMarkup as renderMarkup} from 'react-dom/server';
+import {readFile} from 'node:fs/promises';
 import {build} from 'esbuild';
 import {uniqueOperatorReasons,historicalNode,operatorNodeGroups,operatorNodeStatus,operatorBootstrap,operatorCapacitySummary,filterOperatorHistory,operatorExtensionCurrent,operatorExtensionReadback} from './operator-presentation.js';
 
@@ -13,11 +14,13 @@ const ended={...active,id:'old-node',state:'destroyed',runtime_state:'failed',ob
 const {Module}=await import('node:module');
 const viewModule=new Module(new URL('./operator-machine-view.test-build.cjs',import.meta.url).pathname);
 // ESM import from a data URL cannot resolve external React packages; esbuild CJS stays in this directory.
-const cjs=await build({entryPoints:[new URL('./operator-machine-view.jsx',import.meta.url).pathname.replace(/^\/([A-Za-z]:)/,'$1')],bundle:true,write:false,platform:'node',format:'cjs',packages:'external'});
+const viewPath=new URL('./operator-machine-view.jsx',import.meta.url).pathname.replace(/^\/([A-Za-z]:)/,'$1');
+const cjs=await build({stdin:{contents:(await readFile(viewPath,'utf8'))+"\nexport {I18nProvider as TestI18nProvider} from './i18n/I18nProvider.jsx';\n",resolveDir:viewPath.replace(/[/\\][^/\\]+$/,''),loader:'jsx'},bundle:true,write:false,platform:'node',format:'cjs',packages:'external',loader:{'.css':'empty'}});
 viewModule.filename=new URL('./operator-machine-view.test-build.cjs',import.meta.url).pathname.replace(/^\/([A-Za-z]:)/,'$1');
 viewModule.paths=Module._nodeModulePaths(viewModule.filename.replace(/[/\\][^/\\]+$/,''));
 viewModule._compile(cjs.outputFiles[0].text,viewModule.filename);
-const {NodeCard,MachineRow,CandidateCard}=viewModule.exports;
+const {NodeCard,MachineRow,CandidateCard,TestI18nProvider}=viewModule.exports;
+const renderToStaticMarkup=element=>{const previous=Object.getOwnPropertyDescriptor(globalThis,'localStorage');Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:()=> 'zh'}});try{return renderMarkup(React.createElement(TestI18nProvider,null,element));}finally{if(previous)Object.defineProperty(globalThis,'localStorage',previous);else delete globalThis.localStorage;}};
 const render=node=>renderToStaticMarkup(React.createElement(NodeCard,{node,profiles:[],disabled:false,onAction:()=>{},now}));
 
 test('ended and manually reviewed records stay in searchable non-destructive history; unresolved review stays visible',()=>{

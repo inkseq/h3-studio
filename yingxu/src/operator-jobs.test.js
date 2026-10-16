@@ -94,9 +94,9 @@ test('an in-flight admin task page cannot restore foreign-owner data after same-
 
 test('task row renders any-owner queued selection while disabling running and uncertain work',async()=>{
   const path=fileURLToPath(new URL('./OperatorJobsPanel.jsx',import.meta.url)),contents=await readFile(path,'utf8');
-  const bundled=await build({stdin:{contents,resolveDir:path.replace(/[/\\][^/\\]+$/,''),loader:'jsx'},bundle:true,write:false,platform:'node',format:'cjs',packages:'external'});
+  const bundled=await build({stdin:{contents:contents+"\nexport {I18nProvider as TestI18nProvider} from './i18n/I18nProvider.jsx';\n",resolveDir:path.replace(/[/\\][^/\\]+$/,''),loader:'jsx'},bundle:true,write:false,platform:'node',format:'cjs',packages:'external',loader:{'.css':'empty'}});
   const module=new Module(path);module.filename=path;module.paths=Module._nodeModulePaths(path.replace(/[/\\][^/\\]+$/,''));module._compile(bundled.outputFiles[0].text,path);
-  const html=renderToStaticMarkup(React.createElement(module.exports.OperatorJobsTable,{jobs:[job('queue'),job('wait',{owner_id:'superdan',status:'waiting_capacity'}),job('running',{status:'running'}),job('uncertain',{status:'reconciling'})]}));
+  const html=renderWithLocale(module,React.createElement(module.exports.OperatorJobsTable,{jobs:[job('queue'),job('wait',{owner_id:'superdan',status:'waiting_capacity'}),job('running',{status:'running'}),job('uncertain',{status:'reconciling'})]}));
   assert.match(html,/supervan/);assert.match(html,/superdan/);assert.match(html,/aria-label="选择任务 queue"\/>/);assert.match(html,/aria-label="选择任务 wait"\/>/);assert.match(html,/aria-label="选择任务 running" disabled=""/);assert.match(html,/aria-label="选择任务 uncertain" disabled=""/);assert.doesNotMatch(html,/生成|重新提交|启动机器/);
 });
 
@@ -108,3 +108,10 @@ test('admin diagnostics retain original execution and notification identities wi
   assert.deepEqual(jobDiagnostics({diagnostic:{reason_code:'secret raw reason',age_seconds:-1,attempt_no:2,current_attempt_id:'https://private',dispatch:{event_id:'token',state:'secret'}}}),[]);
   assert.equal(canCancelJob(row),false);
 });
+
+function renderWithLocale(module,element){
+  const descriptor=Object.getOwnPropertyDescriptor(globalThis,'localStorage');
+  Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:()=> 'zh'}});
+  try{return renderToStaticMarkup(React.createElement(module.exports.TestI18nProvider,null,element));}
+  finally{if(descriptor)Object.defineProperty(globalThis,'localStorage',descriptor);else delete globalThis.localStorage;}
+}

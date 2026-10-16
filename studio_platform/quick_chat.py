@@ -24,7 +24,7 @@ from .project_validation import ID, validate_project
 from .project_activity import append_activity
 from .repository import Conflict, NotFound, Scope, BudgetExceeded, canonical, request_hash, documents, jobs, attempts, artifacts
 from .quick_chat_titles import DEFAULT_TITLE, TITLE_MODEL, QuickChatTitleMixin, public_title_state
-from .quick_chat_history import QuickChatHistoryMixin, CLEANUP_SCOPES, RETENTION_SECONDS
+from .quick_chat_history import QuickChatHistoryMixin, CLEANUP_SCOPES
 from .content_lifecycle import owner_reference_gate, assert_project_writable, assert_reference_payload
 
 

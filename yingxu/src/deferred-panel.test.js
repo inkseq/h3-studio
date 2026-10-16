@@ -47,7 +47,7 @@ test('a quota failure across account switching keeps private drafts recoverable 
 test('a delayed optional panel keeps navigation visible, then renders the same draft without modifying it',async()=>{
   let resolve,calls=0;const pending=new Promise(r=>resolve=r),Panel=deferredPanel(()=>{calls++;return pending;},'字幕编辑器'),draft={title:'未同步的字幕稿'},original=structuredClone(draft);
   const output=new PassThrough();let html='';output.on('data',value=>html+=value.toString());const ended=once(output,'end');let shellReady;
-  const shell=new Promise(r=>shellReady=r),stream=renderToPipeableStream(React.createElement('main',null,React.createElement('nav',null,'返回章节'),React.createElement(Panel,{draft})),{onShellReady(){stream.pipe(output);shellReady();}});
+  const shell=new Promise(r=>shellReady=r),stream=renderToPipeableStream(React.createElement('main',null,React.createElement('nav',null,'返回章节'),React.createElement(Panel,{draft,locale:'zh'})),{onShellReady(){stream.pipe(output);shellReady();}});
   try{await shell;assert.match(html,/返回章节/);assert.match(html,/正在打开字幕编辑器/);assert.match(html,/role="status"/);assert.match(html,/aria-busy="true"/);assert.equal(calls,1);
     resolve({default:({draft:value})=>React.createElement('textarea',{defaultValue:value.title})});await ended;assert.match(html,/未同步的字幕稿/);assert.deepEqual(draft,original);assert.equal(calls,1);
   }finally{stream.abort();}

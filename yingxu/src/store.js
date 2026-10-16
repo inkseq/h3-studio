@@ -1,3 +1,4 @@
+import {translate} from './i18n/locale.js';
 import {reconcileGeneratedTracks} from './generated-sound-model.js';
 import {rangeShapeIssue} from './video-cut-model.js';
 import {detachDeletedReferences} from './entity-references.js';
@@ -103,19 +104,19 @@ export function validateProject(input){
   }
   return {ok:true,project:clone(input)};
 }
-export function readiness(project,id,{includeConnectionNotice=true}={}){
-  const e=project.entities.find(x=>x.id===id);if(!e)return ['节点不存在。'];
+export function readiness(project,id,{includeConnectionNotice=true,locale='zh'}={}){
+  const e=project.entities.find(x=>x.id===id);if(!e)return [translate(locale,'workspace.sharedDetail9')];
   const blockers=[];
   if(['shot','generation'].includes(e.type)){
-    if(!e.description.trim()&&!String(e.data.prompt||'').trim())blockers.push('补充镜头内容或生成描述。');
-    if((e.type==='shot'||e.data.recipe==='video')&&(!finite(e.data.seconds)||e.data.seconds<=0))blockers.push('填写有效的镜头时长。');
+    if(!e.description.trim()&&!String(e.data.prompt||'').trim())blockers.push(translate(locale,'workspace.sharedDetail10'));
+    if((e.type==='shot'||e.data.recipe==='video')&&(!finite(e.data.seconds)||e.data.seconds<=0))blockers.push(translate(locale,'workspace.sharedDetail11'));
     const refs=project.links.filter(l=>l.target===id);
-    for(const ref of refs){const a=project.entities.find(x=>x.id===ref.source);if(['image','video','audio'].includes(a?.type)&&(!a.data.fileId||a.data.missingFile))blockers.push(`参考素材「${a.title}」缺少可用文件，请重新上传或恢复完整备份。`);if(ref.role==='dependency')blockers.push(`前置步骤「${a?.title||'未知'}」尚未产生可验证的执行结果。`);}
-    if(e.data.selectedAssetId){const candidate=project.entities.find(x=>x.id===e.data.selectedAssetId);if(!candidate||!candidate.data.fileId||candidate.data.missingFile)blockers.push(`选定候选「${candidate?.title||'未知素材'}」缺少可用文件，请重新上传或重新选择。`);}
-    if(e.status==='review')blockers.push('参考或内容已改变，请复核当前版本。');
-    if(includeConnectionNotice)blockers.push('尚未接入生成服务；当前只能保存配方，不能生成或估算真实费用。');
-  }else if(['image','audio','video'].includes(e.type)&&(!e.data.fileId||e.data.missingFile))blockers.push('缺少可用素材文件，请重新上传或恢复完整备份。');
-  else if(e.type==='scene'&&!String(e.data.script||'').trim())blockers.push('补充这一场的剧本。');
+    for(const ref of refs){const a=project.entities.find(x=>x.id===ref.source);if(['image','video','audio'].includes(a?.type)&&(!a.data.fileId||a.data.missingFile))blockers.push(translate(locale,'workspace.sharedDetail18',{title:a.title}));if(ref.role==='dependency')blockers.push(translate(locale,'workspace.sharedDetail19',{title:a?.title||translate(locale,'workspace.sharedDetail12')}));}
+    if(e.data.selectedAssetId){const candidate=project.entities.find(x=>x.id===e.data.selectedAssetId);if(!candidate||!candidate.data.fileId||candidate.data.missingFile)blockers.push(translate(locale,'workspace.sharedDetail20',{title:candidate?.title||translate(locale,'workspace.sharedDetail13')}));}
+    if(e.status==='review')blockers.push(translate(locale,'workspace.sharedDetail14'));
+    if(includeConnectionNotice)blockers.push(translate(locale,'workspace.sharedDetail15'));
+  }else if(['image','audio','video'].includes(e.type)&&(!e.data.fileId||e.data.missingFile))blockers.push(translate(locale,'workspace.sharedDetail16'));
+  else if(e.type==='scene'&&!String(e.data.script||'').trim())blockers.push(translate(locale,'workspace.sharedDetail17'));
   return [...new Set(blockers)];
 }
 function blank(title='未命名短剧'){return {schemaVersion:4,id:uid('project'),title:title.trim()||'未命名短剧',logline:'',entities:[],links:[],layout:{positions:{},viewport:{x:0,y:0,zoom:1}},jobs:[],updatedAt:timestamp()};}

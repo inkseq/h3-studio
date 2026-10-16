@@ -562,3 +562,9 @@ inventory.json
 !test_spending_limits.py
 !studio_platform/backup_deletion.py
 !test_backup_expected_deletion.py
+
+# Canonical bilingual source modules and styles; no runtime data.
+!yingxu/src/i18n/
+!yingxu/src/i18n/*.js
+!yingxu/src/i18n/*.jsx
+!yingxu/src/i18n/*.css
