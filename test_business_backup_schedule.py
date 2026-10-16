@@ -52,6 +52,38 @@ class ScheduleTests(unittest.TestCase):
         self.assertNotIn('docker.sock', ' '.join(cmd))
         self.assertNotIn('AWS_ACCESS_KEY_ID', ' '.join(cmd))
 
+    @unittest.skipIf(sys.platform == 'win32', 'POSIX mode semantics required')
+    def test_snapshot_private_modes_preserve_host_traversal_barrier(self):
+        import os
+        import stat
+        with tempfile.TemporaryDirectory() as temporary:
+            operation = Path(temporary); operation.chmod(0o700)
+            snapshot = operation/'snapshot'; snapshot.mkdir(mode=0o700)
+            media = snapshot/'media'; media.mkdir()
+            artifact = media/'file'; artifact.write_bytes(b'fixture')
+            try:
+                with mock.patch.object(host,'protected',side_effect=lambda p,*a:p), \
+                        mock.patch.object(host.os,'chown') as ownership, \
+                        mock.patch.object(host.os,'getuid',return_value=0):
+                    # Local CI can be unprivileged; only the root-owned copy check is
+                    # substituted, while real filesystem modes and traversal remain.
+                    original = Path.lstat
+                    def root_stat(p):
+                        v = original(p)
+                        return type('Metadata',(),dict(st_uid=0,st_mode=v.st_mode,st_nlink=v.st_nlink))()
+                    with mock.patch.object(Path,'lstat',root_stat):
+                        host.freeze_transport_snapshot(snapshot)
+                self.assertEqual(stat.S_IMODE(operation.stat().st_mode),0o700)
+                self.assertEqual(stat.S_IMODE(snapshot.stat().st_mode),0o500)
+                self.assertEqual(stat.S_IMODE(media.stat().st_mode),0o500)
+                self.assertEqual(stat.S_IMODE(artifact.stat().st_mode),0o400)
+                self.assertEqual({call.args for call in ownership.call_args_list},
+                    {(snapshot,10001,10001),(media,10001,10001),(artifact,10001,10001)})
+                self.assertFalse(artifact.stat().st_mode & 0o077)
+            finally:
+                snapshot.chmod(0o700)
+                media.chmod(0o700)
+
     def test_oci_config_identity_requires_approved_archive_and_exact_revision(self):
         manifest_id, config_id = 'sha256:'+'a'*64, 'sha256:'+'b'*64
         commit = 'c'*40; manifest = {'image_id':manifest_id,'image':'sixnine-platform:'+commit}

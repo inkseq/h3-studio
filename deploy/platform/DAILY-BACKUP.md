@@ -37,8 +37,10 @@ The helper validates the protected accepted manifest, current app image ID and
 It retains snapshots under `/srv/sixnine/platform-data/business-backups/<uuid>`.
 Before upload, Docker copies that snapshot into the root-controlled operation
 directory without following symlinks. The helper rejects links/nonregular files
-and makes this private copy read-only. The application cannot replace the
-transport mount source. The configured snapshot is limited to 2 GiB media plus
+and gives only the transport UID (10001) read access: files 0400 and directories
+0500. The enclosing operation directory remains root-owned 0700, so the app
+cannot traverse or replace this host copy even though it shares that UID. The
+transport receives only a read-only bind mount of the exact snapshot. The configured snapshot is limited to 2 GiB media plus
 the existing 256 MiB DB limit; less than 5 GiB available disk refuses a new run.
 Both local copies, outputs and S3
 versions are retained: monitor space and plan reviewed archival/cleanup before
@@ -61,8 +63,14 @@ do not conflate that independent export with the portable snapshot.
 
 Acceptance: exact stack/IAM/IMDS isolation readback; manual service success;
 matching remote completion version/hash; isolated restore success and hold;
-timer enabled/next trigger; a later scheduled receipt; then same-byte production
-promotion and separately bound installation. A copied receipt is explicitly
+timer enabled/next trigger; a real scheduler-dispatch receipt; then same-byte
+production promotion and separately bound installation. A bounded acceptance
+transient timer may trigger the same backup service after that day's copy is
+complete: require `already_completed` and unchanged operation UUID, local
+receipt and remote version set. This validates scheduler dispatch and daily
+idempotency without altering the daily calendar or taking another snapshot.
+Report the manual copy, scheduler dispatch and the next cross-day fresh daily
+backup separately; the latter remains pending until its actual scheduled run. A copied receipt is explicitly
 `restore_verified:false` until the separate restore operation succeeds.
 
 R2 has no native S3 bucket versioning APIs. [Cloudflare compatibility](https://developers.cloudflare.com/r2/api/s3/api/)
