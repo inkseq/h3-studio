@@ -197,6 +197,9 @@ class PostgresPortableBackupTests(LedgerCase):
                 record[role]["provider"] = "r2"
             conn.execute(update(asset_table).values(record=json.dumps(record)))
         class ReadOnlyR2:
+            from studio_platform.storage_config import S3StorageConfig
+            config = S3StorageConfig("r2", "https://00000000000000000000000000000000.r2.cloudflarestorage.com", "auto", "backup-test",
+                "cloudflare-r2", "fixture", enabled=True)
             def stat(self, key): return replace(local.stat(key), provider="r2")
             def open(self, key): return local.open(key)
         target = self.root/"r2-backup"

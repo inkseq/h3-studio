@@ -107,6 +107,16 @@ def transport(image, name, mounts, args):
         '--env', 'AWS_SHARED_CREDENTIALS_FILE=/nonexistent', image,
         'python', '-B', '-m', 'studio_platform.backup_remote_cli', *args, '--instance-role-only']
 
+def approved_image(release, directory, manifest, commit, *, pinned_image=None):
+    """Reuse release validation for both OCI manifest and Docker config IDs."""
+    identities = release.validate_image_archive(directory/'image.tar.gz', manifest)
+    reference = pinned_image or manifest['image']
+    value = json.loads(docker(['image', 'inspect', '--format',
+        '{"id":{{json .Id}},"revision":{{json (index .Config.Labels "org.opencontainers.image.revision")}}}', reference]))
+    require(value.get('id') in identities and value.get('revision') == commit
+        and (pinned_image is None or value.get('id') == pinned_image), 'backup_image_not_in_approved_archive')
+    return value['id']
+
 def check_history(directory, day):
     """No new prefix while any earlier upload outcome remains uncertain."""
     for prior in directory.glob('????-??-??'):
@@ -148,8 +158,8 @@ def run():
         require(len(ids) == 1 and re.fullmatch('[0-9a-f]{12,64}', ids[0]), 'backup_app_identity')
         template = '{"image":{{json .Image}},"running":{{json .State.Running}},"mounts":{{json .Mounts}}}'
         app = json.loads(docker(['inspect', '--format', template, ids[0]]))
-        image = docker(['image', 'inspect', '--format', '{{.Id}}', manifest['image']]).strip()
-        require(app['image'] == image == manifest['image_id'] and app['running'] is True, 'backup_app_image_mismatch')
+        image = approved_image(release, directory, manifest, commit)
+        require(app['image'] == image and app['running'] is True, 'backup_app_image_mismatch')
         require(any(m['Destination'] == '/data' and m['Source'] == str(ROOT/'platform-data')
             and m['Type'] == 'bind' for m in app['mounts']), 'backup_data_mount_mismatch')
         nonce = str(uuid.uuid4())
@@ -223,8 +233,7 @@ def restore(day):
     require(re.fullmatch('[0-9a-f]{40}', commit), 'restore_commit_invalid')
     release.approved_manifest(ROOT, directory, commit)
     manifest = release.manifest(directory, commit)
-    require(manifest['image_id'] == intent['image'], 'restore_image_mismatch')
-    require(docker(['image','inspect','--format','{{.Id}}', intent['image']]).strip() == intent['image'], 'restore_image_missing')
+    approved_image(release, directory, manifest, commit, pinned_image=intent['image'])
     require(shutil.disk_usage(STATE).free > 3*receipt['bytes']+512*1024**2, 'restore_disk_reserve_required')
     destination = STATE/('restore-'+day)
     new_directory(destination)  # Existing or uncertain operation never replays.

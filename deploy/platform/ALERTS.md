@@ -102,6 +102,17 @@ use namespace `Inkseq/OperatorAlerts`, dimensions `Environment` and `InstanceId`
 - `DeliveryHealthy`: 1 only when no pending/failed delivery remains, otherwise
   0. Alarm on repeated zero or missing data through the separate external path.
 
+Use metric math `FILL(m1,0)` with exactly one returned expression. The input
+`m1` retains the exact namespace/environment/instance dimensions, `Minimum`,
+`Count`, and 60-second period; alarm on `< 1` for three of three periods. Keep
+both ALARM and OK actions on the matching environment topic. A direct metric
+with only missing-data-as-breaching can reuse older healthy points from the
+expanded evaluation window; the actual staging pause exposed this behavior.
+A single delayed zero cannot satisfy three of three. Verify a bounded staging
+timer pause and recovery through the actual recipient inbox before production.
+New alarms may briefly report missing pre-installation history and then recover
+as real samples arrive; do not describe startup history as a production drill.
+
 The host cannot email after it is powered off; external missing-data alarms are
 required acceptance, not an optional replacement for the timer. Use the same
 environment-scoped SNS action for those alarms and verify trigger/recovery on

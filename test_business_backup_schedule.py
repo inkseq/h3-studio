@@ -52,6 +52,21 @@ class ScheduleTests(unittest.TestCase):
         self.assertNotIn('docker.sock', ' '.join(cmd))
         self.assertNotIn('AWS_ACCESS_KEY_ID', ' '.join(cmd))
 
+    def test_oci_config_identity_requires_approved_archive_and_exact_revision(self):
+        manifest_id, config_id = 'sha256:'+'a'*64, 'sha256:'+'b'*64
+        commit = 'c'*40; manifest = {'image_id':manifest_id,'image':'sixnine-platform:'+commit}
+        release = mock.Mock(); release.validate_image_archive.return_value = (manifest_id,config_id)
+        directory = Path('/approved/release')
+        with mock.patch.object(host,'docker',return_value=json.dumps({'id':config_id,'revision':commit})):
+            self.assertEqual(host.approved_image(release,directory,manifest,commit),config_id)
+            self.assertEqual(host.approved_image(release,directory,manifest,commit,pinned_image=config_id),config_id)
+        release.validate_image_archive.assert_called_with(directory/'image.tar.gz',manifest)
+        for value in ({'id':'sha256:'+'d'*64,'revision':commit}, {'id':config_id,'revision':'e'*40}, {'id':config_id}):
+            with mock.patch.object(host,'docker',return_value=json.dumps(value)), self.assertRaises(ValueError):
+                host.approved_image(release,directory,manifest,commit)
+        with mock.patch.object(host,'docker',return_value=json.dumps({'id':manifest_id,'revision':commit})), self.assertRaises(ValueError):
+            host.approved_image(release,directory,manifest,commit,pinned_image=config_id)
+
     def test_unknown_previous_day_blocks_new_copy_and_completed_same_day_is_noop(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary); prior = root/'2026-10-15'; prior.mkdir()
