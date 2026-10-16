@@ -4,7 +4,6 @@
   "source_index_file": "/opt/sixnine/dstack-sources/index.json",
   "ssh_key_file": "/run/secrets/sixnine-gpu-ssh-key",
   "known_hosts_file": "/var/lib/sixnine/dstack-runtime/known-hosts",
-  "broker_config_file": "/run/secrets/sixnine-hatchet.json",
   "first_local_port": 19100,
   "last_local_port": 19131,
   "trust_first_host_key": false

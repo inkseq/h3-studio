@@ -516,48 +516,10 @@ class Repository:
             self._dispatch_wakeup(connection, aggregate_id)
 
     def _dispatch_wakeup(self, connection, job_id):
-        # This outbox notification is committed with the existing business
-        # transition. It contains identity only, never prompts or media URLs.
-        # Legacy expiry recovery promises scalar-only reads. Inspect the route
-        # as a JSON scalar before touching an immutable plan; prompts, source
-        # snapshots and results are never needed to create a wakeup.
-        job = connection.execute(select(jobs.c.status, jobs.c.lease_worker_id,
-            jobs.c.not_before, jobs.c.request_hash,
-            jobs.c.execution_plan["dispatch_backend"].as_string().label("dispatch_backend"))
-            .where(jobs.c.id == job_id)).mappings().first()
-        if job is None:
-            raise NotFound("job_not_found")
-        if (job["dispatch_backend"] != "hatchet-v1"
-                or job["status"] not in {"queued", "running", "submission_unknown", "collecting"}
-                or job["lease_worker_id"] is not None):
-            return
-        # Keep one undelivered wakeup per job. Published wakeups may be followed
-        # by recovery wakeups, which always reuse the original attempt.
-        if connection.execute(select(outbox.c.id).where(outbox.c.event_type == "job.dispatch_requested",
-                outbox.c.aggregate_id == job_id, outbox.c.delivered_at.is_(None))).first():
-            return
-        # An accepted Hatchet run may still be executing/pending while its
-        # original worker yields a poll lease. Do not enqueue a new broker run
-        # per poll. The broker recovery scan closes this delivery only after a
-        # positive terminal observation, while preserving the GPU attempt.
-        if connection.execute(select(dispatch_receipts.c.event_id).where(
-                dispatch_receipts.c.job_id == job_id, dispatch_receipts.c.state == "published")).first():
-            return
-        event_id = str(uuid.uuid4())
-        execution_plan = connection.execute(select(jobs.c.execution_plan)
-            .where(jobs.c.id == job_id)).scalar_one()
-        connection.execute(insert(outbox).values(id=event_id, event_type="job.dispatch_requested",
-            aggregate_id=job_id, payload={"version": 1, "job_id": job_id,
-                "request_hash": job["request_hash"], "plan_hash": request_hash(execution_plan)},
-            created_at=self.clock()))
-        sequence = connection.execute(select(func.max(dispatch_receipts.c.sequence))
-            .where(dispatch_receipts.c.job_id == job_id)).scalar() or 0
-        connection.execute(insert(dispatch_receipts).values(event_id=event_id, job_id=job_id,
-            state="pending", publish_attempts=0, sequence=sequence+1,
-            not_before=job["not_before"], updated_at=self.clock()))
+        """Commit-time hint only; historical delivery receipts stay untouched."""
         from .demand_wakeup import notify_demand
         notify_demand(connection)
-        return event_id
+
 
     def put_document(self, scope, kind, document_id, payload, *, expected_version=None):
         kind, document_id, payload = identifier(kind), identifier(document_id), canonical(payload)

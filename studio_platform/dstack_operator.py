@@ -374,35 +374,6 @@ class LedgerDstackStore:
         except Exception:
             pass
 
-    def record_broker(self, intent_id, worker_id, observation):
-        """Separate transport eligibility from native/provider readiness."""
-        require(isinstance(observation,dict) and set(observation) <= {
-            "ready","observed_at","heartbeat_at","reason_code","worker_id"},
-            "dstack_broker_observation_invalid")
-        require(_finite(observation.get("observed_at")) and
-            0 <= observation["observed_at"] <= self.repo.clock() and
-            observation.get("worker_id") == worker_id, "dstack_broker_observation_invalid")
-        with self.repo.transaction() as connection:
-            self.repo._lock_capacity(connection)
-            node,intent=self._node(connection,intent_id)
-            payload=copy.deepcopy(node["payload"])
-            binding=payload["dstack"]
-            prior=binding.get("broker_observation",{})
-            if prior.get("observed_at",0)>observation["observed_at"]:
-                return
-            worker=connection.execute(select(registered_workers).where(registered_workers.c.id==worker_id)).mappings().one_or_none()
-            require(worker is not None and worker["instance_id"]==intent["provider_instance_id"]
-                and worker["provider"]==intent["provider"]
-                and worker["spec"].get("dispatch_backend")=="hatchet-v1"
-                and worker["spec"].get("engine_manifest_digest")==binding["manifest_digest"]
-                and worker["spec"].get("configuration_id")==binding["configuration_id"],
-                "dstack_broker_binding_changed")
-            value=copy.deepcopy(observation)
-            value["ready"]=bool(value.get("ready") is True and node["desired_state"]=="running"
-                and _window_open(intent, node, self.repo.clock()))
-            binding["broker_observation"]=value
-            self._save(connection,node,payload)
-
     def record_registration(self, intent_id, worker_id, reason_code=None):
         """Safe control-plane outcome, separate from native/runtime readiness.
 

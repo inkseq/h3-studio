@@ -110,8 +110,9 @@ class WorkspaceTests(LedgerCase):
                 drain_requested=0, fence=1, expires_at=self.now+120, updated_at=self.now))
             original = connection.execute(select(operator_nodes).where(operator_nodes.c.intent_id == node_id)).mappings().one()
             payload = copy.deepcopy(original["payload"])
-            payload["dstack"]["broker_observation"] = {"ready": True, "worker_id": worker_id,
-                "observed_at": self.now, "heartbeat_at": self.now}
+            payload["dstack"]["consumer_observation"] = {"ready": True, "worker_id": worker_id,
+                "observed_at": self.now, "worker_fence": 1, "instance_id": instance,
+                "runtime_incarnation": payload["dstack"]["runtime_incarnation"]}
             connection.execute(update(operator_nodes).where(operator_nodes.c.intent_id == node_id)
                 .values(payload=payload, runtime_state="busy" if state == "busy" else "ready"))
         return worker_id

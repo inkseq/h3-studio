@@ -158,9 +158,9 @@ class FactoryTests(LedgerCase):
         binding, _ = self.allocation()
         before = self.store.load(binding["intent_id"])
         with patch.dict(os.environ, {"DSTACK_RUNTIME_CONFIG": str(self.config_path)}):
-            runtime, broker, work_dir = create_runtime(self.repo, self.store)
+            runtime, work_dir = create_runtime(self.repo, self.store)
         self.assertIsInstance(runtime, DstackNativeRuntime)
-        self.assertEqual((broker, work_dir), (self.broker, self.root / "runtime"))
+        self.assertEqual(work_dir, self.root / "runtime")
         self.assertEqual(self.store.load(binding["intent_id"]), before)
         self.assertFalse(work_dir.exists())
         self.assertNotIn("local_port", before)
@@ -187,7 +187,7 @@ class FactoryTests(LedgerCase):
     def test_factory_drives_original_runtime_once_per_node_and_connects_distinct_slots(self):
         first, first_run = self.allocation()
         second, second_run = self.allocation("ref", "two")
-        runtime, _, _ = create_runtime(self.repo, self.store, configuration_path=self.config_path)
+        runtime, _ = create_runtime(self.repo, self.store, configuration_path=self.config_path)
         remotes = {}
         def ssh_factory(config, coordinates):
             remote = remotes.setdefault(config.local_port, {"starts": 0, "uploads": 0, "config": config})

@@ -135,9 +135,9 @@ def build_migration(commit, platform_directory, destination, selections, *,
             or inspected.get("Architecture") != "amd64" or inspected.get("Os") != "linux"):
         raise ValueError("Migration dispatch image is not the exact reviewed Linux source")
     paths = {"platform-overlay.yaml": "deploy/dstack/platform-overlay.yaml",
-        "hatchet-entrypoint.sh": "deploy/hatchet/entrypoint.sh", "migration-check.py": "tools/check_migration_deploy.py",
+        "migration-check.py": "tools/check_migration_deploy.py",
         "maintenance.py": "deploy/dstack/maintenance.py", "runtime-config.example.json": "deploy/dstack/runtime-config.example.json",
-        "server-config.example.yml": "deploy/dstack/server-config.example.yml", "broker.example.json": "deploy/hatchet/broker.example.json"}
+        "server-config.example.yml": "deploy/dstack/server-config.example.yml"}
     server = bundle_dstack(commit, destination)
     for name, source in paths.items():
         shutil.copyfile(ROOT / source, destination / name)
@@ -170,7 +170,7 @@ def build_migration(commit, platform_directory, destination, selections, *,
             for chunk in iter(lambda: stream.read(1024 * 1024), b""):
                 digest.update(chunk)
         checksums[name] = digest.hexdigest()
-    document = {"version": 1, "commit": commit,
+    document = {"version": 2, "layout": "postgres-notify-v1", "commit": commit,
         "platform_manifest_sha256": hashlib.sha256(platform.read_bytes()).hexdigest(),
         "dispatch": {"image": image, "image_id": inspected["Id"]},
         "dstack": {"image": server["image"], "image_id": server["image_id"],

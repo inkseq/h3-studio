@@ -10,7 +10,6 @@ from sqlalchemy import insert, select, update
 from studio_platform.demand_wakeup import (DemandWakeup, IDLE_SAFETY_SECONDS,
     notify_demand, run_demand_loop)
 from studio_platform.dstack_controller import DstackController
-from studio_platform.hatchet_dispatch import OutboxDispatcher
 from studio_platform.operator_capacity import operator_commands, operator_nodes
 from studio_platform.repository import attempts, budget_accounts, jobs, outbox
 from test_platform_repository import LedgerCase
@@ -93,9 +92,6 @@ class DemandLedgerTests(LedgerCase):
             capacity=SimpleNamespace(store=SimpleNamespace()), registration_capacity_usage=Mock())
         return DstackController(service, Mock())
 
-    def dispatcher(self):
-        return OutboxDispatcher(self.repo, Mock(), publisher_id="test-publisher")
-
     def modern_job(self):
         job = self.job()
         with self.repo.transaction() as c:
@@ -104,8 +100,8 @@ class DemandLedgerTests(LedgerCase):
         return job
 
     def test_queued_future_cancel_collect_unknown_and_terminal_unsafe_keep_awake(self):
-        controller, dispatcher = self.controller(), self.dispatcher()
-        self.assertFalse(controller.has_demand()); self.assertFalse(dispatcher.has_demand())
+        controller = self.controller()
+        self.assertFalse(controller.has_demand())
         job = self.modern_job()
         for status in ("waiting_capacity", "queued", "claimed", "submitting", "running",
                        "collecting", "submission_unknown", "cancel_requested", "recovery_hold"):
@@ -113,18 +109,17 @@ class DemandLedgerTests(LedgerCase):
                 c.execute(update(jobs).where(jobs.c.id == job["id"]).values(
                     status=status, not_before=self.now+3600))
             self.assertTrue(controller.has_demand(), status)
-            self.assertTrue(dispatcher.has_demand(), status)
         with self.repo.transaction() as c:
             c.execute(update(jobs).where(jobs.c.id == job["id"]).values(status="failed"))
-        self.assertFalse(controller.has_demand()); self.assertFalse(dispatcher.has_demand())
+        self.assertFalse(controller.has_demand())
         with self.repo.transaction() as c:
             c.execute(insert(attempts).values(id=str(uuid.uuid4()), job_id=job["id"], worker_id="original",
                 fence=1, number=1, status="failed", created_at=self.now-5, updated_at=self.now,
                 submission_started_at=self.now-4, upstream_task_id="original-task", upstream_stopped=0))
-        self.assertTrue(controller.has_demand()); self.assertTrue(dispatcher.has_demand())
+        self.assertTrue(controller.has_demand())
         with self.repo.transaction() as c:
             c.execute(update(attempts).where(attempts.c.job_id == job["id"]).values(upstream_stopped=1))
-        self.assertFalse(controller.has_demand()); self.assertFalse(dispatcher.has_demand())
+        self.assertFalse(controller.has_demand())
 
     def test_historical_stopped_rows_do_not_poll_but_live_node_and_cleanup_do(self):
         controller = self.controller()

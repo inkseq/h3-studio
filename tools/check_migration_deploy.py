@@ -77,14 +77,15 @@ def validate_storage(document, *, target='production'):
     services = document["services"]
     selected = {key: services["app"]["environment"].get(key, "") for key in fields}
     selected["SIXNINE_STORAGE_PROVIDER"] = selected["SIXNINE_STORAGE_PROVIDER"] or "local"
-    for name in ("app", "controller", "dispatch"):
+    for name in ("app", "controller", *(("dispatch",) if "dispatch" in services else ())):
         env = services[name]["environment"]
         require(not {key for key in env if key.startswith("SIXNINE_STORAGE_")} - fields - {"SIXNINE_STORAGE_CREDENTIAL_FILE"},
             "migration_storage_unexpected_environment")
         require(all((env.get(key, "") or ("local" if key.endswith("_PROVIDER") else "")) == value
             for key, value in selected.items()), "migration_storage_identity_split")
-    require(not services["dispatch"]["environment"].get("SIXNINE_STORAGE_CREDENTIAL_FILE")
-        and "r2_storage" not in secret_names(services["dispatch"]), "migration_storage_dispatch_credential")
+    if "dispatch" in services:
+        require(not services["dispatch"]["environment"].get("SIXNINE_STORAGE_CREDENTIAL_FILE")
+            and "r2_storage" not in secret_names(services["dispatch"]), "migration_storage_dispatch_credential")
     secrets = document.get("secrets", {})
     require("r2_storage" in secrets and "grafana_cloud" in secrets, "migration_storage_mount_missing")
     for name in ("app", "controller"):
@@ -117,7 +118,15 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, targe
     resources = deployment_target.resources({**(resource_environment or {}), 'INKSEQ_DEPLOYMENT_TARGET': target})
     require(type(document) is dict and type(document.get("services")) is dict, "migration_compose_invalid")
     services = document["services"]
-    require({"app", "db", "db-init", "caddy", "hatchet-db", *CPU_SHARED} <= set(services), "migration_services_missing")
+    modern = document.get("x-sixnine-dispatch-layout") == "postgres-notify-v1"
+    require(document.get("x-sixnine-dispatch-layout") in (None, "postgres-notify-v1"), "migration_layout_invalid")
+    shared = ("dstack", "controller") if modern else CPU_SHARED
+    business = ("app", "controller") if modern else ("app", "dispatch", "controller")
+    expected_services = {"app", "db", "db-init", "caddy", *shared} | (set() if modern else {"hatchet-db"})
+    require(set(services) == expected_services, "migration_services_missing")
+    if modern:
+        require(not {"hatchet_broker", "hatchet_api_token", "database_password", "administrator_password"} & set(document.get("secrets", {}))
+            and not {"hatchet-config", "hatchet-postgres"} & set(document.get("volumes", {})), "migration_retired_broker_mount")
     public = services["app"].get("environment", {})
     if "PUBLIC_ORIGIN" in public:
         require(public.get("PUBLIC_ORIGIN") == identity['origin']
@@ -126,7 +135,7 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, targe
             and all(services[name].get("environment", {}).get("PUBLIC_ORIGIN") == identity['origin']
                 and "SIXNINE_PUBLIC_ORIGIN" not in services[name].get("environment", {})
                 and "PUBLIC_ORIGIN_ALIASES" not in services[name].get("environment", {})
-                for name in ("controller", "dispatch")), "migration_public_origin_split")
+                for name in business if name != "app"), "migration_public_origin_split")
         require(services["caddy"].get("environment") in
             ({"INKSEQ_LEGACY_REDIRECT": "0"}, {"INKSEQ_LEGACY_REDIRECT": "1"}), "migration_domain_redirect_phase_invalid")
         require(target != 'staging' or services['caddy']['environment']['INKSEQ_LEGACY_REDIRECT'] == '0',
@@ -140,11 +149,11 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, targe
         require(public.get("SIXNINE_PUBLIC_ORIGIN") == "https://www.sixnine.art"
             and "PUBLIC_ORIGIN_ALIASES" not in public
             and all(not {"PUBLIC_ORIGIN", "PUBLIC_ORIGIN_ALIASES"} & set(services[name].get("environment", {}))
-                for name in ("controller", "dispatch")), "migration_public_origin_split")
+                for name in business if name != "app"), "migration_public_origin_split")
         require(not services["caddy"].get("environment"), "migration_domain_redirect_phase_invalid")
     require(dstack_image == DSTACK_IMAGE or re.fullmatch(r"sixnine-dstack:[0-9a-f]{40}@sha256:[0-9a-f]{64}", dstack_image),
             "migration_dstack_image_binding_invalid")
-    require(services["dstack"]["image"] == dstack_image and services["hatchet"]["image"] == HATCHET_IMAGE,
+    require(services["dstack"]["image"] == dstack_image and (modern or services["hatchet"]["image"] == HATCHET_IMAGE),
             "migration_infrastructure_image_changed")
     for name, service in services.items():
         require(service.get('cgroup_parent', '') == resources['cgroup_parent'], 'migration_cpu_cgroup_parent_invalid')
@@ -166,11 +175,11 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, targe
             require(not service.get("ports"), "migration_private_port_published")
         logs = service.get("logging", {}).get("options", {})
         require(logs.get("max-size") and logs.get("max-file"), "migration_unbounded_logs")
-    for name in CPU_SHARED:
+    for name in shared:
         service = services[name]
         require(service.get("network_mode") == "service:app" and not service.get("networks"),
                 "migration_loopback_namespace_split")
-    for name in ("app", "dispatch", "controller"):
+    for name in business:
         service = services[name]
         env = service["environment"]
         default = env.get("SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID")
@@ -187,7 +196,7 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, targe
     controller = services["controller"]
     targets = {volume["target"] for volume in controller.get("volumes", [])}
     require({"/dstack-runtime", "/dstack-sources"} <= targets and
-        {"gpu_ssh_key", "dstack_runtime_config", "hatchet_broker", "hatchet_api_token"} <= secret_names(controller),
+        ({"gpu_ssh_key", "dstack_runtime_config"} | (set() if modern else {"hatchet_broker", "hatchet_api_token"})) <= secret_names(controller),
         "migration_runtime_mounts_missing")
     require("gpu_ssh_key" not in secret_names(services["app"]) and
         "dstack_database_url" not in secret_names(services["controller"]), "migration_credential_boundary_invalid")
@@ -198,14 +207,15 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, targe
         and {"dstack_api_token", "dstack_database_url"} <= secret_names(dstack), "migration_dstack_auth_invalid")
     require("--log-level" in str(dstack.get("command")) and "--host" in str(dstack.get("command")),
             "migration_dstack_entrypoint_invalid")
-    hatchet = services["hatchet"]["environment"]
-    require(hatchet.get("SERVER_ALLOW_SIGNUP") == "false" and hatchet.get("SERVER_ALLOW_INVITES") == "false"
-        and hatchet.get("SERVER_GRPC_BIND_ADDRESS") == "127.0.0.1"
-        and hatchet.get("SERVER_MSGQUEUE_KIND") == "postgres"
-        and {"administrator_password", "database_password"} <= secret_names(services["hatchet"]),
-        "migration_hatchet_auth_invalid")
-    for name in ("hatchet-config", "hatchet-postgres"):
-        require(document.get("volumes", {}).get(name, {}).get("external") is True, "migration_blank_broker_volume")
+    if not modern:
+        hatchet = services["hatchet"]["environment"]
+        require(hatchet.get("SERVER_ALLOW_SIGNUP") == "false" and hatchet.get("SERVER_ALLOW_INVITES") == "false"
+            and hatchet.get("SERVER_GRPC_BIND_ADDRESS") == "127.0.0.1"
+            and hatchet.get("SERVER_MSGQUEUE_KIND") == "postgres"
+            and {"administrator_password", "database_password"} <= secret_names(services["hatchet"]),
+            "migration_hatchet_auth_invalid")
+        for name in ("hatchet-config", "hatchet-postgres"):
+            require(document.get("volumes", {}).get(name, {}).get("external") is True, "migration_blank_broker_volume")
     app_env = services["app"]["environment"]
     storyboard = app_env.get("SIXNINE_STORYBOARD_OWNERS", "")
     require(type(storyboard) is str and (not storyboard or
@@ -213,7 +223,7 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, targe
         and set(storyboard.split(",")) <= {"superdan", "supervan"}),
         "migration_storyboard_reference_invalid")
     require(all("SIXNINE_STORYBOARD_OWNERS" not in services[name]["environment"]
-        for name in CPU_SHARED), "migration_storyboard_worker_environment")
+        for name in shared), "migration_storyboard_worker_environment")
     require((app_env.get("SIXNINE_GENERATION_ENABLED"), app_env.get("SIXNINE_EXECUTION_BACKEND"))
         in {("0", "disabled"), ("1", "wangp-worker")}, "migration_admission_switch_invalid")
     require(all(controller["environment"].get(key) == app_env.get(key)
@@ -221,10 +231,10 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, targe
         "migration_controller_execution_settings_split")
     total = sum(memory_mib(service.get("mem_limit")) for service in services.values())
     if resources['name'] == deployment_target.COMPACT_RESOURCES:
-        require(set(services) == {'app', 'db', 'db-init', 'caddy', 'hatchet-db', *CPU_SHARED},
+        require(set(services) == expected_services,
                 'migration_compact_service_set_invalid')
         require({name: memory_mib(service.get('mem_limit')) for name, service in services.items()}
-                == deployment_target.COMPACT_SERVICE_MIB, 'migration_compact_service_caps_changed')
+                == {name: cap for name, cap in deployment_target.COMPACT_SERVICE_MIB.items() if name in expected_services}, 'migration_compact_service_caps_changed')
         require(type(host_memory_mib) is int and host_memory_mib >= resources['minimum_host_mib']
                 and resources['resident_mib'] <= host_memory_mib-512
                 and total <= resources['resident_mib']+resources['swap_mib'],
@@ -295,11 +305,14 @@ def check(base, overlay, *, environment=None, runner=subprocess.run, host_memory
                     memory_bytes=metadata['memory_bytes'])
                 receipt['compact_host_resources_verified'] = True
         if probe:
-            result = runner(command+["exec", "-T", "app", "python", "-c", PROBE], env=environment,
+            probe_code = PROBE if "hatchet" in document["services"] else PROBE.replace("    assert request('http://127.0.0.1:8888/api/ready',parse_json=False)[0]==200\n", "")
+            result = runner(command+["exec", "-T", "app", "python", "-c", probe_code], env=environment,
                 capture_output=True, text=True, timeout=25)
             require(result.returncode == 0 and result.stdout.strip() == "migration_private_probe_passed",
                     "migration_private_probe_failed")
-            receipt.update(private_dstack_authenticated=True, hatchet_health_ready=True)
+            receipt.update(private_dstack_authenticated=True)
+            if "hatchet" in document["services"]:
+                receipt["hatchet_health_ready"] = True
         return receipt
 
 

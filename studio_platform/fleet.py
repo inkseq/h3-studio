@@ -429,10 +429,21 @@ def run_slot(config, worker_id, settings, *, repository=None, store_factory=crea
                 raise ValueError("recovery_requires_drain_safe_runner")
             recovery_kwargs = {"stop_new": lambda: True, "job_allowed": lambda job: False,
                 "collection_lock_dir": config.work_dir / "recovery-collection"}
-        runner = runner_factory(repo, store, directory, backend=backend, control=control,
-            submission_guard=ExecutionPolicies(settings, repo).submission_allowed,
-            stop_requested=lambda: (directory / "drain.flag").exists(), **recovery_kwargs)
-        return runner.run_once(worker_id, slot.spec.pool) if once else runner.run_forever(worker_id, slot.spec.pool)
+        telemetry = None
+        if not slot.recovery_only and slot.spec.dispatch_backend == "hatchet-v1" and runner_factory is WorkerRunner:
+            from .postgres_dispatch import PostgresSlotRunner
+            from .telemetry import configured_telemetry
+            runner_factory = PostgresSlotRunner
+            telemetry = configured_telemetry()
+            recovery_kwargs.update(collection_lock_dir=config.work_dir / "collection-lock", telemetry=telemetry)
+        try:
+            runner = runner_factory(repo, store, directory, backend=backend, control=control,
+                submission_guard=ExecutionPolicies(settings, repo).submission_allowed,
+                stop_requested=lambda: (directory / "drain.flag").exists(), **recovery_kwargs)
+            return runner.run_once(worker_id, slot.spec.pool) if once else runner.run_forever(worker_id, slot.spec.pool)
+        finally:
+            if telemetry is not None:
+                telemetry.close()
     finally:
         if backend is not None and hasattr(backend, "close"):
             backend.close()

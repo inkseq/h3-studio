@@ -1,13 +1,39 @@
+## PostgreSQL queue wake migration (#217)
+
+New artifacts use manifest version 2, layout `postgres-notify-v1` and omit
+Hatchet templates, broker services, broker mounts and the dispatcher. The
+existing fenced PostgreSQL queue remains authoritative. Immutable `hatchet-v1`
+route values are historical identity, consumed by the new per-slot runner.
+
+Install the independently reviewed helper/checker closure first. Deploy with
+the existing approved activation path and retain paths.json version 1, its
+active hash and managed secret unchanged: old path references are unused by
+the new overlay. No manual marker edit or credential migration is required.
+Future version 2 paths omit broker references; secret hydration can project the
+old v1 secret without changing credentials. Preserve all old secret files.
+
+The protected release lock covers stopping exactly verified CPU containers
+(dispatch, hatchet, hatchet-db), then recreating app/dstack/controller and
+checking exact images, namespace, mounts, provenance and health. After health,
+remove only those verified old containers without volumes; ready retries finish
+cleanup idempotently. Failure retains pending state for reconciliation.
+Rollback requires the independently approved original v1 artifact with retained
+named volumes/secrets; no down/remove-orphans, new broker bootstrap or GPU
+operation. Jobs, attempts, leases, budgets and native runs remain unchanged.
+
+Accept on staging first, including queue wake/reconnect and idle CPU evidence;
+production promotes the same artifact bytes, without rebuild.
+
 # Approved CPU migration release
 
-This route adds the dstack server, Hatchet engine, dispatcher and controller to
+This route runs the dstack server and PostgreSQL queue controller alongside
 the existing `sixnine-platform` Compose project. It does not rent a GPU, stop a
 provider instance, settle a bill, reset accepted jobs or delete storage. Native
 GPU images are published separately and are never downloaded to this CPU host.
 
 ## Finite GPU/R2 qualification (#174)
 
-Qualification uses the normal owner-confirmed job, registered slot, Hatchet
+Qualification uses the normal owner-confirmed job, registered slot, PostgreSQL queue
 worker, immutable native operation and artifact writer. It does not run a
 parallel collector, replay a settled write, or regenerate an old result to
 repair storage. Keep the original CPU delivery route available for retained
@@ -69,7 +95,7 @@ use. The protected migration manifest binds the derivative image, helper and
 installed source hashes before publication/loading; old approved artifacts keep
 their original pinned dstack image for rollback.
 
-Controller and dispatcher subscribe to committed PostgreSQL wake hints before
+Controller and slot workers subscribe to committed PostgreSQL wake hints before
 scanning the original ledgers. With no work or unresolved outcome they block;
 only the controller performs a read-only account safety sweep every15minutes.
 Active observations/idle-stop cadence is unchanged. Notifications do not grant
@@ -207,16 +233,15 @@ release artifact. The helper reads only path references from
 
 Replace the memory amount, owner and volume names with observed/reviewed values.
 The explicit default must be included in the approved source-set index and be
-the same in app, dispatcher and controller. The volume names must already exist; changing them must not silently initialize
-a blank broker. Initialize a new broker once through the separately reviewed
-Hatchet bootstrap before activation. Use generation `1`/`wangp-worker` only for
+the same in app and controller. Historical volume names remain unchanged for
+v1 rollback; no broker bootstrap is performed. Use generation `1`/`wangp-worker` only for
 an explicitly authorized acceptance deployment with its exact existing profiles.
 The activation marker freezes the complete path/configuration document hash;
 later configuration changes require reviewed maintenance, not an app release.
 The optional nonsecret `SIXNINE_STORYBOARD_OWNERS` field in that same environment
 document selects the new storyboard UI for explicit existing browser accounts.
 Omit it, or set it to an empty string, to keep the UI disabled. It is passed only
-to `app`, not to dispatcher, controller, dstack or Hatchet; it grants no operator,
+to `app`, not to controller or dstack; it grants no operator,
 asset, job or budget permissions. Allowed nonempty values contain unique account
 IDs from `superdan` and `supervan`. Do not inherit this flag from a shell or
 project `.env`, and do not edit an active frozen configuration during a source
@@ -239,14 +264,13 @@ It saves the exact old/candidate configuration and marker bytes in the protected
 `migration/storyboard-maintenance/OPERATION_ID/` directory before any mutation.
 The durable `migration/storyboard-maintenance.json` records the pending intent.
 
-The app reads this environment flag at startup. Because dstack, Hatchet,
-dispatcher and controller share its container network namespace, updating it
+The app reads this environment flag at startup. Because dstack and controller share its container network namespace, updating it
 reconnects **app and those four CPU members** using their current approved images.
 It does not load images, initialize/restart either database, change the frontend
 pointer, alter lifecycle policies, rent/stop a provider GPU, or write jobs and
 budgets. Original runtime environment and persistent mount signatures are
 checked; only the app's storyboard flag may differ. Once CPU health, namespace,
-broker mounts, authenticated probes and the live app flag pass, the command
+runtime mounts, authenticated probes and the live app flag pass, the command
 atomically replaces each configuration/marker file and updates their frozen
 binding. The current/previous source release records remain unchanged.
 
@@ -266,11 +290,6 @@ CPU configuration and restores both original files byte-for-byte. Backups stay
 as evidence. A lost success response is checked through the completed receipt,
 current hashes and live flag; it is not permission for a blind replay.
 The derived source-directory path is set by the helper for the exact artifact.
-For first initialization, a temporary private CPU bootstrap project may use
-these same explicitly named Hatchet volumes and persisted infrastructure
-credentials to capture the broker token. Stop only its bootstrap containers
-before integrated activation; preserve both volumes and token identity. This
-is one broker initialization, not a second broker or business ledger.
 
 Pre-pull only the pinned public CPU infrastructure images in the overlay. Load
 the two separately approved app/dispatch archives. Their exact loaded identities
@@ -344,15 +363,14 @@ Run the installed root helper under the existing release authority:
 
 The helper locks the existing release lock, journals activation and the pending
 commit, checks protected inputs and capacity, and updates the five members
-sharing the app network namespace together: app, dstack, Hatchet, dispatcher and
-controller. It retains both named Hatchet volumes and the business database.
+sharing the app network namespace together: app, dstack and controller. It retains both named Hatchet volumes and the business database.
 It verifies actual image identities, service labels, namespace joins, original
 volume mounts, service health and private authenticated dstack access before
 marking the release healthy. It never uses `docker compose down -v`.
 
 Once `/srv/sixnine/migration/active.json` exists, the ordinary installed
 `deploy_approved.py COMMIT` fetches both approved artifacts and routes through
-the migration helper. Thus an ordinary application update cannot leave broker
+the migration helper. Thus an ordinary application update cannot leave worker
 members attached to the replaced app container or forget the overlay. Every
 such release needs an approved additive artifact and matching installed helper;
 a helper change is a separately reviewed root installation.

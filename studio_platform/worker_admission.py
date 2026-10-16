@@ -12,7 +12,7 @@ from .repository import (attempts, budget_accounts, budget_reservations, instanc
 
 STOP_NEW_SECONDS = 300
 COMPLETION_MARGIN_SECONDS = 120
-BROKER_HEARTBEAT_SECONDS = 60
+CONSUMER_HEARTBEAT_SECONDS = 60
 SHUTDOWN_MARGIN_SECONDS = 300
 
 
@@ -270,16 +270,15 @@ def worker_window_reason(connection, worker, now, *, expected_runtime_s=None, de
                         or spec.get("configuration_id") != original.get("configuration_id")
                         or spec.get("model_id") != original.get("model_id")):
                     return "managed_dstack_binding_mismatch"
-                broker = original.get("broker_observation", {})
-                observed = broker.get("observed_at")
-                heartbeat = broker.get("heartbeat_at")
-                freshness = node["payload"].get("observation_fresh_seconds", 30)
-                if (broker.get("ready") is not True or broker.get("worker_id") != worker["id"]
-                        or type(observed) not in (int,float) or not math.isfinite(observed)
-                        or not 0 <= now-observed <= freshness
-                        or type(heartbeat) not in (int,float) or not math.isfinite(heartbeat)
-                        or not 0 <= now-heartbeat <= BROKER_HEARTBEAT_SECONDS):
-                    return "managed_hatchet_consumer_unconfirmed"
+                consumer = original.get("consumer_observation", {})
+                observed = consumer.get("observed_at")
+                if (consumer.get("ready") is not True or consumer.get("worker_id") != worker["id"]
+                        or consumer.get("worker_fence") != worker["fence"]
+                        or consumer.get("instance_id") != worker["instance_id"]
+                        or consumer.get("runtime_incarnation") != original.get("runtime_incarnation")
+                        or not original.get("runtime_incarnation")
+                        or not _finite(observed) or not 0 <= now-observed <= CONSUMER_HEARTBEAT_SECONDS):
+                    return "managed_queue_consumer_unconfirmed"
             reason = managed_window_reason(intent, node, now, expected_runtime_s=expected_runtime_s,
                 deployment_profile_id=deployment_profile_id)
             if reason:

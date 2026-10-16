@@ -1,8 +1,8 @@
 """CPU reconciliation of owned dstack runs; never retries a rental or GPU POST.
 
 The original database owns leases, budgets, jobs and drain decisions. dstack
-owns capacity. Native readiness owns the private model endpoint. Hatchet carries
-identity-only wakeups. All dependencies are injected; imports have no I/O.
+owns capacity. Native readiness owns the private model endpoint. PostgreSQL
+notifications wake original-ledger consumers. All dependencies are injected; imports have no I/O.
 """
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ def _terminal_review_candidate(run, binding, project):
 
 
 class DstackController:
-    def __init__(self, service, runtime, *, worker_process=None, broker_readiness=None, telemetry=None):
+    def __init__(self, service, runtime, *, worker_process=None, telemetry=None):
         if service.capacity is None:
             raise ValueError("dstack_capacity_disabled")
         self.service, self.repo, self.runtime = service, service.repo, runtime
@@ -64,7 +64,6 @@ class DstackController:
         self.capacity.readiness = runtime.readiness
         self.control = WorkerControl(self.repo, capacity_usage=service.registration_capacity_usage)
         self.worker_process = worker_process
-        self.broker_readiness = broker_readiness
         # The existing original-row writer publishes bounded allocation facts.
         # Import/construction stays offline; only the explicit entry point loads
         # the already mounted Cloud configuration. Export never owns state.
@@ -97,7 +96,7 @@ class DstackController:
                 or binding.get("reason_code") != "dstack_allocation_requires_reconciliation"
                 or binding.get("apply_started") is not True or binding.get("stop_started")
                 or not binding.get("run_id") or binding.get("registration_observation")
-                or binding.get("broker_observation") or binding.get("host_observation")
+                or binding.get("broker_observation") or binding.get("consumer_observation") or binding.get("host_observation")
                 or node["payload"].get("host_observation")
                 or any(binding.get(key) is not None for key in (
                     "provider_instance_id", "runtime_incarnation", "first_runtime_ready_at"))
@@ -111,7 +110,10 @@ class DstackController:
                 operator_nodes.c.intent_id == node["intent_id"])).mappings().one()
             intent = connection.execute(select(instance_intents).where(
                 instance_intents.c.id == node["intent_id"])).mappings().one()
-            if dict(current) != node or intent["state"] != "creation_unknown" or intent["provider_instance_id"] is not None:
+            # A stopped uncertain start can already be in the original
+            # destroying phase. Cadence evidence never settles that obligation.
+            if (dict(current) != node or intent["state"] not in {"creation_unknown", "destroying"}
+                    or intent["provider_instance_id"] is not None):
                 return None
             worker_id = "dstack-" + node["intent_id"].replace("-", "")
             if (connection.execute(select(registered_workers.c.id).where(registered_workers.c.id == worker_id)).first()
@@ -420,18 +422,12 @@ class DstackController:
                 self.control.mark_ready(slot.spec.worker_id, upstream_idle_confirmed=True)
             if self.worker_process:
                 self.worker_process.ensure(intent_id, slot)
-            if self.broker_readiness:
-                self.capacity.store.record_broker(intent_id,slot.spec.worker_id,
-                    self.broker_readiness.projection(slot))
         elif binding.get("state") == "busy" and fresh and workers:
             # Running original inference must not age out its live consumer's
             # proof. Refresh transport eligibility without marking it idle.
             slot=self.runtime.slot(intent_id)
             if self.worker_process:
                 self.worker_process.ensure(intent_id,slot)
-            if self.broker_readiness:
-                self.capacity.store.record_broker(intent_id,slot.spec.worker_id,
-                    self.broker_readiness.projection(slot))
         return {"node_id": intent_id, "state": observation["state"]}
 
     def tick(self):
@@ -466,11 +462,11 @@ class DstackController:
         return {"state": "running", "nodes": results}
 
 
-class HatchetProcesses:
+class SlotProcesses:
     """Only CPU worker processes. No arbitrary command or GPU process signal."""
-    def __init__(self, work_dir, broker_config, *, popen=subprocess.Popen):
-        self.work_dir, self.broker_config = Path(work_dir), Path(broker_config)
-        if not self.work_dir.is_absolute() or not self.broker_config.is_absolute():
+    def __init__(self, work_dir, *, popen=subprocess.Popen):
+        self.work_dir = Path(work_dir)
+        if not self.work_dir.is_absolute():
             raise ValueError("absolute_dstack_worker_paths_required")
         self.popen, self.children = popen, {}
         self._supervisor_lock = None
@@ -506,8 +502,8 @@ class HatchetProcesses:
             json.dump(value, stream, sort_keys=True)
             stream.flush(); os.fsync(stream.fileno())
         temporary.replace(path)
-        self.children[intent_id] = self.popen([sys.executable, "-m", "studio_platform.hatchet_dispatch", "worker",
-            "--broker-config", str(self.broker_config), "--fleet-config", str(path), "--worker-id", slot.spec.worker_id],
+        self.children[intent_id] = self.popen([sys.executable, "-m", "studio_platform.fleet",
+            "--config", str(path), "--slot", slot.spec.worker_id],
             stdin=subprocess.DEVNULL)
 
     def stop(self, intent_id):
@@ -561,13 +557,10 @@ def main(argv=None):
         service=from_environment(repo,settings)
         if service.capacity is None:
             raise ValueError("dstack_capacity_disabled")
-        runtime,broker,work_dir=create_runtime(repo,service.capacity.store)
-        from .hatchet_readiness import BrokerReadiness
-        from .hatchet_dispatch import read_broker_config
-        readiness=BrokerReadiness(read_broker_config(broker),clock=repo.clock)
-        processes=HatchetProcesses(work_dir,broker).__enter__()
+        runtime,work_dir=create_runtime(repo,service.capacity.store)
+        processes=SlotProcesses(work_dir).__enter__()
         telemetry=configured_telemetry()
-        controller=DstackController(service,runtime,worker_process=processes,broker_readiness=readiness,
+        controller=DstackController(service,runtime,worker_process=processes,
             telemetry=telemetry)
         stop=threading.Event()
         if threading.current_thread() is threading.main_thread():
@@ -588,7 +581,7 @@ def main(argv=None):
         finally:
             wakeup.close()
     finally:
-        # Closing local tunnels is safe; durable broker/original attempts remain
+        # Closing local tunnels is safe; durable original attempts remain
         # recoverable. Do not translate process shutdown into paid-host stop.
         try:
             if processes:

@@ -1,3 +1,4 @@
+x-sixnine-dispatch-layout: postgres-notify-v1
 # Merge after deploy/platform/compose.yaml. No service is started by this file.
 # All variable values are exact image identities, protected paths or existing
 # authorization/configuration, never credentials. Do not use a project .env.
@@ -143,105 +144,6 @@ services:
       start_period: 45s
     logging: *migration-logs
 
-  hatchet-db:
-    cgroup_parent: ${INKSEQ_CPU_CGROUP_PARENT:-}
-    image: postgres:15@sha256:c961aa287d8698297cb26cdfadfbe9fd2cbaf77e53cfffe9636e8d8a1e4d842c
-    pull_policy: never
-    restart: unless-stopped
-    mem_limit: 256m
-    shm_size: 64m
-    pids_limit: 128
-    security_opt: [no-new-privileges:true]
-    command: [postgres, -c, max_connections=80, -c, shared_buffers=32MB, -c, work_mem=2MB]
-    environment:
-      POSTGRES_USER: hatchet
-      POSTGRES_DB: hatchet
-      POSTGRES_PASSWORD_FILE: /run/secrets/database_password
-    secrets: [database_password]
-    volumes: [hatchet-postgres:/var/lib/postgresql/data]
-    networks: [database]
-    healthcheck:
-      test: [CMD, pg_isready, -d, hatchet, -U, hatchet]
-      interval: 5s
-      timeout: 4s
-      retries: 24
-    logging: *migration-logs
-
-  hatchet:
-    cgroup_parent: ${INKSEQ_CPU_CGROUP_PARENT:-}
-    image: ghcr.io/hatchet-dev/hatchet/hatchet-lite:v0.110.5@sha256:cc81f078a5285d7d2051ec4a4fa459d033e1face4ca5983d82612b00da6e3fa3
-    pull_policy: never
-    restart: unless-stopped
-    entrypoint: [/bin/sh, /sixnine/entrypoint.sh]
-    network_mode: service:app
-    mem_limit: 384m
-    pids_limit: 256
-    stop_grace_period: 60s
-    security_opt: [no-new-privileges:true]
-    depends_on:
-      app: {condition: service_started}
-      hatchet-db: {condition: service_healthy}
-    environment:
-      DATABASE_POSTGRES_HOST: hatchet-db
-      DATABASE_POSTGRES_PORT: "5432"
-      DATABASE_POSTGRES_USERNAME: hatchet
-      DATABASE_POSTGRES_DB_NAME: hatchet
-      DATABASE_POSTGRES_SSL_MODE: disable
-      DATABASE_MAX_CONNS: "10"
-      DATABASE_MIN_CONNS: "1"
-      DATABASE_LOG_QUERIES: "false"
-      SERVER_MSGQUEUE_KIND: postgres
-      SERVER_AUTH_COOKIE_DOMAIN: 127.0.0.1
-      SERVER_AUTH_COOKIE_INSECURE: "true"
-      SERVER_GRPC_BIND_ADDRESS: 127.0.0.1
-      SERVER_GRPC_INSECURE: "true"
-      SERVER_GRPC_BROADCAST_ADDRESS: 127.0.0.1:7077
-      SERVER_GRPC_PORT: "7077"
-      SERVER_URL: http://127.0.0.1:8888
-      SERVER_INTERNAL_CLIENT_INTERNAL_GRPC_BROADCAST_ADDRESS: 127.0.0.1:7077
-      SERVER_AUTH_SET_EMAIL_VERIFIED: "true"
-      SERVER_ALLOW_SIGNUP: "false"
-      SERVER_ALLOW_INVITES: "false"
-      SERVER_LOGGER_LEVEL: warn
-      DATABASE_LOGGER_LEVEL: warn
-      ADMIN_EMAIL: sixnine-operator@localhost.invalid
-      ADMIN_NAME: Sixnine operator
-      DEFAULT_TENANT_NAME: Sixnine dispatch
-      DEFAULT_TENANT_SLUG: sixnine
-      SERVER_LIMITS_DEFAULT_TENANT_RETENTION_PERIOD: 168h
-    secrets: [database_password, administrator_password]
-    volumes:
-      - hatchet-config:/config
-      - type: bind
-        source: ../hatchet/entrypoint.sh
-        target: /sixnine/entrypoint.sh
-        read_only: true
-        bind: {create_host_path: false}
-    healthcheck:
-      test: [CMD, curl, --fail, --silent, http://127.0.0.1:8888/api/ready]
-      interval: 10s
-      timeout: 5s
-      retries: 24
-      start_period: 30s
-    logging: *migration-logs
-
-  dispatch:
-    <<: *cpu-service
-    mem_limit: 128m
-    pids_limit: 64
-    command: [python, -m, studio_platform.hatchet_dispatch, dispatcher, --broker-config, /run/secrets/hatchet_broker]
-    environment: *business-environment
-    secrets: [app_database_url, execution_profiles, grafana_cloud, hatchet_broker, hatchet_api_token]
-    volumes:
-      - type: bind
-        source: /srv/sixnine/platform-data
-        target: /data
-        bind: {create_host_path: false}
-    tmpfs: ["/tmp:size=16777216,mode=1777"]
-    depends_on:
-      app: {condition: service_healthy}
-      hatchet: {condition: service_healthy}
-
   controller:
     <<: *cpu-service
     mem_limit: 640m
@@ -255,7 +157,7 @@ services:
       DSTACK_OPERATOR_CONFIG: /run/secrets/dstack_operator_config
       DSTACK_RUNTIME_CONFIG: /run/secrets/dstack_runtime_config
       SIXNINE_STORAGE_CREDENTIAL_FILE: ${SIXNINE_STORAGE_CREDENTIAL_FILE:+/run/secrets/r2_storage}
-    secrets: [app_database_url, execution_profiles, grafana_cloud, r2_storage, hatchet_broker, hatchet_api_token, dstack_operator_config, dstack_runtime_config, dstack_api_token, dstack_ssh_public_key, gpu_ssh_key]
+    secrets: [app_database_url, execution_profiles, grafana_cloud, r2_storage, dstack_operator_config, dstack_runtime_config, dstack_api_token, dstack_ssh_public_key, gpu_ssh_key]
     volumes:
       - type: bind
         source: /srv/sixnine/platform-data
@@ -274,7 +176,6 @@ services:
     depends_on:
       app: {condition: service_healthy}
       dstack: {condition: service_healthy}
-      hatchet: {condition: service_healthy}
 
 secrets:
   execution_profiles:
@@ -302,20 +203,3 @@ secrets:
     file: ${SIXNINE_DSTACK_SSH_PUBLIC_KEY_FILE:?Existing selected SSH public key file required}
   gpu_ssh_key:
     file: ${SIXNINE_GPU_SSH_KEY_FILE:?Existing CPU-only SSH private key file required}
-  hatchet_broker:
-    file: ${SIXNINE_HATCHET_BROKER_CONFIG_FILE:?Protected authenticated broker config required}
-  hatchet_api_token:
-    file: ${SIXNINE_HATCHET_TOKEN_FILE:?Protected existing Hatchet API token required}
-  database_password:
-    file: ${SIXNINE_HATCHET_SECRET_DIR:?Existing protected Hatchet secret directory required}/database-password
-  administrator_password:
-    file: ${SIXNINE_HATCHET_SECRET_DIR:?Existing protected Hatchet secret directory required}/administrator-password
-
-volumes:
-  # Existing volumes must be selected; missing names must not start a blank DB.
-  hatchet-postgres:
-    external: true
-    name: ${SIXNINE_HATCHET_POSTGRES_VOLUME:?Existing Hatchet PostgreSQL volume required}
-  hatchet-config:
-    external: true
-    name: ${SIXNINE_HATCHET_CONFIG_VOLUME:?Existing Hatchet signing/config volume required}

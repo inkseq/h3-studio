@@ -8,7 +8,7 @@ missing historical values mean `legacy`. Neither user input nor a rollout flag
 can change an accepted job's route. Exact-job claims and all recovery purposes
 filter that route. The existing business ledger, physical slot locks, fencing,
 submission intent and output receipts remain authority under at-least-once
-Hatchet dispatch. Lost dispatch responses may be delivered again; uncertain GPU
+PostgreSQL lease-queue dispatch (historical route identity `hatchet-v1`). Lost dispatch responses may be delivered again; uncertain GPU
 submission is reconciled on the original attempt, never regenerated blindly.
 Worker/timeouts/cancellation do not establish an idle GPU. See
 [DSTACK-MIGRATION.md](DSTACK-MIGRATION.md) and [#132](https://github.com/inkseq/h3-studio/issues/132).

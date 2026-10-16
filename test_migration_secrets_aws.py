@@ -95,6 +95,66 @@ class ManagedSecretTests(unittest.TestCase):
     def load(self, api, **options):
         return target.load(api, intent_store=self.store, **options)
 
+    def test_postgres_layout_projects_existing_credentials_without_rotation(self):
+        value = initialized()
+        value['hatchet_api_token'] = 'a'*32+'.'+'b'*32+'.'+'c'*32
+        original = copy.deepcopy(value)
+        old = target.outputs(value)
+        result = target.outputs(value, transport='postgres-notify')
+        self.assertEqual(result, {k: v for k, v in old.items() if not k.startswith('hatchet')})
+        self.assertEqual(value, original)
+        api = FakeAPI(value)
+        self.assertEqual(self.load(api), original)
+        self.assertEqual(api.puts, [])
+
+    def test_postgres_schema_has_exact_existing_infrastructure_pair(self):
+        value = initialized()
+        value['schema_version'] = 2
+        value['infrastructure'] = {k: value['infrastructure'][k] for k in target.POSTGRES_INFRASTRUCTURE}
+        target.validate(value)
+        self.assertFalse(any(k.startswith('hatchet') for k in target.outputs(value)))
+        api = FakeAPI(value)
+        self.assertEqual(self.load(api), value)
+        self.assertEqual(api.puts, [])
+        for change in ('extra_infrastructure', 'broker_token', 'missing_database', 'uninitialized'):
+            invalid = copy.deepcopy(value)
+            if change == 'extra_infrastructure':
+                invalid['infrastructure']['hatchet_database_password'] = 'p'*48
+            elif change == 'broker_token':
+                invalid['hatchet_api_token'] = 'a'*32+'.'+'b'*32+'.'+'c'*32
+            elif change == 'missing_database':
+                del invalid['infrastructure']['dstack_database_url']
+            else:
+                del invalid['infrastructure']
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                target.validate(invalid, allow_uninitialized=True)
+        with self.assertRaisesRegex(ValueError, 'transport_invalid'):
+            target.outputs(value, transport='hatchet')
+
+    def test_postgres_schema_retains_original_initialization_identity(self):
+        original = initialized()
+        self.store.value = {'schema_version': 1, 'source_version_id': 'original-version',
+            'client_request_token': '00000000-0000-0000-0000-000000000001',
+            'infrastructure': original['infrastructure']}
+        value = copy.deepcopy(original)
+        value['schema_version'] = 2
+        value['infrastructure'] = {k: value['infrastructure'][k] for k in target.POSTGRES_INFRASTRUCTURE}
+        self.assertEqual(self.load(FakeAPI(value)), value)
+        value['infrastructure']['dstack_admin_token'] = 'CHANGED_'+'x'*40
+        with self.assertRaisesRegex(RuntimeError, 'identity_conflict'):
+            self.load(FakeAPI(value))
+
+    def test_hydration_transport_uses_protected_version_and_rejects_unknown(self):
+        for version, expected in ((1, 'hatchet'), (2, 'postgres-notify')):
+            with patch.object(target, '_protected_json', return_value={
+                    'version': version, 'environment': {}, 'host_memory_mib': 1911}):
+                self.assertEqual(target.hydration_transport(), expected)
+        for version in (True, 3, '2'):
+            with patch.object(target, '_protected_json', return_value={
+                    'version': version, 'environment': {}, 'host_memory_mib': 1911}):
+                with self.assertRaisesRegex(ValueError, 'transport_invalid'):
+                    target.hydration_transport()
+
     def test_r2_opt_in_is_additive_closed_and_never_rotates_existing_secret(self):
         value = initialized(); before = target.outputs(value)
         value["r2_storage"] = r2_storage()
