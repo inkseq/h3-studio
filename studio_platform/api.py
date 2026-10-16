@@ -108,13 +108,23 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
 
     @app.exception_handler(Conflict)
     async def conflict(_request, error):
-        return JSONResponse({"detail": str(error)}, status_code=409)
+        code = str(error)
+        guidance = {
+            "connection_paused": {"en": "This assistant is paused. Ask the owner to resume it; accepted work is preserved.", "zh": "此 AI 助手已暂停，请让所有者恢复连接；已接收任务保持不变。"},
+            "connection_unavailable": {"en": "This connection is expired or revoked. Ask the owner to review access; do not retry paid work with a new key automatically.", "zh": "连接已过期或撤销，请让所有者检查授权；不要自动换新密钥重试付费操作。"},
+            "connection_permission_denied": {"en": "This connection can organise drafts but cannot perform paid work. Ask the owner for a generation grant.", "zh": "此连接可整理草稿，但不能执行付费操作；如需生成，请让所有者授予生成权限。"},
+        }
+        if code in guidance:
+            return JSONResponse({"code": code, "message": guidance[code]["en"], "messages": guidance[code]}, status_code=409)
+        return JSONResponse({"detail": code}, status_code=409)
 
     @app.exception_handler(BudgetExceeded)
     async def quota(_request, error):
         # Closed monetary vocabulary: capacity failures must not masquerade as
         # a depleted account, and exception strings must never expose secrets.
         code = str(error)
+        from .agent_management import record_refusal
+        record_refusal(repo.engine,settings.tenant_id,getattr(_request.state,'principal',None),code,repo.clock())
         if code in {"user_daily_limit_reached", "connection_daily_limit_reached", "spending_usage_unconfirmed"}:
             messages = {"user_daily_limit_reached": {"en": "Your daily spending limit has been reached.", "zh": "已达到你的每日消费上限。"},
                 "connection_daily_limit_reached": {"en": "This assistant's daily spending limit has been reached.", "zh": "已达到此 AI 助手的每日消费上限。"},
@@ -347,7 +357,15 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
 
     @app.get("/v1/projects/{project_id}")
     def get_project(project_id: str, request: Request):
-        return project_response(authorized_project(request.state.principal, project_id))
+        record=authorized_project(request.state.principal, project_id)
+        from .agent_management import doc_where,ATTRIBUTION_PROJECT
+        from .repository import documents
+        with repo.engine.connect() as conn:
+            rows=conn.execute(select(documents.c.payload).where(documents.c.tenant_id==settings.tenant_id,
+                documents.c.owner_id==request.state.principal.owner,documents.c.project_id==ATTRIBUTION_PROJECT,
+                documents.c.kind=='created_by',documents.c.payload['project_id'].as_string()==project_id)).scalars()
+            attribution={r['resource_id']:{k:r[k] for k in ('kind','connection_id','name')} for r in rows}
+        return {**project_response(record),'created_by':attribution}
 
     @app.put("/v1/projects/{project_id}")
     def save_project(project_id: str, request: Request, body: dict):

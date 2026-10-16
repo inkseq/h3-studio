@@ -13,7 +13,7 @@ Read same-origin `/for-agents/guide.md` (plain Markdown instructions and complet
 
 For conversation history and editable generation cards, use **Quick Chat** below. The legacy quick creation path remains valid for a single editable project clip; do not ask the user to design chapters for one clip. For a script, episodes or multiple scenes, use the story workflow. They share the same owner, asset and job authority; preserve unrelated content when using an existing project.
 
-Prefer the owner's explicit **Connect Codex** grant when that UI is released. The signed-in owner creates a connection in `/v1/account/agent-connections`; a machine key cannot create another connection. The returned instructions include a five-minute one-time code, exact origin, account, connection ID and authorization fingerprint. Read the helper before executing it and compare its SHA-256 with same-origin `/for-agents/connect-manifest.json`. A matching digest checks release consistency, not independent trust in the website. Pass the code through the hidden prompt or `--code-stdin`, never argv. Never paste a permanent API key into chat.
+Prefer the owner's explicit **Connect Codex** grant when that UI is released. The signed-in owner creates a connection in `/v1/account/agent-connections`; a machine key cannot create another connection. The returned instructions include an owner-configured one-time code (10 minutes by default), exact origin, account, connection ID and authorization fingerprint. Read the helper before executing it and compare its SHA-256 with same-origin `/for-agents/connect-manifest.json`. A matching digest checks release consistency, not independent trust in the website. Pass the code through the hidden prompt or `--code-stdin`, never argv. Never paste a permanent API key into chat.
 
 ```sh
 python scripts/connect.py connect --server https://inkseq.com --connection CONNECTION_ID --account ACCOUNT --tenant sixnine --fingerprint AUTHORIZATION_FINGERPRINT
@@ -23,9 +23,9 @@ python scripts/sixnine.py --base-url https://inkseq.com --connection CONNECTION_
 
 The helper generates the permanent key locally and saves it **before exchange** in Windows current-user DPAPI, Linux Secret Service or the native macOS user Keychain. Linux requires existing `secret-tool` and a working user Secret Service. macOS requires an existing default file-based user Keychain that is already unlocked and accessible to this process; the helper binds reads and writes to that same Keychain. Native macOS operations suppress authentication UI, so a lock or denied/interaction-required access stops the helper. Any unlock or access authorization is a separate user action through trusted system UI; retry the original connection/grant, using resume with the same material if it was already saved. The helper does not collect a Keychain password, auto-unlock/create a Keychain, change access controls or pass credentials to a command argument. Unsupported/missing storage stops before exchange, without installing software or writing plaintext credentials. External users do not need our AI Registry.
 
-Read the manifest's storage requirements and verification checklist. A helper digest establishes same-release consistency; neither the digest nor fake OS tests prove that this machine's credential store is accessible, that live onboarding has passed, or that a GPU is available. After a lost response, run `connect.py ... resume --connection CONNECTION_ID` with the same saved material; do not regenerate a key, verifier or grant. The recovery window is five minutes. Once connected, the original owner/origin/scopes/expiry remain fixed; the owner can revoke access without deleting their creations.
+Read the manifest's storage requirements and verification checklist. A helper digest establishes same-release consistency; neither the digest nor fake OS tests prove that this machine's credential store is accessible, that live onboarding has passed, or that a GPU is available. After a lost response, run `connect.py ... resume --connection CONNECTION_ID` with the same saved material; do not regenerate a key, verifier or grant. The recovery window defaults to five minutes and is frozen in each new scoped grant. Once connected, the original owner/origin/scopes/expiry remain fixed; the owner can revoke access without deleting their creations.
 
-The `creator-full` version 1 grant covers the owner's projects, assets, jobs and assistant calls for 90 days from authorization. It does not grant access to other accounts, enable disabled services, remove budgets or authorize a particular paid action. The connection UI has a separate publication gate; do not claim a button exists solely because discovery is readable.
+The legacy unscoped `creator-full` version 1 grant covers the owner's projects, assets, jobs and assistant calls for 90 days from authorization. It does not grant access to other accounts, enable disabled services, remove budgets or authorize a particular paid action. The connection UI has a separate publication gate; do not claim a button exists solely because discovery is readable.
 
 The owner chooses a per-connection daily spending cap when connecting and can edit it later in **Settings → AI assistants**. A cap of `0` adds no connection limit; the owner's daily limit, original cumulative credit, reserved charges and infrastructure safeguards still apply. Daily limits follow **Australia/Sydney**, including daylight saving; unresolved charges from earlier days remain included until reconciled. The initial cap is part of a nonzero-cap connection's authorization fingerprint; later owner settings do not replace the original grant, reset spending or broaden scopes.
 
@@ -369,3 +369,61 @@ retarget. Original-key replay returns the same blocked receipt. This proof is
 never inferred from HTTP 4xx: unresolved storage journals and unknown outcomes
 remain on the original operation. 中文：只有明确“未创建镜头”的封闭回执才可重新选择；
 未知存储结果仍须核对原操作，不能自动换Key或清理资产。
+
+
+## Scoped assistant management (#234)
+
+Browser owners retain the original one-use connection/exchange protocol. New
+issuance adds `scope: {kind: "all"}` or `{kind: "session" | "story", id: "<owned id>"}`
+and `permission: "organise" | "generate"` alongside the original required profile
+ID/version. Organise allows draft and asset organisation but removes paid job and
+assistant authority, including automatic naming. Scope is resolved to original
+project permissions before issuance; immutable authorization/fingerprint freezes
+it. Omitting both new fields preserves the legacy fingerprint shape.
+
+GET/PATCH `/v1/account/agent-connection-settings` exposes versioned owner settings:
+`code_ttl_seconds` (600), `recovery_ttl_seconds` (300), `key_lifetime_days` (90),
+`max_pending_connections` (5). PATCH requires `expected_version`, complete `value`
+and Idempotency-Key. Changes affect new grants only; existing recovery/expiry and
+scope never expand. These controls do not change the original abuse protection.
+
+PATCH `/v1/account/agent-connections/{id}` accepts `expected_version` from
+`state_version`, optional `paused` and/or `daily_limit_microusd`, with a stable
+Idempotency-Key. Zero cap means unlimited. Cap changes use the same original
+owner spending settings/version; usage is conservative Sydney-day projected
+exposure including unresolved prior-day obligations, not an invoice. Pause and
+revocation deny new authentication/admission, including a stale authenticated
+principal. They do not cancel accepted jobs or delete drafts/assets. Original
+accepted replay and accounting are preserved.
+
+A stale control/settings CAS returns a durable original-key receipt with
+`no_mutation_committed: true`, `error_code: "connection_version_conflict"` and the
+exact original `request`. Match resource and request before acknowledging; never
+infer no-write from a generic HTTP error. Unknown outcomes retain their original
+body/key for explicit reconciliation. No automatic replacement grant is allowed.
+
+GET `.../{id}/activity?limit=20&offset=0` returns only event ID, closed event type,
+time and `next_offset`; no prompts, media, credentials or ledger details. Closed
+cap refusals are recorded after admission rollback. New connection-created
+sessions/takes and story entities expose immutable `created_by` metadata; legacy
+history without proven attribution stays null. Project reads expose an entity-ID
+map separately from the editable project body. No immutable recipe is rewritten.
+
+中文：连接可限定本次创作、当前故事或全部作品；“整理”允许编辑草稿但不付费。
+一次性代码默认10分钟，时效和连接上限可配置；改设置不扩大旧授权。暂停/撤销不取消
+已接收任务。费用为含未知预留的保守占用，0表示不限额；未知结果只核对原操作。
+
+After the browser owner creates the chosen scoped grant, use the existing helper
+with its exact returned origin/connection/fingerprint and OS-protected store.
+The code stays in the hidden prompt or stdin. No helper command mints or manages
+browser-only grants. For an existing connected assistant, ordinary readback is:
+
+```powershell
+# $origin/$connection/$helper are the existing verified connection and helper.
+python $helper --base-url $origin --connection $connection request GET /api/auth/me
+python $helper --base-url $origin --connection $connection request GET /v1/quick-chat/sessions --output sessions.json
+```
+
+The owner uses Settings to pause, resume, change the cap or revoke; the assistant
+must not attempt to widen its own scope. A permission/cap refusal is not permission
+to create another connection, choose another owner or retry paid work automatically.

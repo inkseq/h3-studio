@@ -571,3 +571,6 @@ inventory.json
 
 !studio_platform/quick_chat_takes.py
 !test_quick_chat_takes.py
+
+!studio_platform/agent_management.py
+!test_agent_management.py

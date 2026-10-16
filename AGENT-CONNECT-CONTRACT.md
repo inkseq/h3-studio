@@ -6,9 +6,9 @@ This is the G2 contract, following [DEC-008](DECISIONS.md) and [PROJECT-PLAN.md]
 
 Anonymous GET/HEAD discovery is limited to `/for-agents`, `/llms.txt`, the guide JSON, `/for-agents/guide.md`, Skill, reviewed four-file ZIP, `connect.py`, and its digest manifest. `guide.md?download=true` serves the same Markdown bytes with an attachment filename. The Markdown and ZIP's `README.md` are generated from the current public instructions and structured contract, not a separate API specification. These static resources never read private projects or advertise live GPU availability. The ZIP contains `README.md`, `SKILL.md`, `scripts/sixnine.py` and `scripts/connect.py`. A digest proves consistency with the same-origin release, not independent trust in that website. Public documents require no credential or login; a browsing-tool reading failure can be handled by direct same-origin HTTPS retrieval or the user's downloaded file.
 
-Only an authenticated browser owner can issue, inspect or revoke `/v1/account/agent-connections`. Writes require an accepted Origin; machine keys cannot mint keys through this interface. Creation requires the explicit `creator-full` profile ID/version and a stable idempotency key. The first response includes a five-minute random code. Only its digest is stored. Repeating issuance returns the same record without reconstructing the code; the owner must revoke an inaccessible pending grant before intentionally creating a replacement.
+Only an authenticated browser owner can issue, inspect or revoke `/v1/account/agent-connections`. Writes require an accepted Origin; machine keys cannot mint keys through this interface. Creation requires the explicit `creator-full` profile ID/version and a stable idempotency key. The first response includes a short-lived random code (10 minutes by default; owner-configurable). Only its digest is stored. Repeating issuance returns the same record without reconstructing the code; the owner must revoke an inaccessible pending grant before intentionally creating a replacement.
 
-The authorization record and its SHA-256 fingerprint freeze origin, tenant, account, connection ID, profile version, eight explicit scopes, all of that owner's projects, and a 90-day expiry measured from the grant. The scopes are project create/read/write, asset read/write, job read/write and `assistant:run`. Future scopes do not automatically expand a grant or existing manual PAT. No account, budget, rental or infrastructure authority is granted.
+The legacy unscoped authorization record and its SHA-256 fingerprint freeze origin, tenant, account, connection ID, profile version, eight explicit scopes, all of that owner's projects, and a 90-day expiry measured from the grant. The scopes are project create/read/write, asset read/write, job read/write and `assistant:run`. Future scopes do not automatically expand a grant or existing manual PAT. No account, budget, rental or infrastructure authority is granted.
 
 ## Client-held key and one-time exchange
 
@@ -20,7 +20,7 @@ The same-origin digest manifest lists these storage requirements and a connectio
 
 The only anonymous write is `POST /v1/agent-connect/exchange`, bounded to an 8 KiB JSON body, with exact fields, cross-site checks and source/known-connection rate limits. It accepts the short-lived code, the token digest/prefix, verifier challenge and expected authorization fingerprint. It never accepts or returns the raw PAT. Account and connection locking atomically consume the grant and insert a normal existing `platform_personal_api_keys` record. PostgreSQL and SQLite use their respective locking mechanisms; there is no parallel authentication authority.
 
-A lost exchange response is recovered with the original local token/verifier within five minutes of the first claim. Recovery returns the same key metadata; it cannot create another key or extend expiry. A response lost before the first claim permits retrying only the same saved material. Expired, revoked, changed-account, changed-origin or changed-fingerprint authority fails closed. Logout invalidates an unconsumed browser grant; an already-issued PAT retains the existing PAT lifecycle. Password/account changes and explicit revocation invalidate access. Revoke leaves drafts, accepted jobs and assets intact.
+A lost exchange response is recovered with the original local token/verifier within the grant’s recovery window (five minutes by default) after the first claim. Recovery returns the same key metadata; it cannot create another key or extend expiry. A response lost before the first claim permits retrying only the same saved material. Expired, revoked, changed-account, changed-origin or changed-fingerprint authority fails closed. Logout invalidates an unconsumed browser grant; an already-issued PAT retains the existing PAT lifecycle. Password/account changes and explicit revocation invalidate access. Revoke leaves drafts, accepted jobs and assets intact.
 
 The helper has no redirect-following credential path and prints safe connection/account metadata. Codes are read through a hidden prompt or stdin, never CLI arguments. Permanent keys, recovery material and signed URLs must not be put in chat, URLs, ordinary documents or logs. The API/media helper loads a connection with `--connection ID`; it refuses mixed credential sources. Manual process-environment PAT and already-configured internal Registry use remain explicit advanced fallbacks.
 
@@ -41,3 +41,46 @@ Upload through the session asset route or `sixnine.py upload --session ID`; resu
 - Source-local and known-connection rate limits do not establish production reverse-proxy trust. Public TLS/origin/proxy configuration, real browser onboarding, actual OS credential-service availability and multi-process deployment remain explicit release checks.
 - Revocation cannot cancel already accepted work by itself. Use existing job cancellation rules; never reset jobs or accounting during credential recovery.
 - Fake HTTP/OS stores and isolated SQL tests do not prove a live credential exchange, model availability, paid generation or frontend publication. Their exact evidence belongs in the PR and #21, not this durable contract.
+
+
+## Scoped assistant management (#234)
+
+Browser owners retain the original one-use connection/exchange protocol. New
+issuance adds `scope: {kind: "all"}` or `{kind: "session" | "story", id: "<owned id>"}`
+and `permission: "organise" | "generate"` alongside the original required profile
+ID/version. Organise allows draft and asset organisation but removes paid job and
+assistant authority, including automatic naming. Scope is resolved to original
+project permissions before issuance; immutable authorization/fingerprint freezes
+it. Omitting both new fields preserves the legacy fingerprint shape.
+
+GET/PATCH `/v1/account/agent-connection-settings` exposes versioned owner settings:
+`code_ttl_seconds` (600), `recovery_ttl_seconds` (300), `key_lifetime_days` (90),
+`max_pending_connections` (5). PATCH requires `expected_version`, complete `value`
+and Idempotency-Key. Changes affect new grants only; existing recovery/expiry and
+scope never expand. These controls do not change the original abuse protection.
+
+PATCH `/v1/account/agent-connections/{id}` accepts `expected_version` from
+`state_version`, optional `paused` and/or `daily_limit_microusd`, with a stable
+Idempotency-Key. Zero cap means unlimited. Cap changes use the same original
+owner spending settings/version; usage is conservative Sydney-day projected
+exposure including unresolved prior-day obligations, not an invoice. Pause and
+revocation deny new authentication/admission, including a stale authenticated
+principal. They do not cancel accepted jobs or delete drafts/assets. Original
+accepted replay and accounting are preserved.
+
+A stale control/settings CAS returns a durable original-key receipt with
+`no_mutation_committed: true`, `error_code: "connection_version_conflict"` and the
+exact original `request`. Match resource and request before acknowledging; never
+infer no-write from a generic HTTP error. Unknown outcomes retain their original
+body/key for explicit reconciliation. No automatic replacement grant is allowed.
+
+GET `.../{id}/activity?limit=20&offset=0` returns only event ID, closed event type,
+time and `next_offset`; no prompts, media, credentials or ledger details. Closed
+cap refusals are recorded after admission rollback. New connection-created
+sessions/takes and story entities expose immutable `created_by` metadata; legacy
+history without proven attribution stays null. Project reads expose an entity-ID
+map separately from the editable project body. No immutable recipe is rewritten.
+
+中文：连接可限定本次创作、当前故事或全部作品；“整理”允许编辑草稿但不付费。
+一次性代码默认10分钟，时效和连接上限可配置；改设置不扩大旧授权。暂停/撤销不取消
+已接收任务。费用为含未知预留的保守占用，0表示不限额；未知结果只核对原操作。
