@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 
 from .auth import API_SCOPES, USERS, Auth, AuthenticationError, Principal, accounts, digest, personal_keys, sessions
 
-CODE_TTL_SECONDS = 300
+CODE_TTL_SECONDS = 600
 RECOVERY_TTL_SECONDS = 300
 KEY_LIFETIME_DAYS = 90
 PROFILE_ID = "creator-full"
@@ -60,13 +60,18 @@ class ConnectError(Exception):
         super().__init__(code)
 
 
-class AgentConnect:
+from .agent_management import AgentManagementMixin
+
+
+class AgentConnect(AgentManagementMixin):
     def __init__(self, auth: Auth):
         self.auth, self.engine, self.tenant, self.clock = auth, auth.engine, auth.tenant, auth.clock
         with self.engine.begin() as conn:
             if self.engine.dialect.name == "postgresql":
                 conn.exec_driver_sql("SELECT pg_advisory_xact_lock(685939796868749722)")
             metadata.create_all(conn)
+            from .repository import documents
+            documents.create(conn, checkfirst=True)
 
     def _begin(self, conn):
         if self.engine.dialect.name == "sqlite":
@@ -114,14 +119,17 @@ class AgentConnect:
             raise ConnectError("connection_origin_invalid", 422) from None
         return f"{parsed.scheme}://{parsed.netloc.lower()}"
 
-    def profile(self):
+    def profile(self, policy=None):
+        from .agent_management import DEFAULTS
+        policy=policy or DEFAULTS
         return {"id": PROFILE_ID, "version": PROFILE_VERSION, "scopes": list(CONNECT_SCOPES),
-            "all_projects": True, "project_ids": [], "key_lifetime_days": KEY_LIFETIME_DAYS,
-            "code_ttl_seconds": CODE_TTL_SECONDS, "recovery_ttl_seconds": RECOVERY_TTL_SECONDS,
+            "all_projects": True, "project_ids": [], "key_lifetime_days": policy["key_lifetime_days"],
+            "code_ttl_seconds": policy["code_ttl_seconds"], "recovery_ttl_seconds": policy["recovery_ttl_seconds"],
+            "max_pending_connections": policy["max_pending_connections"],
             "description": "本人现有和未来项目的创作、上传、视频生成及文本助手调用；不含账户、预算或基础设施管理"}
 
     def issue(self, principal: Principal, *, name="Codex", authorization_profile_id,
-            authorization_profile_version, idempotency_key, origin, daily_limit_microusd=0):
+            authorization_profile_version, idempotency_key, origin, daily_limit_microusd=0, scope=None, permission=None):
         from .repository import money
         try:
             money(daily_limit_microusd)
@@ -142,6 +150,8 @@ class AgentConnect:
             "profile_version": authorization_profile_version, "origin": origin}
         if daily_limit_microusd:
             request_value["daily_limit_microusd"] = daily_limit_microusd
+        if scope is not None or permission is not None:
+            request_value.update(scope=scope,permission=permission)
         request_hash = digest(json.dumps(request_value, sort_keys=True, separators=(",", ":")))
         code, now = "sxc_" + secrets.token_urlsafe(32), self.clock()
         with self.engine.begin() as conn:
@@ -156,23 +166,29 @@ class AgentConnect:
                 # Lost issuance responses cannot be reconstructed from hashes.
                 return {"connection": self._public_current(conn, prior), "code": None,
                     "code_available": False, "replayed": True}
+            from .spending_limits import lock_owner
+            lock_owner(conn,self.tenant,principal.owner)
+            policy=self._settings(conn,principal.owner)['value']
+            grant=self._grant_scope(conn,principal,scope,permission) if scope is not None or permission is not None else None
             active = conn.execute(select(connections.c.id).where(connections.c.tenant == self.tenant,
                 connections.c.owner == principal.owner, connections.c.revoked_at.is_(None),
                 connections.c.claimed_at.is_(None), connections.c.expires_at > now)).all()
-            if len(active) >= 5:
+            if len(active) >= policy['max_pending_connections']:
                 raise ConnectError("too_many_pending_connections", 429)
             connection_id = "connection-" + uuid.uuid4().hex
             authorization = {"origin": origin, "owner": principal.owner, "tenant": self.tenant,
                 "connection_id": connection_id, "profile_id": PROFILE_ID, "profile_version": PROFILE_VERSION,
                 "scopes": list(CONNECT_SCOPES), "all_projects": True, "project_ids": [],
-                "key_lifetime_days": KEY_LIFETIME_DAYS, "key_expires_at": now + KEY_LIFETIME_DAYS * 86400}
+                "key_lifetime_days": policy['key_lifetime_days'] if grant else KEY_LIFETIME_DAYS,
+                "key_expires_at": now + (policy['key_lifetime_days'] if grant else KEY_LIFETIME_DAYS) * 86400}
+            if grant:authorization.update(grant,recovery_ttl_seconds=policy['recovery_ttl_seconds'])
             if daily_limit_microusd:
                 authorization["daily_limit_microusd"] = daily_limit_microusd
             encoded = json.dumps(authorization, sort_keys=True, separators=(",", ":"))
             row = dict(tenant=self.tenant, id="connection-" + uuid.uuid4().hex, owner=principal.owner,
                 name=name.strip(), code_hash=digest(code), session_hash=principal.session_hash,
                 auth_mode=self.auth.mode, password_version=principal.password_version,
-                created_at=now, expires_at=now + CODE_TTL_SECONDS, idempotency_key=idempotency_key,
+                created_at=now, expires_at=now + policy["code_ttl_seconds"], idempotency_key=idempotency_key,
                 request_hash=request_hash, authorization=encoded, authorization_fingerprint=digest(encoded))
             row["id"] = connection_id
             conn.execute(insert(connections).values(**row))
@@ -193,6 +209,8 @@ class AgentConnect:
         result.update(status=status, scopes=authorization["scopes"], project_ids=authorization["project_ids"],
             all_projects=authorization["all_projects"], key_lifetime_days=authorization["key_lifetime_days"],
             authorization=authorization, authorization_fingerprint=row["authorization_fingerprint"])
+        result.update(scope=authorization.get('scope',{'kind':'all'}),permission=authorization.get('permission','generate'),
+            daily_limit_microusd=authorization.get('daily_limit_microusd',0),paused=False,state_version=0)
         if key:
             result["key"] = self.auth.public_key(key)
         return result
@@ -211,7 +229,7 @@ class AgentConnect:
                 sessions.c.tenant == self.tenant, sessions.c.token_hash == row["session_hash"],
                 sessions.c.expires > self.clock())).first():
             unavailable = True
-        return self._public(dict(row), dict(key) if key else None, unavailable=unavailable)
+        return self._management_public(conn,row,self._public(dict(row), dict(key) if key else None, unavailable=unavailable))
 
     def list(self, principal, *, limit=50, offset=0):
         if type(limit) is not int or not 1 <= limit <= 100 or type(offset) is not int or not 0 <= offset <= 10000:
@@ -222,7 +240,7 @@ class AgentConnect:
                 connections.c.owner == principal.owner).order_by(connections.c.created_at.desc(), connections.c.id)
                 .limit(limit).offset(offset)).mappings().all()
             values = [self._public_current(conn, row) for row in rows]
-            return {"connections": values, "authorization_profile": self.profile(),
+            return {"connections": values, "authorization_profile": self.profile(self._settings(conn,principal.owner)["value"]),
                 "limit": limit, "offset": offset, "has_more": len(values) == limit,
                 "next_offset": offset + limit if len(values) == limit else None}
 
@@ -333,7 +351,7 @@ class AgentConnect:
                     scopes=json.dumps(authorization["scopes"]), all_projects=int(authorization["all_projects"]),
                     auth_mode=self.auth.mode, password_version=row["password_version"],
                     created_at=now, expires_at=authorization["key_expires_at"], last_used_at=None, revoked_at=None)
-                claimed = dict(claimed_at=now, recovery_until=now + RECOVERY_TTL_SECONDS,
+                claimed = dict(claimed_at=now, recovery_until=now + authorization.get("recovery_ttl_seconds",RECOVERY_TTL_SECONDS),
                     client_challenge=client_challenge, token_hash=token_hash, key_id=key["id"])
                 changed = conn.execute(update(connections).where(connections.c.tenant == self.tenant,
                     connections.c.id == row["id"], connections.c.claimed_at.is_(None),
@@ -367,6 +385,8 @@ class AgentConnect:
         with self.engine.begin() as conn:
             self._begin(conn)
             self._browser(conn, principal)
+            from .spending_limits import lock_owner
+            lock_owner(conn,self.tenant,principal.owner)
             row = conn.execute(select(connections).where(connections.c.tenant == self.tenant,
                 connections.c.owner == principal.owner, connections.c.id == connection_id)
                 .with_for_update()).mappings().first()

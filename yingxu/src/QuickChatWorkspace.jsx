@@ -1,3 +1,4 @@
+import {AssistantBadge} from './AssistantConnections.jsx';
 import QuickChatPreferences from './QuickChatPreferences.jsx';
 import {checkedPreferences,createConversationFiles} from './quick-chat-takes.js';
 import {useI18n,LanguageSwitcher} from './i18n/I18nProvider.jsx';
@@ -137,13 +138,13 @@ export default function QuickChatWorkspace(){
       <button className="qc-new" disabled={busy} onClick={newSession}><Plus size={16}/>{t('workspace.copy9')}</button>
       <CreationHistory state={state} controller={controller} busy={busy} onSelect={selectSession}/>
       <button className="qc-take-preferences" disabled={!c.account||busy} onClick={openTakePreferences}>{t('takes.preferences')}</button>
-      <OperatorEntry account={c.account} className="qc-operator-entry"/><button className="qc-agent-entry" onClick={()=>setDialog('agent')}><Bot size={15}/>{t('workspace.copy10')}</button>
+      <OperatorEntry account={c.account} className="qc-operator-entry"/><button className="qc-agent-entry" onClick={()=>setDialog('agent')}><Bot size={15}/>{t('assistants.entry')}</button>
       <button className="qc-account" onClick={()=>setDialog('login')}><span className="qc-avatar">{(c.account||t('workspace.status31')).slice(0,1).toUpperCase()}</span><span><b>{c.account||t('workspace.status32')}</b><small>{c.account?t('workspace.status33'):t('workspace.status34')}</small></span></button>
     </aside>
     <main id="quick-chat-main" className="qc-main">
       <header className="qc-header"><LanguageSwitcher/><a className="account-settings-link" href="/settings">{t('settings.title')}</a>
         <button className="qc-mobile-menu" aria-label={t('workspace.accessible2')} onClick={()=>setMobile(!mobile)}><Menu size={19}/></button>
-        <span>{state.session?.title||t('workspace.status35')}{state.session?.version&&<button className="qc-rename" disabled={busy} aria-label={t('workspace.accessible3')} onClick={openRename}>{t('workspace.copy11')}</button>}</span>
+        <span>{state.session?.title||t('workspace.status35')}<AssistantBadge createdBy={state.session?.created_by}/>{state.session?.version&&<button className="qc-rename" disabled={busy} aria-label={t('workspace.accessible3')} onClick={openRename}>{t('workspace.copy11')}</button>}</span>
         <div><button className="qc-connection-state" onClick={()=>setDialog('status')} aria-label={t('workspace.accessible4')}>{connectionLabel}</button>{c.account&&<button disabled={busy} onClick={()=>quietly(controller.refresh())} aria-label={t('workspace.accessible5')}><RefreshCw size={15}/></button>}</div>
       </header>
       <div className="qc-thread" role="region" aria-label={t('workspace.accessible6')} tabIndex={0}>

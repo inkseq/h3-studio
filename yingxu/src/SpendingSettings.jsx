@@ -1,4 +1,5 @@
 import {microsToDollars,dollarsToMicros} from './money.js';
+import AssistantConnections from './AssistantConnections.jsx';
 import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {createCloudClient} from './cloud-client.js';
 import {LanguageSwitcher,useI18n} from './i18n/I18nProvider.jsx';
@@ -54,13 +55,9 @@ export default function SpendingSettings({account}){
         {field('settings.daily',draft.daily,value=>setDraft(previous=>({...previous,daily:value})))}
         {field('settings.ask',draft.ask,value=>setDraft(previous=>({...previous,ask:value})))}
         <p>{t('settings.zero')}</p><p>{t('settings.day')}</p><p>{t('settings.usage',{amount:money(user.usage.projected_microusd)})}</p>
-      </section><section aria-labelledby="assistant-settings-title"><h2 id="assistant-settings-title">{t('settings.assistants')}</h2>
-        {!user.connections.length&&<p>{t('settings.noAssistants')}</p>}{user.connections.map(row=><article key={row.actor_id}><h3>{row.name} {row.revoked&&<small>{t('settings.revoked')}</small>}</h3>
-          {field('settings.cap',draft.connections[row.actor_id],value=>setDraft(previous=>({...previous,connections:{...previous.connections,[row.actor_id]:value}})))}
-        </article>)}
       </section><button disabled={busy}>{t(busy?'settings.saving':'settings.save')}</button></form>
       {admin&&adminDraft&&<form onSubmit={event=>{event.preventDefault();void save(true);}}><section aria-labelledby="admin-settings-title"><h2 id="admin-settings-title">{t('settings.admin')}</h2>
         {[['settings.testDaily','testDaily'],['settings.hourly','hourly'],['settings.fleetHourly','fleetHourly'],['settings.idle','idle'],['settings.runtime','runtime']].map(([label,key])=><React.Fragment key={key}>{field(label,adminDraft[key],value=>setAdminDraft(previous=>({...previous,[key]:value})))}</React.Fragment>)}
         <p>{t('settings.adminHelp')}</p></section><button disabled={busy}>{t(busy?'settings.saving':'settings.save')}</button></form>}
-    </>}<button disabled={busy} onClick={()=>void load()}>{t('settings.reload')}</button></main>;
+    </>}<AssistantConnections account={account} onLogin={()=>{window.location.href='/quick-chat';}}/><button disabled={busy} onClick={()=>void load()}>{t('settings.reload')}</button></main>;
 }

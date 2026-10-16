@@ -26,7 +26,7 @@ CONNECTION_STORAGE_REQUIREMENTS = {
 CONNECTION_VERIFICATION_CHECKLIST = (
     "Inspect the helper and compare its SHA-256 with the manifest on the exact user-supplied origin; a match proves release consistency, not independent trust.",
     "Check the applicable OS store and calling process access before exchange; no automatic dependency installation, Keychain creation or plaintext fallback.",
-    "Use the owner's explicit grant and five-minute code through the hidden prompt or stdin, never a permanent key or code in command arguments.",
+    "Use the owner's explicit grant and configured short-lived code through the hidden prompt or stdin, never a permanent key or code in command arguments.",
     "After connecting, use whoami to confirm the expected account and exact origin; recover a lost response only with the same saved token/verifier and connection ID.",
     "Verify owner revocation separately without deleting drafts, accepted jobs or assets; connection does not authorize a particular paid task.",
 )
@@ -96,23 +96,53 @@ def register_routes(app, *, service=None):
         headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
         if error.retry_after:
             headers["Retry-After"] = str(error.retry_after)
-        return JSONResponse({"code": error.code, "message": error.code,
+        guidance={
+            'connection_version_conflict':('Connection settings changed. Reload before a new explicit update.','连接设置已改变，请重新读取后再明确修改。'),
+            'connection_scope_invalid':('Choose this conversation, this story, or all your work.','请选择此对话、此故事或你的全部作品。'),
+            'connection_scope_not_found':('The selected work is unavailable or not owned by this account.','所选作品不可用或不属于当前账号。'),
+            'connection_permission_invalid':('Choose organise without paid work, or create and generate.','请选择不执行付费工作的整理权限，或创作并生成权限。'),
+            'connection_not_connected':('Connect first; revoked connections cannot resume. Existing work is retained.','请先连接；已撤销的连接不能恢复，原作品保留。'),
+            'connection_settings_invalid':('Use positive integer connection settings and the current version.','请使用正整数连接设置和当前版本。'),
+            'connection_daily_limit_invalid':('Use a nonnegative USD micro-unit cap; zero means unlimited.','请使用非负美元微单位额度；零表示不限额。'),
+            'connection_update_invalid':('Use the current integer version and a boolean pause or nonnegative cap.','请使用当前整数版本、布尔暂停值或非负额度。')}
+        en,zh=guidance.get(error.code,('Connection request was refused. Reconcile the original request before retrying.','连接请求被拒绝，请先核对原请求，不要重复创建。'))
+        return JSONResponse({"code": error.code, "message": en, "messages":{"en":en,"zh":zh},
             "retryable": error.status_code in {429, 503}}, status_code=error.status_code, headers=headers)
 
     @app.post("/v1/account/agent-connections", status_code=201)
     async def issue(request: Request):
         source_guard(request, browser=True)
         principal = browser(request)
-        value = await body(request, allowed={"name", "authorization_profile_id", "authorization_profile_version", "daily_limit_microusd"},
+        value = await body(request, allowed={"name", "authorization_profile_id", "authorization_profile_version", "daily_limit_microusd", "scope", "permission"},
             required={"authorization_profile_id", "authorization_profile_version"})
         try:
             return await run_in_threadpool(service.issue, principal, name=value.get("name", "Codex"),
                 authorization_profile_id=value["authorization_profile_id"],
                 authorization_profile_version=value["authorization_profile_version"],
                 idempotency_key=request.headers.get("idempotency-key"), origin=origin(request),
-                daily_limit_microusd=value.get("daily_limit_microusd", 0))
+                daily_limit_microusd=value.get("daily_limit_microusd", 0), scope=value.get("scope"),permission=value.get("permission"))
         except AuthenticationError:
             raise ConnectError("connection_login_required", 401) from None
+
+    @app.get("/v1/account/agent-connection-settings")
+    def connection_settings(request:Request):
+        return service.settings(browser(request))
+
+    @app.patch("/v1/account/agent-connection-settings")
+    async def update_connection_settings(request:Request):
+        source_guard(request,browser=True)
+        value=await body(request,allowed={"expected_version","value"},required={"expected_version","value"})
+        return service.change_settings(browser(request),value,request.headers.get('idempotency-key'))
+
+    @app.patch("/v1/account/agent-connections/{connection_id}")
+    async def update_connection(connection_id:str,request:Request):
+        source_guard(request,browser=True)
+        value=await body(request,allowed={"expected_version","paused","daily_limit_microusd"},required={"expected_version"})
+        return service.change_connection(browser(request),connection_id,value,request.headers.get('idempotency-key'))
+
+    @app.get("/v1/account/agent-connections/{connection_id}/activity")
+    def connection_activity(connection_id:str,request:Request,limit:int=20,offset:int=0):
+        return service.activity(browser(request),connection_id,limit,offset)
 
     @app.get("/v1/account/agent-connections")
     def list_connections(request: Request, limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0, le=10000)):

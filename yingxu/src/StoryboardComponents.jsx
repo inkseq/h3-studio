@@ -1,3 +1,4 @@
+import {AssistantBadge} from './AssistantConnections.jsx';
 import {useI18n} from './i18n/I18nProvider.jsx';
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
@@ -414,7 +415,7 @@ export function ShotCard({shot, index, selected, onOpen}) {const {t:tr,locale}=u
         <Progress v={latest} />
       </div>
       <div className="card-body">
-        <div className="card-title" title={shot.title}>{shot.title}</div>
+        <div className="card-title" title={shot.title}>{shot.title}<AssistantBadge createdBy={shot.created_by}/></div>
         <div className="card-meta"><ModeChip info={info} /><span className="q">{QUALITY_LABEL[shot.quality]}</span>
           {info.warnings.length > 0 && <span className="warnbadge" title={info.warnings.join('\n')}>!</span>}</div>
         <WhoChips shot={shot} small />

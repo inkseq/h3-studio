@@ -141,6 +141,18 @@ def admit_spending(repo, connection, scope, reference_type, reference_id, amount
         if any(row['state'] != 'reserved' for row in previous):
             raise Conflict('budget_already_settled')
         increment = max(0, amount - max((money(row['amount_microusd']) for row in previous), default=0))
+    if (increment or not origin) and actor_id.startswith('key:'):
+        from .agent_management import paused,connection_for_actor
+        from .auth import personal_keys
+        grant=connection_for_actor(connection,scope.tenant_id,scope.owner_id,actor_id)
+        if grant is not None:
+            import json
+            if json.loads(grant['authorization']).get('permission')=='organise':raise Conflict('connection_permission_denied')
+            key=connection.execute(select(personal_keys).where(personal_keys.c.tenant==scope.tenant_id,
+                personal_keys.c.owner==scope.owner_id,personal_keys.c.id==actor_id[4:]).with_for_update()).mappings().first()
+            if key is None or key['revoked_at'] is not None or key['expires_at']<=repo.clock() or grant['revoked_at'] is not None:
+                raise Conflict('connection_unavailable')
+            if paused(connection,scope.tenant_id,scope.owner_id,actor_id[4:]):raise Conflict('connection_paused')
     settings = read_settings(connection, scope.tenant_id, scope.owner_id)
     if spending_settings_version is not None and settings["version"] != spending_settings_version:
         raise Conflict("spending_settings_changed")
@@ -203,8 +215,21 @@ def check_submission_confirmation(repo, tenant, principal, plan_ids):
         return SubmissionSpendingCheck(True, settings["version"])
 
 
-def unquoted_spend_blocked(connection, tenant, principal):
-    lock_owner(connection, tenant, principal.owner)
+def unquoted_spend_blocked(connection, tenant, principal, *, now=None):
+    import time
+    import json
+    from .agent_management import connection_for_actor,paused
+    from .auth import personal_keys
+    lock_owner(connection,tenant,principal.owner)
+    grant=connection_for_actor(connection,tenant,principal.owner,principal.actor_id)
+    if grant is not None:
+        key=connection.execute(select(personal_keys).where(personal_keys.c.tenant==tenant,
+            personal_keys.c.owner==principal.owner,personal_keys.c.id==grant['key_id'])).mappings().first()
+        if (grant['revoked_at'] is not None or key is None or key['revoked_at'] is not None
+                or key['expires_at']<=(time.time() if now is None else now)
+                or paused(connection,tenant,principal.owner,grant['key_id'])
+                or json.loads(grant['authorization']).get('permission')=='organise'):
+            return True
     value = read_settings(connection, tenant, principal.owner)["value"]
     return bool(value["daily_limit_microusd"] or value["ask_above_microusd"]
                 or value["connection_limits"].get(principal.actor_id, 0))

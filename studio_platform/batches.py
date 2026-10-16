@@ -215,6 +215,8 @@ def register_routes(app):
                 service.record_item(principal, record["id"], index, {"job_id": job["id"], "error_code": None})
                 activate(principal, record, job["id"])
             except (NotFound, Conflict, BudgetExceeded, ValueError) as error:
+                from .agent_management import record_refusal
+                record_refusal(service.repo.engine,app.state.settings.tenant_id,principal,str(error),service.repo.clock())
                 from .spending_limits import SpendingConfirmationRequired
                 if isinstance(error, SpendingConfirmationRequired):
                     raise
