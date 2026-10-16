@@ -41,7 +41,7 @@ class GenerationAdmission:
         reject_managed(project)
         return self.planning.create(principal, body, project)
 
-    def preflight(self, principal, project, shot_id, *, expected_version=None):
+    def preflight(self, principal, project, shot_id, *, expected_version=None, seed_override=None, plan_id=None):
         project_id = project["id"]
         record = self.access.project(principal, project_id, "jobs:write")
         if expected_version is None and not managed_project(project):
@@ -51,7 +51,13 @@ class GenerationAdmission:
         if source_snapshot(project, shot_id) != source_snapshot(record["payload"], shot_id):
             raise Conflict("shot_version_conflict")
         current_capabilities = self.capabilities_provider()
-        draft, _ = read_draft(project, shot_id, capabilities=current_capabilities)
+        render_project, defaults_version = project, None
+        if not managed_project(project):
+            from .storyboard_versions import preferences, effective_project
+            setting = preferences(self.repo, self.settings.tenant_id, principal.owner)
+            defaults_version = setting["version"]
+            render_project, _ = effective_project(project, shot_id, setting["defaults"])
+        draft, _ = read_draft(render_project, shot_id, capabilities=current_capabilities)
         if any(draft["inputs"].values()):
             self.access.project(principal, project_id, "assets:read")
 
@@ -75,13 +81,30 @@ class GenerationAdmission:
                     or selection.get("artifact_id") != artifact_id):
                 raise ValueError("上一镜末帧来源未通过素材收据核对")
 
-        body = plan_body(project, shot_id, current_capabilities, derive, validate_frame=validate_frame)
+        body = plan_body(render_project, shot_id, current_capabilities, derive, validate_frame=validate_frame)
+        if seed_override is not None:
+            body["controls"]["seed"] = seed_override
         latest = self.access.project(principal, project_id, "jobs:write")
         if expected_version is not None and latest["version"] != expected_version:
             raise Conflict("document_version_conflict")
         if source_snapshot(project, shot_id) != source_snapshot(latest["payload"], shot_id):
             raise Conflict("shot_version_conflict")
-        return self.planning.create(principal, body, latest["payload"])
+        if defaults_version is not None and preferences(self.repo, self.settings.tenant_id, principal.owner)["version"] != defaults_version:
+            raise Conflict("storyboard_defaults_changed")
+        if defaults_version is None:
+            return self.planning.create(principal, body, latest["payload"])
+        import copy
+        recipe = {k: copy.deepcopy(body[k]) for k in ("recipe_id", "prompt", "controls")}
+        # Keep original receipt/range/audio intent, not only CPU-derived IDs.
+        recipe["inputs"] = copy.deepcopy(draft["inputs"])
+        if body.get("deployment_profile_id"):
+            recipe["deployment_profile_id"] = body["deployment_profile_id"]
+        shot = next(e for e in project["entities"] if e["id"] == shot_id)
+        context = {"shot": copy.deepcopy(shot), "scene": next((copy.deepcopy(e) for e in project["entities"] if e["id"] == shot.get("parentId")), None),
+            "storyboard": copy.deepcopy(project.get("journey", {}).get("storyboard", {})),
+            "profiles": [copy.deepcopy(e) for e in project["entities"] if e["type"] in {"character", "location", "prop"}]}
+        return self.planning.create(principal, body, latest["payload"], plan_id=plan_id,
+            authoring_recipe=recipe, authoring_context=context, defaults_version=defaults_version)
 
     def create(self, principal, plan_id, key, *, initial_status=None, business_identity=None):
         plan = self.access.plan(principal, plan_id)
@@ -96,7 +119,7 @@ class GenerationAdmission:
         existing = self.repo.lookup_job_by_idempotency(task_scope, key)
         if existing:
             return self.repo.create_job(task_scope, plan_id, key)
-        self.planning.check_source(project, plan["request"])
+        self.planning.check_source(project, plan["request"], principal)
         execution = plan["execution_plan"]
         if execution.get("budget_error_code") == "budget_exceeded":
             raise BudgetExceeded("budget_exceeded")
@@ -121,7 +144,7 @@ class GenerationAdmission:
             reject_managed(project)
         elif not managed_project(project) or job["actor_id"] != "quick-chat-execution":
             raise Conflict("quick_chat_execution_required")
-        self.planning.check_source(project, plan["request"])
+        self.planning.check_source(project, plan["request"], principal)
         task_scope = self.task_scope(principal, job["project_id"], job["id"] if business else None)
         budgets = self.policies.ensure_current(plan, task_scope)
         return self.repo.enqueue(task_scope, job["id"], budget_account_ids=budgets,
@@ -136,7 +159,7 @@ class GenerationAdmission:
         plan = self.access.plan(principal, plan_id)
         if plan["project_id"] != job["project_id"]:
             raise Conflict("plan_not_available")
-        self.planning.check_source(project, plan["request"])
+        self.planning.check_source(project, plan["request"], principal)
         task_scope = self.task_scope(principal, job["project_id"], job_id)
         self.policies.ensure_current(plan, task_scope)
         return self.repo.refresh_unadmitted_plan(task_scope, job_id, plan_id)

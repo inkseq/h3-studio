@@ -317,10 +317,12 @@ def read_draft(project, shot_id, *, recipes=None, capabilities=None):
             issues.append("前置步骤尚未明确选择为实际参考素材")
     # Cast/location assignments remain story data in FL. Only REF turns their
     # uploaded images into model inputs; explicit media edges stay explicit.
-    if recipe and recipe["mode"] == "ref":
+    if recipe and recipe["mode"] == "ref" and not h3.get("explicitReferences"):
         scene = lookup.get(shot["parentId"], {})
         cast = lambda e: [v for v in e.get("data", {}).get("cast", []) if isinstance(v, dict)]
         own, inherited = cast(shot), cast(scene)
+        if h3.get("explicitCast"):
+            inherited = []
         characters = list(dict.fromkeys([v.get("characterId") for v in [*inherited, *own]] +
             [v["source"] for v in project["links"] if v["target"] == shot_id and v["role"] == "identity"
              and lookup.get(v["source"], {}).get("type") == "character"]))

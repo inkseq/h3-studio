@@ -152,7 +152,8 @@ class GenerationPlanning:
         self.repo, self.assets, self.settings, self.policies = repo, assets, settings, policies
         self.access, self.read = access, read
 
-    def create(self, principal, body, project):
+    def create(self, principal, body, project, *, plan_id=None, authoring_recipe=None,
+               authoring_context=None, defaults_version=None):
         # Entry-point authorization is performed by GenerationAccess before
         # this call; preflight also checks the editable source around derivation.
         project_id = project["id"]
@@ -163,6 +164,12 @@ class GenerationPlanning:
         if not validate_source_ref(project, ref):
             raise Conflict("shot_version_conflict")
         compiled["server_source_hash"] = source_snapshot(project, ref["shot_id"])
+        if authoring_recipe is not None:
+            import copy
+            compiled["authoring_recipe"] = copy.deepcopy(authoring_recipe)
+            compiled["authoring_recipe"]["controls"]["seed"] = str(compiled["request"]["seed"])
+            compiled["authoring_context"] = copy.deepcopy(authoring_context)
+            compiled["authoring_defaults_version"] = defaults_version
         admission = self.policies.evaluate(compiled, self.access.scope(principal, project_id), fingerprint)
         execution = admission.execution
         if compiled.get("deployment_profile_id"):
@@ -178,15 +185,29 @@ class GenerationPlanning:
         enabled, blockers = execution["enabled"], execution["blockers"]
         simulation = self.settings.execution_backend == "mock"
         plan = self.repo.create_plan(self.access.scope(principal, project_id), compiled, execution,
-            expires_at=admission.expires_at, estimated_cost_microusd=admission.cost)
+            expires_at=admission.expires_at, estimated_cost_microusd=admission.cost, plan_id=plan_id)
+        if plan_id is not None:
+            return self.retained_plan(plan)
         return {"plan_id": plan["id"], "status": "ready" if enabled else "blocked", "request_hash": plan["request_hash"],
                 "effective_request": compiled["request"], "output_spec": compiled["output_spec"],
                 "client_ref": ref, "expires_at": plan["expires_at"], "blockers": blockers,
                 "warnings": ["本地模拟：不调用模型，不代表H3速度或质量"] if simulation else [],
                 "estimate": admission.estimate, "execution": self.read.execution(execution), "simulation": simulation}
 
-    @staticmethod
-    def check_source(project, compiled):
+    def retained_plan(self, plan):
+        compiled, execution = plan["request"], plan["execution_plan"]
+        return {"plan_id": plan["id"], "status": "ready" if execution.get("enabled") else "blocked",
+            "request_hash": plan["request_hash"], "effective_request": compiled["request"],
+            "output_spec": compiled["output_spec"], "client_ref": compiled["client_ref"],
+            "expires_at": plan["expires_at"], "blockers": execution.get("blockers", []),
+            "estimate": {"cost_microusd": plan["estimated_cost_microusd"] if execution.get("quote_known") is True else None, "final_bill": False},
+            "execution": self.read.execution(execution), "simulation": execution.get("backend") == "mock"}
+
+    def check_source(self, project, compiled, principal=None):
+        if "authoring_defaults_version" in compiled:
+            from .storyboard_versions import preferences
+            if principal is None or preferences(self.repo, self.access.tenant_id, principal.owner)["version"] != compiled["authoring_defaults_version"]:
+                raise Conflict("storyboard_defaults_changed")
         if compiled["recipe_id"] == RENDER_RECIPE:
             if not validate_render_source(project, compiled):
                 raise Conflict("chapter_timeline_changed")

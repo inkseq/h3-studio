@@ -490,10 +490,14 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
         from .generation_draft import read_draft, shot_entity
         record = authorized_project(request.state.principal, project_id)
         project = record["payload"]
-        draft, issues = read_draft(project, shot_id, capabilities=capabilities(settings))
+        from .storyboard_versions import preferences, effective_project
+        defaults = preferences(repo, settings.tenant_id, request.state.principal.owner)
+        rendered, provenance = effective_project(project, shot_id, defaults["defaults"])
+        draft, issues = read_draft(rendered, shot_id, capabilities=capabilities(settings))
         view = "/freestyle" if project.get("journey", {}).get("workspace") == "freestyle" else "/"
         return {"project_id": project_id, "shot_id": shot_id, "project_version": record["version"],
             "shot_version": shot_entity(project, shot_id)["version"], "draft": draft, "issues": issues,
+            "defaults": provenance,
             "web_url": f"{view}?project={quote(project_id, safe='')}&entity={quote(shot_id, safe='')}"}
 
     @app.post("/v1/projects/{project_id}/shots/{shot_id}/generation-plans", status_code=201)
@@ -669,6 +673,8 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
     register_routes(app)
     from .guided import register_routes as register_guided_routes
     register_guided_routes(app)
+    from .storyboard_versions import register_routes as register_storyboard_routes
+    register_storyboard_routes(app)
     from .agent_discovery import register_routes as register_agent_discovery_routes
     register_agent_discovery_routes(app)
     from .operator_routes import register_routes as register_operator_routes

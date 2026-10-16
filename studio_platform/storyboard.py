@@ -98,7 +98,10 @@ def validate(project, lookup):
     """Validate new fields without modifying or upgrading old documents."""
     style = project.get("journey", {}).get("storyboard")
     if style is not None:
-        _fields(style, {"style"}, "全片风格")
+        _fields(style, {"style", "defaults"}, "全片风格")
+        if "defaults" in style:
+            from .storyboard_versions import validate_defaults
+            validate_defaults(style["defaults"])
         if not isinstance(style.get("style", ""), str) or len(style.get("style", "")) > 12000:
             raise ValueError("全片风格须为不超过12000字符的文本")
     for entity in project["entities"]:

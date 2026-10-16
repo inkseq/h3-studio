@@ -4,6 +4,11 @@ from copy import deepcopy
 from .project_validation import ROLES, TYPES
 
 ACTION_FIELDS = {
+    "storyboard.bulk": {"shot_ids", "operation", "parent_id"},
+    "storyboard.defaults": {"value"},
+    "storyboard.restore": {"shot_id", "artifact_id"},
+    "storyboard.star": {"shot_id", "artifact_id", "starred"},
+    "storyboard.fork_profile": {"profile_id", "shot_ids", "new_profile_id", "title"},
     "entity.create": {"entity"}, "entity.update": {"entity_id", "patch"},
     "entity.delete": {"entity_id", "cascade"}, "link.create": {"link"}, "link.delete": {"link_id"},
     "project.update": {"patch"}, "journey.update": {"patch"}, "layout.update": {"patch"},
@@ -15,6 +20,11 @@ ACTION_FIELDS = {
     "sound.set": {"chapter_id", "tracks", "mode"}, "sound.generated": {"shot_id", "gain"},
 }
 ACTION_REQUIRED = {
+    "storyboard.bulk": {"shot_ids", "operation"},
+    "storyboard.defaults": {"value"},
+    "storyboard.restore": {"shot_id", "artifact_id"},
+    "storyboard.star": {"shot_id", "artifact_id", "starred"},
+    "storyboard.fork_profile": {"profile_id", "shot_ids", "new_profile_id"},
     "entity.create": {"entity"}, "entity.update": {"entity_id", "patch"},
     "entity.delete": {"entity_id"}, "link.create": {"link"}, "link.delete": {"link_id"},
     "project.update": {"patch"}, "journey.update": {"patch"}, "layout.update": {"patch"},
@@ -85,6 +95,16 @@ def operation_schemas():
     attach = {"entity_id": ID_SCHEMA, "title": TITLE, "parent_id": PARENT, "shot_id": ID_SCHEMA,
         "select": {"type": "boolean", "default": False, "description": "True requires shot_id and image/video media; explicitly selects this media for that shot."}}
     props = {
+        "storyboard.bulk": {"shot_ids": {"type": "array", "minItems": 1, "uniqueItems": True, "items": ID_SCHEMA},
+            "operation": {"enum": ["draft", "final", "move"]}, "parent_id": ID_SCHEMA},
+        "storyboard.defaults": {"value": {"type": "object", "additionalProperties": False, "properties": {
+            "recipe_id": {"enum": list(RECIPES)}, "deployment_profile_id": {"type": ["string", "null"]},
+            "controls": {"type": "object", "additionalProperties": False,
+                "properties": {k: v for k, v in editable_controls.items() if k not in {"duration", "seed"}}}}}},
+        "storyboard.restore": {"shot_id": ID_SCHEMA, "artifact_id": ID_SCHEMA},
+        "storyboard.star": {"shot_id": ID_SCHEMA, "artifact_id": ID_SCHEMA, "starred": {"type": "boolean"}},
+        "storyboard.fork_profile": {"profile_id": ID_SCHEMA, "new_profile_id": ID_SCHEMA, "title": TITLE,
+            "shot_ids": {"type": "array", "minItems": 1, "uniqueItems": True, "items": ID_SCHEMA}},
         "entity.create": {"entity": {"type": "object", "additionalProperties": False, "required": ["type"], "properties": ENTITY_PROPERTIES}},
         "entity.update": {"entity_id": ID_SCHEMA, "patch": ENTITY_PATCH},
         "entity.delete": {"entity_id": ID_SCHEMA, "cascade": {"type": "boolean", "default": False}},
@@ -124,6 +144,11 @@ def operation_schemas():
         "sound.generated": {"shot_id": ID_SCHEMA, "gain": {"type": "number", "minimum": 0, "maximum": 1, "default": .7}},
     }
     rules = {
+        "storyboard.bulk": ["One project CAS changes all selected shots or none. Draft/final is intent only; move requires an existing scene. No enqueue or deletion."],
+        "storyboard.defaults": ["Replace story defaults; omitted shot overrides keep inheriting. Duration and seed remain per shot."],
+        "storyboard.restore": ["Only an original server-snapshotted recipe is restorable. Unknown history is refused. Exact effective inputs replace implicit current profile compilation; source assets, context and accepted jobs remain retained."],
+        "storyboard.star": ["Owner project annotation only; never changes the immutable generation recipe."],
+        "storyboard.fork_profile": ["Copies an existing project-local character/location/prop and rewires selected shots in one CAS. Other stories, original profile and unselected shots are unchanged. Cross-story usage is not claimed."],
         "entity.create": ["chapter has no parent; scene requires an existing chapter parent; shot requires an existing scene parent. Other entities may be project-wide or children of chapter/scene/shot.", "Creation/ready status only edits the document; no model runs."],
         "entity.update": ["id/type/version cannot be patched. Final hierarchy and media bindings must validate."],
         "entity.delete": ["Children require cascade=true. References are reconciled; server files and generation jobs are retained. This does not cancel jobs."],

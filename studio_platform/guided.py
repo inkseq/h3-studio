@@ -266,6 +266,8 @@ class Guided:
                     from .generation_draft import prepare_patch
                     resolved[index] = prepare_patch(action, lambda ident: self.resolve(principal, project_id,
                         {"op": "asset.attach", "asset_id": ident}))
+                elif action.get("op") in {"storyboard.restore", "storyboard.star"}:
+                    resolved[index] = self.app.state.storyboard_versions.resolve_action(principal, project_id, action)
         try:
             with self.repo.transaction() as conn:
                 owner_reference_gate(conn, self.settings.tenant_id, principal.owner)
@@ -368,7 +370,10 @@ class Guided:
     def apply(self, project, action, resolved=None):
         validate_action_fields(action)
         op = action.get("op")
-        if op == "entity.create":
+        if op.startswith("storyboard."):
+            from .storyboard_versions import apply_action
+            apply_action(project, action, resolved)
+        elif op == "entity.create":
             new_entity(project, action.get("entity"))
         elif op == "entity.update":
             update_entity(entity_by_id(project, action.get("entity_id")), action.get("patch"))
@@ -651,7 +656,16 @@ def register_routes(app):
         p = request.state.principal
         from .generation_admission import reject_managed
         reject_managed(app.state.authorized_project(p, project_id, "projects:write")["payload"])
-        return service.mutate(p, project_id, body, idempotency_key)
+        try:
+            return service.mutate(p, project_id, body, idempotency_key)
+        except Conflict as error:
+            if str(error) == "document_version_conflict" and body.get("actions") and all(
+                    isinstance(a, dict) and str(a.get("op", "")).startswith("storyboard.") for a in body["actions"]):
+                from fastapi.responses import JSONResponse
+                return JSONResponse({"detail": {"code": "document_version_conflict", "project_id": project_id,
+                    "no_mutation_committed": True, "request_hash": request_hash(body),
+                    "message": "Story changed; reload before a new explicit edit. / 故事已更改，请刷新后重新编辑。"}}, status_code=409)
+            raise
 
     @app.post("/v1/projects/{project_id}/entities", status_code=201)
     def add_entity(project_id: str, request: Request, body: dict, idempotency_key: str | None = Header(None)):

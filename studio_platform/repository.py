@@ -599,7 +599,7 @@ class Repository:
                 value["payload"] = {"title": value.pop("_title")}
         return values
 
-    def create_plan(self, scope, request, execution_plan, *, expires_at, estimated_cost_microusd=0):
+    def create_plan(self, scope, request, execution_plan, *, expires_at, estimated_cost_microusd=0, plan_id=None):
         if not isinstance(expires_at, (int, float)) or not math.isfinite(expires_at):
             raise ValueError("invalid_plan_expiry")
         if expires_at <= self.clock():
@@ -607,13 +607,19 @@ class Repository:
         request, execution_plan = canonical(request), canonical(execution_plan)
         if execution_plan.get("dispatch_backend", "legacy") not in {"legacy", "hatchet-v1"}:
             raise ValueError("invalid_dispatch_backend")
-        row = dict(id=str(uuid.uuid4()), tenant_id=scope.tenant_id, owner_id=scope.owner_id,
+        row = dict(id=plan_id or str(uuid.uuid4()), tenant_id=scope.tenant_id, owner_id=scope.owner_id,
             project_id=scope.project_id, request=request, request_hash=request_hash(request),
             execution_plan=execution_plan, plan_hash=request_hash(execution_plan),
             estimated_cost_microusd=money(estimated_cost_microusd),
             created_at=self.clock(), expires_at=float(expires_at))
         with self.transaction() as connection:
             self._content_write_guard(connection, scope, request)
+            if plan_id is not None:
+                previous = connection.execute(select(plans).where(plans.c.id == plan_id)).mappings().first()
+                if previous:
+                    if any(previous[k] != row[k] for k in ("tenant_id", "owner_id", "project_id", "request_hash")):
+                        raise Conflict("plan_idempotency_conflict")
+                    return dict(previous)
             connection.execute(insert(plans).values(**row))
         return row
 

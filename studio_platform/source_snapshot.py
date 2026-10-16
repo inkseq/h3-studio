@@ -72,7 +72,9 @@ def source_snapshot(project, shot_id):
     return request_hash({"shot_id": shot_id, "entities": [lookup[k] for k in sorted(chosen)],
                          "links": [used_links[k] for k in sorted(used_links)],
                          **({"storyboard_style": project.get("journey", {}).get("storyboard", {}).get("style", "")}
-                            if storyboard else {})})
+                            if storyboard else {}),
+                         **({"storyboard_defaults": project["journey"]["storyboard"]["defaults"]}
+                            if "defaults" in project.get("journey", {}).get("storyboard", {}) else {})})
 
 
 def validate_source_ref(project, ref):
