@@ -5,7 +5,7 @@ application's Local storage, create a second asset/job ledger, provision AWS,
 enable restored jobs, or authorize deletion. Source and fake-S3 tests are not
 production backup/restore acceptance.
 
-## Keep snapshot creation unchanged
+## Use one consistent snapshot
 
 Use the existing `studio_platform.backup_cli postgres-local` in the exact
 approved application image, with the existing protected database URL file and
@@ -13,6 +13,16 @@ Local object directory. The operator must verify that image, container,
 read-only input mounts and explicit new private output directory first. Do not
 run the backup against an inferred path, expose the DSN, or combine an unrelated
 database dump and media listing. See [the existing snapshot/restore guide](BACKUP-RECOVERY.zh-CN.md).
+
+For the deployed PostgreSQL/R2 application, `backup_cli configured --destination`
+uses its existing explicit database URL and R2 identity. It reads immutable
+published keys and verifies provider, owner-bound key, size and SHA before
+publishing a manifest. It neither constructs the app nor migrates the source.
+There is no fallback to a default AWS identity or Local file when R2 fails.
+Local and R2 references may coexist only when both original stores are present.
+Isolated restore preserves the original manifest/database, copies verified bytes
+to Local, and changes only the restored asset/artifact provider locators before
+applying the existing execution hold. No R2 write/versioning API is called.
 
 `backup_remote` accepts only a completed backup that passes `verify_local`.
 It copies only `database.sqlite3`, the manifest-listed `media/*.bin`, and

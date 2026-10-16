@@ -1,6 +1,6 @@
 # 业务备份与隔离恢复
 
-验收日期：2026-10-04。当前工具支持 **SQLite 或 PostgreSQL + LocalObjectStore 的业务与媒体备份，恢复到全新 SQLite 隔离目录**，另保留 PostgreSQL 数据库原生导出命令。跨库作品恢复不等于生产 PostgreSQL 恢复或 PITR。所有测试只使用临时假项目、本机生成的模拟媒体以及已有专用 PostgreSQL 测试容器；没有读取生产库、调用供应商或改变云实例。
+当前工具支持 **SQLite + Local、PostgreSQL + 显式 Local/R2 的业务与媒体备份，恢复到全新 SQLite/Local 隔离目录**，另保留 PostgreSQL 数据库原生导出命令。R2 覆盖通过不可变 key、owner、大小、SHA 与同一数据库快照绑定，不依赖 R2 原生版本控制。跨库作品恢复不等于生产 PostgreSQL 恢复或 PITR。源码测试与真实线上备份/恢复验收分开，以操作回执为准。
 
 这不是自动容灾切换。恢复后需要重新建立认证，并人工核对尚未结束的任务、外部实例和费用。API、CPU 渲染、GPU 和自动扩容服务均不会被备份工具启动。
 
@@ -67,6 +67,13 @@ python tools/backup_platform.py restore-local --backup <已有备份目录绝对
 
 ## PostgreSQL + Local：完整便携业务备份
 
+部署为 R2 时，管理员在已接受的原应用容器内使用
+`python -m studio_platform.backup_cli configured --destination <全新私有目录>`。
+它只复用当前配置的数据库和 R2 读取身份，不调用应用初始化或创建源表。
+每天执行与独立 S3 传输、精确版本恢复的流程见
+[每日备份运行约定](deploy/platform/DAILY-BACKUP.md)。该入口默认限制媒体总量
+2 GiB，旧显式 Local 入口的限制不变。恢复目录只读验收通过前，不删除源媒体。
+
 ```text
 python tools/backup_platform.py postgres-local --url-file <受保护的应用DSN文件绝对路径> --object-root <LocalObjectStore根绝对路径> --destination <全新备份目录绝对路径> --schema public
 python tools/backup_platform.py verify --backup <该备份目录绝对路径>
@@ -102,7 +109,7 @@ DSN 仅在进程内解析，子进程通过最小环境接收 libpq 变量；参
 - 原生 `pg_dump` 与媒体清单共同绑定同一个导出snapshot的编排；现有 `postgres-database-only` 仍只有数据库，不能拿它和另一时点的文件列表拼成完整备份。
 - 生产 PG 恢复 CLI、目标版本兼容迁移、独立恢复账号及恢复后隔离逻辑的正式自动化。
 - WAL/PITR、异机加密副本、保留/过期策略、定期验收报警；未设置保留期或删除授权。
-- R2/S3/Hippius 对象备份、远端损坏/版本恢复和 Linux 中央授权入口；当前 Local 工具遇到远端 provider 会拒绝。
+- S3/Hippius 源对象备份仍不支持；R2 使用下述 configured 入口，不能向 Local 命令隐式注入替代 provider。未完成上传的临时原件与原始 storage binding 仍需独立保全。
 
 ## 验收命令及结果
 

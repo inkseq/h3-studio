@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Inkseq business backup (UTC)
+
+[Timer]
+OnCalendar=*-*-* 16:30:00 UTC
+RandomizedDelaySec=300
+Persistent=true
+Unit=inkseq-business-backup.service
+
+[Install]
+WantedBy=timers.target

@@ -3,12 +3,14 @@ from pathlib import Path
 import argparse
 import json
 
-from .backup import backup_local, backup_postgres_local, verify_local, restore_local, dump_postgres
+from .backup import backup_local, backup_postgres_local, backup_configured, verify_local, restore_local, dump_postgres
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Private business-data backup; credentials and sessions excluded")
     actions = parser.add_subparsers(dest="action", required=True)
+    configured = actions.add_parser("configured", help="Read-only PG and explicitly configured Local/R2 sources in the existing app container")
+    configured.add_argument("--destination", required=True, type=Path)
     backup = actions.add_parser("local")
     backup.add_argument("--database", required=True, type=Path)
     backup.add_argument("--object-root", required=True, type=Path)
@@ -32,7 +34,9 @@ def main(argv=None):
         help="Operator assertion: running inside reviewed private Compose network; only exact db:5432/sixnine identity allowed")
     args = parser.parse_args(argv)
     try:
-        if args.action == "local":
+        if args.action == "configured":
+            result = backup_configured(args.destination)
+        elif args.action == "local":
             result = backup_local(args.database, args.object_root, args.destination)
         elif args.action == "verify":
             manifest = verify_local(args.backup)

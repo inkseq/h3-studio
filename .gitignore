@@ -542,3 +542,10 @@ inventory.json
 !test_alert_conditions.py
 !test_alert_http.py
 !test_alert_monitor_posix.py
+
+# CR20 private business backup scheduling.
+!deploy/platform/business_backup.py
+!deploy/platform/inkseq-business-backup.service
+!deploy/platform/inkseq-business-backup.timer
+!test_business_backup_schedule.py
+!deploy/platform/DAILY-BACKUP.md

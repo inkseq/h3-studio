@@ -8,11 +8,16 @@ change a job, GPU, budget or release bucket. Source checks are not AWS acceptanc
 ## Explicit destination and authority
 
 Supply every parameter; none has a default. The independently observed target
-is account `829135631045`, Region `ap-southeast-1`, and existing role
-`arn:aws:iam::829135631045:role/sixnine-platform-ec2`. Recheck these before an
+is account `829135631045`, Region `ap-southeast-1`. Production uses existing role
+`arn:aws:iam::829135631045:role/sixnine-platform-ec2`; staging uses
+`arn:aws:iam::829135631045:role/inkseq/staging/sixnine-staging-ec2`.
+Supply the exact role name and path as separate parameters; template rules
+reject crossed pairs. Recheck these before an
 authorized deployment. `ExpectedAccountId` and `ExpectedRegion` are asserted
 against the stack context. `BackupBucketName` must be a new globally unique
-`sixnine-business-backup-...` name; this stack does not adopt an existing bucket.
+`sixnine-business-backup-...` or `inkseq-business-backup-...` name; this stack does
+not adopt an existing bucket. Staging creates its own bucket/key/backup role;
+do not update the existing production stack or widen its trust/bucket policy.
 
 The six resources are one backup role, one customer-managed KMS key, one bucket,
 its deny policy, the backup role's access policy, and a uniquely named policy

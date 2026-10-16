@@ -35,6 +35,9 @@ class BackupError(Exception):
 
 
 def _schemas():
+    # Register the same additive business tables as the application, without
+    # constructing services or creating/migrating a source schema.
+    from . import operator_capacity, capacity_market, dstack_workspace
     from .repository import metadata
     from .assets import metadata as assets
     from .storage_asset_journal import _schema as quota
@@ -208,9 +211,13 @@ def _media_references(db):
         key, size, sha, mime = info.get("key", info.get("object_key")), info.get("size_bytes"), info.get("sha256"), info.get("content_type")
         if (not isinstance(key, str) or not key_belongs_to(key, owner) or type(size) is not int or not 0 < size <= 512*MIB
                 or not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha)
-                or not isinstance(mime, str) or len(mime) > 128 or info.get("provider", "local") != "local"):
+                or not isinstance(mime, str) or len(mime) > 128 or info.get("provider", "local") not in {"local", "r2"}):
             raise BackupError("backup_media_reference_requires_review")
         item = dict(key=key, size_bytes=size, sha256=sha, content_type=mime, owner=owner)
+        # Old Local manifests intentionally retain their exact format. Remote
+        # identity is bound into new manifests and checked against the DB copy.
+        if info.get("provider", "local") != "local":
+            item["provider"] = info["provider"]
         if key in found and any(found[key][k] != value for k, value in item.items()):
             raise BackupError("backup_media_reference_conflict")
         entry = found.setdefault(key, dict(item, references=[]))
@@ -230,14 +237,18 @@ def _media_references(db):
     return found, pending
 
 
-def _publish_media_backup(output, object_root, references, pending, counts, *, source_database):
+def _publish_media_backup(output, object_root, references, pending, counts, *, source_database, stores=None):
     media = output/"media"
     media.mkdir(mode=0o700)
-    store = LocalObjectStore(object_root)
+    stores = stores if stores is not None else {"local": LocalObjectStore(object_root)}
     objects = []
     for key, item in sorted(references.items()):
+        provider = item.get("provider", "local")
+        if provider not in stores:
+            raise BackupError("backup_source_provider_not_configured")
+        store = stores[provider]
         info = store.stat(key)
-        if (info.size_bytes, info.sha256, info.content_type) != (item["size_bytes"], item["sha256"], item["content_type"]):
+        if info.provider != provider or (info.size_bytes, info.sha256, info.content_type) != (item["size_bytes"], item["sha256"], item["content_type"]):
             raise BackupError("backup_object_metadata_mismatch")
         filename = hashlib.sha256(key.encode("ascii")).hexdigest()+".bin"
         with store.open(key) as source, (media/filename).open("xb") as target:
@@ -362,16 +373,21 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
         target.dispose()
 
 
-def backup_postgres_engine(engine, object_root, destination, *, schema="public", max_media_bytes=40*1024*MIB):
+def backup_postgres_engine(engine, object_root, destination, *, schema="public", max_media_bytes=40*1024*MIB, stores=None):
     """Complete PG business + Local media backup; restore target is SQLite.
 
     The caller supplies an approved in-process engine; never serialize/log it.
     No pg_dump, administrative role or source schema mutation is needed.
     """
-    object_root, destination = _absolute(object_root), _absolute(destination)
-    if (not (object_root/"objects").is_dir() or not (object_root/"staging").is_dir()
+    destination = _absolute(destination)
+    object_root = _absolute(object_root) if object_root is not None else None
+    if stores is None and (object_root is None or not (object_root/"objects").is_dir() or not (object_root/"staging").is_dir()
             or destination.is_relative_to(object_root)):
         raise BackupError("backup_local_object_root_missing_or_overlapping")
+    if stores is not None and (not isinstance(stores, dict) or not stores or set(stores)-{"local", "r2"}):
+        raise BackupError("backup_source_provider_not_configured")
+    if stores is not None and "local" in stores and destination.is_relative_to(_absolute(stores["local"].root)):
+        raise BackupError("backup_destination_overlaps_live_storage")
     if type(max_media_bytes) is not int or max_media_bytes < 1:
         raise BackupError("backup_media_limit_invalid")
     output = _private_new_directory(destination)
@@ -381,12 +397,42 @@ def backup_postgres_engine(engine, object_root, destination, *, schema="public",
             references, pending = _media_references(db)
         if len(references) > 100000 or sum(item["size_bytes"] for item in references.values()) > max_media_bytes:
             raise BackupError("backup_media_limit_exceeded")
-        result = _publish_media_backup(output, object_root, references, pending, counts, source_database="postgresql")
+        result = _publish_media_backup(output, object_root, references, pending, counts, source_database="postgresql", stores=stores)
         return {**result, "source_database": "postgresql", "restoration_target": "isolated-sqlite-and-local-objects", "native_postgres_restore": False}
     except BackupError:
         raise
     except Exception:
         raise BackupError("backup_postgres_local_failed_incomplete_directory_kept") from None
+
+
+def backup_configured(destination, *, settings=None, max_media_bytes=2*1024*MIB):
+    """Use the existing app's explicit DB/storage identity, never AWS defaults.
+
+    Runs as an operator command inside the existing isolated application
+    container. No schema creation, app startup, auth export or provider writes.
+    """
+    from .settings import Settings
+    from .storage import S3ObjectStore
+    from .storage_config import S3StorageConfig, load_configured_storage_credentials
+    settings = settings or Settings.from_environment()
+    stores = {}
+    local = settings.data_dir / "objects"
+    if (local/"objects").is_dir() and (local/"staging").is_dir():
+        stores["local"] = LocalObjectStore(local)
+    if settings.storage_provider == "r2":
+        cfg = S3StorageConfig("r2", settings.storage_endpoint, settings.storage_region,
+            settings.storage_bucket, "cloudflare-r2", settings.storage_profile, enabled=True)
+        credentials = load_configured_storage_credentials(cfg, credentials_file=settings.storage_credential_file,
+            registry_root=os.environ.get("AI_REGISTRY_ROOT"))
+        stores["r2"] = S3ObjectStore(cfg, credentials)
+    elif settings.storage_provider != "local":
+        raise BackupError("backup_source_provider_not_configured")
+    engine = create_engine(settings.database_url, echo=False, hide_parameters=True,
+        connect_args={"connect_timeout": 10, "application_name": "inkseq-business-backup"})
+    try:
+        return backup_postgres_engine(engine, None, destination, stores=stores, max_media_bytes=max_media_bytes)
+    finally:
+        engine.dispose()
 
 
 def verify_local(directory):
@@ -504,6 +550,7 @@ def restore_local(backup_directory, destination):
                 store.put(item["key"], body, content_type=item["content_type"],
                           max_bytes=item["size_bytes"], expected_sha256=item["sha256"])
         _create_business_schema(target/"platform.sqlite3")
+        _restore_local_provider_metadata(target/"platform.sqlite3", manifest)
         held = _quarantine_restored_database(target/"platform.sqlite3")
         _write_json(target/"RECOVERY-HOLD.json", dict(version=1, execution_enabled=False,
             authentication_reprovision_required=True, held_jobs=held, staging_restored=False,
@@ -514,6 +561,34 @@ def restore_local(backup_directory, destination):
                 "authentication": "must_reprovision", "execution_enabled": False}
     except Exception:
         raise BackupError("restore_failed_new_directory_kept_for_review") from None
+
+
+def _restore_local_provider_metadata(path, manifest):
+    """Rewrite only verified media locators in the new isolated recovery copy.
+
+    The original DB/manifest retain source-provider evidence. Provider-specific
+    object tokens cannot describe a newly created Local object.
+    """
+    remote = {item["key"] for item in manifest["objects"] if item.get("provider", "local") == "r2"}
+    if not remote:
+        return
+    def convert(info):
+        if info.get("key", info.get("object_key")) in remote and info.get("provider") == "r2":
+            info["provider"] = "local"
+            for name in ("etag", "version_id"):
+                if name in info:
+                    info[name] = None
+    with closing(sqlite3.connect(path)) as db, db:
+        for ident, raw in db.execute("SELECT id,record FROM platform_assets").fetchall():
+            value = json.loads(raw)
+            for role in ("original", "model"):
+                if value.get(role):
+                    convert(value[role])
+            db.execute("UPDATE platform_assets SET record=? WHERE id=?", (json.dumps(value), ident))
+        for ident, raw in db.execute("SELECT id,metadata FROM platform_artifacts").fetchall():
+            value = json.loads(raw)
+            convert(value)
+            db.execute("UPDATE platform_artifacts SET metadata=? WHERE id=?", (json.dumps(value), ident))
 
 
 def _postgres_environment(url_file, *, private_platform_network=False):

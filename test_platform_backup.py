@@ -67,6 +67,74 @@ class BackupTests(unittest.TestCase):
         self.assertEqual(result["state"], "backed_up")
         return destination
 
+    def remote_backup(self, *, corrupt=False, wrong_provider=False):
+        from dataclasses import replace
+        from studio_platform.backup import backup_postgres_engine, _snapshot, _export_business_db
+        # Synthetic R2-only records: Local is a fixture byte source, never a
+        # configured fallback. The adapter exposes only stat/open reads.
+        with closing(sqlite3.connect(self.database)) as db, db:
+            for ident, raw in db.execute("SELECT id,record FROM platform_assets").fetchall():
+                record = json.loads(raw)
+                for role in ("original", "model"):
+                    record[role]["provider"] = "r2"
+                db.execute("UPDATE platform_assets SET record=? WHERE id=?", (json.dumps(record), ident))
+        local = self.store
+        class ReadOnlyR2:
+            def stat(self, key):
+                return replace(local.stat(key), provider="local" if wrong_provider else "r2")
+            def open(self, key):
+                return io.BytesIO(b"corrupt") if corrupt else local.open(key)
+        def export(engine, destination, **kwargs):
+            with closing(_snapshot(self.database)) as snapshot:
+                return _export_business_db(snapshot, destination)
+        with mock.patch("studio_platform.backup._export_postgres_business_db", side_effect=export):
+            backup_postgres_engine(object(), None, self.root/"remote-backup", stores={"r2": ReadOnlyR2()})
+        return self.root/"remote-backup"
+
+    def test_r2_only_media_manifest_and_isolated_restore_preserve_original_evidence(self):
+        from studio_platform.repository import artifacts
+        lease = TaskQueue(self.repo).claim("backup-test-worker", "test-pool").lease
+        expected_media = {}
+        for kind, mime in (("video", "video/mp4"), ("audio", "audio/wav")):
+            body = ("synthetic-"+kind).encode()
+            info = self.store.write_new("superdan", str(uuid.uuid4()), io.BytesIO(body), content_type=mime)
+            expected_media[info.key] = body
+            with self.repo.engine.begin() as conn:
+                conn.execute(insert(artifacts).values(id=str(uuid.uuid4()), job_id=self.job["id"],
+                    attempt_id=lease.attempt_id, created_at=1, metadata={"provider":"r2", "object_key":info.key,
+                    "size_bytes":info.size_bytes,"sha256":info.sha256,"content_type":mime,"kind":kind,"validated":True}))
+        source = self.remote_backup()
+        manifest = verify_local(source)
+        self.assertEqual({item["provider"] for item in manifest["objects"]}, {"r2"})
+        original = (source/"database.sqlite3").read_bytes()
+        result = restore_local(source, self.root/"remote-restored")
+        self.assertEqual(result["held_jobs"], 1)
+        self.assertEqual((source/"database.sqlite3").read_bytes(), original)
+        with closing(sqlite3.connect(self.root/"remote-restored"/"platform.sqlite3")) as db:
+            record = json.loads(db.execute("SELECT record FROM platform_assets").fetchone()[0])
+            self.assertEqual(record["original"]["provider"], "local")
+            self.assertEqual(record["model"]["provider"], "local")
+        restored = LocalObjectStore(self.root/"remote-restored"/"objects")
+        with restored.open(record["original"]["key"]) as body:
+            self.assertEqual(body.read(), png())
+        for key, expected in expected_media.items():
+            with restored.open(key) as body:
+                self.assertEqual(body.read(), expected)
+        with closing(sqlite3.connect(self.root/"remote-restored"/"platform.sqlite3")) as db:
+            specs = [json.loads(row[0]) for row in db.execute("SELECT metadata FROM platform_artifacts")]
+            self.assertEqual({s["kind"] for s in specs}, {"video", "audio"})
+            self.assertTrue(all(s["provider"] == "local" for s in specs))
+
+    def test_r2_changed_bytes_never_publish_completion_manifest(self):
+        with self.assertRaises(BackupError):
+            self.remote_backup(corrupt=True)
+        self.assertFalse((self.root/"remote-backup"/"manifest.json").exists())
+
+    def test_r2_provider_mismatch_never_falls_back(self):
+        with self.assertRaises(BackupError):
+            self.remote_backup(wrong_provider=True)
+        self.assertFalse((self.root/"remote-backup"/"manifest.json").exists())
+
     def test_real_asset_project_backup_and_isolated_restore_preserve_owner_and_disable_jobs(self):
         source = self.backup()
         manifest = verify_local(source)
