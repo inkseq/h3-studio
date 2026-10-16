@@ -22,6 +22,7 @@ from .storage import _sync_directory
 
 FORMAT = "sixnine-private-backup-copy-v1"
 FORMAT_V2 = "sixnine-private-backup-copy-v2"
+FORMAT_V3 = "sixnine-private-backup-copy-v3"
 MAX_FILE = 512*MIB
 MAX_TOTAL = 40*1024*MIB + 272*MIB
 MAX_JSON = 16*MIB
@@ -130,8 +131,8 @@ def plan_copy(backup_directory, target, *, allow_incomplete=False):
                 snapshot_manifest_sha256=files[-1]["sha256"],
                 objects=len(manifest["objects"]), bytes=sum(item["size_bytes"] for item in files),
                 staging_included=False, authentication_included=False)
-    if manifest["version"] == 2:
-        plan.update(format=FORMAT_V2, coverage=manifest["coverage"])
+    if manifest["version"] in (2, 3):
+        plan.update(format=FORMAT_V3 if manifest["version"] == 3 else FORMAT_V2, coverage=manifest["coverage"])
     # Refuse before any remote writes if even valid returned version IDs could
     # make the final transfer receipt unreadable. Accumulate individual encoded
     # entries rather than allocating an unbounded worst-case manifest.
@@ -271,21 +272,28 @@ def copy_backup(backup_directory, target, receipt_directory, *, client, allow_in
 
 def coverage_fields(value):
     """Closed versioned transport coverage; counts describe available bytes only."""
-    need(isinstance(value, dict) and value.get("format") in (FORMAT, FORMAT_V2), "backup_coverage_invalid")
+    need(isinstance(value, dict) and value.get("format") in (FORMAT, FORMAT_V2, FORMAT_V3), "backup_coverage_invalid")
     if value["format"] == FORMAT:
         need("coverage" not in value, "backup_coverage_invalid")
         return {}
     c=value.get("coverage")
+    classified = value["format"] == FORMAT_V3
     keys={"status","referenced_objects","available_objects","missing_objects","referenced_bytes","available_bytes","missing_bytes"}
-    need(isinstance(c,dict) and set(c)==keys and all(type(c[k]) is int and c[k]>=0 for k in keys-{"status"}), "backup_coverage_invalid")
+    if classified: keys |= {'expected_missing_objects','expected_missing_bytes','unexpected_missing_objects','unexpected_missing_bytes','loss_alert_required'}
+    need(isinstance(c,dict) and set(c)==keys and all(type(c[k]) is int and c[k]>=0 for k in keys-{"status", "loss_alert_required"}), "backup_coverage_invalid")
     need(c["referenced_objects"]==c["available_objects"]+c["missing_objects"] and c["referenced_bytes"]==c["available_bytes"]+c["missing_bytes"]
          and c["status"]==("incomplete" if c["missing_objects"] else "complete") and c["available_objects"]==value.get("objects")
          and (c["missing_objects"]==0)==(c["missing_bytes"]==0), "backup_coverage_invalid")
+    if classified:
+        need(type(c['loss_alert_required']) is bool and c['loss_alert_required'] == (c['unexpected_missing_objects'] > 0)
+            and c['missing_objects'] == c['expected_missing_objects']+c['unexpected_missing_objects']
+            and c['missing_bytes'] == c['expected_missing_bytes']+c['unexpected_missing_bytes']
+            and all((c[k+'_objects']==0)==(c[k+'_bytes']==0) for k in ('expected_missing','unexpected_missing')), 'backup_coverage_invalid')
     return {"coverage":c}
 
 
 def _completion(value, target, snapshot):
-    need(isinstance(value,dict) and value.get("format") in (FORMAT,FORMAT_V2) and value.get("phase")=="copy_complete"
+    need(isinstance(value,dict) and value.get("format") in (FORMAT,FORMAT_V2,FORMAT_V3) and value.get("phase")=="copy_complete"
          and value.get("target")==asdict(target) and value.get("snapshot_manifest_sha256")==snapshot,
          "backup_completion_identity_mismatch")
     coverage_fields(value)
@@ -307,7 +315,7 @@ def _completion(value, target, snapshot):
     need(total<=MAX_TOTAL and {"database.sqlite3","manifest.json"}<=names
          and files[-1]["name"]=="manifest.json" and files[-1]["sha256"]==snapshot,
          "backup_completion_manifest_mismatch")
-    if value["format"] == FORMAT_V2:
+    if value["format"] in (FORMAT_V2, FORMAT_V3):
         need(value["coverage"]["available_bytes"] == sum(x["size_bytes"] for x in files if x["name"].startswith("media/"))
              and value["coverage"]["available_objects"] == len(files)-2, "backup_coverage_inventory_mismatch")
     return files
@@ -315,7 +323,7 @@ def _completion(value, target, snapshot):
 
 def restore_copy(target, receipt, download_directory, restore_directory, *, client, allow_incomplete=False):
     """Fetch exact pinned versions, verify, then use the existing disabled restore."""
-    need(receipt.get("format") in (FORMAT,FORMAT_V2) and receipt.get("target")==asdict(target)
+    need(receipt.get("format") in (FORMAT,FORMAT_V2,FORMAT_V3) and receipt.get("target")==asdict(target)
          and receipt.get("phase")=="copied_not_restored", "backup_transfer_receipt_invalid")
     need(type(allow_incomplete) is bool, "backup_opt_in_invalid")
     coverage=coverage_fields(receipt)
@@ -350,7 +358,7 @@ def restore_copy(target, receipt, download_directory, restore_directory, *, clie
             _read(client,target,item["name"],item,snapshot,version=item["version_id"],output=target_file)
             target_file.flush();os.fsync(target_file.fileno())
     manifest=verify_local(incoming,allow_incomplete=allow_incomplete)
-    need(({"coverage":manifest["coverage"]} if manifest["version"]==2 else {})==coverage, "backup_coverage_mismatch")
+    need(({"coverage":manifest["coverage"]} if manifest["version"] in (2,3) else {})==coverage, "backup_coverage_mismatch")
     result=restore_local(incoming,destination,allow_incomplete=allow_incomplete)
     need(result.get("state")=="restored_isolated" and result.get("execution_enabled") is False,
          "isolated_restore_unconfirmed")

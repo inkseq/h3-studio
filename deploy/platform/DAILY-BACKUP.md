@@ -103,3 +103,21 @@ authorize it. The isolated `RECOVERY-HOLD.json` retains missing references,
 coverage and `media_recovery_complete: false`. Only available verified objects
 are remapped to Local; absent references remain in the preserved DB. No
 credentials, execution, live repair or production restoration are enabled.
+
+For expected-deletion classification, a reviewed configuration uses `version: 3`
+with exactly `allow_missing_media: true` and `classify_expected_deletions: true`
+in addition to the original environment/instance/target fields. The original
+target and credentials are unchanged. Versions 1 and 2 remain supported.
+The helper carries the closed v3 coverage through copy, daily completion,
+`already_completed` and isolated recovery summaries. A backup-loss observer
+uses `coverage.loss_alert_required` (unexpected missing objects only), while
+still disclosing expected missing objects/bytes. An older v2 missing count has
+no verified classification and remains actionable. Expected deletion does not
+make `coverage.status` complete or permit claiming full byte recovery.
+
+The existing application alert monitor does not currently ingest backup
+coverage. This format supplies the verified loss classification for the daily
+backup observer; it does not claim a new SNS/CloudWatch alarm has been installed.
+Helper/config upgrades and final candidate acceptance remain separately reviewed
+operations. Source merge alone does not alter the installed scheduler or replay
+any failed operation.

@@ -555,3 +555,6 @@ inventory.json
 !test_restore_native_sources.py
 
 !test_backup_incomplete_coverage.py
+
+!studio_platform/backup_deletion.py
+!test_backup_expected_deletion.py

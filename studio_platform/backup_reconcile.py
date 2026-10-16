@@ -11,7 +11,7 @@ import json
 import re
 import time
 
-from .backup_remote import (FORMAT, FORMAT_V2, coverage_fields, MAX_JSON, MIB, RemoteBackupError, _check,
+from .backup_remote import (FORMAT, FORMAT_V2, FORMAT_V3, coverage_fields, MAX_JSON, MIB, RemoteBackupError, _check,
     _completion, _preflight, _read, _version, canonical, need, sha)
 
 RECONCILE_FORMAT = 'sixnine-private-backup-reconciliation-v1'
@@ -41,7 +41,7 @@ def validate_intent(target, intent):
     """Strict local validation before any cloud read or client initialization."""
     coverage=coverage_fields(intent)
     need(isinstance(intent,dict) and set(intent)==INTENT_KEYS | set(coverage)
-         and intent['format'] in (FORMAT, FORMAT_V2) and intent['target']==asdict(target)
+         and intent['format'] in (FORMAT, FORMAT_V2, FORMAT_V3) and intent['target']==asdict(target)
          and intent['phase']=='before_remote_write'
          and isinstance(intent['operation_id'],str)
          and re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}',intent['operation_id'])
