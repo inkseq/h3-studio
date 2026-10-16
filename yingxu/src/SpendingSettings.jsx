@@ -1,16 +1,12 @@
+import {microsToDollars,dollarsToMicros} from './money.js';
 import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {createCloudClient} from './cloud-client.js';
 import {LanguageSwitcher,useI18n} from './i18n/I18nProvider.jsx';
 import './spending-settings.css';
 
-const dollars=value=>String(value/1_000_000);
-function micros(value){
-  if(!/^(?:0|[1-9]\d*)(?:\.\d{1,6})?$/.test(value))throw Error('settings.invalid');
-  const [whole,fraction='']=value.split('.'),result=Number(whole)*1_000_000+Number(fraction.padEnd(6,'0'));
-  if(!Number.isSafeInteger(result)||result>9_000_000_000_000_000)throw Error('settings.invalid');
-  return result;
-}
-const money=value=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:6}).format(value/1_000_000);
+const dollars=microsToDollars;
+function micros(value){try{return dollarsToMicros(value);}catch{throw Error('settings.invalid');}}
+const money=value=>'$'+microsToDollars(value);
 
 export default function SpendingSettings({account}){
   const {t}=useI18n(),api=useMemo(()=>{const client=createCloudClient();client.setAccount(account);return client;},[account]);
