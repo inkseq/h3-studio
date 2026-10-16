@@ -555,3 +555,8 @@ inventory.json
 !test_restore_native_sources.py
 
 !test_backup_incomplete_coverage.py
+
+# Editable v2 admission settings; same ledger, no credential material.
+!studio_platform/spending_limits.py
+!studio_platform/spending_routes.py
+!test_spending_limits.py

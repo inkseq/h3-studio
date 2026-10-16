@@ -370,8 +370,15 @@ class DstackController:
         fresh = type(observed) in (int, float) and 0 <= now-observed <= self.service.policy["observation_fresh_seconds"]
         last = max(last, binding.get("first_runtime_ready_at", now))
         lifecycle = payload.get("lifecycle", {})
+        idle_seconds = lifecycle.get("idle_shutdown_seconds", self.service.policy["idle_shutdown_seconds"])
+        if lifecycle.get("test_gpu_guard"):
+            from .spending_limits import ADMIN_OWNER, read_settings
+            with self.repo.engine.connect() as connection:
+                limits = read_settings(connection, payload["tenant_id"], ADMIN_OWNER)
+            if limits["version"]:
+                idle_seconds = min(idle_seconds, limits["value"]["idle_shutdown_seconds"])
         action = idle_action(now=now, hard_deadline=payload["hard_deadline"], hold_until=payload["hold_until"],
-            last_business_activity=last, idle_seconds=lifecycle.get("idle_shutdown_seconds", self.service.policy["idle_shutdown_seconds"]),
+            last_business_activity=last, idle_seconds=idle_seconds,
             active_jobs=active, unsafe_attempts=unsafe, collection_holds=int(binding.get("state") == "busy"),
             observations_fresh=bool(fresh), lifecycle_version=lifecycle.get("version", 1),
             keep_on=lifecycle.get("keep_on", "idle"), budget_available=funded)

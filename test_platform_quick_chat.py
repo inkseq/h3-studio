@@ -457,12 +457,12 @@ class QuickChatTests(unittest.TestCase):
         pf = self.preflight(revision)
         entered, release = threading.Event(), threading.Event()
         original = self.service.hooks.enqueue
-        def paused(principal, job):
+        def paused(principal, job, **spending):
             if not entered.is_set():
                 entered.set()
                 if not release.wait(5):
                     raise AssertionError("test release missing")
-            return original(principal, job)
+            return original(principal, job, **spending)
         with mock.patch.object(self.service.hooks, "enqueue", side_effect=paused):
             with ThreadPoolExecutor(max_workers=1) as pool:
                 future = pool.submit(self.submit, revision, pf)
@@ -494,11 +494,11 @@ class QuickChatTests(unittest.TestCase):
         revision = self.card(copies=2)["revision"]
         original = self.service.hooks.enqueue
         call_count = [0]
-        def fail_one(principal, job):
+        def fail_one(principal, job, **spending):
             call_count[0] += 1
             if call_count[0] == 1:
                 raise Conflict("test_admission_blocked")
-            return original(principal, job)
+            return original(principal, job, **spending)
         pf = self.preflight(revision)
         with mock.patch.object(self.service.hooks, "enqueue", side_effect=fail_one):
             result = self.submit(revision, pf)

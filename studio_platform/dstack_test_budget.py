@@ -27,8 +27,8 @@ def validate_guard(value):
     if (not isinstance(value, dict) or set(value) != fields
             or type(value["version"]) is not int or value["version"] != 1
             or value["timezone"] != "Australia/Sydney" or value["budget_account_id"] != ACCOUNT
-            or type(value["daily_limit_microusd"]) is not int or not 1 <= value["daily_limit_microusd"] <= 20_000_000
-            or type(value["max_runtime_seconds"]) is not int or not 600 <= value["max_runtime_seconds"] <= 7200
+            or type(value["daily_limit_microusd"]) is not int or not 1 <= value["daily_limit_microusd"] <= 9_000_000_000_000_000
+            or type(value["max_runtime_seconds"]) is not int or not 60 <= value["max_runtime_seconds"] <= 86400
             or type(value["stop_margin_seconds"]) is not int or not 300 <= value["stop_margin_seconds"] <= 600):
         raise ValueError("dstack_test_guard_invalid")
     return value
@@ -140,6 +140,14 @@ def budget_reason(connection, intent, node, now, *, minimum_reserved=0, expected
         return reason
     try:
         guard = node_guard(intent, node)
+        if guard is not None:
+            from .spending_limits import ADMIN_OWNER, read_settings
+            limits = read_settings(connection, node["payload"]["tenant_id"], ADMIN_OWNER)
+            if limits["version"]:
+                guard = dict(guard, daily_limit_microusd=min(guard["daily_limit_microusd"], limits["value"]["test_daily_limit_microusd"]))
+                runtime = min(guard["max_runtime_seconds"], limits["value"]["max_runtime_seconds"])
+                if now-intent["created_at"] + expected_runtime_s + guard["stop_margin_seconds"] >= runtime:
+                    return "dstack_test_runtime_limit_reached"
         if guard is not None and projected_cost(connection, guard, now, replacement_id=intent["id"],
                 minimum_reserved=minimum_reserved) >= guard["daily_limit_microusd"]:
             return "dstack_test_daily_limit_reached"

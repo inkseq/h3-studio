@@ -102,6 +102,36 @@ class DailyTestBudgetTests(LedgerCase):
         old = replace(_request(row["payload"]["request"]), test_max_duration_s=None)
         self.assertEqual(old.run_spec(original.PUB)["configuration"]["max_duration"], "off")
 
+    def test_changed_admin_runtime_reaches_native_spec_and_original_guard(self):
+        from studio_platform.repository import spending_settings
+        from studio_platform.spending_limits import ADMIN_OWNER, admin_defaults
+        value=admin_defaults(self.service)
+        value['max_runtime_seconds']=4000
+        with self.repo.transaction() as connection:
+            connection.execute(insert(spending_settings).values(tenant_id=self.settings.tenant_id,
+                owner_id=ADMIN_OWNER,version=1,value=value,updated_at=self.now,actor_id=self.owner.actor_id))
+        node=self.start(preview=self.preview())['node_id']
+        self.assertEqual(self.store.load(node)['run_spec']['configuration']['max_duration'],4000)
+        intent,row=self.rows()
+        self.assertEqual(row['payload']['request']['test_max_duration_s'],4000)
+        self.assertEqual(row['payload']['lifecycle']['test_gpu_guard']['max_runtime_seconds'],4000)
+        with self.repo.engine.connect() as connection:
+            self.assertIsNone(budget_reason(connection,intent,row,self.now))
+
+    def test_runtime_below_verified_execution_runway_refuses_before_any_offer_or_money(self):
+        from studio_platform.repository import spending_settings
+        from studio_platform.spending_limits import ADMIN_OWNER, admin_defaults
+        value=admin_defaults(self.service)
+        value['max_runtime_seconds']=2000  # verified1800 + stop margin300 cannot fit
+        with self.repo.transaction() as connection:
+            connection.execute(insert(spending_settings).values(tenant_id=self.settings.tenant_id,
+                owner_id=ADMIN_OWNER,version=1,value=value,updated_at=self.now,actor_id=self.owner.actor_id))
+        with patch.object(self.capacity,'plan',side_effect=AssertionError('no provider calls')):
+            with self.assertRaisesRegex(OperatorError,'dstack_test_runtime_limit_reached'):
+                self.preview()
+        self.assertEqual(self.counts(),(0,0,0,0))
+        self.assertEqual(self.client.applied,[])
+
     def test_sydney_day_boundaries_include_dst_short_and_long_days(self):
         def stamp(value):
             return datetime.fromisoformat(value).replace(tzinfo=timezone.utc).timestamp()

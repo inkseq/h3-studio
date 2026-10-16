@@ -121,7 +121,12 @@ class AgentConnect:
             "description": "本人现有和未来项目的创作、上传、视频生成及文本助手调用；不含账户、预算或基础设施管理"}
 
     def issue(self, principal: Principal, *, name="Codex", authorization_profile_id,
-            authorization_profile_version, idempotency_key, origin):
+            authorization_profile_version, idempotency_key, origin, daily_limit_microusd=0):
+        from .repository import money
+        try:
+            money(daily_limit_microusd)
+        except ValueError:
+            raise ConnectError("connection_daily_limit_invalid", 422) from None
         if not isinstance(name, str) or not 1 <= len(name.strip()) <= 80:
             raise ConnectError("connection_name_invalid", 422)
         if (authorization_profile_id != PROFILE_ID or type(authorization_profile_version) is not int
@@ -133,8 +138,11 @@ class AgentConnect:
         from . import auth as auth_module
         if not set(CONNECT_SCOPES).issubset(auth_module.API_SCOPES):
             raise ConnectError("connection_profile_unavailable", 503)
-        request_hash = digest(json.dumps({"name": name.strip(), "profile_id": authorization_profile_id,
-            "profile_version": authorization_profile_version, "origin": origin}, sort_keys=True, separators=(",", ":")))
+        request_value = {"name": name.strip(), "profile_id": authorization_profile_id,
+            "profile_version": authorization_profile_version, "origin": origin}
+        if daily_limit_microusd:
+            request_value["daily_limit_microusd"] = daily_limit_microusd
+        request_hash = digest(json.dumps(request_value, sort_keys=True, separators=(",", ":")))
         code, now = "sxc_" + secrets.token_urlsafe(32), self.clock()
         with self.engine.begin() as conn:
             self._begin(conn)
@@ -158,6 +166,8 @@ class AgentConnect:
                 "connection_id": connection_id, "profile_id": PROFILE_ID, "profile_version": PROFILE_VERSION,
                 "scopes": list(CONNECT_SCOPES), "all_projects": True, "project_ids": [],
                 "key_lifetime_days": KEY_LIFETIME_DAYS, "key_expires_at": now + KEY_LIFETIME_DAYS * 86400}
+            if daily_limit_microusd:
+                authorization["daily_limit_microusd"] = daily_limit_microusd
             encoded = json.dumps(authorization, sort_keys=True, separators=(",", ":"))
             row = dict(tenant=self.tenant, id="connection-" + uuid.uuid4().hex, owner=principal.owner,
                 name=name.strip(), code_hash=digest(code), session_hash=principal.session_hash,
@@ -331,6 +341,20 @@ class AgentConnect:
                 if changed.rowcount != 1:
                     raise ConnectError("connection_consumed", 409)
                 conn.execute(insert(personal_keys).values(**key))
+                from .spending_limits import lock_owner, read_settings
+                from .repository import spending_settings
+                cap = authorization.get("daily_limit_microusd", 0)
+                if cap:
+                    lock_owner(conn, self.tenant, row["owner"])
+                    config = read_settings(conn, self.tenant, row["owner"])
+                    limits = {**config["value"]["connection_limits"], "key:" + key["id"]: cap}
+                    stored = {"value": {**config["value"], "connection_limits": limits},
+                        "version": config["version"] + 1, "actor_id": "browser:" + row["owner"], "updated_at": now}
+                    if config["version"]:
+                        conn.execute(update(spending_settings).where(spending_settings.c.tenant_id == self.tenant,
+                            spending_settings.c.owner_id == row["owner"]).values(**stored))
+                    else:
+                        conn.execute(insert(spending_settings).values(tenant_id=self.tenant, owner_id=row["owner"], **stored))
                 row = dict(row) | claimed
                 self._emit(conn, row, "exchanged")
                 return {"connection": self._public(row, key), "key": self.auth.public_key(key), "recovered": False}

@@ -35,7 +35,12 @@ class BatchCrashTests(unittest.TestCase):
 
     def test_crash_after_task_before_link_never_exposes_runnable_orphan(self):
         self.ready()
-        with patch.object(self.app.state.batches, "record_item", side_effect=RuntimeError("synthetic process crash")):
+        original_record=self.app.state.batches.record_item
+        def crash_on_job_link(principal,batch_id,index,value):
+            if value.get("job_id"):
+                raise RuntimeError("synthetic process crash")
+            return original_record(principal,batch_id,index,value)
+        with patch.object(self.app.state.batches, "record_item", side_effect=crash_on_job_link):
             response = self.client.post("/v1/batches", json=self.body, headers=self.headers)
         self.assertEqual(response.status_code, 500)
         before = self.rows()
