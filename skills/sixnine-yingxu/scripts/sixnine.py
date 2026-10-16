@@ -87,6 +87,8 @@ def safe_authoring_fields(body):
         'sampler_name', 'scheduler', 'denoise', 'shift_video', 'shift_audio', 'ref_image_size',
         'video_decode', 'video_tile_size', 'video_overlap', 'video_temporal_size', 'video_temporal_overlap',
         'audio_decode', 'encoder_device',
+        'video_conditioning', 'audio_conditioning', 'audio_refinement', 'mask_mode',
+        'image_refs_relative_size', 'video_excerpts', 'audio_excerpts', 'duration_seconds',
         'generate_audio', 'export_crf'}
     reasons = {'missing_field', 'type_mismatch', 'unknown_field', 'invalid_value', 'stale_version'}
     result = []

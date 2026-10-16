@@ -95,6 +95,74 @@ class AgentClientTests(unittest.TestCase):
         self.assertNotIn("PRIVATE", str(error.exception))
         self.assertNotIn("synthetic-test-key", str(error.exception))
 
+    def test_card_control_422_paths_follow_the_public_schema_without_echoing_values(self):
+        from studio_platform.quick_chat_schema import CardControls
+        for field in CardControls.model_fields:
+            with self.subTest(field=field):
+                seen = []
+                expected = {"path": ["body", "controls", field], "reason": "invalid_value"}
+                def handler(request):
+                    seen.append((request.method, request.headers["Idempotency-Key"]))
+                    return httpx.Response(422, json={"code": "invalid_request", "field_errors": [
+                        {**expected, "input": "PRIVATE-CONTROL-VALUE synthetic-test-key",
+                         "message": "https://private.example/reference", "ctx": {"secret": "PRIVATE"}}]})
+                with self.assertRaises(ValueError) as error:
+                    self.run_client(handler, method="POST", path="/v1/quick-chat/sessions/session-one/cards",
+                        idempotency_key="same-authored-card")
+                message = str(error.exception)
+                self.assertIn("field_errors="+json.dumps([expected], separators=(",", ":")), message)
+                for private in ("PRIVATE", "synthetic-test-key", "private.example"):
+                    self.assertNotIn(private, message)
+                self.assertEqual(seen, [("POST", "same-authored-card")])
+
+    def test_excerpt_422_paths_preserve_public_position_and_duration_fields(self):
+        from studio_platform.quick_chat_schema import ExcerptInput
+        for field in ("video_excerpts", "audio_excerpts"):
+            for leaf in ExcerptInput.model_fields:
+                for index in (0, 2):
+                    with self.subTest(field=field, leaf=leaf, index=index):
+                        expected = {"path": ["body", "controls", field, index, leaf], "reason": "type_mismatch"}
+                        with self.assertRaises(ValueError) as error:
+                            self.run_client(lambda _: httpx.Response(422, json={"code": "invalid_request",
+                                "field_errors": [expected]}))
+                        self.assertIn("field_errors="+json.dumps([expected], separators=(",", ":")), str(error.exception))
+
+    def test_422_field_diagnostics_keep_private_paths_reasons_and_invalid_bounds_suppressed(self):
+        expected = {"path": ["body", "controls", "steps"], "reason": "invalid_value"}
+        invalid = [
+            {"path": ["body", "controls", "PRIVATE-PATH"], "reason": "invalid_value"},
+            {"path": ["body", "controls", "denoise"], "reason": "PRIVATE-REASON"},
+            {"path": ["PRIVATE-ROOT", "controls", "denoise"], "reason": "invalid_value"},
+            {"path": "https://private.example/synthetic-test-key", "reason": "invalid_value"},
+            *({"path": ["body", "controls", "video_excerpts", index, "duration_seconds"],
+               "reason": "invalid_value"} for index in (True, -1, 17)),
+            {"path": ["body"]+["controls"]*8, "reason": "invalid_value"},
+            None, "PRIVATE-ENTRY synthetic-test-key",
+        ]
+        for entry in invalid:
+            with self.subTest(entry=entry), self.assertRaises(ValueError) as error:
+                self.run_client(lambda _: httpx.Response(422, json={"code": "invalid_request",
+                    "field_errors": [expected, entry], "detail": "PRIVATE synthetic-test-key"}))
+            message = str(error.exception)
+            self.assertIn("field_errors="+json.dumps([expected], separators=(",", ":")), message)
+            for private in ("PRIVATE", "synthetic-test-key", "private.example"):
+                self.assertNotIn(private, message)
+
+    def test_422_diagnostic_count_and_response_size_stay_bounded(self):
+        expected = {"path": ["body", "controls", "audio_refinement"], "reason": "invalid_value"}
+        extra = {"path": ["body", "controls", "seed"], "reason": "type_mismatch"}
+        with self.assertRaises(ValueError) as error:
+            self.run_client(lambda _: httpx.Response(422, json={"code": "invalid_request",
+                "field_errors": [expected]*12+[extra]}))
+        self.assertIn("field_errors="+json.dumps([expected]*12, separators=(",", ":")), str(error.exception))
+        self.assertNotIn('"seed"', str(error.exception))
+        with self.assertRaises(ValueError) as error:
+            self.run_client(lambda _: httpx.Response(422, json={"code": "invalid_request",
+                "field_errors": [expected], "detail": "PRIVATE synthetic-test-key "*1000}))
+        self.assertIn("HTTP 422", str(error.exception))
+        for suppressed in ("field_errors=", "PRIVATE", "synthetic-test-key"):
+            self.assertNotIn(suppressed, str(error.exception))
+
     def test_valid_download_matches_manifest_and_refuses_overwrite(self):
         data = b"representative artifact bytes"
         with tempfile.TemporaryDirectory() as folder:
