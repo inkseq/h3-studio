@@ -330,6 +330,21 @@ class ControlTests(LedgerCase):
         self.assertEqual(self.control.pool_status("control-test", **query)["draining"], 1)
         self.assertEqual(self.control.pool_status("control-test", **query)["ready"], 0)
 
+    def test_pool_status_snapshot_expires_and_next_request_reads_current_stop(self):
+        self.ready(self.spec())
+        query = dict(model_id="test-model", configuration_id="manifest-test", recipe_id="test-recipe")
+        ordinary = self.control.pool_status("control-test", **query)
+        with self.control.pool_status_snapshot(pools=("control-test",)) as snapshot:
+            self.assertEqual(self.control.pool_status("control-test", **query, _snapshot=snapshot), ordinary)
+            with self.assertRaisesRegex(ValueError, "pool_status_snapshot_unavailable"):
+                self.control.pool_status("other-pool", **query, _snapshot=snapshot)
+        with self.assertRaisesRegex(ValueError, "pool_status_snapshot_unavailable"):
+            self.control.pool_status("control-test", **query, _snapshot=snapshot)
+        self.control.drain("worker")
+        with self.control.pool_status_snapshot(pools=("control-test",)) as fresh:
+            state = self.control.pool_status("control-test", **query, _snapshot=fresh)
+            self.assertEqual((state["ready"], state["draining"]), (0, 1))
+
     def test_worker_recipe_binding_must_be_an_explicit_unique_tuple(self):
         base = self.spec()
         from dataclasses import replace

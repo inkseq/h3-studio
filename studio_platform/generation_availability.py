@@ -1,4 +1,5 @@
 """Authenticated advisory capacity projection; no admission or provider actions."""
+from contextlib import ExitStack
 from sqlalchemy import select
 
 from .control import WorkerControl, REAL_GPU_BACKENDS
@@ -16,18 +17,24 @@ def _result(recipe, state, reason):
             "available": state in {"ready", "busy"}}
 
 
-def _preparing(repo, registry, policy, mode, now):
+def _preparing(repo, registry, policy, mode, now, *, snapshot):
     """Only a fresh exact managed binding can claim an in-progress startup."""
     if not policy.get("deployment_profile_id"):
         return "unavailable"
-    with repo.engine.connect() as connection:
+    if snapshot["preparing"] is None:
+        connection = snapshot["pool"].connection
         rows = list(connection.execute(select(operator_nodes, instance_intents.c.provider,
             instance_intents.c.state.label("instance_state"), instance_intents.c.hard_deadline,
-            instance_intents.c.provider_instance_id.label("bound_instance_id"))
-            .join(instance_intents, instance_intents.c.id == operator_nodes.c.intent_id)
-            .where(instance_intents.c.pool == policy["pool"])).mappings())
+            instance_intents.c.provider_instance_id.label("bound_instance_id"), instance_intents.c.pool)
+            .join(instance_intents, instance_intents.c.id == operator_nodes.c.intent_id)).mappings())
         heartbeat = connection.execute(select(operator_heartbeats).where(
             operator_heartbeats.c.id == "global")).mappings().first()
+        by_pool = {}
+        for row in rows:
+            by_pool.setdefault(row["pool"], []).append(row)
+        snapshot["preparing"] = (by_pool, heartbeat)
+    by_pool, heartbeat = snapshot["preparing"]
+    rows = by_pool.get(policy["pool"], ())
     states = set()
     for row in rows:
         chosen = row["payload"].get("selection", {})
@@ -90,7 +97,7 @@ def _preparing(repo, registry, policy, mode, now):
     return "starting" if "starting" in states else "unknown" if "unknown" in states else "unavailable"
 
 
-def _mode_result(settings, repo, registry, policy, valid, mode, recipe, now):
+def _mode_result(settings, repo, registry, policy, valid, mode, recipe, now, *, control, snapshot):
     if not settings.generation_enabled or settings.execution_backend not in REAL_GPU_BACKENDS:
         state, reason = "disabled", "generation_disabled"
     elif not valid:
@@ -105,12 +112,14 @@ def _mode_result(settings, repo, registry, policy, valid, mode, recipe, now):
                 policy["qualification"]["expires_at"], policy["reservation"]["expires_at"])):
         state, reason = "disabled", "profile_authority_expired"
     else:
-        counts = WorkerControl(repo).pool_status(policy["pool"], model_id=policy["model_id"],
+        if snapshot["pool"] is None:
+            snapshot["pool"] = snapshot["contexts"].enter_context(control.pool_status_snapshot(now=now))
+        counts = control.pool_status(policy["pool"], model_id=policy["model_id"],
             configuration_id=policy["configuration_id"], recipe_id=recipe, backend=policy["backend"],
             engine_manifest_digest=policy.get("engine_manifest_digest", ""), output_delivery=policy.get("output_delivery", ""),
             expected_runtime_s=policy["reservation"]["expected_runtime_s"],
             deployment_profile_id=policy.get("deployment_profile_id"),
-            dispatch_backend=policy.get("dispatch_backend", "legacy"))
+            dispatch_backend=policy.get("dispatch_backend", "legacy"), _snapshot=snapshot["pool"])
         if counts["ready"]:
             state, reason = "ready", "matching_worker_ready"
         elif counts["busy"]:
@@ -123,7 +132,7 @@ def _mode_result(settings, repo, registry, policy, valid, mode, recipe, now):
         elif counts["registered"]:
             state, reason = "starting", "matching_worker_starting"
         else:
-            state = _preparing(repo, registry, policy, mode, now)
+            state = _preparing(repo, registry, policy, mode, now, snapshot=snapshot)
             reason = {"starting": "matching_capacity_starting", "unknown": "capacity_readiness_unconfirmed",
                       "unavailable": "matching_capacity_unavailable"}[state]
     return _result(recipe, state, reason)
@@ -137,20 +146,25 @@ def generation_availability(settings, repo, *, registry=None):
     except ValueError:
         policies, policies_valid = {}, False
     profiles = []
-    for profile in public_catalog()["profiles"]:
-        modes = {}
-        for mode, recipe in MODES.items():
-            policy = policies.get((profile["id"], recipe))
-            modes[mode] = _mode_result(settings, repo, registry, policy, policies_valid, mode, recipe, now)
-        profiles.append({"deployment_profile_id": profile["id"], "modes": modes})
-    # Missing profile selection is the existing legacy route, never the default
-    # named profile. Read precisely the same policy source as selected_policy().
-    try:
-        legacy, legacy_valid = read_policy(settings.execution_policy_file), True
-    except ValueError:
-        legacy, legacy_valid = None, False
-    profiles.append({"deployment_profile_id": None, "modes": {
-        mode: _mode_result(settings, repo, registry, legacy, legacy_valid, mode, recipe, now)
-        for mode, recipe in MODES.items()}})
+    control = WorkerControl(repo)
+    with ExitStack() as contexts:
+        snapshot = {"pool": None, "preparing": None, "contexts": contexts}
+        for profile in public_catalog()["profiles"]:
+            modes = {}
+            for mode, recipe in MODES.items():
+                policy = policies.get((profile["id"], recipe))
+                modes[mode] = _mode_result(settings, repo, registry, policy, policies_valid, mode, recipe, now,
+                    control=control, snapshot=snapshot)
+            profiles.append({"deployment_profile_id": profile["id"], "modes": modes})
+        # Missing profile selection is the existing legacy route, never the default
+        # named profile. Read precisely the same policy source as selected_policy().
+        try:
+            legacy, legacy_valid = read_policy(settings.execution_policy_file), True
+        except ValueError:
+            legacy, legacy_valid = None, False
+        profiles.append({"deployment_profile_id": None, "modes": {
+            mode: _mode_result(settings, repo, registry, legacy, legacy_valid, mode, recipe, now,
+                control=control, snapshot=snapshot)
+            for mode, recipe in MODES.items()}})
     return {"version": 1, "observed_at": now, "expires_at": now+10,
             "poll_after_seconds": 10, "advisory_only": True, "profiles": profiles}

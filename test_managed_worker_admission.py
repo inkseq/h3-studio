@@ -45,8 +45,10 @@ class ManagedAdmissionTests(OperatorCase):
             "reservation": {"expected_runtime_s": self.duration, "expires_at": 10000},
             "output_delivery": getattr(self, "output_delivery", ""),
             "dispatch_backend": getattr(self, "dispatch", "legacy")}
-        return _mode_result(SimpleNamespace(generation_enabled=True, execution_backend="wangp-worker"),
-            self.repo, self.registry, policy, True, "fl", self.binding.recipe_ids[0], self.now)
+        with self.control.pool_status_snapshot(now=self.now) as pool:
+            return _mode_result(SimpleNamespace(generation_enabled=True, execution_backend="wangp-worker"),
+                self.repo, self.registry, policy, True, "fl", self.binding.recipe_ids[0], self.now,
+                control=self.control, snapshot={"pool": pool, "preparing": None})
 
     def assert_blocked(self, reason):
         before = self.repo.get_job(self.scope, self.job["id"])
