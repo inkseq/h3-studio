@@ -74,3 +74,19 @@ Independent artifact/host approval must also compare the retained four hashes an
 无网络边界检查：`python -m unittest test_ci_changes test_release_contract test_frontend_release test_frontend_deploy test_platform_frontend test_platform_release test_platform_gpu_release test_platform_gpu_scaler test_platform_aws_deploy`。GPU 测试使用模拟依赖，不代表真实推理验证。
 
 采用的官方依据：[GitHub workflow 路径过滤与触发规则](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)、[Docker GitHub Actions 构建缓存](https://docs.docker.com/build/cache/backends/gha/)、[Starlette 静态文件路径行为](https://www.starlette.io/staticfiles/)。
+# Staging 2GiB + 2GiB swap：待实测的资源配置
+
+这是明确选择的 staging 资源配置，尚未在小机器上验收。生产默认配置、3584MiB 物理内存门槛、既有服务上限及同一产物晋级规则不变。配置不能从请求参数或普通环境变量切换；仅现有 staging 主机的 root 保护 `deployment-target.json` 可增加 `resource_profile: staging-2g-swap2g`。保护的 migration paths 同时记录 `INKSEQ_RESOURCE_PROFILE`、固定 `INKSEQ_CPU_CGROUP_PARENT=inkseq-staging-workload.slice` 和实际观测的 `host_memory_mib`。
+
+服务仍保留合计3296MiB的原上限，特别是 dstack768、dispatch128、controller640MiB。所有服务包括 db-init 必须进入同一父 slice，实际父组限制为1280MiB内存和2048MiB swap，合计3328MiB；物理内存最低1792MiB，至少给组外系统保留512MiB。父组比各子组的合计内存上限小，可能发生回收、交换或组内OOM；算术和源码检查不能证明真实任务可用，也不能将swap当成物理RAM。
+
+未来操作按以下有限顺序进行；本批源码不会创建swap、安装服务、缩容或重启：
+
+1. 先完成当前 b590 的GPU验收、停测试机和同产物晋级，再处理CPU修复批次。保存原主机类型、当前/上一版、target/paths/site及boot文件的原始字节和哈希；确认无活跃GPU、任务或worker lease，保留历史和未知账单。
+2. 只在现有加密EBS中分配 `/srv/sixnine/staging.swap`：预先空闲至少5GiB，创建恰好2GiB、root:root0600、单链接、完整分配的普通文件，再格式化并启用。分配后仍须保留原发布要求的至少3GiB空闲；不得清除当前/上一版、数据库、素材或回滚文件来凑空间。
+3. 通过既有受保护安装流程安装 `deploy/platform/ec2/` 中三个新资源文件，保留正常 `inkseq-staging-secrets.service` 和原drop-in。swap unit、slice及正常密钥hydrator必须在Docker前启动；不运行任何 `--initialize`。预检逐项核对实际swap、文件权限/占用块、unit字节、cgroup v2/systemd驱动、实际MemoryMax/MemorySwapMax及依赖，不能仅提交一份自述成功的收据。
+4. 在仍为medium的主机上启用该保护配置，用正常发布入口重建同一候选的CPU容器。先测冷启动，再测单GPU的准备、连续任务和视频/独立音频收集；记录父/子组内存、swap、OOM、重启、耗时及下载结果。运行时核对全部常驻服务的真实进程属于父组；stage operator政策必须最多1台/1GPU。预检通过、假数据测试或medium试验均不能代替小主机验收。
+5. 上述实测通过后，才对同一实例停机、改small并启动；读取新公网IP并仅更新staging DNS。正常boot hydrator从现有独立Secrets Manager读取并重建tmpfs，保留DB/Hatchet卷，不依赖首次启动的user-data。重新测真实物理内存、服务/TLS/登录和一条完整GPU路径；所有开发及GPU测试仍限staging。
+6. 任一阶段失败先保留证据和任务，不重复付费生成。若已缩容，先把同一实例恢复medium，再恢复原target/paths和同一受保护的当前/上一版。恢复原profile会重新要求3584MiB；禁止在small上删profile来绕过资源验收。恢复容器到默认父组、确认无成员及足够可用内存后才能安全停用swap。原b590仅按其精确helper/checker哈希使用已安装检查器回滚，不能运行产物中的未审查代码。
+
+只读检查不会分配swap或修改服务。主机资源准备、medium单GPU资格、小主机boot/单GPU资格及最终缩容仍是未完成验收项。官方语义参考：[Docker内存与swap](https://docs.docker.com/engine/containers/resource_constraints/)、[Compose cgroup_parent](https://docs.docker.com/reference/compose-file/services/#cgroup_parent)。

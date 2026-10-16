@@ -1,0 +1,11 @@
+[Unit]
+Description=Existing-disk swap for isolated staging
+Before=docker.service
+
+[Swap]
+What=/srv/sixnine/staging.swap
+Priority=10
+TimeoutSec=90
+
+[Install]
+WantedBy=swap.target

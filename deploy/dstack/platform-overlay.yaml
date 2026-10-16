@@ -22,6 +22,7 @@ x-business-environment: &business-environment
   SIXNINE_STORAGE_PROFILE: ${SIXNINE_STORAGE_PROFILE:-}
 
 x-cpu-service: &cpu-service
+  cgroup_parent: ${INKSEQ_CPU_CGROUP_PARENT:-}
   image: ${SIXNINE_DISPATCH_IMAGE:?Exact tested CPU dispatch image digest required}
   pull_policy: never
   user: "10001:10001"
@@ -58,6 +59,7 @@ services:
       test: [CMD, python, -c, "import json,urllib.request; h=json.load(urllib.request.urlopen('http://127.0.0.1:8845/healthz',timeout=5)); assert h['auth_ready'] and not h['render_enabled'] and not h['cloud_creation_enabled']"]
 
   dstack:
+    cgroup_parent: ${INKSEQ_CPU_CGROUP_PARENT:-}
     image: ${SIXNINE_DSTACK_SERVER_IMAGE:?Exact artifact-bound CPU dstack image required}
     pull_policy: never
     user: "0:0"
@@ -142,6 +144,7 @@ services:
     logging: *migration-logs
 
   hatchet-db:
+    cgroup_parent: ${INKSEQ_CPU_CGROUP_PARENT:-}
     image: postgres:15@sha256:c961aa287d8698297cb26cdfadfbe9fd2cbaf77e53cfffe9636e8d8a1e4d842c
     pull_policy: never
     restart: unless-stopped
@@ -165,6 +168,7 @@ services:
     logging: *migration-logs
 
   hatchet:
+    cgroup_parent: ${INKSEQ_CPU_CGROUP_PARENT:-}
     image: ghcr.io/hatchet-dev/hatchet/hatchet-lite:v0.110.5@sha256:cc81f078a5285d7d2051ec4a4fa459d033e1face4ca5983d82612b00da6e3fa3
     pull_policy: never
     restart: unless-stopped

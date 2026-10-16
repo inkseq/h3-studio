@@ -112,8 +112,9 @@ def validate_storage(document, *, target='production'):
         "migration_storage_r2_configuration_invalid")
 
 
-def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, target='production'):
+def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, target='production', resource_environment=None):
     identity = deployment_target.profile(target)
+    resources = deployment_target.resources({**(resource_environment or {}), 'INKSEQ_DEPLOYMENT_TARGET': target})
     require(type(document) is dict and type(document.get("services")) is dict, "migration_compose_invalid")
     services = document["services"]
     require({"app", "db", "db-init", "caddy", "hatchet-db", *CPU_SHARED} <= set(services), "migration_services_missing")
@@ -146,6 +147,7 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, targe
     require(services["dstack"]["image"] == dstack_image and services["hatchet"]["image"] == HATCHET_IMAGE,
             "migration_infrastructure_image_changed")
     for name, service in services.items():
+        require(service.get('cgroup_parent', '') == resources['cgroup_parent'], 'migration_cpu_cgroup_parent_invalid')
         require(re.fullmatch(r"[^\s@]+@sha256:[0-9a-f]{64}", service.get("image", "")), "migration_image_unpinned")
         require(service.get("pull_policy") == "never", "migration_implicit_image_pull")
         require(not any(service.get(key) for key in ("gpus", "devices", "privileged", "env_file")), "migration_unsafe_service")
@@ -218,10 +220,23 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, targe
         for key in ("SIXNINE_GENERATION_ENABLED", "SIXNINE_EXECUTION_BACKEND")),
         "migration_controller_execution_settings_split")
     total = sum(memory_mib(service.get("mem_limit")) for service in services.values())
-    require(type(host_memory_mib) is int and host_memory_mib >= 1024 and total <= host_memory_mib-512,
-            "migration_host_memory_overcommitted")
+    if resources['name'] == deployment_target.COMPACT_RESOURCES:
+        require(set(services) == {'app', 'db', 'db-init', 'caddy', 'hatchet-db', *CPU_SHARED},
+                'migration_compact_service_set_invalid')
+        require({name: memory_mib(service.get('mem_limit')) for name, service in services.items()}
+                == deployment_target.COMPACT_SERVICE_MIB, 'migration_compact_service_caps_changed')
+        require(type(host_memory_mib) is int and host_memory_mib >= resources['minimum_host_mib']
+                and resources['resident_mib'] <= host_memory_mib-512
+                and total <= resources['resident_mib']+resources['swap_mib'],
+                'migration_host_memory_overcommitted')
+    else:
+        require(type(host_memory_mib) is int and host_memory_mib >= 1024 and total <= host_memory_mib-512,
+                "migration_host_memory_overcommitted")
     return {"state": "migration_compose_verified", "service_memory_cap_mib": total,
-        "host_reserve_mib": host_memory_mib-total, "namespace": "app", "gpu_operations": 0}
+        "host_reserve_mib": host_memory_mib-(resources['resident_mib'] or total),
+        **({'resource_profile': resources['name'], 'parent_resident_mib': resources['resident_mib'],
+            'parent_swap_mib': resources['swap_mib']} if resources['swap_mib'] else {}),
+        "namespace": "app", "gpu_operations": 0}
 
 
 def local_inputs(document):
@@ -261,13 +276,24 @@ def check(base, overlay, *, environment=None, runner=subprocess.run, host_memory
             raise ValueError("migration_compose_render_invalid") from None
         receipt = validate(document, host_memory_mib=host_memory_mib,
             dstack_image=effective_environment.get("SIXNINE_DSTACK_SERVER_IMAGE", DSTACK_IMAGE),
-            target=deployment_target.environment(effective_environment)['name'])
+            target=deployment_target.environment(effective_environment)['name'], resource_environment=effective_environment)
         if "PUBLIC_ORIGIN" in document["services"]["app"]["environment"]:
             require(document["services"]["caddy"]["environment"]["INKSEQ_LEGACY_REDIRECT"]
                 == effective_environment.get("INKSEQ_LEGACY_REDIRECT", "0"),
                 "migration_domain_redirect_phase_unbound")
         if check_inputs:
             local_inputs(document)
+            if deployment_target.resources(effective_environment)['name'] == deployment_target.COMPACT_RESOURCES:
+                sealed = deployment_target.host()
+                require(deployment_target.resource_environment(sealed) == {
+                    key: effective_environment.get(key) for key in ('INKSEQ_RESOURCE_PROFILE', 'INKSEQ_CPU_CGROUP_PARENT')},
+                    'migration_compact_sealed_profile_mismatch')
+                metadata = deployment_target.resource_metadata()
+                require(metadata['memory_bytes']//1024**2 == host_memory_mib,
+                        'migration_compact_observed_host_memory_changed')
+                deployment_target.validate_resource_metadata(effective_environment, metadata,
+                    memory_bytes=metadata['memory_bytes'])
+                receipt['compact_host_resources_verified'] = True
         if probe:
             result = runner(command+["exec", "-T", "app", "python", "-c", PROBE], env=environment,
                 capture_output=True, text=True, timeout=25)
