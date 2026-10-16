@@ -407,7 +407,8 @@ def run_slot(config, worker_id, settings, *, repository=None, store_factory=crea
             raise ValueError("fleet_adapter_identity_mismatch")
         if slot.spec.backend == "wangp-worker" and getattr(getattr(backend, "manifest", None), "digest", None) != slot.spec.engine_manifest_digest:
             raise ValueError("fleet_adapter_manifest_mismatch")
-        if not slot.recovery_only and worker["current_job_id"] is None and worker["state"] != "retired":
+        if (not slot.recovery_only and worker["current_job_id"] is None and worker["state"] != "retired"
+                and not (slot.spec.dispatch_backend == "hatchet-v1" and worker["drain_requested"])):
             if slot.spec.backend in {"mock", "cpu-render"}:
                 control.mark_ready(worker_id, upstream_idle_confirmed=True)
             elif slot.confirmed_idle:
