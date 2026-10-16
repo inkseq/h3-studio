@@ -66,21 +66,25 @@ def main(argv=None):
     parser.add_argument("--execute",action="store_true")
     parser.add_argument("--instance-role-only", action="store_true",
                         help="Require existing EC2 role credentials, never static/profile/container keys")
+    parser.add_argument("--allow-incomplete", action="store_true", help="Explicitly transport or recover a v2 archive with declared missing media")
     args=parser.parse_args(argv)
     try:
         target=BackupTarget(**read_json(args.target,maximum=16384))
         need(args.action=="plan" or args.execute,"explicit_backup_transport_execution_required")
         if args.action=="plan":
             need(args.backup is not None,"backup_source_required")
-            plan=plan_copy(args.backup,target)
+            plan=plan_copy(args.backup,target,allow_incomplete=args.allow_incomplete)
             result=dict(state="offline_backup_copy_plan",objects=plan["objects"],bytes=plan["bytes"],
                         snapshot_manifest_sha256=plan["snapshot_manifest_sha256"],cloud_operations=0)
+            if "coverage" in plan:result["coverage"]=plan["coverage"]
         elif args.action=="copy":
             need(args.backup is not None and args.receipts is not None,"backup_source_and_new_receipts_required")
             client = aws_client(target, instance_role_only=True) if args.instance_role_only else aws_client(target)
-            result=copy_backup(args.backup,target,args.receipts,client=client)
+            result=copy_backup(args.backup,target,args.receipts,client=client,allow_incomplete=args.allow_incomplete)
+            coverage = {"coverage": result["coverage"]} if "coverage" in result else {}
             result={k:result[k] for k in ("phase","completion_sha256","completion_bytes",
                 "completion_version_id","snapshot_manifest_sha256","objects","bytes","restore_verified")}
+            result.update(coverage)
         elif args.action=="reconcile":
             from .backup_remote import MAX_JSON, _record, canonical, sha
             need(args.receipts is not None and args.reconciliation is not None,"backup_reconciliation_paths_required")
@@ -107,6 +111,7 @@ def main(argv=None):
                 _record(evidence/"completion.json",report["transfer_receipt"])
             result={k:report[k] for k in ("classification","code","original_intent_sha256",
                 "snapshot_manifest_sha256","automatic_retry","cloud_write_operations","restore_verified")}
+            if "coverage" in report:result["coverage"]=report["coverage"]
             result.update(state="backup_copy_reconciled",verified_files=len(report["verified_files"]),
                           missing_current_files=len(report["missing_current_files"]))
             print(json.dumps(result,sort_keys=True));return 0 if result["classification"]=="complete" else 2
@@ -114,7 +119,7 @@ def main(argv=None):
             need(all(x is not None for x in (args.receipt,args.download,args.destination)),"backup_restore_paths_required")
             receipt=read_json(args.receipt,maximum=16384)
             client = aws_client(target, instance_role_only=True) if args.instance_role_only else aws_client(target)
-            result=restore_copy(target,receipt,args.download,args.destination,client=client)
+            result=restore_copy(target,receipt,args.download,args.destination,client=client,allow_incomplete=args.allow_incomplete)
         print(json.dumps(result,sort_keys=True));return 0
     except Exception as error:
         code=str(error) if isinstance(error,RemoteBackupError) else "backup_transport_refused_or_unconfirmed"

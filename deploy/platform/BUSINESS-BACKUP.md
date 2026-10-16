@@ -149,3 +149,31 @@ matches the original SHA-256 and length. A present mismatching HEAD SHA fails.
 The isolated recovery copy maps verified remote media to Local while retaining
 original remote receipts and budget history; it stays on execution hold and is
 not an automatically deployable replacement database.
+
+### Explicit incomplete-media archives
+
+Default v1 export, verification and restoration remain strict. Explicit
+`backup_cli configured --allow-missing-media` emits v2 with available `objects`,
+`missing_objects` and exact `coverage`. Each missing entry retains the original
+owner/key/size/SHA/provider binding and reference provenance, plus
+`reason: source_object_not_found`, `observation: head` and observation time.
+Only definitive not-found from the exact configured R2 HEAD qualifies. No
+fallback provider, ignored GET failure, permission error or truncated body does.
+
+Verification proves available and missing sets are disjoint and their union
+matches every original DB reference, including identities and available body
+hashes. Incomplete `verify`, `restore-local`, and remote plan/copy/restore require
+`--allow-incomplete`. Transport uses `sixnine-private-backup-copy-v2`, propagating
+coverage through its intent, pinned completion, receipt, reconciliation and
+recovery summary. Reconciliation `classification: complete` describes all bytes
+of the declared archive; `coverage.status` still reports missing source media.
+
+Private manifests and recovery holds contain object identities; public reports
+expose only counts, hashes and closed error codes. An incomplete archive does
+not repair sources, release unknown reservations, establish why objects went
+missing or authorize production recovery. Keep failed UUIDs and partial evidence
+until a separately reviewed positive terminal closure.
+
+The S3 object-metadata envelope keeps its existing v1 integrity marker for both
+archive formats. Explicit v2 identity and coverage are carried by the hashed
+manifest, intent and completion; encryption/checksum guards are unchanged.

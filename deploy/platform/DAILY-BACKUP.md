@@ -80,3 +80,26 @@ do not provide version history. This workflow therefore creates independent
 versioned, encrypted S3 copies. It never silently enables a live R2 lock or
 deletes source media. Incomplete upload staging/orphans remain outside the
 published-reference snapshot and require their existing separate preservation.
+
+## Explicit incomplete-media archives
+
+Strict version 1 remains the default. A separately reviewed configuration may
+set `version: 2` and add exactly `allow_missing_media: true`. Only a definitive
+R2 HEAD `ObjectNotFound` may become a missing-reference record. Local misses,
+permission/timeout errors, identity mismatches, corrupt bodies and GET failures
+still stop the operation. Every available body must match its original size and
+SHA. Original business data, receipts and financial unknowns remain intact.
+
+Version 2 manifests, remote receipts, daily completion and subsequent
+`already_completed` output retain exact available/missing object and byte
+coverage. A successful copy or scheduler invocation with `coverage.status:
+incomplete` is a verified incomplete archive, never a full media backup.
+Changing the protected configuration requires a reviewed update and cannot
+resolve or replay a previous failed operation.
+
+An incomplete staging recovery also requires the explicit invocation
+`--restore-day YYYY-MM-DD --allow-incomplete`. Configuration alone does not
+authorize it. The isolated `RECOVERY-HOLD.json` retains missing references,
+coverage and `media_recovery_complete: false`. Only available verified objects
+are remapped to Local; absent references remain in the preserved DB. No
+credentials, execution, live repair or production restoration are enabled.

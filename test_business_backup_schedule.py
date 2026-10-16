@@ -35,6 +35,36 @@ class ScheduleTests(unittest.TestCase):
         with self.assertRaises(ValueError): host.validate_config(good, host.HOSTS['production'])
         with self.assertRaises(ValueError): host.validate_config({**good, 'credentials': 'not-allowed'}, good['instance_id'])
 
+    def test_incomplete_daily_config_requires_explicit_version_and_boolean(self):
+        good = self.config()
+        v2 = {**good, 'version': 2, 'allow_missing_media': True}
+        self.assertEqual(host.validate_config(v2, good['instance_id']), v2)
+        for bad in ({**good, 'allow_missing_media': True}, {**v2, 'allow_missing_media': 1},
+                    {**v2, 'allow_missing_media': False}, {**good, 'version': 2}):
+            with self.assertRaises(ValueError):host.validate_config(bad, good['instance_id'])
+
+    def test_completed_calendar_reports_incomplete_coverage_and_rejects_tamper(self):
+        c = dict(status='incomplete', referenced_objects=3, available_objects=2, missing_objects=1,
+                 referenced_bytes=15, available_bytes=10, missing_bytes=5)
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);day='2026-10-16';prior=root/day;prior.mkdir()
+            done=dict(version=2,day=day,completion_sha256='a'*64,receipt_sha256='b'*64,coverage=c)
+            (prior/'completed.json').write_text(json.dumps(done))
+            with mock.patch.object(host,'protected',side_effect=lambda p,*a:p), mock.patch.object(host,'read',side_effect=lambda p:json.loads(p.read_text())):
+                self.assertTrue(host.check_history(root,day))
+                self.assertEqual(host.completed_summary(prior,day),dict(state='already_completed',day=day,coverage=c))
+                for field,value in [('missing_objects',True),('status','complete'),('referenced_bytes',10)]:
+                    bad=copy.deepcopy(done);bad['coverage'][field]=value;(prior/'completed.json').write_text(json.dumps(bad))
+                    with self.assertRaises(ValueError):host.check_history(root,day)
+
+    def test_transfer_coverage_cannot_overstate_copied_objects_or_bytes(self):
+        c=dict(status='incomplete', referenced_objects=3, available_objects=2, missing_objects=1,
+               referenced_bytes=15, available_bytes=10, missing_bytes=5)
+        receipt=dict(format='sixnine-private-backup-copy-v2',coverage=c,objects=2,bytes=20)
+        self.assertEqual(host.coverage(receipt), {'coverage':c})
+        for delta in ({'objects':3},{'bytes':9},{'objects':True}):
+            with self.assertRaises(ValueError):host.coverage({**receipt,**delta})
+
     def test_docker_failure_does_not_surface_sensitive_subprocess_details(self):
         with mock.patch.object(host.subprocess, 'run', return_value=mock.Mock(returncode=1,stdout=b'private data',stderr=b'secret')):
             with self.assertRaisesRegex(ValueError, '^backup_docker_failed_or_unknown$'):

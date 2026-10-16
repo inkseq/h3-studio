@@ -32,17 +32,21 @@ def main(argv=None):
     portable.add_argument("--schema", default="public")
     portable.add_argument("--private-platform-network", action="store_true",
         help="Operator assertion: running inside reviewed private Compose network; only exact db:5432/sixnine identity allowed")
+    configured.add_argument("--allow-missing-media", action="store_true", help="Explicit v2 archive of available media; definitive R2 HEAD misses remain recorded, never called a full backup")
+    verify.add_argument("--allow-incomplete", action="store_true")
+    restore.add_argument("--allow-incomplete", action="store_true")
     args = parser.parse_args(argv)
     try:
         if args.action == "configured":
-            result = backup_configured(args.destination)
+            result = backup_configured(args.destination, allow_missing_media=args.allow_missing_media)
         elif args.action == "local":
             result = backup_local(args.database, args.object_root, args.destination)
         elif args.action == "verify":
-            manifest = verify_local(args.backup)
+            manifest = verify_local(args.backup, allow_incomplete=args.allow_incomplete)
             result = {"state": "verified", "objects": len(manifest["objects"]), "media_bytes": manifest["media_bytes"]}
+            if manifest["version"] == 2:result["coverage"] = manifest["coverage"]
         elif args.action == "restore-local":
-            result = restore_local(args.backup, args.destination)
+            result = restore_local(args.backup, args.destination, allow_incomplete=args.allow_incomplete)
         elif args.action == "postgres-local":
             result = backup_postgres_local(args.url_file, args.object_root, args.destination, schema=args.schema,
                                            private_platform_network=args.private_platform_network)
