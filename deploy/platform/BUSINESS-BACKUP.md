@@ -174,6 +174,35 @@ not repair sources, release unknown reservations, establish why objects went
 missing or authorize production recovery. Keep failed UUIDs and partial evidence
 until a separately reviewed positive terminal closure.
 
-The S3 object-metadata envelope keeps its existing v1 integrity marker for both
-archive formats. Explicit v2 identity and coverage are carried by the hashed
+The S3 object-metadata envelope keeps its existing v1 integrity marker for all
+archive formats. Explicit version identity and coverage are carried by the hashed
 manifest, intent and completion; encryption/checksum guards are unchanged.
+
+### Expected permanent deletion (explicit v3)
+
+`configured --allow-missing-media --classify-expected-deletions` emits v3.
+Old v1/v2 archives retain their original readers and meaning. A genuine R2 HEAD
+not-found is classified `expected_deleted` only when the same exported database
+proves every reference's deleted state, owner/tenant/project, exact identity and
+storage-bound key tombstones, and their same completed `purge`/`empty_trash`
+action. The action must confirm accounting release and an exact deleted
+key/size/SHA/binding plan entry with a finite checked/completed time. Tombstones
+alone are not proof: they are created before deletion. Active persisted
+references (including other saved stories) prevent suppression. Missing,
+ambiguous, unfinished or mismatching proof remains `unexpected_missing`.
+This reads archived proof; it does not execute cleanup or change source data.
+
+Each v3 missing record retains `classification` and `deletion_evidence`.
+Offline verification independently recomputes both from the checksummed DB.
+Coverage adds `expected_missing_objects/bytes`, `unexpected_missing_objects/bytes`
+and `loss_alert_required`, which is true exactly when unexpected objects exist.
+Loss monitoring consumes that field; v2 missing counts remain unclassified and
+must not be retroactively suppressed. The expected counts remain visible.
+`status: incomplete` and `media_recovery_complete: false` still describe absent
+bytes, even when every absence is expected. Restore still requires explicit
+incomplete opt-in and HOLD; it never resurrects intentionally deleted content.
+
+Transport v3 (`sixnine-private-backup-copy-v3`) propagates the exact classification
+through all pinned receipts and reconciliation. This does not identify who
+performed a provider delete or its precise time: cleanup can confirm an object
+already absent. It is not a claim that missing bytes were backed up or recovered.

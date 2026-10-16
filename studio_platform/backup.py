@@ -294,13 +294,19 @@ def _media_references(db, provider_bindings=None, *, offline=False):
     return found, pending
 
 
-def _publish_media_backup(output, object_root, references, pending, counts, *, source_database, stores=None, allow_missing_media=False):
+def _publish_media_backup(output, object_root, references, pending, counts, *, source_database, stores=None, allow_missing_media=False, classify_expected_deletions=False):
     media = output/"media"
     media.mkdir(mode=0o700)
     stores = stores if stores is not None else {"local": LocalObjectStore(object_root)}
-    if type(allow_missing_media) is not bool:
+    if (type(allow_missing_media) is not bool or type(classify_expected_deletions) is not bool
+            or classify_expected_deletions and not allow_missing_media):
         raise BackupError("backup_opt_in_invalid")
     objects, missing = [], []
+    evidence = {}
+    if classify_expected_deletions:
+        from .backup_deletion import deletion_evidence
+        with closing(_open_sqlite_readonly(output/"database.sqlite3")) as db:
+            evidence = deletion_evidence(db, references)
     for key, item in sorted(references.items()):
         provider = item.get("provider", "local")
         if provider not in stores:
@@ -314,7 +320,10 @@ def _publish_media_backup(output, object_root, references, pending, counts, *, s
         except ObjectNotFound:
             if not allow_missing_media or provider != "r2":
                 raise
-            missing.append(dict(item, reason="source_object_not_found", observation="head", observed_at=time.time()))
+            absent = dict(item, reason="source_object_not_found", observation="head", observed_at=time.time())
+            if classify_expected_deletions:
+                absent.update(classification="expected_deleted" if key in evidence else "unexpected_missing", deletion_evidence=evidence.get(key, []))
+            missing.append(absent)
             continue
         # Presigned GPU PUTs lack optional HEAD SHA metadata. Every body still
         # must match the original DB/receipt SHA and size before publication.
@@ -339,7 +348,8 @@ def _publish_media_backup(output, object_root, references, pending, counts, *, s
         excluded=list(sorted(AUTH_TABLES)), staging_included=False, orphan_objects_included=False,
         execution_restore="hold", native_postgres_restore=False)
     if allow_missing_media:
-        manifest.update(version=2, missing_objects=missing, coverage=_coverage(objects, missing))
+        manifest.update(version=3 if classify_expected_deletions else 2, missing_objects=missing,
+            coverage=_coverage(objects, missing, classified=classify_expected_deletions))
     _write_json(output/"manifest.json", manifest)  # Success marker written last.
     _sync_directory(media)
     _sync_directory(output)
@@ -455,13 +465,14 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
         target.dispose()
 
 
-def backup_postgres_engine(engine, object_root, destination, *, schema="public", max_media_bytes=40*1024*MIB, stores=None, allow_missing_media=False):
+def backup_postgres_engine(engine, object_root, destination, *, schema="public", max_media_bytes=40*1024*MIB, stores=None, allow_missing_media=False, classify_expected_deletions=False):
     """Complete PG business + Local media backup; restore target is SQLite.
 
     The caller supplies an approved in-process engine; never serialize/log it.
     No pg_dump, administrative role or source schema mutation is needed.
     """
-    if type(allow_missing_media) is not bool:
+    if (type(allow_missing_media) is not bool or type(classify_expected_deletions) is not bool
+            or classify_expected_deletions and not allow_missing_media):
         raise BackupError("backup_opt_in_invalid")
     destination = _absolute(destination)
     object_root = _absolute(object_root) if object_root is not None else None
@@ -482,7 +493,7 @@ def backup_postgres_engine(engine, object_root, destination, *, schema="public",
                 for provider, store in (stores or {"local": LocalObjectStore(object_root)}).items()})
         if len(references) > 100000 or sum(item["size_bytes"] for item in references.values()) > max_media_bytes:
             raise BackupError("backup_media_limit_exceeded")
-        result = _publish_media_backup(output, object_root, references, pending, counts, source_database="postgresql", stores=stores, allow_missing_media=allow_missing_media)
+        result = _publish_media_backup(output, object_root, references, pending, counts, source_database="postgresql", stores=stores, allow_missing_media=allow_missing_media, classify_expected_deletions=classify_expected_deletions)
         return {**result, "source_database": "postgresql", "restoration_target": "isolated-sqlite-and-local-objects", "native_postgres_restore": False}
     except BackupError:
         raise
@@ -490,7 +501,7 @@ def backup_postgres_engine(engine, object_root, destination, *, schema="public",
         raise BackupError("backup_postgres_local_failed_incomplete_directory_kept") from None
 
 
-def backup_configured(destination, *, settings=None, max_media_bytes=2*1024*MIB, allow_missing_media=False):
+def backup_configured(destination, *, settings=None, max_media_bytes=2*1024*MIB, allow_missing_media=False, classify_expected_deletions=False):
     """Use the existing app's explicit DB/storage identity, never AWS defaults.
 
     Runs as an operator command inside the existing isolated application
@@ -499,7 +510,8 @@ def backup_configured(destination, *, settings=None, max_media_bytes=2*1024*MIB,
     from .settings import Settings
     from .storage import S3ObjectStore
     from .storage_config import S3StorageConfig, load_configured_storage_credentials
-    if type(allow_missing_media) is not bool:
+    if (type(allow_missing_media) is not bool or type(classify_expected_deletions) is not bool
+            or classify_expected_deletions and not allow_missing_media):
         raise BackupError("backup_opt_in_invalid")
     settings = settings or Settings.from_environment()
     stores = {}
@@ -517,17 +529,23 @@ def backup_configured(destination, *, settings=None, max_media_bytes=2*1024*MIB,
     engine = create_engine(settings.database_url, echo=False, hide_parameters=True,
         connect_args={"connect_timeout": 10, "application_name": "inkseq-business-backup"})
     try:
-        return backup_postgres_engine(engine, None, destination, stores=stores, max_media_bytes=max_media_bytes, allow_missing_media=allow_missing_media)
+        return backup_postgres_engine(engine, None, destination, stores=stores, max_media_bytes=max_media_bytes, allow_missing_media=allow_missing_media, classify_expected_deletions=classify_expected_deletions)
     finally:
         engine.dispose()
 
 
-def _coverage(objects, missing):
+def _coverage(objects, missing, *, classified=False):
     available_bytes = sum(x["size_bytes"] for x in objects)
     missing_bytes = sum(x["size_bytes"] for x in missing)
-    return dict(status="incomplete" if missing else "complete", referenced_objects=len(objects)+len(missing),
+    result = dict(status="incomplete" if missing else "complete", referenced_objects=len(objects)+len(missing),
         available_objects=len(objects), missing_objects=len(missing), referenced_bytes=available_bytes+missing_bytes,
         available_bytes=available_bytes, missing_bytes=missing_bytes)
+    if classified:
+        expected = [x for x in missing if x['classification'] == 'expected_deleted']
+        result.update(expected_missing_objects=len(expected), expected_missing_bytes=sum(x['size_bytes'] for x in expected),
+            unexpected_missing_objects=len(missing)-len(expected), unexpected_missing_bytes=missing_bytes-sum(x['size_bytes'] for x in expected),
+            loss_alert_required=len(missing) != len(expected))
+    return result
 
 
 def verify_local(directory, *, allow_incomplete=False):
@@ -535,12 +553,12 @@ def verify_local(directory, *, allow_incomplete=False):
     try:
         raw = _regular(directory/"manifest.json", max_bytes=16*MIB).read_bytes()
         manifest = json.loads(raw)
-        if type(allow_incomplete) is not bool or type(manifest.get("version")) is not int or manifest["version"] not in (1, 2) or manifest.get("kind") != "sixnine-local-business-backup":
+        if type(allow_incomplete) is not bool or type(manifest.get("version")) is not int or manifest["version"] not in (1, 2, 3) or manifest.get("kind") != "sixnine-local-business-backup":
             raise BackupError("backup_format_not_supported")
         missing = manifest.get("missing_objects", [])
         if (not isinstance(missing, list) or len(missing) > 100000
                 or manifest["version"] == 1 and ("missing_objects" in manifest or "coverage" in manifest)
-                or manifest["version"] == 2 and not {"missing_objects", "coverage"} <= set(manifest)):
+                or manifest["version"] in (2, 3) and not {"missing_objects", "coverage"} <= set(manifest)):
             raise BackupError("backup_manifest_reference_mismatch")
         if missing and not allow_incomplete:
             raise BackupError("backup_incomplete_requires_explicit_opt_in")
@@ -557,6 +575,10 @@ def verify_local(directory, *, allow_incomplete=False):
                     for k, v in bindings.items()):
                 raise BackupError("backup_manifest_reference_mismatch")
             references, pending = _media_references(db, bindings or None, offline=True)
+            evidence = {}
+            if manifest['version'] == 3:
+                from .backup_deletion import deletion_evidence
+                evidence = deletion_evidence(db, references)
             # An older trusted backup may precede newly added optional tables.
             # Verify its original table set, then create safe empty additions
             # only inside the NEW restoration target.
@@ -576,15 +598,19 @@ def verify_local(directory, *, allow_incomplete=False):
             if any(item.get(k) != value for k, value in expected.items()):
                 raise BackupError("backup_manifest_reference_mismatch")
             if index >= len(objects):
-                if (set(item) != set(expected) | {"reason", "observation", "observed_at"}
+                if (set(item) != set(expected) | {"reason", "observation", "observed_at"} | ({"classification", "deletion_evidence"} if manifest["version"] == 3 else set())
                         or item.get("provider") != "r2" or item["reason"] != "source_object_not_found"
                         or item["observation"] != "head" or type(item["observed_at"]) not in (int, float)
                         or not math.isfinite(item["observed_at"]) or item["observed_at"] <= 0
                         or type(manifest.get("created_at")) not in (int, float)
                         or not math.isfinite(manifest["created_at"]) or item["observed_at"] > manifest["created_at"]):
                     raise BackupError("backup_manifest_reference_mismatch")
+                if manifest['version'] == 3 and (item['classification'] != ('expected_deleted' if key in evidence else 'unexpected_missing')
+                        or item['deletion_evidence'] != evidence.get(key, [])
+                        or any(p['completed_at'] > item['observed_at'] for p in item['deletion_evidence'])):
+                    raise BackupError("backup_deletion_evidence_mismatch")
                 continue
-            if manifest["version"] == 2 and set(item) != set(expected) | {"file"}:
+            if manifest["version"] in (2, 3) and set(item) != set(expected) | {"file"}:
                 raise BackupError("backup_manifest_reference_mismatch")
             filename = hashlib.sha256(key.encode("ascii")).hexdigest()+".bin"
             if item.get("file") != filename:
@@ -594,10 +620,11 @@ def verify_local(directory, *, allow_incomplete=False):
                 raise BackupError("backup_media_checksum_mismatch")
         if sum(item["size_bytes"] for item in objects) != manifest["media_bytes"] or pending != manifest["pending_assets"]:
             raise BackupError("backup_manifest_totals_mismatch")
-        if manifest["version"] == 2:
+        if manifest["version"] in (2, 3):
             c=manifest["coverage"]
-            if (not isinstance(c, dict) or any(type(c.get(k)) is not int for k in _coverage(objects, missing) if k != "status")
-                    or c != _coverage(objects, missing)):
+            if (not isinstance(c, dict) or any(type(c.get(k)) is not int for k in _coverage(objects, missing, classified=manifest["version"] == 3) if k not in {"status", "loss_alert_required"})
+                    or c != _coverage(objects, missing, classified=manifest["version"] == 3)
+                    or manifest["version"] == 3 and type(c.get("loss_alert_required")) is not bool):
                 raise BackupError("backup_manifest_totals_mismatch")
             if {p.name for p in (directory/"media").iterdir()} != {item["file"] for item in objects}:
                 raise BackupError("backup_manifest_reference_mismatch")
@@ -681,13 +708,13 @@ def restore_local(backup_directory, destination, *, allow_incomplete=False):
             authentication_reprovision_required=True, held_jobs=held, staging_restored=False,
             capacity_approvals_enabled=False, capacity_waiters_held=True,
             cloud_resources_may_still_bill=True)
-        if manifest["version"] == 2:
+        if manifest["version"] in (2, 3):
             hold.update(coverage=manifest["coverage"], missing_objects=manifest["missing_objects"], media_recovery_complete=not manifest["missing_objects"])
         _write_json(target/"RECOVERY-HOLD.json", hold)
         _sync_directory(target)
         result = {"state": "restored_isolated", "objects": len(manifest["objects"]), "held_jobs": len(held),
                 "authentication": "must_reprovision", "execution_enabled": False}
-        if manifest["version"] == 2:
+        if manifest["version"] in (2, 3):
             result.update(coverage=manifest["coverage"], media_recovery_complete=not manifest["missing_objects"])
         return result
     except Exception:
