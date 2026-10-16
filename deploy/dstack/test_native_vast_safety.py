@@ -157,11 +157,16 @@ class NativeVastSafetyTests(unittest.TestCase):
     def test_invalid_args_diagnostic_accepts_only_closed_documented_details(self):
         for message, expected in [
                 ("error 400/3471: Invalid args: len(args) > 4096", (3471, "args", "length_limit")),
+                ("Invalid args: len(args) > 8192", (None, "args", "length_limit")),
                 ("error 400/3467: Invalid args: 'id' is required and must be a valid offer ID", (3467, "id", "required_or_invalid")),
+                ("Invalid args: 'id' is required and must be a valid offer ID", (None, "id", "required_or_invalid")),
                 ("error 400/3499: Invalid args: env contains Bearer PRIVATE", (3499, "unknown", "unspecified")),
                 ("error 400/3499: PRIVATE nonstandard provider detail", (3499, "unknown", "unspecified")),
                 ("error 400/3471: Invalid args: len(args) > 4096 https://private.invalid/secret", (3471, "unknown", "unspecified")),
                 ("error 400/3471: Invalid args: len(args) > 4096\nBearer PRIVATE", (None, "unknown", "unspecified")),
+                ("Invalid args: len(args) > 4096\nBearer PRIVATE", (None, "unknown", "unspecified")),
+                ("Invalid args: len(args) > 4096 https://private.invalid/secret", (None, "unknown", "unspecified")),
+                ("Invalid args: len(args) > 0", (None, "unknown", "unspecified")),
                 ("Bearer PRIVATE error 400/3471: Invalid args: len(args) > 4096", (None, "unknown", "unspecified")),
                 ("error 404/3471: Invalid args: len(args) > 4096", (None, "unknown", "unspecified")),
                 ("error 400/347100000000000: Invalid args: len(args) > 4096", (None, "unknown", "unspecified")),
@@ -170,6 +175,56 @@ class NativeVastSafetyTests(unittest.TestCase):
                 (None, (None, "unknown", "unspecified"))]:
             with self.subTest(expected=expected):
                 self.assertEqual(safety._invalid_args_diagnostic(message), expected)
+
+    def test_argument_metadata_counts_only_utf8_bytes_without_stringifying_other_values(self):
+        class Private:
+            def __str__(self):raise AssertionError("must not stringify private values")
+        for value, expected in [(["PRIVATE", "\u4e2d"], (2, 10, 7)), ("PRIVATE\u00e9", (1, 9, 9)),
+                                ([], (0, 0, 0)), (["\ud800"], (1, None, None)),
+                                ([Private()], (None, None, None)), ({"PRIVATE": "value"}, (None, None, None)),
+                                (None, (None, None, None))]:
+            with self.subTest(expected=expected):
+                self.assertEqual(safety._argument_sizes({"args": value}), expected)
+        self.assertEqual(safety._field_shape({"msg": Private()}, "msg"), ("other", None))
+
+    def test_flat_message_variants_log_closed_sizes_and_keep_the_exact_original_put(self):
+        for message_field in ("msg", "message", "detail"):
+            data = {"success": False, "error": "invalid_args", "ask_id": 123,
+                    message_field: "Invalid args: len(args) > 8192", "echoed_payload": "PRIVATE"}
+            payload = {"args": ["PRIVATE", "\u4e2d"], "env": {"TOKEN": "PRIVATE"}}
+            original = copy.deepcopy(payload)
+            session = NS(put=Mock(return_value=response(400, data)))
+            with self.subTest(message_field=message_field), self.assertLogs(safety._logger, level="WARNING") as logs:
+                with self.assertRaises(safety.VastSafeReject) as caught:
+                    safety.create_instance_once(session, 123, payload)
+            self.assertNotIsInstance(caught.exception, safety.VastAllocationUnknown)
+            self.assertEqual(set(caught.exception.outcome), safety.OUTCOME_KEYS)
+            self.assertIn("provider_subcode=None field=args reason=length_limit", logs.output[0])
+            self.assertIn("args_type=array args_count=2 args_total_bytes=10 args_max_bytes=7", logs.output[0])
+            self.assertIn(message_field + "_type=string " + message_field + "_length=30", logs.output[0])
+            for private in ("PRIVATE", "TOKEN", "8192", "Invalid args", "echoed_payload"):
+                self.assertNotIn(private, logs.output[0])
+            session.put.assert_called_once_with("/v0/asks/123/", json=original)
+            self.assertIs(session.put.call_args.kwargs["json"], payload)
+            self.assertEqual(payload, original)
+
+    def test_nested_unknown_message_shapes_never_log_values_or_authorize_allocation_proof(self):
+        data = {"success": False, "error": "invalid_args", "msg": {"message": "PRIVATE"},
+                "message": ["Invalid args: len(args) > 8192"], "detail": "Bearer PRIVATE"}
+        with self.assertLogs(safety._logger, level="WARNING") as logs:
+            with self.assertRaises(safety.VastSafeReject):
+                safety.create_instance_once(NS(put=Mock(return_value=response(400, data))), 123, {"args": "PRIVATE"})
+        self.assertIn("field=unknown reason=unspecified", logs.output[0])
+        self.assertIn("msg_type=object msg_length=None message_type=array message_length=None", logs.output[0])
+        self.assertNotIn("PRIVATE", logs.output[0])
+        self.assertNotIn("8192", logs.output[0])
+        # A flat error detail is diagnostic text, never a new trusted refusal code.
+        for field in ("error", "message"):
+            unproven = {"success": False, field: "Invalid args: len(args) > 8192"}
+            with self.subTest(field=field), patch.object(safety._logger, "warning") as log:
+                with self.assertRaises(safety.VastAllocationUnknown):
+                    safety.create_instance_once(NS(put=Mock(return_value=response(400, unproven))), 123, {})
+                log.assert_not_called()
 
     def test_rejected_create_logs_no_body_or_payload_and_preserves_original_proof(self):
         for message, expected in [

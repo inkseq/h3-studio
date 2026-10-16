@@ -88,10 +88,10 @@ def _invalid_args_diagnostic(message):
     unspecified = (None, "unknown", "unspecified")
     if not isinstance(message, str) or len(message) > 2048:
         return unspecified
-    match = re.fullmatch(r"error 400/([1-9][0-9]{0,8}): ([^\r\n]{1,1900})", message)
+    match = re.fullmatch(r"(?:error 400/([1-9][0-9]{0,8}): )?([^\r\n]{1,1900})", message)
     if match is None:
         return unspecified
-    subcode, detail = int(match[1]), match[2]
+    subcode, detail = int(match[1]) if match[1] else None, match[2]
     if not detail.startswith("Invalid args: "):
         return subcode, "unknown", "unspecified"
     detail = detail[len("Invalid args: "):]
@@ -102,13 +102,44 @@ def _invalid_args_diagnostic(message):
     return subcode, "unknown", "unspecified"
 
 
-def _log_invalid_args(ask_id, data):
+def _field_shape(data, name):
+    if name not in data:
+        return "missing", None
+    value = data[name]
+    kind = {str: "string", list: "array", dict: "object", bool: "boolean",
+            int: "number", float: "number", type(None): "null"}.get(type(value), "other")
+    return kind, len(value) if type(value) is str else None
+
+
+def _argument_sizes(payload):
+    args = payload.get("args") if type(payload) is dict else None
+    values = [args] if type(args) is str else args if type(args) is list else None
+    if values is None or any(type(value) is not str for value in values):
+        return None, None, None
     try:
-        subcode, field, reason = _invalid_args_diagnostic(data.get("msg"))
+        sizes = [len(value.encode("utf-8")) for value in values]
+    except UnicodeEncodeError:
+        return len(values), None, None
+    return len(values), sum(sizes), max(sizes, default=0)
+
+
+def _log_invalid_args(ask_id, data, payload):
+    try:
+        diagnostics = [_invalid_args_diagnostic(data.get(name)) for name in ("msg", "message", "detail", "error")]
+        subcode, field, reason = next((value for value in diagnostics if value[1] != "unknown"),
+                                     next((value for value in diagnostics if value[0] is not None), diagnostics[0]))
+        count, total, maximum = _argument_sizes(payload)
+        args_type, _ = _field_shape(payload if type(payload) is dict else {}, "args")
         _logger.warning(
             "sixnine_vast_create_rejected ask_id=%s http_status=400 "
-            "error_code=invalid_args provider_subcode=%s field=%s reason=%s",
+            "error_code=invalid_args provider_subcode=%s field=%s reason=%s "
+            "args_type=%s args_count=%s args_total_bytes=%s args_max_bytes=%s "
+            "msg_type=%s msg_length=%s message_type=%s message_length=%s "
+            "detail_type=%s detail_length=%s error_type=%s error_length=%s",
             ask_id, subcode, field, reason,
+            args_type, count, total, maximum,
+            *_field_shape(data, "msg"), *_field_shape(data, "message"),
+            *_field_shape(data, "detail"), *_field_shape(data, "error"),
         )
     except Exception:
         pass  # Logging cannot turn a proven rejection into an unknown mutation.
@@ -220,7 +251,7 @@ def create_instance_once(session, bundle_id, payload):
         if code is not None:
             outcome = {**unknown, "code": code, "outcome": "rejected"}
             if status == 400 and code == "invalid_args":
-                _log_invalid_args(ask_id, data)
+                _log_invalid_args(ask_id, data, payload)
             if status == 429:
                 delay = _delay(response)
                 _record_rate_limit(response, delay)
