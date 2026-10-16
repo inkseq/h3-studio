@@ -170,11 +170,11 @@ def apply_action(project, action, resolved=None):
             if operation == "move":
                 shot.update(parentId=parent["id"], order=order + index)
             else:
-                if "storyboard" not in shot["data"]:
-                    recipe = shot["data"].get("h3", {}).get("recipeId", "h3-fl2v")
-                    from .capabilities import RECIPES
-                    shot["data"]["storyboard"] = {"version": 1, "mode": RECIPES.get(recipe, "fl")}
-                shot["data"]["storyboard"]["quality"] = operation
+                if "storyboard" in shot["data"]:
+                    shot["data"]["storyboard"]["quality"] = operation
+                else:
+                    # A label must not opt an exact/legacy recipe into compilation.
+                    shot["data"]["qualityIntent"] = operation
             shot["version"] += 1
         return
     if op != "storyboard.fork_profile":
@@ -295,13 +295,25 @@ class StoryboardVersions:
         for shot in (e for e in project["entities"] if e["type"] == "shot"):
             data = shot["data"]
             scene = lookup.get(shot.get("parentId"), {}).get("data", {})
-            ids = {v.get("characterId") if isinstance(v, dict) else v for v in data.get("cast", scene.get("cast", []))}
-            ids.add(data.get("locationId", scene.get("locationId")))
-            sb = data.get("storyboard", {})
-            if sb.get("place"):
-                ids.add(sb["place"].get("locationId"))
-            ids.update(sb.get("propIds", []))
-            ids.update(v["source"] for v in project["links"] if v["target"] == shot["id"])
+            sb = data.get("storyboard")
+            if sb is not None:
+                bindings = data.get("cast", scene.get("cast", []))
+                ids = {v.get("characterId") if isinstance(v, dict) else v for v in bindings}
+                place = sb.get("place")
+                if "place" not in sb:
+                    place = {"locationId": data.get("locationId") or scene.get("locationId")}
+                if place:
+                    ids.add(place.get("locationId"))
+                ids.update(sb.get("propIds", []))
+            elif data.get("h3", {}).get("explicitReferences"):
+                ids = set()  # Historical provenance is not a live profile binding.
+            else:
+                bindings = list(data.get("cast", []))
+                if not data.get("h3", {}).get("explicitCast"):
+                    bindings += scene.get("cast", [])
+                ids = {v.get("characterId") if isinstance(v, dict) else v for v in bindings}
+                ids.add(data.get("locationId") or scene.get("locationId"))
+                ids.update(v["source"] for v in project["links"] if v["target"] == shot["id"])
             for ident in ids & usage.keys():
                 usage[ident].append(shot["id"])
         return {"project_id": project_id, "project_version": record["version"], "usage_scope": "project",

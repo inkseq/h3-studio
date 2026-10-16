@@ -58,6 +58,26 @@ class StoryboardVersionTests(unittest.TestCase):
             self.assertEqual(conn.execute(select(func.count()).select_from(jobs)).scalar_one(), 1)
             self.assertEqual(conn.execute(select(func.count()).select_from(budget_reservations)).scalar_one(), 0)
 
+    def test_profile_usage_honors_explicit_storyboard_bindings_and_restored_mode(self):
+        from types import SimpleNamespace
+        from studio_platform.storyboard_versions import StoryboardVersions
+        profiles = [{'id':i,'type':kind,'title':i,'data':{}} for i,kind in
+            [('hero','character'),('old-place','location'),('new-place','location')]]
+        scene = {'id':'scene','type':'scene','data':{'cast':['hero'],'locationId':'old-place'}}
+        def shot(ident, data):
+            return {'id':ident,'type':'shot','parentId':'scene','data':data}
+        project = {'entities':profiles+[scene,
+            shot('cleared',{'cast':[],'storyboard':{'place':None}}),
+            shot('explicit',{'cast':[],'storyboard':{'place':{'locationId':'new-place'}}}),
+            shot('inherited',{'storyboard':{}}),
+            shot('restored',{'h3':{'explicitReferences':True},'cast':['hero'],'locationId':'old-place'})],
+            'links':[]}
+        service = object.__new__(StoryboardVersions)
+        service.access = SimpleNamespace(project=lambda *args:{'payload':project,'version':1})
+        result = service.profiles(None, 'project')
+        usage = {p['id']:p['shot_ids'] for p in result['profiles']}
+        self.assertEqual(usage, {'hero':['inherited'],'old-place':['inherited'],'new-place':['explicit']})
+
     def current(self):
         return self.client.get('/v1/projects/story-one').json()
 
@@ -115,6 +135,11 @@ class StoryboardVersionTests(unittest.TestCase):
             version=self.current()['version']).raise_for_status()
         self.edit([{'op':'storyboard.restore','shot_id':'shot-one','artifact_id':artifact}],
             version=self.current()['version']).raise_for_status()
+        self.edit([{'op':'storyboard.bulk','shot_ids':['shot-one'],'operation':'final'}],
+            version=self.current()['version']).raise_for_status()
+        restored_shot = next(e for e in self.current()['project']['entities'] if e['id']=='shot-one')
+        self.assertNotIn('storyboard', restored_shot['data'])
+        self.assertEqual(restored_shot['data']['qualityIntent'], 'final')
         restored = self.client.get('/v1/projects/story-one/shots/shot-one/generation-draft').json()['draft']
         self.assertEqual(restored, original_recipe)
         next_plan = self.preflight('restored-plan', copies=1).json()['items'][0]['plan']
