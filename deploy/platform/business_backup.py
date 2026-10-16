@@ -64,8 +64,10 @@ def docker(args, *, timeout=30):
     return r.stdout.decode()
 
 def validate_config(value, host):
-    require(type(value) is dict and set(value) == {'version', 'environment', 'instance_id', 'target'}, 'backup_config_fields')
-    require(type(value['version']) is int and value['version'] == 1 and value['environment'] in HOSTS
+    require(type(value) is dict and type(value.get('version')) is int and value['version'] in (1, 2), 'backup_config_fields')
+    fields = {'version', 'environment', 'instance_id', 'target'} | ({'allow_missing_media'} if value['version'] == 2 else set())
+    require(set(value) == fields and (value['version'] == 1 or value['allow_missing_media'] is True), 'backup_config_fields')
+    require(type(value['version']) is int and value['version'] in (1, 2) and value['environment'] in HOSTS
         and value['instance_id'] == host == HOSTS[value['environment']], 'backup_host_mismatch')
     t = value['target']
     require(type(t) is dict and set(t) == {'account_id', 'region', 'bucket', 'kms_key_arn', 'role_arn'}, 'backup_target_fields')
@@ -75,6 +77,20 @@ def validate_config(value, host):
     require(re.fullmatch(r'arn:aws:kms:ap-southeast-1:829135631045:key/[0-9a-f-]{36}', t['kms_key_arn']), 'backup_key')
     require(re.fullmatch(r'arn:aws:iam::829135631045:role/[A-Za-z0-9/+=,.@_-]+', t['role_arn']), 'backup_role')
     return value
+
+def coverage(value):
+    c = value.get('coverage')
+    if value.get('version', 1) == 1 and value.get('format', 'sixnine-private-backup-copy-v1') == 'sixnine-private-backup-copy-v1':
+        require(c is None, 'backup_coverage_invalid'); return {}
+    fields = {'status','referenced_objects','available_objects','missing_objects','referenced_bytes','available_bytes','missing_bytes'}
+    require(type(c) is dict and set(c) == fields and all(type(c[k]) is int and c[k] >= 0 for k in fields-{'status'}), 'backup_coverage_invalid')
+    require(c['referenced_objects'] == c['available_objects']+c['missing_objects'] and c['referenced_bytes'] == c['available_bytes']+c['missing_bytes']
+        and c['status'] == ('incomplete' if c['missing_objects'] else 'complete') and (c['missing_objects']==0)==(c['missing_bytes']==0), 'backup_coverage_invalid')
+    if 'objects' in value or 'bytes' in value:
+        require(type(value.get('objects')) is int and type(value.get('bytes')) is int
+            and c['available_objects'] == value['objects'] and c['available_bytes'] <= value['bytes'], 'backup_coverage_invalid')
+    return {'coverage': c}
+
 
 def copy_receipt(path, target):
     for p in [path, *path.parents]:
@@ -87,10 +103,11 @@ def copy_receipt(path, target):
         require(stat.S_ISREG(s.st_mode) and s.st_nlink == 1 and s.st_size <= 16384, 'backup_receipt_invalid')
         value = json.loads(f.read(16385))
     require(set(value) == {'format', 'target', 'phase', 'completion_version_id', 'completion_sha256',
-        'completion_bytes', 'snapshot_manifest_sha256', 'objects', 'bytes', 'restore_verified'}, 'backup_receipt_fields')
-    require(value['target'] == target and value['format'] == 'sixnine-private-backup-copy-v1'
+        'completion_bytes', 'snapshot_manifest_sha256', 'objects', 'bytes', 'restore_verified'} | set(coverage(value)), 'backup_receipt_fields')
+    require(value['target'] == target and value['format'] in ('sixnine-private-backup-copy-v1', 'sixnine-private-backup-copy-v2')
         and value['phase'] == 'copied_not_restored' and value['restore_verified'] is False, 'backup_completion_mismatch')
-    require(all(type(value[k]) is int and value[k] > 0 for k in ('objects','bytes','completion_bytes'))
+    require(all(type(value[k]) is int and value[k] > 0 for k in ('bytes','completion_bytes'))
+        and type(value['objects']) is int and value['objects'] >= (0 if value['format'].endswith('-v2') else 1)
         and all(isinstance(value[k],str) and re.fullmatch('[0-9a-f]{64}', value[k])
             for k in ('completion_sha256','snapshot_manifest_sha256'))
         and isinstance(value['completion_version_id'], str) and 1 <= len(value['completion_version_id']) <= 1024,
@@ -148,11 +165,16 @@ def check_history(directory, day):
         need = prior/'completed.json'
         require(need.exists(), 'backup_prior_outcome_requires_reconciliation')
         value = read(need)
-        require(value.get('version') == 1 and value.get('day') == prior.name
+        require(type(value.get('version')) is int and value['version'] in (1, 2) and value.get('day') == prior.name
             and all(isinstance(value.get(k), str) and re.fullmatch('[0-9a-f]{64}', value[k])
                 for k in ('completion_sha256', 'receipt_sha256')),
             'backup_prior_receipt_invalid')
+        coverage(value)
     return (directory/day).exists()
+
+def completed_summary(operation, day):
+    return {'state': 'already_completed', 'day': day, **coverage(read(operation/'completed.json'))}
+
 
 def run():
     require(os.geteuid() == 0, 'backup_root_required')
@@ -175,7 +197,7 @@ def run():
         # A previous unknown transfer blocks new prefixes: reconciliation first.
         operation = STATE/day
         if check_history(STATE, day):
-            return {'state': 'already_completed', 'day': day}
+            return completed_summary(operation, day)
         require(shutil.disk_usage(ROOT).free >= 5*1024**3, 'backup_disk_reserve_required')
         ids = docker(['ps', '--quiet', '--filter', 'label=com.docker.compose.project=sixnine-platform',
             '--filter', 'label=com.docker.compose.service=app']).split()
@@ -188,7 +210,7 @@ def run():
             and m['Type'] == 'bind' for m in app['mounts']), 'backup_data_mount_mismatch')
         nonce = str(uuid.uuid4())
         new_directory(operation)
-        record(operation/'intent.json', {'version': 1, 'day': day, 'commit': commit, 'image': image,
+        record(operation/'intent.json', {'version': cfg['version'], 'day': day, 'commit': commit, 'image': image,
             'operation_id': nonce, 'automatic_retry': False})
         snapshot_host = ROOT/'platform-data'/'business-backups'/nonce
         snapshot_container = '/data/business-backups/'+nonce
@@ -196,7 +218,7 @@ def run():
         docker(['exec', ids[0], 'python', '-B', '-c',
             "from pathlib import Path;p=Path('/data/business-backups');p.mkdir(mode=0o700,exist_ok=True);assert p.is_dir() and not p.is_symlink()"])
         docker(['exec', ids[0], 'python', '-B', '-m', 'studio_platform.backup_cli', 'configured',
-            '--destination', snapshot_container], timeout=900)
+            '--destination', snapshot_container] + (['--allow-missing-media'] if cfg['version'] == 2 else []), timeout=900)
         # Private handoff: cp without -L retains symlinks, which are rejected.
         # The app cannot replace this root-controlled transport mount source.
         snapshot_host = operation/'snapshot'
@@ -213,19 +235,20 @@ def run():
         name = 'inkseq-backup-transfer-'+nonce
         docker(transport(image, name, [(snapshot_host, '/snapshot', True),
             (operation/'target.json', '/target.json', True), (transfer, '/output', False)],
-            ['copy', '--execute', '--target', '/target.json', '--backup', '/snapshot', '--receipts', '/output/transfer']), timeout=1800)
+            ['copy', '--execute', '--target', '/target.json', '--backup', '/snapshot', '--receipts', '/output/transfer'] + (['--allow-incomplete'] if cfg['version'] == 2 else [])), timeout=1800)
         receipt = copy_receipt(transfer/'transfer'/'completion.json', target)
+        require(receipt['format'] == 'sixnine-private-backup-copy-v'+str(cfg['version']), 'backup_coverage_config_mismatch')
         record(operation/'receipt.json', receipt)
         (operation/'receipt.json').chmod(0o644)  # Nonsecret hash/version/target identities only.
-        record(operation/'completed.json', {'version': 1, 'day': day, 'commit': commit,
+        record(operation/'completed.json', {'version': cfg['version'], 'day': day, 'commit': commit,
             'completion_sha256': receipt['completion_sha256'], 'completion_version_id': receipt['completion_version_id'],
             'receipt_sha256': hashlib.sha256((operation/'receipt.json').read_bytes()).hexdigest(),
-            'restore_verified': False})
-        return {'state': 'copied_not_restored', 'day': day}
+            'restore_verified': False, **coverage(receipt)})
+        return {'state': 'copied_not_restored', 'day': day, **coverage(receipt)}
     finally:
         os.close(lockfd)
 
-def restore(day):
+def restore(day, *, allow_incomplete=False):
     """Explicit recovery drill: remote pinned versions to a new private copy.
 
     No database credentials, app data mount, API/worker or live writes. Retain
@@ -245,6 +268,8 @@ def restore(day):
         and receipt['completion_version_id'] == complete['completion_version_id']
         and receipt['target'] == target and target == {**cfg['target'], 'prefix': 'business-backups/'+intent['operation_id']},
         'restore_receipt_identity_mismatch')
+    require(type(allow_incomplete) is bool and (allow_incomplete or coverage(complete).get('coverage', {}).get('status') != 'incomplete'), 'restore_incomplete_requires_explicit_opt_in')
+    require(coverage(complete) == coverage(receipt), 'restore_coverage_mismatch')
     commit = intent['commit']; directory = ROOT/'releases'/commit
     require(re.fullmatch('[0-9a-f]{40}', commit), 'restore_commit_invalid')
     release.approved_manifest(ROOT, directory, commit)
@@ -259,15 +284,15 @@ def restore(day):
     docker(transport(intent['image'], 'inkseq-backup-restore-'+day, [
         (operation/'target.json','/target.json',True), (operation/'receipt.json','/receipt.json',True),
         (output,'/output',False)], ['restore','--execute','--target','/target.json','--receipt','/receipt.json',
-        '--download','/output/download','--destination','/output/restored']), timeout=1800)
+        '--download','/output/download','--destination','/output/restored'] + (['--allow-incomplete'] if allow_incomplete else [])), timeout=1800)
     record(destination/'completed.json', {'state':'verified_isolated_restore', 'day':day,
-        'receipt_sha256':complete['receipt_sha256'], 'live_database_used':False, 'execution_enabled':False})
-    return {'state':'verified_isolated_restore','day':day,'execution_enabled':False}
+        'receipt_sha256':complete['receipt_sha256'], 'live_database_used':False, 'execution_enabled':False, **coverage(complete)})
+    return {'state':'verified_isolated_restore','day':day,'execution_enabled':False, **coverage(complete)}
 
 if __name__ == '__main__':
     try:
-        require(len(sys.argv) == 1 or len(sys.argv) == 3 and sys.argv[1] == '--restore-day', 'backup_fixed_invocation_required')
-        print(json.dumps(run() if len(sys.argv) == 1 else restore(sys.argv[2])))
+        require(len(sys.argv) == 1 or len(sys.argv) in (3, 4) and sys.argv[1] == '--restore-day' and (len(sys.argv) == 3 or sys.argv[3] == '--allow-incomplete'), 'backup_fixed_invocation_required')
+        print(json.dumps(run() if len(sys.argv) == 1 else restore(sys.argv[2], allow_incomplete=len(sys.argv) == 4)))
     except Exception:
         print('{"state":"backup_failed_or_unknown","automatic_retry":false}', file=sys.stderr)
         raise SystemExit(1) from None

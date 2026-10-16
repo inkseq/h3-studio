@@ -553,3 +553,5 @@ inventory.json
 !deploy/dstack/native-retention.json
 !tools/restore_native_sources.py
 !test_restore_native_sources.py
+
+!test_backup_incomplete_coverage.py

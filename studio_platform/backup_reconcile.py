@@ -11,7 +11,7 @@ import json
 import re
 import time
 
-from .backup_remote import (FORMAT, MAX_JSON, MIB, RemoteBackupError, _check,
+from .backup_remote import (FORMAT, FORMAT_V2, coverage_fields, MAX_JSON, MIB, RemoteBackupError, _check,
     _completion, _preflight, _read, _version, canonical, need, sha)
 
 RECONCILE_FORMAT = 'sixnine-private-backup-reconciliation-v1'
@@ -39,8 +39,9 @@ def _json(data):
 
 def validate_intent(target, intent):
     """Strict local validation before any cloud read or client initialization."""
-    need(isinstance(intent,dict) and set(intent)==INTENT_KEYS
-         and intent['format']==FORMAT and intent['target']==asdict(target)
+    coverage=coverage_fields(intent)
+    need(isinstance(intent,dict) and set(intent)==INTENT_KEYS | set(coverage)
+         and intent['format'] in (FORMAT, FORMAT_V2) and intent['target']==asdict(target)
          and intent['phase']=='before_remote_write'
          and isinstance(intent['operation_id'],str)
          and re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}',intent['operation_id'])
@@ -60,12 +61,13 @@ def validate_intent(target, intent):
     size=32768+len(canonical(intent))
     for v in files:size+=len(canonical({**v,'version_id':'\\'*1024}))+1
     need(size<=MAX_JSON,'backup_reconcile_evidence_limit')
-    return {k:intent[k] for k in PLAN_KEYS}
+    return {k:intent[k] for k in PLAN_KEYS | set(coverage)}
 
 
 def validate_receipt(target, intent, receipt):
     if receipt is None:return
-    need(isinstance(receipt,dict) and set(receipt)==TRANSFER_KEYS and receipt['format']==FORMAT
+    need(isinstance(receipt,dict) and set(receipt)==TRANSFER_KEYS | set(coverage_fields(intent)) and receipt['format']==intent['format']
+         and coverage_fields(receipt)==coverage_fields(intent)
          and receipt['phase']=='copied_not_restored' and receipt['target']==asdict(target)
          and receipt['snapshot_manifest_sha256']==intent['snapshot_manifest_sha256']
          and type(receipt['objects']) is int and receipt['objects']==intent['objects']
@@ -136,7 +138,7 @@ def reconcile_copy(target,intent,*,client,receipt=None):
         return result
     try:
         _preflight(client,target)
-        claim=canonical({'format':FORMAT,'operation_id':intent['operation_id'],
+        claim=canonical({'format':intent['format'],'operation_id':intent['operation_id'],
                          'snapshot_manifest_sha256':snapshot,'target':asdict(target)})
         observed=_current(client,target,'claim.json',snapshot,
                           expected={'size_bytes':len(claim),'sha256':sha(claim)})
@@ -154,21 +156,23 @@ def reconcile_copy(target,intent,*,client,receipt=None):
             completed={'version_id':version,**expected,'value':_json(output.getvalue())}
         if completed is not None:
             value=completed['value']
-            need(isinstance(value,dict) and set(value)==INTENT_KEYS
+            need(isinstance(value,dict) and set(value)==INTENT_KEYS | set(coverage_fields(intent))
                  and value.get('operation_id')==intent['operation_id'],
                  'backup_reconcile_completion_operation_mismatch')
             files=_completion(value,target,snapshot)
-            proposed={k:value[k] for k in PLAN_KEYS}
+            proposed={k:value[k] for k in PLAN_KEYS | set(coverage_fields(intent))}
             proposed['files']=[{k:v for k,v in item.items() if k!='version_id'} for item in files]
             need(canonical(proposed)==canonical(plan),'backup_reconcile_completion_inventory_mismatch')
             result['observed_completion']={k:completed[k] for k in ('version_id','size_bytes','sha256')}
             for item in files:
                 _read(client,target,item['name'],item,snapshot,version=item['version_id'])
                 result['verified_files'].append(dict(item))
-            transfer=dict(format=FORMAT,target=asdict(target),phase='copied_not_restored',
+            transfer=dict(format=intent["format"],target=asdict(target),phase='copied_not_restored',
                 completion_version_id=completed['version_id'],completion_sha256=completed['sha256'],
                 completion_bytes=completed['size_bytes'],snapshot_manifest_sha256=snapshot,
                 objects=intent['objects'],bytes=intent['bytes'],restore_verified=False)
+            transfer.update(coverage_fields(intent))
+            result.update(coverage_fields(intent))
             result.update(classification='complete',code='backup_copy_complete_bytes_verified',transfer_receipt=transfer)
             return finish()
         for item in plan['files']:
