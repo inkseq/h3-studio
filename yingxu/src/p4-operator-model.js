@@ -4,9 +4,9 @@ export {dstackProvider};
 export const modeLabel=mode=>mode==='both'?'FL / REF · 可切换':dstackMode(mode);
 export const finite=value=>typeof value==='number'&&Number.isFinite(value);
 // Readback renders can occur after the timer tick which began the request.
-// Compare observations with the current clock, retaining age/future guards.
+// Allow small server/client clock skew, retaining the age and future guards.
 export function workspaceStale(snapshot,now=Date.now()){
-  return !!snapshot&&(!finite(snapshot.observed_at)||!finite(now)||now-snapshot.observed_at*1000>30000||now<snapshot.observed_at*1000);
+  return !!snapshot&&(!finite(snapshot.observed_at)||!finite(now)||now-snapshot.observed_at*1000>30000||snapshot.observed_at>(now+5000)/1000);
 }
 export const money=value=>finite(value)?'$'+(value/1e6).toFixed(value<100000?3:2):'—';
 export const time=value=>finite(value)?new Date(value*1000).toLocaleString('zh-CN'):'—';

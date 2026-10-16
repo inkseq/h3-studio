@@ -20,7 +20,7 @@ test('live workspace reads require identity and arrays instead of dummy zero mac
   await assert.rejects(api.state(),/尚未确认/);await assert.rejects(api.state(),/尚未确认/);assert.equal((await api.state()).nodes[0].id,'original');
 });
 
-test('workspace freshness uses the response readback clock while preserving aged and future guards',async context=>{
+test('workspace freshness tolerates bounded clock skew while preserving aged and invalid observations',async context=>{
   let clock=1000000,resolve;
   context.mock.method(Date,'now',()=>clock);
   const controller=createP4OperatorController({storage:memory(),client:client({state:()=>new Promise(done=>{resolve=done;})})});
@@ -29,12 +29,17 @@ test('workspace freshness uses the response readback clock while preserving aged
   resolve({operator:{account:'superdan'},observed_at:(tick+100)/1000,nodes:[],groups:[],queue:[]});
   await initial;
   const snapshot=controller.getState().snapshot;
-  assert.equal(workspaceStale(snapshot,tick),true,'the request-start timer predates the valid observation');
+  assert.equal(workspaceStale(snapshot,tick),false,'a small server/client clock difference does not disable the workspace');
   assert.equal(workspaceStale(snapshot),false,'the returned state is fresh at rendering time');
-  clock=snapshot.observed_at*1000+30001;
+  clock=snapshot.observed_at*1000+30000;
+  assert.equal(workspaceStale(snapshot),false,'the existing30-second freshness boundary is retained');
+  clock++;
   assert.equal(workspaceStale(snapshot),true,'an old readback does not stay actionable');
-  assert.equal(workspaceStale({...snapshot,observed_at:(clock+1)/1000}),true,'future observations remain rejected');
+  assert.equal(workspaceStale({...snapshot,observed_at:(clock+5000)/1000}),false,'up to5 seconds of clock skew is accepted');
+  assert.equal(workspaceStale({...snapshot,observed_at:(clock+5001)/1000}),true,'larger future observations remain rejected');
   assert.equal(workspaceStale({...snapshot,observed_at:null}),true);
+  assert.equal(workspaceStale({...snapshot,observed_at:NaN}),true);
+  assert.equal(workspaceStale(snapshot,Infinity),true);
   assert.equal(workspaceStale(null),false);
   controller.destroy();
 });
