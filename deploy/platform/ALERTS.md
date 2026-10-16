@@ -6,13 +6,24 @@ loopback counters, and `python -m studio_platform.alert_snapshot` inside the
 existing app container. It never calls a provider, rents/stops capacity, changes
 a job, hydrates secrets, or runs another business database. The evaluator is the
 stdlib-only `studio_platform/alert_conditions.py` installed as `alert_conditions.py`
-next to `alert_monitor.py` and the existing `deployment_target.py`.
+next to `alert_monitor.py` in `/opt/inkseq-alert-monitor-v1`.
 
 Install reviewed exact source bytes and units through the protected host update
-procedure. The provided unit uses the existing `/opt/inkseq-release-staging-v1`
-helper root; verify the actual approved host root before installing. No timer is
-enabled by adding these source files. Install unit/timer files root-owned mode
-0644 and helper files with root-controlled permissions. Accept staging before production.
+procedure. This independent root-owned directory contains exactly
+`alert_monitor.py`, `alert_conditions.py`, and `deployment_target.py`. Copy
+`deployment_target.py` byte-for-byte from the accepted release revision; record
+and compare its SHA-256 with the approved host helper before installation. It
+uses the existing protected host target record and contains no credentials.
+Do not add monitor files to the release helper directory: its exact file closure
+is an independent release protection. Neither installation nor future monitor
+updates change that helper closure or its active marker.
+
+Install the directory root-owned mode 0755, all three Python files root-owned
+mode 0644, and unit/timer files root-owned mode 0644. No parent may be writable
+by a non-root user. The unit runs Python with `-B`, so the directory stays
+read-only without bytecode writes. No timer is enabled by adding these source
+files. Accept staging before production using the same reviewed monitor bytes
+and an environment-specific protected configuration.
 
 ## Protected configuration
 
