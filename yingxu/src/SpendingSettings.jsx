@@ -49,7 +49,7 @@ export default function SpendingSettings({account}){
     finally{if(current===epoch.current)setBusy(false);}
   }
   const field=(label,value,onChange)=><label className="spending-field"><span>{t(label)}</span><input inputMode="decimal" value={value} disabled={busy} onChange={event=>onChange(event.target.value)}/></label>;
-  return <main className="spending-page"><header><a href="/quick-chat">{t('settings.back')}</a><LanguageSwitcher/></header><h1>{t('settings.title')}</h1>
+  return <main className="spending-page"><header><a href="/quick-chat">{t('settings.back')}</a><LanguageSwitcher/></header><h1>{t('settings.title')}</h1><p><a href="/quick-chat?preferences=takes">{t('takes.preferences')}</a></p>
     {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{t(notice)}</p>}
     {!user||!draft?<p role="status">{busy?t('settings.loading'):t('settings.login')}</p>:<>
       <form onSubmit={event=>{event.preventDefault();void save();}}><section aria-labelledby="budget-settings-title"><h2 id="budget-settings-title">{t('settings.budget')}</h2>

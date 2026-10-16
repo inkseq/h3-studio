@@ -19,7 +19,7 @@ function ProfileInputBoundary({support}){
   if(!support?.input_notes&&!support?.joint_cases?.length)return null;
   return <section className="qc-profile-boundary"><strong>{t('workspace.copy72')}</strong>{support.input_notes&&<p className="qc-muted">{support.input_notes}</p>}{support.joint_cases?.length>0&&<ul className="qc-muted">{support.joint_cases.map((item,index)=><li key={index}>{t('chatControls.copy29',{width:item.width,height:item.height,steps:item.steps,frames:item.frames})}{item.input_roles?.length?item.input_roles.map(role=>roles[role]||role).join(' ＋ '):t('chatControls.copy6')}</li>)}</ul>}<p className="qc-muted">{t('workspace.copy135')}</p></section>;
 }
-export default function QuickChatControls({capabilities,settings,bindings=[],cardPrompt,scope='next',modeIntent,busy=false,onSave,onClose,onEditMaterials,availability,operator=false,onRefreshAvailability,availabilityChecking=false}){
+export default function QuickChatControls({capabilities,settings,copiesMax=4,bindings=[],cardPrompt,scope='next',modeIntent,busy=false,onSave,onClose,onEditMaterials,availability,operator=false,onRefreshAvailability,availabilityChecking=false}){
   const {t,locale}=useI18n();
   const [draft,setDraft]=useState(()=>clone(settings)),[prompt,setPrompt]=useState(cardPrompt||''),[error,setError]=useState(''),[pendingMode,setPendingMode]=useState(null);
   const recipe=recipeFor(capabilities,draft),schema=effectiveControlSchema(recipe);
@@ -44,8 +44,8 @@ export default function QuickChatControls({capabilities,settings,bindings=[],car
   async function save(event){
     event.preventDefault();if(pendingMode){setError(t('chatControls.copy8'));return;}
     if(recipe?.mode!==recipeFor(capabilities,settings)?.mode){try{requireModeAvailable(availability,capabilities,draft);}catch(error){setError(error.message);return;}}
-    const problems=settingsProblems(draft,recipe);if(scope==='card'&&!prompt.trim())problems.unshift(t('chatControls.copy9'));
-    if(problems.length){setError(problems.join(' '));return;}setError('');
+    const problems=settingsProblems(draft,recipe,copiesMax);if(scope==='card'&&!prompt.trim())problems.unshift(t('chatControls.copy9'));
+    if(problems.length){setError(problems.map(problem=>problem.startsWith('takes.')?t(problem):problem).join(' '));return;}setError('');
     try{await onSave(draft,prompt,{modeIntent:mode});onClose();}catch(err){setError(err.message||t('chatControls.copy10'));}
   }
   const allGroups=new Set(CONTROL_GROUPS.flatMap(([,names])=>names));
@@ -67,7 +67,7 @@ export default function QuickChatControls({capabilities,settings,bindings=[],car
           {duration&&(duration.type==='integer'&&Number.isInteger(duration.minimum)&&Number.isInteger(duration.maximum)&&duration.maximum-duration.minimum<60?<label className="qc-field"><span>{t('workspace.copy80')}</span><select aria-label={t('workspace.copy80')} disabled={duration.available===false} value={draft.controls?.duration??duration.default} onChange={e=>set('duration',Number(e.target.value))}>{Array.from({length:Math.max(0,duration.maximum-duration.minimum+1)},(_,i)=>duration.minimum+i).map(value=><option key={value} value={value}>{t('chatControls.copy28',{value})}</option>)}</select></label>:fields(['duration']))}
           {resolution&&<label className="qc-field"><span>{t('workspace.copy81')}</span><select aria-label={t('workspace.copy81')} value={draft.controls?.resolution??resolution.default} disabled={resolution.available===false} onChange={e=>set('resolution',e.target.value)}>{[...(resolution.enum||[])].sort((a,b)=>parseInt(b)-parseInt(a)).map(value=><option key={value} value={value}>{value==='custom'?t('chatControls.copy22'):value}</option>)}</select></label>}
           {ratio&&<label className="qc-field"><span>{t('workspace.copy82')}</span><select aria-label={t('workspace.copy82')} value={draft.controls?.aspect_ratio??ratio.default} disabled={ratio.available===false} onChange={e=>set('aspect_ratio',e.target.value)}>{['16:9','9:16','1:1','21:9','4:3','3:4',...(ratio.enum||[])].filter((value,index,all)=>all.indexOf(value)===index&&ratio.enum?.includes(value)).map(value=><option key={value} value={value}>{labels[value]||value}</option>)}</select></label>}
-          <label className="qc-field"><span>{t('workspace.copy83')}</span><select aria-label={t('workspace.copy83')} value={draft.copies||1} onChange={e=>setDraft({...draft,copies:Number(e.target.value)})}>{[1,2,3,4].map(n=><option key={n} value={n}>{n}</option>)}</select></label>
+          <label className="qc-field"><span>{t('workspace.copy83')}</span><input type="number" min="1" step="1" max={copiesMax} aria-label={t('workspace.copy83')} value={draft.copies??1} onChange={e=>setDraft({...draft,copies:Number(e.target.value)})}/></label>
         </div>
         {audio&&<label className={'qc-check '+(audio.available===false?'qc-disabled':'')}><input type="checkbox" checked={draft.controls?.generate_audio??audio.default??false} disabled={audio.available===false} onChange={e=>set('generate_audio',e.target.checked)}/>{t('workspace.copy84')}</label>}
         {draft.controls?.resolution==='custom'&&<div className="qc-form-grid">{fields(['width','height'])}<p className="qc-muted">{recipe.custom_canvas_constraints?.description}</p></div>}
