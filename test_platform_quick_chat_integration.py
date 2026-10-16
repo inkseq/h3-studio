@@ -319,12 +319,14 @@ class QuickChatIntegrationTests(LedgerCase):
         self.write(base+"/materials", {"expected_version": session["version"], "bindings": [{
             "binding_id": "first-image", "version": 0, "asset_id": asset["asset_id"],
             "kind": "image", "slot": "first_frame", "enabled": True}]}, "bind-image", method="PUT")
-        saved = self.write(base+"/cards", {"title": "Image motion", "prompt": "A person slowly turns toward the camera.",
-            "recipe_id": "h3-base-fl2va-v1", "controls": {"duration": 5, "resolution": "480P", "seed": "18446744073709551615"},
-            "inputs": {"first_frame": {"asset_id": asset["asset_id"]}}, "copies": 2}, "new-card")
+        with mock.patch("studio_platform.quick_chat.secrets.randbits", return_value=23) as random:
+            saved = self.write(base+"/cards", {"title": "Image motion", "prompt": "A person slowly turns toward the camera.",
+                "recipe_id": "h3-base-fl2va-v1", "controls": {"duration": 5, "resolution": "480P", "seed": "18446744073709551615"},
+                "inputs": {"first_frame": {"asset_id": asset["asset_id"]}}, "copies": 2}, "new-card")
+        random.assert_called_once_with(64)
         revision = saved["revision"]
         seeds = [x["seed"] for x in revision["items"]]
-        self.assertEqual(seeds, ["18446744073709551615", "0"])
+        self.assertEqual(seeds, ["18446744073709551615", "23"])
         path = base+"/revisions/"+revision["id"]
         preflight = self.write(path+"/preflights", {"capabilities_version": VERSION,
             "revision_hash": revision["input_hash"]}, "preflight")
