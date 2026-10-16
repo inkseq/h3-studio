@@ -35,10 +35,6 @@ def deletion_evidence(db, references):
     from .content_lifecycle import reference_ids
     active_assets, active_artifacts = set(), set()
     def retain(value):
-        # Purge preserves immutable IDs inside explicitly redacted job/results
-        # as audit evidence. Those are not active saved-content references.
-        if isinstance(value, dict) and value.get('content_deleted') is True:
-            return
         a, b = reference_ids(value)
         active_assets.update(a); active_artifacts.update(b)
     for row in objects.values():
@@ -46,7 +42,6 @@ def deletion_evidence(db, references):
             retain(row['payload'])
     for table, columns in (('platform_documents', ('payload',)),
             ('platform_plans', ('request', 'execution_plan')),
-            ('platform_jobs', ('request', 'execution_plan', 'result')),
             ('platform_edit_receipts', ('response',))):
         if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
             for values in db.execute('SELECT '+','.join('"'+c+'"' for c in columns)+' FROM "'+table+'"'):
@@ -99,8 +94,6 @@ def deletion_evidence(db, references):
                 tenant, owner, project, deleted, job = sources[ref['table'], ref['id']]
                 if not deleted or owner != item['owner'] or project != ref['project_id']:
                     break
-                if ref['id'] in (active_assets if ref['table'] == 'assets' else active_artifacts):
-                    break
                 kind = {'assets': 'asset', 'artifacts': 'artifact'}[ref['table']]
                 identity = tombstone(tenant, owner, kind, ref['id'])
                 key_proof = tombstone(tenant, owner, 'key', key, binding)
@@ -132,4 +125,23 @@ def deletion_evidence(db, references):
                 result[key] = proofs
         except (KeyError, TypeError, ValueError):
             continue
-    return result
+    # Only the server-redacted original job may retain its own proven-deleted
+    # artifact IDs as audit evidence. User-editable content_deleted flags in
+    # documents, turns or edit receipts never bypass the active census above.
+    audit = {}
+    for proofs in result.values():
+        for proof in proofs:
+            tenant, owner, project, _, job = sources[proof['table'], proof['id']]
+            if job is not None:
+                audit.setdefault((tenant, owner, project, job), set()).add(proof['id'])
+    for ident, tenant, owner, project, request, execution, response in db.execute(
+            'SELECT id,tenant_id,owner_id,project_id,request,execution_plan,result FROM platform_jobs'):
+        request, execution, response = (json.loads(v) if v is not None else None for v in (request, execution, response))
+        allowed = audit.get((tenant, owner, project, ident), set()) if request == {'content_deleted': True} else set()
+        retain(request)
+        for value, eligible in ((execution, True), (response, isinstance(response, dict) and response.get('content_deleted') is True)):
+            a, b = reference_ids(value)
+            active_assets.update(a)
+            active_artifacts.update(b - allowed if eligible else b)
+    return {key: proofs for key, proofs in result.items() if all(
+        p['id'] not in (active_assets if p['table'] == 'assets' else active_artifacts) for p in proofs)}

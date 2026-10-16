@@ -35,8 +35,8 @@ class ExpectedDeletionTests(unittest.TestCase):
                 spec['content_deleted'] = True
                 db.execute('UPDATE platform_artifacts SET metadata=? WHERE id=?', (json.dumps(spec), ident))
                 # Actual purge keeps audit IDs in the redacted job result.
-                db.execute('UPDATE platform_jobs SET result=? WHERE id=?',
-                    (json.dumps({'content_deleted': True, 'artifact_id': ident}), self.job['id']))
+                db.execute('UPDATE platform_jobs SET request=?,result=? WHERE id=?',
+                    (json.dumps({'content_deleted': True}), json.dumps({'content_deleted': True, 'artifact_id': ident}), self.job['id']))
                 binding = json.loads(db.execute('SELECT record FROM platform_artifact_write_receipts').fetchone()[0])['binding']
                 tenant = self.scope.tenant_id; owner = 'superdan'; action_id = 'history-proof'
                 object_spec = dict(object_key=self.missing_key, size_bytes=spec['size_bytes'], sha256=spec['sha256'],
@@ -97,6 +97,9 @@ class ExpectedDeletionTests(unittest.TestCase):
             'active_same_key': lambda db,p,s,a,i:db.execute('UPDATE platform_artifacts SET metadata=? WHERE id=?', (json.dumps({**s,'content_deleted':False}),i)),
             'additional_reference_same_key': lambda db,p,s,a,i:db.execute("INSERT INTO platform_artifacts (id,job_id,attempt_id,created_at,metadata) SELECT '00000000-0000-4000-8000-000000000001',job_id,attempt_id,created_at,? FROM platform_artifacts WHERE id=?", (json.dumps({**s,'content_deleted':False}),i)),
             'active_other_reference': lambda db,p,s,a,i:db.execute("INSERT INTO platform_quick_chat_objects (id,tenant,owner,session_id,kind,parent_id,business_key,version,payload,created_at,updated_at) SELECT 'active-ref',tenant,owner,session_id,'turn',NULL,'active',1,?,1,3 FROM platform_quick_chat_objects WHERE id=?", (json.dumps({'saved_artifact':i}),a)),
+            'editable_flag_cannot_hide_turn': lambda db,p,s,a,i:db.execute("INSERT INTO platform_quick_chat_objects (id,tenant,owner,session_id,kind,parent_id,business_key,version,payload,created_at,updated_at) SELECT 'active-ref',tenant,owner,session_id,'turn',NULL,'active',1,?,1,3 FROM platform_quick_chat_objects WHERE id=?", (json.dumps({'content_deleted':True,'saved_artifact':i}),a)),
+            'editable_flag_cannot_hide_document': lambda db,p,s,a,i:db.execute("UPDATE platform_documents SET payload=?", (json.dumps({'content_deleted':True,'saved_artifact':i}),)),
+            'nonredacted_job_cannot_hide_audit': lambda db,p,s,a,i:db.execute("UPDATE platform_jobs SET request=?", (json.dumps({'content_deleted':True,'prompt':'still-live'}),)),
         }
         # Fresh isolated fixture per case; no modified live or restored source.
         for name, mutation in mutations.items():
