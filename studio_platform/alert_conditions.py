@@ -1,0 +1,179 @@
+"""Pure notification transitions; stdlib only, no task/budget/provider authority.
+
+Persist returned state only as monitor deduplication metadata. Unknown samples
+never resolve an alarm. Delivery/ack persistence belongs to the host publisher.
+"""
+import copy
+import math
+import re
+import uuid
+
+DEFAULTS = {
+    "gpu_max_seconds": 7200, "stuck_seconds": 1800, "wake_count": 10,
+    "cpu_percent": 70, "memory_percent": 85, "host_sustain_seconds": 900,
+    "health_down_seconds": 120, "http_5xx_min": 3, "http_5xx_ratio": .05,
+    "max_sample_gap_seconds": 180,
+}
+CODES = frozenset({"gpu_runtime_exceeded", "gpu_idle_stop_overdue", "test_spend_80",
+    "test_spend_100", "job_stuck", "job_repeated_wake", "host_cpu_sustained",
+    "host_memory_sustained", "host_process_unhealthy", "health_down", "http_5xx_rate", "generation_failure"})
+STATES = frozenset({"waiting_capacity", "queued", "claimed", "submitting", "running",
+    "submission_unknown", "cancel_requested", "collecting", "recovery_hold", "starting", "upstream_status_unknown"})
+
+
+def finite(value):
+    return type(value) in (int, float) and math.isfinite(value)
+
+
+def identity(value):
+    try:
+        return value if isinstance(value, str) and str(uuid.UUID(value)) == value else None
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def _configuration(overrides):
+    if overrides is not None and (not isinstance(overrides, dict) or set(overrides) - set(DEFAULTS)):
+        raise ValueError("alert_thresholds_invalid")
+    config = {**DEFAULTS, **(overrides or {})}
+    if any(not finite(v) or v <= 0 for v in config.values()):
+        raise ValueError("alert_thresholds_invalid")
+    if config["http_5xx_ratio"] > 1 or config["cpu_percent"] > 100 or config["memory_percent"] > 100:
+        raise ValueError("alert_thresholds_invalid")
+    return config
+
+
+def evaluate(snapshot, previous_state, *, environment, now, host=None, thresholds=None):
+    """Return {state, notifications}; caller persists before attempting delivery."""
+    if environment not in {"staging", "production"} or not finite(now) or now < 0:
+        raise ValueError("alert_context_invalid")
+    config = _configuration(thresholds)
+    prior = previous_state or {}
+    if prior and (not isinstance(prior, dict) or prior.get("version") != 1
+                  or prior.get("environment") != environment):
+        raise ValueError("alert_state_invalid")
+    state = copy.deepcopy(prior) if prior else {"version": 1, "environment": environment,
+        "conditions": {}, "seen_failure_kinds": [], "observed_jobs": {}}
+    notifications, considered = [], set()
+    origin = "https://staging.inkseq.com" if environment == "staging" else "https://inkseq.com"
+
+    def message(code, resource, transition, since):
+        assert code in CODES and (resource is None or identity(resource))
+        return {"code": code, "environment": environment, "resource_id": resource,
+            "duration_seconds": max(0, int(now-since)), "console_link": origin+"/freestyle",
+            "transition": transition}
+
+    def condition(code, resource, value, *, sustain=0, since=None, suffix=""):
+        key = code+":"+(resource or "host")+suffix
+        considered.add(key)
+        current = state["conditions"].get(key, {"code": code, "resource_id": resource,
+            "active": False, "since": None, "last_observed": None})
+        if value is None:
+            # Keep an active incident, but do not count missing time toward a
+            # not-yet-fired sustained condition.
+            if not current["active"]:
+                current["since"] = None
+            state["conditions"][key] = current
+            return
+        if value:
+            gap = current["last_observed"] is None or not 0 <= now-current["last_observed"] <= config["max_sample_gap_seconds"]
+            if current["since"] is None or gap and not current["active"]:
+                current["since"] = since if finite(since) and 0 <= since <= now else now
+            if not current["active"] and now-current["since"] >= sustain:
+                current["active"] = True
+                notifications.append(message(code, resource, "firing", current["since"]))
+        else:
+            if current["active"]:
+                notifications.append(message(code, resource, "resolved", current["since"] if current["since"] is not None else now))
+            current.update(active=False, since=None)
+        current["last_observed"] = now
+        state["conditions"][key] = current
+
+    complete = (isinstance(snapshot, dict) and snapshot.get("version") == 1 and snapshot.get("complete") is True
+        and all(isinstance(snapshot.get(name), list) for name in ("gpus", "jobs", "failures"))
+        and "test_spend" in snapshot
+        and finite(snapshot.get("observed_at")) and 0 <= now-snapshot["observed_at"] <= config["max_sample_gap_seconds"])
+    db_codes = {"gpu_runtime_exceeded", "gpu_idle_stop_overdue", "job_stuck", "job_repeated_wake"}
+    if complete:
+        for gpu in snapshot.get("gpus", []):
+            resource = identity(gpu.get("id"))
+            if resource is None:
+                continue
+            started, idle = gpu.get("running_since"), gpu.get("idle_since")
+            limit = gpu.get("idle_limit_seconds")
+            condition("gpu_runtime_exceeded", resource,
+                now-started > config["gpu_max_seconds"] if finite(started) and 0 <= started <= now else None,
+                since=started)
+            condition("gpu_idle_stop_overdue", resource,
+                False if gpu.get("has_obligations") is True else
+                now-idle > limit if gpu.get("has_obligations") is False and finite(idle)
+                    and 0 <= idle <= now and finite(limit) and limit > 0 else None, since=idle)
+        observed = {}
+        for job in snapshot.get("jobs", []):
+            resource, status = identity(job.get("id")), job.get("status")
+            if resource is None or status not in STATES:
+                continue
+            previous = state["observed_jobs"].get(resource, {})
+            first = job.get("state_since")
+            if not finite(first) or not 0 <= first <= now:
+                consecutive = (state.get("database_gap") is not True and finite(state.get("database_observed_at"))
+                    and 0 <= now-state["database_observed_at"] <= config["max_sample_gap_seconds"])
+                first = previous.get("since") if previous.get("status") == status and consecutive else now
+                if not finite(first) or not 0 <= first <= now:
+                    first = now
+            observed[resource] = {"status": status, "since": first}
+            # A changed state starts a new episode even if both states are old.
+            old_status = previous.get("status")
+            if old_status is not None and old_status != status:
+                condition("job_stuck", resource, False)
+            condition("job_stuck", resource, now-first > config["stuck_seconds"], since=first)
+            count = job.get("wake_count")
+            condition("job_repeated_wake", resource,
+                count > config["wake_count"] if type(count) is int and count >= 0 else None, since=first)
+        state["observed_jobs"] = observed
+        spend = snapshot.get("test_spend")
+        if isinstance(spend, dict):
+            amount, limit = spend.get("projected_microusd"), spend.get("limit_microusd")
+            for percent in (80, 100):
+                condition("test_spend_"+str(percent), None,
+                    amount*100 >= limit*percent if type(amount) is int and amount >= 0
+                        and type(limit) is int and limit > 0 else None)
+        else:
+            for percent in (80, 100):
+                condition("test_spend_"+str(percent), None, None)
+        seen = set(state["seen_failure_kinds"])
+        for failure in snapshot.get("failures", []):
+            kind, resource = failure.get("kind"), identity(failure.get("job_id"))
+            if (not isinstance(kind, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,159}", kind)
+                    or resource is None or kind in seen):
+                continue
+            seen.add(kind)
+            at = failure.get("at")
+            notifications.append(message("generation_failure", resource, "firing",
+                at if finite(at) and 0 <= at <= now else now))
+        state["seen_failure_kinds"] = sorted(seen)
+        # Only a complete authoritative snapshot may establish disappearance.
+        for key, current in list(state["conditions"].items()):
+            if key not in considered and current["code"] in db_codes:
+                condition(current["code"], current["resource_id"], False)
+                del state["conditions"][key]
+        state["database_observed_at"] = now
+        state["database_gap"] = False
+    else:
+        state["database_gap"] = True
+    host = host if isinstance(host, dict) else {}
+    for field, code, threshold in (("cpu_percent", "host_cpu_sustained", "cpu_percent"),
+                                  ("memory_percent", "host_memory_sustained", "memory_percent")):
+        value = host.get(field)
+        condition(code, None, value > config[threshold] if finite(value) and 0 <= value <= 100 else None,
+            sustain=config["host_sustain_seconds"])
+    for field, code, duration in (("health_ok", "health_down", "health_down_seconds"),
+                                  ("processes_ok", "host_process_unhealthy", "host_sustain_seconds")):
+        value = host.get(field)
+        condition(code, None, not value if type(value) is bool else None, sustain=config[duration])
+    total, failed = host.get("http_requests"), host.get("http_5xx")
+    condition("http_5xx_rate", None,
+        failed >= config["http_5xx_min"] and total > 0 and failed/total >= config["http_5xx_ratio"]
+        if type(total) is int and type(failed) is int and 0 <= failed <= total else None)
+    state["observed_at"] = now
+    return {"state": state, "notifications": notifications}

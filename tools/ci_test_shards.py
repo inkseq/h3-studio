@@ -58,7 +58,7 @@ test_job_cancellation_ledger test_job_events test_operator_jobs
 test_host_policy test_host_scorecard test_dstack_host_selection test_operator_host_routes
 test_quick_chat_history test_creation_history_storage test_creation_history_routes
 test_postgres_dispatch test_dispatch_telemetry test_dstack_passive_review
-test_demand_wakeup test_dstack_allocation_proof
+test_demand_wakeup test_dstack_allocation_proof test_alert_snapshot test_alert_http
 """.split())
 
 # CPU ffmpeg/font fixtures have additional process/codec costs. These multipliers

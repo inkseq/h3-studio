@@ -1,0 +1,337 @@
+#!/usr/bin/python3
+"""One finite, read-only host observation and bounded SNS delivery pass.
+
+The local file contains notification deduplication only, never task/accounting
+authority. No provider APIs, service restarts or business writes are performed.
+"""
+from __future__ import annotations
+
+from contextlib import contextmanager
+from datetime import datetime, timezone
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+
+REGION = 'ap-southeast-1'
+ACCOUNT = '829135631045'
+NAMESPACE = 'Inkseq/OperatorAlerts'
+CONFIG = Path('/etc/inkseq/alert-monitor.json')
+STATE = Path('/var/lib/inkseq-alert-monitor/state.json')
+SERVICES = ('app', 'db', 'caddy', 'dstack', 'controller')
+MAX_BYTES = 1024 * 1024
+MAX_PENDING = 128
+THRESHOLD_FIELDS = frozenset({'gpu_max_seconds', 'stuck_seconds', 'wake_count', 'cpu_percent',
+    'memory_percent', 'host_sustain_seconds', 'health_down_seconds', 'http_5xx_min',
+    'http_5xx_ratio', 'max_sample_gap_seconds'})
+HTTP_PROBE = """import json,urllib.request
+result={'health_ok':False,'http_requests':None,'http_5xx':None}
+try:
+ with urllib.request.urlopen('http://127.0.0.1:8845/healthz',timeout=3) as r:
+  h=json.loads(r.read(16384));result['health_ok']=r.status==200 and h.get('auth_ready') is True
+except Exception: pass
+try:
+ with urllib.request.urlopen('http://127.0.0.1:8845/internal/alert-counters',timeout=3) as r:
+  c=json.loads(r.read(16384))
+ if set(c)=={'epoch','window_seconds','requests','server_errors'} and c['window_seconds']==300 and type(c['requests']) is int and type(c['server_errors']) is int and 0<=c['server_errors']<=c['requests']:
+  result.update(http_requests=c['requests'],http_5xx=c['server_errors'])
+except Exception: pass
+print(json.dumps(result))
+"""
+
+
+def require(value, code):
+    if not value:
+        raise ValueError(code)
+
+
+def encode(value):
+    return (json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False) + '\n').encode()
+
+
+def protected_directory(path):
+    for item in (Path(path), *Path(path).parents):
+        info = item.lstat()
+        require(stat.S_ISDIR(info.st_mode) and info.st_uid == 0 and not info.st_mode & 0o022,
+                'alert_directory_unprotected')
+
+
+def read_protected(path, *, missing=False):
+    path = Path(path)
+    protected_directory(path.parent)
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except FileNotFoundError:
+        if missing:
+            return None
+        raise
+    with os.fdopen(fd, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and info.st_nlink == 1
+                and not info.st_mode & 0o077 and info.st_size <= MAX_BYTES, 'alert_file_unprotected')
+        raw = stream.read(MAX_BYTES + 1)
+        require(len(raw) <= MAX_BYTES, 'alert_file_too_large')
+    return json.loads(raw)
+
+
+def atomic(path, value):
+    path = Path(path)
+    protected_directory(path.parent)
+    raw = encode(value)
+    require(len(raw) <= MAX_BYTES, 'alert_state_too_large')
+    if path.exists() or path.is_symlink():
+        read_protected(path)
+    descriptor, temporary = tempfile.mkstemp(prefix='.alert-', dir=path.parent)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, 'wb') as stream:
+            stream.write(raw); stream.flush(); os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
+
+
+@contextmanager
+def locked(path):
+    import fcntl
+    protected_directory(Path(path).parent)
+    descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        info = os.fstat(descriptor)
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and info.st_nlink == 1
+                and not info.st_mode & 0o077, 'alert_lock_unprotected')
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        yield
+    finally:
+        os.close(descriptor)
+
+
+def config(value, target):
+    require(type(value) is dict and set(value) == {'version', 'environment', 'instance_id', 'topic_arn', 'thresholds'}
+            and value['version'] == 1 and type(value['version']) is int
+            and value['environment'] in ('staging', 'production')
+            and target['name'] == value['environment'] and target['instance_id'] == value['instance_id']
+            and re.fullmatch(r'i-[0-9a-f]{17}', value['instance_id']), 'alert_config_invalid')
+    topic = f"arn:aws:sns:{REGION}:{ACCOUNT}:sixnine-{value['environment']}-operator-alerts"
+    require(value['topic_arn'] == topic and type(value['thresholds']) is dict, 'alert_destination_invalid')
+    thresholds = value['thresholds']
+    require(not set(thresholds) - THRESHOLD_FIELDS and all(type(item) in (int, float)
+        and math.isfinite(item) and item > 0 for item in thresholds.values())
+        and all(thresholds.get(key, 1) <= limit for key, limit in
+                (('cpu_percent', 100), ('memory_percent', 100), ('http_5xx_ratio', 1))),
+        'alert_thresholds_invalid')
+    return value
+
+
+def clients():
+    # Systemd supplies an empty credential/config environment. Refuse a process
+    # that resolved a static/profile/container identity instead of the host role.
+    import boto3
+    from botocore.config import Config
+    session = boto3.Session(region_name=REGION)
+    identity = session.get_credentials()
+    require(identity is not None and identity.method == 'iam-role', 'alert_instance_role_required')
+    options = Config(connect_timeout=3, read_timeout=5, retries={'mode': 'standard', 'total_max_attempts': 1},
+                     max_pool_connections=2, proxies={})
+    return tuple(session.client(service, region_name=REGION,
+        endpoint_url=f'https://{"monitoring" if service == "cloudwatch" else service}.{REGION}.amazonaws.com', config=options)
+        for service in ('sns', 'cloudwatch'))
+
+
+def docker(arguments, *, runner=subprocess.run):
+    result = runner(['/usr/bin/docker', *arguments], stdin=subprocess.DEVNULL, capture_output=True,
+        timeout=10, env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8'})
+    require(result.returncode == 0 and len(result.stdout) <= MAX_BYTES, 'alert_docker_observation_failed')
+    return result.stdout.decode('utf-8')
+
+
+def containers(*, runner=subprocess.run):
+    values = {}
+    for service in SERVICES:
+        names = docker(['ps', '--all', '--quiet', '--filter', 'label=com.docker.compose.project=sixnine-platform',
+            '--filter', 'label=com.docker.compose.service=' + service], runner=runner).split()
+        require(len(names) <= 1 and all(re.fullmatch(r'[0-9a-f]{12,64}', name) for name in names),
+                'alert_container_identity_ambiguous')
+        if not names:
+            values[service] = None
+            continue
+        # Render only identity and health; never fetch Config.Env or mount paths.
+        template = '{"project":{{json (index .Config.Labels "com.docker.compose.project")}},"service":{{json (index .Config.Labels "com.docker.compose.service")}},"running":{{json .State.Running}},"restarting":{{json .State.Restarting}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}}}'
+        row = json.loads(docker(['inspect', '--format', template, names[0]], runner=runner))
+        require(row['project'] == 'sixnine-platform' and row['service'] == service, 'alert_container_identity_changed')
+        running = row['running'] is True and row['restarting'] is not True
+        healthy = row['health'] == 'healthy'
+        values[service] = {'id': names[0], 'ok': running and (healthy if service in ('app', 'db', 'dstack') else True)}
+    return values
+
+
+def proc_sample(*, proc=Path('/proc')):
+    fields = (proc / 'stat').read_text().splitlines()[0].split()
+    require(fields[0] == 'cpu' and len(fields) >= 9, 'alert_cpu_sample_invalid')
+    counters = [int(value) for value in fields[1:9]]  # guest already counted in user/nice
+    memory = {line.split(':')[0]: int(line.split()[1]) for line in (proc / 'meminfo').read_text().splitlines()}
+    require(memory['MemTotal'] > 0 and 0 <= memory['MemAvailable'] <= memory['MemTotal'], 'alert_memory_sample_invalid')
+    return {'total': sum(counters), 'idle': counters[3] + counters[4],
+            'memory_percent': 100 * (1 - memory['MemAvailable'] / memory['MemTotal'])}
+
+
+def observe(previous_cpu, *, runner=subprocess.run, proc=Path('/proc')):
+    sample = proc_sample(proc=proc)
+    cpu = None
+    if previous_cpu is not None:
+        total, idle = sample['total'] - previous_cpu['total'], sample['idle'] - previous_cpu['idle']
+        if total > 0 and 0 <= idle <= total:
+            cpu = 100 * (1 - idle / total)
+    host = {'cpu_percent': cpu, 'memory_percent': sample['memory_percent'], 'health_ok': None,
+            'http_requests': None, 'http_5xx': None, 'processes_ok': None}
+    snapshot = None
+    try:
+        found = containers(runner=runner)
+        host['processes_ok'] = all(value is not None and value['ok'] for value in found.values())
+        app = found['app']
+        if app is None:
+            host['health_ok'] = False
+        else:
+            try:
+                probe = json.loads(docker(['exec', app['id'], 'python', '-B', '-c', HTTP_PROBE], runner=runner))
+                require(type(probe) is dict and set(probe) == {'health_ok', 'http_requests', 'http_5xx'}
+                        and type(probe['health_ok']) is bool, 'alert_http_probe_invalid')
+                host.update(probe)
+            except (OSError, subprocess.SubprocessError, ValueError):
+                host['health_ok'] = False
+            snapshot = json.loads(docker(['exec', app['id'], 'python', '-B', '-m', 'studio_platform.alert_snapshot'], runner=runner))
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        # Unknown ledger state never fabricates a healthy observation or recovery.
+        snapshot = None
+    return snapshot, host, {'total': sample['total'], 'idle': sample['idle']}
+
+
+def notification(value, environment):
+    require(type(value) is dict and set(value) == {'code', 'environment', 'resource_id', 'duration_seconds', 'console_link', 'transition'},
+            'alert_notification_invalid')
+    # The core evaluator owns this finite code list. Keep a second boundary at SNS.
+    require(value['code'] in {'gpu_runtime_exceeded', 'gpu_idle_stop_overdue', 'test_spend_80', 'test_spend_100',
+            'job_stuck', 'job_repeated_wake', 'host_cpu_sustained', 'host_memory_sustained',
+            'host_process_unhealthy', 'health_down', 'http_5xx_rate', 'generation_failure'}
+            and value['environment'] == environment and value['transition'] in {'firing', 'resolved'}
+            and (value['resource_id'] is None or type(value['resource_id']) is str
+                and re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', value['resource_id']))
+            and type(value['duration_seconds']) is int and 0 <= value['duration_seconds'] <= 315360000,
+            'alert_notification_invalid')
+    origin = 'https://staging.inkseq.com' if environment == 'staging' else 'https://inkseq.com'
+    require(value['console_link'] == origin + '/freestyle', 'alert_notification_link_invalid')
+    return value
+
+
+def initial_state(environment):
+    return {'version': 1, 'environment': environment, 'sequence': 0, 'evaluator': {}, 'cpu': None, 'pending': []}
+
+
+def validate_state(state, environment):
+    require(type(state) is dict and set(state) == {'version', 'environment', 'sequence', 'evaluator', 'cpu', 'pending'}
+            and type(state['version']) is int and state['version'] == 1 and state['environment'] == environment
+            and type(state['sequence']) is int and state['sequence'] >= 0 and type(state['evaluator']) is dict
+            and type(state['pending']) is list and len(state['pending']) <= MAX_PENDING, 'alert_state_invalid')
+    require(state['cpu'] is None or type(state['cpu']) is dict and set(state['cpu']) == {'total', 'idle'}
+            and all(type(value) is int and value >= 0 for value in state['cpu'].values())
+            and state['cpu']['idle'] <= state['cpu']['total'], 'alert_cpu_state_invalid')
+    for entry in state['pending']:
+        require(type(entry) is dict and set(entry) == {'id', 'notification', 'attempts', 'retry_at'}
+                and type(entry['id']) is str and re.fullmatch(r'[0-9a-f]{64}', entry['id'])
+                and type(entry['attempts']) is int and entry['attempts'] >= 0
+                and type(entry['retry_at']) in (int, float) and math.isfinite(entry['retry_at'])
+                and entry['retry_at'] >= 0, 'alert_pending_invalid')
+        notification(entry['notification'], environment)
+    return state
+
+
+def tick(settings, state, snapshot, host, cpu, *, evaluator, sns, cloudwatch, save, now):
+    """Pure collaborators permit fake-clock/fake-network boundary tests."""
+    state = json.loads(encode(validate_state(state, settings['environment'])))
+    result = evaluator(snapshot, state['evaluator'], environment=settings['environment'], now=now,
+                       host=host, thresholds=settings['thresholds'])
+    require(type(result) is dict and set(result) == {'state', 'notifications'} and type(result['state']) is dict
+            and type(result['notifications']) is list, 'alert_evaluation_invalid')
+    require(len(state['pending']) + len(result['notifications']) <= MAX_PENDING, 'alert_pending_full')
+    for item in result['notifications']:
+        notification(item, settings['environment'])
+        state['sequence'] += 1
+        identity = hashlib.sha256(encode({'sequence': state['sequence'], 'notification': item})).hexdigest()
+        state['pending'].append({'id': identity, 'notification': item, 'attempts': 0, 'retry_at': now})
+    state.update(evaluator=result['state'], cpu=cpu)
+    save(state)  # Persist transitions before any possibly-ambiguous remote write.
+    delivery_healthy = True
+    from botocore.exceptions import BotoCoreError, ClientError
+    for _ in range(3):
+        if not state['pending'] or state['pending'][0]['retry_at'] > now:
+            break
+        entry = state['pending'][0]
+        entry['attempts'] += 1
+        entry['retry_at'] = now + min(900, 60 * 2 ** min(entry['attempts'] - 1, 4))
+        save(state)
+        try:
+            response = sns.publish(TopicArn=settings['topic_arn'],
+                Subject='Inkseq ' + settings['environment'] + ' ' + entry['notification']['transition'],
+                Message=encode(entry['notification']).decode().strip())
+            require(type(response.get('MessageId')) is str and bool(response['MessageId']), 'alert_publish_ack_missing')
+        except (BotoCoreError, ClientError, ValueError):
+            delivery_healthy = False
+            break  # The request may have succeeded: retry can duplicate, never claim exactly once.
+        state['pending'].pop(0)
+        save(state)
+    observed = snapshot.get('observed_at') if type(snapshot) is dict else None
+    fresh = (type(snapshot) is dict and snapshot.get('version') == 1 and snapshot.get('complete') is True
+        and type(observed) in (int, float) and math.isfinite(observed)
+        and 0 <= now - observed <= settings['thresholds'].get('max_sample_gap_seconds', 180))
+    metric = {'Namespace': NAMESPACE, 'MetricData': [
+        {'MetricName': 'MonitorHeartbeat', 'Dimensions': [{'Name': 'Environment', 'Value': settings['environment']},
+            {'Name': 'InstanceId', 'Value': settings['instance_id']}], 'Timestamp': datetime.fromtimestamp(now, timezone.utc),
+         'Value': 1, 'Unit': 'Count'},
+        {'MetricName': 'DeliveryHealthy', 'Dimensions': [{'Name': 'Environment', 'Value': settings['environment']},
+            {'Name': 'InstanceId', 'Value': settings['instance_id']}], 'Timestamp': datetime.fromtimestamp(now, timezone.utc),
+         'Value': int(delivery_healthy and not state['pending']), 'Unit': 'Count'},
+        {'MetricName': 'SnapshotHealthy', 'Dimensions': [{'Name': 'Environment', 'Value': settings['environment']},
+            {'Name': 'InstanceId', 'Value': settings['instance_id']}], 'Timestamp': datetime.fromtimestamp(now, timezone.utc),
+         'Value': int(fresh), 'Unit': 'Count'}]}
+    cloudwatch.put_metric_data(**metric)
+    return state
+
+
+def main():
+    try:
+        require(os.name == 'posix' and os.geteuid() == 0 and len(sys.argv) == 1, 'alert_fixed_host_invocation_required')
+        import deployment_target
+        from alert_conditions import evaluate
+        settings = config(read_protected(CONFIG), deployment_target.host())
+        with locked(STATE.with_suffix('.lock')):
+            state = read_protected(STATE, missing=True)
+            if state is None:
+                state = initial_state(settings['environment'])
+            validate_state(state, settings['environment'])
+            snapshot, host, cpu = observe(state['cpu'])
+            sns, cloudwatch = clients()
+            tick(settings, state, snapshot, host, cpu, evaluator=evaluate, sns=sns, cloudwatch=cloudwatch,
+                 save=lambda value: atomic(STATE, value), now=time.time())
+        print('{"state":"alert_monitor_observed"}')
+        return 0
+    except Exception:
+        # Operational failures must be visible through service exit/missing heartbeat,
+        # without leaking endpoint responses, configuration or exception strings.
+        print('{"state":"alert_monitor_failed"}', file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())
