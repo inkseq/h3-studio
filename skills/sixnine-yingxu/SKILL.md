@@ -162,11 +162,13 @@ Read the `upload_constraints` field in `GET /v1/capabilities` before sending fil
 |---|---|
 | `first_frame`, `last_frame` | `{"asset_id":"..."}` or `null`; FL, and REF when the selected profile advertises these anchors |
 | `images` | `[{"asset_id":"...","purpose":"reference"}]`; Ref recipe |
-| `videos` | `[{"asset_id":"...","purpose":"motion","include_audio":false}]`; Ref recipe |
-| `audios` | `[{"asset_id":"...","purpose":"audio"}]`; Ref recipe |
+| `videos` | `[{"asset_id":"...","purpose":"motion","include_audio":false}]`; REF references, or an explicitly selected FL control-video mode advertised by the chosen profile |
+| `audios` | `[{"asset_id":"...","purpose":"audio"}]`; REF references, or FL soundtrack input when the chosen profile advertises `audio_conditioning:"soundtrack"` |
 | `guides` | `[{"media_id":"...","time_seconds":0,"use_audio":false}]`; timed anchors |
 
 Audio/video list entries and guides may include `source_range:{"start":0,"end":4}` in seconds. On the same existing association, omitting the range preserves it; explicit `source_range:null` clears it. Stored selections are compiled into real derivatives at preflight, which requires `assets:write`. Preserve originals; do not silently trim, rescale or mute the user's input to bypass constraints.
+
+For full-control profiles, FL video input requires explicit `controls.video_conditioning:"denoise"` or `"in_context"`; FL does not accept ordinary reference-video mode. FL audio input requires `controls.audio_conditioning:"soundtrack"`. The separate `"from_video"` audio mode is supported only with FL denoise video and no separate audio input or selected soundtrack. `controls.video_excerpts` and `controls.audio_excerpts` instead require REF with one video in reference mode; each entry uses `time_seconds` and `duration_seconds`. Audio excerpts additionally require that video's `include_audio:true`, `audio_conditioning:"reference"` and no separate audio input. These controls differ from a source file's `source_range`. Read the selected profile's current capabilities and preflight for the exact permitted combination; never infer support from this table or change inputs to pass a check.
 
 Read the selected profile's `generation_support[fl|ref].controls`, `input_support`, `limits` and `supported_constraints`; recipe names alone do not determine input compatibility. FL supports text-only, first-only, last-only or both. Additive full-control native profiles also map timed image injections, explicitly selected control-video/soundtrack modes and, in REF, first/last anchors alongside ordinary references. Retained profiles keep their original FL/REF separation and silent-video limits. Choose only modes and controls advertised for the exact selected profile; never discard a supplied input to make it fit.
 
