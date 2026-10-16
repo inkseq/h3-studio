@@ -97,6 +97,30 @@ def copy_receipt(path, target):
         'backup_receipt_values')
     return value
 
+def freeze_transport_snapshot(snapshot):
+    """Private transport-readable copy, inaccessible through the host parent.
+
+    The app shares uid10001 with the restricted transport, so the enclosing
+    root-owned 0700 operation directory must remain a traversal barrier.
+    Only the exact snapshot is mounted read-only into the transport container.
+    """
+    protected(snapshot, True)
+    protected(snapshot.parent, True)
+    require(stat.S_IMODE(snapshot.parent.stat().st_mode) == 0o700, 'backup_operation_not_private')
+    entries = [snapshot]
+    for parent, directories, files in os.walk(snapshot, followlinks=False):
+        for name in directories + files:
+            p = Path(parent)/name; info = p.lstat(); entries.append(p)
+            require(len(entries) <= 100005 and info.st_uid == 0 and not p.is_symlink()
+                and (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode) and info.st_nlink == 1),
+                'backup_private_copy_invalid')
+    # Validate the entire copied tree before changing ownership or modes.
+    for p in reversed(entries):
+        directory = p.is_dir()
+        os.chown(p, 10001, 10001)
+        p.chmod(0o500 if directory else 0o400)
+
+
 def transport(image, name, mounts, args):
     command = ['run', '--pull', 'never', '--name', name, '--network', 'host', '--read-only',
         '--user', '10001:10001', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
@@ -178,15 +202,7 @@ def run():
         snapshot_host = operation/'snapshot'
         new_directory(snapshot_host)
         docker(['cp', ids[0]+':'+snapshot_container+'/.', str(snapshot_host)], timeout=900)
-        count = 0
-        for parent, directories, files in os.walk(snapshot_host, followlinks=False):
-            for name in directories+files:
-                p = Path(parent)/name; info = p.lstat(); count += 1
-                require(count <= 100004 and info.st_uid == 0 and not p.is_symlink()
-                    and (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode) and info.st_nlink == 1),
-                    'backup_private_copy_invalid')
-                p.chmod(0o555 if stat.S_ISDIR(info.st_mode) else 0o444)
-        snapshot_host.chmod(0o555)
+        freeze_transport_snapshot(snapshot_host)
         target = {**cfg['target'], 'prefix': 'business-backups/'+nonce}
         record(operation/'target.json', target)
         (operation/'target.json').chmod(0o644)  # Explicit public identifiers only.
