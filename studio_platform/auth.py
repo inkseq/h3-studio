@@ -93,6 +93,8 @@ class Auth:
             if engine.dialect.name == "postgresql":
                 connection.exec_driver_sql("SELECT pg_advisory_xact_lock(685939796868749721)")
             metadata.create_all(connection)
+            from .repository import documents
+            documents.create(connection,checkfirst=True)
 
     def ready(self, connection=None):
         if self.mode == "local-test":
@@ -290,6 +292,8 @@ class Auth:
 
     def revoke_key(self, owner, key_id):
         with self.engine.begin() as conn:
+            from .spending_limits import lock_owner
+            lock_owner(conn,self.tenant,owner)
             row = conn.execute(select(personal_keys).where(personal_keys.c.tenant == self.tenant,
                 personal_keys.c.owner == owner, personal_keys.c.id == key_id)).mappings().first()
             if not row:
@@ -322,10 +326,15 @@ class Auth:
                     accounts.c.username == row["owner"])).mappings().first()
                 if not account or account["disabled"] or account["updated"] != row["password_version"] or not self.ready(conn):
                     return None
+            from .agent_management import paused,doc_where
+            from .repository import documents
+            if paused(conn,self.tenant,row['owner'],row['id']):return None
+            pause_exists=select(documents.c.document_id).where(*doc_where(self.tenant,row['owner'],'connection_key_state',row['id']),
+                documents.c.payload['paused'].as_boolean()==True).exists()
             # Conditional update makes revocation racing authentication fail closed.
             changed = conn.execute(update(personal_keys).where(personal_keys.c.tenant == self.tenant,
                 personal_keys.c.id == row["id"], personal_keys.c.revoked_at.is_(None),
-                personal_keys.c.expires_at > now).values(last_used_at=now))
+                personal_keys.c.expires_at > now, ~pause_exists).values(last_used_at=now))
             if changed.rowcount != 1:
                 return None
             return Principal(row["owner"], "key:"+row["id"], True, tuple(json.loads(row["projects"])),

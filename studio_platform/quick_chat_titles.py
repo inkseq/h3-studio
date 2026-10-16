@@ -96,7 +96,7 @@ class QuickChatTitleMixin:
                 if self.title_generator is None or not state or state["status"] != "pending":
                     return False
                 from .spending_limits import unquoted_spend_blocked
-                if unquoted_spend_blocked(conn, self.tenant, principal):
+                if unquoted_spend_blocked(conn, self.tenant, principal, now=self.repo.clock()):
                     payload = copy.deepcopy(session["payload"])
                     payload["title_generation"].update(status="failed", error_code="assistant_quote_unavailable", completed_at=self.repo.clock())
                     self._put(conn, session, payload)

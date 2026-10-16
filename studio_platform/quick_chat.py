@@ -174,6 +174,12 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
             session_id=session_id, kind=kind, parent_id=parent, business_key=business, version=1,
             payload=canonical(payload), created_at=now, updated_at=now)
         conn.execute(insert(objects).values(**row))
+        if kind in {'session','revision'}:
+            from .agent_management import record_created,creator
+            record_created(conn,self.tenant,principal,kind,row['id'],now)
+            if kind=='revision':
+                for item in payload['items']:record_created(conn,self.tenant,principal,'take',item['id'],now)
+            row['created_by']=creator(conn,self.tenant,principal.owner,kind,row['id'])
         return row
 
     def _put(self, conn, row, payload, *, bump=False, allow_history=False):
@@ -220,6 +226,8 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
             key=key, fingerprint=request_hash(body), object_id=ident, created_at=self.repo.clock()))
 
     def _event(self, conn, principal, session, event_type, resource_id):
+        from .agent_management import record_event
+        record_event(conn,self.tenant,principal,event_type,self.repo.clock())
         payload = copy.deepcopy(session["payload"])
         payload["latest_seq"] += 1
         conn.execute(insert(events).values(id="event-"+uuid.uuid4().hex, tenant=self.tenant, owner=principal.owner,
@@ -271,6 +279,11 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
         input_entries(result)
         return result
 
+    def _creation_public(self,row,kind):
+        if 'created_by' in row:return row['created_by']
+        from .agent_management import creator
+        with self.repo.engine.connect() as conn:return creator(conn,self.tenant,row['owner'],kind,row['id'])
+
     def _session_public(self, row):
         p = row["payload"]
         return {"id": row["id"], "title": p["title"], "version": row["version"], "model_id": p["model_id"],
@@ -280,7 +293,7 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
             "next_settings": p["next_settings"], "input_refs": self._inputs(p["bindings"], p["next_settings"]["recipe_id"],
                 p['next_settings'].get('deployment_profile_id')),
             "latest_seq": p["latest_seq"], "web_url": "/quick-chat?session="+row["id"],
-            "created_at": row["created_at"], "updated_at": row["updated_at"]}
+            "created_at": row["created_at"], "updated_at": row["updated_at"], "created_by":self._creation_public(row,"session")}
 
     def create_session(self, principal, body, key):
         fields(body, {"title", "model_id", "is_test"})
@@ -906,8 +919,10 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
                 from .spending_limits import SpendingConfirmationRequired
                 if isinstance(error, SpendingConfirmationRequired):
                     raise
-                spending_codes = {"user_daily_limit_reached", "connection_daily_limit_reached", "spending_usage_unconfirmed"}
+                spending_codes = {"user_daily_limit_reached", "connection_daily_limit_reached", "spending_usage_unconfirmed", "connection_paused", "connection_unavailable", "connection_permission_denied"}
                 code = error.code if isinstance(error, QuickChatError) else str(error) if str(error) in spending_codes else "budget_exceeded" if isinstance(error, BudgetExceeded) else "admission_blocked"
+                from .agent_management import record_refusal
+                record_refusal(self.repo.engine,self.tenant,principal,code,self.repo.clock())
                 with self.repo.transaction() as conn:
                     current = self._get(conn, principal, execution["id"], session_id, "execution", lock=True)
                     self._put(conn, current, {**current["payload"], "status": "admission_blocked", "error_code": code})
@@ -1232,7 +1247,7 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
                 self._event(conn, principal, session, "assistant.failed", turn_id)
                 return
             from .spending_limits import unquoted_spend_blocked
-            if unquoted_spend_blocked(conn, self.tenant, principal):
+            if unquoted_spend_blocked(conn, self.tenant, principal, now=self.repo.clock()):
                 p.update(status="failed", error_code="assistant_quote_unavailable")
                 p["assistant_run"]["status"] = "failed"
                 self._put(conn, turn, p)

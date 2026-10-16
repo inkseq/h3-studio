@@ -214,5 +214,61 @@ class MainAndRehearsalTests(unittest.TestCase):
         self.assertIn('--no-owner', plan['restore'])
 
 
+class RehearsalReadinessTests(unittest.TestCase):
+    def plan(self):
+        return offline_rehearsal.commands(COMMIT, 'postgres@sha256:'+'f'*64, 'd'*32)
+
+    def test_bootstrap_socket_cannot_admit_restore_before_final_tcp(self):
+        plan = self.plan()
+        events = []
+        def command(args, **kwargs):
+            self.assertEqual(args[args.index('-h')+1], '127.0.0.1')
+            self.assertEqual(args[args.index('-p')+1], '5432')
+            events.append('tcp_probe')
+            if len(events) < 3:
+                # A socket-only bootstrap server is ready, but TCP is not.
+                raise offline_rehearsal.release.ReleaseError('not_ready')
+        def restore(args, **kwargs):
+            self.assertEqual(events, ['tcp_probe']*3)
+            tail = args[args.index('pg_restore'):]
+            self.assertEqual(tail[tail.index('--host')+1], '127.0.0.1')
+            self.assertEqual(tail[tail.index('--port')+1], '5432')
+            self.assertEqual(kwargs['stdin'].read(), b'original-dump')
+            events.append('restore')
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)/'copy'; source.write_bytes(b'original-dump')
+            with patch.object(offline_rehearsal.release, 'command', side_effect=command), \
+                    patch.object(offline_rehearsal.subprocess, 'run', side_effect=restore), \
+                    patch('time.sleep') as sleep:
+                offline_rehearsal.restore_copy(plan, source, {})
+            self.assertEqual(sleep.call_count, 2)
+            self.assertEqual(source.read_bytes(), b'original-dump')
+        self.assertEqual(events[-1], 'restore')
+        self.assertIn('SIXNINE_DATABASE_URL=postgresql+psycopg://postgres@/rehearsal?host=/var/run/postgresql', plan['migrate'])
+
+    def test_exhaustion_never_opens_dump_or_restores(self):
+        source = Mock()
+        with patch.object(offline_rehearsal.release, 'command', side_effect=offline_rehearsal.release.ReleaseError('not_ready')) as command, \
+                patch.object(offline_rehearsal.subprocess, 'run') as restore, patch('time.sleep'):
+            with self.assertRaisesRegex(offline_rehearsal.release.ReleaseError, '^rehearsal_database_not_ready$'):
+                offline_rehearsal.restore_copy(self.plan(), source, {})
+        self.assertEqual(command.call_count, 40)
+        source.open.assert_not_called(); restore.assert_not_called()
+
+    def test_restore_failure_is_closed_and_never_retried(self):
+        for error, code in (
+            (offline_rehearsal.subprocess.CalledProcessError(1, ['pg_restore'], stderr=b'private SQL'), 'rehearsal_restore_failed_retained'),
+            (offline_rehearsal.subprocess.TimeoutExpired(['pg_restore'], 600), 'rehearsal_restore_timeout_retained')):
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as directory:
+                source = Path(directory)/'copy'; source.write_bytes(b'original-dump')
+                with patch.object(offline_rehearsal.release, 'command') as command, \
+                        patch.object(offline_rehearsal.subprocess, 'run', side_effect=error) as restore:
+                    with self.assertRaisesRegex(offline_rehearsal.release.ReleaseError, '^'+code+'$'):
+                        offline_rehearsal.restore_copy(self.plan(), source, {})
+                self.assertEqual(command.call_count, 1)
+                self.assertEqual(restore.call_count, 1)
+                self.assertEqual(source.read_bytes(), b'original-dump')
+
+
 if __name__ == '__main__':
     unittest.main()

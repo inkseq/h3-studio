@@ -1,3 +1,4 @@
+import {assistantCatalogs} from './assistantCatalogs.js';
 import {takesCatalogs} from './takesCatalogs.js';
 import {adjunctCatalogs} from './adjunctCatalogs.js';
 import {accountDetailCatalogs} from './accountDetailCatalogs.js';
@@ -17,7 +18,7 @@ import {storyboardCatalogs} from './storyboardCatalogs.js';
 import {legacyCatalogs} from './legacyCatalogs.js';
 export const catalogs = {
   en: {
-    ...takesCatalogs.en,
+    ...takesCatalogs.en,...assistantCatalogs.en,
     'workspace.closeHistory': 'Close creation history',
     ...adjunctCatalogs.en,
     ...h3MoreCatalogs.en,
@@ -46,7 +47,7 @@ export const catalogs = {
     'locale.switchToEnglish': 'Switch to English',
   },
   zh: {
-    ...takesCatalogs.zh,
+    ...takesCatalogs.zh,...assistantCatalogs.zh,
     'workspace.closeHistory': '关闭创作记录',
     ...adjunctCatalogs.zh,
     ...h3MoreCatalogs.zh,

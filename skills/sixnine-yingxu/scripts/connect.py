@@ -783,6 +783,8 @@ class AgentClient:
                 or connection.get("id") != expected["connection_id"] or key.get("id") != connection.get("key_id")
                 or key.get("prefix") != state["api_key"][:12] or "api_key" in result
                 or key.get("scopes") != authorization.get("scopes")
+                or key.get("project_ids") != authorization.get("project_ids")
+                or key.get("all_projects") != authorization.get("all_projects")
                 or key.get("expires_at") != authorization.get("key_expires_at")
                 or connection.get("status") != "connected"):
             state["status"] = "unknown"

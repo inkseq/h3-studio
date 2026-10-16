@@ -705,3 +705,51 @@ The transfer DTO binds `source_session_id`, `item_id`, `project_id`, original
 match all five before acknowledging any completed/blocked receipt, and must also
 match the known `id` on status reads or replay. `project_version` is the resulting
 version and must not replace the original expected-version identity check.
+
+
+## Scoped assistant management (#234)
+
+Browser owners retain the original one-use connection/exchange protocol. New
+issuance adds `scope: {kind: "all"}` or `{kind: "session" | "story", id: "<owned id>"}`
+and `permission: "organise" | "generate"` alongside the original required profile
+ID/version. Organise allows draft and asset organisation but removes paid job and
+assistant authority, including automatic naming. Scope is resolved to original
+project permissions before issuance; immutable authorization/fingerprint freezes
+it. Omitting both new fields preserves the legacy fingerprint shape.
+
+GET/PATCH `/v1/account/agent-connection-settings` exposes versioned owner settings:
+`code_ttl_seconds` (600), `recovery_ttl_seconds` (300), `key_lifetime_days` (90),
+`max_pending_connections` (5). PATCH requires `expected_version`, complete `value`
+and Idempotency-Key. Changes affect new grants only; existing recovery/expiry and
+scope never expand. These controls do not change the original abuse protection.
+
+PATCH `/v1/account/agent-connections/{id}` accepts `expected_version` from
+`state_version`, optional `paused` and/or `daily_limit_microusd`, with a stable
+Idempotency-Key. Zero cap means unlimited. Cap changes use the same original
+owner spending settings/version; usage is conservative Sydney-day projected
+exposure including unresolved prior-day obligations, not an invoice. Pause and
+revocation deny new authentication/admission, including a stale authenticated
+principal. They do not cancel accepted jobs or delete drafts/assets. Original
+accepted replay and accounting are preserved.
+
+A stale control/settings CAS returns a durable original-key receipt with
+`no_mutation_committed: true`, `error_code: "connection_version_conflict"` and the
+exact original `request`. Match resource and request before acknowledging; never
+infer no-write from a generic HTTP error. Unknown outcomes retain their original
+body/key for explicit reconciliation. No automatic replacement grant is allowed.
+
+GET `.../{id}/activity?limit=20&offset=0` returns only event ID, closed event type,
+time and `next_offset`; no prompts, media, credentials or ledger details. Closed
+cap refusals are recorded after admission rollback. New connection-created
+sessions/takes and story entities expose immutable `created_by` metadata; legacy
+history without proven attribution stays null. Project reads expose an entity-ID
+map separately from the editable project body. No immutable recipe is rewritten.
+
+中文：连接可限定本次创作、当前故事或全部作品；“整理”允许编辑草稿但不付费。
+一次性代码默认10分钟，时效和连接上限可配置；改设置不扩大旧授权。暂停/撤销不取消
+已接收任务。费用为含未知预留的保守占用，0表示不限额；未知结果只核对原操作。
+
+Global spending-settings edits invalidate the affected connection `state_version`
+when its effective cap changes, including removal to zero/unlimited. Unchanged
+caps and daily/ask-only changes preserve connection control versions and pause
+state; either writer therefore rejects a stale edit from the other surface.

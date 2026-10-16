@@ -126,6 +126,7 @@ class QuickChatTakesMixin:
                     if cursor and identity>=tuple(cursor[1:]):continue
                     entries.append((r,item))
             page=entries[:limit]; values=[]; submissions={}
+            from .agent_management import creator
             for r,item in page:
                 submission=conn.execute(select(objects.c.id).where(objects.c.tenant==self.tenant,objects.c.owner==principal.owner,
                     objects.c.kind=="submission",objects.c.business_key==r["id"])).scalar_one_or_none()
@@ -136,7 +137,7 @@ class QuickChatTakesMixin:
                     objects.c.session_id==session_id,objects.c.kind=="take_annotation",objects.c.business_key==item["id"])).mappings().first()
                 values.append({"status":"draft","job":None,"job_id":None,"retryable":False,"resume_admission_available":False,
                     **copy.deepcopy(live),"id":item["id"],"index":item["index"],"seed":item["seed"],"revision_id":r["id"],
-                    "group_number":group_offsets[r["id"]]+item["index"]+1,"submission_id":submission,"created_at":r["created_at"],"recipe":self._take_recipe(r["payload"],item),
+                    "created_by":creator(conn,self.tenant,principal.owner,"take",item["id"]),"group_number":group_offsets[r["id"]]+item["index"]+1,"submission_id":submission,"created_at":r["created_at"],"recipe":self._take_recipe(r["payload"],item),
                     "annotation":{"version":annotation["version"] if annotation else 0,"starred":annotation["payload"]["starred"] if annotation else False}})
             after=None
             if len(entries)>limit:

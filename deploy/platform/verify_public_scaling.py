@@ -316,7 +316,7 @@ def collect(root, state, browser, agent, headers, outsider, *, decoder=None):
         assert track['generatedFrom']['jobId'] == item['job_id']
         assert track['generatedFrom']['videoArtifactId'] == video['id'] and track['generatedFrom']['audioArtifactId'] == audio['id']
         assert track['start'] == 0 and track['end'] == 5
-        assert public.request(browser, 'GET', '/v1/projects/'+PROJECT) == project
+        assert public.request(browser, 'GET', '/v1/projects/'+PROJECT) == {**project, 'created_by': {}}  # Ordinary PAT: no assistant attribution.
         public.request(outsider, 'GET', '/v1/projects/'+PROJECT, expected=404)
         public.request(outsider, 'GET', '/v1/jobs/'+item['job_id'], expected=404)
         for artifact in artifacts:

@@ -89,7 +89,7 @@ def verify():
                 {**headers, 'Idempotency-Key': 'edit-' + run + '-' + username})
             assert edited['version'] == 2 and len(edited['project']['entities']) == 3
             # Browser and Agent must read the same persistent document.
-            assert request(browser[username], 'GET', f'/v1/projects/{ident}') == edited
+            assert request(browser[username], 'GET', f'/v1/projects/{ident}') == {**edited, 'created_by': {}}  # Ordinary PAT: no assistant attribution.
             request(agent, 'POST', f'/v1/projects/{ident}/actions',
                 {'expected_version': 1, 'actions': actions}, headers, expected=409)
             exported = request(agent, 'GET', f'/v1/projects/{ident}/export?format=json', headers=headers)

@@ -34,8 +34,10 @@ def commands(commit, postgres_image, nonce):
             '--mount', 'type=volume,src='+socket+',dst=/var/run/postgresql',
             '--env', 'POSTGRES_HOST_AUTH_METHOD=trust', '--env', 'POSTGRES_DB=rehearsal',
             postgres_image],
+        'ready': ['exec', name, 'pg_isready', '-h', '127.0.0.1', '-p', '5432',
+            '-U', 'postgres', '-d', 'rehearsal'],
         'restore': ['exec', '-i', name, 'pg_restore', '--exit-on-error', '--no-owner', '--no-acl',
-            '--username', 'postgres', '--dbname', 'rehearsal'],
+            '--host', '127.0.0.1', '--port', '5432', '--username', 'postgres', '--dbname', 'rehearsal'],
         'migrate': ['run', '--pull', 'never', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL',
             '--security-opt', 'no-new-privileges:true', '--memory', '1g', '--pids-limit', '256',
             '--tmpfs', '/data:size=67108864,uid=10001,gid=10001,mode=0700',
@@ -46,6 +48,32 @@ def commands(commit, postgres_image, nonce):
             '--env', 'SIXNINE_EXECUTION_BACKEND=disabled', '--env', 'SIXNINE_STORAGE_PROVIDER=local',
             'sixnine-platform:'+commit, 'python', '-m', 'studio_platform.manage', 'init-db'],
     }
+
+
+def restore_copy(plan, source, environment):
+    # The image entrypoint's temporary bootstrap server accepts Unix sockets
+    # before database creation finishes. Only the final server listens on TCP.
+    # Loopback remains inside the network-none disposable container.
+    import time
+    for _ in range(40):
+        try:
+            release.command(plan['ready'], environment=environment, timeout=10)
+            break
+        except release.ReleaseError:
+            time.sleep(1)
+    else:
+        raise release.ReleaseError('rehearsal_database_not_ready')
+    try:
+        with source.open('rb') as dump:
+            subprocess.run([release.DOCKER, '--host', 'unix:///var/run/docker.sock', *plan['restore']],
+                stdin=dump, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                env=environment, timeout=600, check=True)
+    except subprocess.TimeoutExpired:
+        raise release.ReleaseError('rehearsal_restore_timeout_retained') from None
+    except (OSError, subprocess.SubprocessError):
+        # Do not expose SQL, rows or client stderr. The original intent and
+        # disposable resources remain for an explicit reviewed reconciliation.
+        raise release.ReleaseError('rehearsal_restore_failed_retained') from None
 
 
 def run(commit, *, root=release.ROOT):
@@ -77,18 +105,7 @@ def run(commit, *, root=release.ROOT):
     # No retries after an uncertain Docker mutation; the intent retains exact
     # disposable names for operator recovery. Never inspect/delete other names.
     release.command(plan['database'], environment=environment)
-    import time
-    for _ in range(40):
-        try:
-            release.command(['exec', plan['name'], 'pg_isready', '-U', 'postgres', '-d', 'rehearsal'], environment=environment)
-            break
-        except release.ReleaseError:
-            time.sleep(1)
-    else:
-        raise release.ReleaseError('rehearsal_database_not_ready')
-    with source.open('rb') as dump:
-        subprocess.run([release.DOCKER, '--host', 'unix:///var/run/docker.sock', *plan['restore']],
-            stdin=dump, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=environment, timeout=600, check=True)
+    restore_copy(plan, source, environment)
     release.command(plan['migrate'], environment=environment, timeout=600)
     release.require(release.checksum(source) == original, 'rehearsal_original_dump_changed')
     release.command(['rm', '--force', plan['name']], environment=environment)

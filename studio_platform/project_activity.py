@@ -69,6 +69,16 @@ def append_activity(connection, *, tenant_id, principal, project_id, version, oc
                     before, after, actions=(), event_type="project.edited"):
     if event_type not in {"project.created", "project.saved", "project.edited"}:
         raise ValueError("invalid_project_activity_type")
+    from .agent_management import record_created,record_event
+    record_event(connection,tenant_id,principal,event_type,occurred_at)
+    if before is None:record_created(connection,tenant_id,principal,'project',project_id,occurred_at,project_id)
+    from .project_validation import TYPES
+    old_ids={e['id'] for e in (before or {}).get('entities',[])}
+    for entity in (after or {}).get('entities',[]):
+        kind=entity.get('type')
+        # Legacy/minimal documents retain their audit history without invented attribution.
+        if entity['id'] not in old_ids and isinstance(kind,str) and kind in TYPES:
+            record_created(connection,tenant_id,principal,kind,entity['id'],occurred_at,project_id)
     # Read only the explicit display-name field, never tokens, prefixes, hashes,
     # credential IDs, document bodies, or service client identifiers.
     actor_label = principal.owner
