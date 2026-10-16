@@ -951,9 +951,10 @@ class DstackCapacity:
             "provider": binding["backend"], "complete_account_empty": True}
         return self.store.review_unallocated_start(intent_id, review)
 
-    def observe(self, intent_id):
+    def observe(self, intent_id, *, _on_observed=None):
         binding = self.store.load(intent_id)
         _require(isinstance(binding, dict) and binding.get("apply_started") is True, "dstack_intent_not_submitted")
+        observed_run = None
         try:
             run = self.client.get(run_id=binding["run_id"]) if binding.get("run_id") else self.client.get(run_name=binding["run_name"])
             if run is None:
@@ -962,11 +963,16 @@ class DstackCapacity:
             else:
                 _owns(run, binding, self.client.project)
                 value = self._observation(run, binding)
+                observed_run = run
         except DstackError as error:
             value = {"state": "observation_unknown", "ready": False, "reason_code": str(error), "observed_at": self.clock()}
         except Exception:
             value = {"state": "observation_unknown", "ready": False, "reason_code": "dstack_response_invalid", "observed_at": self.clock()}
         self.store.record(intent_id, value)
+        # A controller may reuse this exact read for scheduling only. The raw
+        # run never enters the ledger or changes the original observation.
+        if observed_run is not None and _on_observed is not None:
+            _on_observed(observed_run)
         return value
 
     def _observation(self, run, binding):

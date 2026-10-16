@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -19,14 +20,39 @@ import threading
 from sqlalchemy import or_, select
 
 from .control import WorkerControl, worker_spec_payload
-from .dstack_capacity import idle_action
+from .dstack_capacity import idle_action, _owns, _terminal_no_allocation_shape
+from .demand_wakeup import IDLE_SAFETY_SECONDS
 from .dstack_operator import BACKEND_MARKER, _request, _cold_unadmitted_runtime, _window_open
-from .operator_capacity import operator_nodes
-from .repository import BudgetExceeded, attempts, instance_intents, jobs, registered_workers, scaler_actions
+from .operator_capacity import operator_commands, operator_nodes
+from .repository import BudgetExceeded, attempts, instance_intents, jobs, registered_workers, request_hash, scaler_actions
 from .worker import _slot_lock
 from .telemetry import NullTelemetry, configured_telemetry
 
 TERMINAL = {"succeeded", "failed", "cancelled"}
+
+
+def _terminal_review_candidate(run, binding, project):
+    """Scheduling evidence only; an unknown allocator result stays unknown."""
+    try:
+        from .dstack_allocation_proof import ATTEMPT_FIELDS, PREFIX, _unique_object
+        _owns(run, binding, project)
+        if (run.get("id") != binding.get("run_id")
+                or not _terminal_no_allocation_shape(run, binding)
+                or run["jobs"][0].get("job_connection_info") is not None):
+            return False
+        message = run["latest_job_submission"].get("termination_reason_message")
+        if not isinstance(message, str) or len(message.encode()) > 8192 or not message.startswith(PREFIX):
+            return False
+        marker = json.loads(message[len(PREFIX):], object_pairs_hook=_unique_object)
+        selected = {item["offer_id"] for item in binding["host_selection"]["offers"]}
+        return (isinstance(marker, dict) and set(marker) == {"version", "outcome", "attempted_count", "attempts"}
+            and type(marker["version"]) is int and marker["version"] == 1 and marker["outcome"] == "unknown"
+            and isinstance(marker["attempts"], list) and 1 <= len(marker["attempts"]) <= 25
+            and type(marker["attempted_count"]) is int and marker["attempted_count"] == len(marker["attempts"])
+            and all(isinstance(item, dict) and set(item) == ATTEMPT_FIELDS
+                and item["ask_id"] in selected and item["contract_id"] is None for item in marker["attempts"]))
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return False
 
 
 class DstackController:
@@ -45,32 +71,121 @@ class DstackController:
         self.telemetry = telemetry if telemetry is not None else NullTelemetry()
         self.capacity.store.telemetry = self.telemetry
         self._cleanup_pending = set()
+        # Scheduling stamps only. They never authorize admission, retirement,
+        # settlement or a claim that the original PUT allocated nothing.
+        self._passive_unknown = {}
+
+    def _business_demand(self, connection):
+        if connection.execute(select(jobs.c.id).where(
+            jobs.c.tenant_id == self.service.settings.tenant_id,
+            jobs.c.execution_plan["dispatch_backend"].as_string() == "hatchet-v1",
+            jobs.c.status.in_(("waiting_capacity", "queued", "claimed", "submitting", "running",
+                               "collecting", "submission_unknown", "cancel_requested", "recovery_hold")))
+            .limit(1)).first():
+            return True
+        return connection.execute(select(attempts.c.id).select_from(attempts.join(jobs,
+            attempts.c.job_id == jobs.c.id)).where(
+            jobs.c.tenant_id == self.service.settings.tenant_id,
+            jobs.c.execution_plan["dispatch_backend"].as_string() == "hatchet-v1",
+            or_(attempts.c.submission_started_at.is_not(None), attempts.c.upstream_task_id.is_not(None)),
+            or_(attempts.c.upstream_stopped != 1, attempts.c.upstream_stopped.is_(None)))
+            .limit(1)).first() is not None
+
+    def _passive_fingerprint(self, node):
+        binding = node["payload"].get("dstack", {})
+        if (node["desired_state"] != "stopped" or node["runtime_state"] != "creation_unknown"
+                or binding.get("reason_code") != "dstack_allocation_requires_reconciliation"
+                or binding.get("apply_started") is not True or binding.get("stop_started")
+                or not binding.get("run_id") or binding.get("registration_observation")
+                or binding.get("broker_observation") or binding.get("host_observation")
+                or node["payload"].get("host_observation")
+                or any(binding.get(key) is not None for key in (
+                    "provider_instance_id", "runtime_incarnation", "first_runtime_ready_at"))
+                or any(binding.get(key) not in (None, False) for key in (
+                    "bootstrap_started", "bootstrap_launch_started", "runtime_launch_started"))):
+            return None
+        with self.repo.engine.connect() as connection:
+            if connection.dialect.name == "postgresql":
+                connection = connection.execution_options(isolation_level="REPEATABLE READ", postgresql_readonly=True)
+            current = connection.execute(select(operator_nodes).where(
+                operator_nodes.c.intent_id == node["intent_id"])).mappings().one()
+            intent = connection.execute(select(instance_intents).where(
+                instance_intents.c.id == node["intent_id"])).mappings().one()
+            if dict(current) != node or intent["state"] != "creation_unknown" or intent["provider_instance_id"] is not None:
+                return None
+            worker_id = "dstack-" + node["intent_id"].replace("-", "")
+            if (connection.execute(select(registered_workers.c.id).where(registered_workers.c.id == worker_id)).first()
+                    or connection.execute(select(attempts.c.id).where(attempts.c.worker_id == worker_id)).first()
+                    or connection.execute(select(jobs.c.id).where(jobs.c.lease_worker_id == worker_id)).first()):
+                return None
+            commands = [dict(row) for row in connection.execute(select(operator_commands).where(or_(
+                operator_commands.c.id == node["command_id"],
+                operator_commands.c.payload["node_id"].as_string() == node["intent_id"]))
+                .order_by(operator_commands.c.id)).mappings()]
+            action = connection.execute(select(scaler_actions).where(
+                scaler_actions.c.intent_id == node["intent_id"])).mappings().one()
+            return request_hash({"node": node, "intent": dict(intent), "commands": commands, "action": dict(action)})
+
+    def _passive_matches(self, node, *, allow_due=False):
+        witness = self._passive_unknown.get(node["intent_id"])
+        if witness is None:
+            return False
+        try:
+            age = self.repo.clock() - witness["observed_at"]
+            matches = (age >= 0 and (allow_due or age < IDLE_SAFETY_SECONDS)
+                and witness["fingerprint"] == self._passive_fingerprint(node))
+        except Exception:
+            matches = False
+        if not matches:
+            self._passive_unknown.pop(node["intent_id"], None)
+        return matches
+
+    def _empty_inventory(self, inventory, backend):
+        observed = inventory.get("observed_at") if isinstance(inventory, dict) else None
+        return (isinstance(inventory, dict) and inventory.get("backend") == backend
+            and inventory.get("complete") is True and inventory.get("instance_ids") == []
+            and type(observed) in (int, float) and math.isfinite(observed)
+            and 0 <= self.repo.clock() - observed <= 30)
+
+    def _defer_terminal_review(self, node, run):
+        try:
+            if self._cleanup_pending or getattr(self.worker_process, "children", None):
+                return False
+            with self.repo.engine.connect() as connection:
+                if self._business_demand(connection):
+                    self._passive_unknown.clear()
+                    return False
+            fingerprint = self._passive_fingerprint(node)
+            binding = node["payload"].get("dstack", {})
+            if not fingerprint or not _terminal_review_candidate(run, binding, self.capacity.client.project):
+                return False
+            inventory = self.capacity.client.provider_inventory(binding["backend"])
+            if (not self._empty_inventory(inventory, binding["backend"])
+                    or fingerprint != self._passive_fingerprint(node)):
+                return False
+            self._passive_unknown[node["intent_id"]] = {
+                "fingerprint": fingerprint, "observed_at": self.repo.clock()}
+            return True
+        except Exception:
+            self._passive_unknown.pop(node["intent_id"], None)
+            return False
 
     def has_demand(self):
         """Historical stopped rows/invoices alone do not require fast polling."""
         if self._cleanup_pending or getattr(self.worker_process, "children", None):
+            self._passive_unknown.clear()
             return True
         with self.repo.engine.connect() as connection:
-            node = connection.execute(select(operator_nodes.c.intent_id).where(
+            if self._business_demand(connection):
+                self._passive_unknown.clear()
+                return True
+            nodes = [dict(row) for row in connection.execute(select(operator_nodes).where(
                 operator_nodes.c.payload["capacity_backend"].as_string() == BACKEND_MARKER,
                 operator_nodes.c.payload["tenant_id"].as_string() == self.service.settings.tenant_id,
-                operator_nodes.c.runtime_state != "stopped").limit(1)).first()
-            if node:
-                return True
-            if connection.execute(select(jobs.c.id).where(
-                jobs.c.tenant_id == self.service.settings.tenant_id,
-                jobs.c.execution_plan["dispatch_backend"].as_string() == "hatchet-v1",
-                jobs.c.status.in_(("waiting_capacity", "queued", "claimed", "submitting", "running",
-                                   "collecting", "submission_unknown", "cancel_requested", "recovery_hold")))
-                .limit(1)).first():
-                return True
-            return connection.execute(select(attempts.c.id).select_from(attempts.join(jobs,
-                attempts.c.job_id == jobs.c.id)).where(
-                jobs.c.tenant_id == self.service.settings.tenant_id,
-                jobs.c.execution_plan["dispatch_backend"].as_string() == "hatchet-v1",
-                or_(attempts.c.submission_started_at.is_not(None), attempts.c.upstream_task_id.is_not(None)),
-                or_(attempts.c.upstream_stopped != 1, attempts.c.upstream_stopped.is_(None)))
-                .limit(1)).first() is not None
+                operator_nodes.c.runtime_state != "stopped")).mappings()]
+        # Due stamps remain passive until the existing safety callback refreshes
+        # them. Direct tick refuses an expired stamp; no second polling actor.
+        return any(not self._passive_matches(node, allow_due=True) for node in nodes)
 
     def safety_sweep(self):
         """Rare complete-account observation; never stops or settles a resource."""
@@ -85,12 +200,37 @@ class DstackController:
                 raise ValueError("incomplete_provider_inventory")
             known = {name: set() for name in providers}
             known_runs = set()
-            for node in self._nodes():
+            nodes = self._nodes()
+            for node in nodes:
                 binding = node["payload"].get("dstack", {})
                 if binding.get("backend") in known and binding.get("provider_instance_id"):
                     known[binding["backend"]].add(binding["provider_instance_id"])
                 if binding.get("run_id"):
                     known_runs.add(binding["run_id"])
+            with self.repo.engine.connect() as connection:
+                busy = self._business_demand(connection)
+            if busy or self._cleanup_pending or getattr(self.worker_process, "children", None):
+                self._passive_unknown.clear()
+            present = {node["intent_id"] for node in nodes}
+            for intent_id in list(self._passive_unknown):
+                if intent_id not in present:
+                    self._passive_unknown.pop(intent_id, None)
+            for node in nodes:
+                if not self._passive_matches(node, allow_due=True):
+                    continue
+                witness = self._passive_unknown[node["intent_id"]]
+                binding = node["payload"]["dstack"]
+                if (not self._empty_inventory(providers.get(binding["backend"]), binding["backend"])
+                        or any(row["id"] == binding["run_id"] for row in rows)):
+                    self._passive_unknown.pop(node["intent_id"], None)
+                    continue
+                if self.repo.clock() - witness["observed_at"] >= IDLE_SAFETY_SECONDS:
+                    run = client.get(run_id=binding["run_id"])
+                    if (not _terminal_review_candidate(run, binding, client.project)
+                            or witness["fingerprint"] != self._passive_fingerprint(node)):
+                        self._passive_unknown.pop(node["intent_id"], None)
+                        continue
+                    witness["observed_at"] = self.repo.clock()
             return {"state": "idle_safety_observed", "active_runs": len(rows),
                 "provider_allocations": {name: len(value["instance_ids"]) for name, value in providers.items()},
                 "untracked_active_runs": sum(row["id"] not in known_runs for row in rows),
@@ -99,6 +239,7 @@ class DstackController:
                 "provider_observed_at": {name: value["observed_at"] for name, value in providers.items()},
                 "business_writes": 0, "provider_mutations": 0}
         except Exception:
+            self._passive_unknown.clear()
             return {"state": "idle_safety_unconfirmed", "business_writes": 0, "provider_mutations": 0}
 
     def _nodes(self):
@@ -208,12 +349,16 @@ class DstackController:
             # stop_started alone cannot prove that its HTTP request arrived.
             observation = self.capacity.stop(intent_id)
             return {"node_id": intent_id, "state": observation["state"]}
-        observation = self.capacity.observe(intent_id)
+        observed = []
+        observation = (self.capacity.observe(intent_id, _on_observed=observed.append)
+            if node["desired_state"] == "stopped" else self.capacity.observe(intent_id))
         binding = self.capacity.store.load(intent_id)
         with self.repo.engine.connect() as connection:
             current = dict(connection.execute(select(operator_nodes).where(operator_nodes.c.intent_id == intent_id)).mappings().one())
             intent = dict(connection.execute(select(instance_intents).where(instance_intents.c.id == intent_id)).mappings().one())
         workers, active, unsafe, last = self._obligations(intent)
+        if observed and not workers and not active and not unsafe and self._defer_terminal_review(current, observed[0]):
+            return {"node_id": intent_id, "state": observation["state"], "code": "dstack_terminal_review_waiting_safety"}
         payload = current["payload"]
         now = self.repo.clock()
         observed = binding.get("observed_at")
@@ -288,8 +433,14 @@ class DstackController:
 
     def tick(self):
         results = []
+        with self.repo.engine.connect() as connection:
+            busy = self._business_demand(connection)
+        if busy or self._cleanup_pending or getattr(self.worker_process, "children", None):
+            self._passive_unknown.clear()
         for node in self._nodes():
             try:
+                if self._passive_matches(node):
+                    continue
                 # A task terminal is not an invoice or provider destruction proof.
                 if node["runtime_state"] == "stopped":
                     with self.repo.engine.connect() as connection:
