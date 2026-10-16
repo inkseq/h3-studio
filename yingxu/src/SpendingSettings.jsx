@@ -18,6 +18,7 @@ export default function SpendingSettings({account}){
   const [user,setUser]=useState(null),[admin,setAdmin]=useState(null),[draft,setDraft]=useState(null),[adminDraft,setAdminDraft]=useState(null);
   const [busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[error,setError]=useState(''),epoch=useRef(0);
   const load=async()=>{
+    if(!account){setBusy(false);return;}
     const current=epoch.current;setBusy(true);setError('');
     try{
       const data=await api.request('/v1/account/spending-settings');
@@ -32,6 +33,7 @@ export default function SpendingSettings({account}){
   };
   useEffect(()=>{epoch.current++;setUser(null);setAdmin(null);setDraft(null);setNotice('');void load();return()=>{epoch.current++;api.reset();};},[api]);
   async function save(isAdmin=false){
+    if(!account)return;
     const current=epoch.current;setBusy(true);setError('');setNotice('');
     try{
       let body;
