@@ -126,7 +126,9 @@ def register_routes(app):
             # Admission is durable before a worker can claim the task. A crash
             # between creation and linking leaves an inert, idempotent task.
             try:
-                app.state.enqueue_planned(principal, job)
+                required = any(item.get("confirmation_required") for item in latest["items"] if item.get("job_id") == job_id)
+                version = next((item.get("spending_settings_version") for item in latest["items"] if item.get("job_id") == job_id), None)
+                app.state.enqueue_planned(principal, job, confirmation_required=required, spending_settings_version=version)
             except Conflict:
                 # A racing retry/cancel may already have transitioned this job.
                 if repo.get_job(task_scope, job_id)["status"] == "planned":
@@ -184,6 +186,20 @@ def register_routes(app):
         # Reservation occurs before per-item validation so partial admission can
         # recover after a process crash. Ownership is still checked for every plan.
         record = service.reserve(principal, project_id, body["plan_ids"], idempotency_key)
+        from .spending_limits import check_submission_confirmation
+        pending_plans = []
+        for item in record["items"]:
+            if not item["job_id"] and not item["error_code"]:
+                pending_plans.append(item["plan_id"])
+            elif item["job_id"]:
+                job = repo.get_job_for_owner(service.tenant, principal.owner, item["job_id"])
+                if job["status"] in {"planned", "blocked"}:
+                    pending_plans.append(item["plan_id"])
+        check = check_submission_confirmation(repo, service.tenant, principal, [] if record["cancel_requested"] else pending_plans)
+        for index, item in enumerate(record["items"]):
+            if item["plan_id"] in pending_plans:
+                service.record_item(principal, record["id"], index, {"spending_settings_version": check.version,
+                    **({"confirmation_required": True} if check else {})})
         for index, item in enumerate(record["items"]):
             if not item["job_id"] and (item["error_code"] or service.get(principal, record["id"])["cancel_requested"]):
                 continue
@@ -199,6 +215,9 @@ def register_routes(app):
                 service.record_item(principal, record["id"], index, {"job_id": job["id"], "error_code": None})
                 activate(principal, record, job["id"])
             except (NotFound, Conflict, BudgetExceeded, ValueError) as error:
+                from .spending_limits import SpendingConfirmationRequired
+                if isinstance(error, SpendingConfirmationRequired):
+                    raise
                 code = "plan_not_available" if isinstance(error, NotFound) else ("budget_exceeded" if isinstance(error, BudgetExceeded) else "plan_no_longer_valid")
                 service.record_item(principal, record["id"], index, {"error_code": code})
         return visible(principal, service.get(principal, record["id"]))

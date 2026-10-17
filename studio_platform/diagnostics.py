@@ -95,7 +95,7 @@ def operator_snapshot(repository, *, tenant_id):
             .where(budget_accounts.c.tenant_id == tenant_id)).one()
         unresolved = conn.execute(select(func.count()).select_from(budget_reservations.join(
             budget_accounts, budget_reservations.c.account_id == budget_accounts.c.id)).where(
-                budget_accounts.c.tenant_id == tenant_id, budget_reservations.c.state == "reserved",
+                budget_accounts.c.tenant_id == tenant_id, budget_reservations.c.state.in_(("reserved", "invoice_pending")),
                 or_(and_(budget_reservations.c.reference_type == "job",
                          budget_reservations.c.reference_id.in_(select(jobs.c.id).where(
                              jobs.c.tenant_id == tenant_id, jobs.c.result["billing_status"].as_string() == "pending"))),

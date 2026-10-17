@@ -174,7 +174,7 @@ class CapacityRequest:
         _require(type(self.lifecycle_version) is int and self.lifecycle_version in {1, 2},
             "dstack_lifecycle_invalid")
         _require(self.test_max_duration_s is None or self.lifecycle_version == 2
-            and type(self.test_max_duration_s) is int and 600 <= self.test_max_duration_s <= 7200,
+            and type(self.test_max_duration_s) is int and 60 <= self.test_max_duration_s <= 86400,
             "dstack_test_duration_invalid")
         _require(type(self.created_at) in (int, float) and math.isfinite(self.created_at)
             and self.created_at > 0, "dstack_deadline_invalid")

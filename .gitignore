@@ -567,3 +567,12 @@ inventory.json
 !studio_platform/settlement_recovery.py
 !test_settlement_recovery.py
 !docs/SETTLEMENT-RECOVERY.md
+
+# Bounded financial Settings dependency and regression coverage
+!studio_platform/spending_limits.py
+!studio_platform/spending_routes.py
+!test_spending_limits.py
+!test_spending_routes.py
+!test_spending_connections.py
+!test_spending_quick_chat.py
+!docs/FINANCIAL254-HOTFIX.md

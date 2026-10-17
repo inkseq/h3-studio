@@ -10,7 +10,7 @@ const rejectedStart=(operation,error)=>operation.method==='start'&&error.status=
   ['budget_exceeded','budget_not_configured','capacity_unavailable'].includes(error.detail?.code);
 /** UI command journal only. Runtime, jobs, groups and accounting remain API-owned. */
 export function createP4OperatorController({client=createP4OperatorClient(),storage=globalThis.localStorage}={}){
-  let epoch=0,reading=false,jobReading=0,hostReading={owner:0,admin:0,audit:0,target:0},state={account:null,snapshot:null,catalog:null,hosts:null,adminSnapshot:null,adminBudgets:null,adminPrices:null,budgetAudits:null,adminJobs:null,adminHosts:null,hostAudits:null,hostTarget:null,pending:null,busy:false,loading:false,error:'',denied:false};
+  let epoch=0,reading=false,budgetReading=0,jobReading=0,hostReading={owner:0,admin:0,audit:0,target:0},state={account:null,snapshot:null,catalog:null,hosts:null,adminSnapshot:null,adminBudgets:null,adminPrices:null,budgetAudits:null,adminJobs:null,adminHosts:null,hostAudits:null,hostTarget:null,pending:null,busy:false,loading:false,error:'',denied:false};
   const listeners=new Set(),emit=patch=>{state={...state,...patch};listeners.forEach(fn=>fn());};
   const guard=(account,version)=>{if(account!==state.account||version!==epoch)throw Error('登录账户已改变，原响应未展示。');};
   function pending(value){if(!storage||!state.account)throw Error('无法保留原操作标识，未提交操作。');if(value)storage.setItem(pendingKey(state.account),JSON.stringify(value));else storage.removeItem(pendingKey(state.account));emit({pending:value});}
@@ -22,10 +22,20 @@ export function createP4OperatorController({client=createP4OperatorClient(),stor
     finally{if(version===epoch){reading=false;emit({loading:false});}}
   }
   async function readAdmin(){const account=state.account,version=epoch;if(state.snapshot?.operator?.admin!==true)throw Error('没有管理员权限。');try{const value=await client.adminState();guard(account,version);if(value.operator?.account!==account||value.operator?.admin!==true)throw Error('管理员身份尚未确认。');emit({adminSnapshot:value});return value;}catch(error){if(version===epoch)emit({error:error.message,adminSnapshot:null,adminBudgets:null,adminPrices:null,budgetAudits:null,adminJobs:null,adminHosts:null,hostAudits:null,hostTarget:null,...(error.status===403&&state.snapshot?{snapshot:{...state.snapshot,operator:{...state.snapshot.operator,admin:false}}}:{})});throw error;}}
-  async function readBudgetAdmin(){
-    const account=state.account,version=epoch;if(state.snapshot?.operator?.admin!==true)throw Error('没有管理员权限。');
-    try{const [budgets,prices,audits]=await Promise.all([client.adminBudgets(),client.adminPrices(),client.budgetAudit()]);guard(account,version);if(budgets.account!==account||budgets.admin!==true||prices.operator?.account!==account||prices.operator.admin!==true||!Array.isArray(audits.events))throw Error('管理员身份已改变，原预算响应未展示。');emit({adminBudgets:budgets,adminPrices:prices,budgetAudits:audits});return {budgets,prices,audits};}
-    catch(error){if(version===epoch)emit({adminBudgets:null,adminPrices:null,budgetAudits:null,adminJobs:null,adminHosts:null,hostAudits:null,hostTarget:null,error:error.message,...(error.status===403&&state.snapshot?{snapshot:{...state.snapshot,operator:{...state.snapshot.operator,admin:false}}}:{})});throw error;}
+  async function readBudgetAdmin({after_id}={}){
+    const account=state.account,version=epoch,request=++budgetReading,prior=state.adminBudgets;
+    if(state.snapshot?.operator?.admin!==true)throw Error('没有管理员权限。');
+    if(after_id&&prior?.next_after_id!==after_id)throw Error('原预算分页已改变，请刷新。');
+    try{
+      const [page,prices,audits]=await Promise.all([client.adminBudgets({after_id}),after_id?Promise.resolve(state.adminPrices):client.adminPrices(),after_id?Promise.resolve(state.budgetAudits):client.budgetAudit()]);
+      guard(account,version);
+      if(state.snapshot?.operator?.admin!==true)throw Object.assign(Error('管理员权限已改变，原预算响应未展示。'),{status:403});
+      if(request!==budgetReading)throw Error('较新的预算读取已完成，原响应未展示。');
+      if(page.account!==account||page.admin!==true||prices?.operator?.account!==account||prices.operator.admin!==true||!Array.isArray(audits?.events))throw Error('管理员身份已改变，原预算响应未展示。');
+      if(after_id&&(state.adminBudgets!==prior||page.next_after_id===after_id))throw Error('原预算分页已改变，请刷新。');
+      const budgets=after_id?{...page,budgets:[...new Map([...prior.budgets,...page.budgets].map(row=>[row.id,row])).values()]}:page;
+      emit({adminBudgets:budgets,adminPrices:prices,budgetAudits:audits});return {budgets,prices,audits};
+    }catch(error){if(version===epoch&&request===budgetReading)emit({adminBudgets:null,adminPrices:null,budgetAudits:null,adminJobs:null,adminHosts:null,hostAudits:null,hostTarget:null,error:error.message,...(error.status===403&&state.snapshot?{snapshot:{...state.snapshot,operator:{...state.snapshot.operator,admin:false}}}:{})});throw error;}
   }
   async function readJobAdmin({after_id}={}){
     const account=state.account,version=epoch,request=++jobReading;
@@ -85,7 +95,7 @@ export function createP4OperatorController({client=createP4OperatorClient(),stor
   }
   const nodeCommand=(method,node,body)=>command(method,[node.id],body,async(account,version)=>({...body,expected_version:(await freshNode(node,account,version)).version}));
   return {client,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},getState:()=>state,
-    async setAccount(account){epoch++;reading=false;jobReading++;for(const key of Object.keys(hostReading))hostReading[key]++;client.setAccount(account);let saved=null;try{saved=account?JSON.parse(storage?.getItem(pendingKey(account))||'null'):null;}catch{saved={corrupt:true};}emit({account,snapshot:null,catalog:null,hosts:null,adminSnapshot:null,adminBudgets:null,adminPrices:null,budgetAudits:null,adminJobs:null,adminHosts:null,hostAudits:null,hostTarget:null,pending:saved,busy:false,loading:false,error:'',denied:false});if(account)try{await refresh();}catch{}},
+    async setAccount(account){epoch++;reading=false;budgetReading++;jobReading++;for(const key of Object.keys(hostReading))hostReading[key]++;client.setAccount(account);let saved=null;try{saved=account?JSON.parse(storage?.getItem(pendingKey(account))||'null'):null;}catch{saved={corrupt:true};}emit({account,snapshot:null,catalog:null,hosts:null,adminSnapshot:null,adminBudgets:null,adminPrices:null,budgetAudits:null,adminJobs:null,adminHosts:null,hostAudits:null,hostTarget:null,pending:saved,busy:false,loading:false,error:'',denied:false});if(account)try{await refresh();}catch{}},
     refresh,readAdmin,readBudgetAdmin,readJobAdmin,readHosts,readHostAudit,readHostTarget,poll:admin=>state.busy?Promise.resolve():refresh(admin),
     async preview(body){const account=state.account,version=epoch;const value=await client.preview(body);guard(account,version);return value;},stopImpact:(kind,target)=>client.stopImpact(kind,target),
     async metrics(nodeId){const account=state.account,version=epoch;const value=await client.metrics(nodeId);guard(account,version);if(value?.node_id!==nodeId)throw Error('机器统计身份尚未确认。');return value;},

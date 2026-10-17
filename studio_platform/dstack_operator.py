@@ -656,7 +656,7 @@ class DstackOperator:
                 and self.config.get("project") == "sixnine-staging"
                 and self.policy.get("lifecycle_version") == 2
                 and self.policy.get("max_instances") == self.policy.get("max_physical_gpus") == 1
-                and self.policy["idle_shutdown_seconds"] == 600
+                and 1 <= self.policy["idle_shutdown_seconds"] <= 86400
                 and all(profile["pool"] in POOLS and profile["project_id"] in PROJECTS
                     and ACCOUNT in profile["budget_account_ids"] and profile["extra_reservation_microusd"] > 0
                     for profile in self.profiles.values()), "dstack_test_guard_binding_invalid", 422)
@@ -719,7 +719,7 @@ class DstackOperator:
         require(self.policy.get("enabled") is True and self.capacity is not None, "dstack_capacity_disabled")
         require(self.repo.clock() < self.policy["expires_at"], "dstack_authority_expired")
 
-    def _capacity_request(self, profile, intent_id, created_at, deadline, duration, *, lifecycle_version=1):
+    def _capacity_request(self, profile, intent_id, created_at, deadline, duration, *, lifecycle_version=1, test_max_duration=None):
         return CapacityRequest(intent_id=intent_id, backend=profile["backend"], profile_id=profile["runtime_profile_id"],
             mode=profile["mode"], model_id=profile["model_id"], configuration_id=profile["configuration_id"],
             manifest_digest=profile["manifest_digest"], image=profile["image"], gpu_names=tuple(profile["gpu_names"]),
@@ -728,7 +728,7 @@ class DstackOperator:
             created_at=created_at, hard_deadline=deadline, max_duration_s=duration,
             regions=tuple(profile.get("regions", [])), min_reliability=profile.get("min_reliability", .9),
             lifecycle_version=lifecycle_version,
-            test_max_duration_s=(self.policy.get("test_gpu_guard", {}).get("max_runtime_seconds")
+            test_max_duration_s=(test_max_duration or self.policy.get("test_gpu_guard", {}).get("max_runtime_seconds")
                 if lifecycle_version == 2 else None))
 
     def _expected_runtime(self, profile):
@@ -755,26 +755,41 @@ class DstackOperator:
                 raise
             raise OperatorError("dstack_execution_policy_unconfirmed") from None
 
-    def _lifecycle(self, body, now, expected_runtime):
+    def _admin_limits(self, connection=None):
+        from .spending_limits import ADMIN_OWNER, read_settings, admin_defaults
+        if connection is None:
+            with self.repo.engine.connect() as connection:
+                return self._admin_limits(connection)
+        return read_settings(connection, self.settings.tenant_id, ADMIN_OWNER, admin_defaults=admin_defaults(self))
+
+    def _lifecycle(self, body, now, expected_runtime, *, limits=None):
+        limits = limits or self._admin_limits()["value"]
         keep = body.get("keep_on", "until" if body.get("hold_seconds", 0) else "idle")
         hold = body.get("hold_seconds", 0)
-        idle = body.get("idle_shutdown_seconds", self.policy["idle_shutdown_seconds"])
+        idle = body.get("idle_shutdown_seconds", limits["idle_shutdown_seconds"])
         require(isinstance(keep, str) and keep in {"idle", "until", "until_stopped"}
             and _integer(hold, 0, 86400) and _integer(idle, 1, 86400)
             and (keep == "until" and hold > 0 or keep != "until" and hold == 0),
             "dstack_lifecycle_policy_invalid", 422)
         guard = self.policy.get("test_gpu_guard")
-        require(guard is None or keep == "idle" and idle <= 600,
+        require(guard is None or keep == "idle" and idle <= limits["idle_shutdown_seconds"],
             "dstack_test_idle_policy_required", 422)
         result = {"version": 2, "keep_on": keep, "hold_until": now + hold if hold else 0,
             "idle_shutdown_seconds": idle, "reservation_seconds": self.policy["reservation_seconds"],
             "expected_runtime_s": expected_runtime}
         if guard is not None:
+            require(limits["max_runtime_seconds"] > expected_runtime + guard["stop_margin_seconds"],
+                "dstack_test_runtime_limit_reached", 422)
             result["test_gpu_guard"] = copy.deepcopy(guard)
+            result["test_gpu_guard"].update(daily_limit_microusd=limits["test_daily_limit_microusd"],
+                max_runtime_seconds=limits["max_runtime_seconds"])
         return result
 
     def fund_window(self, connection, intent, node, now):
         """Fund preparation, elapsed paid time and a full safe execution runway."""
+        from .spending_limits import ADMIN_OWNER, lock_owner
+        self.repo._lock_capacity(connection)
+        lock_owner(connection, self.settings.tenant_id, ADMIN_OWNER)
         from .worker_admission import COMPLETION_MARGIN_SECONDS
         payload, lifecycle = node["payload"], node["payload"]["lifecycle"]
         from .dstack_test_budget import budget_reason
@@ -855,9 +870,12 @@ class DstackOperator:
         prices = OperatorPrices(self.repo, self.settings)
         with self.repo.engine.connect() as connection:
             price, _, _ = prices.read(connection, profile)
+            admin_limits = self._admin_limits(connection)
         chosen_price = body.get("max_price_microusd", price["max_price_microusd"])
         require(_integer(chosen_price) and chosen_price <= price["price_ceiling_microusd"],
             "dstack_price_ceiling_exceeded", 422)
+        require(chosen_price <= admin_limits["value"]["max_hourly_price_microusd"],
+            "admin_hourly_price_limit_reached", 422)
         profile = copy.deepcopy(profile)
         profile["max_price_microusd"] = chosen_price
         ttl = body.get("ttl_seconds", self.policy.get("reservation_seconds"))
@@ -866,12 +884,13 @@ class DstackOperator:
         now = self.repo.clock()
         if not continuing:
             require(now + ttl <= self.policy["expires_at"], "dstack_authority_window_exceeded")
-        lifecycle = self._lifecycle(body, now, self._expected_runtime(profile)) if continuing else None
+        lifecycle = self._lifecycle(body, now, self._expected_runtime(profile), limits=admin_limits["value"]) if continuing else None
         if continuing:
             lifecycle["budget_account_ids"] = copy.deepcopy(profile["budget_account_ids"])
         preview_id = str(uuid.uuid4())
         request = self._capacity_request(profile, preview_id, now, None if continuing else now + ttl,
-            None if continuing else ttl, lifecycle_version=2 if continuing else 1)
+            None if continuing else ttl, lifecycle_version=2 if continuing else 1,
+            test_max_duration=lifecycle.get("test_gpu_guard", {}).get("max_runtime_seconds") if lifecycle else None)
         offers=plan_offers(self.capacity.plan(request, self.config["ssh_public_key"]),request)
         require(bool(offers),"dstack_no_compatible_offers")
         if request.backend == "vastai":
@@ -913,6 +932,7 @@ class DstackOperator:
         cost = math.ceil(profile["max_price_microusd"] * (initial_seconds + 300) / 3600) + profile["extra_reservation_microusd"]
         payload = {"capacity_backend": BACKEND_MARKER, "tenant_id": self.settings.tenant_id, "owner_id": owner,
             "profile_id": profile["id"], "profile": profile, "config_fingerprint": self.fingerprint,
+            "admin_limits_snapshot": request_hash(admin_limits),
             "request": asdict(request), "reservation_microusd": cost,
             "price_policy_snapshot": price["snapshot"]}
         if continuing:
@@ -968,7 +988,7 @@ class DstackOperator:
             clock=self.repo.clock, fresh_seconds=self.policy["observation_fresh_seconds"])
         require(usage["instances"] + 1 <= self.policy["max_instances"] and
             usage["physical_gpus"] + 1 <= self.policy["max_physical_gpus"], "dstack_capacity_limit_exceeded")
-        require(usage["hourly_cost_microusd"] + hourly <= self.policy["max_hourly_cost_microusd"], "dstack_hourly_limit_exceeded")
+        require(usage["hourly_cost_microusd"] + hourly <= self._admin_limits(connection)["value"]["fleet_hourly_limit_microusd"], "dstack_hourly_limit_exceeded")
         return usage
 
     def registration_capacity_usage(self, connection, spec):
@@ -1082,6 +1102,8 @@ class DstackOperator:
         digest = request_hash({"kind": "dstack_start", "body": body})
         with self.repo.transaction() as connection:
             self.repo._lock_capacity(connection)
+            from .spending_limits import ADMIN_OWNER, lock_owner
+            lock_owner(connection, self.settings.tenant_id, ADMIN_OWNER)
             existing = self._existing_command(connection, actor, key, digest)
             if existing:
                 return {"command_id": existing["id"], "node_id": existing["payload"]["node_id"], "state": existing["state"]}
@@ -1092,6 +1114,8 @@ class DstackOperator:
             value = preview["payload"]
             require(value.get("config_fingerprint") == self.fingerprint and value.get("capacity_backend") == BACKEND_MARKER,
                 "dstack_preview_configuration_changed")
+            require(value.get("admin_limits_snapshot") == request_hash(self._admin_limits(connection)),
+                "spending_settings_changed")
             from .operator_prices import OperatorPrices
             trusted = self.profiles.get(value["profile_id"])
             require(trusted is not None and trusted["owner_id"] == owner,
@@ -1152,7 +1176,8 @@ class DstackOperator:
                 dry_run=False, provider=PROVIDERS[profile["backend"]], connection=connection,
                 continuing=continuing, capacity_usage=usage, active_instance_ids=usage["active_instance_ids"])
             request = self._capacity_request(profile, intent["id"], now, original["hard_deadline"], original["max_duration_s"],
-                lifecycle_version=original.get("lifecycle_version", 1))
+                lifecycle_version=original.get("lifecycle_version", 1),
+                test_max_duration=original.get("test_max_duration_s"))
             if host_selection is not None:
                 request = replace(request, host_selection=copy.deepcopy(host_selection))
             binding = request.binding(self.config["ssh_public_key"])

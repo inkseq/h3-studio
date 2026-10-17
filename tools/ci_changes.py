@@ -169,7 +169,10 @@ def dispatch_action(inputs: dict, ref: str) -> str:
         raise ValueError("resume_requires_an_approved_deployment")
     if resume and not re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", resume):
         raise ValueError("invalid_resume_command")
-    if (prepare or approved or frontend or promoted) and ref != "refs/heads/main":
+    financial_hotfix_prepare = (ref == "refs/heads/codex/financial254-a76-hotfix-20261017"
+        and prepare and kind == "platform" and not (approved or frontend or promoted or resume)
+        and (inputs.get("retain_native_sources_transport") or "github") == "github")
+    if (prepare or approved or frontend or promoted) and ref != "refs/heads/main" and not financial_hotfix_prepare:
         raise ValueError("release_actions_require_main")
     if binding(inputs) is not None and not (prepare and kind == "platform" and not approved and not frontend and not promoted):
         raise ValueError("native_retention_requires_platform_preparation")

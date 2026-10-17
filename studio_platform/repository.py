@@ -178,6 +178,21 @@ budget_reservations = Table(
     Column("settled_at", Float),
     UniqueConstraint("account_id", "reference_type", "reference_id"),
 )
+spending_settings = Table("platform_spending_settings", metadata,
+    Column("tenant_id", String(200), primary_key=True),
+    Column("owner_id", String(200), primary_key=True),
+    Column("version", Integer, nullable=False), Column("value", JSON, nullable=False),
+    Column("updated_at", Float, nullable=False), Column("actor_id", String(200), nullable=False))
+spending_origins = Table("platform_spending_origins", metadata,
+    Column("reference_type", String(30), primary_key=True),
+    Column("reference_id", String(200), primary_key=True),
+    Column("tenant_id", String(200), nullable=False), Column("owner_id", String(200), nullable=False),
+    Column("actor_id", String(200), nullable=False), Column("created_at", Float, nullable=False))
+spending_confirmations = Table("platform_spending_confirmations", metadata,
+    Column("tenant_id", String(200), primary_key=True), Column("owner_id", String(200), primary_key=True),
+    Column("plan_id", String(36), primary_key=True), Column("actor_id", String(200), primary_key=True),
+    Column("plan_hash", String(64), nullable=False), Column("settings_version", Integer, nullable=False),
+    Column("expires_at", Float, nullable=False), Column("consumed_reference", String(200)))
 artifacts = Table(
     "platform_artifacts", metadata, Column("id", String(36), primary_key=True),
     Column("job_id", String(36), ForeignKey("platform_jobs.id"), nullable=False),
@@ -681,6 +696,11 @@ class Repository:
             func.coalesce(func.sum(budget_reservations.c.actual_cost_microusd), 0).label("cost_microusd"),
             func.count().label("reservation_count")).where(
                 confirmed, budget_reservations.c.settled_at.is_(None))).mappings().one()
+        invoice_pending = connection.execute(select(
+            func.count().label("reservation_count"),
+            func.coalesce(func.sum(budget_reservations.c.amount_microusd), 0).label("reserved_estimate_microusd"))
+            .where(budget_reservations.c.account_id == row["id"],
+                   budget_reservations.c.state == "invoice_pending")).mappings().one()
         limit, spent, reserved = (row[name] for name in
             ("limit_microusd", "spent_microusd", "reserved_microusd"))
         retired = fixed_cap_retired(row)
@@ -690,6 +710,10 @@ class Repository:
             "basis": "cumulative", "currency": "USD", "limit_microusd": limit,
             "limit_mode": "settings" if retired else "cumulative",
             "legacy_projection_only": retired,
+            "invoice_pending": {"reservation_count": int(invoice_pending["reservation_count"]),
+                "reserved_estimate_microusd": int(invoice_pending["reserved_estimate_microusd"]),
+                "actual_cost_microusd": None,
+                "included_in_settings_exposure": True},
             "legacy_limit_microusd": row["limit_microusd"] if fixed_cap_retired(row) else None,
             "spent_microusd": spent, "reserved_microusd": reserved,
             "remaining_microusd": max(0, limit - committed),
@@ -802,7 +826,11 @@ class Repository:
         cursor = f'{rows[limit-1]["created_at"]}:{rows[limit-1]["id"]}' if len(rows) > limit else None
         return {"events": events, "next_before": cursor}
 
-    def _reserve(self, connection, scope, account_ids, reference_type, reference_id, amount):
+    def _reserve(self, connection, scope, account_ids, reference_type, reference_id, amount, *, spending_actor=None, confirmation_required=False, spending_settings_version=None):
+        from .spending_limits import admit_spending
+        admit_spending(self, connection, scope, reference_type, reference_id, amount,
+                       actor_id=spending_actor or scope.actor_id, confirmation_required=confirmation_required,
+                       spending_settings_version=spending_settings_version)
         account_ids = sorted(set(account_ids))
         if amount and not account_ids:
             raise BudgetExceeded("budget_not_configured")
@@ -823,6 +851,9 @@ class Repository:
     def _settle(self, connection, reference_type, reference_id, actual_cost):
         actual_cost = money(actual_cost)
         settled_at = self._budget_now()
+        # Settlement records authoritative actuals under the original lock
+        # order. Admission caps must not add an owner/account lock inversion or
+        # prevent late costs from being recorded truthfully.
         rows = list(connection.execute(select(budget_reservations).where(
             budget_reservations.c.reference_type == reference_type,
             budget_reservations.c.reference_id == reference_id).order_by(
@@ -872,6 +903,13 @@ class Repository:
         if (not ids or len(ids) != len(budget_account_ids)
                 or ids != sorted(lifecycle.get("budget_account_ids", []))):
             raise BudgetExceeded("instance_budget_binding_changed")
+        from .spending_limits import admit_spending
+        origin = connection.execute(select(spending_origins).where(
+            spending_origins.c.reference_type == "instance", spending_origins.c.reference_id == intent_id)).mappings().first()
+        admit_spending(self, connection,
+            Scope(payload["tenant_id"], payload["owner_id"], payload["project_id"]),
+            "instance", intent_id, max(0, minimum - intent["reserved_cost_microusd"]),
+            actor_id=origin["actor_id"] if origin else "legacy-instance", record_origin=False)
         accounts = []
         for account_id in ids:
             account = self._locked(connection, select(budget_accounts).where(budget_accounts.c.id == account_id))
@@ -944,7 +982,7 @@ class Repository:
                 return
         raise Conflict("capacity_drain_repreflight")
 
-    def create_job(self, scope, plan_id, idempotency_key, *, budget_account_ids=(), initial_status="queued"):
+    def create_job(self, scope, plan_id, idempotency_key, *, budget_account_ids=(), initial_status="queued", spending_actor=None, confirmation_required=False, spending_settings_version=None):
         identifier(idempotency_key)
         if initial_status not in ("queued", "planned", "blocked", "waiting_capacity"):
             raise ValueError("invalid_initial_status")
@@ -991,7 +1029,8 @@ class Repository:
                 connection.execute(insert(jobs).values(**row))
                 if initial_status in ("queued", "waiting_capacity"):
                     self._reserve(connection, scope, budget_account_ids, "job", row["id"],
-                                  row["estimated_cost_microusd"])
+                                  row["estimated_cost_microusd"], spending_actor=spending_actor, confirmation_required=confirmation_required,
+                                  spending_settings_version=spending_settings_version)
                 if initial_status == "waiting_capacity":
                     from .capacity import admit_waiter
                     admit_waiter(self, connection, scope, row, plan)
@@ -1010,7 +1049,7 @@ class Repository:
                 return {**dict(existing), "created": False}
             raise Conflict("idempotency_conflict") from None
 
-    def enqueue(self, scope, job_id, *, budget_account_ids=()):
+    def enqueue(self, scope, job_id, *, budget_account_ids=(), spending_actor=None, confirmation_required=False, spending_settings_version=None):
         with self.transaction() as connection:
             self._content_write_guard(connection, scope)
             self._locked(connection, select(capacity_gate).where(capacity_gate.c.id == "global"))
@@ -1028,7 +1067,8 @@ class Repository:
                 require_delivery_configuration(connection, "wangp-worker",
                     execution.get("configuration_id"), execution.get("output_delivery", ""))
             self._require_pool_not_stopping(connection, job["pool"], plan["execution_plan"], plan["request"])
-            self._reserve(connection, scope, budget_account_ids, "job", job_id, job["estimated_cost_microusd"])
+            self._reserve(connection, scope, budget_account_ids, "job", job_id, job["estimated_cost_microusd"], spending_actor=spending_actor,
+                confirmation_required=confirmation_required, spending_settings_version=spending_settings_version)
             status = "waiting_capacity" if plan["execution_plan"].get("admission_state") == "waiting_capacity" else "queued"
             if status == "waiting_capacity":
                 from .capacity import admit_waiter

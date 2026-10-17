@@ -5,6 +5,7 @@ import {Plus,LayoutGrid,Workflow,ChevronRight,ChevronLeft,Search,Undo2,Redo2,Dow
 const Canvas=React.lazy(()=>import('./Canvas.jsx'));
 import Freestyle from './Freestyle.jsx';
 const OperatorConsole=React.lazy(()=>import('./P4OperatorConsole.jsx'));
+const BudgetSettings=React.lazy(()=>import('./BudgetSettings.jsx'));
 const QuickChatWorkspace=React.lazy(()=>import('./QuickChatWorkspace.jsx'));
 import {navigateWorkspace} from './workspace-navigation.js';
 import {CloudProjects,CloudWorkspaceBar,CloudShotPanel,CloudProduction,useCloud} from './CloudStudio.jsx';
@@ -157,5 +158,5 @@ export default function App(){
  const changePage=(next,{selected=false}={})=>{const url=new URL(window.location.href);if(next==='library'){for(const key of ['view','project','entity','panel'])url.searchParams.delete(key);}else{url.searchParams.set('view','workspace');if(selected){const live=store.getState();url.searchParams.delete('entity');url.searchParams.delete('panel');if(live.workspace.mode==='cloud')url.searchParams.set('project',live.project.id);else url.searchParams.delete('project');}}window.history.pushState(null,'',url.pathname+url.search);setSidebarView(next);};
  useEffect(()=>{document.querySelector(sidebarView==='library'?'#story-library-heading':'.story-home-back')?.focus({preventScroll:true});},[sidebarView]);
  useEffect(()=>{const change=()=>{setPath(window.location.pathname);setSidebarView(storyPageFromUrl());};window.addEventListener('popstate',change);return()=>window.removeEventListener('popstate',change);},[]);
- return <><PersistenceWarning key={'persistence:'+workspaceKey}/>{path.replace(/\/$/,'')==='/operator'?<React.Suspense fallback={<p role="status">正在打开 GPU 控制台…</p>}><OperatorConsole/></React.Suspense>:path.replace(/\/$/,'')==='/quick-chat'?<React.Suspense fallback={<p role="status">正在打开聊天创作…</p>}><QuickChatWorkspace/></React.Suspense>:path.replace(/\/$/,'')==='/freestyle'?<Freestyle key={workspaceKey}/>:<SeriesApp key={workspaceKey} sidebarView={sidebarView} onSidebarView={changePage}/>}</>;
+ return <><PersistenceWarning key={'persistence:'+workspaceKey}/>{path.replace(/\/$/,'')==='/settings'?<React.Suspense fallback={<p role="status">正在打开设置…</p>}><BudgetSettings/></React.Suspense>:path.replace(/\/$/,'')==='/operator'?<React.Suspense fallback={<p role="status">正在打开 GPU 控制台…</p>}><OperatorConsole/></React.Suspense>:path.replace(/\/$/,'')==='/quick-chat'?<React.Suspense fallback={<p role="status">正在打开聊天创作…</p>}><QuickChatWorkspace/></React.Suspense>:path.replace(/\/$/,'')==='/freestyle'?<Freestyle key={workspaceKey}/>:<SeriesApp key={workspaceKey} sidebarView={sidebarView} onSidebarView={changePage}/>}</>;
 }

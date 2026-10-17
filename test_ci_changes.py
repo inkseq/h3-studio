@@ -161,6 +161,26 @@ class ChangeClassificationTests(unittest.TestCase):
 
 
 class DispatchTests(unittest.TestCase):
+    def test_financial_hotfix_only_prepares_full_unprivileged_artifacts(self):
+        ref = "refs/heads/codex/financial254-a76-hotfix-20261017"
+        inputs = {"deploy": True, "release_kind": "platform"}
+        result = ci.plan("workflow_dispatch", {"inputs": inputs}, SHA, ref, Path("."))
+        self.assertEqual(result["action"], "prepare-platform")
+        self.assertEqual(result["category"], "full")
+        self.assertTrue(result["postgres"])
+        for other in (ref + "-other", "refs/tags/financial254-a76-hotfix-20261017"):
+            with self.subTest(ref=other), self.assertRaises(ValueError):
+                ci.dispatch_action(inputs, other)
+        for change in ({"release_kind": "frontend"}, {"approved_commit": SHA},
+                       {"approved_frontend_commit": SHA}, {"promote_commit": SHA},
+                       {"resume_command": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"},
+                       {"retain_native_sources_transport": "s3"}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                ci.dispatch_action({**inputs, **change}, ref)
+        for key in ("approved_commit", "approved_frontend_commit", "promote_commit"):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                ci.dispatch_action({key: SHA}, ref)
+
     def test_native_retention_is_explicit_platform_prepare_only(self):
         values = {"retain_native_sources_run": "42", "retain_native_sources_commit": BASE,
             "retain_native_sources_index_sha256": "c" * 64}
