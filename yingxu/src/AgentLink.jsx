@@ -14,7 +14,7 @@ export default function AgentLink({state,onOpenCloud,onLocate,onActivity}){
   async function follow(){
     setError('');
     if(!c.account){onOpenCloud();return;}
-    if(!here){try{const done=await cloud.open(target.projectId);if(!done)onOpenCloud();}catch{setError(at('adjunct.agentLink.copy45'));}return;}
+    if(!here){try{const done=await cloud.open(target.projectId);if(!done)return;}catch{setError(at('adjunct.agentLink.copy45'));}return;}
     if(target.activity)onActivity();
     else if(target.entityId){if(!onLocate(target.entityId)){setError(at('adjunct.agentLink.copy46'));return;}}
     else onActivity();
