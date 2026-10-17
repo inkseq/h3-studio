@@ -55,3 +55,7 @@ The latest owner instruction supersedes the intervening proposal to promote the 
 ## CR-20261017-26 — urgent #254 reservations and Settings authority
 
 Owner prioritizes #254 ahead of the frozen #251 component batch. Confirm historical machines at Vast before app-native audited release/settlement; never mutate running instance56330848. Close terminal exposure without inventing zero invoices, repair recurring settlement and notify on terminal money held over one hour. Retire superdan/supervan bootstrap owner/project/shared fixed caps; editable Settings and forgot-to-stop protections remain authoritative. The owner explicitly authorizes reviewed production money operations now. Preserve the existing production frontend during this emergency; combined #251 staging acceptance and same-artifact promotion remains pending.
+
+## CR-20261017-27 — #254: visible administrator budget controls
+
+Owner follow-up https://github.com/inkseq/h3-studio/issues/254#issuecomment-6228797265 requires the authenticated human administrator's GPU My budget tab (and Settings Admin entry) to expose the original audited budget editor for all accounts, including shared GPU/job accounts, with readable labels. Preserve the existing CAS, actor audit, reservations and confirmed spend. This does not revoke CR26: retired bootstrap fixed caps remain nonbinding once the new runtime is installed; the editor must identify stored historical limits honestly. Keep the emergency frontend limited to this requested administrator presentation; do not include the frozen #251 interface batch.
