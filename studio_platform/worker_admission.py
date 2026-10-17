@@ -5,6 +5,8 @@ worker binding and can reconcile or collect after the admission window closes.
 """
 import math
 
+from .budget_policy import effective_budget_limit
+
 from sqlalchemy import inspect, select
 
 from .repository import (attempts, budget_accounts, budget_reservations, instance_intents,
@@ -107,7 +109,7 @@ def dstack_budget_reason(connection, intent, node, now, *, expected_runtime_s=No
             or account["owner_id"] is not None and account["owner_id"] != payload.get("owner_id")
             or account["project_id"] is not None and account["project_id"] != payload.get("project_id")
             or account["reserved_microusd"] < amount
-            or account["spent_microusd"] + account["reserved_microusd"] > account["limit_microusd"]
+            or account["spent_microusd"] + account["reserved_microusd"] > effective_budget_limit(account)
             for account in accounts)):
         return "managed_dstack_budget_unconfirmed"
     started = connection.execute(select(scaler_actions.c.create_started_at).where(

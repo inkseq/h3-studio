@@ -143,3 +143,18 @@ class BudgetAlertSnapshotTests(budget_fixture.DailyTestBudgetTests):
                 worker_id="original-worker",fence=1,status="failed",created_at=self.now,updated_at=self.now,
                 submission_started_at=self.now,upstream_task_id="original",upstream_stopped=0))
         self.assertTrue(self.snapshot()["gpus"][0]["has_obligations"])
+
+
+class TerminalSnapshot254Tests(LedgerCase):
+    def test_terminal_hold_age_uses_original_event_not_reconciliation_updates(self):
+        job=self.job()
+        first=self.now
+        with self.repo.transaction() as c:
+            c.execute(update(jobs).where(jobs.c.id==job["id"]).values(status="failed",updated_at=self.now))
+            self.repo._emit(c,"job.failed",job["id"],{})
+        self.now+=7200
+        with self.repo.transaction() as c:c.execute(update(jobs).where(jobs.c.id==job["id"]).values(updated_at=self.now))
+        value=read_snapshot(self.repo,now=self.now,tenant_id=self.scope.tenant_id)
+        self.assertEqual(value["terminal_reservations"],[{"id":job["id"],"terminal_since":first}])
+        with self.repo.transaction() as c:self.repo._settle(c,"job",job["id"],0)
+        self.assertEqual(read_snapshot(self.repo,now=self.now,tenant_id=self.scope.tenant_id)["terminal_reservations"],[])

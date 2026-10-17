@@ -30,7 +30,7 @@ MAX_BYTES = 1024 * 1024
 MAX_PENDING = 128
 THRESHOLD_FIELDS = frozenset({'gpu_max_seconds', 'stuck_seconds', 'wake_count', 'cpu_percent',
     'memory_percent', 'host_sustain_seconds', 'health_down_seconds', 'http_5xx_min',
-    'http_5xx_ratio', 'max_sample_gap_seconds'})
+    'http_5xx_ratio', 'max_sample_gap_seconds', 'terminal_reservation_seconds'})
 HTTP_PROBE = """import json,urllib.request
 result={'health_ok':False,'http_requests':None,'http_5xx':None}
 try:
@@ -224,7 +224,7 @@ def notification(value, environment):
     # The core evaluator owns this finite code list. Keep a second boundary at SNS.
     require(value['code'] in {'gpu_runtime_exceeded', 'gpu_idle_stop_overdue', 'test_spend_80', 'test_spend_100',
             'job_stuck', 'job_repeated_wake', 'host_cpu_sustained', 'host_memory_sustained',
-            'host_process_unhealthy', 'health_down', 'http_5xx_rate', 'generation_failure'}
+            'host_process_unhealthy', 'health_down', 'http_5xx_rate', 'generation_failure', 'terminal_reservation_stale'}
             and value['environment'] == environment and value['transition'] in {'firing', 'resolved'}
             and (value['resource_id'] is None or type(value['resource_id']) is str
                 and re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', value['resource_id']))

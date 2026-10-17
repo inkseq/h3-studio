@@ -1,4 +1,3 @@
-import {translate} from './i18n/locale.js';
 /* Layout A projection of the existing v4 document. No second project store. */
 import {children,ancestors} from './store.js';
 import {effectiveLimits,effectiveControlSchema,roleSupported} from './quick-chat-model.js';
@@ -9,13 +8,16 @@ const list=value=>Array.isArray(value)?value:[];
 export function chapterShots(project,chapterId){return children(project,chapterId).filter(e=>e.type==='scene').flatMap(scene=>children(project,scene.id).filter(e=>e.type==='shot'));}
 export function storyboardProfile(capabilities,quality,inputMode,explicitId){
   const profiles=capabilities?.deployment_profiles||[],enabled=p=>p.generation_support?.[inputMode]?.configured===true&&p.generation_support?.[inputMode]?.enabled===true;
-  const id=explicitId||capabilities?.default_deployment_profile_id;
-  const exact=profiles.find(p=>p.id===id);
-  return exact&&enabled(exact)?exact:null;
+  const matches=p=>quality==='final'?p.model_id==='MiniMax-H3-Base-INT8':p.model_id==='MiniMax-H3-Pruned-Rank8-INT8';
+  if(explicitId){const exact=profiles.find(p=>p.id===explicitId);if(!exact)return null;if(matches(exact))return enabled(exact)?exact:null;}
+  const preferred=profiles.find(p=>p.id===capabilities?.default_deployment_profile_id&&matches(p)&&enabled(p));
+  // The API catalogue appends newer profiles while retaining historical ones.
+  return preferred||profiles.findLast(p=>matches(p)&&enabled(p))||null;
 }
 export function storyboardGenerationProfile(capabilities,shot,{quality,sourceRequest}={}){
   const targetQuality=quality||shot.quality,inputMode=sourceRequest?.mode||shot.mode.toLowerCase();
-  return storyboardProfile(capabilities,targetQuality,inputMode,sourceRequest?.deployment_profile_id||shot.entity?.data.h3?.deploymentProfileId);
+  const changedContext=targetQuality!==shot.quality||inputMode!==shot.mode.toLowerCase();
+  return storyboardProfile(capabilities,targetQuality,inputMode,changedContext?undefined:shot.entity?.data.h3?.deploymentProfileId);
 }
 export function storyboardView(project,{chapterId,capabilities,jobs=[],queue=null,busy=false,error=''}={}){
   const chapter=find(project,chapterId)||children(project,null).find(e=>e.type==='chapter');
@@ -30,28 +32,27 @@ export function storyboardView(project,{chapterId,capabilities,jobs=[],queue=nul
     const versions=shotJobs.map((j,n)=>{const artifact=j.artifacts?.find(a=>a.kind==='video'),entity=project.entities.find(e=>e.data.cloudArtifactId===artifact?.id&&e.type==='video');return {id:entity?.id||j.id,n:n+1,quality:j.effective_request?.model?.includes('Pruned')?'draft':'final',seed:j.effective_request?.seed,mode:j.effective_request?.mode==='ref'?'REF':'FL',status:j.status==='succeeded'?'done':j.status,jobId:j.id,artifactId:artifact?.id,asset:entity?{fileId:entity.data.fileId,entity,kind:'video'}:null,duration:artifact?.metadata?.duration??artifact?.metadata?.duration_seconds,error:j.error_code||j.message||'',audio:j.artifacts?.find(a=>a.kind==='audio'),effectiveRequest:j.effective_request};});
     for(const id of list(s.data.candidateIds)){if(versions.some(v=>v.id===id))continue;const e=find(project,id);if(e?.type==='video')versions.push({id:e.id,n:versions.length+1,status:'done',quality:'draft',mode:mode(s)==='ref'?'REF':'FL',artifactId:e.data.cloudArtifactId,jobId:e.data.sourceJobId,asset:{fileId:e.data.fileId,entity:e,kind:'video'},duration:e.data.metadata?.duration});}
     const scene=find(project,s.parentId),cast=new Map((s.data.storyboard&&Object.hasOwn(s.data,'cast')?list(s.data.cast):[...list(scene?.data.cast),...list(s.data.cast)]).map(c=>[c.characterId,{id:c.characterId,variant:c.lookId}]));
-    return {id:s.id,title:s.title,script:s.data.script||'',prompt:s.data.prompt??s.description,mode:mode(s)==='ref'?'REF':'FL',duration:s.data.seconds??5,start:Object.hasOwn(b,'firstFrameId')?b.firstFrameId:project.links.find(l=>l.target===s.id&&l.role==='firstFrame')?.source||'',end:Object.hasOwn(b,'lastFrameId')?b.lastFrameId:project.links.find(l=>l.target===s.id&&l.role==='lastFrame')?.source||'',refs:b.extraRefs?.map(r=>r.entityId)||project.links.filter(l=>l.target===s.id&&['reference','identity','motion','audio'].includes(l.role)&&assets.some(a=>a.id===l.source)).map(l=>l.source),cast:[...cast.values()],place:Object.hasOwn(b,'place')?(b.place?{id:b.place.locationId,variant:b.place.versionId}:null):s.data.locationId?{id:s.data.locationId,variant:''}:scene?.data.locationId?{id:scene.data.locationId,variant:''}:null,props:b.propIds||[],continuePrev:!!b.continuePrevious,previousFrame:b.previousFrame?.frameAssetId,quality:b.quality??s.data.qualityIntent??'draft',seedLock:!!s.data.h3?.controls?.seed,versions,chosen:s.data.selectedAssetId||'',entity:s};
+    return {id:s.id,title:s.title,script:s.data.script||'',prompt:s.data.prompt??s.description,mode:mode(s)==='ref'?'REF':'FL',duration:s.data.seconds??5,start:Object.hasOwn(b,'firstFrameId')?b.firstFrameId:project.links.find(l=>l.target===s.id&&l.role==='firstFrame')?.source||'',end:Object.hasOwn(b,'lastFrameId')?b.lastFrameId:project.links.find(l=>l.target===s.id&&l.role==='lastFrame')?.source||'',refs:b.extraRefs?.map(r=>r.entityId)||project.links.filter(l=>l.target===s.id&&['reference','identity','motion','audio'].includes(l.role)&&assets.some(a=>a.id===l.source)).map(l=>l.source),cast:[...cast.values()],place:Object.hasOwn(b,'place')?(b.place?{id:b.place.locationId,variant:b.place.versionId}:null):s.data.locationId?{id:s.data.locationId,variant:''}:scene?.data.locationId?{id:scene.data.locationId,variant:''}:null,props:b.propIds||[],continuePrev:!!b.continuePrevious,previousFrame:b.previousFrame?.frameAssetId,quality:b.quality||'draft',seedLock:!!s.data.h3?.controls?.seed,versions,chosen:s.data.selectedAssetId||'',entity:s};
   });
-  return {project:{id:project.id,title:project.title,chapter:chapter?.title||'第一章',chapterId:chapter?.id||null,style:project.journey?.storyboard?.style||'',aspect:project.journey?.brief?.aspect||'16:9'},shots,assets,profiles,queue,busy,error,capabilities,modelLabelKeys:Object.fromEntries(['draft','final'].filter(q=>!storyboardProfile(capabilities,q,'fl')?.label).map(q=>[q,'storyboard.modelUnloaded'])),models:Object.fromEntries(['draft','final'].map(q=>[q,storyboardProfile(capabilities,q,'fl')?.label||'服务能力尚未读取']))};
+  return {project:{title:project.title,chapter:chapter?.title||'第一章',chapterId:chapter?.id||null,style:project.journey?.storyboard?.style||'',aspect:project.journey?.brief?.aspect||'16:9'},shots,assets,profiles,queue,busy,error,capabilities,models:Object.fromEntries(['draft','final'].map(q=>[q,storyboardProfile(capabilities,q,'fl')?.label||'服务能力尚未读取']))};
 }
-export function expandStoryboard(shot,state,{forSync=false,locale='zh',effectiveProfile=null,effectiveRecipe=null}={}){
- const t=(key,values)=>translate(locale,key,values);
+export function expandStoryboard(shot,state,{forSync=false}={}){
   const asset=id=>state.assets.find(a=>a.id===id),profile=id=>state.profiles.find(p=>p.id===id);
   // Explicit saved look/version IDs are exact. Missing IDs are not a request
   // to silently supply another look's image; only an unset ID uses defaults.
   const variant=(p,id)=>id?p?.variants.find(v=>v.id===id):p?.variants.find(v=>v.id===p.def)||p?.variants[0];
   const parts=[],items=[],notes=[],warnings=[],inputMode=shot.mode.toLowerCase();
-  const chosen=effectiveProfile||(effectiveRecipe?null:storyboardProfile(state.capabilities,shot.quality,inputMode,shot.entity?.data.h3?.deploymentProfileId)),support=chosen?.generation_support?.[inputMode]||effectiveRecipe;
+  const chosen=storyboardProfile(state.capabilities,shot.quality,inputMode,shot.entity?.data.h3?.deploymentProfileId),support=chosen?.generation_support?.[inputMode];
   const constraints=support?.execution_policy_constraints||support?.constraints||support?.execution_support?.constraints||{};
   const advertised=support?{...support,mode:inputMode,execution_support:{...support,constraints}}:null;
   const schema=effectiveControlSchema(advertised),limits=support?effectiveLimits(advertised):null,nativeRoles=support?.limits?.input_count_semantics==='native_roles_v2';
-  if(!support)warnings.push(t('projection.noCapabilities'));
+  if(!support)warnings.push('当前模型能力尚未读取，请刷新服务能力。');
   if(state.project.style.trim())parts.push({label:'全片风格',text:state.project.style.trim()});
   const place=profile(shot.place?.id),pv=variant(place,shot.place?.variant);
   if(shot.place?.id&&!place)warnings.push('保存的场景不存在，请重新选择。');
   if(place){if(shot.place.variant&&!pv)warnings.push('保存的场景版本不存在，请重新选择。');parts.push({label:'场景',text:`${place.name}：${place.desc}${pv?'；'+pv.name+'：'+(pv.desc||''):''}`});}
   const cast=shot.cast.map(c=>({binding:c,p:profile(c.id),v:variant(profile(c.id),c.variant)}));
-  cast.forEach(({binding,p,v})=>{if(!p){warnings.push('保存的人物不存在，请重新选择。');return;}if(binding.variant&&!v)warnings.push(t('projection.missingLook',{name:p.name}));parts.push({label:'人物',text:`${p.name}：${p.desc}${v?'；'+v.name+'：'+(v.desc||''):''}`});});
+  cast.forEach(({binding,p,v})=>{if(!p){warnings.push('保存的人物不存在，请重新选择。');return;}if(binding.variant&&!v)warnings.push('保存的「'+p.name+'」造型不存在，请重新选择。');parts.push({label:'人物',text:`${p.name}：${p.desc}${v?'；'+v.name+'：'+(v.desc||''):''}`});});
   const props=shot.props.map(profile).filter(Boolean);props.forEach(p=>parts.push({label:'道具',text:`${p.name}：${p.desc}`}));
   if(shot.prompt.trim())parts.push({label:'动作',text:shot.prompt.trim()});else warnings.push('还没写这一镜的动作描述。');
   const kinds={image:'图片',video:'视频',audio:'声音'};
@@ -71,8 +72,8 @@ export function expandStoryboard(shot,state,{forSync=false,locale='zh',effective
   if(shot.mode==='REF'){
     // Same ordering as the saved-draft compiler: each character's main image
     // and voice, then place, props, authored extras, and ambient sound.
-    cast.filter(c=>c.p).forEach(({p,v})=>{add(v?.images[0],'图片',p.name+' · '+(v?.name||''));const voice=p.voices.find(vo=>vo.asset===(v?.voice||p.voice));if(voice)add(voice.asset,'声音',t('projection.voice',{name:p.name}),voice.start);});
-    if(place)add(pv?.images[0],'图片','场景');props.forEach(p=>add(p.variants[0]?.images[0],'图片',t('projection.prop',{name:p.name})));
+    cast.filter(c=>c.p).forEach(({p,v})=>{add(v?.images[0],'图片',p.name+' · '+(v?.name||''));const voice=p.voices.find(vo=>vo.asset===(v?.voice||p.voice));if(voice)add(voice.asset,'声音',p.name+' 的声音',voice.start);});
+    if(place)add(pv?.images[0],'图片','场景');props.forEach(p=>add(p.variants[0]?.images[0],'图片','道具 · '+p.name));
     shot.refs.forEach(id=>{const a=asset(id),range=shot.entity?.data.storyboard?.extraRefs?.find(ref=>ref.entityId===id);add(id,kinds[a?.kind]||'图片','附加素材',a&&a.kind!=='image'?range?.clipStart??0:undefined);});
     if(place?.ambient)add(place.ambient,'声音','场景环境声',place.ambientStart??0);
     const seen=new Set(),counts={图片:0,视频:0,声音:0},durations={视频:0,声音:0},keys={图片:'max_images',视频:'max_videos',声音:'max_audios'};
@@ -81,7 +82,7 @@ export function expandStoryboard(shot,state,{forSync=false,locale='zh',effective
       const duration=Object.hasOwn(durations,item.kind)?3:0,maximumSeconds=limits?.[item.kind==='视频'?'max_total_video_duration':'max_total_audio_duration'];
       if(seen.has(identity))item.reason='同一输入区域的素材已发送，不重复发送';
       else if(!Number.isInteger(max)||!Number.isInteger(total))item.reason='当前参考输入范围尚未读取';
-      else if(counts[item.kind]>=max||sent>=total)item.reason=t('projection.countLimit',{kind:({图片:t('legacy.projection6'),视频:t('legacy.projection7'),声音:t('legacy.projection8')})[item.kind]||item.kind,max,total});
+      else if(counts[item.kind]>=max||sent>=total)item.reason=`当前模型/API 数量上限（${item.kind} ${max}，总计 ${total}）`;
       else if(duration&&Number.isFinite(maximumSeconds)&&durations[item.kind]+duration>maximumSeconds+.01)item.reason='当前能力总参考时长上限；按优先级未发送';
       item.sent=!item.reason;if(!item.sent)continue;seen.add(identity);counts[item.kind]++;sent++;if(duration)durations[item.kind]+=duration;
     }
@@ -95,7 +96,7 @@ export function expandStoryboard(shot,state,{forSync=false,locale='zh',effective
   }
   if(shot.mode==='REF'&&!items.some(i=>i.sent))warnings.push('全能参考至少需要一份可用参考。');
   const known=value=>Number.isFinite(value)?value:'—';
-  return {mode:shot.mode,frameInputs:inputMode==='fl'||support?.input_support?.first_frame===true||support?.input_support?.last_frame===true,controlInputs:inputMode==='fl'&&(support?.input_support?.video_conditioning===true||support?.input_support?.kept_soundtrack===true),kind:shot.mode==='REF'?'全能参考':shot.continuePrev?'接上一镜':shot.start&&shot.end?'首尾帧':shot.start?'首帧生成':shot.end?'尾帧生成':'文字生成',machine:chosen?.label||t('projection.noModel'),sec:shot.duration,res:shot.entity?.data.h3?.controls?.resolution||schema.resolution?.default||t('projection.unconfirmed'),parts,items,warnings,notes,durationRange:{minimum:schema.duration?.minimum,maximum:schema.duration?.maximum,step:schema.duration?.multipleOf||1},limitsLabel:limits?t('projection.limits',{images:known(limits.max_images),videos:known(limits.max_videos),audios:known(limits.max_audios),total:known(limits.max_total_files)}):'能力尚未读取'};
+  return {mode:shot.mode,frameInputs:inputMode==='fl'||support?.input_support?.first_frame===true||support?.input_support?.last_frame===true,controlInputs:inputMode==='fl'&&(support?.input_support?.video_conditioning===true||support?.input_support?.kept_soundtrack===true),kind:shot.mode==='REF'?'全能参考':shot.continuePrev?'接上一镜':shot.start&&shot.end?'首尾帧':shot.start?'首帧生成':shot.end?'尾帧生成':'文字生成',machine:chosen?.label||'未选择模型',sec:shot.duration,res:shot.entity?.data.h3?.controls?.resolution||schema.resolution?.default||'待确认',parts,items,warnings,notes,durationRange:{minimum:schema.duration?.minimum,maximum:schema.duration?.maximum,step:schema.duration?.multipleOf||1},limitsLabel:limits?`图片 ${known(limits.max_images)} · 视频 ${known(limits.max_videos)} · 声音 ${known(limits.max_audios)} · 总计 ${known(limits.max_total_files)}`:'能力尚未读取'};
 }
 export function storyboardDrop(shot,item,slot,state){
   if(item.profile){const p=item.profile,v=p.variants.find(v=>v.id===p.def)||p.variants[0];if(['start','end'].includes(slot)&&p.type!=='character'){if(!v?.images[0])return {patch:null,msg:'档案还没有主图。'};return {patch:{[slot]:v.images[0],...(slot==='start'?{continuePrev:false}:{})},msg:'已使用档案主图。'};}
@@ -110,25 +111,11 @@ export function storyboardDrop(shot,item,slot,state){
   return {patch:{refs:[...new Set([...shot.refs,a.id])]},msg:shot.mode==='FL'&&!supported?'参考已保存，切到全能参考时发送。':'已加入附加参考，控制方式由预检核对。',hint:'松开：加入参考'};
 }
 export function storyboardSnapshot(project,shotId){const shot=find(project,shotId),chap=ancestors(project,shotId).find(e=>e.type==='chapter'),shots=chap?chapterShots(project,chap.id):[],at=shots.findIndex(s=>s.id===shotId);return {shot,style:project.journey?.storyboard?.style||'',profiles:project.entities.filter(e=>['character','location','prop'].includes(e.type)),assets:project.entities.filter(e=>['image','video','audio'].includes(e.type)),previous:shot?.data.storyboard?.continuePrevious?shots[at-1]?.data.selectedAssetId:null};}
-export function patchStoryboardShot(project,id,patch){const shot=find(project,id);if(!shot)throw Error('镜头不存在。');
-  if(!shot.data.storyboard&&!Object.keys(patch).some(key=>['cast','place','props','continuePrev'].includes(key))&&(!Object.hasOwn(patch,'mode')||shot.data.h3?.explicitReferences)){
-    for(const key of ['script','prompt'])if(Object.hasOwn(patch,key))shot.data[key]=patch[key];
-    if(Object.hasOwn(patch,'title'))shot.title=patch.title;
-    if(Object.hasOwn(patch,'quality'))shot.data.qualityIntent=patch.quality;
-    if(Object.hasOwn(patch,'duration')){shot.data.seconds=patch.duration;shot.data.h3={...shot.data.h3,controls:{...shot.data.h3?.controls,duration:patch.duration}};}
-    if(Object.hasOwn(patch,'seedLock'))shot.data.h3={...shot.data.h3,controls:{...shot.data.h3?.controls,seed:patch.seedLock?(shot.data.h3?.controls?.seed??project.jobs.findLast(j=>j.client_ref?.shot_id===id)?.effective_request?.seed??'1'):null}};
-    if(Object.hasOwn(patch,'mode'))shot.data.h3={...shot.data.h3,inputMode:patch.mode.toLowerCase(),recipeId:patch.mode.toLowerCase()==='ref'?'h3-base-ref2va-v1':'h3-base-fl2va-v1'};
-    for(const [field,role] of [['start','firstFrame'],['end','lastFrame']])if(Object.hasOwn(patch,field)){
-      project.links=project.links.filter(l=>!(l.target===id&&l.role===role));if(patch[field])project.links.push({id:uid('link'),source:patch[field],target:id,role});
-    }
-    if(Object.hasOwn(patch,'refs')){
-      const roles=['reference','identity','motion','audio'],old=project.links.filter(l=>l.target===id&&roles.includes(l.role));
-      project.links=project.links.filter(l=>!(l.target===id&&roles.includes(l.role))||patch.refs.includes(l.source));
-      for(const source of patch.refs)if(!old.some(l=>l.source===source))project.links.push({id:uid('link'),source,target:id,role:find(project,source)?.type==='audio'?'audio':'reference'});
-    }
-    shot.version++;if(shot.data.selectedAssetId)shot.status='review';return;
-  }
-const b={version:1,mode:mode(shot),quality:'draft',place:null,propIds:[],firstFrameId:'',lastFrameId:'',continuePrevious:false,extraRefs:[],...shot.data.storyboard};
+export function patchStoryboardShot(project,id,patch){const shot=find(project,id);if(!shot)throw Error('镜头不存在。');const b={version:1,mode:mode(shot),quality:'draft',place:null,propIds:[],firstFrameId:'',lastFrameId:'',continuePrevious:false,extraRefs:[],...shot.data.storyboard};
+  // A deliberate mode/quality edit selects a new model context. A same-context
+  // edit must retain its exact deployment profile instead of reverting it.
+  const changedContext=Object.hasOwn(patch,'mode')&&patch.mode.toLowerCase()!==b.mode||Object.hasOwn(patch,'quality')&&patch.quality!==b.quality;
+  if(changedContext&&shot.data.h3)shot.data.h3={...shot.data.h3,deploymentProfileId:''};
   if(Object.hasOwn(patch,'title'))shot.title=patch.title;if(Object.hasOwn(patch,'script'))shot.data.script=patch.script;if(Object.hasOwn(patch,'prompt'))shot.data.prompt=patch.prompt;
   if(Object.hasOwn(patch,'duration')){shot.data.seconds=patch.duration;shot.data.h3={...shot.data.h3,controls:{...shot.data.h3?.controls,duration:patch.duration}};}
   for(const [from,to] of Object.entries({mode:'mode',quality:'quality',start:'firstFrameId',end:'lastFrameId',continuePrev:'continuePrevious',props:'propIds'}))if(Object.hasOwn(patch,from))b[to]=from==='mode'?patch[from].toLowerCase():patch[from];

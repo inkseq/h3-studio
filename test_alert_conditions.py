@@ -129,3 +129,24 @@ class AlertStateRetentionTests(unittest.TestCase):
         self.assertTrue(unknown["state"]["conditions"]["test_spend_100:host"]["active"])
         recovered=evaluate(snapshot(10120,test_spend={"projected_microusd":0,"limit_microusd":20_000_000}),unknown["state"],environment="staging",now=10120)
         self.assertEqual({n["code"] for n in recovered["notifications"]},{"test_spend_80","test_spend_100"})
+
+
+class TerminalReservation254Tests(unittest.TestCase):
+    def test_old_hold_fires_deduplicates_survives_unknown_and_resolves(self):
+        data=snapshot(10000,terminal_reservations=[{"id":JOB,"terminal_since":1}])
+        first=evaluate(data,None,environment="production",now=10000)
+        self.assertEqual([(n["code"],n["transition"]) for n in first["notifications"]],[("terminal_reservation_stale","firing")])
+        again=evaluate({**data,"observed_at":10060},first["state"],environment="production",now=10060)
+        self.assertEqual(again["notifications"],[])
+        unknown=evaluate(snapshot(10120,complete=False),again["state"],environment="production",now=10120)
+        self.assertEqual(unknown["notifications"],[])
+        clear=evaluate(snapshot(10180,terminal_reservations=[]),unknown["state"],environment="production",now=10180)
+        self.assertEqual(clear["notifications"][0]["transition"],"resolved")
+
+    def test_missing_historical_time_uses_continuous_observation(self):
+        state=None;messages=[]
+        for now in range(0,3661,60):
+            result=evaluate(snapshot(now,terminal_reservations=[{"id":JOB,"terminal_since":None}]),state,environment="staging",now=now)
+            messages+=result["notifications"];state=result["state"]
+        self.assertEqual(len(messages),1)
+        self.assertEqual(messages[0]["duration_seconds"],3600)

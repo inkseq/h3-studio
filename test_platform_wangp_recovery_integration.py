@@ -5,6 +5,8 @@ from pathlib import Path
 import shutil
 import subprocess
 import unittest
+from sqlalchemy import select
+from studio_platform.repository import budget_reservations
 
 from comfy_workflow import native_output_spec
 from studio_platform.artifact_writer import ArtifactWriter
@@ -206,8 +208,18 @@ class WanGPRecoveryIntegrationTests(LedgerCase):
         for key, digest in before.items():
             with self.store.open(key) as source:
                 self.assertEqual(hashlib.sha256(source.read()).hexdigest(), digest)
-        # Neither unknown job cost nor pending rental invoice becomes zero.
-        self.assertEqual(self.repo.get_budget("owner-budget"), self.initial_budget)
+        # Terminal job admission is released; its invoice stays unknown and the
+        # rental reservation remains held until its separate physical closure.
+        self.assertEqual(self.repo.get_budget("owner-budget"), {**self.initial_budget,
+            "reserved_microusd": self.initial_budget["reserved_microusd"] - 100_000})
+        with self.repo.engine.connect() as conn:
+            rows = list(conn.execute(select(budget_reservations)).mappings())
+        job_invoice = next(row for row in rows if row["reference_type"] == "job")
+        instance_hold = next(row for row in rows if row["reference_type"] == "instance")
+        self.assertEqual((job_invoice["state"], job_invoice["amount_microusd"], job_invoice["actual_cost_microusd"]),
+                         ("invoice_pending", 100_000, None))
+        self.assertEqual((instance_hold["state"], instance_hold["amount_microusd"], instance_hold["actual_cost_microusd"]),
+                         ("reserved", 100_000, None))
 
     def damaged_journal(self, *, replacement):
         self.start()

@@ -17,7 +17,7 @@ from .dstack_test_budget import ACCOUNT, projected_cost, validate_guard
 from .generation_diagnostics import WANGP_VALIDATION_CODES, COMMON_CODES, _WORKER_CODES
 from .inference.protocol import INFERENCE_FAILURE_CODES
 from .operator_capacity import operator_nodes
-from .repository import (Repository, attempts, budget_accounts, instance_intents,
+from .repository import (Repository, attempts, budget_accounts, budget_reservations, instance_intents,
     jobs, outbox, registered_workers, scaler_actions)
 
 TERMINAL = frozenset({"succeeded", "failed", "cancelled"})
@@ -58,7 +58,7 @@ def read_snapshot(repo, *, now, tenant_id, test_guard=None, wake_window_seconds=
     if type(wake_window_seconds) is not int or not 60 <= wake_window_seconds <= 86400:
         raise ValueError("alert_wake_window_invalid")
     result = {"version": 1, "observed_at": now, "complete": True,
-        "gpus": [], "jobs": [], "test_spend": None, "failures": []}
+        "gpus": [], "jobs": [], "test_spend": None, "failures": [], "terminal_reservations": []}
     with repo.engine.connect() as connection:
         if connection.dialect.name == "postgresql":
             connection = connection.execution_options(isolation_level="REPEATABLE READ", postgresql_readonly=True)
@@ -144,6 +144,32 @@ def read_snapshot(repo, *, now, tenant_id, test_guard=None, wake_window_seconds=
             started = node["create_started_at"] if node["create_started_at"] is not None else node["created_at"]
             result["gpus"].append({"id": node["id"], "running_since": started,
                 "idle_since": idle_since, "idle_limit_seconds": idle_limit, "has_obligations": bool(busy)})
+        # Closed references with still-held money, collapsed across budget layers.
+        terminal_events = select(outbox.c.aggregate_id.label("reference_id"),
+            func.max(outbox.c.created_at).label("terminal_at")).where(outbox.c.event_type.in_(
+                ("job.succeeded", "job.failed", "job.cancelled", "dstack.stop_requested"))).group_by(outbox.c.aggregate_id).subquery()
+        held = select(budget_reservations.c.reference_type, budget_reservations.c.reference_id,
+            jobs.c.status.label("job_status"), terminal_events.c.terminal_at,
+            instance_intents.c.state.label("instance_state"), operator_nodes.c.runtime_state,
+            operator_nodes.c.payload["dstack"]["first_stopped_at"].label("stopped_at")).select_from(
+                budget_reservations.join(budget_accounts, budget_accounts.c.id == budget_reservations.c.account_id)
+                .outerjoin(jobs, and_(budget_reservations.c.reference_type == "job", jobs.c.id == budget_reservations.c.reference_id))
+                .outerjoin(instance_intents, and_(budget_reservations.c.reference_type == "instance", instance_intents.c.id == budget_reservations.c.reference_id))
+                .outerjoin(operator_nodes, operator_nodes.c.intent_id == instance_intents.c.id)
+                .outerjoin(terminal_events, terminal_events.c.reference_id == budget_reservations.c.reference_id)).where(
+                    budget_accounts.c.tenant_id == tenant_id, budget_reservations.c.state == "reserved",
+                    or_(jobs.c.status.in_(tuple(TERMINAL)), instance_intents.c.state == "destroyed",
+                        operator_nodes.c.runtime_state == "stopped"))
+        terminal_holds = {}
+        for row in _rows(connection, held):
+            reference = row["reference_id"]
+            if identity(reference) is None:
+                raise ValueError("alert_terminal_reservation_identity_invalid")
+            since = row["terminal_at"] if row["reference_type"] == "job" else row["stopped_at"]
+            if not finite(since):
+                since = row["terminal_at"]
+            terminal_holds[reference] = {"id": reference, "terminal_since": since if finite(since) else None}
+        result["terminal_reservations"] = list(terminal_holds.values())
         account = connection.execute(select(budget_accounts.c.id).where(budget_accounts.c.id == ACCOUNT,
             budget_accounts.c.tenant_id == tenant_id)).first()
         if account:
