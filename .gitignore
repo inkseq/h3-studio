@@ -579,3 +579,5 @@ inventory.json
 !skills/sixnine-yingxu/reference/
 !skills/sixnine-yingxu/reference/api.md
 !skills/sixnine-yingxu/reference/recovery.md
+!studio_platform/storyboard_versions.py
+!test_storyboard_versions.py

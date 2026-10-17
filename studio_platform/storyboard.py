@@ -16,10 +16,11 @@ SHOT_FIELDS = {"version", "mode", "quality", "place", "propIds", "firstFrameId",
 
 def contract():
     """Discoverable additive fields; existing document/action APIs remain used."""
+    from .storyboard_versions import contract as versions_contract
     ident = {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,160}$"}
     ids = {"type": "array", "maxItems": 100, "uniqueItems": True, "items": ident}
     start = {"type": "number", "minimum": 0, "maximum": 360000, "default": 0}
-    return {"version": 1, "entity_id_semantics": "All profile/shot image, voice and frame IDs are existing same-project document entity IDs, not upload receipt IDs.",
+    return {"version": 1, "version_workflow": versions_contract(), "entity_id_semantics": "All profile/shot image, voice and frame IDs are existing same-project document entity IDs, not upload receipt IDs.",
         "fields": {"character.data": {"defaultLookId": ident, "mainVoiceId": ident,
             "voices": {"type": "array", "maxItems": 100, "items": {"type": "object", "additionalProperties": False,
                 "required": ["id", "assetId"], "properties": {"id": ident, "assetId": ident, "clipStart": start}}}},
@@ -98,7 +99,10 @@ def validate(project, lookup):
     """Validate new fields without modifying or upgrading old documents."""
     style = project.get("journey", {}).get("storyboard")
     if style is not None:
-        _fields(style, {"style"}, "全片风格")
+        _fields(style, {"style", "defaults"}, "全片风格")
+        if "defaults" in style:
+            from .storyboard_versions import validate_defaults
+            validate_defaults(style["defaults"])
         if not isinstance(style.get("style", ""), str) or len(style.get("style", "")) > 12000:
             raise ValueError("全片风格须为不超过12000字符的文本")
     for entity in project["entities"]:

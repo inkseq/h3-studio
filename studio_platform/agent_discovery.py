@@ -71,11 +71,13 @@ def quick_examples():
 def public_guide():
     """Relative URLs deliberately keep discovery and credentials on one origin."""
     from .quick_chat_routes import agent_contract
+    from .storyboard_versions import contract as storyboard_versions_contract
     return {
         "name": "Inkseq / 映序", "version": 2, "api_version": "v1",
         "description": "Create one quick H3 clip or edit a multi-chapter story; save the same prompt, separate references and controls visible on the website, plan generation and adopt results without replacing prior takes.",
         "discovery_is_authorization": False,
         "quick_chat": agent_contract(),
+        "storyboard_versions": storyboard_versions_contract(),
         "job_changes": agent_contract()["job_changes"],
         "creation_titles": {
             "kind": "optional_short_title_metadata", "model_id": "gemma-4-31b-it",

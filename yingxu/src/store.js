@@ -195,6 +195,12 @@ export function createStore({storage,now=()=>Date.now(),seed=legacySeed}={}){
       cloudSavedJSON=JSON.stringify(valid.project);protectedRaw=false;recoveryRaw=null;past.length=0;future.length=0;coalesce=null;
       state={...state,project:draft?.project||valid.project,workspaceEpoch:state.workspaceEpoch+1,workspace:{mode:'cloud',account,serverVersion:version,dirty:!!draft?.dirty},selectedId:null,scopeId:null,section:'journey',notice:'云项目已打开；原本机作品保留。'};persist();emit();return true;
     },
+    applyCloudCommand(project,{account,expectedVersion,version,expectedProject}={}){
+      if(state.workspace.mode!=='cloud'||state.workspace.account!==account||state.project.id!==project?.id||state.workspace.serverVersion!==expectedVersion||JSON.stringify(state.project)!==JSON.stringify(expectedProject)||!Number.isInteger(version)||version<=expectedVersion)return false;
+      const valid=validateProject(project);if(!valid.ok)return false;
+      cloudSavedJSON=JSON.stringify(valid.project);past.length=0;future.length=0;coalesce=null;
+      state={...state,project:valid.project,workspace:{...state.workspace,serverVersion:version,dirty:false},selectedId:valid.project.entities.some(e=>e.id===state.selectedId)?state.selectedId:null,scopeId:valid.project.entities.some(e=>e.id===state.scopeId)?state.scopeId:null};persist();emit();return true;
+    },
     markCloudSaved(version,submittedProject){
       if(state.workspace.mode!=='cloud'||!Number.isInteger(version)||version<state.workspace.serverVersion||submittedProject.id!==state.project.id)return false;
       cloudSavedJSON=JSON.stringify(submittedProject);state={...state,workspace:{...state.workspace,serverVersion:version}};persist();emit();return true;

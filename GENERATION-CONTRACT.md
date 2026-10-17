@@ -753,3 +753,46 @@ Global spending-settings edits invalidate the affected connection `state_version
 when its effective cap changes, including removal to zero/unlimited. Unchanged
 caps and daily/ask-only changes preserve connection control versions and pause
 state; either writer therefore rejects a stale edit from the other surface.
+
+
+## Storyboard versions and grouped preflight (#235)
+
+`GET /v1/projects/{p}/shots/{s}/versions` returns original succeeded video/image
+receipts newest first, with bounded `limit`/`offset` and `next_offset`. Recipe and
+raw authoring context come only from the original immutable job; missing legacy
+snapshots remain `unknown`. Stars use project CAS outside the immutable plan.
+`storyboard.restore` restores the exact effective prompt/inputs/controls/profile
+and records the original authoring provenance, excluding mutable profile
+recomposition. `storyboard.select` delegates original artifact adoption and
+selection authorization; neither action generates or deletes anything.
+
+Owner `GET/PATCH /v1/storyboard/preferences` supplies global defaults; story
+`storyboard.defaults` and explicit shot settings override them. Duration and seed
+remain per shot. The original Quick Chat copies preference is shared, editable,
+and checked only for new preflights. Draft/final is authoring intent, not an
+automatic model replacement or a new qualification whitelist. Actual selected
+profile capabilities remain authoritative.
+
+`POST /v1/projects/{p}/storyboard/preflights` accepts `expected_version`, unique
+`shot_ids`, `copies`, and optional `capabilities_version`, with an original
+Idempotency-Key. It freezes distinct seeds and original plan IDs before progress;
+only the first copy preserves an explicit seed. GET of the returned operation
+observes progress without advancing it. Replaying the identical POST explicitly
+resumes those same plans. Pending/unknown results never justify a new operation.
+A positively blocked unpaid preflight is distinct from an accepted job. Only
+explicit owner choice may abandon it and create a new intent. New admission
+checks original project/default identity again under the owner transaction lock;
+already accepted same-key jobs remain recoverable after edits. Existing batch
+admission, aggregate confirmation, reservations and settlement remain authoritative.
+Estimates are budget reservations and machine allowances, never promised ETA or
+final billing; unquoted values remain null.
+
+Bulk draft/final/move and project-local profile fork run in one project CAS.
+Fork rewires selected shots only, including inherited/string cast bindings;
+unselected shots and shared originals remain unchanged. Global usage/search and
+trash/undo remain separate dependencies. Public API/helper examples are in
+`skills/sixnine-yingxu/reference/api.md`; no helper authentication bytes changed.
+
+中文：版本配方只读原始不可变快照；旧记录缺失时明确未知。恢复、收藏、选择和批量
+编辑不生成、不删除。份数上限复用可编辑设置；全局→故事→镜头继承，时长和种子留在
+镜头。预检冻结原种子/计划，未知结果保留原请求；实际入队仍走原预算与整批确认。

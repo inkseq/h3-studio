@@ -72,7 +72,32 @@ A character look is `{id:"day",name:"Day",description:"User description",version
 
 `shot.configure_generation` action takes `shot_id` and requested recipe_id/prompt/controls/inputs. GET `/v1/projects/PROJECT/shots/SHOT/generation-draft`, then POST its `/generation-plans` with `{expected_version:project_version}` (optional current capabilities_version). Plan generation does not enqueue. POST `/v1/jobs` with `{plan_id:READY_PLAN}` or `/v1/batches` with `{client_project_id:PROJECT,plan_ids:[READY_PLAN,...]}` only within generation authority. Batch admission may partially succeed; observe its original receipt.
 
-`artifact.adopt` with artifact_id/shot_id/select:false adds a candidate; `shot.select` uses the adopted entity_id, not artifact receipt ID. Adopt actual returned audio separately; `sound.generated` requires a selected adopted video and exactly one matching FLAC from the same succeeded job. Never invent missing audio. Future scene UI/defaults (#235) are not a new API contract.
+`artifact.adopt` with artifact_id/shot_id/select:false adds a candidate; `shot.select` uses the adopted entity_id, not artifact receipt ID. Adopt actual returned audio separately; `sound.generated` requires a selected adopted video and exactly one matching FLAC from the same succeeded job. Never invent missing audio.
+
+### Storyboard versions and bulk work
+
+GET `/v1/projects/PROJECT/shots/SHOT/versions?limit=20&offset=0` returns newest-first original video/image artifacts, `next_offset`, project version, `recipe_status`, `recipe` and original `authoring_context`. The recipe contains prompt, recipe/profile IDs, controls including exact seed, ready receipt inputs with original roles/ranges/audio. Unknown historical recipes are null: never reconstruct them from today's profiles. Selecting a candidate and restoring its settings are different edits; neither enqueues work.
+
+Use the existing project actions envelope and one saved Idempotency-Key:
+
+```json
+{"expected_version":7,"actions":[{"op":"storyboard.star","shot_id":"SHOT","artifact_id":"ARTIFACT","starred":true}]}
+```
+
+`storyboard.select` takes the same shot/artifact IDs (without starred), authorizes the original shot receipt, and explicitly adopts/selects it through the existing artifact path. `storyboard.restore` takes those same IDs. It saves the exact effective recipe as explicit inputs and retains original profile context separately. It never rewrites accepted jobs or source assets. `storyboard.bulk` takes `shot_ids`, `operation:"draft"|"final"|"move"`, and `parent_id` for move. All selected shots change in one project CAS or none. Quality is intent, not automatic model replacement: explicitly include `shot.configure_generation` actions with actual selected profile IDs when requested. No delete/undo action is added (#236).
+
+GET/PATCH `/v1/storyboard/preferences` reads/replaces account defaults with `{expected_version,defaults:{recipe_id?,deployment_profile_id?,controls:{...}}}` plus a saved key. `storyboard.defaults` action stores `{value:DEFAULTS}` on the story. Defaults inherit global→story→shot; generation-draft and versions expose stored layers, effective values and provenance. Duration and seed are shot-only. Original Quick Chat `copies_max` remains the shared editable copies limit. Default changes invalidate unaccepted new quotes at the transaction gate; original accepted replay is unchanged.
+
+POST `/v1/projects/PROJECT/storyboard/preflights` with saved body `{"expected_version":7,"shot_ids":["SHOT"],"copies":2}` and key creates an unpaid durable operation. GET the returned `/storyboard/preflights/ID` to observe; explicit same-body/key POST resumes missing plan projections. Items retain `shot_id,index,seed,plan_id,plan`; a fixed seed applies only to copy zero, other seeds are distinct in the selected runtime domain. Never redraw after timeout. `estimate.cost_microusd` and `machine_seconds` are nullable; machine allowance is not ETA. Only explicitly approved ready plan IDs go to original `/v1/batches`; aggregate spending confirmation and partial batch recovery stay unchanged.
+
+```sh
+python scripts/sixnine.py --base-url ORIGIN --connection CONNECTION_ID request POST /v1/projects/PROJECT/storyboard/preflights --json-file storyboard-preflight.json --idempotency-key saved-preflight-key --output preflight.json
+python scripts/sixnine.py --base-url ORIGIN --connection CONNECTION_ID request GET /v1/projects/PROJECT/storyboard/preflights/RETURNED_ID --output observed.json
+```
+
+Do not automatically chain admission. Pending/unknown retains the original key/body. A matching `closed_preflight:true,status:"blocked",no_generation_submitted:true` permits explicitly abandoning that unpaid preflight; original partial plans remain retained. New storyboard-only action CAS failures positively report `no_mutation_committed` with canonical `request_hash`; generic errors are not proof of no write.
+
+GET `/v1/projects/PROJECT/storyboard/profiles` reports project-local shot usage only. `storyboard.fork_profile` action takes `profile_id,new_profile_id,shot_ids,title?`; one CAS copies a character/location/prop and rewires selected shots, leaving original profiles, unselected shots and other projects untouched. Global usage/search remains #238. 中文：旧配方缺失显示未知；预检不生成，未知结果保留原操作；档案副本只改所选镜头，删除撤销另属 #236。
 
 ### Input slots and partial edits
 

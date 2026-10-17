@@ -73,10 +73,11 @@ function validShotPatch(project, patch) {
 }
 function patchShot(project, shot, patch) {
   if (!validShotPatch(project,patch)) return false;
+  if (!shot.data.storyboard && shot.data.h3?.explicitReferences && Object.keys(patch).some(key=>['cast','place','props','continuePrev'].includes(key))) return false;
   const clean = {...patch};
   for (const key of ['start','end']) if (clean[key] === null) clean[key] = '';
   // The first opt-in edit materializes legacy inherited context, then it is exact.
-  if (!shot.data.storyboard) {
+  if (!shot.data.storyboard && !shot.data.h3?.explicitReferences && Object.keys(clean).some(key=>['mode','cast','place','props','continuePrev'].includes(key))) {
     clean.cast ??= effectiveCast(project,shot).map(value => ({id:value.characterId,variant:value.lookId || ''}));
     const place = effectivePlace(project,shot);
     if (!owns(clean,'place')) clean.place = place ? {id:place.locationId,variant:place.versionId || ''} : null;

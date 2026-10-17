@@ -17,7 +17,7 @@ export function StoryboardUIProvider({adapter,children}){
         if(result?.ok===false){setError(result.error||t('storyboard.changeFailed'));return result;}
         if(action.type==='newProfile'&&(typeof result==='string'||result?.id))setOpenProfile(typeof result==='string'?result:result.id);
         return result;
-      }catch(problem){const message=problem?.message||t('storyboard.operationUnknown');setError(message);return {ok:false,error:message};}
+      }catch(problem){const message=problem?.message||t('storyboard.operationUnknown');const displayed=message.startsWith('workbench.')?t(message):message;setError(displayed);return {ok:false,error:displayed};}
     };
     const db={...adapter.db,state,expand:(shot,locale)=>adapter.expand(shot,locale),planDrop:(shot,item,slot)=>adapter.planDrop(shot,item,slot)};
     return {state,dispatch,db,adapter,clearError:()=>setError('')};

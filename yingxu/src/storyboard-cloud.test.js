@@ -7,7 +7,7 @@ import {shotSnapshot,digest,stableJSON} from './cloud-model.js';
 import {applyStoryboardAction} from './storyboard-actions.js';
 
 const clone=value=>structuredClone(value);
-function memory(){const map=new Map();return {map,getItem:key=>map.get(key)??null,setItem:(key,value)=>map.set(key,value)};}
+function memory(){const map=new Map();return {map,getItem:key=>map.get(key)??null,setItem:(key,value)=>map.set(key,value),removeItem:key=>map.delete(key)};}
 const controls={duration:{type:'integer',minimum:4,maximum:15,default:5},resolution:{type:'string',enum:['480P'],default:'480P'},steps:{type:'integer',minimum:1,maximum:50,default:8},seed:{type:['string','null'],default:null},generate_audio:{type:'boolean',default:true},guides:{type:'array',default:[]},video_audio:{type:'object',default:{}}};
 const recipes=['fl','ref'].map(mode=>({id:`h3-base-${mode==='fl'?'fl2va':'ref2va'}-v1`,mode,controls}));
 const profiles=['draft','final'].map(id=>({id,label:id,model_id:`MiniMax-H3-${id==='draft'?'Pruned-Rank8':'Base'}-INT8`,generation_support:Object.fromEntries(['fl','ref'].map(mode=>[mode,{enabled:true,configured:true,controls,limits:{max_images:5,max_videos:2,max_audios:3,max_total_files:8}}]))}));
@@ -146,4 +146,113 @@ test('new frame and saved draft clients carry normal expected-account protection
   assert.equal(calls[0].path,'/v1/projects/owned-project/artifacts/owned-artifact/frames');assert.equal(calls[0].options.headers['Idempotency-Key'],'stable-frame-key');assert.deepEqual(JSON.parse(calls[0].options.body),{position:'last'});
   assert.equal(calls[1].path,'/v1/projects/owned-project/shots/owned-shot/generation-draft');assert.equal(calls[2].path,'/v1/projects/owned-project/shots/owned-shot/generation-plans');for(const call of calls)assert.equal(call.options.headers['X-Expected-Account'],'superdan');
   const foreign=createCloudClient({fetcher:async()=>new Response('{"private":"other owner"}',{headers:{'X-Authenticated-Account':'supervan'}})});foreign.setAccount('superdan');await assert.rejects(foreign.saveFrame('owned-project','owned-artifact',{position:'last'},'same-key'),/old response was not shown or saved/);
+});
+
+
+test('workbench unknown write reuses exact body/key and does not overwrite a newer local edit',async()=>{
+ const h=await harness();try{
+  const seen=[];let resolve;h.api.request=async(path,options)=>{seen.push(clone(options));return new Promise(r=>{resolve=r});};
+  const run=h.controller.workbenchCommand('actions',{actions:[{op:'storyboard.bulk',shot_ids:[h.shot],operation:'final'}]});
+  while(!resolve)await new Promise(r=>setTimeout(r,0));
+  const original=clone(h.store.getState().project),version=h.store.getState().workspace.serverVersion;
+  h.store.updateEntity(h.shot,{description:'New typing while request is pending'});
+  resolve({id:original.id,version:version+1,project:original});await assert.rejects(run,/workbench.changed/);
+  assert.ok(h.controller.workbenchPending());assert.equal(h.store.getState().project.entities.find(e=>e.id===h.shot).description,'New typing while request is pending');
+  h.api.request=async(path,options)=>{seen.push(clone(options));throw new CloudError('Forbidden',{status:403});};
+  await assert.rejects(h.controller.workbenchCommand(null,null,{recover:true}),/Forbidden/);assert.deepEqual(seen[1],seen[0]);assert.ok(h.controller.workbenchPending());
+ }finally{h.controller.destroy();}
+});
+test('workbench closed no-write proof only clears matching request hash and project',async()=>{
+ const h=await harness();try{
+  h.api.request=async(path,options)=>{throw new CloudError('Conflict',{status:409,detail:{code:'document_version_conflict',no_mutation_committed:true,project_id:'wrong',request_hash:await digest(options.body)}});};
+  await assert.rejects(h.controller.workbenchCommand('actions',{actions:[{op:'storyboard.bulk',shot_ids:[h.shot],operation:'draft'}]}));assert.ok(h.controller.workbenchPending());
+  h.api.request=async(path,options)=>{throw new CloudError('Conflict',{status:409,detail:{code:'document_version_conflict',no_mutation_committed:true,project_id:h.store.getState().project.id,request_hash:await digest(options.body)}});};
+  await assert.rejects(h.controller.workbenchCommand(null,null,{recover:true}),/workbench.closed/);assert.equal(h.controller.workbenchPending(),null);
+ }finally{h.controller.destroy();}
+});
+
+test('aggregate preflight syncs inputs once without a legacy plan or inherited-default writes; lost response recovers original key',async()=>{
+ const h=await harness();try{
+  const image=h.store.addEntity('image',null,{title:'Selected reference',data:{fileId:'local-image',fileName:'selected.png',mime:'image/png'}});
+  h.files.set('local-image',new File(['image'],'selected.png',{type:'image/png'}));
+  h.store.updateEntity(h.shot,{data:{storyboard:{...h.store.getState().project.entities.find(e=>e.id===h.shot).data.storyboard,extraRefs:[{entityId:image}]},h3:{inputMode:'ref',controls:{duration:5}}}});
+  const requests=[];let lost=true;
+  h.api.request=async(path,options)=>{requests.push(clone({path,...options}));if(lost){lost=false;throw new CloudError('lost',{status:503});}return {request_hash:await digest(options.body),id:'original-preflight',project_id:h.store.getState().project.id,project_version:options.body.expected_version,status:'completed',ready:true,items:[0,1].map(index=>({shot_id:h.shot,index,seed:String(index+10),plan_id:'plan-'+index,plan:{status:'ready'}}))};};
+  await assert.rejects(h.controller.workbenchCommand('preflight',{shot_ids:[h.shot],copies:2,capabilities_version:'story-v1'}));
+  const original=h.controller.workbenchPending();assert.equal(original.kind,'preflight');
+  const before=h.calls.length;const result=await h.controller.workbenchCommand(null,null,{recover:true});
+  assert.equal(result.id,'original-preflight');assert.equal(h.calls.length,before);assert.equal(h.controller.workbenchPending(),null);
+  assert.deepEqual(requests[0],requests[1]);assert.equal(h.calls.filter(row=>row[0]==='upload').length,1);
+  assert.equal(h.calls.some(row=>['savedPlan','plan','submit'].includes(row[0])),false);
+  const persisted=h.store.getState().project.entities.find(row=>row.id===h.shot).data.h3;
+  assert.deepEqual(persisted,{inputMode:'ref',controls:{duration:5}});
+ }finally{h.controller.destroy();}
+});
+test('aggregate preflight late response cannot open or clear another workspace operation',async()=>{
+ const h=await harness();try{
+  let resolve,started;const entered=new Promise(r=>started=r);
+  h.api.request=(path,options)=>{started();return new Promise(r=>{resolve=()=>r({id:'pf',project_id:h.store.getState().project.id,project_version:options.body.expected_version,status:'completed',ready:true,items:[{shot_id:h.shot,index:0,plan_id:'p'}]});});};
+  const action=h.controller.workbenchCommand('preflight',{shot_ids:[h.shot],copies:1,capabilities_version:'story-v1'});await entered;
+  const old=h.controller.workbenchPending();h.store.leaveCloudProject();resolve();await assert.rejects(action);
+  assert.equal(h.storage.map.get(`inkseq-storyboard-command-v1:superdan:${old.projectId}`),JSON.stringify(old));
+ }finally{h.controller.destroy();}
+});
+
+test('partial preflight retains original receipt identity and only matching closed proof can be acknowledged',async()=>{
+ const h=await harness();try{
+  let mode='pending',originalBody;
+  h.api.request=async(path,options)=>{
+   if(options)originalBody=options.body;
+   return {id:mode==='wrong'?'foreign':'original-pf',project_id:h.store.getState().project.id,project_version:originalBody.expected_version,request_hash:await digest(originalBody),status:mode==='pending'?'pending':'blocked',no_generation_submitted:true,...(mode==='pending'?{}:{closed_preflight:true}),items:[{shot_id:h.shot,index:0,plan_id:'original-plan',plan:null}]};
+  };
+  const value=await h.controller.workbenchCommand('preflight',{shot_ids:[h.shot],copies:1,capabilities_version:'story-v1'});
+  assert.equal(value.status,'pending');const pending=h.controller.workbenchPending();assert.equal(pending.receiptId,'original-pf');
+  await assert.rejects(h.controller.workbenchCommand('preflight',{shot_ids:[h.shot],copies:1}));
+  mode='wrong';await assert.rejects(h.controller.workbenchAbandonClosed('foreign'));assert.deepEqual(h.controller.workbenchPending(),pending);
+  mode='blocked';await h.controller.workbenchAbandonClosed('original-pf');assert.equal(h.controller.workbenchPending(),null);
+ }finally{h.controller.destroy();}
+});
+
+test('verified batch acceptance is not turned into a retryable submit error by failed list refresh',async()=>{
+ const h=await harness();try{
+  const writes=[];h.api.request=async(path,options)=>{writes.push(clone({path,...options}));return {id:'accepted-batch',client_project_id:h.store.getState().project.id,items:[{plan_id:'p1',job_id:'j1'}]};};
+  h.api.jobs=async()=>{throw Error('read unavailable');};
+  const receipt=await h.controller.workbenchCommand('batch',{projectVersion:h.store.getState().workspace.serverVersion,plan_ids:['p1']});
+  assert.equal(receipt.id,'accepted-batch');assert.equal(writes.length,1);assert.equal(h.controller.workbenchPending(),null);
+ }finally{h.controller.destroy();}
+});
+
+test('actual nested storyboard and top-level copies CAS proof envelopes clear only their matching resource and body',async()=>{
+ const h=await harness();try{
+  let nested=true,resource='wrong';
+  h.api.request=async(path,options)=>{const proof={code:nested?'document_version_conflict':'version_conflict',resource,no_mutation_committed:true,request_hash:await digest(options.body)};throw new CloudError('conflict',{status:409,detail:nested?{detail:proof}:proof});};
+  await assert.rejects(h.controller.workbenchCommand('preferences',{expected_version:2,defaults:{controls:{steps:12}}}));assert.ok(h.controller.workbenchPending());
+  resource='storyboard_preferences';await assert.rejects(h.controller.workbenchCommand(null,null,{recover:true}),/workbench.closed/);assert.equal(h.controller.workbenchPending(),null);
+  nested=false;resource='quick_chat_preferences';await assert.rejects(h.controller.workbenchCommand('copies',{expected_version:2,copies_max:6,takes_fold_count:8}),/workbench.closed/);assert.equal(h.controller.workbenchPending(),null);
+ }finally{h.controller.destroy();}
+});
+
+test('restored explicit recipe preflight preserves non-storyboard inputs and quality intent',async()=>{
+ const h=await harness();try{
+  h.store.editProject(p=>{const shot=p.entities.find(x=>x.id===h.shot);delete shot.data.storyboard;shot.data.qualityIntent='final';shot.data.h3.explicitReferences=[{asset_id:'original',role:'reference',source_range:{start:1,end:2}}];});
+  await h.controller.save();const before=clone(h.store.getState().project.entities.find(x=>x.id===h.shot).data);
+  h.api.request=async(path,options)=>({id:'restored-pf',request_hash:await digest(options.body),project_id:h.store.getState().project.id,project_version:options.body.expected_version,status:'completed',ready:true,items:[{shot_id:h.shot,index:0,plan_id:'p',plan:{}}]});
+  await h.controller.workbenchCommand('preflight',{shot_ids:[h.shot],copies:1});
+  assert.deepEqual(h.store.getState().project.entities.find(x=>x.id===h.shot).data,before);
+  assert.equal(h.calls.some(x=>['upload','frame','plan','savedPlan','submit'].includes(x[0])),false);
+ }finally{h.controller.destroy();}
+});
+
+test('restored no-profile draft remains exact while an explicit unavailable profile refuses',async()=>{
+ const h=await harness();try{
+  h.store.editProject(p=>{const shot=p.entities.find(x=>x.id===h.shot);delete shot.data.storyboard;delete shot.data.h3.deploymentProfileId;shot.data.h3.explicitReferences=[{asset_id:'original',role:'reference'}];});
+  await h.controller.save();const before=clone(h.store.getState().project.entities.find(x=>x.id===h.shot).data);
+  const original=h.api.generationDraft;let missing=false;
+  h.api.generationDraft=async(...args)=>{const r=await original(...args);delete r.draft.deployment_profile_id;if(missing)r.draft.deployment_profile_id='unavailable-exact';return r;};
+  h.api.request=async(path,options)=>({id:'no-profile-pf',request_hash:await digest(options.body),project_id:h.store.getState().project.id,project_version:options.body.expected_version,status:'completed',ready:true,items:[{shot_id:h.shot,index:0,plan_id:'p',plan:{}}]});
+  await h.controller.workbenchCommand('preflight',{shot_ids:[h.shot],copies:1});
+  assert.deepEqual(h.store.getState().project.entities.find(x=>x.id===h.shot).data,before);
+  missing=true;await assert.rejects(h.controller.workbenchCommand('preflight',{shot_ids:[h.shot],copies:1}),/workbench.capabilities/);
+  assert.equal(h.calls.some(x=>['upload','frame','plan','savedPlan','submit'].includes(x[0])),false);
+ }finally{h.controller.destroy();}
 });

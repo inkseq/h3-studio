@@ -8,6 +8,7 @@ from .quick_chat import QuickChatService, QuickChatError, default_next_settings
 from .quick_chat_assistant import QuickChatAssistant, model_schema
 from .quick_chat_titles import TITLE_MODEL
 from .capabilities import capabilities
+from .repository import request_hash
 from .upload_route import QuickChatAssetUploadRoute
 from .quick_chat_schema import CreateCardRequest, ReviseCardRequest, safe_field_errors, TakePreferencesRequest, TakeStarRequest, TakeAgainRequest, TakeStoryRequest
 from .quick_chat_response_schema import AUTHORING_ERRORS, CardAuthoringResponse
@@ -156,7 +157,16 @@ def register_routes(app, *, hooks=None, assistant=None, assistant_enabled=False,
         return service.preferences(request.state.principal)
 
     def update_take_preferences(request: Request, body: TakePreferencesRequest, key: str = Header(..., alias="Idempotency-Key")):
-        return service.set_preferences(request.state.principal, body.model_dump(exclude_unset=True), key)
+        value = body.model_dump(exclude_unset=True)
+        try:
+            return service.set_preferences(request.state.principal, value, key)
+        except QuickChatError as exc:
+            # This service CAS is checked under the owner lock before any write.
+            if exc.code != "version_conflict":
+                raise
+            return JSONResponse({"code": exc.code, "message": exc.message,
+                "retryable": exc.retryable, "resource": "quick_chat_preferences",
+                "no_mutation_committed": True, "request_hash": request_hash(value)}, status_code=exc.status)
 
     app.router.add_api_route("/v1/quick-chat/preferences", update_take_preferences, methods=["PATCH"], status_code=200,
         route_class_override=QuickChatAuthoringRoute, responses=AUTHORING_ERRORS)

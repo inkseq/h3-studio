@@ -2,7 +2,7 @@
 from .repository import request_hash
 
 
-def source_snapshot(project, shot_id):
+def source_components(project, shot_id):
     lookup = {e["id"]: e for e in project["entities"]}
     storyboard = "storyboard" in lookup.get(shot_id, {}).get("data", {})
     shot = lookup.get(shot_id, {})
@@ -69,10 +69,16 @@ def source_snapshot(project, shot_id):
         for guide in node.get("data", {}).get("h3", {}).get("guides", []):
             if isinstance(guide, dict) and isinstance(guide.get("media_id"), str):
                 pending.append(guide["media_id"])
-    return request_hash({"shot_id": shot_id, "entities": [lookup[k] for k in sorted(chosen)],
+    return {"shot_id": shot_id, "entities": [lookup[k] for k in sorted(chosen)],
                          "links": [used_links[k] for k in sorted(used_links)],
                          **({"storyboard_style": project.get("journey", {}).get("storyboard", {}).get("style", "")}
-                            if storyboard else {})})
+                            if storyboard else {}),
+                         **({"storyboard_defaults": project["journey"]["storyboard"]["defaults"]}
+                            if "defaults" in project.get("journey", {}).get("storyboard", {}) else {})}
+
+
+def source_snapshot(project, shot_id):
+    return request_hash(source_components(project, shot_id))
 
 
 def validate_source_ref(project, ref):
