@@ -140,6 +140,8 @@ export function createStore({storage,now=()=>Date.now(),seed=legacySeed}={}){
   let state={project:null,workspaceEpoch:0,workspace:{mode:'local'},mode:'guide',section:'journey',selectedId:null,scopeId:null,saveState:'尚未保存',notice:'',undoCount:0,redoCount:0};
   const emit=()=>{state=freeze({...state,undoCount:past.length,redoCount:future.length});for(const fn of [...listeners])fn();};
   const cloudKey=(account,id)=>`yingxu-cloud-draft-v1:${encodeURIComponent(account)}:${encodeURIComponent(id)}`;
+  const keptCloudKey=(account,id)=>`yingxu-cloud-kept-drafts-v1:${encodeURIComponent(account)}:${encodeURIComponent(id)}`;
+  const keptCloudDrafts=(account,id,{strict=false}={})=>{try{const drafts=JSON.parse(storage?.getItem(keptCloudKey(account,id))||'[]');if(!Array.isArray(drafts)||drafts.some(draft=>draft?.project?.id!==id||!validateProject(draft.project).ok))throw Error('invalid preserved drafts');return drafts;}catch(error){if(strict)throw error;return [];}};
   const persist=()=>{
     const cloud=state.workspace.mode==='cloud',dirty=cloud&&JSON.stringify(state.project)!==cloudSavedJSON;
     const key=cloud?cloudKey(state.workspace.account,state.project.id):KEY;
@@ -166,12 +168,18 @@ export function createStore({storage,now=()=>Date.now(),seed=legacySeed}={}){
   if(!state.project&&protectedRaw)state={...state,project:blank('待恢复的项目')};
   if(!state.project){let oldRaw=null;try{oldRaw=storage?.getItem(LEGACY_KEY);state={...state,project:oldRaw?migrateLegacy(JSON.parse(oldRaw)):migrateLegacy(seed)};if(oldRaw)state={...state,notice:'已迁移原章节项目；旧浏览器数据仍保留。'};}catch{state={...state,project:migrateLegacy(seed),notice:'旧项目无法迁移，原始数据仍保留。当前打开演示项目。'};}}
   persist();emit();
-  const commit=(p,{coalesceKey=null,history=true}={})=>{
+  const commit=(p,{coalesceKey=null,history=true,observation=false}={})=>{
     const valid=validateProject(p);if(!valid.ok){say(valid.error);return false;}
     reconcileGeneratedTracks(valid.project);
     if(JSON.stringify(state.project)===JSON.stringify(valid.project))return true;
     const t=now();if(history){if(!(coalesceKey&&coalesce?.key===coalesceKey&&t-coalesce.time<1200)){past.push(state.project);if(past.length>100)past.shift();}future.length=0;coalesce=coalesceKey?{key:coalesceKey,time:t}:null;}
-    valid.project.updatedAt=timestamp();state={...state,project:valid.project,notice:''};
+    // Loading authoritative jobs and checking local file presence are reads,
+    // not authoring. Rebase those observations only if no user edit is pending;
+    // a late observation must never acknowledge or clear an actual draft.
+    const cleanObservation=observation&&state.workspace.mode==='cloud'&&!state.workspace.dirty;
+    valid.project.updatedAt=observation?state.project.updatedAt:timestamp();
+    if(cleanObservation)cloudSavedJSON=JSON.stringify(valid.project);
+    state={...state,project:valid.project,notice:''};
     if(state.selectedId&&!valid.project.entities.some(e=>e.id===state.selectedId))state.selectedId=null;
     if(state.scopeId&&!valid.project.entities.some(e=>e.id===state.scopeId))state.scopeId=null;
     persist();emit();return true;
@@ -186,8 +194,14 @@ export function createStore({storage,now=()=>Date.now(),seed=legacySeed}={}){
     getPersistenceRisk:()=>({current:state.saveState.startsWith('保存失败'),otherCloudDrafts:[...volatileCloudDrafts.keys()].filter(key=>state.workspace.mode!=='cloud'||key!==cloudKey(state.workspace.account,state.project.id)).length}),
     checkpoint(){const saved=persist()&&!volatileCloudDrafts.size;if(!saved)state={...state,notice:'当前或先前账户仍有未落盘草稿，已阻止刷新。请用原账户恢复后备份，保留本页面。'};emit();return saved;},
     getCloudDraft(account,id){const key=cloudKey(account,id);if(volatileCloudDrafts.has(key))return clone(volatileCloudDrafts.get(key));try{const raw=storage?.getItem(key);if(!raw)return null;const draft=JSON.parse(raw),valid=validateProject(draft.project);return valid.ok?{...draft,project:valid.project}:null;}catch{return null;}},
+    getPreservedCloudDrafts(account,id){return clone(keptCloudDrafts(account,id));},
     enterCloudProject(project,{account,version,restoreDraft=false}={}){
       const valid=validateProject(project);if(!valid.ok||!account||!Number.isInteger(version)||version<1){say(valid.error||'云项目身份或版本无效');return false;}
+      // Opening the server copy is not permission to discard an unsynced draft.
+      // Archive it before persist() replaces the active draft slot. If durable
+      // preservation fails, leave the current workspace and original bytes alone.
+      const existingDraft=this.getCloudDraft(account,project.id);
+      if(!restoreDraft&&existingDraft?.dirty){try{if(!storage)throw Error('unavailable');const drafts=keptCloudDrafts(account,project.id,{strict:true});if(!drafts.some(draft=>JSON.stringify(draft)===JSON.stringify(existingDraft)))storage.setItem(keptCloudKey(account,project.id),JSON.stringify([...drafts,existingDraft]));}catch{return false;}}
       if(state.workspace.mode==='local')localWorkspace={state,past:[...past],future:[...future],coalesce,protectedRaw,recoveryRaw};
       else persist();
       const draft=restoreDraft?this.getCloudDraft(account,project.id):null;

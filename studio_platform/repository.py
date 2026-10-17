@@ -589,6 +589,9 @@ class Repository:
                      if summary else select(documents))
         statement = statement.where(self._scope(documents, scope), documents.c.kind == kind)
         if exclude_managed:
+            # Purges retain document identities for audit/history even when an
+            # older trash marker is absent. Filter the tombstone before paging.
+            statement = statement.where(documents.c.payload["content_deleted"].as_boolean().is_not(True))
             trash=documents.alias("project_trash")
             statement=statement.where(~documents.c.document_id.in_(select(trash.c.payload["target"]["id"].as_string()).where(
                 trash.c.tenant_id==scope.tenant_id,trash.c.owner_id==scope.owner_id,

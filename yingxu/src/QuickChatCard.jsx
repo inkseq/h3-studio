@@ -35,7 +35,7 @@ export default function QuickChatCard({card,state,controller,onContinue,onUseRes
   const revision=state.revisions[selected||card.current_revision_id],selectedRecipe=selectedTake&&revision&&selectedTake.revision_id===revision.id?selectedTake.recipe:revision,recipe=recipeFor(state.capabilities,revision),submission=Object.values(state.submissions).find(item=>item.revision_id===revision?.id),preflights=Object.values(state.preflights).filter(pref=>pref.revision_id===revision?.id),preflight=preflights.filter(pref=>!pref.item_ids?.length&&(pref.items?.length??0)===(revision?.copies??1)).sort((a,b)=>(b.created_at||0)-(a.created_at||0))[0],expired=preflight?.status==='ready'&&(preflight.stale===true||preflight.expires_at&&preflight.expires_at*1000<=Date.now());
   const countContext=JSON.stringify([state.account,state.session?.id,card.id,revision?.id]),liveCountContext=useRef(countContext);
   liveCountContext.current=countContext;
-  const capacity=modeAvailability(state.availability,state.capabilities,revision);
+  const capacity=modeAvailability(state.availability,state.capabilities,revision,undefined,Date.now(),locale);
   const versions=(card.revisions||[]).map(item=>state.revisions[item.id]||item),bindings=revision?bindingsForInputs(revision.inputs,state.materials):[];
   useEffect(()=>{if(wanted&&state.revisions[wanted]?.card_id===card.id)setSelected(wanted);},[wanted,state.revisions[wanted]?.card_id,card.id]);
   useEffect(()=>{setConfirmStart(false);setRetry(null);setEditing(null);setInputEdit(null);},[state.account,state.session?.id]);

@@ -365,6 +365,8 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
                     {"kind":"project","project_id":project_id,"id":project_id}):
                 raise HTTPException(404,"project_in_trash")
         record=authorized_project(request.state.principal, project_id)
+        if record["payload"].get("content_deleted"):
+            raise HTTPException(404, "project_not_found")
         from .agent_management import doc_where,ATTRIBUTION_PROJECT
         from .repository import documents
         with repo.engine.connect() as conn:
