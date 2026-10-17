@@ -15,6 +15,7 @@ export default function LibraryView({account,filters={type:'image'},setFilters,p
  const uses=row=>new Set((row.usage||[]).map(use=>use.project_id).filter(Boolean)).size;
  const toggle=row=>setSelected(old=>old.includes(libraryKey(row.target))?old.filter(k=>k!==libraryKey(row.target)):[...old,libraryKey(row.target)]);
  const Title=ICONS[filters.type]||Files;
+ if(!account)return <div className="home lib-shell"><StudioHeader account={account} active="library"/><main className="home-main library-signed-out"><h1 className="page-title"><Files size={20}/>{t('library.title')}</h1><div className="empty-state"><span><UserRound size={24}/></span><b>{t('library.signIn')}</b><a className="library-sign-in" href="/quick-chat">{t('story.copy14')}</a></div></main></div>;
  return <div className="home lib-shell"><StudioHeader account={account} active="library"/>
   <div className="libp"><aside className="libp-side">
    <div className="libp-group">{t('library.view.profiles')}</div>
@@ -36,7 +37,7 @@ export default function LibraryView({account,filters={type:'image'},setFilters,p
     <div className="spacer"/><input className="lib-search" aria-label={t('library.search')} placeholder={t('library.search')} value={filters.q||''} disabled={!account} onChange={e=>change({q:e.target.value})}/>
     <button className="primary" disabled={!account||locked} onClick={()=>onUpload?.()}><Upload size={15}/>{t('v2.upload')}</button>
    </div>
-   {feedback}{!account?<p className="muted"><a href="/quick-chat">{t('library.signIn')}</a></p>:<>
+   {feedback}<>
    {showUpload&&uploadPanel}
    {selected.length>0&&<div className="libp-bulk"><b>{t('library.selected',{count:selected.length})}</b><button disabled={locked||!filters.project_id} onClick={onTags}><Tag size={14}/>{t('library.applyTags')}</button><button disabled={locked||!filters.project_id} onClick={onFile}>{t('library.fileInto')}</button><button className="small danger" disabled={locked||!filters.project_id} onClick={onDelete}><Trash2 size={13}/>{t('trash.move')}</button><div className="spacer"/><button className="small ghost" onClick={()=>setSelected(rows.map(r=>libraryKey(r.target)))}>{t('library.select')}</button><button className="small ghost" onClick={()=>setSelected([])}>{t('library.clear')}</button></div>}
    {loading&&rows.length===0&&<p className="muted" role="status">{t('library.loading')}</p>}
@@ -44,7 +45,7 @@ export default function LibraryView({account,filters={type:'image'},setFilters,p
     <button className="libp-check" aria-label={row.title} aria-pressed={selected.includes(libraryKey(row.target))} onClick={e=>{e.stopPropagation();toggle(row);}}>{selected.includes(libraryKey(row.target))&&<Check size={12}/>}</button>{row.type==='audio'?<div className="libp-audio">♪</div>:renderMedia(row)}<span className="libp-name clip">{row.title||t('library.receiptName')}</span><span className="libp-meta">{uses(row)?t('library.view.usedIn',{count:uses(row)}):t('library.view.unused')}{row.tags?.length?' · '+row.tags.join(' · '):''}</span>
    </div>)}</div>
    {!loading&&!rows.length&&<p className="muted">{t('library.none')}</p>}{next!==null&&<button disabled={loading||locked} onClick={onMore}>{t('library.more')}</button>}{!profile&&<p className="muted libp-tip">{t('library.view.tip')} <span>{t('library.usageNote')}</span></p>}
-   </>}
+   </>
   </main>{children}</div>
  </div>;
 }

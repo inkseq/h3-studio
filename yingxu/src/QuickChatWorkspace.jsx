@@ -5,7 +5,7 @@ import QuickChatPreferences from './QuickChatPreferences.jsx';
 import {checkedPreferences,createConversationFiles} from './quick-chat-takes.js';
 import {useI18n} from './i18n/I18nProvider.jsx';
 import React,{useEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react';
-import {Plus,ArrowUp,Settings2,Bot,Menu,X,RefreshCw,LogOut,Upload,Image,Video,Music,Paperclip,Send,Trash2,MoreHorizontal,SlidersHorizontal} from 'lucide-react';
+import {Plus,ArrowUp,Settings2,Bot,Menu,X,RefreshCw,LogOut,Upload,Image,Video,Music,Paperclip,Send,Trash2,MoreHorizontal,SlidersHorizontal,UserRound} from 'lucide-react';
 import {useCloud} from './CloudStudio.jsx';
 import {cloudController as cloud} from './cloud-controller.js';
 import {createQuickChatController,saveMaterialSelection} from './quick-chat-controller.js';
@@ -133,7 +133,7 @@ export default function QuickChatWorkspace(){
   useEffect(()=>{if(new URLSearchParams(window.location.search).get('preferences')==='takes')setDialog('takes');},[]);
   const renderCard=card=><QuickChatCard key={card.id} card={card} state={state} controller={controller} takePreferences={takePreferences} onContinue={continueRevision} onUseResult={useResult} onUseMaterial={reuseMaterial}/>;
   return <div className="home quick-shell quick-live">
-    <StudioHeader account={c.account} active="quick" accountMenu={<button className="avatar" onClick={()=>setDialog('login')} aria-label={c.account||t('workspace.status32')}>{(c.account||t('workspace.status31')).slice(0,1).toUpperCase()}</button>}/>
+    <StudioHeader account={c.account} active="quick" accountMenu={<button className="avatar" onClick={()=>setDialog('login')} aria-label={c.account||t('story.copy14')} title={c.account||t('story.copy14')}>{c.account?c.account.slice(0,1).toLocaleUpperCase():<UserRound size={17} aria-hidden="true"/>}</button>}/>
     <a className="skip" href="#quick-chat-main">{t('workspace.copy7')}</a>
     <div className="qc">
     {mobile&&<button className="qc-scrim" aria-label={t('workspace.closeHistory')} onClick={()=>setMobile(false)}/>}
