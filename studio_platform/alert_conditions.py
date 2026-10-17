@@ -12,11 +12,11 @@ DEFAULTS = {
     "gpu_max_seconds": 7200, "stuck_seconds": 1800, "wake_count": 10,
     "cpu_percent": 70, "memory_percent": 85, "host_sustain_seconds": 900,
     "health_down_seconds": 120, "http_5xx_min": 3, "http_5xx_ratio": .05,
-    "max_sample_gap_seconds": 180,
+    "max_sample_gap_seconds": 180, "terminal_reservation_seconds": 3600,
 }
 CODES = frozenset({"gpu_runtime_exceeded", "gpu_idle_stop_overdue", "test_spend_80",
     "test_spend_100", "job_stuck", "job_repeated_wake", "host_cpu_sustained",
-    "host_memory_sustained", "host_process_unhealthy", "health_down", "http_5xx_rate", "generation_failure"})
+    "host_memory_sustained", "host_process_unhealthy", "health_down", "http_5xx_rate", "generation_failure", "terminal_reservation_stale"})
 STATES = frozenset({"waiting_capacity", "queued", "claimed", "submitting", "running",
     "submission_unknown", "cancel_requested", "collecting", "recovery_hold", "starting", "upstream_status_unknown"})
 
@@ -108,6 +108,16 @@ def evaluate(snapshot, previous_state, *, environment, now, host=None, threshold
                 False if gpu.get("has_obligations") is True else
                 now-idle > limit if gpu.get("has_obligations") is False and finite(idle)
                     and 0 <= idle <= now and finite(limit) and limit > 0 else None, since=idle)
+        terminal_holds = snapshot.get("terminal_reservations")
+        if isinstance(terminal_holds, list):
+            db_codes.add("terminal_reservation_stale")
+            for hold in terminal_holds:
+                resource, since = identity(hold.get("id")), hold.get("terminal_since")
+                if resource is not None:
+                    if finite(since) and 0 <= since <= now:
+                        condition("terminal_reservation_stale", resource, now-since > config["terminal_reservation_seconds"], since=since)
+                    else:
+                        condition("terminal_reservation_stale", resource, True, sustain=config["terminal_reservation_seconds"])
         observed = {}
         for job in snapshot.get("jobs", []):
             resource, status = identity(job.get("id")), job.get("status")

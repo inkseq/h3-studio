@@ -14,6 +14,8 @@ import sys
 import uuid
 from pathlib import Path
 
+from .budget_policy import effective_budget_limit, fixed_cap_retired
+
 from sqlalchemy import insert, select, update
 
 from .backlog_handoff import finite, require
@@ -196,12 +198,12 @@ def prepare(repo, previous, target, proof, *, apply=False):
                     "preparation_recovery_budget_scope_mismatch")
                 if failed:
                     extra = 0 if apply else dry_reserved.get(account["id"], 0)
-                    require(account["spent_microusd"]+account["reserved_microusd"]+extra+reservation["amount_microusd"] <= account["limit_microusd"],
+                    require(account["spent_microusd"]+account["reserved_microusd"]+extra+reservation["amount_microusd"] <= effective_budget_limit(account),
                         "preparation_recovery_original_budget_unavailable")
                     dry_reserved[account["id"]] = extra+reservation["amount_microusd"]
                     if apply:
                         updated = conn.execute(update(budget_accounts).where(budget_accounts.c.id == account["id"],
-                            budget_accounts.c.spent_microusd+budget_accounts.c.reserved_microusd+reservation["amount_microusd"] <= budget_accounts.c.limit_microusd)
+                            budget_accounts.c.spent_microusd+budget_accounts.c.reserved_microusd+reservation["amount_microusd"] <= effective_budget_limit(account))
                             .values(reserved_microusd=budget_accounts.c.reserved_microusd+reservation["amount_microusd"]))
                         require(updated.rowcount == 1, "preparation_recovery_budget_changed")
                         updated = conn.execute(update(budget_reservations).where(budget_reservations.c.id == reservation["id"],
