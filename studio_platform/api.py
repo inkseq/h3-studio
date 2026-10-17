@@ -24,7 +24,8 @@ from .media import MediaError, MediaBusy
 from .project_validation import validate_project
 from .repository import Repository, NotFound, Conflict, BudgetExceeded, artifacts, jobs
 from .settings import Settings
-from .storage import LocalObjectStore, StorageError, S3ObjectStore
+from .storage import (LocalObjectStore, StorageError, S3ObjectStore,
+                      VIDEO_SIGNING_BUCKET_SECONDS, VIDEO_SIGNING_VALIDITY_SECONDS)
 from .storage_config import S3StorageConfig, load_configured_storage_credentials
 from .http_limits import (ADMISSION_SCOPE_KEY, BodyLimitMiddleware, UploadAdmission,
                          RequestAdmission, RequestAdmissionMiddleware, admission_rejected, is_asset_upload, body_limit)
@@ -41,6 +42,7 @@ from . import dstack_workspace  # Account-owned presentation metadata before sch
 
 COOKIE = "sixnine_session"
 TERMINAL = {"succeeded", "failed", "cancelled"}
+ARTIFACT_VIDEO_CACHE_SCOPE_KEY = "inkseq.immutable-artifact-video-cache"
 
 
 def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_hooks=None,
@@ -250,6 +252,16 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
         response = await call_next(request)
         response.headers["Cache-Control"] = (request.scope.get(STATIC_CACHE_SCOPE_KEY, "no-store")
             if response.status_code < 400 else "no-store")
+        video_max_age = request.scope.get(ARTIFACT_VIDEO_CACHE_SCOPE_KEY)
+        if (principal is not None and request.method == "GET" and response.status_code == 307
+                and getattr(request.scope.get("route"), "path", None) == "/v1/artifacts/{artifact_id}/content"
+                and type(video_max_age) is int and 0 <= video_max_age <= VIDEO_SIGNING_BUCKET_SECONDS):
+            response.headers["Cache-Control"] = f"private, max-age={video_max_age}"
+            vary = [value.strip() for value in response.headers.get("Vary", "").split(",") if value.strip()]
+            for header in ("Authorization", "Cookie", "X-Expected-Account"):
+                if header.lower() not in {value.lower() for value in vary}:
+                    vary.append(header)
+            response.headers["Vary"] = ", ".join(vary)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         if request.url.path in {"/", "/index.html", "/for-agents", "/for-agents/"}:
@@ -424,7 +436,7 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
         # resume the same durable receipt, never create a fresh storage key.
         return asset_service.resume(principal.owner, asset_id)
 
-    def object_content(key, mime, filename, request, *, download=False):
+    def object_content(key, mime, filename, request, *, download=False, immutable_video=False):
         headers = {"Accept-Ranges": "bytes", "Content-Disposition": ("attachment" if download else "inline")+"; filename*=UTF-8''"+quote(filename, safe="")}
         if not isinstance(storage, LocalObjectStore):
             if request.method == "HEAD":
@@ -433,7 +445,15 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
                 headers["Content-Length"] = str(info.size_bytes)
                 return StreamingResponse(iter(()), media_type=mime, headers=headers)
             options = {"download_filename": filename} if download else {}
-            url = storage.presign_download(key, expires_seconds=300, **options)
+            if immutable_video and isinstance(storage, S3ObjectStore) and storage.config.provider == "r2":
+                url = storage.presign_immutable_video(key, content_type=mime, **options)
+                now = time.time()
+                # Use the issued URL's bucket, including a rollover during signing.
+                bucket_end = url.expires_at - VIDEO_SIGNING_VALIDITY_SECONDS + VIDEO_SIGNING_BUCKET_SECONDS
+                request.scope[ARTIFACT_VIDEO_CACHE_SCOPE_KEY] = max(0,
+                    min(int(url.expires_at - now) - 600, int(bucket_end - now)))
+            else:
+                url = storage.presign_download(key, expires_seconds=300, **options)
             return RedirectResponse(url.reveal(), status_code=307,
                 headers={"Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer"})
         info = storage.stat(key)
@@ -655,8 +675,12 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
         filename = value.get("filename", f'inkseq-{row["job_id"][:8]}-{value.get("kind", "result")}.{extension}')
         if isinstance(filename, str) and filename.lower().startswith("sixnine-"):
             filename = "inkseq-" + filename[len("sixnine-"):]
+        immutable_video = (value.get("kind") == "video"
+            and value.get("mime", value.get("content_type")) == "video/mp4"
+            and isinstance(value.get("sha256"), str) and re.fullmatch(r"[0-9a-f]{64}", value["sha256"]) is not None
+            and type(value.get("size_bytes")) is int and value["size_bytes"] > 0)
         return object_content(value["object_key"], value.get("mime", value.get("content_type", "application/octet-stream")),
-                              filename, request, download=download)
+                              filename, request, download=download, immutable_video=immutable_video)
 
     # Helpers for the batch/worker integration without exposing internal state to clients.
     app.state.scope = scope

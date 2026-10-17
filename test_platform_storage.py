@@ -380,6 +380,67 @@ class CloudStorageTests(OfflineTest):
                 store._client.meta.events.emit("before-send.s3.PutObject",
                                                 request=SimpleNamespace(url="https://wrong.invalid/redirect"))
 
+    def test_immutable_video_r2_signatures_are_bucket_stable_and_do_not_change_default_signers(self):
+        from datetime import datetime, timezone
+        from urllib.parse import parse_qs, urlsplit
+        from studio_platform.storage import VIDEO_SIGNING_BUCKET_SECONDS, VIDEO_SIGNING_VALIDITY_SECONDS
+        import botocore.auth
+
+        store = S3ObjectStore(config(), S3Credentials("fake-access", "fake-secret"))
+        start = 1760572800 // VIDEO_SIGNING_BUCKET_SECONDS * VIDEO_SIGNING_BUCKET_SECONDS
+        clock = botocore.auth.get_current_datetime
+        def sign(now, **options):
+            with mock.patch("studio_platform.storage.time", SimpleNamespace(time=lambda: now)):
+                return store.presign_immutable_video("safe/video.mp4", content_type="video/mp4", **options)
+        early, late, next_bucket = sign(start), sign(start + VIDEO_SIGNING_BUCKET_SECONDS - 1), sign(start + VIDEO_SIGNING_BUCKET_SECONDS)
+        self.assertEqual(early.reveal(), late.reveal())
+        self.assertNotEqual(late.reveal(), next_bucket.reveal())
+        self.assertEqual(early.expires_at, start + VIDEO_SIGNING_VALIDITY_SECONDS)
+        self.assertEqual(next_bucket.expires_at, start + VIDEO_SIGNING_BUCKET_SECONDS + VIDEO_SIGNING_VALIDITY_SECONDS)
+        query = parse_qs(urlsplit(early.reveal()).query)
+        self.assertEqual(query["X-Amz-Date"], [datetime.fromtimestamp(start, timezone.utc).strftime("%Y%m%dT%H%M%SZ")])
+        self.assertEqual(query["X-Amz-Expires"], ["86400"])
+        self.assertEqual(query["response-cache-control"], ["private, max-age=86400, immutable"])
+        self.assertEqual(query["response-content-type"], ["video/mp4"])
+        self.assertEqual(query["response-content-disposition"], ["inline"])
+        attachment = sign(start + 1, download_filename="章节.mp4")
+        self.assertEqual(parse_qs(urlsplit(attachment.reveal()).query)["response-content-disposition"],
+            ["attachment; filename*=UTF-8''%E7%AB%A0%E8%8A%82.mp4"])
+        self.assertNotEqual(attachment.reveal(), early.reveal())
+        self.assertEqual(early.required_headers, {})
+        self.assertNotIn("fake-secret", repr(early))
+        # Existing SDK GET/PUT dates stay current, short-lived and unmodified,
+        # even when immutable video signing occurs in the same process.
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            urls = list(pool.map(lambda _: store.presign_upload("safe/new", content_type="video/mp4").reveal(), range(3)))
+        default = parse_qs(urlsplit(store.presign_download("safe/video.mp4").reveal()).query)
+        self.assertEqual(default["X-Amz-Expires"], ["300"])
+        self.assertNotEqual(default["X-Amz-Date"], query["X-Amz-Date"])
+        self.assertNotIn("response-cache-control", default)
+        for url in urls:
+            self.assertEqual(parse_qs(urlsplit(url).query)["X-Amz-Expires"], ["300"])
+        self.assertIs(botocore.auth.get_current_datetime, clock)
+
+    def test_immutable_video_policy_is_not_a_general_long_lived_or_public_presign(self):
+        store = S3ObjectStore(config(), S3Credentials("fake-access", "fake-secret"))
+        for mime in ("image/png", "audio/flac", "application/octet-stream", "video/mp4\r\npublic"):
+            with self.assertRaises(StorageError):
+                store.presign_immutable_video("safe/video", content_type=mime)
+        for filename in ("../file.mp4", "bad\r\nheader", ""):
+            with self.assertRaises(StorageError):
+                store.presign_immutable_video("safe/video", content_type="video/mp4", download_filename=filename)
+        with self.assertRaises(InvalidObjectKey):
+            store.presign_immutable_video("../video", content_type="video/mp4")
+        with self.assertRaises(StorageError):
+            store.presign_download("safe/video", expires_seconds=86400)
+        for provider in ("hippius", "aws-s3"):
+            other, _ = self.store(provider)
+            with self.assertRaises(UnsupportedStorageOperation):
+                other.presign_immutable_video("safe/video", content_type="video/mp4")
+        fake_store, _ = self.store()
+        with self.assertRaisesRegex(StorageError, "Explicit storage credentials"):
+            fake_store.presign_immutable_video("safe/video", content_type="video/mp4")
+
     def test_stream_transport_errors_are_safe_and_body_is_closed(self):
         store, fake = self.store()
         body = mock.Mock()
