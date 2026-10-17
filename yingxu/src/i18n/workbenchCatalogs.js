@@ -1,5 +1,6 @@
 export const workbenchCatalogs={
   "en": {
+    "workbench.restoredPrompt": "Saved prompt · includes the original appearance and scene descriptions",
     "workbench.restoredBindings": "Historical profile text is preserved in the saved prompt. Edit the prompt, inputs and controls directly.",
     "workbench.existingJob": "This shot has existing work to reconcile. Read its original status first.",
     "workbench.capabilities": "The selected generation capability is unavailable.",
@@ -76,6 +77,7 @@ export const workbenchCatalogs={
     "workbench.closed": "No change was committed. Refresh and explicitly choose again."
   },
   "zh": {
+    "workbench.restoredPrompt": "原提示词 · 包含原有角色外观和场景描述",
     "workbench.restoredBindings": "历史角色和场景描述已保留在原提示词中，可直接编辑提示词、输入和控制参数。",
     "workbench.existingJob": "该镜头已有任务待核对，请先读取原任务状态。",
     "workbench.capabilities": "所选生成能力暂不可用。",

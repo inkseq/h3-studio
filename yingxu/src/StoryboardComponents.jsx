@@ -1,3 +1,4 @@
+import {TrashMenu,RenameDialog} from './UniversalTrash.jsx';
 import {WorkbenchTakes,WorkbenchCopies,WorkbenchDefaults} from './StoryboardWorkbench.jsx';
 import {AssistantBadge} from './AssistantConnections.jsx';
 import {useI18n} from './i18n/I18nProvider.jsx';
@@ -10,7 +11,7 @@ import {KIND_LABEL, TYPE_LABEL, VARIANT_LABEL} from './storyboard-ui-model.js';
 import {StoryboardDownloads,StoryboardAssetImage,StoryboardVideo,StoryboardPlayButton} from './StoryboardMedia.jsx';
 import {chosenVersion,coverOf,expand,fmt,MODE_LABEL,modeOf,QUALITY_LABEL,planDrop,segments,shotProfiles,shotStatus,startFrame,totalDuration,variantOf,queuePositions} from './storyboard-ui-model.js';
 import {useStoryboardUI as useStore} from './storyboard-ui-context.jsx';
-import {StoryboardNameDialog,StoryboardDeleteDialog} from './StoryboardDialog.jsx';
+import {StoryboardNameDialog} from './StoryboardDialog.jsx';
 import {createStoryboardPlayback} from './storyboard-playback.js';
 
 
@@ -23,7 +24,7 @@ export function AssetThumb({asset,size=36}) {const {t:tr,locale}=useI18n();const
   return <StoryboardAssetImage asset={asset} className="athumb" style={{width:size,height:size}}/>;
 }
 
-function Tile({asset, used, onClick, onZoom, dragId, children}) {const {t:tr,locale}=useI18n();const {TYPE_LABEL,VARIANT_LABEL,KIND_LABEL,MODE_LABEL,QUALITY_LABEL}=displayLabels(tr);
+function Tile({asset, used, onClick, onZoom, dragId, children}) {const {state,dispatch}=useStore();const [renaming,setRenaming]=useState(false);const {t:tr,locale}=useI18n();const {TYPE_LABEL,VARIANT_LABEL,KIND_LABEL,MODE_LABEL,QUALITY_LABEL}=displayLabels(tr);
   const {attributes, listeners, setNodeRef, isDragging} = useDraggable({id: dragId || 'asset:' + asset.id});
   return (
     <div ref={setNodeRef} {...listeners} {...attributes} className={'tile' + (isDragging ? ' dragging' : '') + (used ? ' used' : '')}
@@ -37,13 +38,15 @@ function Tile({asset, used, onClick, onZoom, dragId, children}) {const {t:tr,loc
       {used && <span className="tile-used">✓</span>}
       <span className="tile-name">{asset.name}</span>
       {onZoom && asset.kind !== 'audio' && <button className="tile-zoom" onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onZoom(asset); }}>⤢</button>}
+      {asset.entity?.id&&<TrashMenu target={{kind:'entity',project_id:state.project.id,id:asset.entity.id}} onRename={()=>setRenaming(true)} onEdit={()=>setRenaming(true)}/> }
+      {renaming&&<RenameDialog key={state.contextId+':'+asset.id} title={asset.name} onClose={()=>setRenaming(false)} onSave={async title=>{const result=await dispatch({type:'assetTitle',asset:asset.id,title});if(result?.ok===false||result===false)throw Error('trash.changed');}}/>}
       {children}
     </div>
   );
 }
 
 function ProfileCard({p, used, onOpen, onAdd}) {const {t:tr,locale}=useI18n();const {TYPE_LABEL,VARIANT_LABEL,KIND_LABEL,MODE_LABEL,QUALITY_LABEL}=displayLabels(tr);
-  const {db} = useStore();
+  const {db,state} = useStore();
   const drag = useDraggable({id: 'profile:' + p.id});
   const drop = useDroppable({id: 'pdrop:' + p.id});
   const cover = coverOf(db, p, p.def);
@@ -62,6 +65,7 @@ function ProfileCard({p, used, onOpen, onAdd}) {const {t:tr,locale}=useI18n();co
         <small>{p.type === 'prop' ? tr('storyboard.mixed4',{p0:count}) : tr('storyboard.mixed5',{p0:p.variants.length,p1:VARIANT_LABEL[p.type],p2:count})}{p.voices?.length ? tr('storyboard.mixed6',{p0:p.voices.length}) : ''}{p.ambient ? tr('storyboard.detail6') : ''}</small>
         <small className="muted clip">{p.desc}</small></div>
       {onAdd && <button className="pcard-open" aria-label={used?tr('storyboard.mixed7',{p0:p.name}):tr('storyboard.mixed8',{p0:p.name})} title={used?tr('storyboard.detail7'):tr('storyboard.detail8')} onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onAdd(); }}>{used ? '✓' : '＋'}</button>}
+      <TrashMenu target={{kind:'entity',project_id:state.project.id,id:p.id}} onRename={onOpen} onEdit={onOpen}/>
       {fileOver && <div className={'drop-hint' + (dragged.kind === 'video' || (dragged.kind === 'audio' && p.type === 'prop') ? ' warn' : '')}>{hint}</div>}
     </div>
   );
@@ -243,7 +247,7 @@ export function ProfileEditor() {const {t:tr,locale}=useI18n();const {TYPE_LABEL
       <section className="profile" onClick={e => e.stopPropagation()}>
         <header className="ed-head">
           <div><small>{tr('storyboard.finish17',{kind:TYPE_LABEL[p.type]})}</small><input className="ed-title" aria-label={tr('storyboard.finish5')} value={p.name} onChange={e => dispatch({type: 'profile', id: p.id, patch: {name: e.target.value}})} /></div>
-          <button className="x big" onClick={close}>×</button>
+          <TrashMenu target={{kind:'entity',project_id:state.project.id,id:p.id}}/><button className="x big" onClick={close}>×</button>
         </header>
         <label className="field"><span>{p.type === 'character' ? tr('storyboard.detail26') : p.type === 'location' ? tr('storyboard.detail27') : tr('storyboard.detail28')}{tr('storyboard.finish24')}</span>
           <textarea rows={2} value={p.desc} onChange={e => dispatch({type: 'profile', id: p.id, patch: {desc: e.target.value}})} /></label>
@@ -258,7 +262,7 @@ export function ProfileEditor() {const {t:tr,locale}=useI18n();const {TYPE_LABEL
             <input aria-label={VARIANT_LABEL[p.type]+tr('storyboard.detail29')} value={v.name} onChange={e => dispatch({type: 'variant', pid: p.id, vid: v.id, patch: {name: e.target.value}})} style={{maxWidth: 160}} />
             <input aria-label={VARIANT_LABEL[p.type]+tr('storyboard.detail30')} value={v.desc} placeholder={p.type === 'character' ? tr('storyboard.detail31') : tr('storyboard.detail32')}
               onChange={e => dispatch({type: 'variant', pid: p.id, vid: v.id, patch: {desc: e.target.value}})} />
-            {v.id !== p.def && <button className="small" onClick={() => dispatch({type: 'profile', id: p.id, patch: {def: v.id}})}>{tr('storyboard.copy60')}</button>}
+            <TrashMenu target={{kind:p.type==='character'?'look':'location_version',project_id:state.project.id,id:v.id,parent_id:p.id}}/>{v.id !== p.def && <button className="small" onClick={() => dispatch({type: 'profile', id: p.id, patch: {def: v.id}})}>{tr('storyboard.copy60')}</button>}
           </div>}
           <div className="row tight"><b>{tr('storyboard.copy61')}</b><small className="muted">{tr('storyboard.copy62')}</small>
             <button className="small" onClick={() => setChoose(true)}>{tr('storyboard.copy63')}</button>
@@ -460,8 +464,8 @@ export function ShotEditor({shotId, onClose, inline}) {const {t:tr,locale}=useI1
   const {state, dispatch, db} = useStore();
   const shot = state.shots.find(s => s.id === shotId);
   const [copies,setCopies]=useState('1');
-  const [preview, setPreview] = useState(null), [picker, setPicker] = useState(null), [saving, setSaving] = useState(false), [msg, setMsg] = useState(''),[deleting,setDeleting]=useState(false);
-  useEffect(() => { setPreview(null); setPicker(null); setSaving(false); setMsg(''); setDeleting(false); setCopies('1'); }, [shotId,state.contextId]);
+  const [preview, setPreview] = useState(null), [picker, setPicker] = useState(null), [saving, setSaving] = useState(false), [msg, setMsg] = useState('');
+  useEffect(() => { setPreview(null); setPicker(null); setSaving(false); setMsg(''); setCopies('1'); }, [shotId,state.contextId]);
   if (!shot) return null;
   const index = state.shots.indexOf(shot);
   const info = expand(shot, db,locale);
@@ -477,7 +481,7 @@ export function ShotEditor({shotId, onClose, inline}) {const {t:tr,locale}=useI1
     <section className={'editor' + (inline ? ' inline' : '')}>
       <header className="ed-head">
         <div><small>{tr('storyboard.finish19',{number:String(index+1).padStart(2,'0')})}</small><input className="ed-title" aria-label={tr('storyboard.finish10')} value={shot.title} onChange={e => upd({title: e.target.value})} /></div>
-        {onClose && <button className="x big" aria-label={tr('storyboard.closeEditor')} onClick={onClose}>×</button>}
+        <TrashMenu target={{kind:'entity',project_id:state.project.id,id:shot.id}} onRename={()=>document.querySelector('.ed-title')?.focus()}/>{onClose && <button className="x big" aria-label={tr('storyboard.closeEditor')} onClick={onClose}>×</button>}
       </header>
 
       <div className="ed-preview">
@@ -491,7 +495,7 @@ export function ShotEditor({shotId, onClose, inline}) {const {t:tr,locale}=useI1
 
       <WorkbenchTakes shot={shot}/><WorkbenchDefaults shotId={shot.id}/>
       <label className="field"><span>{tr('storyboard.copy84')}</span><textarea rows={2} value={shot.script} onChange={e => upd({script: e.target.value})} /></label>
-      <label className="field"><span>{tr('storyboard.copy85')}</span>
+      <label className="field"><span>{tr(restoredExact?'workbench.restoredPrompt':'storyboard.copy85')}</span>
         <textarea rows={2} value={shot.prompt} onChange={e => upd({prompt: e.target.value})} placeholder={tr('storyboard.finish11')} /></label>
 
       {restoredExact?<p>{tr('workbench.restoredBindings')}</p>:<Slot onFiles={files=>dispatch({type:'uploadFiles',files,target:{kind:'shot',shot:shot.id,slot:'smart'}})} id={'slot:cast:'+shot.id} className="castslot" label={tr('storyboard.detail77')} hint={tr('storyboard.detail78')} onPick={openPicker('cast')}>
@@ -569,7 +573,6 @@ export function ShotEditor({shotId, onClose, inline}) {const {t:tr,locale}=useI1
 
       </div>
       {picker && <AssetPicker shotId={shot.id} {...picker} onClose={() => setPicker(null)} />}
-      {deleting&&<StoryboardDeleteDialog onConfirm={async()=>{const receipt=await dispatch({type:'remove',id:shot.id});if(receipt?.ok!==false)onClose?.();return receipt;}} onClose={()=>setDeleting(false)}/>}
     </section>
   );
 }

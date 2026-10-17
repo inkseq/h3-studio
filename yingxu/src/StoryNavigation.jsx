@@ -1,3 +1,4 @@
+import {TrashMenu} from './UniversalTrash.jsx';
 import {translate} from './i18n/locale.js';
 import {useI18n} from './i18n/I18nProvider.jsx';
 import './i18n/workspace-language.css';
@@ -93,10 +94,10 @@ function StoryLibraryCard({story,reader,working,onOpen}){const {t,locale}=useI18
     return()=>{alive=false;if(url)URL.revokeObjectURL(url);};
   },[visible,reader,file?.fileId,file?.kind,file?.cloudPath]);
   const known=summary.shotCount!==null;
-  return <button ref={ref} type="button" className="story-library-card" disabled={working} onClick={onOpen} aria-label={t('legacy.openStory',{location:story.mode==='cloud'?t('account.interface5'):t('account.interface6'),title:summary.title})}>
+  return <article className="story-library-card-wrap"><button ref={ref} type="button" className="story-library-card" disabled={working} onClick={onOpen} aria-label={t('legacy.openStory',{location:story.mode==='cloud'?t('account.interface5'):t('account.interface6'),title:summary.title})}>
     <div className="story-library-cover">{coverUrl?file.kind==='video'?<video src={coverUrl} muted playsInline preload="metadata" aria-hidden="true"/>:<img src={coverUrl} alt="" draggable={false}/>:<Clapperboard size={32} aria-hidden="true"/>}<StoryLocation mode={story.mode}/></div>
     <div className="story-library-card-body"><h2 title={summary.title}>{summary.title}</h2><p>{known?t('legacy.storySummary',{selected:summary.chosenCount,total:summary.shotCount}):detailError?t('legacy.visible16'):t('legacy.visible17')}</p><time dateTime={storyEditedTimestamp(summary.updatedAt)?new Date(storyEditedTimestamp(summary.updatedAt)).toISOString():undefined}>{editedLabel(summary.updatedAt,locale)}</time></div>
-  </button>;
+  </button>{story.mode==='cloud'&&<TrashMenu target={{kind:'project',project_id:story.project.id,id:story.project.id}} onEdit={onOpen}/>}</article>;
 }
 
 export function StoryLibraryHome({state,onOpenCloud,onOpenLocal,onSelect}){const {t,locale}=useI18n();
@@ -109,7 +110,7 @@ export function StoryLibraryHome({state,onOpenCloud,onOpenLocal,onSelect}){const
   const visible=stories.filter(story=>String(story.project.title||'').toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   return <section className="story-library-home" aria-labelledby="story-library-heading">
     <header className="story-library-heading"><div><h1 id="story-library-heading" tabIndex={-1}>{t('account.copy17')}</h1><p>{t('account.copy18')}</p></div><button type="button" className="primary" disabled={working} onClick={begin}><Plus size={16}/>{t('account.copy2')}</button></header>
-    <div className="story-library-tools"><label className="story-library-search"><Search size={17}/><input type="search" aria-label={t('account.accessible5')} value={query} onChange={event=>setQuery(event.target.value)} placeholder={t('account.accessible6')}/></label><button type="button" className="story-library-refresh" disabled={working} aria-label={t('account.accessible7')} onClick={()=>act(t('legacy.visible18'),async()=>{library.refreshLocal();if(c.account)await cloud.list();})}><RefreshCw size={16}/></button><button type="button" disabled title={t('account.accessible8')}><Trash2 size={15}/>{t('account.copy19')}</button><label className="story-library-test-toggle" title={t('account.accessible9')}><input type="checkbox" disabled/>{t('account.copy20')}</label></div>
+    <div className="story-library-tools"><label className="story-library-search"><Search size={17}/><input type="search" aria-label={t('account.accessible5')} value={query} onChange={event=>setQuery(event.target.value)} placeholder={t('account.accessible6')}/></label><button type="button" className="story-library-refresh" disabled={working} aria-label={t('account.accessible7')} onClick={()=>act(t('legacy.visible18'),async()=>{library.refreshLocal();if(c.account)await cloud.list();})}><RefreshCw size={16}/></button><a href="/trash"><Trash2 size={15}/>{t('trash.title')}</a><label className="story-library-test-toggle" title={t('account.accessible9')}><input type="checkbox" disabled/>{t('account.copy20')}</label></div>
     {creating&&<form className="story-library-create-form" onSubmit={create}><label>{t('account.copy3')}<input ref={input} required maxLength={80} value={title} onChange={event=>setTitle(event.target.value)} placeholder={t('account.accessible3')} disabled={working}/></label><label>{t('account.copy4')}<select value={source} onChange={event=>setSource(event.target.value)} disabled={working}>{c.account&&<option value="cloud">{t('legacy.cloudAccount',{account:c.account})}</option>}<option value="local">{t('account.copy21')}</option></select></label><button type="submit" className="primary" disabled={working||!title.trim()}>{t('account.copy6')}</button><button type="button" disabled={working} aria-label={t('account.accessible2')} onClick={()=>setCreating(false)}><X size={16}/></button></form>}
     {!c.account&&<p className="story-library-note">{t('account.copy22')}<button type="button" onClick={onOpenCloud}>{t('account.copy23')}</button></p>}
     <div className="story-library-grid">{visible.slice(0,visibleLimit).map(story=><StoryLibraryCard key={(story.mode==='cloud'?c.account:'local')+':'+story.mode+':'+story.project.id} story={story} reader={reader} working={working} onOpen={()=>library.openStory(story,onSelect,onOpenCloud)}/>)}</div>

@@ -1,3 +1,4 @@
+import {digest} from './cloud-model.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createQuickChatClient} from './quick-chat-client.js';
@@ -48,4 +49,13 @@ test('displayed revision selects its own exact take after count save/history swi
  assert.equal(selectedTakeForRevision([first,second],'take23','r6'),null);
  // Older page arriving after a new user choice cannot select another revision.
  assert.equal(selectedTakeForRevision([first,second,old],'take28','r7'),second);
+});
+
+test('take display rename preserves omitted star and original body/key across lost reply and validates exact annotation receipt',async()=>{
+ const calls=[];let mode='lost';const c=await ready(fake({starTake:async(...args)=>{calls.push(structuredClone(args));if(mode==='lost')throw Error('lost');return {take_id:mode==='foreign'?'other':'take',version:3,title:'New name',starred:true};}}));
+ await assert.rejects(c.renameTake({id:'take',annotation:{version:2,starred:true}},'New name'));assert.deepEqual(calls[0][2],{expected_version:2,title:'New name'});mode='foreign';await assert.rejects(c.recover());assert.ok(c.getState().pending);mode='valid';await c.recover();assert.equal(c.getState().pending,null);assert.deepEqual(calls[0],calls[2]);
+});
+test('annotation bare409 and foreign closed proof retain pending; exact no-write proof permits fresh explicit edit',async()=>{
+ let mode='bare';const c=await ready(fake({starTake:async(s,id,body)=>{throw {status:409,detail:mode==='bare'?{}:{code:'version_conflict',resource:'quick_chat_take',session_id:s,take_id:mode==='foreign'?'other':id,no_mutation_committed:true,request_hash:await digest(body)}};}}));
+ await assert.rejects(c.renameTake({id:'take',annotation:{version:2}},'Name'));assert.ok(c.getState().pending);mode='foreign';await assert.rejects(c.recover());assert.ok(c.getState().pending);mode='exact';await assert.rejects(c.recover());assert.equal(c.getState().pending,null);
 });
