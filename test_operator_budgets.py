@@ -123,6 +123,27 @@ class OperatorBudgetTests(unittest.TestCase):
         self.assertEqual(dto["daily7"], [])
         self.assertEqual(dto["unattributed_legacy"], {"cost_microusd": 0, "reservation_count": 0})
         self.assertIsNone(self.rows(budget_reservations)[0]["settled_at"])
+
+    def test_generation_pending_is_not_free_and_rental_is_a_separate_original_account_layer(self):
+        pending = self.reserve(300)
+        with self.repo.transaction() as connection:
+            connection.execute(update(budget_reservations).where(budget_reservations.c.reference_id == pending)
+                .values(state='invoice_pending'))
+            connection.execute(update(budget_accounts).where(budget_accounts.c.id == 'owner').values(reserved_microusd=0))
+            self.repo._reserve(connection, self.scope, ('owner',), 'instance', 'ended-rental', 200)
+            self.repo._settle(connection, 'instance', 'ended-rental', 175)
+        before = (self.rows(budget_accounts), self.rows(budget_reservations), self.rows(outbox))
+        projection = self.service.owned(self.human)['budgets'][0]
+        costs = projection['cost_breakdown']
+        self.assertEqual(costs['basis'], 'original_account_reservations')
+        self.assertIs(costs['account_layers_not_additive'], True)
+        self.assertEqual(costs['job'], {'confirmed_cost_microusd': 0, 'confirmed_reservation_count': 0,
+            'pending_invoice_count': 1, 'pending_estimate_microusd': 300, 'pending_actual_cost_microusd': None})
+        self.assertEqual(costs['instance']['confirmed_cost_microusd'], 175)
+        self.assertEqual(costs['instance']['pending_invoice_count'], 0)
+        self.assertEqual(projection['spent_microusd'], 175)
+        self.assertEqual(projection['reserved_microusd'], 0)
+        self.assertEqual(before, (self.rows(budget_accounts), self.rows(budget_reservations), self.rows(outbox)))
         self.assertEqual(before, (self.rows(budget_accounts), self.rows(budget_reservations), self.rows(outbox)))
 
     def test_additive_settlement_migration_preserves_legacy_null_and_balances(self):

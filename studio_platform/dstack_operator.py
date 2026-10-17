@@ -259,6 +259,9 @@ class LedgerDstackStore:
         with self.repo.transaction() as connection:
             self.repo._lock_capacity(connection)
             node, intent = self._node(connection, intent_id)
+            from .settlement_recovery import reviewed_instance_fenced
+            if reviewed_instance_fenced(connection, intent, node):
+                return  # A late observation cannot settle or revive reviewed history.
             payload = copy.deepcopy(node["payload"])
             binding = payload["dstack"]
             if observation["observed_at"] < binding.get("observed_at", 0):
@@ -1217,8 +1220,16 @@ class DstackOperator:
         except DstackError:
             state = "waiting"
         with self.repo.transaction() as connection:
-            connection.execute(update(operator_commands).where(operator_commands.c.id == command_id)
-                .values(state=state, updated_at=self.repo.clock()))
+            self.repo._lock_capacity(connection)
+            current = self.repo._locked(connection, select(operator_commands).where(operator_commands.c.id == command_id))
+            node = self.repo._locked(connection, select(operator_nodes).where(operator_nodes.c.intent_id == intent["id"]))
+            current_intent = self.repo._locked(connection, select(instance_intents).where(instance_intents.c.id == intent["id"]))
+            from .settlement_recovery import reviewed_instance_fenced
+            if reviewed_instance_fenced(connection, current_intent, node):
+                state = current["state"]
+            else:
+                connection.execute(update(operator_commands).where(operator_commands.c.id == command_id)
+                    .values(state=state, updated_at=self.repo.clock()))
         return {"command_id": command_id, "node_id": intent["id"], "state": state}
 
     def _owned_node(self, connection, principal, node_id, *, allow_admin=False):
