@@ -49,3 +49,6 @@ export const settingsCatalogs = {
 
 settingsCatalogs.en['settings.costDetails']='Cost details';
 settingsCatalogs.zh['settings.costDetails']='费用详情';
+
+Object.assign(settingsCatalogs.en,{'settings.videoCache':'Video cache','settings.videoCacheClear':'Clear','settings.videoCacheUnavailable':'Video cache is unavailable in this browser.','settings.videoCacheChecking':'Checking video cache…','settings.videoCacheUsage':'{amount} MB used · {count} videos · up to 1 GB','settings.videoCacheUsageOne':'{amount} MB used · 1 video · up to 1 GB','settings.videoCacheHelp':'Played videos up to 64 MB are kept here. Access is checked before replay. Signing out clears cached copies; originals stay online.'});
+Object.assign(settingsCatalogs.zh,{'settings.videoCache':'视频缓存','settings.videoCacheClear':'清空','settings.videoCacheUnavailable':'此浏览器暂时无法使用视频缓存。','settings.videoCacheChecking':'正在读取缓存…','settings.videoCacheUsage':'已用 {amount} MB · {count} 条视频 · 最多 1 GB','settings.videoCacheUsageOne':'已用 {amount} MB · 1 条视频 · 最多 1 GB','settings.videoCacheHelp':'缓存已播放且不超过 64 MB 的视频，重播前仍会核对权限。退出登录会清空缓存，线上原件保留。'});

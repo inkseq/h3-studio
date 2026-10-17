@@ -21,6 +21,7 @@ HTML_ROUTES = frozenset({"/", "/index.html", "/app", "/app/", "/freestyle", "/fr
 STATIC_CACHE_SCOPE_KEY = "sixnine.frontend_cache"
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _HASHED_ASSET = re.compile(r".+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+\Z")
+_VIDEO_CACHE_WORKER = re.compile(r"video-cache-worker-[A-Za-z0-9_-]{8,}\.js\Z")
 _MAX_POINTER_BYTES = 1024
 
 
@@ -150,6 +151,11 @@ def register_routes(app):
                 # A link/invalid external path must not be hidden by a bundle copy.
                 raise HTTPException(404, "Not Found") from None
             cache = "public, max-age=31536000, immutable" if _HASHED_ASSET.fullmatch(parts[-1]) else "no-cache"
+            headers = {"Cache-Control": cache}
+            # Only the reviewed hashed video cache worker can claim the root.
+            # Other JS/assets keep their default directory-limited scope.
+            if len(parts) == 1 and _VIDEO_CACHE_WORKER.fullmatch(parts[0]):
+                headers["Service-Worker-Allowed"] = "/"
             request.scope[STATIC_CACHE_SCOPE_KEY] = cache
-            return FileResponse(path, stat_result=metadata, headers={"Cache-Control": cache})
+            return FileResponse(path, stat_result=metadata, headers=headers)
         raise HTTPException(404, "Not Found")

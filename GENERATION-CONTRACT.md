@@ -863,3 +863,34 @@ other API responses retain their previous behavior. Storage keys, metadata, buck
 privacy and CORS are unchanged. This server step does not install a Service Worker
 or claim per-account local cache eviction on sign-out; bounded client caching and
 its sign-out cleanup are the subsequent independently accepted step.
+
+## Bounded browser video cache (#272 step 2)
+
+The hashed video-cache Service Worker may keep disposable complete generated MP4
+copies in one IndexedDB store, keyed by verified account and artifact ID. Total
+copies are bounded to 1 GiB, each file to 64 MiB, and metadata to 256 entries;
+least recently used entries are evicted. No source URL, signed query, token or
+credential is persisted. This is not a new ownership or artifact authority.
+
+Every cached replay or download first calls the existing authenticated content
+HEAD with `cache: no-store`, validates its account fence, MIME and complete size,
+and refuses cached bytes when that check is unavailable or denied. Current HEAD
+disposition supplies inline/attachment headers. Complete cached bodies support
+single and suffix byte ranges (206/416). Assets, audio, API credentials, opaque
+responses, partial responses, errors, oversized and incomplete files are not
+stored. Cold partial metadata requests retain the ordinary authenticated stream.
+
+An already readable full 200 response can stream immediately while its clone is
+stored. Only an opted-in full player actually playing may request a separate full
+fill after an unreadable/partial native response; that first fill can add one full
+download. Fills deduplicate by account/artifact/epoch and have a two-fill bound.
+There is no autonomous catalog prefetch or offline private replay.
+
+Settings exposes usage and clear. Confirmed sign-out, identity change and clear
+advance a transactionally shared epoch, clear byte copies and reject late writes
+across tabs/worker versions. An unresolved initial account does not imply sign-out:
+same-owner reloads retain copies, with fresh server HEAD still required before use.
+Original media, task records and browser drafts are never deleted by cache cleanup.
+Only the exact hashed cache worker asset receives `Service-Worker-Allowed: /`;
+other assets retain their existing scope. Client publication and browser acceptance
+remain separate from these source changes and follow the accepted server step.

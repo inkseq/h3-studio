@@ -59,6 +59,21 @@ test('a transient Story player error retains its native video and only explicit 
  }finally{h.unmount();kit.setMediaHandlers();}
 });
 
+test('only full result/editor players opt into cache warming; thumbnails and hover previews do not',async()=>{
+ const kit=await component,client=createCloudClient();client.setAccount('superdan');
+ kit.setMediaHandlers({native:()=>({href:'/v1/artifacts/video/content?expected_account=superdan',assertCurrent(){}})});
+ try{
+  const preview=props=>renderToStaticMarkup(React.createElement(kit,{client,path:'/v1/artifacts/video/content',kind:'video',...props}));
+  assert.match(preview({}),/data-video-cache-play="true"/);
+  assert.doesNotMatch(preview({compact:true}),/data-video-cache-play/);
+  assert.doesNotMatch(preview({hoverPlay:true}),/data-video-cache-play/);
+  const video=props=>renderToStaticMarkup(React.createElement(kit.story.StoryboardVideo,{asset:{fileId:'cloud_artifact_video',kind:'video'},...props}));
+  assert.match(video({controls:true}),/data-video-cache-play="true"/);
+  assert.match(video({videoRef:{current:null}}),/data-video-cache-play="true"/);
+  assert.doesNotMatch(video({muted:true}),/data-video-cache-play/);
+ }finally{kit.setMediaHandlers();}
+});
+
 test('Story player retry leaves an externally owned local Blob source intact and never revokes it',async()=>{
  const kit=await component,original=URL.revokeObjectURL,revoked=[];URL.revokeObjectURL=url=>revoked.push(url);kit.setMediaHandlers();let loads=0;
  const h=mediaLifecycle(kit.rawVideo,{asset:{src:'blob:owned-by-upload-control',kind:'video'},controls:true});

@@ -1,3 +1,4 @@
+import {videoCacheIdentity,clearVideoCache} from './video-cache-client.js';
 import {storyboardCommandStore,verifyStoryboardReceipt} from './storyboard-commands.js';
 import {boundVideoRange,videoBinding} from './video-cut-model.js';
 import {createCloudClient,safeCloudPath} from './cloud-client.js';
@@ -49,6 +50,7 @@ export function createCloudController({store=defaultStore,client,storage=globalT
       return Object.freeze({href,account:ctx.account,projectId:ctx.projectId,workspaceEpoch:ctx.workspaceEpoch,assertCurrent:()=>guard(ctx)});
     }:null,upload:state.account&&current().workspace.mode==='cloud'?upload:null});}
   function replaceIdentity(account,message=''){
+    videoCacheIdentity(account);
     epoch++;projectOpenRequest++;lastAvailabilityCheck=0;api.reset?.();store.leaveCloudProject();emit({projectOpen:null,legacyOffer:null});
     emit({...emptyProjectList,account,capabilities:null,availability:null,availabilityChecking:false,operatorAccess:false,storyboardEnabled:false,capabilityError:'',assets:[],usage:null,assetError:'',plans:{},preflightErrors:{},batchChecking:null,renderPlans:{},renderOptions:{},renderPending:{},jobs:[],activity:null,activityError:'',nextJobOffset:100,moreJobs:false,batches:[],batchesLoaded:false,nextBatchOffset:10,moreBatches:false,batchPending:null,conflict:null,draftOffer:null,resumeOffer:null,resumeError:'',remoteUpdate:null,remoteUpdateError:'',unknown:{},error:'',message});installMedia();
   }
@@ -335,7 +337,7 @@ export function createCloudController({store=defaultStore,client,storage=globalT
     async readProjectActivity(options={}){requireCloud();const ctx=context();const result=await api.projectActivity(ctx.projectId,options);guard(ctx);return result;},
     login:(username,password)=>action(async()=>{const observedEpoch=epoch,result=await api.login(username,password);if(observedEpoch!==epoch)throw Error('登录期间会话已经改变，请重新核对。');const me=identity(result);if(typeof me!=='string')throw Error('登录响应缺少账户身份。');replaceIdentity(me);announceSession();await reloadProjects();await reloadCapabilities();offerResume();}),
     changePassword:(previous,next)=>action(async()=>{const ctx=accountContext();await api.changePassword(previous,next);guardAccount(ctx);rememberVisit({mode:'local'});replaceIdentity(null,'密码已修改，请重新登录；原 API Key 已撤销，云草稿仍按账户保留。');announceSession();}),
-    logout:()=>action(async()=>{await api.logout();rememberVisit({mode:'local'});replaceIdentity(null,'已退出。云草稿仍按原账户保留，本机作品已恢复。');announceSession();}),
+    logout:()=>action(async()=>{void clearVideoCache().catch(()=>{});await api.logout();rememberVisit({mode:'local'});replaceIdentity(null,'已退出。云草稿仍按原账户保留，本机作品已恢复。');announceSession();}),
     leave(){epoch++;projectOpenRequest++;emit({projectOpen:null,legacyOffer:null});lastAvailabilityCheck=0;api.reset?.();store.leaveCloudProject();rememberVisit({mode:'local'});emit({availability:null,availabilityChecking:false,assets:[],usage:null,assetError:'',plans:{},preflightErrors:{},batchChecking:null,renderPlans:{},renderOptions:{},renderPending:{},jobs:[],activity:null,activityError:'',nextJobOffset:100,moreJobs:false,batches:[],batchesLoaded:false,nextBatchOffset:10,moreBatches:false,batchPending:null,conflict:null,draftOffer:null,resumeOffer:null,resumeError:'',remoteUpdate:null,remoteUpdateError:''});installMedia();},
     resume:()=>action(async()=>{const ctx=accountContext(),offer=state.resumeOffer;if(!offer||current().workspace.mode!=='local')throw Error('请重新核对当前账户与上次作品。');try{const done=await open(offer.projectId);emit({resumeError:''});return done;}catch(error){guardAccount(ctx);if([403,404].includes(error.status)){rememberVisit({mode:'local'});emit({resumeOffer:null,resumeError:'上次云作品已不存在，或当前账户无权读取。当前本机作品和已有草稿均未改变。'});}else emit({resumeError:'上次云作品暂时无法读取。可稍后重试或从云项目列表打开；当前本机作品未改变。'});throw error;}}),
     dismissResume(){rememberVisit({mode:'local'});emit({resumeOffer:null,resumeError:'',draftOffer:null});},
