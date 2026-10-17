@@ -1,0 +1,26 @@
+/* Real-service additions only. Library geometry remains the prototype's libp DOM/styles. */
+/* Unmodified Inter Latin v20; SIL OFL 1.1 in fonts/OFL-Inter.txt. Same font as the prototype. */
+@font-face{font-family:Inter;font-style:normal;font-weight:400 800;font-display:swap;src:url('./fonts/inter-latin-v20.woff2') format('woff2');unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+.lib-shell .libp-main{scrollbar-gutter:stable}
+.library-source-tools{margin-top:10px}
+.library-source-tools>summary{display:flex;align-items:center;gap:9px;padding:6px 10px!important;font-size:13px;border-color:transparent!important}
+.library-source-tools>div{left:0;right:auto;max-width:min(300px,calc(100vw - 24px));padding:14px;background:var(--surface-2);border:1px solid var(--line-2);border-radius:10px}
+.library-source-tools .field{display:flex;flex-direction:column;gap:5px}
+.library-source-tools p{font-size:11px;margin:8px 0}
+.libp-pcard>.library-profile-thumb{display:block;width:64px;height:64px;flex:none;overflow:hidden}
+.library-profile-thumb .library-media{width:100%;height:100%;object-fit:cover}
+.lib-shell .libp-check:focus-visible{opacity:1;outline:2px solid var(--accent);outline-offset:2px}
+.library-name-edit{display:flex;align-items:center;gap:6px}
+.library-name-edit input{margin-bottom:0;min-width:0}
+.libp-detail .field{display:flex;flex-direction:column;gap:6px}
+.libp-detail .libp-tags{padding:0}
+.libp-detail .libp-actions{margin-top:auto}
+.libp-detail .library-usage-note{font-size:11px}
+@media(max-width:760px){
+ .libp-side>.library-source-tools{flex:none;margin-top:0}
+ .library-source-tools>summary{white-space:nowrap;border-color:var(--line)!important;border-radius:999px!important;padding:5px 10px!important}
+ .library-source-tools>div{position:fixed;left:12px;right:12px;top:108px;max-width:none}
+ dialog.library-detail-dialog[open]{position:fixed;inset:0;width:100%;height:100dvh;max-width:none;max-height:none;margin:0;border:0;border-radius:0;padding:14px;display:flex;flex-direction:column;gap:10px}
+ .library-detail-dialog .library-media{width:100%;max-height:36dvh;object-fit:contain}
+ .library-detail-dialog .field{display:flex;flex-direction:column;gap:6px}
+}

@@ -1,0 +1,85 @@
+/* Prototype quick.jsx / takes.jsx view; adapters below only bridge real API controls. */
+.quick-live{height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.quick-live .qc{min-height:0;flex:1}.quick-live .qc-main{min-width:0;margin:0;height:auto}
+.quick-live .qc-empty[hidden]{display:none}.quick-live .qc-empty p{max-width:560px;color:var(--muted)}
+.quick-live .qc-side .qc-list{flex:1}.quick-live .qc-side>a{display:flex;align-items:center;gap:6px;text-decoration:none}
+.quick-live .qc-mbar .clip{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.quick-live .quick-inputs{display:flex;flex-direction:column;gap:8px}.quick-live .composer{flex:none;max-height:45dvh;overflow:auto;padding:0}
+.quick-live .composer-box textarea{flex:1;min-width:0;width:auto}
+.quick-live .composer-opts .adv-btn{white-space:nowrap}.quick-live .opt-sep{height:18px;width:1px;background:var(--line);flex:none}
+.quick-live .qc-inherit,.quick-live .qc-mode-note,.quick-live .qc-material-library{font-size:11px;color:var(--muted)}
+.quick-live .quick-proposal{min-width:0}.quick-live .proposal-head h3{font-size:14px;margin:0}.quick-live .proposal-head>.pill{margin-left:auto}
+.quick-live .quick-proposal-body{display:flex;flex-direction:column;gap:10px;min-width:0}.quick-live .quick-recipe-prompt{margin:0;padding:10px;background:var(--bg);border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere}
+.quick-live .qc-card-version{font-size:11px;color:var(--muted)}.quick-live .quick-proposal-actions{flex-wrap:wrap}.quick-live .qc-card-count{display:flex;align-items:center;gap:6px}.quick-live .qc-card-count input{width:60px}
+.quick-live .refs{flex-wrap:wrap}.quick-live .ref{max-width:100%;overflow-wrap:anywhere}.quick-live .qc-results{display:flex;flex-direction:column;gap:12px}.quick-live .result{padding:10px}.quick-live .result>video,.quick-live .result>img{display:block;width:100%;max-height:420px;object-fit:contain;background:#000}
+.quick-live .batch-strip .bt{position:relative;min-width:0;overflow:hidden}.quick-live .batch-strip .bt>video,.quick-live .batch-strip .bt>img{width:100%;height:90px;object-fit:cover;display:block}.quick-live .bt-wait{height:90px;display:grid;place-items:center;background:var(--surface-2);font-size:12px}
+.quick-live .bt-label{width:100%;justify-content:flex-start;padding:5px 7px;background:transparent;border:0;border-radius:0;font-size:11px}.quick-live .bt-star{position:absolute;right:4px;top:4px;padding:3px 6px;background:#0009;border:0}.quick-live .bt>label{display:flex;align-items:center;gap:4px;font-size:10px;padding:0 5px 5px;color:var(--muted)}
+.quick-live .quick-take-actions{flex-wrap:wrap}.quick-live .quick-take-actions>span{font-size:12px;color:var(--muted)}.quick-live .batch-head>b{font-size:13px}.quick-live .batch-head>button{margin-left:auto;font-size:11px;padding:4px 8px}
+.quick-live .qc-error,.qc-dialog .qc-error{color:var(--bad);overflow-wrap:anywhere}.quick-live .qc-warning,.qc-dialog .qc-warning{padding:10px;border:1px solid var(--warn);border-radius:8px;overflow-wrap:anywhere}.quick-live .qc-muted,.qc-dialog .qc-muted{color:var(--muted)}
+.quick-live .qc-staged{display:flex;gap:8px;overflow:auto}.quick-live .qc-staged-file{display:flex;gap:6px;align-items:center;padding:6px;border:1px solid var(--line);border-radius:8px;max-width:260px}.quick-live .qc-staged-file img{width:48px;height:48px;object-fit:cover}.quick-live .qc-staged-file small{display:block}
+.quick-live .qc-toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%);padding:12px;background:var(--surface-3);border:1px solid var(--line);border-radius:10px;z-index:60;max-width:calc(100vw - 24px)}
+/* Existing advanced/receipt dialogs remain real business adapters, not demo store mutations. */
+.qc-dialog{color:var(--ink);background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:20px;width:min(600px,calc(100vw - 24px));max-width:calc(100vw - 24px);max-height:90dvh;overflow:auto;box-sizing:border-box}
+.qc-dialog-wide{width:min(1000px,calc(100vw - 24px))}.qc-dialog::backdrop{background:#0009}.qc-dialog-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:16px}.qc-dialog-head h2{margin:0;font-size:18px}.qc-dialog-footer{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:16px}.qc-field{display:flex;flex-direction:column;gap:6px;min-width:0;margin:12px 0}.qc-field input,.qc-field select,.qc-field textarea{max-width:100%;width:100%;box-sizing:border-box}.qc-dialog .qc-primary{background:var(--accent);color:#151a0c;border-color:var(--accent)}
+.qc-dialog .batch-cmp img,.qc-dialog .batch-cmp video{width:100%;max-height:50vh;object-fit:contain}.qc-controls-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.qc-dialog .qc-history-list{display:flex;flex-direction:column;gap:4px}.qc-dialog .qc-history-row{display:flex;align-items:center;gap:6px}.qc-dialog .qc-history-row>button{flex:1;text-align:left;justify-content:flex-start}.qc-dialog .qc-history-tools,.qc-dialog .qc-history-selection,.qc-dialog .qc-history-actions{display:flex;gap:8px;flex-wrap:wrap}.qc-dialog .qc-history-trash-row{display:flex;gap:8px;margin:10px 0}
+@media(max-width:760px){.quick-shell.quick-live{padding-bottom:62px}.quick-live .qc-side:not(.open){visibility:hidden}.quick-live .qc{display:flex;flex:1;min-height:0}.quick-live .qc-main{flex:1;min-width:0}.quick-live .composer{width:calc(100% - 20px);max-height:45dvh}.quick-live .batch-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.quick-live .qc-dots{opacity:1}.quick-live .quick-proposal-actions button,.qc-dialog button{min-height:44px}.qc-controls-grid{grid-template-columns:1fr}.qc-dialog input,.qc-dialog select{font-size:16px}}
+
+.quick-live .qc-materials,.qc-dialog .qc-materials{display:flex;flex-wrap:wrap;gap:8px}.quick-live .qc-material,.qc-dialog .qc-material{display:flex;align-items:flex-start;gap:8px;background:var(--surface-2);border:1px solid var(--line);border-radius:9px;padding:7px;max-width:100%;min-width:0}.qc-material img,.qc-material video{width:64px;height:58px;object-fit:cover;border-radius:6px}.qc-material-info{min-width:0;display:flex;flex-direction:column;gap:5px;font-size:11px}.qc-material-info>b{max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.qc-material-info select{font-size:11px;padding:3px;max-width:170px}.qc-material-remove{padding:3px!important}.qc-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.qc-dialog .qc-material{width:100%}.qc-dialog .qc-controls-form{display:flex;flex-direction:column;gap:14px}@media(max-width:760px){.qc-form-grid{grid-template-columns:1fr}.quick-live .qc-material{max-width:100%}}
+
+.quick-live .result-media{min-width:0;overflow:hidden}.quick-live .result-media>video,.quick-live .result-media>img{display:block;width:100%;height:100%;max-height:420px;object-fit:contain;background:#000}.quick-live .result-body{display:flex;flex-wrap:wrap;align-content:center;gap:8px}.quick-live .result-body>.row{width:100%}
+
+/* The prototype spec row opens the existing complete real-service editor. */
+.quick-live .quick-spec-values>button{width:auto;min-height:32px;border:0;background:transparent;color:var(--ink-2);font-size:12px;padding:3px 11px;border-radius:7px;box-shadow:none}
+.quick-live .quick-spec-values>button:hover:not(:disabled){background:var(--surface-3);color:var(--ink)}
+.quick-live .quick-copy-count{font-size:11px;color:var(--muted);white-space:nowrap}
+
+/* Loaded proposals and actual take groups use the same card hierarchy as quick.jsx. */
+.quick-live .qc-turn{display:flex;flex-direction:column;gap:12px;min-width:0}
+.quick-live .quick-proposal-head{align-items:center;min-width:0}
+.quick-live .quick-proposal-head>svg{flex:none}
+.quick-live .quick-proposal-head>div{display:flex;align-items:baseline;gap:8px;min-width:0}
+.quick-live .quick-proposal-head h3{overflow-wrap:anywhere;min-width:0}
+.quick-live .quick-proposal-version{font-size:11px;color:var(--muted);white-space:nowrap}
+.quick-live .quick-prompt-wrap{position:relative;min-width:0}
+.quick-live .quick-prompt-wrap:has(.quick-prompt-edit) .quick-recipe-prompt{padding-right:42px}
+.quick-live .quick-prompt-edit{position:absolute;top:6px;right:6px;padding:5px;min-height:28px}
+.quick-live .quick-recipe-spec{flex-wrap:wrap}
+.quick-live .quick-spec-chip{font-size:11px;background:var(--surface-2)}
+.quick-live .quick-proposal-body>.refs>.ref{display:inline-flex;align-items:center;gap:5px;font-size:11px;max-width:100%;text-align:left}
+.quick-live .quick-proposal-body>.refs .qc-media-thumb{width:28px;height:28px;border-radius:4px;object-fit:cover;flex:none}
+.quick-live .quick-proposal-body>.refs .qc-compact{width:28px;height:28px;min-width:28px;flex:none}
+.quick-live .quick-takes{min-width:0;border:0;border-top:1px solid var(--line);border-radius:0;padding:12px 0 0;background:transparent}
+.quick-live .quick-takes .batch-head{flex-wrap:wrap}
+.quick-live .quick-takes .batch-head>button{margin-left:0}
+.quick-live .quick-takes .batch-head>small{font-size:11px}
+.quick-live .quick-takes .bt{background:var(--surface-2);border:1px solid var(--line);border-radius:8px}
+.quick-live .quick-takes .bt.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.quick-live .quick-takes .bt.cmp{box-shadow:0 0 0 2px var(--fl)}
+.quick-live .bt-preview{display:block;width:100%;aspect-ratio:16/9;min-width:0;background:var(--surface-3);cursor:pointer}
+.quick-live .bt-preview>video,.quick-live .bt-preview>img{width:100%;height:100%;object-fit:cover;display:block}
+.quick-live .bt-preview>audio{max-width:100%;height:100%}
+.quick-live .bt-preview>.bt-wait{height:100%}
+.quick-live .bt-preview:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
+.quick-live .quick-takes .bt-star{min-height:24px;line-height:1;color:#fff}
+.quick-live .quick-takes .bt-star.on{color:#ffd166}
+.quick-live .quick-takes .bt-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;text-align:left}
+.quick-live .quick-take-actions{align-items:center}
+.quick-live .quick-take-actions>span{margin-right:auto}
+.quick-live .quick-inline-compare{min-width:0}
+.quick-live .quick-inline-compare .batch-cmp>section{display:flex;flex-direction:column;gap:8px;min-width:0}
+.quick-live .quick-inline-compare .batch-cmp video,.quick-live .quick-inline-compare .batch-cmp img{width:100%;max-height:360px;object-fit:contain;background:#000;border-radius:8px}
+.quick-live .quick-inline-compare .batch-cmp p{margin:0;font-size:12px}
+.quick-live .quick-proposal:has(.quick-takes.comparing) .qc-results{display:none}
+.quick-live .quick-result .result-body{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:8px}
+.quick-live .quick-result .result-body>.row{width:100%}
+.quick-live .quick-result .qc-artifact-download{display:inline-flex;align-items:center;gap:5px;min-height:32px;font-size:12px}
+@media(max-width:760px){
+ .quick-live .quick-proposal-head>div{flex-wrap:wrap;gap:4px}
+ .quick-live .quick-proposal-head>.pill{max-width:45%;overflow-wrap:anywhere}
+ .quick-live .quick-takes .batch-head{gap:6px}
+ .quick-live .quick-takes .batch-head>button,.quick-live .quick-take-actions>button{min-height:44px}
+ .quick-live .quick-inline-compare .batch-cmp{gap:6px}
+ .quick-live .quick-inline-compare .batch-cmp button{width:100%;min-height:44px}
+ .quick-live .quick-result{grid-template-columns:minmax(0,1fr)}
+ .quick-live .quick-result .result-media>video{max-height:50vh}
+}
