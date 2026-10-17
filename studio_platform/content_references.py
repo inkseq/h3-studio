@@ -29,6 +29,14 @@ def history_blocker(connection, service, owner, session):
     from .storage_asset_journal import receipts
     from .artifact_writer import write_receipts
     project = session["payload"]["project_id"]
+    # Original owner reference gate also protects import recovery before uploads exist.
+    for row in connection.execute(select(documents).where(documents.c.tenant_id==service.tenant,
+            documents.c.owner_id==owner,documents.c.project_id=="__library",
+            documents.c.kind=="library_import")).mappings():
+        payload=row["payload"]; request=payload.get("request",{})
+        if payload.get("state") not in {"completed","blocked"} and project in {
+                request.get("source",{}).get("project_id"),request.get("target_project_id")}:
+            return "authoring_operation_unresolved"
     # The hidden projection is immutable to generic authoring. Include every
     # historical execution/revision, not only the latest card or displayed job.
     children = list(connection.execute(select(objects).where(objects.c.tenant == service.tenant,
@@ -133,6 +141,9 @@ def cleanup_plan(connection, service, principal, sessions, *, media_targets=None
     all_documents = list(connection.execute(select(documents)).mappings())
     for row in all_documents:
         if media_targets is not None and row["tenant_id"]==tenant and row["owner_id"]==owner:
+            # Only explicit universal purge may ignore this owner's completed
+            # import audit capsule. Live documents and accepted inputs remain below.
+            if row["project_id"]=="__library" and row["kind"]=="library_import" and row["payload"].get("state")=="completed": continue
             if row["project_id"]=="__trash" and (row["kind"]=="trash_action" or
                     row["kind"]=="trash_item" and (row["document_id"] in ignored_trash_ids or row["payload"].get("state")=="purged")): continue
             if row["project_id"]=="__projects" and row["document_id"] in purged_projects: continue

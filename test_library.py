@@ -224,3 +224,78 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(result.json()['code'],'library_source_version_conflict');self.assertTrue(result.json()['no_mutation_committed'])
         self.assertEqual(result.json()['request_hash'],request_hash(body))
         with self.app.state.repository.engine.connect() as c:self.assertEqual(c.execute(select(func.count()).select_from(documents).where(documents.c.kind=='library_import')).scalar_one(),0)
+
+    def test_pending_import_blocks_source_and_destination_lifecycle_then_recovers(self):
+        from studio_platform.library_imports import LibraryImports
+        self.prepare();body=self.import_body()
+        with patch.object(LibraryImports,'finish',side_effect=TimeoutError('before upload')):
+            pending=self.importing(body).json()
+        self.assertEqual(pending['state'],'pending')
+        with self.app.state.repository.engine.connect() as c:
+            self.assertEqual(c.execute(select(func.count()).select_from(receipts)).scalar_one(),1)
+        for pid,kind,ident in [('story-one','entity','file-one'),('story-one','project','story-one'),('target','project','target')]:
+            response=self.client.post('/v1/trash/actions',json={'action':'trash','items':[{'project_id':pid,'kind':kind,'id':ident,'expected_version':self.current(pid)['version']}]},headers={'Idempotency-Key':'pending-'+pid+kind})
+            self.assertEqual(response.status_code,409,response.text)
+            self.assertEqual(response.json()['detail']['code'],'authoring_operation_unresolved')
+            self.assertTrue(response.json()['detail']['no_mutation_committed'])
+        done=self.importing(body).json();self.assertEqual(done['operation_id'],pending['operation_id']);self.assertEqual(done['state'],'completed')
+
+    def test_completed_import_audit_excluded_only_from_explicit_owned_purge(self):
+        from studio_platform.content_references import cleanup_plan
+        from types import SimpleNamespace
+        from sqlalchemy import update
+        self.prepare();self.importing(self.import_body()).raise_for_status()
+        repo=self.app.state.repository
+        principal=SimpleNamespace(owner='superdan',allows=lambda *args:True)
+        service=SimpleNamespace(tenant=self.app.state.settings.tenant_id,storage=self.app.state.assets.store,assets=self.app.state.assets)
+        with repo.transaction() as c:
+            row=c.execute(select(documents).where(documents.c.kind=='library_import')).mappings().one()
+            original=copy.deepcopy(row['payload'])
+            # Remove only isolated fixture's current source authoring reference;
+            # compare the original audit independently of other live references.
+            c.execute(update(documents).where(documents.c.project_id=='__projects',documents.c.document_id=='story-one').values(payload={'entities':[]}))
+            target={'asset_ids':{self.asset},'artifact_ids':set()}
+            completed=cleanup_plan(c,service,principal,[],media_targets=target)
+            self.assertFalse(any(w['reason']=='story_or_profile_reference' for w in completed['warnings']))
+            c.execute(update(documents).where(documents.c.kind=='library_import').values(payload={**original,'state':'pending'}))
+            pending=cleanup_plan(c,service,principal,[],media_targets=target)
+            self.assertTrue(any(w['reason']=='story_or_profile_reference' for w in pending['warnings']))
+            c.execute(update(documents).where(documents.c.kind=='library_import').values(payload=original))
+            self.assertEqual(c.execute(select(documents.c.payload).where(documents.c.kind=='library_import')).scalar_one(),original)
+
+    def test_terminal_import_receipt_survives_source_trash_without_recreation(self):
+        self.prepare();body=self.import_body();done=self.importing(body).json()
+        response=self.client.post('/v1/trash/actions',json={'action':'trash','items':[{'project_id':'story-one','kind':'project','id':'story-one','expected_version':self.current()['version']}]},headers={'Idempotency-Key':'trash-source'})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(self.client.get('/v1/library/imports/'+done['operation_id']).json(),done)
+        self.assertEqual(self.importing(body).json(),done)
+        self.login('supervan');self.assertEqual(self.client.get('/v1/library/imports/'+done['operation_id']).status_code,404)
+
+    def test_original_guided_validation_is_closed_without_authoring_or_reupload(self):
+        self.prepare();body=self.import_body()
+        from studio_platform.library_imports import LibraryImports
+        original=LibraryImports.plan
+        def large(service,*args):
+            payload=original(service,*args);file=next(iter(payload['files'].values()))
+            payload['files']={str(i):copy.deepcopy(file) for i in range(101)}
+            payload['entity_ids'].update({str(i):'copied-'+str(i) for i in range(101)})
+            return payload
+        before=copy.deepcopy(self.current('target'))
+        with patch.object(LibraryImports,'plan',large):response=self.importing(body)
+        self.assertEqual(response.status_code,200,response.text)
+        result=response.json();self.assertEqual(result['state'],'blocked');self.assertTrue(result['no_authoring_committed'])
+        self.assertEqual(result['reason'],'library_authoring_validation_failed')
+        self.assertEqual(self.current('target'),before)
+        usage=self.app.state.assets.usage('superdan')
+        self.assertEqual(self.importing(body).json(),result);self.assertEqual(self.app.state.assets.usage('superdan'),usage)
+
+    def test_same_receipt_usage_unions_authorized_stories_not_copied_assets(self):
+        self.prepare()
+        project=copy.deepcopy(self.current()['project']);project['id']='target'
+        shot=next(e for e in project['entities'] if e['id']=='shot-one')
+        shot['data'].pop('storyboard',None)
+        project['links'].append({'id':'use-file','source':'file-one','target':'shot-one','role':'reference'})
+        response=self.client.put('/v1/projects/target',json={'project':project,'expected_version':self.current('target')['version']},headers={'Idempotency-Key':'cross-story-ref'})
+        self.assertEqual(response.status_code,200,response.text)
+        rows=self.client.get('/v1/library?project_id=story-one&work=target&type=file').json()['items']
+        self.assertTrue(any(row['asset_id']==self.asset and 'target' in row['work_ids'] for row in rows))

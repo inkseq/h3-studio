@@ -123,7 +123,7 @@ class Library:
         with self.repo.engine.connect() as conn:
             rows=list(conn.execute(select(documents).where(documents.c.tenant_id==self.tenant,documents.c.owner_id==principal.owner,
                 documents.c.project_id=='__projects',documents.c.kind=='project')).mappings())
-        results=[]
+        results=[];global_usage={}
         for row in rows:
             pid=row['document_id']
             if not principal.allows(pid,'projects:read'):continue
@@ -152,6 +152,11 @@ class Library:
                     if ref.get('entity_id') in usage:usage[ref['entity_id']].append(shot['id'])
                 selected=shot['data'].get('selectedAssetId')
                 if selected in usage:usage[selected].append(shot['id'])
+            for token,shot_ids in receipt_usage.items():
+                global_usage.setdefault(token,set()).update((pid,sid) for sid in shot_ids)
+            for entity in project['entities']:
+                for kind,field in (('asset','cloudAssetId'),('artifact','cloudArtifactId')):
+                    if entity['data'].get(field):global_usage.setdefault((kind,entity['data'][field]),set()).update((pid,sid) for sid in usage.get(entity['id'],[]))
             attached=set()
             def append(kind,ident,typ,title,data,extra=None):
                 tags=data.get('tags',[]) if kind=='entity' else project.get('journey',{}).get('libraryTags',{}).get(kind+':'+ident,[])
@@ -187,6 +192,12 @@ class Library:
                     try:self.access.artifact(principal,output['id'])
                     except (NotFound,Conflict):continue
                     append('artifact',output['id'],output['metadata']['kind'],output['id'],{})
+        for entry in results:
+            links={(v['project_id'],v['shot_id']) for v in entry['usage']}
+            for kind in ('asset','artifact'):
+                if entry.get(kind+'_id'):links.update(global_usage.get((kind,entry[kind+'_id']),set()))
+            entry['usage']=[{'project_id':pid,'shot_id':sid,'web_url':'/?'+urlencode({'project':pid,'entity':sid})} for pid,sid in sorted(links)]
+            entry['work_ids']=sorted({pid for pid,sid in links});entry['unused']=not links
         return results
     def listing(self,principal,*,project_id=None,type=None,work=None,unused=None,tag=None,q=None,limit=100,offset=0):
         if not 1<=limit<=100 or offset<0:raise ValueError('Invalid pagination / 分页无效')

@@ -54,6 +54,11 @@ class LibraryImports:
         return value
     def save(self,conn,principal,ident,payload):
         conn.execute(update(documents).where(*self.where(principal,ident)).values(payload=payload,version=documents.c.version+1,updated_at=self.repo.clock()))
+    def receipt_access(self,principal,body):
+        for pid,scope in ((body['source']['project_id'],'projects:read'),
+                (body['target_project_id'],'projects:write'),(body['target_project_id'],'assets:read'),
+                (body['target_project_id'],'assets:write')):
+            if not principal.allows(pid,scope):raise NotFound('project_not_found')
     def access(self,principal,body):
         source=body['source'];self.library.project(principal,source['project_id'])
         target=self.library.project(principal,body['target_project_id'],True)
@@ -110,11 +115,12 @@ class LibraryImports:
             'reason':payload.get('reason'),'message':'Import retains its original receipt and copies. / 导入保留原回执和已复制文件。'}
     def observe(self,principal,ident):
         with self.repo.engine.connect() as conn:payload=self.row(conn,principal,ident)['payload']
-        self.access(principal,payload['request'])
+        if payload['state'] in {'completed','blocked'}:self.receipt_access(principal,payload['request'])
+        else:self.access(principal,payload['request'])
         return self.public(ident,payload)
     def start(self,principal,body,key):
         from .quick_chat import key_check
-        key_check(key);target=self.access(principal,body)
+        key_check(key);self.receipt_access(principal,body)
         ident=request_hash({'tenant':self.tenant,'owner':principal.owner,'actor':principal.actor_id,'key':key})
         with self.repo.transaction() as conn:
             owner_reference_gate(conn,self.tenant,principal.owner)
@@ -122,6 +128,7 @@ class LibraryImports:
             if old:
                 if old['payload']['request_hash']!=request_hash(body):raise Conflict('library_import_idempotency_conflict')
                 payload=old['payload']
+                if payload['state'] not in {'completed','blocked'}:self.access(principal,body)
             else:
                 # Recheck target under the same owner gate before reserving any upload.
                 target=self.access(principal,body)
@@ -190,6 +197,9 @@ class LibraryImports:
         request={'expected_version':body['expected_project_version'],'actions':actions}
         try:
             result=self.app.state.guided.mutate(principal,pid,request,'library-import-'+ident)
+        except ValueError:
+            # Original guided transaction rolled back deterministic validation.
+            payload.update(state='blocked',reason='library_authoring_validation_failed')
         except Conflict as exc:
             if str(exc)!='document_version_conflict':raise
             # All upload receipts have already been positively ready/verified.
