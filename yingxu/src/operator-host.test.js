@@ -8,7 +8,7 @@ import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {createP4OperatorClient} from './p4-operator-client.js';
 import {createP4OperatorController} from './p4-operator-controller.js';
-import {failureLabel,hostInventoryConfirmed,hostPolicyBody,hostPolicyReceipt,inventoryError,referenceHostOffers,validHostPage,validHostPolicyBody} from './operator-host-model.js';
+import {failureLabel,hostInventoryConfirmed,hostPolicyBody,hostPolicyReceipt,inventoryError,inventoryOutcome,referenceHostOffers,validHostPage,validHostPolicyBody} from './operator-host-model.js';
 
 const memory=()=>{const values=new Map();return {getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)};};
 const policy=(extra={})=>({manual:'default',effective:'default',revision:0,snapshot:'a'.repeat(64),reason_code:null,expires_at:null,automatic_deny_until:null,...extra});
@@ -41,9 +41,30 @@ test('merged reference offers retain each physical host and enforce native offer
   assert.equal(referenceHostOffers([safe,offer('153816','53646995',{host_history:[]})],'approved-profile',100000)[0].confirmed,1);
 });
 
-test('only definite compatible-offers absence is empty; network/provider/HTTP uncertainty stays unknown',()=>{
-  assert.equal(inventoryError({detail:{code:'dstack_no_compatible_offers'}}).state,'empty');
-  for(const error of [{message:'dstack_no_compatible_offers'},{status:503,detail:{code:'provider_read_unconfirmed'}},{status:429,detail:{code:'budget_exceeded'}},new Error('timeout')])assert.equal(inventoryError(error).state,'failed');
+test('exact no-offer and no-joint-host advisories are empty; transport/auth/mapping uncertainty stays failed',()=>{
+  for(const code of ['dstack_no_compatible_offers','dstack_no_compatible_host_offers']){
+    for(const detail of [{code},{detail:code}])assert.deepEqual(inventoryError({status:409,detail}),{state:'empty',reasonCode:code});
+    for(const status of [401,403,429,500,503])assert.equal(inventoryError({status,detail:{code}}).state,'failed');
+  }
+  for(const error of [{message:'dstack_no_compatible_host_offers'},{status:503,detail:{code:'provider_read_unconfirmed'}},{status:429,detail:{code:'dstack_provider_rate_limited'}},{status:409,detail:{code:'dstack_host_offers_unconfirmed'}},{status:409,detail:{code:'host_identity_unconfirmed'}},new Error('timeout')])assert.equal(inventoryError(error).state,'failed');
+  const empty=inventoryError({detail:{code:'dstack_no_compatible_host_offers'}});
+  assert.equal(inventoryOutcome(empty,'en').state,'empty');assert.match(inventoryOutcome(empty,'en').message,/no jointly eligible host/);
+  assert.match(inventoryOutcome(empty,'en').message,/does not mean the whole market is empty/);
+  assert.match(inventoryOutcome(empty,'zh').message,/不代表整个市场无货/);
+  assert.match(inventoryOutcome({state:'failed'},'en').label,/Stock unknown/);
+  assert.equal(empty.preview,undefined);assert.deepEqual(referenceHostOffers([],'approved-profile'),[]);
+});
+
+test('empty inventory renders current profile filters and price as advisory, with current EN/ZH wording',async()=>{
+  const path=fileURLToPath(new URL('./P4OperatorConsole.jsx',import.meta.url)),contents=await readFile(path,'utf8'),bundled=await build({stdin:{contents:contents+"\nexport {I18nProvider as TestI18nProvider} from './i18n/I18nProvider.jsx';\n",resolveDir:path.replace(/[/\\][^/\\]+$/,''),loader:'jsx'},bundle:true,write:false,platform:'node',format:'cjs',packages:'external',loader:{'.css':'empty'}});const module=new Module(path);module.filename=path;module.paths=Module._nodeModulePaths(path.replace(/[/\\][^/\\]+$/,''));module._compile(bundled.outputFiles[0].text,path);
+  const item={profile:{memory_gib:29,gpu_memory_gib:30,cpu_count:12,disk_gib:350,max_price_microusd:1500000},...inventoryError({status:409,detail:{code:'dstack_no_compatible_host_offers'}})};
+  const en=renderWithLocale(module,React.createElement(module.exports.InventoryAdvisory,{item}),'en');
+  for(const value of ['role="status"','RAM ≥ 29 GiB','VRAM ≥ 30 GiB','CPU ≥ 12','Disk ≥ 350 GiB','Price cap $1.50/hour','no jointly eligible host','Retry or adjust Settings'])assert.ok(en.includes(value),value);
+  assert.doesNotMatch(en,/Query failed|Stock unknown|dstack_no_compatible_host_offers/);
+  const zh=renderWithLocale(module,React.createElement(module.exports.InventoryAdvisory,{item}),'zh');
+  for(const value of ['内存 ≥ 29 GiB','磁盘 ≥ 350 GiB','价格上限 $1.50/小时','不代表整个市场无货'])assert.ok(zh.includes(value),value);
+  const failed=renderWithLocale(module,React.createElement(module.exports.InventoryAdvisory,{item:{profile:item.profile,...inventoryError({status:429,message:'Rate limited',detail:{code:'dstack_provider_rate_limited'}})}}),'en');
+  assert.match(failed,/p4-error/);assert.match(failed,/Rate limited/);assert.doesNotMatch(failed,/Current filters|no jointly eligible host/);
 });
 
 test('policy requests use closed reasons and original physical ID/revision/snapshot only',()=>{
@@ -102,9 +123,9 @@ test('real host rendering labels allocated observations, separate IDs, controls 
   const merged=renderWithLocale(module,React.createElement(module.exports.OfferHostHistory,{members:[offer(),offer('153816','53646995')],profileId:'approved-profile',now:100000}));assert.match(merged,/#152440/);assert.match(merged,/#153816/);assert.match(merged,/Offer #53646994/);assert.match(merged,/Offer #53646995/);
 });
 
-function renderWithLocale(module,element){
+function renderWithLocale(module,element,locale='zh'){
   const descriptor=Object.getOwnPropertyDescriptor(globalThis,'localStorage');
-  Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:()=> 'zh'}});
+  Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:()=>locale}});
   try{return renderToStaticMarkup(React.createElement(module.exports.TestI18nProvider,null,element));}
   finally{if(descriptor)Object.defineProperty(globalThis,'localStorage',descriptor);else delete globalThis.localStorage;}
 }
