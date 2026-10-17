@@ -49,6 +49,14 @@ class SettlementTests(LedgerCase):
             r = conn.execute(select(budget_reservations)).mappings().one()
             self.assertEqual((r['state'], r['amount_microusd'], r['actual_cost_microusd']), ('invoice_pending', 100000, None))
             self.assertEqual(daily_projection(conn, self.scope.tenant_id, self.scope.owner_id, self.now), 100000)
+        projection = self.repo.list_budget_projections(self.scope.tenant_id, owner_id=self.scope.owner_id)['budgets'][0]
+        self.assertEqual(projection['invoice_pending'], {'reservation_count': 1,
+            'reserved_estimate_microusd': 100000, 'actual_cost_microusd': None,
+            'included_in_settings_exposure': True})
+        self.assertIsInstance(projection['remaining_microusd'], int)
+        from studio_platform.diagnostics import operator_snapshot
+        diagnostic = operator_snapshot(self.repo, tenant_id=self.scope.tenant_id)
+        self.assertEqual(diagnostic['budget_counters']['pending_reservations'], 1)
         self.repo.settle_completed_job(self.scope, row['id'], actual_cost_microusd=80000)
         self.repo.settle_completed_job(self.scope, row['id'], actual_cost_microusd=80000)
         self.assertEqual(self.repo.get_budget('owner-budget')['spent_microusd'], 80000)

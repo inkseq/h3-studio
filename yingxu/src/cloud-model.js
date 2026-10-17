@@ -1,4 +1,3 @@
-import {translate} from './i18n/locale.js';
 import {boundVideoRange} from './video-cut-model.js';
 import {ancestors,validateProject} from './store.js';
 import {effectiveLook} from './character-model.js';
@@ -7,10 +6,9 @@ import {roleSupported,validControlValue,recipeFor,effectiveControlSchema,CONTROL
 
 const clone=value=>structuredClone(value);
 export const jobLabels={planned:'等待批次确认',waiting_capacity:'等待计算容量',queued:'等待执行',claimed:'已分配',submitting:'正在提交',running:'生成中',collecting:'保存与核验结果',checking:'检查成片',succeeded:'已完成',failed:'失败',cancel_requested:'正在确认取消',cancelled:'已取消',blocked:'等待条件满足',submission_unknown:'提交结果待核对',recovery_hold:'恢复后待核对'};
-export const jobStatusLabel=(status,locale='zh')=>Object.hasOwn(jobLabels,status)?translate(locale,'jobs.status.'+status):status;
 export const activeJobStatuses=new Set(['waiting_capacity','queued','claimed','submitting','running','collecting','checking','cancel_requested']);
-export function recoveryMessage(job,locale='zh'){return job?.error_code==='cancellation_requires_reconciliation'?translate(locale,'jobs.cancelReview'):translate(locale,'jobs.review');}
-export function capacityWaitMessage(job,locale='zh'){
+export function recoveryMessage(job){return job?.error_code==='cancellation_requires_reconciliation'?'已记录取消意愿，但原提交结果仍需管理员核对。原任务和费用记录保留，请勿重复提交。':'原任务等待管理员核对执行与费用；作品仍可编辑，请勿重复提交。';}
+export function capacityWaitMessage(job){
   if(job?.status!=='waiting_capacity'&&!(job?.status==='queued'&&job?.error_code==='capacity_queued_task_repair_required'))return '';
   const reasons={
     capacity_no_matching_gpu:'暂时没有符合型号、显存和价格上限的可用 GPU。系统会继续查找其他合适机器；原任务保留，无需重新提交。',
@@ -29,25 +27,24 @@ export function capacityWaitMessage(job,locale='zh'){
     capacity_gpu_busy:'GPU 正在处理队列中的任务，当前任务等待空闲执行位置，无需重新提交。',
     capacity_searching_gpu:'正在查找符合条件的 GPU，尚未开始生成。找到后会自动准备机器，可取消等待。',
   };
-  return Object.hasOwn(reasons,job.error_code)?translate(locale,'jobs.reason.'+job.error_code):translate(locale,'jobs.waitDefault');
+  return reasons[job.error_code]||'等待计算容量启动与验收，尚未开始模型推理。保持原任务，可请求取消；无需重新提交。';
 }
-export function jobMessage(job,locale='zh'){if(job?.status==='waiting_capacity'||job?.status==='queued'&&job?.error_code==='capacity_queued_task_repair_required')return capacityWaitMessage(job,locale);if(job?.status==='recovery_hold')return recoveryMessage(job,locale);if(job?.error_code==='render_cache_capacity_exhausted')return translate(locale,'jobs.cacheFull');return job?.failure_diagnostic?.message||job?.message||job?.error?.message||job?.error_code||'';}
-export function failureDetails(job,locale='zh'){
- const at=(key,values)=>translate(locale,key,values);
+export function jobMessage(job){if(job?.status==='waiting_capacity'||job?.status==='queued'&&job?.error_code==='capacity_queued_task_repair_required')return capacityWaitMessage(job);if(job?.status==='recovery_hold')return recoveryMessage(job);if(job?.error_code==='render_cache_capacity_exhausted')return '粗剪服务的工作空间已满，本次已停止，尚未开始编码。素材保持不变；请等管理员处理容量后，再预检并确认新的粗剪任务。';return job?.failure_diagnostic?.message||job?.message||job?.error?.message||job?.error_code||'';}
+export function failureDetails(job){
   const diagnostic=job?.failure_diagnostic;if(!diagnostic||diagnostic.version!==1)return null;
-  const code=value=>typeof value==='string'&&/^[A-Za-z0-9_.:-]{1,200}$/.test(value)?value:at('adjunct.failureDetails.copy18'),scalar=value=>typeof value==='number'&&Number.isFinite(value)?String(value):typeof value==='boolean'?value?at('adjunct.failureDetails.copy19'):at('adjunct.failureDetails.copy20'):typeof value==='string'&&/^[A-Za-z0-9_.:-]{1,200}$/.test(value)?value:null,rows=[];
+  const code=value=>typeof value==='string'&&/^[A-Za-z0-9_.:-]{1,200}$/.test(value)?value:'未知',scalar=value=>typeof value==='number'&&Number.isFinite(value)?String(value):typeof value==='boolean'?value?'是':'否':typeof value==='string'&&/^[A-Za-z0-9_.:-]{1,200}$/.test(value)?value:null,rows=[];
   const add=(label,value)=>{const text=scalar(value);if(text!==null)rows.push([label,text]);};
-  add(at('adjunct.failureDetails.copy21'),job.id);add(at('adjunct.failureDetails.copy22'),diagnostic.mode);add(at('adjunct.failureDetails.copy23'),diagnostic.profile_id);
-  for(const field of ['duration','resolution','aspect_ratio','steps','sampler_name','scheduler','seed','denoise','shift_video','generate_audio','video_conditioning','audio_conditioning','image_refs_relative_size','audio_refinement','mask_mode','export_crf'])add(Object.hasOwn(CONTROL_LABELS,field)?at('adjunct.control.'+field):field,diagnostic.controls?.[field]);
-  for(const [field,label]of [['video_excerpts',at('adjunct.failureDetails.copy24')],['audio_excerpts',at('adjunct.failureDetails.copy25')]])if(Array.isArray(diagnostic.controls?.[field]))rows.push([label,diagnostic.controls[field].map(entry=>at('adjunct.failureDetails.copy26',{v0:scalar(entry.time_seconds)??'?',v1:scalar(entry.duration_seconds)??'?'})).join('；')||at('adjunct.failureDetails.copy27')]);
-  for(const [field,label]of [['images',at('adjunct.failureDetails.copy28')],['videos',at('adjunct.failureDetails.copy29')],['audios',at('adjunct.failureDetails.copy30')]]){const entry=diagnostic.inputs?.[field];add(label+at('adjunct.failureDetails.copy31'),entry?.count);if(Array.isArray(entry?.durations_seconds)&&entry.durations_seconds.length)rows.push([label+at('adjunct.failureDetails.copy32'),entry.durations_seconds.map(value=>scalar(value)??'?').join('、')]);add(label+at('adjunct.failureDetails.copy33'),entry?.total_duration_seconds);}
-  add(at('adjunct.failureDetails.copy34'),diagnostic.inputs?.first_frame);add(at('adjunct.failureDetails.copy35'),diagnostic.inputs?.last_frame);add(at('adjunct.failureDetails.copy36'),diagnostic.inputs?.video_audio_enabled_count);
-  if(Array.isArray(diagnostic.inputs?.guides))rows.push([at('adjunct.failureDetails.copy37'),diagnostic.inputs.guides.map(guide=>at('adjunct.failureDetails.copy38',{v0:code(guide.kind),v1:scalar(guide.time_seconds)??'?',v2:guide.use_audio?at('adjunct.failureDetails.copy39'):''})).join('；')||at('adjunct.failureDetails.copy27')]);
-  for(const [field,label]of [['width',at('adjunct.failureDetails.copy41')],['height',at('adjunct.failureDetails.copy42')],['frames',at('adjunct.failureDetails.copy43')],['fps',at('adjunct.failureDetails.copy44')],['duration_s',at('adjunct.failureDetails.copy45')]])add(label,diagnostic.output?.[field]);
-  for(const [field,label]of [['provider',at('adjunct.failureDetails.copy46')],['machine_id',at('adjunct.failureDetails.copy47')],['offer_id',at('adjunct.failureDetails.copy48')],['provider_instance_id',at('adjunct.failureDetails.copy49')],['node_id',at('adjunct.failureDetails.copy50')],['gpu_type','GPU']])add(label,diagnostic.host?.[field]);
-  return {stage:({preflight:at('adjunct.failureDetails.copy51'),input:at('adjunct.failureDetails.copy52'),submit:at('adjunct.failureDetails.copy53'),generation:at('adjunct.failureDetails.copy54'),collect:at('adjunct.failureDetails.copy55'),export:at('adjunct.failureDetails.copy56'),runtime:at('adjunct.failureDetails.copy57')})[diagnostic.stage]||code(diagnostic.stage),reason:code(diagnostic.reason_code),rows};
+  add('任务',job.id);add('方式',diagnostic.mode);add('模型配方',diagnostic.profile_id);
+  for(const field of ['duration','resolution','aspect_ratio','steps','sampler_name','scheduler','seed','denoise','shift_video','generate_audio','video_conditioning','audio_conditioning','image_refs_relative_size','audio_refinement','mask_mode','export_crf'])add(CONTROL_LABELS[field]||field,diagnostic.controls?.[field]);
+  for(const [field,label]of [['video_excerpts','视频摘录'],['audio_excerpts','声音摘录']])if(Array.isArray(diagnostic.controls?.[field]))rows.push([label,diagnostic.controls[field].map(entry=>`中心 ${scalar(entry.time_seconds)??'?'} 秒 / ${scalar(entry.duration_seconds)??'?'} 秒`).join('；')||'无']);
+  for(const [field,label]of [['images','图片参考'],['videos','视频参考'],['audios','声音参考']]){const entry=diagnostic.inputs?.[field];add(label+'数量',entry?.count);if(Array.isArray(entry?.durations_seconds)&&entry.durations_seconds.length)rows.push([label+'片段（秒）',entry.durations_seconds.map(value=>scalar(value)??'?').join('、')]);add(label+'累计（秒）',entry?.total_duration_seconds);}
+  add('首帧',diagnostic.inputs?.first_frame);add('尾帧',diagnostic.inputs?.last_frame);add('视频原声数',diagnostic.inputs?.video_audio_enabled_count);
+  if(Array.isArray(diagnostic.inputs?.guides))rows.push(['时间锚点',diagnostic.inputs.guides.map(guide=>`${code(guide.kind)} · ${scalar(guide.time_seconds)??'?'} 秒${guide.use_audio?' · 含原声':''}`).join('；')||'无']);
+  for(const [field,label]of [['width','宽'],['height','高'],['frames','帧数'],['fps','帧率'],['duration_s','生成时长']])add(label,diagnostic.output?.[field]);
+  for(const [field,label]of [['provider','平台'],['machine_id','主机'],['offer_id','报价'],['provider_instance_id','供应商实例'],['node_id','节点'],['gpu_type','GPU']])add(label,diagnostic.host?.[field]);
+  return {stage:({preflight:'预检',input:'输入处理',submit:'模型提交',generation:'模型生成',collect:'收集结果',export:'导出',runtime:'运行环境'})[diagnostic.stage]||code(diagnostic.stage),reason:code(diagnostic.reason_code),rows};
 }
-export function estimateLabel(estimate,locale='zh'){if(!estimate||estimate.cost_microusd==null)return translate(locale,'jobs.noQuote');if(estimate.source==='mock'||estimate.kind==='simulation')return translate(locale,'jobs.mockCost');if(estimate.kind==='included')return translate(locale,'jobs.includedCost');if(estimate.kind==='budget_reservation')return translate(locale,'jobs.reservedCost',{amount:(estimate.cost_microusd/1000000).toFixed(4),currency:estimate.currency||'USD'});if(typeof estimate.cost_microusd==='number')return translate(locale,'jobs.estimatedCost',{amount:(estimate.cost_microusd/1000000).toFixed(4),currency:estimate.currency||'USD'});return translate(locale,'jobs.costUnavailable');}
+export function estimateLabel(estimate){if(!estimate||estimate.cost_microusd==null)return '费用尚未报价，不能据此认为免费。';if(estimate.source==='mock'||estimate.kind==='simulation')return '模拟测试不调用模型，费用为 $0；真实推理价格尚未验证。';if(estimate.kind==='included')return '此项粗剪当前不单独计费；服务器资源仍有运行成本。';if(estimate.kind==='budget_reservation')return `预算预留 $${(estimate.cost_microusd/1000000).toFixed(4)} ${estimate.currency||'USD'}；这是运营配置的额度占用，实际费用待核对，不是最终账单。`;if(typeof estimate.cost_microusd==='number')return `预计 $${(estimate.cost_microusd/1000000).toFixed(4)} ${estimate.currency||'USD'}；以实际执行结算为准。`;return '费用信息暂不可用。';}
 export function stableJSON(value){if(Array.isArray(value))return '['+value.map(stableJSON).join(',')+']';if(value&&typeof value==='object')return '{'+Object.keys(value).sort().map(key=>JSON.stringify(key)+':'+stableJSON(value[key])).join(',')+'}';return JSON.stringify(value);}
 export async function digest(value){const bytes=new TextEncoder().encode(stableJSON(value));return [...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(n=>n.toString(16).padStart(2,'0')).join('');}
 export function blankCloudProject(title){return {schemaVersion:4,id:'project-'+crypto.randomUUID(),title:title.trim(),logline:'',entities:[],links:[],layout:{positions:{},viewport:{x:0,y:0,zoom:1}},jobs:[],updatedAt:new Date().toISOString(),journey:{stage:1}};}
@@ -56,20 +53,19 @@ export function removeFreestyleInput(project,shotId,assetId,{guide=false,roles=[
 export function copyForCloud(project){const p=clone(project);p.id='project-'+crypto.randomUUID();p.jobs=[];p.updatedAt=new Date().toISOString();for(const e of p.entities){const asset=project.entities.find(a=>a.id===e.data.selectedAssetId);if(boundVideoRange(e.data.selectedVideoRange,asset)){e.data.selectedVideoRange.cloudAssetId=null;e.data.selectedVideoRange.cloudArtifactId=null;}}for(const e of p.entities){delete e.data.cloudAssetId;delete e.data.cloudArtifactId;delete e.data.cloudContentPath;}for(const tracks of Object.values(p.journey?.soundTracks||{}))if(Array.isArray(tracks))for(const track of tracks)if(track.generatedFrom)track.needsReview=true;return p;}
 export function checkedProjectRecord(record){const project=record?.project,checked=validateProject(project);if(!checked.ok||!Number.isInteger(record.version)||record.version<1||record.id!==project.id)throw Error(checked.error||'云项目响应无效，未替换当前作品。');return {...record,project:checked.project};}
 
-export function referenceSpecs(project,shotId,{mode,locale='zh'}={}){
- const at=(key,values)=>translate(locale,key,values);
-  const shot=project.entities.find(e=>e.id===shotId);if(!shot||!['shot','generation'].includes(shot.type))return {references:[],issues:[at('adjunct.referenceSpecs.copy58')]};
+export function referenceSpecs(project,shotId,{mode}={}){
+  const shot=project.entities.find(e=>e.id===shotId);if(!shot||!['shot','generation'].includes(shot.type))return {references:[],issues:['镜头不存在。']};
   const find=id=>project.entities.find(e=>e.id===id),references=[],issues=[];
   const add=(asset,purpose,range=null,linkId=null)=>{
-    if(!asset||!['image','video','audio'].includes(asset.type)){issues.push(at('adjunct.referenceSpecs.copy59'));return;}
-    if(!asset.data.fileId||asset.data.missingFile){issues.push(at('adjunct.referenceSpecs.copy60',{v0:asset.title}));return;}
-    if(range&&(range.fileId!==asset.data.fileId||!Number.isFinite(range.start)||!Number.isFinite(range.end)||range.start<0||range.end<=range.start)){issues.push(at('adjunct.referenceSpecs.copy61',{v0:asset.title}));return;}
+    if(!asset||!['image','video','audio'].includes(asset.type)){issues.push('参考必须指向实际的图片、视频或音频素材。');return;}
+    if(!asset.data.fileId||asset.data.missingFile){issues.push(`「${asset.title}」缺少文件，请补传。`);return;}
+    if(range&&(range.fileId!==asset.data.fileId||!Number.isFinite(range.start)||!Number.isFinite(range.end)||range.start<0||range.end<=range.start)){issues.push(`「${asset.title}」的选段已过期或无效，请重新确认。`);return;}
     references.push({entity:asset,purpose,range,linkId,key:[asset.id,asset.data.fileId,purpose,range?.start??'',range?.end??''].join('|')});
   };
   for(const link of project.links.filter(l=>l.target===shotId)){
     const asset=find(link.source);
     if(['image','video','audio'].includes(asset?.type))add(asset,link.role,shot.data.referenceRanges?.[link.id],link.id);
-    else if(link.role==='dependency')issues.push(at('adjunct.referenceSpecs.copy62',{v0:asset?.title||at('adjunct.referenceSpecs.copy63')}));
+    else if(link.role==='dependency')issues.push(`前置步骤「${asset?.title||'未知'}」尚未被明确选为实际参考素材。`);
   }
   // Shared visual identity is an ordinary REF input. FL retains the story's
   // cast/location assignments but only sends explicitly chosen frame inputs.
@@ -77,12 +73,12 @@ export function referenceSpecs(project,shotId,{mode,locale='zh'}={}){
   const scene=find(shot.parentId),characters=new Set([...(scene?.data.cast||[]),...(shot.data.cast||[])].map(c=>c.characterId));
   for(const link of project.links.filter(l=>l.target===shotId&&l.role==='identity'&&find(l.source)?.type==='character'))characters.add(link.source);
   for(const id of characters){const character=find(id),binding=effectiveLook(project,shot,id),look=character?.data.looks?.find(l=>l.id===binding?.lookId);
-    if(!look){issues.push(at('adjunct.referenceSpecs.copy64',{v0:character?.title||at('adjunct.referenceSpecs.copy63')}));continue;}
-    const gallery=Object.values(look.gallery||{}).filter(Boolean);if(!gallery.length)issues.push(at('adjunct.referenceSpecs.copy66',{v0:look.name}));
+    if(!look){issues.push(`角色「${character?.title||'未知'}」尚未选择可用造型和参考图。`);continue;}
+    const gallery=Object.values(look.gallery||{}).filter(Boolean);if(!gallery.length)issues.push(`造型「${look.name}」尚未放入参考图。`);
     for(const assetId of gallery){const asset=find(assetId);if(!references.some(r=>r.entity.id===assetId))add(asset,'identity');}
   }
   for(const id of shotLocationIds(project,shot)){
-    const location=find(id);if(location?.type!=='location'){issues.push(at('adjunct.referenceSpecs.copy67'));continue;}
+    const location=find(id);if(location?.type!=='location'){issues.push('已绑定地点不存在，请重新选择。');continue;}
     for(const assetId of location.data.referenceAssetIds||[])if(!references.some(ref=>ref.entity.id===assetId))add(find(assetId),'reference');
   }
   }

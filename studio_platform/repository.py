@@ -708,6 +708,11 @@ class Repository:
             func.coalesce(func.sum(budget_reservations.c.actual_cost_microusd), 0).label("cost_microusd"),
             func.count().label("reservation_count")).where(
                 confirmed, budget_reservations.c.settled_at.is_(None))).mappings().one()
+        invoice_pending = connection.execute(select(
+            func.count().label("reservation_count"),
+            func.coalesce(func.sum(budget_reservations.c.amount_microusd), 0).label("reserved_estimate_microusd"))
+            .where(budget_reservations.c.account_id == row["id"],
+                   budget_reservations.c.state == "invoice_pending")).mappings().one()
         limit, spent, reserved = (row[name] for name in
             ("limit_microusd", "spent_microusd", "reserved_microusd"))
         retired = fixed_cap_retired(row)
@@ -717,6 +722,10 @@ class Repository:
             "basis": "cumulative", "currency": "USD", "limit_microusd": limit,
             "limit_mode": "settings" if retired else "cumulative",
             "legacy_projection_only": retired,
+            "invoice_pending": {"reservation_count": int(invoice_pending["reservation_count"]),
+                "reserved_estimate_microusd": int(invoice_pending["reserved_estimate_microusd"]),
+                "actual_cost_microusd": None,
+                "included_in_settings_exposure": True},
             "legacy_limit_microusd": row["limit_microusd"] if fixed_cap_retired(row) else None,
             "spent_microusd": spent, "reserved_microusd": reserved,
             "remaining_microusd": max(0, limit - committed),
