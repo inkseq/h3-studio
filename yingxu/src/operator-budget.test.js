@@ -28,25 +28,27 @@ test('cumulative warning includes existing reservations and exhaustion never imp
   assert.equal(budgetUsage(row({limit_microusd:0,spent_microusd:0,reserved_microusd:0})).status,'exhausted');
 });
 
-test('budget names distinguish owners, projects and the two shared accounts',()=>{
+test('retained financial labels distinguish owners, projects, shared accounts and retired caps',()=>{
   assert.equal(budgetLabel(row({owner_id:'supervan'})),'账户预算 · supervan');
   assert.equal(budgetLabel(row({owner_id:'supervan',project_id:'night-delivery'})),'项目预算 · supervan / night-delivery');
   assert.equal(budgetLabel(row({owner_id:null,id:'demand-gpu-remaining-20261004'})),'共享 GPU 预算');
   assert.equal(budgetLabel(row({owner_id:null,id:'demand-job-total-20261004'})),'共享生成预算');
+  assert.equal(budgetLabel(row({owner_id:null,id:'demand-gpu-remaining-20261004'}),'en'),'Shared GPU budget');
   assert.equal(budgetUsage(row({limit_mode:'settings',status:'exhausted'})),null);
+  assert.equal(budgetUsage(row({legacy_projection_only:true,status:'exhausted'})),null);
 });
 
-test('admin account pagination can reach shared rows beyond the first hundred',async()=>{
+test('admin account pagination retains the original F guards and reaches shared rows after the first hundred',async()=>{
   const requests=[],first=Array.from({length:100},(_,index)=>row({id:'account-'+index}));let priceReads=0;
   const api=fake({adminBudgets:async options=>{requests.push(options);return options.after_id?page([row({id:'demand-gpu-remaining-20261004',owner_id:null}),row({id:'demand-job-total-20261004',owner_id:null})],{admin:true}):page(first,{admin:true,next_after_id:'account-99'});},adminPrices:async()=>{priceReads++;return {operator:{account:'superdan',admin:true},profiles:[],audits:[]};}});
   const controller=createP4OperatorController({client:api,storage:memory()});await controller.setAccount('superdan');
   await controller.readBudgetAdmin();await controller.readBudgetAdmin({after_id:'account-99'});
   assert.equal(controller.getState().adminBudgets.budgets.length,102);assert.equal(controller.getState().adminBudgets.next_after_id,null);
   assert.deepEqual(requests,[{after_id:undefined},{after_id:'account-99'}]);assert.equal(priceReads,1);
-  assert.deepEqual(controller.getState().adminBudgets.budgets.slice(-2).map(budgetLabel),['共享 GPU 预算','共享生成预算']);
+  assert.deepEqual(controller.getState().adminBudgets.budgets.slice(-2).map(budget=>budgetLabel(budget)),['共享 GPU 预算','共享生成预算']);
 });
 
-test('admin budget reads use the server capability and reject a revoked page response',async()=>{
+test('admin budget page responses are discarded when server permission is revoked',async()=>{
   let allowed=false,reads=0,resolvePage;
   const api=fake({state:async()=>({operator:{account:'superdan',admin:allowed},nodes:[],groups:[],queue:[]}),adminBudgets:async options=>{reads++;return options.after_id?new Promise(resolve=>{resolvePage=resolve;}):page([row()],{admin:true,next_after_id:'more'});}});
   const controller=createP4OperatorController({client:api,storage:memory()});await controller.setAccount('superdan');
@@ -60,12 +62,12 @@ test('admin budget reads use the server capability and reject a revoked page res
 test('owner read rejects another owner or a global row and binds ordinary cookie actor headers',async()=>{
   const calls=[],values=[page([row({owner_id:'supervan'})]),page([row({owner_id:null})]),page(),page([row({owner_id:null})],{admin:true})];
   const api=createP4OperatorClient({fetcher:async(path,options)=>{calls.push({path,options});return new Response(JSON.stringify(values.shift()),{headers:{'Content-Type':'application/json','X-Authenticated-Account':'superdan'}});}});api.setAccount('superdan');
-  await assert.rejects(api.budgets(),/身份/);await assert.rejects(api.budgets(),/身份/);assert.equal((await api.budgets()).budgets[0].id,'owner-budget');assert.equal((await api.adminBudgets()).admin,true);
+  await assert.rejects(api.budgets(),/identity/);await assert.rejects(api.budgets(),/identity/);assert.equal((await api.budgets()).budgets[0].id,'owner-budget');assert.equal((await api.adminBudgets()).admin,true);
   assert.equal(calls[0].path,'/v1/operator/budgets?limit=100');assert.equal(calls[3].path,'/v1/operator/admin/budgets?limit=100');assert.ok(calls.every(call=>call.options.credentials==='same-origin'&&call.options.headers['X-Expected-Account']==='superdan'));
 });
 
 test('a budget response cannot survive an account switch or fabricate monthly/daily zero balances',async()=>{
-  let resolve;const api=createP4OperatorClient({fetcher:()=>new Promise(done=>{resolve=done;})});api.setAccount('superdan');const reading=api.budgets();await Promise.resolve();api.setAccount('supervan');resolve(new Response(JSON.stringify(page()),{headers:{'Content-Type':'application/json'}}));await assert.rejects(reading,/账户已改变/);
+  let resolve;const api=createP4OperatorClient({fetcher:()=>new Promise(done=>{resolve=done;})});api.setAccount('superdan');const reading=api.budgets();await Promise.resolve();api.setAccount('supervan');resolve(new Response(JSON.stringify(page()),{headers:{'Content-Type':'application/json'}}));await assert.rejects(reading,/account has changed/);
   assert.equal(validBudgetPage(page([],{}),'superdan'),true);assert.equal(validBudgetPage(page([],{basis:'monthly'}),'superdan'),false);assert.equal(page().budgets[0].daily7.length,1);
 });
 
@@ -123,17 +125,20 @@ test('accepted admin change requires its original audited receipt before clearin
 
 test('actual budget cards show sparse recorded dates and legacy uncertainty without monthly resets',async()=>{
   const path=fileURLToPath(new URL('./OperatorBudgetPanel.jsx',import.meta.url)),contents=await readFile(path,'utf8'),directory=path.replace(/[/\\][^/\\]+$/,'');
-  const result=await build({stdin:{contents,resolveDir:directory,loader:'jsx'},bundle:true,write:false,platform:'node',format:'cjs',packages:'external',loader:{'.css':'empty'}}),module=new Module(path);module.filename=path;module.paths=Module._nodeModulePaths(directory);module._compile(result.outputFiles[0].text,path);
-  const markup=renderToStaticMarkup(React.createElement(module.exports.BudgetAccounts,{budgets:[row()]}));
+  const result=await build({stdin:{contents:contents+"\nexport {I18nProvider as TestI18nProvider} from './i18n/I18nProvider.jsx';\n",resolveDir:directory,loader:'jsx'},bundle:true,write:false,platform:'node',format:'cjs',packages:'external',loader:{'.css':'empty'}}),module=new Module(path);module.filename=path;module.paths=Module._nodeModulePaths(directory);module._compile(result.outputFiles[0].text,path);
+  const markup=renderWithLocale(module,React.createElement(module.exports.BudgetAccounts,{budgets:[row()]}));
   assert.match(markup,/累计额度/);assert.match(markup,/已结算/);assert.match(markup,/已预留/);assert.match(markup,/剩余额度/);assert.match(markup,/80%/);assert.match(markup,/2026-10-14/);assert.doesNotMatch(markup,/2026-10-13|月度|monthly/);assert.match(markup,/旧记录日期未确认/);assert.match(markup,/\$2\.00/);assert.match(markup,/没有记录的日期不视为零费用/);
-  const exhausted=renderToStaticMarkup(React.createElement(module.exports.BudgetAccounts,{budgets:[row({reserved_microusd:80000000,status:'exhausted'})],compact:true}));assert.match(exhausted,/额度不足/);
-  const retired=renderToStaticMarkup(React.createElement(module.exports.BudgetAccounts,{budgets:[row({limit_mode:'settings',legacy_projection_only:true,status:'exhausted',invoice_pending:{reservation_count:2,reserved_estimate_microusd:2000000,actual_cost_microusd:null}})],compact:true}));
+  const exhausted=renderWithLocale(module,React.createElement(module.exports.BudgetAccounts,{budgets:[row({reserved_microusd:80000000,status:'exhausted'})],compact:true}));assert.match(exhausted,/额度不足/);
+  const retiredRow=row({limit_mode:'settings',legacy_projection_only:true,status:'exhausted',invoice_pending:{reservation_count:2,reserved_estimate_microusd:2000000,actual_cost_microusd:null}});
+  const retired=renderWithLocale(module,React.createElement(module.exports.BudgetAccounts,{budgets:[retiredRow],compact:true}));
   assert.match(retired,/原固定额度已停用/);assert.match(retired,/待核账单预估.*\$2\.00/);assert.match(retired,/实际费用尚未确认/);assert.doesNotMatch(retired,/额度不足|<progress|剩余额度/);
   const state={account:'superdan',snapshot:{operator:{account:'superdan',admin:true}},adminBudgets:page([row({owner_id:null,id:'demand-gpu-remaining-20261004'}),row({owner_id:null,id:'demand-job-total-20261004'})],{admin:true}),adminPrices:{profiles:[],audits:[]},budgetAudits:{events:[]}},controller={readBudgetAdmin:async()=>{}};
-  const admin=renderToStaticMarkup(React.createElement(module.exports.BudgetWorkspace,{account:'superdan',controller,state,busy:false}));
+  const admin=renderWithLocale(module,React.createElement(module.exports.BudgetWorkspace,{account:'superdan',controller,state,busy:false}));
   assert.match(admin,/预算与价格管理/);assert.match(admin,/共享 GPU 预算/);assert.match(admin,/共享生成预算/);assert.match(admin,/全部账户已读取/);assert.match(admin,/settings\?tab=admin/);
-  const ordinary=renderToStaticMarkup(React.createElement(module.exports.BudgetWorkspace,{account:'supervan',controller,state:{...state,account:'supervan',snapshot:{operator:{account:'supervan',admin:false}}},busy:false}));
+  const ordinary=renderWithLocale(module,React.createElement(module.exports.BudgetWorkspace,{account:'supervan',controller,state:{...state,account:'supervan',snapshot:{operator:{account:'supervan',admin:false}}},busy:false}));
   assert.doesNotMatch(ordinary,/预算与价格管理|共享 GPU 预算|共享生成预算|settings\?tab=admin/);
+  const english=renderWithLocale(module,React.createElement(module.exports.BudgetAccounts,{budgets:[retiredRow],compact:true}),'en');
+  assert.match(english,/original fixed cap is retired/);assert.match(english,/Pending invoice estimate/);assert.doesNotMatch(english,/原固定额度|operatorPanel\./);
 });
 
 test('definite monetary start rejection clears only its journal and allows explicit budget restore without a paid retry',async()=>{
@@ -163,3 +168,10 @@ test('generic rate limits, unconfirmed capacity, timeouts and service failures r
   }
   const controller=createP4OperatorController({client:fake({updateBudget:async()=>{throw Object.assign(Error('uncertain other operation'),{status:429,detail:{code:'budget_exceeded'}});}}),storage:memory()});await controller.setAccount('superdan');await assert.rejects(controller.updateBudget(row(),106000000));assert.equal(controller.getState().pending.method,'updateBudget','the definite start-only proof does not broaden other command semantics');
 });
+
+function renderWithLocale(module,element,locale='zh'){
+  const descriptor=Object.getOwnPropertyDescriptor(globalThis,'localStorage');
+  Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:()=>locale}});
+  try{return renderToStaticMarkup(React.createElement(module.exports.TestI18nProvider,null,element));}
+  finally{if(descriptor)Object.defineProperty(globalThis,'localStorage',descriptor);else delete globalThis.localStorage;}
+}

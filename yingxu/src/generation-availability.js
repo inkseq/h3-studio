@@ -1,3 +1,4 @@
+import {translate} from './i18n/locale.js';
 /* Advisory capacity only. Submission and original-operation recovery stay server-owned. */
 export const MODE_LABELS={fl:'FL2VA 首尾帧',ref:'Ref2VA 全能参考'};
 const copy={
@@ -9,10 +10,10 @@ const copy={
   unknown:['状态待确认','暂时无法确认执行状态，请刷新后重试。'],
   stale:['状态已过期','执行状态已过期，请刷新后再生成。'],
 };
-export function modeAvailability(snapshot,capabilities,settings={},mode,now=Date.now()){
+export function modeAvailability(snapshot,capabilities,settings={},mode,now=Date.now(),locale='zh'){
   const selected=capabilities?.recipes?.find(item=>item.id===settings.recipe_id);
   mode=mode||selected?.mode;
-  const result=(state,available=false,reason_code=null)=>({mode,state,available,reason_code,label:copy[state][0],message:copy[state][1]});
+  const result=(state,available=false,reason_code=null)=>({mode,state,available,reason_code,label:translate(locale,'availability.'+state),message:translate(locale,'availability.'+state+'Message')});
   if(!['fl','ref'].includes(mode)||!selected||snapshot?.version!==1||snapshot.advisory_only!==true||!Array.isArray(snapshot.profiles))return result('unknown');
   const observed=snapshot.observed_at,expires=snapshot.expires_at,seconds=now/1000;
   if(!Number.isFinite(observed)||!Number.isFinite(expires)||expires<=observed||expires-observed>10.01||observed>seconds+5)return result('unknown');

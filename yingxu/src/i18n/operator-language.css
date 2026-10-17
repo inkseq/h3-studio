@@ -1,0 +1,1 @@
+.p4-shell button,.operator-hosts button,.operator-jobs button{white-space:normal;overflow-wrap:anywhere}.p4-dialog h2,.p4-dialog label{min-width:0;overflow-wrap:anywhere}@media(max-width:760px){.p4-shell button,.p4-dialog button,.operator-budget button{min-height:44px}.p4-dialog input,.p4-dialog select{max-width:100%}.p4-actions,.operator-actions{flex-wrap:wrap;gap:8px}}

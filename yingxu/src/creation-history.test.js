@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {createQuickChatClient} from './quick-chat-client.js';
 import {createQuickChatController} from './quick-chat-controller.js';
 import {checkedHistoryPreview,checkedHistoryResult,historySelectable,purgeCountdown} from './creation-history-model.js';
+import {digest} from './cloud-model.js';
 import {saveDraft,readDraft} from './quick-chat-draft.js';
 const memory=()=>{const data=new Map();return {getItem:key=>data.get(key)||null,setItem:(key,value)=>data.set(key,value),removeItem:key=>data.delete(key)};};
 const row=(id='s',extra={})=>({id,title:'原创作',version:3,trash_state:'active',trashable:true,is_test:false,review_hold:false,...extra});
@@ -57,7 +58,7 @@ test('malformed success does not clear unknown action or announce deleted conten
   const {controller}=await setup({actionHistory:async()=>receipt('trash',[{id:'other'}])});await selected(controller);await assert.rejects(controller.confirmHistory());assert.ok(controller.getState().pending);assert.equal(controller.getState().historyReceipt,null);
 });
 test('known conflict clears only pending confirmation and preserves selected records and draft',async()=>{
-  const {controller,storage}=await setup({actionHistory:async()=>{throw Object.assign(Error('version conflict'),{status:409});}});saveDraft('owner','s','local',{storage,edit:true});await selected(controller);await assert.rejects(controller.confirmHistory());assert.equal(controller.getState().pending,null);assert.equal(controller.getState().historyPreview,null);assert.deepEqual(controller.getState().historySelection,['s']);assert.equal(readDraft('owner','s',storage),'local');
+  const {controller,storage}=await setup({actionHistory:async body=>{throw Object.assign(Error('version conflict'),{status:409,detail:{resource:'quick_chat_history',action:'confirm',code:'history_preview_changed',no_mutation_committed:true,request_hash:await digest(body)}});}});saveDraft('owner','s','local',{storage,edit:true});await selected(controller);await assert.rejects(controller.confirmHistory());assert.equal(controller.getState().pending,null);assert.equal(controller.getState().historyPreview,null);assert.deepEqual(controller.getState().historySelection,['s']);assert.equal(readDraft('owner','s',storage),'local');
 });
 test('generic 429/5xx remain unknown and no absent operation journal permits a mutation',async()=>{
   for(const status of [429,503]){const {controller}=await setup({actionHistory:async()=>{throw Object.assign(Error('unknown'),{status});}});await selected(controller);await assert.rejects(controller.confirmHistory());assert.ok(controller.getState().pending);}
@@ -77,4 +78,10 @@ test('account change during pending-action GET cannot erase the original owner j
 });
 test('restore cannot claim a purged result; blocked purge is reported without claiming all deleted',()=>{
   const operation={action:'restore',items:[{id:'s'}]};assert.throws(()=>checkedHistoryResult(receipt('restore',[{id:'s'}],{items:[{id:'s',state:'completed',trash_state:'purged'}]}),operation));assert.throws(()=>checkedHistoryResult(receipt('restore',[{id:'s'}],{ledger_retained:false}),operation));const value=checkedHistoryResult(receipt('purge',[{id:'s'}],{items:[{id:'s',state:'blocked',trash_state:'trashed',blocked_reason:'shared_reference'}]}),{action:'purge',items:[{id:'s'}]});assert.equal(value.items[0].trash_state,'trashed');
+});
+
+test('bare authentication/conflict errors preserve original history confirmation; expired original closes only on exact proof',async()=>{
+ for(const status of [401,403,404,409]){const {controller}=await setup({actionHistory:async()=>{throw Object.assign(Error('unknown'),{status});}});await selected(controller);await assert.rejects(controller.confirmHistory());assert.ok(controller.getState().pending);}
+ const calls=[];let first=true,wrong=true;const {controller}=await setup({actionHistory:async(body,key)=>{calls.push({body:structuredClone(body),key});if(first){first=false;throw Error('lost');}throw Object.assign(Error('expired'),{status:409,detail:{resource:'quick_chat_history',action:'confirm',code:'history_preview_expired',no_mutation_committed:true,request_hash:wrong?'foreign':await digest(body)}});}});
+ await selected(controller);await assert.rejects(controller.confirmHistory());await assert.rejects(controller.recover());assert.ok(controller.getState().pending);wrong=false;await assert.rejects(controller.recover());assert.equal(controller.getState().pending,null);assert.deepEqual(calls[0],calls[1]);assert.deepEqual(calls[0],calls[2]);
 });

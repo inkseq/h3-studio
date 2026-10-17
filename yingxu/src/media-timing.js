@@ -1,9 +1,10 @@
-export function validateRange(start,end,duration){
-  if(start===''||end===''||!Number.isFinite(Number(start))||!Number.isFinite(Number(end)))return '请输入开始和结束秒数。';
-  if(!Number.isFinite(duration)||duration<=0)return '等待文件时长读取完成；若一直无法读取，请重新上传。';
-  if(Number(start)<0)return '开始时间不能小于 0 秒。';
-  if(Number(end)<=Number(start))return '结束时间必须大于开始时间。';
-  if(Number(end)>duration+0.001)return `结束时间不能超过文件总长 ${duration.toFixed(2)} 秒。`;
+import {translate} from './i18n/locale.js';
+export function validateRange(start,end,duration,locale='zh'){
+  if(start===''||end===''||!Number.isFinite(Number(start))||!Number.isFinite(Number(end)))return translate(locale,'sound.range0');
+  if(!Number.isFinite(duration)||duration<=0)return translate(locale,'sound.range1');
+  if(Number(start)<0)return translate(locale,'sound.range2');
+  if(Number(end)<=Number(start))return translate(locale,'sound.range3');
+  if(Number(end)>duration+0.001)return translate(locale,'sound.maxRange',{seconds:duration.toFixed(2)});
   return '';
 }
 // Match CPU rendering: round each shot once, then accumulate integer 24fps frames.

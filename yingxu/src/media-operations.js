@@ -1,3 +1,4 @@
+import {translate} from './i18n/locale.js';
 import {validateLink} from './store.js';
 import {resolveCanvasPositions} from './canvas-layout.js';
 import {addLook,editLook,gallerySlots} from './character-model.js';
@@ -42,15 +43,15 @@ export async function uploadLookImage({store,characterId,lookId,slot,file,upload
 export const freestyleRoles=(kind,role)=>kind==='image'&&role==='reference'?['reference','identity']:kind==='video'?['motion','reference']:kind==='audio'?['audio','reference']:[role];
 export function freestyleInputIds(project,shotId,{kind,role,guide=false}){const shot=project.entities.find(e=>e.id===shotId);return guide?(shot?.data.h3?.guides||[]).map(g=>g.media_id):[...new Set(project.links.filter(l=>l.target===shotId&&freestyleRoles(kind,role).includes(l.role)&&project.entities.some(e=>e.id===l.source&&e.type===kind)).map(l=>l.source))];}
 
-export async function uploadFreestyleFiles({store,shotId,files,kind,role,guide=false,maximum,countAllReferences=false,upload}){
+export async function uploadFreestyleFiles({store,shotId,files,kind,role,guide=false,maximum,countAllReferences=false,upload,locale='zh'}){
  const context=captureWorkspace(store),shot=find(store,shotId),recipe=shot?.data.h3?.recipeId??null,profile=shot?.data.h3?.deploymentProfileId??null;
- if(!shot||!['shot','generation'].includes(shot.type)||shot.type==='generation'&&shot.data.recipe!=='video')throw Error('请先打开要添加参考的视频镜头。');
+ if(!shot||!['shot','generation'].includes(shot.type)||shot.type==='generation'&&shot.data.recipe!=='video')throw Error(translate(locale,'h3more.upload.openShot'));
  const draftMode=shot.data.h3?.inputMode??null;
  const unchanged=()=>{const live=find(store,shotId);return !!live&&live.type===shot.type&&(live.data.h3?.recipeId??null)===recipe&&(live.data.h3?.inputMode??null)===draftMode&&(live.data.h3?.deploymentProfileId??null)===profile;};
- const check=count=>{assertWorkspace(store,context);if(!unchanged())throw Error('镜头或生成方式已改变；没有把迟到的素材接入新设置。');const used=countAllReferences?effectiveReferenceCount(store.getState().project,shotId,kind):freestyleInputIds(store.getState().project,shotId,{kind,role,guide}).length;if(!Number.isInteger(maximum)||maximum<1||used+count>maximum)throw Error(`此区域最多 ${maximum} 份${countAllReferences?'（含人物与地点继承参考）':''}，请先移除一份关联再替换。原文件会保留。`);};
+ const check=count=>{assertWorkspace(store,context);if(!unchanged())throw Error(translate(locale,'h3more.upload.changed'));const used=countAllReferences?effectiveReferenceCount(store.getState().project,shotId,kind):freestyleInputIds(store.getState().project,shotId,{kind,role,guide}).length;if(!Number.isInteger(maximum)||maximum<1||used+count>maximum)throw Error(translate(locale,'h3more.upload.limit',{maximum,inherited:countAllReferences?translate(locale,'h3more.upload.inherited'):''}));};
  check(files.length);
  for(const file of files){
-  check(1);const result=await guardedUpload(store,context,unchanged,'镜头或生成方式已改变；没有把迟到的素材接入新设置。',()=>upload(file,kind||undefined));check(1);
+  check(1);const result=await guardedUpload(store,context,unchanged,translate(locale,'h3more.upload.changed'),()=>upload(file,kind||undefined));check(1);
   const id=`${result.type}-${crypto.randomUUID()}`;
   requireCommit(store,store.editProject(p=>{
    const live=p.entities.find(e=>e.id===shotId);
