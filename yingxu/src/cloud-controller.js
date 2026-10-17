@@ -39,7 +39,13 @@ export function createCloudController({store=defaultStore,client,storage=globalT
   const announceSession=()=>{try{storage?.setItem(sessionEvent,uid());}catch{/* No password or session cookie is ever stored here. */}};
   const sessionChanged=event=>{if(event.key===sessionEvent&&state.account)expire();};
   globalThis.window?.addEventListener('storage',sessionChanged);
-  function installMedia(){api.setAccount?.(state.account);mediaHandlers({maxBytes:state.capabilities?.upload_max_bytes,read:state.account?async fileId=>{const match=/^cloud_(asset|artifact)_([A-Za-z0-9_-]+)$/.exec(fileId);if(!match)throw Error('云素材标识无效。');const ctx=context(),blob=await api.download(`/v1/${match[1]}s/${match[2]}/content`);guard(ctx);return blob;}:null,upload:state.account&&current().workspace.mode==='cloud'?upload:null});}
+  function installMedia(){api.setAccount?.(state.account);mediaHandlers({maxBytes:state.capabilities?.upload_max_bytes,read:state.account?async fileId=>{const match=/^cloud_(asset|artifact)_([A-Za-z0-9_-]+)$/.exec(fileId);if(!match)throw Error('云素材标识无效。');const ctx=context(),blob=await api.download(`/v1/${match[1]}s/${match[2]}/content`);guard(ctx);return blob;}:null,
+    native:state.account&&current().workspace.mode==='cloud'?(fileId,{download=false}={})=>{
+      requireCloud();const ctx=context(),match=/^cloud_(asset|artifact)_([A-Za-z0-9_-]+)$/.exec(fileId);
+      if(!match)throw Error('client.mediaPath');
+      const href=api.nativeContentURL(`/v1/${match[1]}s/${match[2]}/content`,{download});guard(ctx);
+      return Object.freeze({href,account:ctx.account,projectId:ctx.projectId,workspaceEpoch:ctx.workspaceEpoch,assertCurrent:()=>guard(ctx)});
+    }:null,upload:state.account&&current().workspace.mode==='cloud'?upload:null});}
   function replaceIdentity(account,message=''){
     epoch++;lastAvailabilityCheck=0;api.reset?.();store.leaveCloudProject();
     emit({...emptyProjectList,account,capabilities:null,availability:null,availabilityChecking:false,operatorAccess:false,storyboardEnabled:false,capabilityError:'',assets:[],usage:null,assetError:'',plans:{},preflightErrors:{},batchChecking:null,renderPlans:{},renderOptions:{},renderPending:{},jobs:[],activity:null,activityError:'',nextJobOffset:100,moreJobs:false,batches:[],batchesLoaded:false,nextBatchOffset:10,moreBatches:false,batchPending:null,conflict:null,draftOffer:null,resumeOffer:null,resumeError:'',remoteUpdate:null,remoteUpdateError:'',unknown:{},error:'',message});installMedia();

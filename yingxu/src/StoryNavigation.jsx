@@ -76,25 +76,27 @@ function useLibraryReader(account){
   const guard=()=>{if(!account||cloud.getState().account!==account)throw Error(t('legacy.visible14'));};
   return useMemo(()=>({
     project:async id=>{guard();const record=checkedProjectRecord(await reader.project(id));guard();if(record.id!==id)throw Error(t('legacy.visible15'));return record.project;},
-    cover:async file=>{guard();const blob=await reader.download(file.cloudPath);guard();return blob;},
+    cover:file=>{guard();const href=reader.nativeContentURL(file.cloudPath);guard();return Object.freeze({href,assertCurrent:guard});},
   }),[reader,account]);
 }
 
 function StoryLibraryCard({story,reader,working,onOpen}){const {t,locale}=useI18n();
-  const ref=useRef(),[visible,setVisible]=useState(false),[loaded,setLoaded]=useState(null),[detailError,setDetailError]=useState(false),[coverUrl,setCoverUrl]=useState('');
+  const ref=useRef(),[visible,setVisible]=useState(false),[loaded,setLoaded]=useState(null),[detailError,setDetailError]=useState(false),[cover,setCover]=useState(null),[coverError,setCoverError]=useState(false);
   const project=Array.isArray(story.project.entities)?story.project:loaded||story.project,summary=storyLibrarySummary(project,locale),file=storyCoverFileId(summary.cover,{mode:story.mode});
+  const coverKey=file?.cloudPath||file?.fileId;
+  let coverUrl=cover?.reader===reader&&cover?.key===coverKey&&!coverError?cover.url:'';try{cover?.target?.assertCurrent();}catch{coverUrl='';}
   useEffect(()=>{if(typeof IntersectionObserver==='undefined'){setVisible(true);return;}const observer=new IntersectionObserver(entries=>{if(entries.some(entry=>entry.isIntersecting)){setVisible(true);observer.disconnect();}},{rootMargin:'160px'});if(ref.current)observer.observe(ref.current);return()=>observer.disconnect();},[]);
   useEffect(()=>{let alive=true;setLoaded(null);setDetailError(false);if(!visible||story.mode!=='cloud'||Array.isArray(story.project.entities))return;
     reader.project(story.project.id).then(project=>{if(alive)setLoaded(project);}).catch(()=>{if(alive)setDetailError(true);});return()=>{alive=false;};
   },[visible,reader,story.mode,story.project.id,story.project.version,story.project.updated_at,Array.isArray(story.project.entities)]);
-  useEffect(()=>{let alive=true,url='';setCoverUrl('');if(!visible||!file)return;
-    const read=file.cloudPath?reader.cover(file):getFile(file.fileId);
-    read.then(blob=>{if(!alive||!blob?.size||(blob.type&&!blob.type.startsWith(file.kind+'/')))return;url=URL.createObjectURL(blob);setCoverUrl(url);}).catch(()=>{});
+  useEffect(()=>{let alive=true,url='';setCover(null);setCoverError(false);if(!visible||!file)return;
+    if(file.cloudPath){try{const target=reader.cover(file);target.assertCurrent();setCover({reader,key:coverKey,url:target.href,target});}catch{setCoverError(true);}return()=>{alive=false;};}
+    getFile(file.fileId).then(blob=>{if(!alive)return;if(!blob?.size||(blob.type&&!blob.type.startsWith(file.kind+'/'))){setCoverError(true);return;}url=URL.createObjectURL(blob);setCover({reader,key:coverKey,url});}).catch(()=>{if(alive)setCoverError(true);});
     return()=>{alive=false;if(url)URL.revokeObjectURL(url);};
   },[visible,reader,file?.fileId,file?.kind,file?.cloudPath]);
   const known=summary.shotCount!==null;
   return <div className="story-wrap"><button ref={ref} type="button" className="story-card" disabled={working} onClick={onOpen} aria-label={t('legacy.openStory',{location:story.mode==='cloud'?t('account.interface5'):t('account.interface6'),title:summary.title})}>
-    <div className="cover">{coverUrl?file.kind==='video'?<video src={coverUrl} muted playsInline preload="metadata" aria-hidden="true"/>:<img src={coverUrl} alt="" draggable={false}/>:<span className="cover-empty"><Clapperboard size={30}/></span>}<StoryLocation mode={story.mode}/>{(project.journey?.brief?.aspect||project.journey?.storyboardDefaults?.aspect)&&<em className="aspect">{project.journey?.brief?.aspect||project.journey?.storyboardDefaults?.aspect}</em>}</div>
+    <div className="cover">{coverUrl?file.kind==='video'?<video src={coverUrl} muted playsInline preload="metadata" aria-hidden="true" onError={()=>setCoverError(true)}/>:<img src={coverUrl} alt="" draggable={false} onError={()=>setCoverError(true)}/>:<span className="cover-empty" role={coverError?'alert':undefined} title={coverError?t('library.previewUnavailable'):undefined}>{coverError?t('library.previewUnavailable'):<Clapperboard size={30}/>}</span>}<StoryLocation mode={story.mode}/>{(project.journey?.brief?.aspect||project.journey?.storyboardDefaults?.aspect)&&<em className="aspect">{project.journey?.brief?.aspect||project.journey?.storyboardDefaults?.aspect}</em>}</div>
     <b title={summary.title}>{summary.title}</b><small className="clip">{project.logline||t('v2.noLogline')}</small><small className="muted">{known?<>{t('v2.storyChapters',{count:project.entities.filter(e=>e.type==='chapter').length})} · {t('v2.storyShots',{count:summary.shotCount})} · {t('v2.storySelected',{selected:summary.chosenCount,total:summary.shotCount})} · </>:detailError?t('legacy.visible16'):t('legacy.visible17')}{editedLabel(summary.updatedAt,locale)}</small>
   </button>{story.mode==='cloud'&&<TrashMenu target={{kind:'project',project_id:story.project.id,id:story.project.id}} onEdit={onOpen}/>}</div>;
 

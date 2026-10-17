@@ -6,9 +6,20 @@ export const bundleLimits=Object.freeze({file:30*MB,media:120*MB,archive:150*MB,
 const validFileId=id=>typeof id==='string'&&/^[\w-]{1,100}$/.test(id);
 const utf8=new TextEncoder();
 let dbPromise;
-let cloudMediaReader=null,cloudMediaUploader=null,cloudMaxBytes=null;
-export function setCloudMediaHandlers({read=null,upload=null,maxBytes=null}={}){cloudMediaReader=read;cloudMediaUploader=upload;cloudMaxBytes=Number.isSafeInteger(maxBytes)&&maxBytes>0?maxBytes:null;}
+let cloudMediaReader=null,cloudMediaUploader=null,cloudMediaNative=null,cloudMaxBytes=null;
+export function setCloudMediaHandlers({read=null,upload=null,native=null,maxBytes=null}={}){cloudMediaReader=read;cloudMediaUploader=upload;cloudMediaNative=native;cloudMaxBytes=Number.isSafeInteger(maxBytes)&&maxBytes>0?maxBytes:null;}
 export const isCloudFileId=id=>typeof id==='string'&&/^cloud_(?:asset|artifact)_[A-Za-z0-9_-]+$/.test(id);
+// View-only access. Byte processing/export continues to use getFile below.
+// Capture the originating resolver and its context once; never refresh an old
+// link against a later account's global handler when a user clicks it.
+export function nativeMediaSource(id,{download=false}={}){
+ if(!isCloudFileId(id)){
+  if(typeof id==='string'&&id.startsWith('cloud_'))throw Error('client.mediaPath');
+  return null;
+ }
+ if(!cloudMediaNative)throw Error('client.mediaAccount');
+ const source=cloudMediaNative(id,{download});source.assertCurrent();return source;
+}
 function database(){return dbPromise??=new Promise((resolve,reject)=>{const req=indexedDB.open('yingxu-media-v1',1);req.onupgradeneeded=()=>req.result.createObjectStore('files');req.onsuccess=()=>resolve(req.result);req.onerror=()=>{dbPromise=null;reject(req.error)}})}
 export async function putFile(id,file){const db=await database();return new Promise((resolve,reject)=>{const tx=db.transaction('files','readwrite');tx.objectStore('files').put(file,id);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error)})}
 export async function getFile(id){if(isCloudFileId(id)){if(!cloudMediaReader)throw Error('请登录云工作室后读取此素材。');return cloudMediaReader(id);}const db=await database();return new Promise((resolve,reject)=>{const req=db.transaction('files').objectStore('files').get(id);req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
