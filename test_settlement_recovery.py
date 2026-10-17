@@ -82,6 +82,55 @@ class SettlementTests(LedgerCase):
         reconcile(self.repo, invoice, apply=True)
         self.assertEqual(self.repo.get_budget('owner-budget')['spent_microusd'], 60000)
 
+    def retried_terminal(self, status, marker=None, historical=False):
+        self.job()
+        first = self.queue.claim("old-worker", "test-pool", lease_seconds=10)
+        if status == "lease_expired":
+            self.now += 11
+            self.assertEqual(self.queue.recover_expired()[0]["status"], "queued")
+        else:
+            self.queue.defer_unsubmitted(first.lease, retry_after_s=0)
+        second = self.queue.claim("new-worker", "test-pool")
+        self.assertEqual(second.job["attempt_no"], 2)
+        if marker:
+            with self.repo.transaction() as conn:
+                conn.execute(update(attempts).where(attempts.c.id == first.lease.attempt_id)
+                    .values(**{marker: self.now if marker == "submission_started_at" else "unknown-task"}))
+        self.queue.begin_submission(second.lease)
+        self.queue.record_submitted(second.lease, "retried-task")
+        self.queue.begin_collection(second.lease)
+        if historical:
+            with patch('studio_platform.settlement_recovery.release_terminal_job'):
+                row = self.queue.complete(second.lease, [VALID_ARTIFACT], actual_cost_microusd=None)
+        else:
+            row = self.queue.complete(second.lease, [VALID_ARTIFACT], actual_cost_microusd=None)
+        with self.repo.engine.connect() as conn:
+            old = conn.execute(select(attempts).where(attempts.c.id == first.lease.attempt_id)).mappings().one()
+        self.assertEqual((old['status'], old['upstream_stopped']), (status, 0))
+        return row
+
+    def test_unsubmitted_retry_histories_release_without_rewriting_history(self):
+        for status in ('lease_expired', 'deferred'):
+            with self.subTest(status=status):
+                row = self.retried_terminal(status)
+                self.assertEqual(self.repo.get_budget('owner-budget')['reserved_microusd'], 0)
+                self.assertIsNone(row['result']['actual_cost_microusd'])
+                # The separately audited historical path uses the same closure rule.
+                historical = self.retried_terminal(status, historical=True)
+                reconcile(self.repo, self.request(historical), apply=True)
+                self.assertEqual(self.repo.get_budget('owner-budget')['reserved_microusd'], 0)
+
+    def test_retry_history_with_either_submission_marker_keeps_original_hold(self):
+        expected = 0
+        for status in ('lease_expired', 'deferred'):
+            for marker in ('submission_started_at', 'upstream_task_id'):
+                with self.subTest(status=status, marker=marker):
+                    row = self.retried_terminal(status, marker)
+                    expected += 100000
+                    self.assertEqual(self.repo.get_budget('owner-budget')['reserved_microusd'], expected)
+                    with self.assertRaisesRegex(Conflict, 'upstream_unresolved'):
+                        reconcile(self.repo, self.request(row), apply=True)
+
     def test_changed_snapshot_or_uncertain_attempt_refuses_entire_batch(self):
         row = self.terminal(historical=True)
         request = self.request(row)

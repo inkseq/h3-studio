@@ -72,9 +72,17 @@ def inspect_reference(repo, tenant, kind, identity):
                              for r in value["reservations"]]}
 
 
+def closed_attempt(attempt):
+    """Fenced pre-submit histories own no upstream task; submitted unknowns do."""
+    return (attempt["status"] in TERMINAL and attempt["upstream_stopped"] == 1) or (
+        attempt["status"] in {"lease_expired", "deferred"}
+        and attempt["submission_started_at"] is None
+        and attempt["upstream_task_id"] is None)
+
+
 def validate_terminal(value, kind, proof, now):
     row = value["reference"]
-    require(all(a["status"] in TERMINAL and a["upstream_stopped"] == 1 for a in value["attempts"]),
+    require(all(closed_attempt(a) for a in value["attempts"]),
             "settlement_upstream_unresolved")
     if kind == "job":
         require(row["status"] in TERMINAL, "settlement_job_not_terminal")
@@ -126,7 +134,7 @@ def release_terminal_job(repo, conn, job_id):
     if row["status"] not in TERMINAL:
         return
     history = list(conn.execute(select(attempts).where(attempts.c.job_id == job_id).with_for_update()).mappings())
-    if any(a["status"] not in TERMINAL or a["upstream_stopped"] != 1 for a in history):
+    if any(not closed_attempt(a) for a in history):
         return  # A historical uncertain attempt still owns its original hold.
     release_pending_invoice(repo, conn, "job", job_id)
 
@@ -142,7 +150,7 @@ def release_removed_instance(repo, conn, identity):
         return
     ids = [w["id"] for w in workers]
     history = list(conn.execute(select(attempts).where(attempts.c.worker_id.in_(ids)).with_for_update()).mappings()) if ids else []
-    if any(a["status"] not in TERMINAL or a["upstream_stopped"] != 1 for a in history):
+    if any(not closed_attempt(a) for a in history):
         return
     release_pending_invoice(repo, conn, "instance", identity)
 
