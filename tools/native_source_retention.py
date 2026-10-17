@@ -24,6 +24,10 @@ INPUTS = ("retain_native_sources_run", "retain_native_sources_commit", "retain_n
 SHA = re.compile(r"[0-9a-f]{40}")
 DIGEST = re.compile(r"[0-9a-f]{64}")
 MAX_ARCHIVE = 64 * 1024 * 1024
+# One reviewed successful main push supplies unchanged native bytes to #254.
+FINANCIAL254_PRIOR_PUSH = (
+    "38999357489", "0a293395471b1fc08160db27411fd36f8729bcf4",
+    "fcac7928646662cb07298661e620e32765e49ecd37a0afcc287eb706c853acac")
 
 
 def binding(inputs):
@@ -41,9 +45,11 @@ def verify_run_identity(run, inputs):
     selected = binding(inputs)
     if selected is None:
         raise ValueError("native_retention_binding_required")
-    run_id, commit, _ = (selected[key] for key in INPUTS)
+    run_id, commit, index = (selected[key] for key in INPUTS)
+    reviewed_push = (type(run) is dict and run.get("event") == "push"
+                     and (run_id, commit, index) == FINANCIAL254_PRIOR_PUSH)
     if (type(run) is not dict or type(run.get("id")) is not int or run["id"] != int(run_id)
-            or run.get("path") != WORKFLOW or run.get("event") != "workflow_dispatch"
+            or run.get("path") != WORKFLOW or (run.get("event") != "workflow_dispatch" and not reviewed_push)
             or run.get("head_sha") != commit or run.get("head_branch") != "main"
             or run.get("status") != "completed" or run.get("conclusion") != "success"
             or (run.get("repository") or {}).get("full_name") != REPOSITORY

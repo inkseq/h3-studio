@@ -49,6 +49,31 @@ class Provenance(unittest.TestCase):
             with self.subTest(run=value), self.assertRaises(ValueError):
                 retention.binding(dict(INPUTS, retain_native_sources_run=value))
 
+    def test_only_exact_reviewed_financial_main_push_can_supply_native_bytes(self):
+        run_id, commit, index = retention.FINANCIAL254_PRIOR_PUSH
+        inputs = dict(zip(retention.INPUTS, (run_id, commit, index)))
+        run = dict(self.run, id=int(run_id), event="push", head_sha=commit)
+        artifacts = copy.deepcopy(self.artifacts)
+        item = artifacts["artifacts"][0]
+        item.update(name="sixnine-migration-" + commit,
+                    workflow_run={"id": int(run_id), "head_sha": commit, "head_branch": "main"})
+        self.assertEqual(retention.verify_run(run, artifacts, inputs), 84)
+        for field, wrong in zip(retention.INPUTS, ("42", NEW, INDEX)):
+            changed = dict(inputs, **{field: wrong})
+            matching_run = dict(run, id=int(changed[retention.INPUTS[0]]), head_sha=changed[retention.INPUTS[1]])
+            with self.subTest(binding=field), self.assertRaises(ValueError):
+                retention.verify_run_identity(matching_run, changed)
+        for change in ({"event": "pull_request"}, {"head_branch": "topic"},
+                       {"repository": {"full_name": "other/repo"}},
+                       {"head_repository": {"full_name": "other/repo"}},
+                       {"conclusion": "failure"}, {"status": "in_progress"}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                retention.verify_run_identity(dict(run, **change), inputs)
+        expired = copy.deepcopy(artifacts); expired["artifacts"][0]["expired"] = True
+        with self.assertRaises(ValueError): retention.verify_run(run, expired, inputs)
+        with self.assertRaises(ValueError):
+            retention.verify_run_identity(dict(self.run, event="push"), INPUTS)
+
     def test_same_successful_main_run_and_unexpired_exact_artifact_required(self):
         self.assertEqual(retention.verify_run(self.run, self.artifacts, INPUTS), 84)
         for change in ({"id": 43}, {"path": ".github/workflows/other.yml"}, {"event": "pull_request"},
