@@ -63,3 +63,56 @@ not understand it. Deploy the reviewed compatible source as one bounded batch.
 For an urgent incident on an older runtime, only existing actual-cost settlement
 methods may be used with independently established actual amounts; this module
 does not authorize hot-loading partial state semantics.
+
+## Reviewed historical capacity (version2, issue264)
+
+Version1 and its completed audit receipts remain unchanged. Version2 is an
+explicit private recovery request for reviewed historical instances only; it
+does not change public APIs, the automatic observer, spend caps or settlement.
+Every entry must be `instance` with `actual_cost_microusd:null`.
+
+The version1 top-level fields are retained, with `version:2` and one additional
+`reviewed_provider_accounts` map from original provider (`vast`, `lium`,
+`targon`) to the SHA256 of the independently verified original account binding.
+Exclude both protected owner IDs `56330848` and `56336890` in the reviewed
+request. Use `inspect_reference(..., version=2)` for the stronger CAS snapshot.
+
+Each `provider_absence` has exactly `kind:"reviewed_account_empty"`, `provider`,
+`provider_instance_id` (including original null), `account_binding_sha256`,
+`complete:true`, `instance_ids:[]`, `observed_at`, `evidence_sha256`, and
+`owned_run`. Bind the account SHA to the reviewed top-level map. A successful
+complete account read must be at most120seconds old **after all locks**; do
+the provider read before the database operation, never under its transaction.
+
+For dstack, `owned_run` contains exactly `run_id`, `run_name`, `binding_sha256`,
+`original_binding_matched:true`, terminal `status` (`failed`, `terminated`, or
+`aborted`), `observed_at`, and `evidence_sha256`. Independently verify the exact
+persisted run ID using dstack's existing `_owns` comparison and preserve that
+read receipt. `binding_sha256` hashes the entire original persisted dstack
+binding via `request_hash`; identity, configuration and observation freshness
+must match. A failed run alone, or an empty account in a different provider or
+identity, is insufficient. This rule proves ended capacity, **never no charge**.
+
+For legacy Lium/Targon, `owned_run:null` additionally requires the original
+valid manual-review receipt and stopped/manually-reviewed node. Missing node
+tenant metadata is accepted only for this reviewed legacy case when **all**
+original reservation accounts match the requested tenant. No tenant or review
+history is backfilled. Historical attempts must be positively stopped and
+linked jobs terminal; original start-command siblings must all be destroyed or
+included in the same safe batch. A different tenant or live sibling refuses
+the whole transaction.
+
+Version2 atomically marks the original intent destroyed (using the legal
+draining→destroying transition where needed), its node stopped, and active
+original start commands completed. The payload retains its original fields
+plus an audit-operation fence. It releases only the exact original reserved
+amount into `invoice_pending`, retaining estimates and null actuals. The CAS
+also covers original commands, sibling nodes/intents and account counters;
+insufficient counters, changed snapshots, protected IDs or active obligations
+refuse the batch. Original version1 recovery events are not replayed.
+
+Budget projections expose confirmed generation invoices, confirmed rental
+invoices, and pending counts/original estimates separately for each original
+account. Confirmed generation zero with pending invoices does not mean free
+generation. Do not invent per-video actuals from GPU rental totals, add the
+estimate to a confirmed invoice, or add overlapping shared/owner/project layers.

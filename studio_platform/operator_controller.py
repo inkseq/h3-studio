@@ -22,7 +22,7 @@ from .autoscale import ScalePolicy
 from .operator_capacity import (ACTIVE_COMMANDS, OperatorError, operator_commands,
     operator_heartbeats, operator_nodes, require, safe_id, public_bootstrap, offer_fingerprint, command_binding_fingerprint,
     MANUAL_REVIEW_CONTROLLER_PREFIX)
-from .repository import (BudgetExceeded, Conflict, LeaseLost, instance_intents, registered_workers,
+from .repository import (BudgetExceeded, Conflict, LeaseLost, instance_intents, outbox, registered_workers,
                          scaler_actions, manually_reviewed_inactive)
 from .scaler import ScaleCoordinator
 
@@ -341,6 +341,19 @@ class OperatorController:
     def _observe(self,node):
         with self.repo.engine.connect() as connection:
             intent=connection.execute(select(instance_intents).where(instance_intents.c.id==node["intent_id"])).mappings().one()
+            fence=node["payload"].get("settlement_recovery",{})
+            if (intent["state"]=="destroyed" and fence.get("version")==2
+                    and fence.get("intent_id")==intent["id"] and fence.get("command_id")==node["command_id"]
+                    and node["desired_state"]=="stopped" and node["runtime_state"]=="stopped"):
+                audit=connection.execute(select(outbox.c.payload).where(
+                    outbox.c.event_type=="budget.recovery_completed",outbox.c.aggregate_id==fence.get("operation_id"))).scalar()
+                if (isinstance(audit,dict) and audit.get("state")=="applied" and audit.get("source")==fence.get("source")
+                        and any(entry.get("reference_type")=="instance" and entry.get("reference_id")==intent["id"]
+                            and entry.get("actual_cost_microusd") is None
+                            and entry.get("evidence_sha256")==fence.get("evidence_sha256")
+                            and entry.get("capacity_fence",{}).get("command_id")==node["command_id"]
+                            for entry in audit.get("entries",[]))):
+                    return "stopped"  # Audited ended history owns no provider observation work.
             if manually_reviewed_inactive(connection,intent):
                 return "manually_reviewed"
         binding=self.service.registry.get(node["binding_id"])

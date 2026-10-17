@@ -713,6 +713,30 @@ class Repository:
             func.coalesce(func.sum(budget_reservations.c.amount_microusd), 0).label("reserved_estimate_microusd"))
             .where(budget_reservations.c.account_id == row["id"],
                    budget_reservations.c.state == "invoice_pending")).mappings().one()
+        # Read the original account layer only. Rental invoices are not
+        # per-video invoices, and estimate-only jobs are never free generation.
+        costs = {kind: {"confirmed_cost_microusd": 0, "confirmed_reservation_count": 0,
+            "pending_invoice_count": 0, "pending_estimate_microusd": 0,
+            "pending_actual_cost_microusd": None} for kind in ("job", "instance")}
+        groups = connection.execute(select(budget_reservations.c.reference_type, budget_reservations.c.state,
+            func.count().label("count"),
+            func.coalesce(func.sum(budget_reservations.c.amount_microusd), 0).label("estimate"),
+            func.coalesce(func.sum(budget_reservations.c.actual_cost_microusd), 0).label("actual"))
+            .where(budget_reservations.c.account_id == row["id"],
+                or_(budget_reservations.c.state == "invoice_pending",
+                    and_(budget_reservations.c.state.in_(("settled", "released")),
+                        budget_reservations.c.actual_cost_microusd.is_not(None))))
+            .group_by(budget_reservations.c.reference_type, budget_reservations.c.state)).mappings()
+        for group in groups:
+            cost = costs.get(group["reference_type"])
+            if cost is None:
+                continue
+            if group["state"] == "invoice_pending":
+                cost["pending_invoice_count"] += int(group["count"])
+                cost["pending_estimate_microusd"] += int(group["estimate"])
+            else:
+                cost["confirmed_reservation_count"] += int(group["count"])
+                cost["confirmed_cost_microusd"] += int(group["actual"])
         limit, spent, reserved = (row[name] for name in
             ("limit_microusd", "spent_microusd", "reserved_microusd"))
         retired = fixed_cap_retired(row)
@@ -722,6 +746,8 @@ class Repository:
             "basis": "cumulative", "currency": "USD", "limit_microusd": limit,
             "limit_mode": "settings" if retired else "cumulative",
             "legacy_projection_only": retired,
+            "cost_breakdown": {"basis": "original_account_reservations",
+                "account_layers_not_additive": True, **costs},
             "invoice_pending": {"reservation_count": int(invoice_pending["reservation_count"]),
                 "reserved_estimate_microusd": int(invoice_pending["reserved_estimate_microusd"]),
                 "actual_cost_microusd": None,

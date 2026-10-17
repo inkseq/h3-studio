@@ -1,12 +1,14 @@
 """Real isolated ledger transitions; no provider calls or runtime credentials."""
 import copy
 import uuid
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from sqlalchemy import select, update
+from sqlalchemy import insert, select, update
 
 from studio_platform.queue import TaskQueue
-from studio_platform.repository import Conflict, attempts, budget_reservations, jobs, outbox
+from studio_platform.repository import (Conflict, attempts, budget_accounts, budget_reservations,
+    instance_intents, jobs, outbox, registered_workers, request_hash, scaler_receipts)
+from studio_platform.operator_capacity import operator_commands, operator_nodes
 from studio_platform.settlement_recovery import inspect_reference, reconcile
 from studio_platform.spending_limits import daily_projection
 from test_platform_repository import LedgerCase
@@ -242,3 +244,222 @@ class RemovalTests(LedgerCase):
             reconcile(self.repo,request,apply=True)
         self.assertEqual(self.repo.list_instance_intents()[0]['state'],'destroying')
         self.assertGreater(self.repo.get_budget('owner-budget')['reserved_microusd'],0)
+
+
+class ReviewedHistoricalRemovalTests(LedgerCase):
+    """Explicit recovery evidence is not a public observer or an invoice."""
+    _setup_dstack = dstack_fixtures.DstackOperatorTests._setup_dstack
+    preview = dstack_fixtures.DstackOperatorTests.preview
+    start = dstack_fixtures.DstackOperatorTests.start
+
+    def setUp(self):
+        super().setUp()
+        self._setup_dstack()
+
+    def ended(self, key='start-1', *, legacy=None, state='creation_unknown'):
+        identity = self.start(key)['node_id']
+        with self.repo.transaction() as conn:
+            node = dict(conn.execute(select(operator_nodes).where(operator_nodes.c.intent_id == identity)).mappings().one())
+            values = dict(state=state)
+            if legacy:
+                values.update(provider=legacy, provider_instance_id='wrk-ended' if legacy == 'targon' else None)
+                review = {'schema_version': 1, 'state': 'manually_reviewed', 'intent_id': identity,
+                    'instance_id': values['provider_instance_id'], 'provider': legacy,
+                    'original_intent_state': state, 'actor': 'reviewed-owner', 'operation_id': str(uuid.uuid4()),
+                    'account_absent': True, 'no_continuing_charge': True}
+                conn.execute(insert(scaler_receipts).values(id=str(uuid.uuid4()), intent_id=identity,
+                    operation='manual_review', observed_at=self.now, facts=review))
+                conn.execute(update(operator_nodes).where(operator_nodes.c.intent_id == identity).values(
+                    payload={'manual_review': review}, desired_state='stopped', runtime_state='manually_reviewed'))
+                conn.execute(update(operator_commands).where(operator_commands.c.id == node['command_id']).values(kind='start'))
+            conn.execute(update(instance_intents).where(instance_intents.c.id == identity).values(**values))
+            conn.execute(update(operator_commands).where(operator_commands.c.id == node['command_id']).values(state='running'))
+        return identity
+
+    def reviewed_request(self, *identities):
+        entries, accounts = [], {}
+        for identity in identities:
+            check = inspect_reference(self.repo, self.scope.tenant_id, 'instance', identity, version=2)
+            with self.repo.engine.connect() as conn:
+                row = conn.execute(select(instance_intents).where(instance_intents.c.id == identity)).mappings().one()
+                node = conn.execute(select(operator_nodes).where(operator_nodes.c.intent_id == identity)).mappings().one()
+            accounts[row['provider']] = 'a'*64
+            binding = node['payload'].get('dstack')
+            run = {'run_id': binding['run_id'], 'run_name': binding['run_name'],
+                'binding_sha256': request_hash(binding), 'original_binding_matched': True, 'status': 'failed',
+                'observed_at': self.now, 'evidence_sha256': 'd'*64} if binding else None
+            entries.append({'reference_type': 'instance', 'reference_id': identity,
+                'expected_sha256': check['expected_sha256'], 'actual_cost_microusd': None,
+                'provider_absence': {'kind': 'reviewed_account_empty', 'provider': row['provider'],
+                    'provider_instance_id': row['provider_instance_id'], 'account_binding_sha256': 'a'*64,
+                    'complete': True, 'instance_ids': [], 'observed_at': self.now,
+                    'evidence_sha256': 'c'*64, 'owned_run': run}})
+        return {'version': 2, 'operation_id': str(uuid.uuid4()), 'tenant_id': self.scope.tenant_id,
+            'actor': 'reviewed-operator', 'source': 'https://github.com/inkseq/h3-studio/issues/264',
+            'evidence_sha256': 'b'*64, 'excluded_provider_instance_ids': ['56330848', '56336890'],
+            'reviewed_provider_accounts': accounts, 'entries': entries}
+
+    def test_identityless_review_fences_original_command_without_inventing_invoice_and_replays_once(self):
+        identity = self.ended()
+        previous = {'operation_id': str(uuid.uuid4()), 'state': 'applied', 'request_hash': '9'*64,
+            'entries': [{'reference_type': 'job', 'reference_id': str(uuid.uuid4()), 'billing_status': 'pending'}]}
+        with self.repo.transaction() as conn:
+            self.repo._emit(conn, 'budget.recovery_completed', previous['operation_id'], previous)
+        request = self.reviewed_request(identity)
+        original = self.repo.get_budget('owner-budget')['reserved_microusd']
+        self.assertGreater(original, 0)
+        self.assertEqual(reconcile(self.repo, request)['state'], 'dry_run')
+        self.assertEqual(self.repo.get_budget('owner-budget')['reserved_microusd'], original)
+        result = reconcile(self.repo, request, apply=True)
+        self.now += 121  # An exact completed replay needs no new provider authority.
+        self.assertEqual(reconcile(self.repo, request, apply=True), result)
+        with self.repo.engine.connect() as conn:
+            intent = conn.execute(select(instance_intents)).mappings().one()
+            node = conn.execute(select(operator_nodes)).mappings().one()
+            command = conn.execute(select(operator_commands)).mappings().one()
+            reservation = conn.execute(select(budget_reservations)).mappings().one()
+            self.assertEqual((intent['state'], node['desired_state'], node['runtime_state'], command['state']),
+                ('destroyed', 'stopped', 'stopped', 'completed'))
+            self.assertEqual((reservation['state'], reservation['actual_cost_microusd'], reservation['amount_microusd']),
+                ('invoice_pending', None, original))
+            self.assertEqual(daily_projection(conn, self.scope.tenant_id, self.scope.owner_id, self.now), original)
+            recovered = list(conn.execute(select(outbox).where(outbox.c.event_type == 'budget.recovery_completed')).mappings())
+            self.assertEqual(len(recovered), 2)
+            self.assertEqual(next(r['payload'] for r in recovered if r['aggregate_id'] == previous['operation_id']), previous)
+        self.assertEqual((self.repo.get_budget('owner-budget')['spent_microusd'],
+            self.repo.get_budget('owner-budget')['reserved_microusd']), (0, 0))
+        changed = copy.deepcopy(request); changed['entries'][0]['actual_cost_microusd'] = 0
+        with self.assertRaises(Conflict):
+            reconcile(self.repo, changed, apply=True)
+
+    def test_legacy_tenant_fallback_requires_original_manual_receipt_and_uses_legal_draining_transition(self):
+        identity = self.ended(legacy='targon', state='draining')
+        with self.assertRaisesRegex(Conflict, 'node_scope_mismatch'):
+            inspect_reference(self.repo, self.scope.tenant_id, 'instance', identity)
+        request = self.reviewed_request(identity)
+        reconcile(self.repo, request, apply=True)
+        self.assertEqual(self.repo.list_instance_intents()[0]['state'], 'destroyed')
+        self.assertIsNone(self.repo.list_instance_intents()[0]['actual_cost_microusd'])
+
+    def test_identityless_legacy_needs_existing_review_and_all_accounts_same_tenant(self):
+        identity = self.ended(legacy='lium')
+        self.reviewed_request(identity)
+        with self.repo.transaction() as conn:
+            conn.execute(update(budget_accounts).values(tenant_id='foreign'))
+        with self.assertRaisesRegex(Conflict, 'tenant_mismatch'):
+            self.reviewed_request(identity)
+        with self.repo.transaction() as conn:
+            conn.execute(update(budget_accounts).values(tenant_id=self.scope.tenant_id))
+            conn.execute(update(operator_nodes).values(payload={}))
+            conn.execute(scaler_receipts.delete())
+        with self.assertRaisesRegex(Conflict, 'node_scope_mismatch'):
+            self.reviewed_request(identity)
+
+    def test_incomplete_nonempty_stale_wrong_account_or_nonterminal_run_never_releases(self):
+        identity = self.ended()
+        request = self.reviewed_request(identity)
+        for changes in ({'complete': False}, {'instance_ids': ['live']}, {'observed_at': self.now-121},
+                        {'account_binding_sha256': 'f'*64}, {'provider': 'targon'},
+                        {'owned_run': {**request['entries'][0]['provider_absence']['owned_run'], 'status': 'running'}},
+                        {'owned_run': {**request['entries'][0]['provider_absence']['owned_run'], 'run_id': str(uuid.uuid4())}},
+                        {'owned_run': {**request['entries'][0]['provider_absence']['owned_run'], 'binding_sha256': 'f'*64}}):
+            with self.subTest(changes=changes):
+                invalid = copy.deepcopy(request); invalid['entries'][0]['provider_absence'].update(changes)
+                with self.assertRaises(Conflict):
+                    reconcile(self.repo, invalid, apply=True)
+        invalid = copy.deepcopy(request)
+        invalid['reviewed_provider_accounts'] = {'targon': 'a'*64}
+        invalid['entries'][0]['provider_absence']['account_binding_sha256'] = None
+        with self.assertRaisesRegex(Conflict, 'absence_unconfirmed'):
+            reconcile(self.repo, invalid, apply=True)
+        self.assertGreater(self.repo.get_budget('owner-budget')['reserved_microusd'], 0)
+
+    def test_original_start_command_cas_and_other_live_sibling_block_batch(self):
+        first, second = self.ended(), self.ended('start-2')
+        request = self.reviewed_request(first)
+        with self.repo.transaction() as conn:
+            node = conn.execute(select(operator_nodes).where(operator_nodes.c.intent_id == first)).mappings().one()
+            conn.execute(update(operator_commands).where(operator_commands.c.id == node['command_id']).values(reason_code='changed'))
+        with self.assertRaisesRegex(Conflict, 'snapshot_changed'):
+            reconcile(self.repo, request, apply=True)
+        with self.repo.transaction() as conn:
+            conn.execute(update(operator_nodes).where(operator_nodes.c.intent_id == second).values(command_id=node['command_id'], ordinal=1))
+        with self.assertRaisesRegex(Conflict, 'sibling_unresolved'):
+            reconcile(self.repo, self.reviewed_request(first), apply=True)
+        reconcile(self.repo, self.reviewed_request(first, second), apply=True)
+        self.assertEqual(self.repo.get_budget('owner-budget')['reserved_microusd'], 0)
+
+    def test_protected_identity_and_changed_account_refuse(self):
+        identity = self.ended()
+        with self.repo.transaction() as conn:
+            conn.execute(update(instance_intents).where(instance_intents.c.id == identity).values(provider_instance_id='56336890'))
+        with self.assertRaisesRegex(Conflict, 'protected_instance'):
+            reconcile(self.repo, self.reviewed_request(identity), apply=True)
+        with self.repo.transaction() as conn:
+            conn.execute(update(instance_intents).where(instance_intents.c.id == identity).values(provider_instance_id=None))
+        request = self.reviewed_request(identity)
+        with self.repo.transaction() as conn:
+            conn.execute(update(budget_accounts).values(spent_microusd=1))
+        with self.assertRaisesRegex(Conflict, 'snapshot_changed'):
+            reconcile(self.repo, request, apply=True)
+        with self.repo.transaction() as conn:
+            conn.execute(update(budget_accounts).values(reserved_microusd=0))
+        with self.assertRaisesRegex(Conflict, 'counter_underflow'):
+            reconcile(self.repo, self.reviewed_request(identity), apply=True)
+
+    def test_live_worker_and_historical_unstopped_attempt_are_not_removal_authority(self):
+        identity = self.ended(legacy='targon', state='destroying')
+        job = self.job()
+        with self.repo.transaction() as conn:
+            conn.execute(insert(registered_workers).values(id='busy-worker', pool='test-pool', provider='targon',
+                instance_id='wrk-ended', spec={}, spec_hash='e'*64, state='busy', current_job_id=job['id'],
+                drain_requested=1, fence=1, expires_at=self.now+60, updated_at=self.now))
+        with self.assertRaisesRegex(Conflict, 'worker_busy'):
+            reconcile(self.repo, self.reviewed_request(identity), apply=True)
+        queue = TaskQueue(self.repo)
+        claim = queue.claim('busy-worker', 'test-pool')
+        queue.begin_submission(claim.lease)
+        with self.repo.transaction() as conn:
+            conn.execute(update(registered_workers).values(state='retired', current_job_id=None))
+        with self.assertRaisesRegex(Conflict, 'upstream_unresolved'):
+            reconcile(self.repo, self.reviewed_request(identity), apply=True)
+        with self.repo.transaction() as conn:
+            conn.execute(update(attempts).values(status='cancelled', upstream_stopped=1))
+            conn.execute(update(jobs).where(jobs.c.id == job['id']).values(
+                status='queued', lease_worker_id=None, lease_expires_at=None))
+        with self.assertRaisesRegex(Conflict, 'worker_busy'):
+            reconcile(self.repo, self.reviewed_request(identity), apply=True)
+
+    def test_only_audited_ended_legacy_fence_skips_provider_observation(self):
+        from studio_platform.operator_controller import OperatorController
+        identity = self.ended(legacy='targon', state='destroying')
+        reconcile(self.repo, self.reviewed_request(identity), apply=True)
+        controller = object.__new__(OperatorController)
+        controller.repo, controller.service = self.repo, Mock()
+        controller.service.registry.get.side_effect = RuntimeError('original observation reached')
+        with self.repo.engine.connect() as conn:
+            node = dict(conn.execute(select(operator_nodes).where(operator_nodes.c.intent_id == identity)).mappings().one())
+        self.assertEqual(controller._observe(node), 'stopped')
+        controller.service.registry.get.assert_not_called()
+        for changes in ({'operation_id': str(uuid.uuid4())}, {'intent_id': str(uuid.uuid4())}):
+            altered = {**node, 'payload': {**node['payload'], 'settlement_recovery': {
+                **node['payload']['settlement_recovery'], **changes}}}
+            with self.assertRaisesRegex(RuntimeError, 'original observation reached'):
+                controller._observe(altered)
+        with self.repo.transaction() as conn:
+            conn.execute(update(instance_intents).where(instance_intents.c.id == identity).values(state='creation_unknown'))
+        with self.assertRaisesRegex(RuntimeError, 'original observation reached'):
+            controller._observe(node)
+
+    def test_evidence_that_expires_while_waiting_for_account_lock_refuses_without_writes(self):
+        identity = self.ended()
+        request, lock = self.reviewed_request(identity), self.repo._locked
+        def slow_lock(conn, statement):
+            result = lock(conn, statement)
+            if getattr(statement, 'get_final_froms', lambda: [])() == [budget_accounts]:
+                self.now += 121
+            return result
+        with patch.object(self.repo, '_locked', side_effect=slow_lock):
+            with self.assertRaisesRegex(Conflict, 'absence_unconfirmed'):
+                reconcile(self.repo, request, apply=True)
+        self.assertGreater(self.repo.get_budget('owner-budget')['reserved_microusd'], 0)
