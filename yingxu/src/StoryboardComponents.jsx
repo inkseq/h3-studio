@@ -521,10 +521,10 @@ export function ShotEditor({shotId, onClose, inline,wide,onWide}) {const {t:tr,l
 
       <div className="modetabs" role="tablist" aria-label={tr('storyboard.finish13')}>
         {['FL', 'REF'].map(k => (
-          <button key={k} role="tab" aria-selected={info.mode === k} className={'mt ' + k.toLowerCase() + (info.mode === k ? ' on' : '')} onClick={() => upd({mode: k})}>
-            <b>{MODE_LABEL[k]}</b><small>{k === 'FL' ? tr('storyboard.detail60') : tr('storyboard.detail61')}</small></button>))}
+          <button key={k} role="tab" title={k === 'FL' ? tr('storyboard.detail60') : tr('storyboard.detail61')} aria-selected={info.mode === k} className={'mt ' + k.toLowerCase() + (info.mode === k ? ' on' : '')} onClick={() => upd({mode: k})}>
+            <b>{MODE_LABEL[k]}</b></button>))}
       </div>
-      <div className={'modepanel ' + info.mode.toLowerCase()}>
+      <p className="mode-help muted">{tr(info.mode === 'FL' ? 'storyboard.detail60' : 'storyboard.detail61')}</p><div className={'modepanel ' + info.mode.toLowerCase()}>
         {info.frameInputs && <>
           <div className="slots">
             <Slot onFiles={files=>dispatch({type:'uploadFiles',files,target:{kind:'shot',shot:shot.id,slot:'start'}})} id={'slot:start:'+shot.id} label={tr('storyboard.detail79')} hint={tr('storyboard.detail81')} onPick={openPicker('start')}
