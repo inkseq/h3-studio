@@ -584,3 +584,7 @@ inventory.json
 
 !studio_platform/universal_trash.py
 !test_universal_trash.py
+!LIBRARY-STORAGE.md
+!studio_platform/library.py
+!studio_platform/library_imports.py
+!test_library.py

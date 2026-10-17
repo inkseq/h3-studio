@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 
 
 FRONTEND_CONTRACT = "sixnine-web-v1"
-HTML_ROUTES = frozenset({"/", "/index.html", "/app", "/app/", "/freestyle", "/freestyle/", "/quick-chat", "/quick-chat/", "/operator", "/operator/", "/settings", "/settings/"})
+HTML_ROUTES = frozenset({"/", "/index.html", "/app", "/app/", "/freestyle", "/freestyle/", "/quick-chat", "/quick-chat/", "/operator", "/operator/", "/settings", "/settings/", "/library", "/library/", "/trash", "/trash/"})
 STATIC_CACHE_SCOPE_KEY = "sixnine.frontend_cache"
 _COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _HASHED_ASSET = re.compile(r".+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+\Z")

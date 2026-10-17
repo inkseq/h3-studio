@@ -175,6 +175,7 @@ def capabilities(settings):
     from .execution_profiles import public_profiles, default_profile_id
     profiles = public_profiles(settings)
     return {"capabilities_version": VERSION, "recipes": recipes, "deployment_profiles": profiles,
+        "library":__import__("studio_platform.library",fromlist=["contract"]).contract(),
         "content_lifecycle":{"version":1,"preview":"/v1/trash/preview","actions":"/v1/trash/actions",
             "list":"/v1/trash","target_kinds":["project","entity","look","location_version","asset","artifact","take"],
             "automatic_expiry":False,"permanent_confirmation_required":True,"conversation_history":"/v1/quick-chat/sessions/history/preview"},

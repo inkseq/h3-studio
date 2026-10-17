@@ -96,6 +96,8 @@ def validate_project(project, max_bytes=8*1024*1024):
                 or not isinstance(data["locationId"], str)
                 or data["locationId"] and not ID.fullmatch(data["locationId"])):
             raise ValueError("地点绑定无效")
+        if "libraryFileIds" in data and (e["type"] not in {"character","location","prop"} or not isinstance(data["libraryFileIds"],list) or any(not isinstance(ident,str) for ident in data["libraryFileIds"]) or len(set(data["libraryFileIds"]))!=len(data["libraryFileIds"])):
+            raise ValueError("Invalid profile filing references. / 档案文件引用无效。")
         if "referenceAssetIds" in data and (e["type"] != "location"
                 or not isinstance(data["referenceAssetIds"], list) or len(data["referenceAssetIds"]) > 100
                 or any(not isinstance(v, str) or not ID.fullmatch(v) for v in data["referenceAssetIds"])
@@ -193,6 +195,8 @@ def validate_project(project, max_bytes=8*1024*1024):
         if confirmed_at is not None and (not isinstance(confirmed_at, str) or len(confirmed_at) > 80):
             raise ValueError("字幕确认时间无效")
     for e in entities:
+        if any(v not in lookup or lookup[v]["type"] not in {"image","video","audio"} for v in e["data"].get("libraryFileIds",[])):
+            raise ValueError("Filed media must belong to this story. / 归档文件必须属于当前故事。")
         location_id = e["data"].get("locationId")
         if location_id and (location_id not in lookup or lookup[location_id]["type"] != "location"):
             raise ValueError("绑定的地点不存在")

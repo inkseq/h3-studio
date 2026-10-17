@@ -708,4 +708,6 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
     app.add_middleware(AlertCountersMiddleware)
     from .universal_trash import register_routes as register_trash_routes
     register_trash_routes(app)
+    from .library import register_routes as register_library_routes
+    register_library_routes(app)
     return app

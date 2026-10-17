@@ -101,3 +101,11 @@ Example response projection: `{"preview_id":"PREVIEW","expires_at":1790000000}`;
 ```
 
 This is a user-facing summary example, not a fabricated API receipt. See recovery for stale settings, owner cap, human confirmation and unknown charges.
+
+
+### Find and import library references
+1. Read `GET /v1/library?tag=rain&type=file`; follow `next_offset`.
+2. Inspect `/v1/library/usage` for a returned target; unused is not purge permission.
+3. Tag/file with original story CAS or explicitly import to another authorized story.
+4. Keep the import key/body; observe its receipt before resuming. See [API](reference/api.md#project-scoped-library-and-explicit-imports-238).
+Example: `python scripts/sixnine.py request GET '/v1/library?tag=rain'`. Imports never generate.

@@ -154,6 +154,8 @@ def delete_entity(project, entity_id, cascade):
                 if retained != look["imageIds"]:
                     look["version"] += 1
                 look["imageIds"] = retained
+        if "libraryFileIds" in data:
+            data["libraryFileIds"] = [ident for ident in data["libraryFileIds"] if ident not in deleted]
         if "imageIds" in data:
             data["imageIds"] = [ident for ident in data["imageIds"] if ident not in deleted]
         for version in data.get("versions", []):
@@ -260,7 +262,9 @@ class Guided:
                 raise ValueError("每次需要1至200个编辑操作")
             for index, action in enumerate(actions):
                 validate_action_fields(action)
-                if action.get("op") in {"asset.attach", "artifact.adopt"}:
+                if action.get("op", "").startswith("library."):
+                    resolved[index] = self.app.state.library.resolve_action(principal,project_id,action)
+                elif action.get("op") in {"asset.attach", "artifact.adopt"}:
                     resolved[index] = self.resolve(principal, project_id, action)
                 elif action.get("op") == "shot.configure_generation":
                     from .generation_draft import prepare_patch
@@ -373,7 +377,10 @@ class Guided:
     def apply(self, project, action, resolved=None):
         validate_action_fields(action)
         op = action.get("op")
-        if op == "storyboard.select":
+        if op.startswith("library."):
+            from .library import apply_action
+            apply_action(project,action,resolved)
+        elif op == "storyboard.select":
             self.apply(project, {**action, "op": "artifact.adopt", "select": True}, resolved)
         elif op.startswith("storyboard."):
             from .storyboard_versions import apply_action
@@ -665,8 +672,8 @@ def register_routes(app):
             return service.mutate(p, project_id, body, idempotency_key)
         except Conflict as error:
             if str(error) == "document_version_conflict" and body.get("actions") and any(
-                    isinstance(a, dict) and str(a.get("op", "")).startswith("storyboard.") for a in body["actions"]) and all(
-                    isinstance(a, dict) and (str(a.get("op", "")).startswith("storyboard.") or a.get("op") == "shot.configure_generation") for a in body["actions"]):
+                    isinstance(a, dict) and str(a.get("op", "")).startswith(("storyboard.","library.")) for a in body["actions"]) and all(
+                    isinstance(a, dict) and (str(a.get("op", "")).startswith(("storyboard.","library.")) or a.get("op") == "shot.configure_generation") for a in body["actions"]):
                 from fastapi.responses import JSONResponse
                 return JSONResponse({"detail": {"code": "document_version_conflict", "project_id": project_id,
                     "no_mutation_committed": True, "request_hash": request_hash(body),

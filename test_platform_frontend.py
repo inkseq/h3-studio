@@ -48,6 +48,7 @@ class FrontendTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
 
     def test_known_html_routes_fall_back_only_before_first_publication(self):
+        self.assertTrue({"/library", "/library/", "/trash", "/trash/"}.issubset(HTML_ROUTES))
         for route in sorted(HTML_ROUTES):
             with self.subTest(route=route):
                 response = self.client.get(route)
