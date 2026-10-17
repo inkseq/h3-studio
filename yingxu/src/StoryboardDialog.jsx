@@ -1,3 +1,4 @@
+import {X} from 'lucide-react';
 import {translate} from './i18n/locale.js';
 import {useI18n} from './i18n/I18nProvider.jsx';
 import React,{useEffect,useRef,useState} from 'react';
@@ -12,10 +13,10 @@ function StoryboardDialog({title,children,onClose,busy=false}){const {t,locale}=
     node.showModal();
     return()=>{node.close();queueMicrotask(()=>{if(opener.current?.isConnected)opener.current.focus();});};
   },[]);
-  return createPortal(<dialog ref={dialog} className="sb-portal sb-dialog" aria-label={title}
+  return createPortal(<dialog ref={dialog} className="qc-dialog sb-portal sb-dialog" aria-label={title}
     onCancel={event=>{event.preventDefault();if(!busy)onClose();}}
     onClick={event=>{if(event.target===event.currentTarget&&!busy)onClose();}}>
-    <div className="picker-head"><h2>{title}</h2><button type="button" className="x big" aria-label={t('storyboard.copy1')} disabled={busy} onClick={onClose}>×</button></div>
+    <div className="picker-head"><h2>{title}</h2><button type="button" className="x big" aria-label={t('storyboard.copy1')} disabled={busy} onClick={onClose}><X size={18}/></button></div>
     {children}
   </dialog>,document.body);
 }
@@ -43,23 +44,4 @@ export function StoryboardNameDialog({title,label=null,onSubmit,onClose}){const 
     finally{pending.current=false;setBusy(false);}
   }
   return <StoryboardDialog title={title} onClose={onClose} busy={busy}><StoryboardNameForm locale={locale} label={label||t('storyboard.name')} name={name} onName={setName} onSubmit={submit} onCancel={onClose} busy={busy} error={error}/></StoryboardDialog>;
-}
-
-export function StoryboardDeleteDialog({onConfirm,onClose}){const {t,locale}=useI18n();
-  const [busy,setBusy]=useState(false),[error,setError]=useState(''),pending=useRef(false);
-  async function confirm(){
-    if(pending.current)return;
-    pending.current=true;setBusy(true);setError('');
-    try{
-      const receipt=await onConfirm();
-      if(receipt?.ok===false){setError(receipt.error||t('storyboard.copy7'));return;}
-      onClose();
-    }catch(problem){setError(problem?.message||t('storyboard.copy8'));}
-    finally{pending.current=false;setBusy(false);}
-  }
-  return <StoryboardDialog title={t('storyboard.copy9')} onClose={onClose} busy={busy}>
-    <p>{t('storyboard.copy10')}</p>
-    {error&&<p role="alert" className="warn">{error}</p>}
-    <div className="row sb-dialog-actions"><button type="button" autoFocus disabled={busy} onClick={onClose}>{t('storyboard.copy2')}</button><button type="button" className="danger" disabled={busy} onClick={confirm}>{busy?t('storyboard.copy11'):t('storyboard.copy12')}</button></div>
-  </StoryboardDialog>;
 }

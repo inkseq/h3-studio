@@ -85,3 +85,63 @@ test('bare authentication/conflict errors preserve original history confirmation
  const calls=[];let first=true,wrong=true;const {controller}=await setup({actionHistory:async(body,key)=>{calls.push({body:structuredClone(body),key});if(first){first=false;throw Error('lost');}throw Object.assign(Error('expired'),{status:409,detail:{resource:'quick_chat_history',action:'confirm',code:'history_preview_expired',no_mutation_committed:true,request_hash:wrong?'foreign':await digest(body)}});}});
  await selected(controller);await assert.rejects(controller.confirmHistory());await assert.rejects(controller.recover());assert.ok(controller.getState().pending);wrong=false;await assert.rejects(controller.recover());assert.equal(controller.getState().pending,null);assert.deepEqual(calls[0],calls[1]);assert.deepEqual(calls[0],calls[2]);
 });
+
+test('row metadata renames the captured row without opening it or changing the current draft',async()=>{
+ const rows=[row('s'),row('other',{title:'Other creation',version:7})],calls=[];
+ const {controller,storage}=await setup({sessions:async()=>({sessions:structuredClone(rows)}),session:async id=>({session:structuredClone(rows.find(r=>r.id===id))}),patchSession:async(id,body,key)=>{calls.push({id,body:structuredClone(body),key});const i=rows.findIndex(r=>r.id===id);rows[i]={...rows[i],...body,version:rows[i].version+1};return {session:structuredClone(rows[i])};}});
+ await controller.open('s');saveDraft('owner','s','A newer unsent draft',{storage,edit:true});const current=structuredClone(controller.getState().session);
+ await controller.patchRow({account:'owner',id:'other',version:7},{title:'Renamed other'});
+ assert.equal(calls.length,1);assert.equal(calls[0].id,'other');assert.deepEqual(calls[0].body,{expected_version:7,title:'Renamed other'});
+ assert.deepEqual(controller.getState().session,current);assert.equal(readDraft('owner','s',storage),'A newer unsent draft');assert.equal(controller.getState().sessions.find(r=>r.id==='other').title,'Renamed other');assert.equal(controller.getState().pending,null);
+});
+
+test('row metadata rejects foreign/stale/ended targets and unsupported fields before creating a pending command',async()=>{
+ let writes=0;const {controller}=await setup({sessions:async()=>({sessions:[row(),row('ended',{trash_state:'trashed'})]}),patchSession:async()=>{writes++;return {};}});
+ for(const target of [{account:'foreign',id:'s',version:3},{account:'owner',id:'s',version:2},{account:'owner',id:'missing',version:3},{account:'owner',id:'ended',version:3}])await assert.rejects(controller.patchRow(target,{title:'New title'}));
+ for(const patch of [{next_settings:{}},{test_accepted:true},{review_hold:true},{title:''},{is_test:'true'},{}])await assert.rejects(controller.patchRow({account:'owner',id:'s',version:3},patch));
+ assert.equal(writes,0);assert.equal(controller.getState().pending,null);
+});
+
+test('unknown row rename recovers exactly its original body/key while another session stays open',async()=>{
+ const rows=[row(),row('other',{version:7,title:'Original other'})],calls=[],storage=memory();let first=true;
+ const client=fake({sessions:async()=>({sessions:structuredClone(rows)}),session:async id=>({session:structuredClone(rows.find(r=>r.id===id))}),patchSession:async(id,body,key)=>{calls.push({id,body:structuredClone(body),key});const i=rows.findIndex(r=>r.id===id);rows[i]={...rows[i],title:body.title,version:8};if(first){first=false;throw Error('lost acknowledgement');}return {session:structuredClone(rows[i])};}});
+ let controller=createQuickChatController({client,storage});await controller.setAccount('owner');await controller.open('s');saveDraft('owner','s','Unsent',{storage,edit:true});
+ await assert.rejects(controller.patchRow({account:'owner',id:'other',version:7},{title:'Saved other'}));const original=structuredClone(controller.getState().pending);
+ assert.equal(original.sessionId,null);assert.deepEqual(original.metadataTarget,{account:'owner',id:'other',version:7});assert.equal(controller.getState().session.id,'s');
+ controller=createQuickChatController({client,storage});await controller.setAccount('owner');await controller.open('s');await controller.recover();
+ assert.deepEqual(calls[0],calls[1]);assert.equal(controller.getState().pending,null);assert.equal(controller.getState().session.id,'s');assert.equal(readDraft('owner','s',storage),'Unsent');
+});
+
+test('late row flag acknowledgement cannot clear another account or its original owner journal',async()=>{
+ let finish;const {controller,storage}=await setup({patchSession:()=>new Promise(resolve=>finish=()=>resolve({session:row('s',{version:4,is_test:true})}))});
+ const updating=controller.patchRow({account:'owner',id:'s',version:3},{is_test:true});const original=structuredClone(controller.getState().pending);await controller.setAccount('next');finish();await assert.rejects(updating);
+ assert.equal(controller.getState().account,'next');assert.equal(controller.getState().pending,null);assert.deepEqual(JSON.parse(storage.getItem('yingxu:quick-chat:operation:owner')),original);
+});
+
+test('malformed row acknowledgements preserve the exact pending metadata request',async()=>{
+ for(const returned of [row('wrong',{title:'New',version:4}),row('s',{title:'Different',version:4}),row('s',{title:'New',version:3})]){
+  const {controller}=await setup({patchSession:async()=>({session:returned})});await assert.rejects(controller.patchRow({account:'owner',id:'s',version:3},{title:'New'}));assert.deepEqual(controller.getState().pending.body,{expected_version:3,title:'New'});
+ }
+});
+
+test('fresh session reads update sidebar generating eligibility instead of retaining an old trashable flag',async()=>{
+ const {controller}=await setup({session:async()=>({session:row('s',{trashable:false,blocked_reason:'active_work'})})});
+ assert.equal(controller.getState().sessions[0].trashable,true);await controller.open('s');
+ assert.equal(controller.getState().sessions[0].trashable,false);assert.equal(controller.getState().sessions[0].blocked_reason,'active_work');
+});
+
+test('recovering a lost row rename acknowledges its exact key without rolling back newer loaded settings',async()=>{
+ let live=row('s',{next_settings:{controls:{duration:5}}}),originalReceipt;const calls=[],opens=[];
+ const {controller,storage}=await setup({sessions:async()=>({sessions:[structuredClone(live)]}),session:async id=>{opens.push(id);return {session:structuredClone(live)};},patchSession:async(id,body,key)=>{
+  calls.push({id,body:structuredClone(body),key});if(calls.length===1){live={...live,title:body.title,version:4};originalReceipt=structuredClone(live);throw Error('lost acknowledgement');}return {session:structuredClone(originalReceipt)};
+ }});
+ await controller.open('s');await assert.rejects(controller.patchRow({account:'owner',id:'s',version:3},{title:'Renamed'}));
+ const pending=structuredClone(controller.getState().pending);
+ // Another client changes generation settings, then this tab reads that v5.
+ live={...live,version:5,next_settings:{controls:{duration:10}}};await controller.open('s');
+ saveDraft('owner','s','Newer unsent prompt',{storage,edit:true});const loaded=structuredClone(controller.getState().session),openCount=opens.length;
+ await controller.recover();
+ assert.deepEqual(calls[0],calls[1]);assert.equal(calls.length,2);assert.equal(calls[1].key,pending.key);assert.deepEqual(calls[1].body,pending.body);
+ assert.deepEqual(controller.getState().session,loaded);assert.equal(controller.getState().session.version,5);assert.equal(controller.getState().session.next_settings.controls.duration,10);
+ assert.equal(opens.length,openCount);assert.equal(controller.getState().pending,null);assert.equal(readDraft('owner','s',storage),'Newer unsent prompt');
+});

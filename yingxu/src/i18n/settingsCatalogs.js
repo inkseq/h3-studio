@@ -46,3 +46,6 @@ export const settingsCatalogs = {
     'errors.spending_usage_unconfirmed':'当前费用尚未确认，请先核对已有费用后再提交。',
   },
 };
+
+settingsCatalogs.en['settings.costDetails']='Cost details';
+settingsCatalogs.zh['settings.costDetails']='费用详情';

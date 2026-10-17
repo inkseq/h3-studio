@@ -55,11 +55,11 @@ export default function QuickChatControls({capabilities,settings,copiesMax=4,bin
   const duration=schema.duration,resolution=schema.resolution,ratio=schema.aspect_ratio,audio=schema.generate_audio;
   const labels={'16:9':t('chatControls.copy11'),'9:16':t('chatControls.copy12'),'1:1':t('chatControls.copy13')};
   const groupLabels={'音画日程 · 实验项':t('adjunct.experimentalSchedule'),'参考与时间':t('chatControls.copy14'),'随机性与采样':t('chatControls.copy15'),'运行与导出':t('chatControls.copy16')};
-  return <ChatDialog title={scope==='next'?t('chatControls.copy17'):t('chatControls.copy18')} onClose={onClose} className="qc-controls-dialog" eyebrow="GENERATION SETTINGS">
+  return <ChatDialog title={scope==='next'?t('chatControls.copy17'):t('chatControls.copy18')} onClose={onClose} className="qc-controls-dialog" eyebrow={t('quickView.advanced')}>
     <form onSubmit={save}>
       <p className="qc-muted">{t('workspace.copy73')}</p>
       {!recipe?<p role="alert">{t('workspace.copy74')}</p>:<>
-        <DeploymentProfileSelect capabilities={capabilities} value={draft.deployment_profile_id} mode={recipe?.mode} disabled={busy} onChange={value=>setDraft({...draft,deployment_profile_id:value})}/><label className="qc-field"><span>{t('workspace.copy75')}</span><select aria-label={t('workspace.copy75')} value={pendingMode?.intent||mode} onChange={e=>changeMode(e.target.value)}>
+        <details className="quick-model-details"><summary>{t('quickView.modelDetails')}</summary><DeploymentProfileSelect capabilities={capabilities} value={draft.deployment_profile_id} mode={recipe?.mode} disabled={busy} onChange={value=>setDraft({...draft,deployment_profile_id:value})}/></details><label className="qc-field"><span>{t('workspace.copy75')}</span><select aria-label={t('workspace.copy75')} value={pendingMode?.intent||mode} onChange={e=>changeMode(e.target.value)}>
           <option value="auto" disabled={effectiveMode('auto')!==recipe.mode&&!modeAvailability(availability,capabilities,draft,effectiveMode('auto')).available}>{t('workspace.copy76')}</option>{['fl','ref'].filter(value=>capabilities.recipes.some(item=>item.mode===value)).map(value=>{const status=modeAvailability(availability,capabilities,draft,value,undefined,locale);return <option key={value} value={value} disabled={!status.available}>{value==='fl'?t('chatControls.copy19'):t('chatControls.copy20')} · {status.label}</option>;})}
         </select></label>
         <GenerationAvailability snapshot={availability} capabilities={capabilities} settings={draft} operator={operator} onRefresh={onRefreshAvailability} checking={availabilityChecking}/>

@@ -142,3 +142,17 @@ export const operatorDetailCatalogs = {
     "operator.more.extractedAmount": " · 已解压 {bytes}"
   }
 };
+
+// English singulars; Chinese count labels retain their normal form.
+operatorDetailCatalogs.en['operator.more.total.one']='{count} machine / {count} GPU';operatorDetailCatalogs.zh['operator.more.total.one']=operatorDetailCatalogs.zh['operator.more.total'];
+operatorDetailCatalogs.en['operator.more.checked.one']='Start conditions checked for {count} machine';operatorDetailCatalogs.zh['operator.more.checked.one']=operatorDetailCatalogs.zh['operator.more.checked'];
+operatorDetailCatalogs.en['operator.more.start.one']='Start {count} machine';operatorDetailCatalogs.zh['operator.more.start.one']=operatorDetailCatalogs.zh['operator.more.start'];
+operatorDetailCatalogs.en['operator.more.checkStart.one']='Check and start {count} machine';operatorDetailCatalogs.zh['operator.more.checkStart.one']=operatorDetailCatalogs.zh['operator.more.checkStart'];
+operatorDetailCatalogs.en['operator.more.waitingLoss.one']='{count} {mode} job will have no available machine';operatorDetailCatalogs.zh['operator.more.waitingLoss.one']=operatorDetailCatalogs.zh['operator.more.waitingLoss'];
+operatorDetailCatalogs.en['operator.more.videos.one']='{count} video';operatorDetailCatalogs.zh['operator.more.videos.one']=operatorDetailCatalogs.zh['operator.more.videos'];
+operatorDetailCatalogs.en['operator.more.offerCount.one']='{count} offer{available}';operatorDetailCatalogs.zh['operator.more.offerCount.one']=operatorDetailCatalogs.zh['operator.more.offerCount'];
+operatorDetailCatalogs.en['operator.more.groupPrice.one']='{count} machine · ≤ {price}/hour';operatorDetailCatalogs.zh['operator.more.groupPrice.one']=operatorDetailCatalogs.zh['operator.more.groupPrice'];
+operatorDetailCatalogs.en['operator.more.availableOffers.one']='{count} available reference configuration · Quantity is not reserved';operatorDetailCatalogs.zh['operator.more.availableOffers.one']=operatorDetailCatalogs.zh['operator.more.availableOffers'];
+operatorDetailCatalogs.en['operator.more.submissionTiming.one']='Average submission to delivery: {seconds} seconds · {count} successful sample';operatorDetailCatalogs.zh['operator.more.submissionTiming.one']=operatorDetailCatalogs.zh['operator.more.submissionTiming'];
+operatorDetailCatalogs.en['operator.more.stageSamples.one']='{count} successful stage sample · {start} to {end}';operatorDetailCatalogs.zh['operator.more.stageSamples.one']=operatorDetailCatalogs.zh['operator.more.stageSamples'];
+operatorDetailCatalogs.en['operator.more.files.one']='{count} file';operatorDetailCatalogs.zh['operator.more.files.one']=operatorDetailCatalogs.zh['operator.more.files'];

@@ -1,4 +1,5 @@
-import {microsToDollars} from './money.js';
+import {microsToDollars,formatMoneyMicros} from './money.js';
+import {Bot} from 'lucide-react';
 import {assistantCatalogs} from './i18n/assistantCatalogs.js';
 import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {useI18n} from './i18n/I18nProvider.jsx';
@@ -7,7 +8,7 @@ import {capMicros,assistantScope,createAssistantOperations,creatorName,assistant
 import {usePageActive} from './AppRouteCache.jsx';
 import './v2/ops-adapter.css';
 const dollars=microsToDollars;
-export function AssistantBadge({createdBy}){const {t}=useI18n(),name=creatorName(createdBy);return name?<span className="assistant-badge" title={t('assistants.badge',{name})}>🤖 {name}</span>:null;}
+export function AssistantBadge({createdBy}){const {t}=useI18n(),name=creatorName(createdBy);return name?<span className="assistant-badge" title={t('assistants.badge',{name})}><Bot size={13} aria-hidden="true"/>{name}</span>:null;}
 export default function AssistantConnections({account,sessionId,projectId,onLogin,embedded=false,active=true}){
  const {t,locale}=useI18n(),client=useMemo(()=>{const c=createQuickChatClient();c.setAccount(account);return c;},[account]);
  const pageActive=usePageActive(),visible=useRef(pageActive&&active);visible.current=pageActive&&active;
@@ -45,7 +46,7 @@ function ConnectionRow({row,busy,t,scopeLabel,permissionLabel,onPatch,onRevoke,o
   if(result)setDraft(null);
  }catch{setError(t('assistants.invalid'));}}
  return <article><h3>{row.name} · {t('assistants.'+(row.paused?'paused':['pending','connected','expired','revoked','unavailable'].includes(row.status)?row.status:'unavailable'))}</h3><p>{scopeLabel(row.scope)} · {permissionLabel(row.permission)}</p>
- <p className="assistant-usage">{Number.isSafeInteger(row.usage?.projected_microusd)?t(row.daily_limit_microusd===0?'assistants.usageUnlimited':'assistants.usage',{amount:dollars(row.usage.projected_microusd),cap:dollars(row.daily_limit_microusd)}):t('assistants.usageUnknown')}</p>
+ <p className="assistant-usage">{Number.isSafeInteger(row.usage?.projected_microusd)?t(row.daily_limit_microusd===0?'assistants.usageUnlimited':'assistants.usage',{amount:formatMoneyMicros(row.usage.projected_microusd),cap:formatMoneyMicros(row.daily_limit_microusd)}):t('assistants.usageUnknown')}</p>
  <form onSubmit={save}><label>{t('assistants.cap')}<input inputMode="decimal" value={cap} onChange={e=>setDraft(old=>({value:e.target.value,version:old?.version??row.state_version}))} disabled={busy||!editable}/></label><small>{t('assistants.zero')}</small><button disabled={busy||!editable}>{t('assistants.saveCap')}</button>{draft&&<button type="button" disabled={busy} onClick={()=>setDraft(null)}>{t('assistants.reloadCap')}</button>}{error&&<p role="alert">{error}</p>}</form>
  <div className="assistant-actions"><button disabled={busy||!editable} onClick={()=>onPatch({expected_version:row.state_version,paused:!row.paused})}>{t(row.paused?'assistants.resume':'assistants.pause')}</button><button disabled={busy||closed} onClick={onRevoke}>{t('assistants.revoke')}</button><button disabled={busy} onClick={onActivity}>{t('assistants.activity')}</button></div></article>;
 }

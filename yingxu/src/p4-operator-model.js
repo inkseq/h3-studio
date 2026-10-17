@@ -1,3 +1,4 @@
+import {formatMoneyMicros} from './money.js';
 import {operatorReasonCodes} from './i18n/operatorReasonCatalogs.js';
 import {translate} from './i18n/locale.js';
 import {dstackProvider,dstackMode,dstackLifecycle} from './dstack-presentation.js';
@@ -10,7 +11,7 @@ export const finite=value=>typeof value==='number'&&Number.isFinite(value);
 export function workspaceStale(snapshot,now=Date.now()){
   return !!snapshot&&(!finite(snapshot.observed_at)||!finite(now)||now-snapshot.observed_at*1000>30000||snapshot.observed_at>(now+5000)/1000);
 }
-export const money=value=>finite(value)?'$'+(value/1e6).toFixed(value<100000?3:2):'—';
+export const money=value=>finite(value)?formatMoneyMicros(Math.round(value)):'—';
 export const time=(value,locale='zh')=>finite(value)?new Date(value*1000).toLocaleString(locale==='zh'?'zh-CN':'en'):'—';
 export const elapsed=(value,locale='zh')=>!finite(value)?'—':translate(locale,'operator.display.'+(value<60?'seconds':value<3600?'minutes':'hours'),{value:value<60?Math.round(value):value<3600?Math.round(value/60):(value/3600).toFixed(1)});
 export const terminal=node=>node?.state==='stopped'||node?.lifecycle_phase==='stopped';

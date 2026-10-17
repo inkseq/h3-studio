@@ -113,12 +113,15 @@ export function applyStoryboardAction(project, action, {chapterId,view} = {}) {
     return {};
   }
   if (action.type === 'add') {
-    const chapter = find(project,chapterId || view?.project.chapterId) || children(project,null).find(entity => entity.type === 'chapter')
-      || newStoryboardEntity(project,'chapter','第一章',null,{});
-    if (chapter?.type !== 'chapter') return false;
-    const scene = children(project,chapter.id).filter(entity => entity.type === 'scene').at(-1)
-      || newStoryboardEntity(project,'scene','新场景',chapter.id,{script:''});
-    const added = newStoryboardEntity(project,'shot','新镜头',scene.id,{seconds:5,prompt:'',script:'',cast:[],
+    if(action.title!==undefined&&(!text(action.title,160)||!action.title.trim())||action.sceneTitle!==undefined&&(!text(action.sceneTitle,160)||!action.sceneTitle.trim()))return false;
+    const requested=action.sceneId===undefined?null:find(project,action.sceneId);
+    if(action.sceneId!==undefined&&requested?.type!=='scene')return false;
+    const existing = find(project,chapterId || view?.project.chapterId) || children(project,null).find(entity => entity.type === 'chapter');
+    if(existing&&existing.type!=='chapter'||requested&&requested.parentId!==existing?.id)return false;
+    const chapter=existing||newStoryboardEntity(project,'chapter','第一章',null,{});
+    const scene = requested||children(project,chapter.id).filter(entity => entity.type === 'scene').at(-1)
+      || newStoryboardEntity(project,'scene',action.sceneTitle||'新场景',chapter.id,{script:''});
+    const added = newStoryboardEntity(project,'shot',action.title||'新镜头',scene.id,{seconds:5,prompt:'',script:'',cast:[],
       storyboard:{version:1,mode:'fl',quality:'draft',place:null,propIds:[],firstFrameId:'',lastFrameId:'',continuePrevious:false,extraRefs:[]}});
     return {id:added.id};
   }

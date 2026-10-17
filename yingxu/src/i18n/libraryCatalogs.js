@@ -189,3 +189,6 @@ export const libraryCatalogs = {
 
 Object.assign(libraryCatalogs.en,{'library.selected':'Selected {count}','library.clear':'Clear selection'});
 Object.assign(libraryCatalogs.zh,{'library.selected':'已选 {count} 项','library.clear':'取消选择'});
+
+libraryCatalogs.en['library.view.usedInOne']='In 1 story';
+libraryCatalogs.zh['library.view.usedInOne']='用在 1 个作品';

@@ -7,12 +7,12 @@ import {ChatDialog} from './QuickChatControls.jsx';
 import MediaLibraryUpload from './MediaLibraryUpload.jsx';
 import {store} from './store.js';
 import {cloudController as cloud} from './cloud-controller.js';
-import {UserRound,MapPin,Box,Files,Image as ImageIcon,Film,Music,SlidersHorizontal} from 'lucide-react';
+import {UserRound,MapPin,Box,Files,Image as ImageIcon,Film,Music,SlidersHorizontal,X} from 'lucide-react';
 import StudioHeader from './StudioHeader.jsx';
 import LibraryView from './v2/LibraryView.jsx';
 import {thumbnailQueue} from './library-thumbnails.js';
 const TYPE_ICONS={character:UserRound,location:MapPin,prop:Box,file:Files,image:ImageIcon,video:Film,audio:Music};
-function LibraryPanel({detail,title,onClose,children}){const [mobile,setMobile]=useState(()=>typeof window!=='undefined'&&window.matchMedia('(max-width:760px)').matches);useEffect(()=>{const q=window.matchMedia('(max-width:760px)'),update=()=>setMobile(q.matches);q.addEventListener('change',update);return()=>q.removeEventListener('change',update);},[]);useEffect(()=>{if(!detail||mobile)return;const escape=e=>{if(e.key==='Escape'){e.preventDefault();onClose();}};window.addEventListener('keydown',escape);return()=>window.removeEventListener('keydown',escape);},[detail,mobile,onClose]);return detail&&!mobile?<aside className="libp-detail" aria-label={title}><header><strong>{title}</strong><button onClick={onClose} aria-label={title+' ×'}>×</button></header>{children}</aside>:<ChatDialog title={title} onClose={onClose} className={detail?'library-detail-dialog':''}>{children}</ChatDialog>;}
+function LibraryPanel({detail,title,onClose,children}){const {t}=useI18n(),[mobile,setMobile]=useState(()=>typeof window!=='undefined'&&window.matchMedia('(max-width:760px)').matches);useEffect(()=>{const q=window.matchMedia('(max-width:760px)'),update=()=>setMobile(q.matches);q.addEventListener('change',update);return()=>q.removeEventListener('change',update);},[]);useEffect(()=>{if(!detail||mobile)return;const escape=e=>{if(e.key==='Escape'){e.preventDefault();onClose();}};window.addEventListener('keydown',escape);return()=>window.removeEventListener('keydown',escape);},[detail,mobile,onClose]);return detail&&!mobile?<aside className="libp-detail" aria-label={title}><header><strong>{title}</strong><button onClick={onClose} aria-label={t('trash.close')}><X size={16}/></button></header>{children}</aside>:<ChatDialog title={title} onClose={onClose} className={detail?'library-detail-dialog':''}>{children}</ChatDialog>;}
 const copy=value=>structuredClone(value),link=(project,entity)=>'/?'+new URLSearchParams({project,...(entity?{entity}:{})});
 export function LibraryMedia({row,api,detail=false}){
  const {t}=useI18n(),[failed,setFailed]=useState(false),[started,setStarted]=useState(null),release=useRef(null);

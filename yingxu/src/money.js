@@ -9,3 +9,13 @@ export function dollarsToMicros(value){
  const [whole,fraction='']=value.split('.'),n=BigInt(whole)*1000000n+BigInt(fraction.padEnd(6,'0'));
  if(n>MAX_MICROS)throw Error('invalid_money');return Number(n);
 }
+
+// Display only: retain exact microdollars for editing and all API contracts.
+export function formatMoneyMicros(value){
+  if(!Number.isSafeInteger(value))return '—';
+  const signed=BigInt(value),amount=signed<0n?-signed:signed;
+  if(amount>MAX_MICROS)return '—';
+  if(amount>0n&&amount<10000n)return signed<0n?'>-$0.01':'<$0.01';
+  const cents=(amount+5000n)/10000n;
+  return (signed<0n?'-':'')+'$'+String(cents/100n)+'.'+String(cents%100n).padStart(2,'0');
+}

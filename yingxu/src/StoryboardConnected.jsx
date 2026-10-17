@@ -1,5 +1,5 @@
 import TakeRecipe from './QuickChatTakeRecipe.jsx';
-import {microsToDollars} from './money.js';
+import {formatMoneyMicros} from './money.js';
 import {createQuickChatClient} from './quick-chat-client.js';
 import {useI18n} from './i18n/I18nProvider.jsx';
 import React,{useEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react';
@@ -40,7 +40,7 @@ function WorkbenchConfirmation({receipt,onClose}){
  const s=useSyncExternalStore(store.subscribe,store.getState,store.getState),scope=useRef({account:c.account,project:s.project.id});
  useEffect(()=>{ref.current.showModal();return()=>ref.current?.close();},[]);
  const same=scope.current.account===c.account&&scope.current.project===s.project.id&&receipt.project_version===s.workspace.serverVersion&&!s.workspace.dirty;
- const money=Number.isSafeInteger(receipt.estimate?.cost_microusd)&&receipt.estimate.cost_microusd>=0&&receipt.estimate.cost_microusd<=9000000000000000?'USD '+microsToDollars(receipt.estimate.cost_microusd):t('workbench.unknown');
+ const money=Number.isSafeInteger(receipt.estimate?.cost_microusd)&&receipt.estimate.cost_microusd>=0&&receipt.estimate.cost_microusd<=9000000000000000?formatMoneyMicros(receipt.estimate.cost_microusd):t('workbench.unknown');
  return <dialog className="modal wide sb-confirm" ref={ref} aria-label={t('workbench.confirm')} onCancel={e=>{e.preventDefault();if(!busy)onClose();}}><h2>{t('workbench.confirm')}</h2><p>{t('workbench.estimate',{amount:money})}</p><p>{Number.isFinite(receipt.estimate?.machine_seconds)?t('workbench.machine',{seconds:receipt.estimate.machine_seconds}):t('workbench.machineUnknown')}</p><p>{t('workbench.notEta')}</p>{(receipt.items||[]).map((item,i)=><section key={item.plan_id||i}><h3>{s.project.entities.find(e=>e.id===item.shot_id)?.title} · {t('workbench.take',{number:item.index+1})}</h3><TakeRecipe take={{seed:item.seed,recipe:planRecipe(item.plan,c.capabilities)}} state={{capabilities:c.capabilities,materials:s.project.entities.filter(e=>e.data.cloudAssetId).map(e=>({asset_id:e.data.cloudAssetId,asset:{file_name:e.title}}))}}/></section>)}{!same&&<p role="alert">{t('workbench.changed')}</p>}{error&&<p role="alert">{error}</p>}<button disabled={busy} onClick={onClose}>{t('workbench.cancel')}</button>{receipt.closed_preflight&&<button disabled={busy} onClick={async()=>{setBusy(true);try{await cloud.workbenchAbandonClosed(receipt.id);onClose();}catch{setError(t('workbench.requestFailed'));}finally{setBusy(false);}}}>{t('workbench.acknowledge')}</button>}<button className="primary" disabled={busy||!same||!receipt.ready} onClick={async()=>{setBusy(true);try{await cloud.workbenchCommand('batch',{projectVersion:receipt.project_version,plan_ids:receipt.items.map(i=>i.plan_id)});onClose();}catch(e){setError(t(e.message.startsWith('workbench.')?e.message:'workbench.requestFailed'));}finally{setBusy(false);}}}>{t('workbench.submit')}</button></dialog>;
 }
 

@@ -1,6 +1,6 @@
 import {useI18n} from './i18n/I18nProvider.jsx';
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
-import {RefreshCw} from 'lucide-react';
+import {RefreshCw,Image as ImageIcon,Play,Pause,Download} from 'lucide-react';
 import {getFile,nativeMediaSource} from './media.js';
 import {artifactMedia} from './artifact-media.js';
 
@@ -16,7 +16,7 @@ function StoryboardDownload({media}){
   const source=useMemo(()=>{try{return {target:nativeMediaSource('cloud_artifact_'+media.id,{download:true})};}catch(error){return {error};}},[media.id]);
   let issue=source.error;try{source.target?.assertCurrent();}catch(error){issue=error;}
   const follow=event=>{try{if(source.error)throw source.error;source.target.assertCurrent();setError('');}catch(error){event.preventDefault();setError(message(error));}};
-  return <span><a className="btn" href={issue?undefined:source.target?.href} download={media.filename.replace('粗剪','镜头')} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" aria-disabled={!!issue} tabIndex={issue?-1:undefined} onClick={follow}>{media.type==='video'?t('legacy.visible37'):t('legacy.visible38')}</a>{(error||issue)&&<small role="alert">{t('legacy.downloadError',{message:error||message(issue)})}</small>}</span>;
+  return <span><a className="btn storyboard-download" href={issue?undefined:source.target?.href} download={media.filename.replace('粗剪','镜头')} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" aria-disabled={!!issue} tabIndex={issue?-1:undefined} onClick={follow}><Download size={14}/>{media.type==='video'?t('legacy.visible37'):t('legacy.visible38')}</a>{(error||issue)&&<small role="alert">{t('legacy.downloadError',{message:error||message(issue)})}</small>}</span>;
 }
 
 // Cloud views stream through the existing owner-fenced native route. Local
@@ -47,11 +47,11 @@ export function useStoryboardMediaUrl(asset,{thumbnail=false}={}){
   const error=failure?.source===source?failure.message:value.error;
   return {...value,url:error?'':value.url,playbackUrl:value.url,error,onError,onReady,retry,assertCurrent:()=>{}};
 }
-export function StoryboardAssetImage({asset,className='',style,alt=''}){
+export function StoryboardAssetImage({asset,className='',style,alt='',retryable=false}){
  const {t}=useI18n();
-  const {url,error,onError}=useStoryboardMediaUrl(asset,{thumbnail:true});
-  if(!url)return <span className={className+' media-empty'} style={style} role={error?'alert':undefined} title={error||t('legacy.visible41')}>{error?t('library.previewUnavailable'):'◇'}</span>;
-  return asset?.kind==='video'&&!asset?.thumb?<video className={className} style={style} src={url} muted preload="metadata" playsInline aria-label={asset.name||t('legacy.visible42')} onError={onError}/>:<img className={className} style={style} src={url} alt={alt} draggable={false} onError={onError}/>;
+  const {url,playbackUrl,error,onError,onReady,retry}=useStoryboardMediaUrl(asset,{thumbnail:true});
+  if(!url)return <span className={className+' media-empty storyboard-thumbnail-empty'} style={style} role={error?'alert':undefined} title={error||t('legacy.visible41')}><ImageIcon size={20} aria-hidden="true"/>{error&&<small>{t('library.previewUnavailable')}</small>}{error&&retryable&&playbackUrl&&<button className="small ghost" type="button" onPointerDown={e=>e.stopPropagation()} onClick={e=>{e.stopPropagation();try{retry();}catch{onError();}}}><RefreshCw size={13}/>{t('workspace.copy60')}</button>}</span>;
+  return asset?.kind==='video'&&!asset?.thumb?<video className={className} style={style} src={url} muted preload="metadata" playsInline aria-label={asset.name||t('legacy.visible42')} onLoadedMetadata={onReady} onError={onError}/>:<img className={className} style={style} src={url} alt={alt} draggable={false} onLoad={onReady} onError={onError}/>;
 }
 export function StoryboardVideo({asset,className='',onTimeUpdate,onLoadedMetadata,videoRef,...props}){
  const {t}=useI18n();
@@ -69,5 +69,5 @@ export function StoryboardPlayButton({asset,start=0,len=null,label}){
     if(!url)return;try{assertCurrent();}catch{onError();return;}const audio=new Audio(url);own.current=audio;const stop=()=>{audio.pause();setPlaying(false);if(currentAudio?.audio===audio)currentAudio=null;};
     audio.addEventListener('loadedmetadata',()=>{try{assertCurrent();audio.currentTime=Math.max(0,start);audio.play().then(()=>setPlaying(true)).catch(()=>{stop();onError();});}catch{stop();onError();}},{once:true});
     audio.addEventListener('ended',stop);audio.addEventListener('error',()=>{stop();onError();});if(Number.isFinite(len))audio.addEventListener('timeupdate',()=>audio.currentTime>=start+len&&stop());currentAudio={audio,stop};};
-  return <button type="button" className={'play'+(playing?' on':'')} disabled={!url} onPointerDown={event=>event.stopPropagation()} onClick={toggle} title={error||label||t('legacy.visible44')}>{playing?'■':'▶'}{label&&' '+label}</button>;
+  return <button type="button" className={'play'+(playing?' on':'')} disabled={!url} onPointerDown={event=>event.stopPropagation()} onClick={toggle} aria-label={label||t('legacy.visible44')} title={error||label||t('legacy.visible44')}>{playing?<Pause size={14}/>:<Play size={14}/ >}{label&&' '+label}</button>;
 }
