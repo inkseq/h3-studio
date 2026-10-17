@@ -4,11 +4,11 @@ from pathlib import Path
 from unittest.mock import patch
 import uuid
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from studio_platform.control import WorkerControl, WorkerSpec
 from studio_platform.queued_task_runner import QueuedTaskRunner, read_verification_summary, QUEUED_TASK_PROFILE
-from studio_platform.repository import jobs
+from studio_platform.repository import budget_reservations, jobs
 from studio_platform.worker import BackendError, NotReady, Outcome, SubmissionRejected, WorkerRunner
 from test_platform_repository import LedgerCase
 
@@ -101,7 +101,13 @@ class QueuedTaskRunnerTests(LedgerCase):
             (job["id"], "succeeded", 1, 1))
         self.assertEqual((current["request_hash"], current["request"]), (original_hash, original_request))
         self.assertEqual(current["result"]["billing_status"], "pending")
-        self.assertEqual(self.repo.get_budget("owner-budget")["reserved_microusd"], 100_000)
+        self.assertEqual(self.repo.get_budget("owner-budget")["reserved_microusd"], 0)
+        with self.repo.engine.connect() as conn:
+            invoice = conn.execute(select(budget_reservations).where(
+                budget_reservations.c.reference_type == "job",
+                budget_reservations.c.reference_id == job["id"])).mappings().one()
+        self.assertEqual((invoice["state"], invoice["amount_microusd"], invoice["actual_cost_microusd"]),
+                         ("invoice_pending", 100_000, None))
         proof = runner.verification_summary()
         self.assertTrue(proof["generation_verified"])
         self.assertEqual(proof["verified_job_scopes"][0]["recipe_id"], "synthetic-fl")

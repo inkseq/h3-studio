@@ -16,7 +16,7 @@ from studio_platform.inference.wangp import WanGPBackend
 from studio_platform.inference.wangp_http import HTTPWanGPTransport
 from studio_platform.inference.wangp_contract import OperationReceipt, RuntimeObservation, canonical_json, operation_id
 from studio_platform.queued_task_runner import QueuedTaskRunner, QUEUED_TASK_PROFILE
-from studio_platform.repository import attempts
+from studio_platform.repository import attempts, budget_reservations
 from studio_platform.runtime_hosts.wangp import WanGPHost
 from studio_platform.runtime_hosts.wangp_receipts import ReceiptJournal
 from studio_platform.runtime_hosts.wangp_session import PinnedWanGPSession, _failure_code
@@ -183,7 +183,13 @@ class FailureRetentionTests(LedgerCase):
         self.assertEqual((attempt["error_code"], attempt["upstream_stopped"]), (code, 1))
         receipt = self.host.inspect(attempt["upstream_task_id"])
         self.assertEqual(OperationReceipt.from_dict(receipt.to_dict()).reason, code)
-        self.assertEqual(self.repo.get_budget("owner-budget"), budget)  # no invented free execution
+        self.assertEqual(self.repo.get_budget("owner-budget"), {**budget, "reserved_microusd": 0})
+        with self.repo.engine.connect() as conn:
+            invoice = conn.execute(select(budget_reservations).where(
+                budget_reservations.c.reference_type == "job",
+                budget_reservations.c.reference_id == current["id"])).mappings().one()
+        self.assertEqual((invoice["state"], invoice["amount_microusd"], invoice["actual_cost_microusd"]),
+                         ("invoice_pending", budget["reserved_microusd"], None))
         self.assertTrue(self.control.get("worker")["drain_requested"])
         self.host.close()
         self.journal = ReceiptJournal(self.journal_path, slot_key="slot-1", manifest_digest=self.engine.digest)
