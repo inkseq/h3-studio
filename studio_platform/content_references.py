@@ -158,7 +158,9 @@ def cleanup_plan(connection, service, principal, sessions, *, media_targets=None
         if row["id"] not in job_ids:
             # A job's own output association is not a live input reference.
             retained_job={"request":row["request"],"execution":row["execution_plan"]}
-            if media_targets is None: retained_job["result"]=row["result"]
+            own_output = (media_targets is not None and row["tenant_id"]==tenant and row["owner_id"]==owner
+                and any(a["job_id"]==row["id"] for a in candidate_artifacts.values()))
+            if not own_output: retained_job["result"]=row["result"]
             retain(retained_job, "other_plan_or_job")
     for row in all_assets:
         if row["id"] not in candidate_assets:

@@ -144,7 +144,7 @@ class QuickChatTakesMixin:
                     "created_by":creator(conn,self.tenant,principal.owner,"take",item["id"]),"group_number":group_offsets[r["id"]]+item["index"]+1,"submission_id":submission,"created_at":r["created_at"],"recipe":self._take_recipe(r["payload"],item),
                     "trash_state":trash["payload"]["state"] if trash else "active","trash_version":trash["version"] if trash else project["version"],
                     "project_id":session["payload"]["project_id"],
-                    "annotation":{"version":annotation["version"] if annotation else 0,"starred":annotation["payload"]["starred"] if annotation else False}})
+                    "annotation":{"version":annotation["version"] if annotation else 0,"starred":annotation["payload"].get("starred",False) if annotation else False,"title":annotation["payload"].get("title","") if annotation else ""}})
             after=None
             if len(entries)>limit:
                 r,item=page[-1];after=base64.urlsafe_b64encode(json.dumps([card_id,r["created_at"],r["id"],item["index"]]).encode()).decode()
@@ -152,9 +152,11 @@ class QuickChatTakesMixin:
 
     def star_take(self, principal, session_id, item_id, body, key):
         from .quick_chat import objects, fields, QuickChatError
-        fields(body,{"expected_version","starred"},{"expected_version","starred"})
-        if type(body["expected_version"]) is not int or body["expected_version"]<0 or type(body["starred"]) is not bool:
+        fields(body,{"expected_version","starred","title"},{"expected_version"})
+        if type(body["expected_version"]) is not int or body["expected_version"]<0 or not ({"starred","title"}&body.keys()) or ("starred" in body and type(body["starred"]) is not bool) or ("title" in body and not isinstance(body["title"],str)):
             raise QuickChatError("invalid_annotation","Invalid annotation. / 收藏参数无效。",422)
+        if len(json.dumps(body,ensure_ascii=False).encode())>self.settings.max_project_bytes:
+            raise QuickChatError("invalid_annotation","Annotation exceeds configured project byte capacity. / 标注超过项目字节容量。",422)
         with self.repo.transaction() as conn:
             self._access(principal,session_id,"projects:write",conn=conn,lock=True)
             self._take(conn,principal,session_id,item_id)
@@ -165,9 +167,10 @@ class QuickChatTakesMixin:
                 objects.c.session_id==session_id,objects.c.kind=="take_annotation",objects.c.business_key==item_id)).mappings().first()
             if body["expected_version"]!=(row["version"] if row else 0):
                 raise QuickChatError("version_conflict","Annotation changed; reload it. / 收藏已更改，请重新读取。")
-            if row:row=self._put(conn,dict(row),{"starred":body["starred"]},bump=True)
-            else:row=self._new(conn,principal,session_id,"take_annotation",{"starred":body["starred"]},business=item_id)
-            response={"take_id":item_id,"version":row["version"],"starred":body["starred"]}
+            value={"starred":False,"title":"",**(row["payload"] if row else {}),**{k:body[k] for k in ("starred","title") if k in body}}
+            if row:row=self._put(conn,dict(row),value,bump=True)
+            else:row=self._new(conn,principal,session_id,"take_annotation",value,business=item_id)
+            response={"take_id":item_id,"version":row["version"],**value}
             receipt=self._new(conn,principal,session_id,"take_annotation_receipt",response)
             self._remember(conn,principal,namespace,key,body,receipt["id"])
             return response

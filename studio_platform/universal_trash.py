@@ -5,7 +5,7 @@ No schema initialization, storage I/O, task creation, automatic expiry or settle
 import copy
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, StrictBool
-from sqlalchemy import select, insert, update
+from sqlalchemy import select, insert, update, inspect
 from .repository import documents, jobs, attempts, registered_workers, Scope, Conflict, NotFound, request_hash
 from .content_lifecycle import owner_reference_gate, assert_reference_payload
 
@@ -49,6 +49,7 @@ def target_key(target):
 
 
 def active_target(conn, tenant, owner, target):
+    if not inspect(conn).has_table(documents.name):return None
     row = conn.execute(select(documents).where(*where(tenant, owner, "trash_item", target_key(target)))).mappings().first()
     return dict(row) if row and row["payload"]["state"] != "active" else None
 
@@ -56,6 +57,7 @@ def active_target(conn, tenant, owner, target):
 def assert_authoring_available(conn,tenant,owner,value):
     """Prevent a stale whole-project save from resurrecting a removed identity."""
     if not isinstance(value,dict) or not isinstance(value.get("entities"),list) or not isinstance(value.get("id"),str):return
+    if not inspect(conn).has_table(documents.name):return
     entities={e.get("id"):e for e in value["entities"] if isinstance(e,dict)}
     for payload in conn.execute(select(documents.c.payload).where(*where(tenant,owner,"trash_item"),
             documents.c.payload["state"].as_string().in_(("trashed","purging","purged")))).scalars():
@@ -133,21 +135,27 @@ def remove_authoring(project, target):
         field, default = ("looks","defaultLookId") if target["kind"] == "look" else ("versions","defaultVersionId")
         values = entity["data"].get(field, [])
         if not any(v["id"] == target["id"] for v in values): raise NotFound("trash_target_not_found")
+        effective_default=entity["data"].get(default) or (values[0]["id"] if values else None)
+        removed_default=effective_default==target["id"]
         entity["data"][field] = [v for v in values if v["id"] != target["id"]]
         if entity["data"].get(default) == target["id"]: entity["data"][default] = ""
         entity["version"] += 1
         for item in project["entities"]:
-            data = item["data"]
+            data = item["data"];before_data=copy.deepcopy(data)
             if field == "looks":
-                for container in (data, data.get("storyboard", {})):
-                    cast=container.get("cast", [])
-                    kept=[binding for binding in cast if not (isinstance(binding,dict)
-                        and binding.get("characterId")==entity["id"] and binding.get("lookId")==target["id"])]
-                    if kept!=cast: container["cast"]=kept; item["version"]+=1
+                def removed_binding(binding):
+                    character=binding if isinstance(binding,str) else binding.get("characterId")
+                    selected="" if isinstance(binding,str) else binding.get("lookId")
+                    return character==entity["id"] and (selected==target["id"] or not selected and removed_default)
+                if "cast" in data:data["cast"]=[binding for binding in data["cast"] if not removed_binding(binding)]
             else:
+                if removed_default and data.get("locationId")==entity["id"]:data["locationId"]=""
                 place = data.get("storyboard", {}).get("place")
-                if place and place.get("locationId") == entity["id"] and place.get("versionId") == target["id"]:
-                    data["storyboard"]["place"] = None; item["version"] += 1
+                if place and place.get("locationId")==entity["id"] and (place.get("versionId")==target["id"]
+                        or not place.get("versionId") and removed_default):
+                    data["storyboard"]["place"] = None
+            if data!=before_data:item["version"]+=1
+
     else:
         raise ValueError("Unsupported authoring target / 不支持的编辑对象")
     # Preserve at least one originally existing chapter and scene per container.
@@ -190,13 +198,20 @@ class UniversalTrash:
 
     def list(self, principal, *, kind=None, limit=100, offset=0):
         if type(limit) is not int or not 1<=limit<=100 or type(offset) is not int or offset<0: raise ValueError("Invalid page / 分页无效")
+        if principal.machine and "projects:read" not in principal.scopes:return {"items":[],"next_offset":None,"auto_purge":False}
+        columns=[documents.c.document_id,documents.c.version]
+        columns += [documents.c.payload[name].label(name) for name in
+            ("target","state","trashed_at","title","display_kind","retained_media")]
+        query=select(*columns).where(*where(self.tenant,principal.owner,"trash_item"),
+            documents.c.payload["state"].as_string().in_(("trashed","purging")))
+        if principal.machine and not principal.all_projects:
+            query=query.where(documents.c.payload["target"]["project_id"].as_string().in_(principal.project_ids))
+        if kind is not None:query=query.where(documents.c.payload["display_kind"].as_string()==kind)
         with self.repo.engine.connect() as conn:
-            rows=list(conn.execute(select(documents).where(*where(self.tenant,principal.owner,"trash_item"),
-                documents.c.payload["state"].as_string().in_(("trashed","purging"))).order_by(documents.c.updated_at.desc(),documents.c.document_id)).mappings())
-            visible=[r for r in rows if principal.allows(r["payload"]["target"]["project_id"],"projects:read")
-                and (kind is None or r["payload"].get("display_kind",r["payload"]["target"]["kind"])==kind)]
-            return {"items":[self.public(r) for r in visible[offset:offset+limit]],
-                "next_offset":offset+limit if len(visible)>offset+limit else None,"auto_purge":False}
+            rows=list(conn.execute(query.order_by(documents.c.updated_at.desc(),documents.c.document_id).limit(limit+1).offset(offset)).mappings())
+        return {"items":[self.public({"document_id":r["document_id"],"version":r["version"],
+            "payload":{k:v for k,v in r.items() if k not in {"document_id","version"}}}) for r in rows[:limit]],
+            "next_offset":offset+limit if len(rows)>limit else None,"auto_purge":False}
 
 
     def _projects(self, conn, principal):
@@ -256,6 +271,15 @@ class UniversalTrash:
             item=next((v for v in entity["data"].get(field,[]) if v["id"]==target["id"]),None)
             if item is None: raise NotFound("trash_target_not_found")
             return item.get("name",""),kind
+        if kind=="asset":
+            import json
+            from .assets import asset_table
+            value=conn.execute(select(asset_table.c.record).where(asset_table.c.id==target["id"],
+                asset_table.c.tenant==self.tenant,asset_table.c.owner==principal.owner)).scalar_one()
+            return json.loads(value).get("file_name",""),kind
+        if kind=="artifact":
+            entity=next((e for e in project.get("entities",[]) if e.get("data",{}).get("cloudArtifactId")==target["id"]),None)
+            return (entity.get("title","") if entity else target["id"]),kind
         return "",kind
 
     def _soft(self, conn, principal, target, versions, staged):
@@ -396,6 +420,19 @@ class UniversalTrash:
                             if not previous:raise NotFound("trash_target_not_found")
                             supplied["expected_version"]=previous["version"]
             targets=[self._check_target(conn,principal,t) for t in supplied_items]
+            if action=="purge":
+                from .quick_chat_history import CLEANUP_SCOPES
+                if any(not principal.allows(t["project_id"], scope) for t in targets for scope in CLEANUP_SCOPES):
+                    raise Conflict("trash_cleanup_scope_required")
+                for target in targets:
+                    if target["kind"]=="project":
+                        dependents=conn.execute(select(documents.c.document_id).where(
+                            documents.c.tenant_id==self.tenant,documents.c.owner_id==principal.owner,
+                            documents.c.kind=="trash_item",documents.c.project_id=="__trash",
+                            documents.c.payload["state"].as_string().in_(("trashed","purging")),
+                            documents.c.payload["target"]["project_id"].as_string()==target["project_id"],
+                            documents.c.document_id!=target_key(target))).first()
+                        if dependents: raise Conflict("trash_dependent_items_retained")
             if len({target_key(t) for t in targets})!=len(targets): raise ValueError("Duplicate targets / 对象重复")
             if "expected_project_versions" in body and not isinstance(body["expected_project_versions"],dict):raise ValueError("Invalid project versions / 故事版本无效")
             versions=dict(body.get("expected_project_versions") or {})
@@ -449,6 +486,10 @@ class UniversalTrash:
                         # Metadata purge is explicit; immutable accepted receipts/media remain protected.
                         payload.update(state="purging",purge_requested_at=self.repo.clock())
                 pending.append((row,payload))
+            # Representation bound derives from the existing project-byte setting,
+            # not an independent business cap. Split a larger explicit selection.
+            if len(__import__('json').dumps([p for _,p in pending],ensure_ascii=False).encode())>2*self.settings.max_project_bytes:
+                raise ValueError("Trash selection exceeds configured project byte capacity; select fewer items. / 回收选择超过项目字节容量，请减少本次选择。")
             purge_plan=self._purge_plan(conn,principal,pending) if action=="purge" else None
             if preview:
                 return {"action":action,"request_hash":fingerprint,"eligible":True,
@@ -464,7 +505,7 @@ class UniversalTrash:
             self._write_projects(conn,principal,changes)
             items=[self.public(self._store_result(conn,principal,target_key(p["target"]))) for _,p in pending]
             response={"action":action,"state":"pending" if purge_plan else "completed","request_hash":fingerprint,"items":items,
-                "project_versions":{p:self._project(conn,principal,p)["version"] for p in changes},
+                "project_versions":{p:self._project(conn,principal,p)["version"] for p in set(changes)|{t["project_id"] for t in targets}},
                 "ledger_retained":True,"media_deleted":False,"auto_purge":False}
             row=self._store(conn,principal.owner,"trash_action",ident,{"request_hash":fingerprint,
                 "targets":targets,"response":response})
@@ -504,7 +545,8 @@ def register_routes(app):
                 "trash_last_container_required","jobs_active_or_uncertain","upstream_stop_unconfirmed",
                 "worker_obligation_unresolved","admission_unresolved","authoring_operation_unresolved","upload_unresolved",
                 "collection_unresolved","job_binding_unknown","history_cleanup_not_enabled","trash_reference_scope_required","trash_target_not_active",
-                "trash_target_not_trashed","trash_upload_unresolved","trash_permanent_confirmation_required","project_in_trash","trash_overlapping_targets"}:
+                "trash_target_not_trashed","trash_upload_unresolved","trash_permanent_confirmation_required","project_in_trash","trash_overlapping_targets",
+                "trash_cleanup_scope_required","trash_dependent_items_retained"}:
                 raise HTTPException(409,{"code":code,"resource":"trash","request_hash":request_hash(body),
                     "no_mutation_committed":True,"message":"No changes committed; reload and review the blocked items. / 未提交更改，请刷新并检查受阻对象。"}) from None
             raise
@@ -548,12 +590,18 @@ def finish_purge(service, record):
                 project_where=(documents.c.tenant_id==service.tenant,documents.c.owner_id==record["owner"],
                     documents.c.project_id=="__projects",documents.c.kind=="project",documents.c.document_id==target["project_id"])
                 conn.execute(update(documents).where(*project_where).values(payload={"id":target["project_id"],
-                    "title":"", "content_deleted":True},updated_at=now))
+                    "title":"", "content_deleted":True},version=documents.c.version+1,updated_at=now))
             value={**row["payload"],"state":"purged","purged_at":now,"projects":{},"retained_media":bool(plan["kept"]["objects"])}
             conn.execute(update(documents).where(*where(service.tenant,record["owner"],"trash_item",ident)).values(payload=value,version=row["version"]+1,updated_at=now))
-            final.append({"trash_id":ident,"state":"purged","target":value["target"]})
+            final.append({"trash_id":ident,"version":row["version"]+1,"state":"purged","target":value["target"],
+                "title":value.get("title",""),"kind":value["display_kind"],"trashed_at":value["trashed_at"],
+                "purge_at":None,"auto_purge":False,"retained_media":value["retained_media"]})
         row=conn.execute(select(documents).where(*where(service.tenant,record["owner"],"trash_action",payload["operation_id"]))).mappings().one()
-        value=copy.deepcopy(row["payload"]);value["response"].update(state="completed",items=final,
+        value=copy.deepcopy(row["payload"])
+        project_versions={project:conn.execute(select(documents.c.version).where(documents.c.tenant_id==service.tenant,
+            documents.c.owner_id==record["owner"],documents.c.project_id=="__projects",documents.c.kind=="project",
+            documents.c.document_id==project)).scalar_one() for project in value["response"]["project_versions"]}
+        value["response"].update(state="completed",items=final,project_versions=project_versions,
             removed=plan["counts"],kept=plan["kept"],media_deleted=bool(plan["objects"]))
         conn.execute(update(documents).where(*where(service.tenant,record["owner"],"trash_action",payload["operation_id"])).values(payload=value,updated_at=now))
         payload.update(state="completed",completed_at=now)

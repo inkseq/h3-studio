@@ -87,7 +87,7 @@ def assert_content_available(connection, tenant, owner, *, asset_ids=(), artifac
                              object_keys=(), storage_binding=None):
     from .universal_trash import where
     selected = connection.execute(select(documents.c.payload).where(*where(tenant,owner,"trash_item"),
-        documents.c.payload["state"].as_string().in_(("trashed","purging","purged")))).scalars()
+        documents.c.payload["state"].as_string().in_(("trashed","purging","purged")))).scalars() if inspect(connection).has_table(documents.name) else ()
     for payload in selected:
         target=payload["target"]
         if (target["kind"]=="asset" and target["id"] in asset_ids or

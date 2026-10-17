@@ -55,7 +55,7 @@ def agent_contract():
             "again": {"method":"POST", "path":PREFIX+"/{session_id}/cards/{card_id}/again",
                 "body":{"expected_card_version":"{card.version}","source_revision_id":"{revision.id}","item_id":"{take.id}","copies":1}},
             "seeds": "A supplied fixed seed belongs only to the first new take; other takes receive distinct random seeds. Again creates a fresh revision in the original group and still requires the original paid preflight and confirmation. It is not execution retry.",
-            "star": {"method":"PATCH","path":PREFIX+"/{session_id}/takes/{item_id}","body":{"expected_version":"{annotation.version}","starred":True}},
+            "star": {"method":"PATCH","path":PREFIX+"/{session_id}/takes/{item_id}","body":{"expected_version":"{annotation.version}","starred":"optional boolean","title":"optional display title; at least one field"}},
             "story": {"method":"POST","path":PREFIX+"/{session_id}/takes/{item_id}/story",
                 "body":{"target_project_id":"{owned_project_id}","expected_project_version":"{project.version}","parent_id":"{scene.id}"},
                 "status":PREFIX+"/{session_id}/story-transfers/{transfer_id}",
@@ -180,7 +180,15 @@ def register_routes(app, *, hooks=None, assistant=None, assistant_enabled=False,
         return service.group_takes(request.state.principal, session_id, card_id, limit=limit, before_cursor=before_cursor)
 
     def star(session_id: str, item_id: str, request: Request, body: TakeStarRequest, key: str = Header(..., alias="Idempotency-Key")):
-        return service.star_take(request.state.principal, session_id, item_id, body.model_dump(exclude_unset=True), key)
+        payload=body.model_dump(exclude_unset=True)
+        try:
+            return service.star_take(request.state.principal, session_id, item_id, payload, key)
+        except QuickChatError as exc:
+            if exc.code=="version_conflict":
+                return JSONResponse({"code":exc.code,"resource":"quick_chat_take","session_id":session_id,
+                    "take_id":item_id,"request_hash":request_hash(payload),"no_mutation_committed":True,
+                    "message":"Annotation changed; reload before editing. / 标注已更改，请刷新后编辑。"},status_code=409)
+            raise
 
     app.router.add_api_route(PREFIX+"/{session_id}/takes/{item_id}", star, methods=["PATCH"], status_code=200,
         route_class_override=QuickChatAuthoringRoute, responses=AUTHORING_ERRORS)
@@ -241,7 +249,16 @@ def register_routes(app, *, hooks=None, assistant=None, assistant_enabled=False,
 
     @app.post(PREFIX+"/history/actions")
     def history_action(request: Request, body: dict, key: str = Header(..., alias="Idempotency-Key")):
-        value = service.apply_history(request.state.principal, body, key)
+        try:
+            value = service.apply_history(request.state.principal, body, key)
+        except QuickChatError as exc:
+            # These failures occur after original-key replay lookup, before any
+            # action write, and leave the original transaction rolled back.
+            if exc.code in {"history_preview_expired", "history_preview_changed", "history_action_blocked"}:
+                return JSONResponse({"detail":{"code":exc.code,"resource":"quick_chat_history",
+                    "action":"confirm","request_hash":request_hash(body),"no_mutation_committed":True,
+                    "message":"No history action committed; request a fresh preview. / 未提交回收操作，请重新预览。"}},status_code=409)
+            raise
         return JSONResponse(value, status_code=202 if value["state"] == "pending" else 200)
 
     @app.get(PREFIX+"/history/actions/{action_id}")

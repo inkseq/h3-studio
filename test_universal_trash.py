@@ -3,7 +3,7 @@ import copy
 import unittest
 from sqlalchemy import select,func
 import test_platform_generation_draft as fixture
-from studio_platform.repository import jobs,budget_reservations
+from studio_platform.repository import jobs,budget_reservations,artifacts,NotFound
 
 class UniversalTrashTests(unittest.TestCase):
     setUp=fixture.GenerationDraftTests.setUp
@@ -77,21 +77,80 @@ class UniversalTrashTests(unittest.TestCase):
         byid={e['id']:e for e in self.current()['project']['entities']}
         for old in before['entities']:
             self.assertEqual(byid[old['id']]['data'],old['data']);self.assertEqual(byid[old['id']]['parentId'],old['parentId'])
+
+    def test_parent_purge_refuses_unselected_recoverable_child(self):
+        self.setup_project()
+        self.apply({'action':'trash','items':[self.target()]}).raise_for_status()
+        moved=self.apply({'action':'trash','items':[self.target('project','story-one')]},'parent').json()
+        item=moved['items'][0]
+        response=self.client.post('/v1/trash/preview',json={'action':'purge','items':[item['target']]})
+        self.assertEqual(response.status_code,409,response.text)
+        self.assertEqual(response.json()['detail']['code'],'trash_dependent_items_retained')
+        self.assertTrue(response.json()['detail']['no_mutation_committed'])
+        self.assertEqual(len(self.client.get('/v1/trash').json()['items']),2)
+
+    def test_history_expired_preview_closed_proof_and_original_replay_survives_expiry(self):
+        from unittest.mock import patch
+        from studio_platform.repository import request_hash
+        self.login('superdan');prefix='/v1/quick-chat/sessions'
+        session=self.client.post(prefix,json={},headers={'Idempotency-Key':'session'}).json()['session']
+        preview=self.client.post(prefix+'/history/preview',json={'action':'trash',
+            'sessions':[{'id':session['id'],'expected_version':session['version']}]}).json()
+        body={'preview_id':preview['preview_id'],'confirmed':True}
+        original=self.client.post(prefix+'/history/actions',json=body,headers={'Idempotency-Key':'history'})
+        self.assertEqual(original.status_code,200,original.text)
+        with patch.object(self.app.state.repository,'clock',return_value=10**12):
+            replay=self.client.post(prefix+'/history/actions',json=body,headers={'Idempotency-Key':'history'})
+            self.assertEqual(replay.json(),original.json())
+            expired=self.client.post(prefix+'/history/actions',json=body,headers={'Idempotency-Key':'another'})
+        self.assertEqual(expired.status_code,409,expired.text)
+        detail=expired.json()['detail'];self.assertTrue(detail['no_mutation_committed'])
+        self.assertEqual(detail['resource'],'quick_chat_history');self.assertEqual(detail['request_hash'],request_hash(body))
+        self.assertEqual(detail['code'],'history_preview_expired')
     def test_variant_removal_does_not_silently_select_another_default_and_undo_restores_bindings(self):
         from studio_platform.universal_trash import remove_authoring,restore_value
         project={'entities':[{'id':'character','type':'character','parentId':None,'version':1,'data':{
             'looks':[{'id':'old'},{'id':'new'}],'defaultLookId':'old'}},
             {'id':'location','type':'location','parentId':None,'version':1,'data':{
                 'versions':[{'id':'old'},{'id':'new'}],'defaultVersionId':'old'}},
-            {'id':'shot','type':'shot','parentId':None,'version':1,'data':{'storyboard':{
-                'cast':[{'characterId':'character','lookId':'old'}],
-                'place':{'locationId':'location','versionId':'old'}}}}]}
+            {'id':'shot','type':'shot','parentId':None,'version':1,'data':{'cast':[{'characterId':'character','lookId':'old'},'character'],
+                'locationId':'location','storyboard':{'place':{'locationId':'location','versionId':'old'}}}}]}
         for kind,parent in [('look','character'),('location_version','location')]:
             value=copy.deepcopy(project);before=remove_authoring(value,{'kind':kind,'id':'old','parent_id':parent})
-            sb=value['entities'][2]['data']['storyboard']
-            self.assertEqual(sb['cast'] if kind=='look' else sb['place'],[] if kind=='look' else None)
+            data=value['entities'][2]['data']
+            self.assertEqual(data['cast'] if kind=='look' else data['storyboard']['place'],[] if kind=='look' else None)
+            if kind=='location_version':self.assertEqual(data['locationId'],'')
             restored=restore_value(before,value,value)
             self.assertEqual(restored,project)
+
+    def test_http_old_exact_attachment_replay_refused_after_completed_purge(self):
+        from test_platform_api import png
+        from studio_platform.guided import receipts
+        from studio_platform.content_lifecycle import history_cleanup_activation_id
+        from studio_platform.repository import request_hash
+        self.setup_project();repo=self.app.state.repository
+        with repo.transaction() as c:c.execute(insert(objects).values(id=history_cleanup_activation_id(self.settings.tenant_id),
+            tenant=self.settings.tenant_id,owner='__system__',session_id='__history_system',kind='history_cleanup_activation',
+            business_key='v1',version=1,payload={'version':1,'enabled':True,'activated_release':'a'*40},created_at=1,updated_at=1))
+        upload=self.client.post('/v1/assets',data={'client_project_id':'story-one'},files={'file':('test.png',png(),'image/png')})
+        self.assertEqual(upload.status_code,201,upload.text);aid=upload.json()['asset_id']
+        action={'op':'asset.attach','asset_id':aid,'entity_id':'original-file','shot_id':'shot-one','role':'firstFrame','select':True}
+        attached=self.edit([action],version=self.current()['version'],key='original-attach')
+        self.assertEqual(attached.status_code,200,attached.text)
+        with repo.engine.connect() as c:before=request_hash([dict(r) for r in c.execute(select(receipts)).mappings()])
+        moved=self.apply({'action':'trash','items':[self.target('asset',aid)]}).json()
+        target=moved['items'][0]['target']
+        preview=self.client.post('/v1/trash/preview',json={'action':'purge','items':[target]}).json()
+        pending=self.apply({'action':'purge','items':[{**target,'expected_version':preview['items'][0]['expected_version']}],
+            'expected_project_versions':preview['affected_project_versions'],'confirmed':True},'permanent')
+        self.assertEqual(pending.status_code,200,pending.text)
+        self.app.state.quick_chat.process_history_cleanup()
+        done=self.client.get('/v1/trash/actions/'+pending.json()['operation_id']).json()
+        self.assertEqual(done['state'],'completed');self.assertTrue(done['media_deleted'])
+        replay=self.edit([action],version=1,key='original-attach')
+        self.assertIn(replay.status_code,(404,409),replay.text)
+        with repo.engine.connect() as c:self.assertEqual(request_hash([dict(r) for r in c.execute(select(receipts)).mappings()]),before)
+        self.assertNotIn('original-file',[e['id'] for e in self.current()['project']['entities']])
 
 
 import io
@@ -202,6 +261,23 @@ class UniversalPurgeTests(ledger.LedgerCase):
         self.assertFalse(result['media_deleted']);self.assertEqual(result['kept']['assets'],1)
         self.assertNotIn('foreign',str(result));self.assertNotIn('supervan',str(result))
 
+    def test_unrelated_foreign_job_result_retains_media_and_cleanup_requires_original_scopes(self):
+        self.activate();asset=self.upload();aid=asset['id']
+        foreign=Scope(self.scope.tenant_id,'supervan','foreign-story')
+        plan=self.repo.create_plan(foreign,{}, {'pool':'test-pool'},expires_at=self.now+1000)
+        job=self.repo.create_job(foreign,plan['id'],'foreign-result',initial_status='planned')
+        with self.repo.transaction() as c:c.execute(update(jobs).where(jobs.c.id==job['id']).values(status='succeeded',result={'asset_id':aid}))
+        moved=self.trash.apply(self.principal,self.body('asset',aid),'trash')
+        item=moved['items'][0]
+        limited=Principal(self.scope.owner_id,'limited',machine=True,project_ids=(self.scope.project_id,),
+            scopes=('projects:read','projects:write','assets:read','assets:write','jobs:read'))
+        with self.assertRaisesRegex(Conflict,'trash_cleanup_scope_required'):
+            self.trash.apply(limited,{'action':'purge','items':[item['target']]},'preview',preview=True)
+        pending,_=self.purge(moved);self.service.process_history_cleanup()
+        final=self.trash.get_action(self.principal,pending['operation_id'])
+        self.assertFalse(final['media_deleted']);self.assertEqual(final['kept']['assets'],1)
+        self.assertNotIn('supervan',str(final));self.assertNotIn('foreign-story',str(final))
+
     def test_original_output_association_does_not_prevent_explicit_unreferenced_purge(self):
         from studio_platform.artifact_writer import ArtifactWriter
         from studio_platform.repository import artifacts
@@ -235,6 +311,18 @@ class UniversalTakeTests(ledger.LedgerCase):
         self.app=create_app(self.settings,repository=self.repo);self.service=self.app.state.quick_chat
         self.principal=Principal(self.scope.owner_id,'browser')
         self.session=self.service.create_session(self.principal,{},'session')['session'];self.sid=self.session['id']
+    def test_take_title_preserves_star_and_immutable_revision_with_cas(self):
+        from studio_platform.quick_chat import QuickChatError
+        value=self.card(copies=1);revision=copy.deepcopy(value['revision']);item=revision['items'][0]
+        first=self.service.star_take(self.principal,self.sid,item['id'],{'expected_version':0,'starred':True},'star')
+        body={'expected_version':first['version'],'title':'My chosen take'}
+        renamed=self.service.star_take(self.principal,self.sid,item['id'],body,'rename')
+        self.assertTrue(renamed['starred']);self.assertEqual(renamed['title'],'My chosen take')
+        self.assertEqual(self.service.star_take(self.principal,self.sid,item['id'],body,'rename'),renamed)
+        with self.assertRaises(QuickChatError):self.service.star_take(self.principal,self.sid,item['id'],body,'stale')
+        with self.assertRaises(NotFound):self.service.star_take(Principal('foreign','browser'),self.sid,item['id'],body,'foreign')
+        self.assertEqual(self.service.get_revision(self.principal,self.sid,revision['id']),revision)
+
     def test_take_trashed_no_new_preflight_again_original_revision_unchanged_then_restore(self):
         from studio_platform.quick_chat import VERSION
         value=self.card(copies=2);revision=copy.deepcopy(value['revision']);item=revision['items'][0]
@@ -278,3 +366,37 @@ class UniversalDeletionProofTests(unittest.TestCase):
         result=backup.verify_local(directory,allow_incomplete=True)
         self.assertEqual(result['coverage']['expected_missing_objects'],1)
         self.assertEqual(result['coverage']['unexpected_missing_objects'],0)
+
+
+import test_storyboard_versions as storyboard_fixture
+class UniversalTitleTests(unittest.TestCase):
+    setUp=storyboard_fixture.StoryboardVersionTests.setUp
+    login=storyboard_fixture.StoryboardVersionTests.login
+    setup_project=storyboard_fixture.StoryboardVersionTests.setup_project
+    key=storyboard_fixture.StoryboardVersionTests.key
+    edit=storyboard_fixture.StoryboardVersionTests.edit
+    source=storyboard_fixture.StoryboardVersionTests.source
+    configure=storyboard_fixture.StoryboardVersionTests.configure
+    current=storyboard_fixture.StoryboardVersionTests.current
+    prepare=storyboard_fixture.StoryboardVersionTests.prepare
+    preflight=storyboard_fixture.StoryboardVersionTests.preflight
+    completed=storyboard_fixture.StoryboardVersionTests.completed
+    def test_version_title_preserves_star_recipe_receipt_and_owner_cas(self):
+        self.prepare();job_id,artifact=self.completed(self.preflight(copies=1).json()['items'][0]['plan_id'])
+        with self.app.state.repository.engine.connect() as c:
+            original=dict(c.execute(select(jobs).where(jobs.c.id==job_id)).mappings().one())
+            original_artifact=dict(c.execute(select(artifacts).where(artifacts.c.id==artifact)).mappings().one())
+        self.edit([{'op':'storyboard.star','shot_id':'shot-one','artifact_id':artifact,'starred':True}],version=self.current()['version']).raise_for_status()
+        body={'expected_version':self.current()['version'],'actions':[{'op':'storyboard.star','shot_id':'shot-one','artifact_id':artifact,'title':'Owner title'}]}
+        url='/v1/projects/story-one/actions'
+        renamed=self.client.post(url,json=body,headers={'Idempotency-Key':'rename'})
+        self.assertEqual(renamed.status_code,200,renamed.text)
+        self.assertEqual(self.client.post(url,json=body,headers={'Idempotency-Key':'rename'}).json(),renamed.json())
+        self.assertEqual(self.client.post(url,json=body,headers={'Idempotency-Key':'stale'}).status_code,409)
+        value=self.client.get('/v1/projects/story-one/shots/shot-one/versions')
+        self.assertEqual(value.status_code,200,value.text)
+        self.assertEqual(value.json()['versions'][0]['title'],'Owner title');self.assertTrue(value.json()['versions'][0]['starred'])
+        with self.app.state.repository.engine.connect() as c:
+            self.assertEqual(dict(c.execute(select(jobs).where(jobs.c.id==job_id)).mappings().one()),original)
+            self.assertEqual(dict(c.execute(select(artifacts).where(artifacts.c.id==artifact)).mappings().one()),original_artifact)
+        self.login('supervan');self.assertEqual(self.client.post(url,json=body,headers={'Idempotency-Key':'foreign'}).status_code,404)

@@ -239,7 +239,8 @@ class TakePreferencesRequest(AuthoringObject):
 
 class TakeStarRequest(AuthoringObject):
     expected_version: Annotated[StrictInt, Field(ge=0)]
-    starred: StrictBool
+    starred: StrictBool = None
+    title: StrictStr = None
 
 
 class TakeAgainRequest(AuthoringObject):
