@@ -11,7 +11,8 @@ import {ChatDialog} from './QuickChatControls.jsx';
 import {store} from './store.js';
 import ItemMenu from './ItemMenu.jsx';
 import {BookOpen,Box,Clapperboard,Film,Image,Layers,MapPin,Music,RotateCcw,Trash2,UserRound,SlidersHorizontal} from 'lucide-react';
-import {usePageActive} from './AppRouteCache.jsx';
+import {usePageActive,useAppLocation} from './AppRouteCache.jsx';
+import {navigateApp} from './app-navigation.js';
 import './v2/ops-adapter.css';
 const Context=createContext(null);
 const trashIcon=kind=>({project:BookOpen,chapter:BookOpen,scene:Clapperboard,shot:Clapperboard,character:UserRound,look:UserRound,location:MapPin,location_version:MapPin,prop:Box,image:Image,video:Film,audio:Music,artifact:Layers,take:Layers})[kind]||Box;
@@ -40,8 +41,9 @@ export function TrashProvider({account,children}){
 }
 export function TrashMenu({target,onRename,onEdit,onTrashSettled,disabled=false}){const ctx=useTrash(),{t}=useI18n();if(!ctx?.account)return null;return <ItemMenu disabled={disabled||ctx.busy||!!ctx.pending}>{close=><>{onRename&&<button role="menuitem" onClick={()=>{close();onRename();}}>{t('trash.rename')}</button>}{onEdit&&<button role="menuitem" onClick={()=>{close();onEdit();}}>{t('trash.edit')}</button>}<button role="menuitem" onClick={async event=>{const dialog=event.currentTarget.closest('dialog');close();const receipt=await ctx.request('trash',[target]);if(dialog?.isConnected){if(onTrashSettled)onTrashSettled();else if(receipt?.state==='completed')dialog.dispatchEvent(new Event('inkseq-close-after-trash'));}}}>{t('trash.move')}</button></>}</ItemMenu>;}
 export default function UniversalTrash(){
- const ctx=useTrash(),{t,locale}=useI18n(),pageActive=usePageActive(),[rows,setRows]=useState([]),[next,setNext]=useState(null),[kind,setKind]=useState(''),[group,setGroup]=useState('all'),[selected,setSelected]=useState([]),[loading,setLoading]=useState(false),[quickCount,setQuickCount]=useState(null),[error,setError]=useState(''),epoch=useRef(0);
+ const ctx=useTrash(),{t,locale}=useI18n(),pageActive=usePageActive(),location=useAppLocation(),[rows,setRows]=useState([]),[next,setNext]=useState(null),[kind,setKind]=useState(''),[group,setGroup]=useState('all'),[selected,setSelected]=useState([]),[loading,setLoading]=useState(false),[quickCount,setQuickCount]=useState(null),[error,setError]=useState(''),epoch=useRef(0);
  useEffect(()=>{if(pageActive)document.title=t('trash.title');},[pageActive,t]);
+ useEffect(()=>{if(pageActive&&new URLSearchParams(location.search).get('kind')==='conversation'){setGroup('session');setKind('conversation');setSelected([]);}},[pageActive,location.search]);
  const account=ctx?.account,revision=ctx?.revision;
  useEffect(()=>{
   let live=true;setQuickCount(null);if(!account)return;
@@ -54,7 +56,7 @@ export default function UniversalTrash(){
  useEffect(()=>{setRows([]);setSelected([]);if(ctx?.account&&kind!=='conversation')load();return()=>{epoch.current++;};},[ctx?.account,ctx?.revision,kind]);
  const inGroup=(row,value=group)=>value==='all'||value==='story'&&['project','chapter','scene','shot','artifact'].includes(row.kind)||value==='lib'&&['character','location','prop','look','location_version','image','video','audio','asset'].includes(row.kind)||value==='session'&&row.kind==='take';
  const items=rows.filter(row=>inGroup(row)),targets=items.filter(row=>selected.includes(row.trash_id)).map(row=>row.target),locked=loading||ctx?.busy||!!ctx?.pending;
- const changeGroup=value=>{setGroup(value);setKind(value==='session'?'conversation':'');setSelected([]);};
+ const changeGroup=value=>{const nextKind=value==='session'?'conversation':'';setGroup(value);setKind(nextKind);setSelected([]);const url=new URL(window.location.href);if(nextKind)url.searchParams.set('kind',nextKind);else url.searchParams.delete('kind');navigateApp(url.pathname+url.search,{replace:true,restore:false,scroll:false});};
  const empty=()=>ctx.run(async()=>{const all=[...rows];let offset=next;const seen=new Set();while(offset!==null){if(seen.has(offset))throw Error('trash.failed');seen.add(offset);const page=await ctx.controller.list(kind,offset);all.push(...page.items);offset=page.next_offset;}return all.filter(r=>r.state==='trashed'&&inGroup(r)).map(r=>r.target);}).then(value=>{if(value?.length)ctx.request('purge',value);});
  return <div className="home ops-adapter"><StudioHeader account={ctx?.account} active="trash"/><main className="trash-page">
    <div className="trash-head"><h1 className="page-title"><Trash2 size={20}/>{t('trash.title')}<small>{ctx?.account&&kind!=='conversation'?rows.length+(next!==null?'+':''):''}</small></h1><div className="spacer"/>{ctx?.account&&kind!=='conversation'&&<button className="ghost small danger-text" disabled={locked||!rows.length} onClick={empty}>{t(kind||group!=='all'?'trash.emptyFiltered':'trash.empty')}</button>}</div>
@@ -86,6 +88,7 @@ export function StoryItemManager({state,onClose,onEdit}){
 
 function ConversationTrash({account,busy,onCount}){
  const controller=useMemo(()=>createQuickChatController(),[]),state=useSyncExternalStore(controller.subscribe,controller.getState,controller.getState);
+ useEffect(()=>{if(state.account===account&&state.historyReceipt?.state==='completed')window.dispatchEvent(new CustomEvent('inkseq-quick-history-changed',{detail:{account}}));},[account,state.account,state.historyReceipt?.action_id,state.historyReceipt?.state]);
  useEffect(()=>{let active=true;controller.setAccount(account).then(()=>{if(active&&controller.getState().account===account)return controller.historyView('trash');}).catch(()=>{});return()=>{active=false;controller.destroy();};},[account,controller]);
  useEffect(()=>{if(state.account===account&&state.historyView==='trash'&&state.trashAsOf!==null)onCount?.(state.trashSessions.length,!!state.trashCursor);},[state.account,state.historyView,state.trashAsOf,state.trashSessions,state.trashCursor,account]);
  return <CreationHistory state={state} controller={controller} busy={busy||state.busy} embeddedTrash onSelect={()=>{}}/>;
