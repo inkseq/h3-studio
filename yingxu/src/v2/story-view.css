@@ -71,6 +71,7 @@
 .sb-workspace .scene-head{display:flex;align-items:center;gap:8px;min-width:0;flex-wrap:wrap}
 .sb-workspace .scene-head>b{max-width:100%;overflow-wrap:anywhere}
 .sb-workspace .scene-head>.spacer{flex:1}
+.sb-workspace .chapter-summary>small,.sb-workspace .scene-head>small{font-size:11px}
 .sb-workspace .scene-empty{border:1px dashed var(--line);border-radius:8px;padding:12px;margin:0;font-size:12px}
 .sb-workspace .card .workbench-select{top:auto;bottom:8px;left:8px;min-width:28px;width:28px;height:28px;min-height:28px;padding:4px;opacity:0;border-radius:50%;background:#17211bdd;color:#fff}
 .sb-workspace .card:hover .workbench-select,.sb-workspace .card.picking .workbench-select,.sb-workspace .card .workbench-select:focus-visible,.sb-workspace .card .workbench-select.checked{opacity:1}
@@ -87,7 +88,9 @@
 .sb-workspace button.small,.sb-workspace button.x,.sb-portal button.small,.sb-portal button.x{min-height:28px;height:28px;padding:3px 7px}
 .sb-workspace button.primary,.sb-portal button.primary{min-height:36px}
 .sb-workspace .library .lib-tabs .sb-library-tab{min-height:32px;height:32px;font-size:11px;flex-direction:row}
-.sb-workspace .modetabs .mt{min-height:36px;flex:1;min-width:0;flex-direction:row;flex-wrap:wrap}
+.sb-workspace .modetabs .mt{min-height:36px;height:36px;flex:1;min-width:0;flex-direction:row;flex-wrap:nowrap;padding-block:0}
+.sb-workspace .mode-help{font-size:11px;margin:6px 0 10px;line-height:1.5}
+.sb-workspace small,.sb-portal small{font-size:max(11px,.85em)}
 .sb-workspace .seg{display:flex;min-width:0;flex-wrap:wrap}
 .sb-workspace .seg>button{flex:1;min-width:0;white-space:nowrap}
 .sb-workspace .quality-row{align-items:center;flex-wrap:wrap}

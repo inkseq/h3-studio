@@ -183,3 +183,6 @@
  .ops-adapter .settings-page .limit-row{align-items:flex-start;flex-wrap:wrap}
  .ops-adapter .limit-input{max-width:100%}
 }
+
+/* The desktop timestamp also needs an explicit floor; browser small defaults are 10.833px. */
+.ops-adapter .p4-observed-at{font-size:11px;line-height:1.4}

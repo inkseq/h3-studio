@@ -5,7 +5,7 @@ import {videoBinding,boundVideoRange} from './video-cut-model.js';
 import assert from 'node:assert/strict';
 import {createStore,validateProject} from './store.js';
 import {createCloudClient,CloudError,safeCloudPath} from './cloud-client.js';
-import {blankCloudProject,freestyleProject,removeFreestyleInput,copyForCloud,controlsForRecipe,selectedProfileRecipe,buildPlanPayload,digest,shotSnapshot,mergeJobCandidate,estimateLabel,recoveryMessage} from './cloud-model.js';
+import {cloudSystemMessage,blankCloudProject,freestyleProject,removeFreestyleInput,copyForCloud,controlsForRecipe,selectedProfileRecipe,buildPlanPayload,digest,shotSnapshot,mergeJobCandidate,estimateLabel,recoveryMessage} from './cloud-model.js';
 import {createCloudController} from './cloud-controller.js';
 
 test('native media targets stream through exact account-fenced routes without reading bytes or storing access links',async()=>{
@@ -279,4 +279,19 @@ test('automatic operational settings require matching single-choice execution ev
 
 test('accepted project trash refresh explicitly replaces visible page while normal refresh keeps loaded history',async()=>{
  const h=harness();await h.controller.login('superdan','test-only');h.api.projects=async()=>({projects:[{id:'kept',title:'Kept',version:1},{id:'gone',title:'Gone',version:1}]});await h.controller.list({replace:true});h.api.projects=async()=>({projects:[{id:'kept',title:'Kept',version:1}]});await h.controller.list();assert.equal(h.controller.getState().projects.some(p=>p.id==='gone'),true);await h.controller.list({replace:true});assert.deepEqual(h.controller.getState().projects.map(p=>p.id),['kept']);assert.equal(h.controller.getState().nextProjectOffset,1);assert.equal(h.controller.getState().moreProjects,false);h.controller.destroy();
+});
+
+
+test('sub-cent display preserves less-than ordering and one currency sign in both locales',()=>{
+ for(const locale of ['en','zh'])for(const kind of ['budget_reservation','estimate']){
+  const value=estimateLabel({cost_microusd:1,currency:'USD',kind},locale);
+  assert.match(value,/<\$0\.01 USD/);assert.doesNotMatch(value,/\$</);
+ }
+});
+
+test('cloud system notices follow locale without translating user text or diagnostics',()=>{
+ assert.equal(cloudSystemMessage('云项目已打开；原本机作品保留。','en'),'Cloud story opened; your local story is preserved.');
+ assert.equal(cloudSystemMessage('已恢复尚未同步的云草稿。','zh'),'已恢复尚未同步的云草稿。');
+ assert.equal(cloudSystemMessage('我的故事：夜雨','en'),'我的故事：夜雨');
+ assert.equal(cloudSystemMessage('HTTP 429 · provider detail','en'),'HTTP 429 · provider detail');
 });

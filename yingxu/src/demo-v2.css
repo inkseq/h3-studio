@@ -1174,7 +1174,7 @@ input::placeholder, textarea::placeholder { color: #6c746f; }
 .hold-hint { position: fixed; z-index: 200; background: var(--ink); color: var(--bg); font-size: 13px; font-weight: 600; padding: 6px 10px; border-radius: 8px; pointer-events: none; box-shadow: var(--shadow-lg); max-width: 70vw; }
 @media (max-width: 760px) {
   .app button:has(> svg):not(.primary):not(.keep-label):not(:where(.more-menu, .qc-side, .hbar nav, .libp-side, .menu-pop, .attach-pop, .choose, .modal-card, .purge-confirm, .profile .vtabs, .story-menu, .chapter-menu) *) {
-    font-size: 0; gap: 0; padding: 7px; min-width: 34px; min-height: 34px; justify-content: center; -webkit-touch-callout: none; user-select: none;
+    font-size: 0; gap: 0; padding: 7px; min-width: 36px; min-height: 36px; justify-content: center; -webkit-touch-callout: none; user-select: none;
   }
   .app button:has(> svg):not(.primary) > svg { flex: none; }
   .story-menu > button, .chapter-menu > button { max-width: 42vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
