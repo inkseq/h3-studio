@@ -562,3 +562,8 @@ inventory.json
 # Incident 254 scoped policy regression
 !studio_platform/budget_policy.py
 !test_budget_policy254.py
+
+# Native audited terminal settlement recovery (#254)
+!studio_platform/settlement_recovery.py
+!test_settlement_recovery.py
+!docs/SETTLEMENT-RECOVERY.md

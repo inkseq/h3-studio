@@ -396,6 +396,9 @@ class TaskQueue:
                 lease_worker_id=None, lease_expires_at=None, updated_at=repo.clock()))
             connection.execute(update(attempts).where(attempts.c.id == lease.attempt_id).values(
                 status="succeeded", upstream_stopped=1, actual_cost_microusd=cost, updated_at=repo.clock()))
+            if cost is None:
+                from .settlement_recovery import release_terminal_job
+                release_terminal_job(repo, connection, lease.job_id)
             repo._emit(connection, "job.succeeded", lease.job_id, {"job_id": lease.job_id, "artifact_ids": artifact_ids})
             return repo._job(connection, lease.job_id)
 
@@ -419,6 +422,9 @@ class TaskQueue:
                 lease_expires_at=None, updated_at=repo.clock()))
             connection.execute(update(attempts).where(attempts.c.id == lease.attempt_id).values(status="failed",
                 error_code=error_code, upstream_stopped=1, actual_cost_microusd=cost, updated_at=repo.clock()))
+            if cost is None:
+                from .settlement_recovery import release_terminal_job
+                release_terminal_job(repo, connection, lease.job_id)
             repo._emit(connection, "job.failed", lease.job_id,
                 {"job_id": lease.job_id, "failure_context": failure_context})
             return repo._job(connection, lease.job_id)
@@ -439,6 +445,9 @@ class TaskQueue:
                 fence=job["fence"] + 1, lease_worker_id=None, lease_expires_at=None, updated_at=repo.clock()))
             connection.execute(update(attempts).where(attempts.c.id == lease.attempt_id).values(status="cancelled",
                 upstream_stopped=1, actual_cost_microusd=cost, updated_at=repo.clock()))
+            if cost is None:
+                from .settlement_recovery import release_terminal_job
+                release_terminal_job(repo, connection, lease.job_id)
             repo._emit(connection, "job.cancelled", lease.job_id, {"job_id": lease.job_id})
             return repo._job(connection, lease.job_id)
 
