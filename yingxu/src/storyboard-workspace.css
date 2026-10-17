@@ -365,6 +365,10 @@ body.sb-resizing video, body.sb-resizing-y video { pointer-events: none; }
 .sb-workspace .sb-error {padding:8px 14px;background:rgba(255,122,107,.12);color:var(--bad);display:flex;gap:8px;align-items:center;}
 .sb-workspace .sb-toast {position:absolute;bottom:12px;left:50%;transform:translateX(-50%);z-index:90;background:var(--ink);color:var(--surface-2,#191c1b);border-radius:14px;padding:8px 12px;max-width:90%;}
 .sb-workspace .media-empty, .sb-portal .media-empty {display:inline-flex;align-items:center;justify-content:center;background:var(--surface-2,#191c1b);color:var(--muted);}
+.sb-workspace :is(.saveframe,.cmp-side),.sb-portal :is(.saveframe,.cmp-side){position:relative;}
+:is(.sb-workspace,.sb-portal) .storyboard-media-error{position:absolute;inset:8px 8px auto;z-index:2;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding:8px;background:rgba(16,20,18,.94);color:#f2f3ef;border:1px solid var(--line);border-radius:8px;font-size:12px;}
+:is(.sb-workspace,.sb-portal) .storyboard-media-error>span{min-width:0;flex:1 1 140px;overflow-wrap:anywhere;}
+:is(.sb-workspace,.sb-portal) .storyboard-media-error>button{height:32px;flex:none;}
 .sb-workspace .tile video, .sb-portal .tile video,.sb-workspace .tseg video,.sb-workspace .ver video,.sb-workspace .vimg video {width:100%;height:100%;object-fit:cover;}
 .sb-workspace .sthumb, .sb-workspace .screen > .media-empty {width:100%;height:100%;}
 .sb-workspace .saveframe video {max-height:220px;width:100%;}

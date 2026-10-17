@@ -14,7 +14,7 @@ import QuickChatControls,{ChatDialog} from './QuickChatControls.jsx';
 import QuickChatMaterials from './QuickChatMaterials.jsx';
 import QuickChatCard from './QuickChatCard.jsx';
 import QuickChatHistory from './QuickChatHistory.jsx';
-import {quickThreadEntries,captureThreadAnchor,restoreThreadAnchor} from './quick-chat-history.js';
+import {quickThreadEntries,initialThreadLoading,captureThreadAnchor,restoreThreadAnchor} from './quick-chat-history.js';
 import QuickChatAgent from './QuickChatAgent.jsx';
 import CreationHistory from './CreationHistory.jsx';
 import GenerationAvailability from './GenerationAvailability.jsx';
@@ -120,6 +120,8 @@ export default function QuickChatWorkspace(){
   // hide only unbound derivative receipts from the composer inventory view.
   const materialInventory=state.materials.filter(binding=>!hiddenAssetIds.includes(binding.asset_id)&&!isInternalDerivedInventory(binding)),visibleMaterials=materialInventory.filter(binding=>binding.enabled!==false||binding.asset?.status&&binding.asset.status!=='ready'),availableMaterials=materialInventory.filter(binding=>binding.enabled===false&&(!binding.asset?.status||binding.asset.status==='ready')),excluded=state.materials.filter(binding=>binding.enabled!==false&&!bindingParticipates(binding,recipe));
   const threadEntries=quickThreadEntries(state.timeline,state.cards,state.cardTurns);
+  const requestedSession=safeSessionId(new URLSearchParams(location.search).get('session'));
+  const threadLoading=initialThreadLoading({requestedSession,sessionReady:c.sessionReady,account:c.account,readyAccount,state,entryCount:threadEntries.length});
   const scrollRef=useRef(null),historyAnchor=useRef(null);
   const captureHistory=()=>{historyAnchor.current={account:c.account,sessionId:state.session?.id,anchor:captureThreadAnchor(scrollRef.current)};};
   async function loadEarlier(textOnly=false){captureHistory();try{const result=await (textOnly?controller.textHistory({onBeforeCommit:captureHistory}):controller.history({reset:state.cardHistoryError?.reset===true,onBeforeCommit:captureHistory}));if(result?.added)setNotice(t('quickHistory.added',{count:result.added}));}catch{/* The scoped history alert and retry remain next to this control. */}}
@@ -154,8 +156,9 @@ export default function QuickChatWorkspace(){
     <main id="quick-chat-main" className="qc-main">
       <div className="qc-mbar"><button className="ghost small" aria-label={t('workspace.accessible2')} onClick={()=>setMobile(!mobile)}><Menu size={16}/>{t('nav.quickCreate')}</button><b className="clip">{state.session?.title||t('workspace.status35')}</b><button className="ghost small" disabled={busy} aria-label={t('workspace.copy9')} onClick={newSession}><Plus size={16}/></button></div>
       <div className="qc-scroll" ref={scrollRef} role="region" aria-label={t('workspace.accessible6')} tabIndex={0}>
-        <section className="qc-empty" hidden={threadEntries.length>0}><h1>{t('quickView.emptyTitle')}</h1><p>{t('quickView.emptyHelp')}</p><div className="examples">{['rain','station','dragon'].map(example=><button key={example} disabled={busy} onClick={()=>{changePrompt(t('quickView.example.'+example));textarea.current?.focus();}}>{t('quickView.example.'+example)}</button>)}</div></section>
-        <div className="thread">{state.session&&<QuickChatHistory state={state} disabled={busy} onCards={()=>loadEarlier()} onText={()=>loadEarlier(true)}/>}
+        {threadLoading&&<section className="quick-thread-loading" role="status" aria-busy="true" aria-label={t('quickHistory.initialLoading')}><p>{t('quickHistory.initialLoading')}</p>{[0,1,2].map(key=><div className="quick-card-skeleton" key={key} aria-hidden="true"><span/><span/><span/><div/></div>)}</section>}
+        <section className="qc-empty" hidden={threadEntries.length>0||threadLoading||!!requestedSession&&!state.cardHistoryLoaded}><h1>{t('quickView.emptyTitle')}</h1><p>{t('quickView.emptyHelp')}</p><div className="examples">{['rain','station','dragon'].map(example=><button key={example} disabled={busy} onClick={()=>{changePrompt(t('quickView.example.'+example));textarea.current?.focus();}}>{t('quickView.example.'+example)}</button>)}</div></section>
+        <div className="thread">{state.session&&!threadLoading&&<QuickChatHistory state={state} disabled={busy} onCards={()=>loadEarlier()} onText={()=>loadEarlier(true)}/>}
         {threadEntries.map(entry=>entry.kind==='card'?renderCard(entry.record):(()=>{const turn=entry.record;return <article className="qc-turn" key={turn.id} data-history-entry={'turn:'+turn.id}>
           <div className="msg user"><div className="bubble">{turn.text}</div></div>
           {turn.assistant_mode!=='none'&&<div className="qc-turn-label">✧ {CHAT_MODELS.find(item=>item.id===turn.model_id)?.label||turn.model_id} · {date(turn.created_at)}{turn.assistant_mode==='discuss'?t('workspace.status36'):''}</div>}

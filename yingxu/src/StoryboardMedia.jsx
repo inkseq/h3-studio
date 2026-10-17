@@ -1,5 +1,6 @@
 import {useI18n} from './i18n/I18nProvider.jsx';
-import React,{useEffect,useMemo,useRef,useState} from 'react';
+import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
+import {RefreshCw} from 'lucide-react';
 import {getFile,nativeMediaSource} from './media.js';
 import {artifactMedia} from './artifact-media.js';
 
@@ -32,11 +33,19 @@ export function useStoryboardMediaUrl(asset,{thumbnail=false}={}){
     getFile(fileId).then(blob=>{if(!alive)return;if(!blob){setValue({url:'',error:t('legacy.visible39')});return;}owned=URL.createObjectURL(blob);setValue({url:owned,error:''});}).catch(()=>{if(alive)setValue({url:'',error:t('legacy.visible40')});});
     return()=>{alive=false;if(owned)URL.revokeObjectURL(owned);};
   },[direct,fileId,native]);
-  const onError=()=>{if(native)setFailure({source:native,message:t('legacy.visible40')});else setValue({url:'',error:t('legacy.visible40')});};
+  // A failed request (for example a temporary 429) must not remove the media
+  // element. Keep its captured source so metadata can recover or an explicit
+  // retry can reload it; never re-resolve it under a later account.
+  const source=native||direct||fileId;
+  const onError=()=>setFailure({source,message:t('legacy.visible40')});
+  const onReady=()=>setFailure(old=>old?.source===source?null:old);
+  const retry=()=>{native?.target?.assertCurrent();setFailure(null);};
   if(native){let error=native.error?t(native.error.message?.startsWith('client.')?native.error.message:'client.accountChanged'):'';try{native.target?.assertCurrent();}catch{error=t('client.accountChanged');}
+    const playbackUrl=error?'':native.target?.href||'';
     if(failure?.source===native)error=failure.message;
-    return {url:error?'':native.target?.href||'',error,onError,assertCurrent:()=>native.target?.assertCurrent()};}
-  return {...value,onError,assertCurrent:()=>{}};
+    return {url:error?'':playbackUrl,playbackUrl,error,onError,onReady,retry,assertCurrent:()=>native.target?.assertCurrent()};}
+  const error=failure?.source===source?failure.message:value.error;
+  return {...value,url:error?'':value.url,playbackUrl:value.url,error,onError,onReady,retry,assertCurrent:()=>{}};
 }
 export function StoryboardAssetImage({asset,className='',style,alt=''}){
  const {t}=useI18n();
@@ -46,8 +55,10 @@ export function StoryboardAssetImage({asset,className='',style,alt=''}){
 }
 export function StoryboardVideo({asset,className='',onTimeUpdate,onLoadedMetadata,videoRef,...props}){
  const {t}=useI18n();
-  const {url,error,onError}=useStoryboardMediaUrl(asset);
-  return url?<video ref={videoRef} className={className} src={url} playsInline preload="metadata" onTimeUpdate={onTimeUpdate} onLoadedMetadata={onLoadedMetadata} {...props} onError={event=>{onError();props.onError?.(event);}}/>:<div className="media-empty" role={error?'alert':undefined}>{error||t('legacy.visible43')}</div>;
+  const {playbackUrl,error,onError,onReady,retry}=useStoryboardMediaUrl(asset),own=useRef(null);
+  const setRef=useCallback(node=>{own.current=node;if(typeof videoRef==='function')videoRef(node);else if(videoRef)videoRef.current=node;},[videoRef]);
+  const reload=event=>{event.preventDefault();event.stopPropagation();try{retry();own.current?.load();}catch{onError();}};
+  return playbackUrl?<><video ref={setRef} className={className} src={playbackUrl} playsInline preload="metadata" onTimeUpdate={onTimeUpdate} onLoadedMetadata={event=>{onReady();onLoadedMetadata?.(event);}} {...props} onCanPlay={event=>{onReady();props.onCanPlay?.(event);}} onError={event=>{onError();props.onError?.(event);}}/>{error&&(props.controls||videoRef)&&<div className="storyboard-media-error" role="alert"><span>{error}</span><button type="button" className="small" onClick={reload}><RefreshCw size={13}/>{t('workspace.copy60')}</button></div>}</>:<div className="media-empty" role={error?'alert':undefined}>{error||t('legacy.visible43')}</div>;
 }
 let currentAudio=null;
 export function StoryboardPlayButton({asset,start=0,len=null,label}){
