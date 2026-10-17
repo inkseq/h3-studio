@@ -47,6 +47,20 @@ class FrontendTests(unittest.TestCase):
         response = self.client.post("/api/auth/login", json={"username": "superdan"})
         self.assertEqual(response.status_code, 200, response.text)
 
+    def test_root_service_worker_scope_is_only_for_exact_hashed_video_cache_asset(self):
+        for name in ("video-cache-worker-abcdefgh.js", "index-abcdefgh.js", "video-cache-worker.js"):
+            (self.release_root / "assets" / name).write_text("// reviewed public source", encoding="utf-8")
+        folder = self.release_root / "assets" / "nested"
+        folder.mkdir()
+        (folder / "video-cache-worker-abcdefgh.js").write_text("// nested", encoding="utf-8")
+        for method in ("GET", "HEAD"):
+            response = self.client.request(method, "/assets/video-cache-worker-abcdefgh.js")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.headers["service-worker-allowed"], "/")
+            self.assertIn("immutable", response.headers["cache-control"])
+            for path in ("/assets/index-abcdefgh.js", "/assets/video-cache-worker.js", "/assets/nested/video-cache-worker-abcdefgh.js", "/assets/missing-abcdefgh.js"):
+                self.assertNotIn("service-worker-allowed", self.client.request(method, path).headers)
+
     def test_known_html_routes_fall_back_only_before_first_publication(self):
         self.assertTrue({"/library", "/library/", "/trash", "/trash/"}.issubset(HTML_ROUTES))
         for route in sorted(HTML_ROUTES):
