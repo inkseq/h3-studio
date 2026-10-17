@@ -13,7 +13,7 @@ const component=(async()=>{
   const result=await build({stdin:{contents:contents+"\nexport {I18nProvider as TestI18nProvider} from './i18n/I18nProvider.jsx';\nexport {StoryboardAssetImage,StoryboardVideo,StoryboardPlayButton,StoryboardDownloads} from './StoryboardMedia.jsx';\nexport {setCloudMediaHandlers as setTestMediaHandlers} from './media.js';\n",resolveDir:path.replace(/[/\\][^/\\]+$/,''),loader:'jsx'},bundle:true,write:false,platform:'node',format:'cjs',packages:'external',loader:{'.css':'empty'}});
   const module=new Module(path);module.filename=path;module.paths=Module._nodeModulePaths(path.replace(/[/\\][^/\\]+$/,''));module._compile(result.outputFiles[0].text,path);
   const wrap=Component=>props=>React.createElement(module.exports.TestI18nProvider,null,React.createElement(Component,props));
-  return Object.assign(wrap(module.exports.PrivateMedia),{story:Object.fromEntries(['StoryboardAssetImage','StoryboardVideo','StoryboardPlayButton','StoryboardDownloads'].map(name=>[name,wrap(module.exports[name])])),rawImage:module.exports.StoryboardAssetImage,rawVideo:module.exports.StoryboardVideo,setMediaHandlers:module.exports.setTestMediaHandlers});
+  return Object.assign(wrap(module.exports.PrivateMedia),{story:Object.fromEntries(['StoryboardAssetImage','StoryboardVideo','StoryboardPlayButton','StoryboardDownloads'].map(name=>[name,wrap(module.exports[name])])),rawPrivateMedia:module.exports.PrivateMedia,rawImage:module.exports.StoryboardAssetImage,rawVideo:module.exports.StoryboardVideo,setMediaHandlers:module.exports.setTestMediaHandlers});
 })();
 
 // Exercise the real hook and its media event handlers without a DOM or network.
@@ -25,6 +25,25 @@ function mediaLifecycle(Component,initialProps){
  const flatten=value=>Array.isArray(value)?value.flatMap(flatten):!value||typeof value!=='object'?[]:[value,...flatten(value.props?.children)];
  return {render(next=props){props=next;cursor=0;effects=[];const internals=React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE,previous=internals.H;let tree;internals.H=hooks;try{tree=Component(props);}finally{internals.H=previous;}const nodes=flatten(tree);for(const effect of effects)effect();return {nodes,video:nodes.find(node=>node.type==='video'),retry:nodes.find(node=>node.type==='button'),alert:nodes.find(node=>node.props?.role==='alert')};},unmount(){for(const slot of slots)slot?.cleanup?.();}};
 }
+
+test('PrivateMedia retry stops the click before reloading and does not activate an enclosing reuse/take control',async()=>{
+ const kit=await component;
+ for(const props of [{kind:'image',compact:true},{kind:'video',hoverPlay:true}]){
+  let outerActivations=0,reloads=0,resolutions=0,event;
+  const client={nativeContentURL(){resolutions++;return '/v1/artifacts/original/content?expected_account=superdan';}};
+  const h=mediaLifecycle(kit.rawPrivateMedia,{client,path:'/v1/artifacts/original/content',...props});
+  try{
+   let view=h.render();const tag=props.kind==='image'?'img':'video',media=view.nodes.find(node=>node.type===tag),source=media.props.src;
+   media.props.ref.current=props.kind==='image'?{set src(value){assert.equal(event.cancelBubble,true);assert.equal(value,source);reloads++;}}:{load(){assert.equal(event.cancelBubble,true);reloads++;}};
+   media.props.onError();view=h.render();assert.ok(view.alert);assert.ok(view.retry);assert.equal(view.retry.props.type,'button');
+   event=new Event('click',{bubbles:true,cancelable:true});view.retry.props.onClick(event);
+   // The existing parent click dispatch must see a stopped native event.
+   if(!event.cancelBubble)outerActivations++;
+   assert.equal(outerActivations,0);assert.equal(event.defaultPrevented,false);assert.equal(reloads,1);assert.equal(resolutions,1);
+   view=h.render();assert.equal(view.alert,undefined);assert.equal(view.nodes.find(node=>node.type===tag).props.src,source);
+  }finally{h.unmount();}
+ }
+});
 
 test('a transient Story player error retains its native video and only explicit retry reloads the same source',async()=>{
  const kit=await component;let reads=0,resolutions=0,loads=0,metadata=0,ready=0,scope='original';
