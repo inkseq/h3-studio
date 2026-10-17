@@ -23,15 +23,19 @@ export function failureLabel(value,locale='zh'){
   if(value.reason_code==='wangp_profile_one_visible_gpu_required')return translate(locale,'operatorPanel.cudaFailure');
   return translate(locale,stages[value.stage]?'operatorPanel.failureStage.'+value.stage:'operatorPanel.unknownFailure');
 }
-export function inventoryOutcome(item){
-  if(item.state==='pending')return {state:'pending',label:'查询中'};
-  if(item.state==='empty')return {state:'empty',label:'本次没有兼容参考配置'};
-  if(item.state==='failed')return {state:'unknown',label:'查询失败 · 库存未知'};
-  return {state:'ready',label:'查询已返回'};
+export function inventoryOutcome(item,locale='zh'){
+  if(item.state==='pending')return {state:'pending',label:translate(locale,'operatorPanel.inventoryPending')};
+  if(item.state==='empty'){
+    const hostEmpty=item.reasonCode==='dstack_no_compatible_host_offers';
+    return {state:'empty',label:translate(locale,hostEmpty?'operatorPanel.inventoryHostEmpty':'operatorPanel.inventoryEmpty'),message:translate(locale,hostEmpty?'operatorPanel.inventoryHostHint':'operatorPanel.inventoryEmptyHint')};
+  }
+  if(item.state==='failed')return {state:'unknown',label:translate(locale,'operatorPanel.inventoryFailed')};
+  return {state:'ready',label:translate(locale,'operatorPanel.inventoryReturned')};
 }
 export function inventoryError(error){
   const code=error?.detail?.code||error?.detail?.detail;
-  return code==='dstack_no_compatible_offers'?{state:'empty',error:'本次查询没有兼容参考配置，未创建租赁。'}:{state:'failed',error:error?.message||'查询未完成，不能当作零库存。'};
+  const definiteEmpty=['dstack_no_compatible_offers','dstack_no_compatible_host_offers'].includes(code)&&[undefined,409].includes(error?.status);
+  return definiteEmpty?{state:'empty',reasonCode:code}:{state:'failed',error:error?.message||'查询未完成，不能当作零库存。'};
 }
 export function referenceHostOffers(offers=[],profileId,now=Date.now()){
   return referenceOffers(offers).map(group=>{const members=offers.filter(offer=>referenceOffers([offer])[0]?.key===group.key);return {...group,members,confirmed:members.filter(offer=>offer.inventory_confirmed===true&&(offer.backend!=='vastai'||hostInventoryConfirmed(offer,profileId,now))).length};});

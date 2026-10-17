@@ -1,5 +1,14 @@
 export const operatorPanelCatalogs = {
   "en": {
+    "operatorPanel.inventoryPending": "Checking",
+    "operatorPanel.inventoryEmpty": "No compatible reference offer this time",
+    "operatorPanel.inventoryHostEmpty": "No jointly eligible host this time",
+    "operatorPanel.inventoryFailed": "Query failed · Stock unknown",
+    "operatorPanel.inventoryReturned": "Query returned",
+    "operatorPanel.inventoryEmptyHint": "No reference offer matched this query. No rental was created.",
+    "operatorPanel.inventoryHostHint": "Current plan offers, inventory mappings and host rules have no jointly eligible host. Retry or adjust Settings; this does not mean the whole market is empty.",
+    "operatorPanel.inventoryFilters": "Current filters: RAM ≥ {ram} GiB · VRAM ≥ {vram} GiB · CPU ≥ {cpu} · Disk ≥ {disk} GiB · Price cap {price}/hour",
+    "operatorPanel.inventoryCapPerHour": "price cap /hour",
     "operatorPanel.usage": "Settled and reserved: {value}% of allowance",
     "operatorPanel.legacy": "Legacy records with unconfirmed dates: {amount} settled · {count} reservations.",
     "operatorPanel.readBudget": "Read at {time}; the service checks the original allowance again at submission.",
@@ -82,6 +91,15 @@ export const operatorPanelCatalogs = {
     "operatorPanel.failureStage.oom": "Out of memory"
   },
   "zh": {
+    "operatorPanel.inventoryPending": "查询中",
+    "operatorPanel.inventoryEmpty": "本次没有兼容参考配置",
+    "operatorPanel.inventoryHostEmpty": "本次没有共同符合条件的主机",
+    "operatorPanel.inventoryFailed": "查询失败 · 库存未知",
+    "operatorPanel.inventoryReturned": "查询已返回",
+    "operatorPanel.inventoryEmptyHint": "本次查询没有匹配的参考配置，未创建租赁。",
+    "operatorPanel.inventoryHostHint": "本次计划报价、库存映射与主机规则没有共同符合条件的主机。可以重查或在设置调整条件；不代表整个市场无货。",
+    "operatorPanel.inventoryFilters": "当前条件：内存 ≥ {ram} GiB · 显存 ≥ {vram} GiB · CPU ≥ {cpu} · 磁盘 ≥ {disk} GiB · 价格上限 {price}/小时",
+    "operatorPanel.inventoryCapPerHour": "价格上限 /小时",
     "operatorPanel.usage": "已结算与预留占额度 {value}%",
     "operatorPanel.legacy": "旧记录日期未确认：已结算 {amount} · {count} 项预留记录。",
     "operatorPanel.readBudget": "读取于 {time}；提交时仍由服务核对原额度。",
