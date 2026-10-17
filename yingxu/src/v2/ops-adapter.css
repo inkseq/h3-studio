@@ -127,6 +127,13 @@
   .ops-adapter .p4-offers{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media(max-width:760px){
+  .ops-adapter .p4-page-heading{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"title refresh" "observed launch";align-items:center;gap:8px 10px}
+  .ops-adapter .p4-page-title{grid-area:title;min-width:0;flex-wrap:wrap;gap:2px 8px;line-height:1.2}
+  .ops-adapter .p4-page-title>small{align-self:center;margin:0}
+  .ops-adapter .p4-observed-at{grid-area:observed;min-width:0;white-space:normal;overflow-wrap:anywhere;line-height:1.4;font-size:11px}
+  .ops-adapter .p4-page-refresh{grid-area:refresh;justify-self:end}
+  .ops-adapter .p4-page-launch{grid-area:launch;justify-self:end;max-width:100%}
+  .ops-adapter .p4-page-heading>.spacer{display:none}
   .ops-adapter .mrow{grid-template-columns:22px minmax(0,1fr);gap:10px;padding:12px}
   .ops-adapter .mrow-state,.ops-adapter .mrow-actions{grid-column:2;max-width:none;justify-content:flex-start}
   .ops-adapter .p4-offers{grid-template-columns:1fr}
