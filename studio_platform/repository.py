@@ -862,14 +862,16 @@ class Repository:
             budget_reservations.c.reference_id == reference_id).order_by(
             budget_reservations.c.account_id).with_for_update()).mappings())
         for row in rows:
-            if row["state"] != "reserved":
+            if row["state"] not in {"reserved", "invoice_pending"}:
                 if row["actual_cost_microusd"] != actual_cost:
                     raise Conflict("budget_already_settled")
                 continue
+            if row["state"] == "invoice_pending" and row["actual_cost_microusd"] is not None:
+                raise Conflict("budget_pending_invoice_invalid")
             # Account locks use a stable order for concurrent tenant/global budgets.
             self._locked(connection, select(budget_accounts).where(budget_accounts.c.id == row["account_id"]))
             connection.execute(update(budget_accounts).where(budget_accounts.c.id == row["account_id"]).values(
-                reserved_microusd=budget_accounts.c.reserved_microusd - row["amount_microusd"],
+                reserved_microusd=budget_accounts.c.reserved_microusd - (row["amount_microusd"] if row["state"] == "reserved" else 0),
                 spent_microusd=budget_accounts.c.spent_microusd + actual_cost))
             connection.execute(update(budget_reservations).where(budget_reservations.c.id == row["id"])
                 .values(state="released" if actual_cost == 0 else "settled", actual_cost_microusd=actual_cost,
@@ -1153,15 +1155,15 @@ class Repository:
                 jobs.c.actor_id == scope.actor_id, jobs.c.idempotency_key == idempotency_key)).mappings().first()
             return None if row is None else dict(row)
 
-    def settle_completed_job(self, scope, job_id, *, actual_cost_microusd):
+    def settle_completed_job(self, scope, job_id, *, actual_cost_microusd, connection=None):
         """Trusted billing reconciliation; terminal output availability is independent.
 
-        None is never interpreted as free. Pending charges conservatively retain
-        reservations. Repeated identical settlement is harmless; conflicting totals
+        None is never interpreted as free. Pending charges retain their original
+        amount for Settings projections even after the terminal hold is released. Repeated identical settlement is harmless; conflicting totals
         require explicit accounting correction rather than a silent overwrite.
         """
         cost = money(actual_cost_microusd)
-        with self.transaction() as connection:
+        with self.transaction() if connection is None else nullcontext(connection) as connection:
             job = self._job(connection, job_id, scope, lock=True)
             if job["status"] not in ("succeeded", "failed", "cancelled"):
                 raise InvalidTransition("job_not_terminal")
@@ -1670,10 +1672,10 @@ class Repository:
             connection.execute(update(instance_intents).where(instance_intents.c.id == intent_id).values(**values))
             return dict(connection.execute(select(instance_intents).where(instance_intents.c.id == intent_id)).mappings().one())
 
-    def settle_instance_cost(self, intent_id, *, actual_cost_microusd):
+    def settle_instance_cost(self, intent_id, *, actual_cost_microusd, connection=None):
         """Invoice reconciliation is independent of confirmed physical destruction."""
         money(actual_cost_microusd)
-        with self.transaction() as connection:
+        with self.transaction() if connection is None else nullcontext(connection) as connection:
             row = self._locked(connection, select(instance_intents).where(instance_intents.c.id == intent_id))
             if row is None:
                 raise NotFound("instance_intent_not_found")
@@ -1686,7 +1688,7 @@ class Repository:
     def _instance_billing(connection, row):
         reservations = list(connection.execute(select(budget_reservations).where(
             budget_reservations.c.reference_type == "instance", budget_reservations.c.reference_id == row["id"])).mappings())
-        pending = any(r["state"] == "reserved" for r in reservations)
+        pending = any(r["state"] in {"reserved", "invoice_pending"} for r in reservations)
         actual = None if pending or not reservations else reservations[0]["actual_cost_microusd"]
         review = manually_reviewed_inactive(connection, row)
         return {**row, "billing_status": "pending" if pending else "settled" if reservations else "unknown",

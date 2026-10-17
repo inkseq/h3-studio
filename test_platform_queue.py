@@ -232,7 +232,7 @@ class QueueTests(LedgerCase):
         self.assertEqual(done["status"], "succeeded")
         self.assertEqual(done["result"]["billing_status"], "pending")
         self.assertEqual(len(self.repo.list_artifacts(self.scope, done["id"])), 1)
-        self.assertEqual(self.repo.get_budget("owner-budget")["reserved_microusd"], 100_000)
+        self.assertEqual(self.repo.get_budget("owner-budget")["reserved_microusd"], 0)  # Invoice remains pending; terminal admission hold is released.
         settled = self.repo.settle_completed_job(self.scope, done["id"], actual_cost_microusd=80_000)
         self.assertEqual(settled["result"]["billing_status"], "settled")
         self.repo.settle_completed_job(self.scope, done["id"], actual_cost_microusd=80_000)

@@ -89,6 +89,7 @@ def projected_cost(connection, guard, now, *, replacement_id=None, minimum_reser
     start, _ = day_window(now)
     statement = select(budget_reservations, instance_intents.c.pool,
         instance_intents.c.state.label("instance_state"), instance_intents.c.created_at.label("intent_created_at"),
+        instance_intents.c.updated_at.label("intent_updated_at"),
         operator_nodes.c.payload, scaler_actions.c.create_started_at).select_from(
             budget_reservations.outerjoin(instance_intents,
                 budget_reservations.c.reference_id == instance_intents.c.id).outerjoin(operator_nodes,
@@ -111,7 +112,7 @@ def projected_cost(connection, guard, now, *, replacement_id=None, minimum_reser
             if row["created_at"] >= start or settled >= start:
                 total += actual
             continue
-        if row["state"] != "reserved" or actual is not None:
+        if row["state"] not in {"reserved", "invoice_pending"} or actual is not None:
             raise BudgetExceeded("dstack_test_budget_unconfirmed")
         payload = row["payload"]
         hourly, extra = payload.get("hourly_cost_microusd"), payload.get("extra_reservation_microusd", 0)
@@ -122,7 +123,10 @@ def projected_cost(connection, guard, now, *, replacement_id=None, minimum_reser
         if not finite(started) or not 0 <= now-started:
             raise BudgetExceeded("dstack_test_budget_unconfirmed")
         binding = payload.get("dstack", {})
-        ended = binding.get("first_stopped_at") if row["instance_state"] == "destroyed" else None
+        # A native run can stop before the supplier stops billing its VM.
+        # Positive provider absence bounds that later interval conservatively.
+        ended = (binding.get("provider_removal_proof", {}).get("observed_at", row["intent_updated_at"])
+                 if row["instance_state"] == "destroyed" else None)
         through = ended if finite(ended) and started <= ended <= now else now + guard["stop_margin_seconds"]
         amount = max(amount, math.ceil(hourly * (through-started) / 3600) + extra)
         observed = binding.get("estimated_cost_microusd")
