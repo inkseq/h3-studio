@@ -25,7 +25,7 @@ export default function StoryNavigation({state,onOpenCloud,onOpenLocal,onSelect}
     const index=cloudProjects.findIndex(p=>p.id===state.project.id),current={id:state.project.id,title:state.project.title};
     if(index<0)cloudProjects.unshift(current);else cloudProjects[index]={...cloudProjects[index],...current};
   }
-  const matches=p=>p.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),visibleCloud=cloudProjects.filter(matches),visibleLocal=locals.filter(matches),working=c.busy||!!pending;
+  const matches=p=>String(p.title??'').toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),visibleCloud=cloudProjects.filter(matches),visibleLocal=locals.filter(matches),working=c.busy||!!pending;
   async function act(label,fn){setPending(label);setError('');try{return await fn();}catch(e){setError(e.message);return false;}finally{setPending('');}}
   const openCloud=id=>act(t('legacy.visible1'),async()=>{const done=await cloud.open(id);if(!done)onOpenCloud();else onSelect();return done;});
   const openLocal=id=>act(t('legacy.visible1'),()=>{const done=openLocalStory(id,{store,cloud});if(done)onSelect();return done;});
