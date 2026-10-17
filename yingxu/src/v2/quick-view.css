@@ -1,4 +1,19 @@
 /* Prototype quick.jsx / takes.jsx view; adapters below only bridge real API controls. */
+.quick-live .qc{min-width:0;grid-template-columns:250px minmax(0,1fr)}
+.quick-live .qc-scroll{min-width:0;min-height:0;width:100%;box-sizing:border-box;overflow-anchor:none}
+.quick-live .thread{width:min(820px,100%);min-width:0;max-width:100%;box-sizing:border-box;margin-inline:auto}
+.quick-live .thread>*{min-width:0;max-width:100%;box-sizing:border-box}
+.quick-live .quick-proposal,.quick-live .quick-proposal-body,.quick-live .quick-prompt-wrap,.quick-live .quick-takes,.quick-live .batch-strip,.quick-live .qc-results{max-width:100%;box-sizing:border-box}
+.quick-live .quick-recipe-prompt{min-width:0;max-width:100%;box-sizing:border-box;overflow-wrap:anywhere;white-space:pre-wrap}
+.quick-live .quick-proposal-head{flex-wrap:wrap}.quick-live .quick-proposal-head h3{min-width:0;overflow-wrap:anywhere}
+.quick-live .quick-recipe-spec,.quick-live .quick-proposal-actions,.quick-live .quick-take-actions{min-width:0;max-width:100%;flex-wrap:wrap}
+.quick-live .result{min-width:0;max-width:100%;box-sizing:border-box;grid-template-columns:minmax(0,360px) minmax(0,1fr)}
+.quick-live .result-body button,.quick-live .ref,.quick-live .quick-recipe-spec .pill{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.quick-live .msg,.quick-live .bubble{min-width:0;max-width:100%;overflow-wrap:anywhere}.quick-live .bubble{white-space:pre-wrap}
+.quick-live .quick-history{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:8px;text-align:center;min-width:0}
+.quick-live .quick-history p{margin:0;line-height:1.6;overflow-wrap:anywhere}.quick-live .quick-history [role=alert]{flex-basis:100%}
+.quick-live .quick-history-text{flex-basis:100%;font-size:11px}.quick-live .quick-history-text button{border:0;background:transparent;color:var(--muted);padding:4px 8px}
+@media(max-width:760px){.quick-live .result{grid-template-columns:minmax(0,1fr)}.quick-live .quick-history button{min-height:36px;white-space:normal}}
 .quick-live{height:100%;min-height:0;display:flex;flex-direction:column;overflow:hidden}
 .quick-live .qc{min-height:0;flex:1}.quick-live .qc-main{min-width:0;margin:0;height:auto}
 .quick-live .qc-empty[hidden]{display:none}.quick-live .qc-empty p{max-width:560px;color:var(--muted)}

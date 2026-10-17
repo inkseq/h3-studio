@@ -54,9 +54,9 @@ test('a completed automatic title refreshes loaded history without replacing pag
   const client=fakeClient({
     sessions:async({cursor})=>{listReads++;return cursor?{sessions:[{id:'older',title:'早期作品',version:1}],next_cursor:'third-page'}:{sessions:[{id:'s',title,version:4,project_id:'compatibility-project'},{id:'other',title:'另一份创作',version:2}],next_cursor:'second-page'};},
     session:async()=>({session:{id:'s',title,version:4,updated_at:100}}),
-    timeline:async(_id,{before_cursor,after_cursor}={})=>before_cursor?{events:[{id:'old-event',seq:1,type:'turn.created',record:{id:'old-turn',status:'recorded'}}],before_cursor:'older-history'}:after_cursor?{events:[],after_cursor:'forward'}:{events:[{id:'event',seq:2,type:'turn.created',record:{id:'turn',status:'recorded'}}],before_cursor:'previous-history',after_cursor:'forward'},
+    timeline:async(_id,{before_cursor,after_cursor}={})=>before_cursor?{events:[{id:'old-event',seq:1,type:'turn.created',record:{id:'old-turn',text:'Older conversation text',status:'recorded'}}],before_cursor:'older-history'}:after_cursor?{events:[],after_cursor:'forward'}:{events:[{id:'event',seq:2,type:'turn.created',record:{id:'turn',text:'Current conversation text',status:'recorded'}}],before_cursor:'previous-history',after_cursor:'forward'},
   }),controller=createQuickChatController({client,storage:memory()});
-  await controller.setAccount('supervan');await controller.open('s');await controller.list({more:true});await controller.history();
+  await controller.setAccount('supervan');await controller.open('s');await controller.list({more:true});await controller.textHistory();
   title='月下剑舞';await controller.poll();
   const state=controller.getState();assert.equal(state.session.title,title);assert.equal(state.session.version,4);
   assert.deepEqual(state.sessions.map(item=>[item.id,item.title]),[['s',title],['other','另一份创作'],['older','早期作品']]);
