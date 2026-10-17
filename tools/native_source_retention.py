@@ -30,6 +30,13 @@ FINANCIAL254_PRIOR_PUSH = (
     "fcac7928646662cb07298661e620e32765e49ecd37a0afcc287eb706c853acac")
 
 
+def _retained_manifest_version(manifest, commit, index_sha256):
+    # The reviewed prior CPU bundle uses envelope v2, not different native bytes.
+    return (type(manifest) is dict and type(manifest.get("version")) is int
+            and (manifest["version"] == 1 or (manifest["version"] == 2
+                 and (commit, index_sha256) == FINANCIAL254_PRIOR_PUSH[1:])))
+
+
 def binding(inputs):
     values = tuple(inputs.get(key) or "" for key in INPUTS)
     if not any(values):
@@ -202,7 +209,7 @@ def retain(directory, commit, index_sha256, selections, *, root, git_sources=Fal
     bootstrap = None if git_sources else _regular(Path(root) / "deploy/wangp/bootstrap.py", 1024 * 1024)
     manifest = _json(_regular(Path(directory) / "migration-manifest.json", 1024 * 1024))
     raw = _regular(Path(directory) / "source-set.tar.gz", MAX_ARCHIVE)
-    if (type(manifest) is not dict or manifest.get("version") != 1 or manifest.get("commit") != commit
+    if (not _retained_manifest_version(manifest, commit, index_sha256) or manifest.get("commit") != commit
             or manifest.get("source_index_sha256") != index_sha256
             or (manifest.get("files") or {}).get("source-set.tar.gz") != hashlib.sha256(raw).hexdigest()):
         raise ValueError("native_retention_manifest_binding_changed")
@@ -272,7 +279,7 @@ def _retain_or_extend(directory, commit, index_sha256, selections, *, root, git_
         raise ValueError("native_retention_binding_invalid")
     manifest = _json(_regular(Path(directory) / "migration-manifest.json", 1024 * 1024))
     raw = _regular(Path(directory) / "source-set.tar.gz", MAX_ARCHIVE)
-    if (type(manifest) is not dict or manifest.get("version") != 1 or manifest.get("commit") != commit
+    if (not _retained_manifest_version(manifest, commit, index_sha256) or manifest.get("commit") != commit
             or manifest.get("source_index_sha256") != index_sha256
             or (manifest.get("files") or {}).get("source-set.tar.gz") != hashlib.sha256(raw).hexdigest()):
         raise ValueError("native_retention_manifest_binding_changed")

@@ -32,6 +32,15 @@ def synthetic_dstack_bundle(commit, destination):
 
 
 class Provenance(unittest.TestCase):
+    def test_reviewed_prior_v2_envelope_is_not_general_v2_permission(self):
+        _, commit, index = retention.FINANCIAL254_PRIOR_PUSH
+        self.assertTrue(retention._retained_manifest_version({"version": 2}, commit, index))
+        self.assertTrue(retention._retained_manifest_version({"version": 1}, OLD, INDEX))
+        for version, source, digest in [(2, OLD, index), (2, commit, INDEX),
+                                        (3, commit, index), (True, commit, index), ("2", commit, index)]:
+            with self.subTest(version=version, source=source, digest=digest):
+                self.assertFalse(retention._retained_manifest_version({"version": version}, source, digest))
+
     def setUp(self):
         self.run = dict(id=42, path=retention.WORKFLOW, event="workflow_dispatch", head_sha=OLD,
             head_branch="main", status="completed", conclusion="success",

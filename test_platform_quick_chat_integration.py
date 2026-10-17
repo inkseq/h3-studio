@@ -115,8 +115,8 @@ class QuickChatIntegrationTests(LedgerCase):
         base, revision, body, _ = self.composer_fixture()
         service = self.app.state.quick_chat
         enqueue = service.hooks.enqueue
-        def interrupted(principal, job):
-            enqueue(principal, job)
+        def interrupted(principal, job, **admission):
+            enqueue(principal, job, **admission)
             raise RuntimeError("lost queue reply")
         path = base+"/revisions/"+revision["id"]+"/submissions"
         with mock.patch.object(service.hooks, "enqueue", side_effect=interrupted):
@@ -134,7 +134,7 @@ class QuickChatIntegrationTests(LedgerCase):
         base, revision, body, _ = self.composer_fixture()
         service = self.app.state.quick_chat; enqueue = service.hooks.enqueue
         original = copy.deepcopy(revision)
-        def edit_then_enqueue(principal, job):
+        def edit_then_enqueue(principal, job, **admission):
             catalog = self.client.get(base+"/materials").json()
             current = self.client.get(base).json()["session"]
             bindings = [{k: b[k] for k in ("binding_id", "version", "asset_id", "kind", "slot", "enabled")} for b in catalog["bindings"]]
@@ -143,7 +143,7 @@ class QuickChatIntegrationTests(LedgerCase):
             changed = self.write(base+"/materials", {"expected_version": current["version"], "bindings": bindings}, "off", method="PUT")
             bindings[0].update(enabled=True, version=next(b["version"] for b in changed["bindings"] if b["binding_id"] == bindings[0]["binding_id"]))
             self.write(base+"/materials", {"expected_version": changed["session_version"], "bindings": bindings}, "on", method="PUT")
-            return enqueue(principal, job)
+            return enqueue(principal, job, **admission)
         path = base+"/revisions/"+revision["id"]+"/submissions"
         with mock.patch.object(service.hooks, "enqueue", side_effect=edit_then_enqueue):
             accepted = self.write(path, body, "racing-submit")
@@ -261,8 +261,8 @@ class QuickChatIntegrationTests(LedgerCase):
             {"capabilities_version": VERSION, "revision_hash": revision["input_hash"], "item_ids": [item["id"]]}, "legacy-resume-preflight")
         resume_body = {"item_ids": [item["id"]], "fresh_preflight_id": fresh["id"], "confirmed": True}
         enqueue = service.hooks.enqueue
-        def interrupted(principal, job):
-            enqueue(principal, job)
+        def interrupted(principal, job, **admission):
+            enqueue(principal, job, **admission)
             raise RuntimeError("lost legacy queue reply")
         with mock.patch.object(service.hooks, "enqueue", side_effect=interrupted):
             with self.assertRaises(RuntimeError):
