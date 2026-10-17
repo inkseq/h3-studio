@@ -32,6 +32,7 @@ export function createQuickChatClient(options={}){
     acknowledgeUnknown:(id,turn,body,key)=>write(base(id)+`/turns/${enc(turn)}/acknowledge-unknown`,body||{},key),
     createCard:(id,body,key)=>write(base(id)+'/cards',body,key),
     card:(id,card)=>api.request(base(id)+`/cards/${enc(card)}`),
+    cards:(id,{before_cursor,limit=10}={})=>api.request(base(id)+'/cards?'+new URLSearchParams({limit,...(before_cursor?{before_cursor}:{})})),
     revision:(id,revision)=>api.request(base(id)+`/revisions/${enc(revision)}`),
     reviseCard:(id,card,body,key)=>write(base(id)+`/cards/${enc(card)}/revisions`,body,key),
     preflight:(id,revision,body,key)=>write(base(id)+`/revisions/${enc(revision)}/preflights`,body,key),

@@ -162,7 +162,7 @@ class ShardTests(unittest.TestCase):
                           "test_dstack_passive_review", "test_dstack_prices", "test_operator_budgets",
                          "test_job_cancellation_ledger", "test_job_events", "test_operator_jobs",
                          "test_host_policy", "test_host_scorecard", "test_dstack_host_selection", "test_operator_host_routes",
-                         "test_quick_chat_history", "test_creation_history_storage", "test_creation_history_routes",
+                         "test_quick_chat_history", "test_quick_chat_card_history", "test_creation_history_storage", "test_creation_history_routes",
                          "test_demand_wakeup", "test_dstack_allocation_proof", "test_alert_snapshot", "test_alert_http"})
         self.assertEqual(len(ci.POSTGRES_MODULES), len(set(ci.POSTGRES_MODULES)))
 

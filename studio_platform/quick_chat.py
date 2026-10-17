@@ -11,10 +11,11 @@ import copy
 import hashlib
 import io
 import json
+import math
 import secrets
 import uuid
 
-from sqlalchemy import Column, Float, Integer, JSON, MetaData, String, Table, UniqueConstraint, insert, select, update, func
+from sqlalchemy import Column, Float, Integer, JSON, MetaData, String, Table, UniqueConstraint, and_, or_, insert, select, update, func
 
 from .auth import Principal
 from .capabilities import RECIPES, VERSION
@@ -693,8 +694,52 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
                 objects.c.parent_id == card_id).order_by(objects.c.created_at, objects.c.id).limit(100)).mappings()
             summaries = [{"id": r["id"], "version": r["payload"]["version"], "created_at": r["created_at"],
                 "input_hash": r["payload"]["input_hash"]} for r in rows]
-        return {**card["payload"], "id": card_id, "version": card["version"], "revisions": summaries,
+        return {**card["payload"], "id": card_id, "version": card["version"], "created_at": card["created_at"], "revisions": summaries,
             "web_url": "/quick-chat?session="+session_id+"&card="+card_id}
+
+    def list_cards(self, principal, session_id, *, limit=10, before_cursor=None):
+        """Visible card history, independent of how many runtime events occurred."""
+        session = self._access(principal, session_id, "projects:read")
+        if type(limit) is not int or not 1 <= limit <= 50:
+            raise QuickChatError("invalid_pagination", "Invalid card page size. / 任务卡分页大小无效。", 422)
+        boundary = None
+        if before_cursor is not None:
+            boundary = cursor_decode(before_cursor, principal, session_id, "cards_older")
+            if (not isinstance(boundary, dict) or set(boundary) != {"tenant", "created_at", "id"}
+                    or boundary["tenant"] != self.tenant
+                    or type(boundary["created_at"]) not in (int, float) or not math.isfinite(boundary["created_at"])
+                    or not isinstance(boundary["id"], str) or len(boundary["id"]) > 80 or not ID.fullmatch(boundary["id"])):
+                raise QuickChatError("invalid_cursor", "Invalid card history position. / 任务卡分页位置无效。", 422)
+        query = select(objects.c.id, objects.c.created_at).where(objects.c.tenant == self.tenant,
+            objects.c.owner == principal.owner, objects.c.session_id == session_id, objects.c.kind == "card",
+            objects.c.payload["content_deleted"].as_boolean().is_not(True))
+        if boundary is not None:
+            query = query.where(or_(objects.c.created_at < boundary["created_at"],
+                and_(objects.c.created_at == boundary["created_at"], objects.c.id < boundary["id"])))
+        with self.repo.engine.connect() as conn:
+            rows = list(conn.execute(query.order_by(objects.c.created_at.desc(), objects.c.id.desc()).limit(limit+1)).mappings())
+        selected, has_more = rows[:limit], len(rows) > limit
+        values = [self.get_card(principal, session_id, row["id"]) for row in reversed(selected)]
+        if principal.allows(session["payload"]["project_id"], "jobs:read"):
+            revision, submission = objects.alias("history_revision"), objects.alias("history_submission")
+            query = select(revision.c.parent_id, submission.c.id).join(submission,
+                submission.c.parent_id == revision.c.id).where(
+                revision.c.tenant == self.tenant, revision.c.owner == principal.owner,
+                revision.c.session_id == session_id, revision.c.kind == "revision",
+                revision.c.parent_id.in_([row["id"] for row in selected]),
+                submission.c.tenant == self.tenant, submission.c.owner == principal.owner,
+                submission.c.session_id == session_id, submission.c.kind == "submission")
+            with self.repo.engine.connect() as conn:
+                links = list(conn.execute(query.order_by(submission.c.created_at, submission.c.id)))
+            for card in values:
+                card["submission_ids"] = [ident for parent, ident in links if parent == card["id"]]
+        else:
+            for card in values:
+                card.update(submission_ids=None, submissions_require_scope="jobs:read")
+        next_cursor = (cursor_encode(principal, session_id, {"tenant": self.tenant,
+            "created_at": selected[-1]["created_at"], "id": selected[-1]["id"]}, "cards_older") if has_more else None)
+        return {"session_id": session_id, "cards": values, "limit": limit, "has_more": has_more,
+            "next_cursor": next_cursor, "start_reached": not has_more}
 
     def _projection(self, principal, session, revision, item):
         scope = Scope(self.tenant, principal.owner, "__projects")

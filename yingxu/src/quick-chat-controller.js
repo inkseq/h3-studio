@@ -4,6 +4,7 @@ import {bindingPayload} from './quick-chat-model.js';
 import {requireModeAvailable} from './generation-availability.js';
 import {rememberDraftOrigin,clearAcceptedDraft} from './quick-chat-draft.js';
 import {HISTORY_ACTIONS,historySelection,checkedHistoryPreview,checkedHistoryResult} from './creation-history-model.js';
+import {CARD_HISTORY_PAGE_SIZE,emptyCardHistory,checkedCardPage} from './quick-chat-history.js';
 const clone=value=>structuredClone(value),uuid=()=>crypto.randomUUID();
 const record=(value,field)=>value?.[field]||value;
 const merge=(older,newer)=>[...new Map([...older,...newer].map(value=>[value.id||value.binding_id,value])).values()];
@@ -24,7 +25,8 @@ export async function saveMaterialSelection(controller,{original,next,proposed})
 }
 export function createQuickChatController({client=createQuickChatClient(),storage=globalThis.localStorage}={}){
   let epoch=0,sessionEpoch=0,readGeneration=0,refreshing=false,availabilitySequence=0,availabilityRequest=null,historyEpoch=0,listSequence={active:0,trash:0};
-  let state={account:null,schema:null,capabilities:null,availability:null,availabilityChecking:false,operatorAccess:false,sessions:[],sessionsCursor:null,session:null,materials:[],timeline:[],historyCursor:null,forwardCursor:null,cards:{},revisions:{},preflights:{},submissions:{},imports:{},busy:false,error:'',notice:'',pending:null,lastUpdated:null,draftReset:null,...initialHistory()};
+  let cardPageSequence=0,cardPageRequest=null,textPageSequence=0;
+  let state={account:null,schema:null,capabilities:null,availability:null,availabilityChecking:false,operatorAccess:false,sessions:[],sessionsCursor:null,session:null,materials:[],timeline:[],historyCursor:null,forwardCursor:null,cards:{},revisions:{},preflights:{},submissions:{},imports:{},busy:false,error:'',notice:'',pending:null,lastUpdated:null,draftReset:null,...initialHistory(),...emptyCardHistory()};
   const listeners=new Set();const emit=patch=>{state={...state,...patch};for(const fn of listeners)fn();};
   const context=()=>({epoch,sessionEpoch,account:state.account,sessionId:state.session?.id});
   function guard(ctx,{session=true}={}){if(ctx.epoch!==epoch||ctx.account!==state.account||ctx.readGeneration!==undefined&&ctx.readGeneration!==readGeneration||session&&(ctx.sessionEpoch!==sessionEpoch||ctx.sessionId!==state.session?.id))throw Error('工作账户、会话或内容已经改变；旧响应没有加入当前创作。');}
@@ -53,7 +55,7 @@ export function createQuickChatController({client=createQuickChatClient(),storag
     const rows=more?merge(view==='active'?state.sessions:state.trashSessions,data.sessions||[]):data.sessions||[];
     emit(view==='active'?{sessions:rows,sessionsCursor:data.next_cursor||null,sessionsAsOf:data.as_of??null}:{trashSessions:rows,trashCursor:data.next_cursor||null,trashAsOf:data.as_of??null});return data;
   }
-  function closeArchivedSession(items){if(!items.some(item=>item.id===state.session?.id&&['trashed','purging','purged'].includes(item.trash_state)))return;sessionEpoch++;readGeneration++;client.reset();emit({session:null,materials:[],timeline:[],cards:{},revisions:{},preflights:{},submissions:{},imports:{},historyCursor:null,forwardCursor:null,draftReset:null});}
+  function closeArchivedSession(items){if(!items.some(item=>item.id===state.session?.id&&['trashed','purging','purged'].includes(item.trash_state)))return;sessionEpoch++;readGeneration++;client.reset();emit({session:null,materials:[],timeline:[],cards:{},revisions:{},preflights:{},submissions:{},imports:{},historyCursor:null,forwardCursor:null,draftReset:null,...resetCardHistory()});}
   async function finishHistory(value,operation,ctx){
     guard(ctx,{session:false});const receipt=checkedHistoryResult(value,operation);
     if(receipt.state==='pending')writePending({...operation,actionId:receipt.action_id});else writePending(null);
@@ -81,6 +83,57 @@ export function createQuickChatController({client=createQuickChatClient(),storag
     const value=await client.patchSession(...operation.args,operation.body,operation.key);guard(ctx,{session:false});const session=checkMetadata(value,operation.sessionId,operation.body);writePending(null);guard(ctx,{session:false});
     if(state.session?.id===session.id)emit({session});guard(ctx,{session:false});closeArchivedSession([session]);guard(ctx,{session:false});await list();return value;
   }
+  function resetCardHistory(){cardPageSequence++;textPageSequence++;cardPageRequest=null;return emptyCardHistory();}
+  async function readHistoryCard(summary,ctx,bundle){
+    const response=await client.card(ctx.sessionId,summary.id);guard(ctx);const card=record(response,'card');
+    if(card?.id!==summary.id||card.session_id&&card.session_id!==ctx.sessionId)throw Error('quickHistory.invalid');
+    bundle.cards[card.id]={...card,created_at:summary.created_at};
+    if(!card.current_revision_id&&!card.current_revision?.id)throw Error('quickHistory.invalid');
+    const ids=new Set([card.current_revision_id,card.current_revision?.id,...(response.revisions||card.revisions||[]).map(item=>item.id)].filter(Boolean));
+    for(const id of ids){const revision=state.revisions[id]||record(await client.revision(ctx.sessionId,id),'revision');guard(ctx);if(revision?.id!==id||revision.card_id!==card.id)throw Error('quickHistory.invalid');bundle.revisions[id]=revision;}
+    for(const id of summary.submission_ids||[]){const submission=state.submissions[id]||record(await client.submission(ctx.sessionId,id),'submission');guard(ctx);if(submission?.id!==id||!submission.revision_id)throw Error('quickHistory.invalid');const revision=bundle.revisions[submission.revision_id]||state.revisions[submission.revision_id]||record(await client.revision(ctx.sessionId,submission.revision_id),'revision');guard(ctx);if(revision?.id!==submission.revision_id||revision.card_id!==card.id)throw Error('quickHistory.invalid');bundle.revisions[revision.id]=revision;bundle.submissions[id]=submission;}
+    if(card.turn_id){const turn=record(await client.getTurn(ctx.sessionId,card.turn_id),'turn');guard(ctx);if(turn?.id!==card.turn_id||typeof turn.text!=='string')throw Error('quickHistory.invalid');bundle.turns[turn.id]=turn;}
+  }
+  async function loadCardHistory({reset=false,onBeforeCommit}={}){
+    if(cardPageRequest)return cardPageRequest;
+    if(!state.account||!state.session?.id)throw Error('quickHistory.scope');
+    if(state.cardHistoryLoaded&&!state.cardHistoryHasMore&&!reset)return {added:0,start_reached:true};
+    const ctx={...context(),readGeneration},sequence=++cardPageSequence,known=new Set(Object.keys(state.cards));
+    let cursor=reset?null:state.cardHistoryCursor;
+    emit({cardHistoryLoading:true,cardHistoryError:null});
+    const request=(async()=>{await Promise.resolve();try{
+      const bundle={cards:{},revisions:{},submissions:{},turns:{}},newIds=new Set(),seen=new Set();let page;
+      // Deep links and forward events may already have loaded an older card.
+      // Skip overlaps by card keyset, never by consuming raw event pages.
+      for(let reads=0;reads<64;reads++){
+        guard(ctx);if(sequence!==cardPageSequence)throw Error('quickHistory.scope');
+        page=checkedCardPage(await client.cards(ctx.sessionId,{limit:CARD_HISTORY_PAGE_SIZE-newIds.size,...(cursor?{before_cursor:cursor}:{})}),ctx.sessionId,cursor,CARD_HISTORY_PAGE_SIZE-newIds.size);guard(ctx);
+        await Promise.all(page.cards.map(summary=>readHistoryCard(summary,ctx,bundle)));guard(ctx);
+        for(const card of page.cards)if(!known.has(card.id))newIds.add(card.id);
+        cursor=page.next_cursor||null;
+        if(newIds.size>=CARD_HISTORY_PAGE_SIZE||!page.has_more)break;
+        if(seen.has(cursor))throw Error('quickHistory.invalid');seen.add(cursor);
+      }
+      if(page.has_more&&newIds.size<CARD_HISTORY_PAGE_SIZE)throw Error('quickHistory.invalid');
+      guard(ctx);if(sequence!==cardPageSequence)throw Error('quickHistory.scope');
+      onBeforeCommit?.();guard(ctx);
+      // Keep any newer forward-poll projection read while this page was in
+      // flight. Loading history must not roll a live job status backwards.
+      emit({cards:{...bundle.cards,...state.cards},revisions:{...bundle.revisions,...state.revisions},submissions:{...bundle.submissions,...state.submissions},cardTurns:{...bundle.turns,...state.cardTurns},cardHistoryCursor:cursor,cardHistoryHasMore:page.has_more,cardHistoryLoaded:true,cardHistoryError:null});
+      return {added:newIds.size,start_reached:!page.has_more};
+    }catch(error){if(ctx.epoch===epoch&&ctx.sessionEpoch===sessionEpoch&&sequence===cardPageSequence)emit({cardHistoryError:{key:error.status===422?'quickHistory.cursor':error.message?.startsWith('quickHistory.')?error.message:'quickHistory.failed',status:Number.isInteger(error.status)?String(error.status):'read',reset:error.status===422}});throw error;}
+    finally{if(ctx.epoch===epoch&&ctx.sessionEpoch===sessionEpoch&&sequence===cardPageSequence){cardPageRequest=null;emit({cardHistoryLoading:false});}}})();
+    cardPageRequest=request;return request;
+  }
+  async function loadTextHistory({onBeforeCommit}={}){
+    if(state.textHistoryLoading||!state.historyCursor)return;
+    const ctx={...context(),readGeneration},sequence=++textPageSequence,known=new Set([...Object.values(state.cardTurns),...state.timeline.map(event=>event.record)].filter(turn=>turn?.text!==undefined).map(turn=>turn.id)),seen=new Set();
+    let cursor=state.historyCursor,events=[];emit({textHistoryLoading:true,textHistoryError:null});
+    try{while(cursor){if(seen.has(cursor)||seen.size>=64)throw Error('quickHistory.invalid');seen.add(cursor);const data=await client.timeline(ctx.sessionId,{before_cursor:cursor,limit:50});guard(ctx);events=merge(events,data.events||[]);cursor=data.before_cursor||data.next_cursor||null;if(events.some(event=>event.record?.text!==undefined&&!known.has(event.record.id)))break;}
+      guard(ctx);if(sequence!==textPageSequence)throw Error('quickHistory.scope');onBeforeCommit?.();guard(ctx);emit({timeline:merge(state.timeline,events).sort((a,b)=>a.seq-b.seq),historyCursor:cursor});
+    }catch(error){if(ctx.epoch===epoch&&ctx.sessionEpoch===sessionEpoch&&sequence===textPageSequence)emit({textHistoryError:{key:'quickHistory.failed',status:Number.isInteger(error.status)?String(error.status):'read'}});throw error;}
+    finally{if(ctx.epoch===epoch&&ctx.sessionEpoch===sessionEpoch&&sequence===textPageSequence)emit({textHistoryLoading:false});}
+  }
   async function loadResources(id,{initial=false}={}){
     const ctx={...context(),readGeneration};const [sessionData,materialsData,firstPage]=await Promise.all([client.session(id),client.materials(id),client.timeline(id,{...(initial?{}:{after_cursor:state.forwardCursor})})]);guard(ctx);
     const session=record(sessionData,'session');if(Number.isInteger(state.session?.version)&&session.version<state.session.version)throw Error('旧版本读取已丢弃，请刷新最新内容。');if(session.id!==id)throw Error('会话响应不匹配。');if(session.trash_state&&session.trash_state!=='active'){closeArchivedSession([session]);throw Error('这条创作已在回收站或删除处理中，请先核对或恢复原记录。');}
@@ -95,21 +148,25 @@ export function createQuickChatController({client=createQuickChatClient(),storag
     const sessions=state.sessions.map(item=>item.id===session.id?{...item,title:session.title??item.title,updated_at:session.updated_at??item.updated_at,version:session.version}:item);
     const clearedDraft=clearAcceptedDraft(storage,state.account,id,session.composer_reset);
     emit({session,sessions,...(clearedDraft?{draftReset:{account:state.account,sessionId:id,submissionId:session.composer_reset.submission_id}}:{}),materials:materialsData.materials||materialsData.bindings||[],timeline:initial?events:merge(state.timeline,events),historyCursor:initial?(timelineData.before_cursor||timelineData.next_cursor||null):state.historyCursor,forwardCursor:timelineData.after_cursor||timelineData.latest_cursor||state.forwardCursor,lastUpdated:Date.now(),error:''});
+    if(initial&&typeof client.cards==='function')try{await loadCardHistory();}catch{guard(ctx);/* A scoped history error stays visible with retry; session reads continue. */}
     // Timeline holds durable creation references; current job state is read
     // separately even when its sequence has not changed.
-    const cardIds=new Set(events.map(event=>event.record?.card_id||event.card_id).filter(Boolean));
+    const newCardIds=initial?[]:events.filter(event=>event.type==='card.created').map(event=>event.record?.card_id||event.card_id).filter(Boolean),liveCardIds=[...new Set([...state.liveCardIds,...newCardIds])];
+    if(newCardIds.length)emit({liveCardIds});
+    const inWindow=id=>!state.cardHistoryLoaded||!!state.cards[id]||liveCardIds.includes(id);
+    const cardIds=new Set(events.map(event=>event.record?.card_id||event.card_id).filter(id=>id&&inWindow(id)));
     // The cursor may advance before card/revision reads finish. Recover only
     // missing data referenced by loaded history, at most 20 cards per poll.
-    const loadedCardIds=new Set([...Object.keys(state.cards),...state.timeline.map(event=>event.record?.card_id||event.card_id).filter(Boolean)]);
+    const loadedCardIds=new Set([...Object.keys(state.cards),...state.timeline.map(event=>event.record?.card_id||event.card_id).filter(id=>id&&inWindow(id))]);
     let recovering=0;
     for(const cardId of loadedCardIds){const card=state.cards[cardId],current=card?.current_revision_id||card?.current_revision?.id;if(!cardIds.has(cardId)&&(!card||current&&!state.revisions[current])){cardIds.add(cardId);if(++recovering>=20)break;}}
-    for(const revisionId of new Set(events.map(event=>event.record?.revision_id).filter(Boolean))){const revision=record(await client.revision(id,revisionId),'revision');guard(ctx);emit({revisions:{...state.revisions,[revision.id]:revision}});if(revision.card_id)cardIds.add(revision.card_id);}
+    for(const revisionId of new Set(events.map(event=>event.record?.revision_id).filter(Boolean))){if(state.cardHistoryLoaded&&!state.revisions[revisionId])continue;const revision=state.revisions[revisionId]||record(await client.revision(id,revisionId),'revision');guard(ctx);emit({revisions:{...state.revisions,[revision.id]:revision}});if(revision.card_id&&inWindow(revision.card_id))cardIds.add(revision.card_id);}
     const eventPreflights=Object.fromEntries(events.filter(event=>event.type==='preflight.completed'&&event.record?.id).map(event=>[event.record.id,event.record]));
     if(Object.keys(eventPreflights).length)emit({preflights:{...state.preflights,...eventPreflights}});
     for(const cardId of cardIds){await loadCard(cardId,ctx);}
-    const pendingTurns=new Map(state.timeline.map(event=>event.record).filter(turn=>turn?.text!==undefined&&['pending','running'].includes(turn.status)).map(turn=>[turn.id,turn]));
-    for(const turnId of pendingTurns.keys()){const turn=record(await client.getTurn(id,turnId),'turn');guard(ctx);emit({timeline:state.timeline.map(event=>event.record?.id===turnId?{...event,record:turn}:event)});}
-    const submissionRefs=values=>values.filter(event=>(event.type.startsWith('submission.')||event.type.startsWith('item.'))).map(event=>event.record?.id).filter(Boolean);
+    const pendingTurns=new Map([...Object.values(state.cardTurns),...state.timeline.map(event=>event.record)].filter(turn=>turn?.text!==undefined&&['pending','running'].includes(turn.status)).map(turn=>[turn.id,turn]));
+    for(const turnId of pendingTurns.keys()){const turn=record(await client.getTurn(id,turnId),'turn');guard(ctx);emit({timeline:state.timeline.map(event=>event.record?.id===turnId?{...event,record:turn}:event),...(state.cardTurns[turnId]?{cardTurns:{...state.cardTurns,[turnId]:turn}}:{})});}
+    const submissionRefs=values=>values.filter(event=>(event.type.startsWith('submission.')||event.type.startsWith('item.'))&&(!state.cardHistoryLoaded||state.submissions[event.record?.id]||state.revisions[event.record?.revision_id])).map(event=>event.record?.id).filter(Boolean);
     const submissionIds=new Set([...Object.keys(state.submissions),...submissionRefs(events)]);
     // A failed dependent GET must not lose the durable submission reference
     // after the forward cursor advances. Recover only loaded history.
@@ -151,7 +208,7 @@ export function createQuickChatController({client=createQuickChatClient(),storag
     catch(error){guard(ctx,{session:!!sessionId});if(method!=='takeToStory'&&error.status>=400&&error.status<500&&![408,429].includes(error.status))writePending(null);throw error;}
   }
   return {client,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},getState:()=>state,
-    async setAccount(account){if(account===state.account)return;epoch++;sessionEpoch++;historyEpoch++;listSequence={active:0,trash:0};availabilitySequence++;availabilityRequest=null;client.setAccount(account);emit({account,schema:null,capabilities:null,availability:null,availabilityChecking:false,operatorAccess:false,sessions:[],sessionsCursor:null,session:null,materials:[],timeline:[],historyCursor:null,forwardCursor:null,cards:{},revisions:{},preflights:{},submissions:{},imports:{},busy:false,error:'',notice:'',pending:readPending(account),lastUpdated:null,draftReset:null,...initialHistory()});if(!account)return;const ctx=context();const availabilityLoad=refreshAvailability().catch(()=>null);const operatorLoad=readOperatorAccess();try{const [schema,capabilities]=await Promise.all([client.schema(),client.capabilities()]);guard(ctx,{session:false});emit({schema,capabilities});await list();await Promise.all([availabilityLoad,operatorLoad]);}catch(error){try{guard(ctx,{session:false});emit({error:error.message});}catch{}}},
+    async setAccount(account){if(account===state.account)return;epoch++;sessionEpoch++;historyEpoch++;listSequence={active:0,trash:0};availabilitySequence++;availabilityRequest=null;client.setAccount(account);emit({account,schema:null,capabilities:null,availability:null,availabilityChecking:false,operatorAccess:false,sessions:[],sessionsCursor:null,session:null,materials:[],timeline:[],historyCursor:null,forwardCursor:null,cards:{},revisions:{},preflights:{},submissions:{},imports:{},busy:false,error:'',notice:'',pending:readPending(account),lastUpdated:null,draftReset:null,...initialHistory(),...resetCardHistory()});if(!account)return;const ctx=context();const availabilityLoad=refreshAvailability().catch(()=>null);const operatorLoad=readOperatorAccess();try{const [schema,capabilities]=await Promise.all([client.schema(),client.capabilities()]);guard(ctx,{session:false});emit({schema,capabilities});await list();await Promise.all([availabilityLoad,operatorLoad]);}catch(error){try{guard(ctx,{session:false});emit({error:error.message});}catch{}}},
     list:options=>act(()=>list(options)),
     historyView:view=>act(async()=>{if(!['active','trash'].includes(view))throw Error('列表类型不正确。');invalidateHistory({historyView:view,historySelection:[],historyReceipt:null});if(view==='trash')await list({view});}),
     hideTests:value=>act(async()=>{invalidateHistory({hideTests:!!value,historySelection:[]});await list();}),
@@ -177,15 +234,16 @@ export function createQuickChatController({client=createQuickChatClient(),storag
       // a failed refresh must not erase an accepted pending purge journal.
       return finishHistory(value,operation,ctx);
     }),
-    open:(id,{revisionId,cardId,submissionId}={})=>act(async()=>{sessionEpoch++;client.reset();emit({session:{id},materials:[],timeline:[],cards:{},revisions:{},preflights:{},submissions:{},imports:{},historyCursor:null,forwardCursor:null,error:'',notice:'',draftReset:null});const session=await loadResources(id,{initial:true}),ctx=context();if(submissionId){const submission=record(await client.submission(id,submissionId),'submission');guard(ctx);emit({submissions:{...state.submissions,[submission.id]:submission}});revisionId=revisionId||submission.revision_id;}if(revisionId){const revision=record(await client.revision(id,revisionId),'revision');guard(ctx);emit({revisions:{...state.revisions,[revision.id]:revision}});cardId=cardId||revision.card_id;}if(cardId)await loadCard(cardId,ctx);return session;}),
-    create:body=>act(async()=>{const response=await command('createSession',[],body,{sessionId:null}),session=record(response,'session');sessionEpoch++;emit({session,materials:[],timeline:[],cards:{},revisions:{},preflights:{},submissions:{},imports:{},historyCursor:null,forwardCursor:null});await list();await loadResources(session.id,{initial:true});return session;}),
+    open:(id,{revisionId,cardId,submissionId}={})=>act(async()=>{sessionEpoch++;client.reset();emit({session:{id},materials:[],timeline:[],cards:{},revisions:{},preflights:{},submissions:{},imports:{},historyCursor:null,forwardCursor:null,error:'',notice:'',draftReset:null,...resetCardHistory()});const session=await loadResources(id,{initial:true}),ctx=context();if(submissionId){const submission=record(await client.submission(id,submissionId),'submission');guard(ctx);emit({submissions:{...state.submissions,[submission.id]:submission}});revisionId=revisionId||submission.revision_id;}if(revisionId){const revision=record(await client.revision(id,revisionId),'revision');guard(ctx);emit({revisions:{...state.revisions,[revision.id]:revision}});cardId=cardId||revision.card_id;}if(cardId)await loadCard(cardId,ctx);return session;}),
+    create:body=>act(async()=>{const response=await command('createSession',[],body,{sessionId:null}),session=record(response,'session');sessionEpoch++;emit({session,materials:[],timeline:[],cards:{},revisions:{},preflights:{},submissions:{},imports:{},historyCursor:null,forwardCursor:null,...resetCardHistory()});await list();await loadResources(session.id,{initial:true});return session;}),
     patch:patch=>act(async()=>{const id=state.session.id,body={expected_version:state.session.version,...patch},metadata=isHistoryMetadata(patch),result=await command('patchSession',[id],body,metadata?{validate:value=>checkMetadata(value,id,body)}:{}),session=record(result,'session');emit({session,sessions:state.sessions.map(item=>item.id===session.id?{...item,title:session.title,updated_at:session.updated_at,version:session.version,is_test:session.is_test,review_hold:session.review_hold,trash_state:session.trash_state}:item)});if(metadata){closeArchivedSession([session]);invalidateHistory({historySelection:[]});await list();}return result;},{success:'创作设置已保存；历史卡片保持原版。'}),
     saveMaterials:bindings=>act(async()=>{const ready=bindings.filter(binding=>{const previous=state.materials.find(item=>item.binding_id===binding.binding_id),asset=previous?.asset;if(asset?.status&&asset.status!=='ready')return false;return !(previous?.version===0&&binding.enabled===false&&stableJSON(binding)===stableJSON(bindingPayload(previous)));});const result=await command('saveMaterials',[state.session.id],{expected_version:state.session.version,bindings:ready});await loadResources(state.session.id);return result;},{success:'本轮材料选择已保存；历史原件保留。'}),
     upload:(file,assetId=uuid())=>act(async()=>{if(state.pending)throw Error('先核对原操作。');readGeneration++;const ctx=context(),key='quick-upload-'+assetId;writePending({id:assetId,method:'uploadMaterial',args:[ctx.sessionId],body:{client_asset_id:assetId,file_name:file.name},sessionId:ctx.sessionId,account:ctx.account,key,created_at:Date.now()});try{const value=await client.uploadMaterial(ctx.sessionId,file,assetId,key);guard(ctx);writePending(null);await loadResources(ctx.sessionId);return value;}catch(error){guard(ctx);if(error.status>=400&&error.status<500&&![408,429].includes(error.status))writePending(null);throw error;}},{success:'文件接收结果已记录；是否可生成以素材校验与预检为准。'}),
     resumeMaterial:assetId=>act(async()=>{const result=await command('resumeMaterial',[state.session.id,assetId],{});await loadResources(state.session.id);return result;},{success:'已核对原素材处理收据，没有重新上传原文件。'}),
     refreshAvailability,
     refresh:()=>act(async()=>{const ctx=context(),[schema,capabilities]=await Promise.all([client.schema(),client.capabilities()]);guard(ctx,{session:false});emit({schema,capabilities});await refreshAvailability().catch(()=>null);await list();return refresh();}),poll:()=>state.busy?Promise.resolve():refresh(),
-    history:()=>act(async()=>{const ctx=context(),data=await client.timeline(ctx.sessionId,{before_cursor:state.historyCursor});guard(ctx);emit({timeline:merge(state.timeline,data.events||[]).sort((a,b)=>a.seq-b.seq),historyCursor:data.before_cursor||data.next_cursor||null});const ids=new Set((data.events||[]).map(e=>e.record?.card_id||e.card_id).filter(Boolean));for(const id of ids)await loadCard(id,ctx);}),
+    history:options=>loadCardHistory(options),
+    textHistory:options=>loadTextHistory(options),
     turn:(text,model_id,assistant_mode='assist',{createCard=false,draft}={})=>act(async()=>{if(createCard&&assistant_mode!=='none')throw Error('直接出卡只用于原输入模式，不替代助手回复。');const result=await command('turn',[state.session.id],{expected_version:state.session.version,text,model_id,assistant_mode,...(createCard?{create_card:true}:{})},{draft});await loadResources(state.session.id);return result;},{success:'这一轮已保存；只有确认任务卡才会生成视频。'}),
     createCard:body=>act(async()=>{const result=await command('createCard',[state.session.id],body);await loadResources(state.session.id);const card=record(result,'card');if(card.id)await loadCard(card.id);return result;},{success:'任务卡已保存，尚未提交视频生成。'}),
     reviseCard:(card,body)=>act(async()=>{const result=await command('reviseCard',[state.session.id,card.id],{expected_card_version:card.version,...body});await loadCard(card.id);await loadResources(state.session.id);return result;},{success:'新版本已保存；旧版本及已提交输入保留。'}),
