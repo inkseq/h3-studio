@@ -22,49 +22,21 @@ test('chapter card order follows scene and shot order without mutating the docum
   const p=fixture();p.entities.push(entity('later-scene','scene',{},'chapter',1),entity('later-shot','shot',{seconds:5},'later-scene'),entity('second-shot','shot',{seconds:5},'scene',1));const before=structuredClone(p);
   assert.deepEqual(chapterShots(p,'chapter').map(s=>s.id),['shot','second-shot','later-shot']);assert.deepEqual(p,before);
 });
-test('quality chooses its advertised model and explicit retired profiles never fall back',()=>{
-  const cap=capabilities();assert.equal(storyboardProfile(cap,'draft','ref').id,'draft');assert.equal(storyboardProfile(cap,'final','fl').id,'final');assert.equal(storyboardProfile(cap,'draft','ref','retired'),null);
-  assert.equal(storyboardProfile(cap,'final','ref','draft').id,'final');assert.equal(storyboardProfile(cap,'draft','ref','final').id,'draft');cap.deployment_profiles[0].generation_support.ref.enabled=false;
-  assert.equal(storyboardProfile(cap,'draft','ref','draft'),null);assert.equal(storyboardProfile(cap,'draft','ref'),null);
+test('explicit BF16 identity wins across quality labels and unavailable pins never fall back',()=>{
+ const cap=capabilities(),bf=structuredClone(cap.deployment_profiles[1]);bf.id='exact-bf16';bf.model_id='MiniMax-H3-Base-BF16';cap.deployment_profiles.push(bf);
+ for(const quality of ['draft','final'])assert.equal(storyboardProfile(cap,quality,'ref',bf.id),bf);
+ assert.equal(storyboardProfile(cap,'draft','ref','missing'),null);
+ bf.generation_support.ref.enabled=false;assert.equal(storyboardProfile(cap,'final','ref',bf.id),null);
+ assert.equal(storyboardProfile(cap,'final','fl').id,'draft');
+ delete cap.default_deployment_profile_id;assert.equal(storyboardProfile(cap,'draft','fl'),null);
+ cap.default_deployment_profile_id=bf.id;assert.equal(storyboardProfile(cap,'draft','ref'),null);
+ assert.equal(storyboardProfile(cap,'draft','fl'),bf);
 });
 
-test('unpinned Final uses the newest configured same-model profile after saved pin and API default',()=>{
-  const cap=capabilities(),old=cap.deployment_profiles[1],latest=structuredClone(old);latest.id='base-144-single-fl';latest.generation_support.ref.enabled=false;
-  cap.deployment_profiles.push(latest);const before=structuredClone(cap);
-  assert.equal(storyboardProfile(cap,'final','fl').id,latest.id);
-  assert.equal(storyboardProfile(cap,'final','fl',old.id).id,old.id);
-  cap.default_deployment_profile_id=old.id;
-  assert.equal(storyboardProfile(cap,'final','fl').id,old.id);
-  cap.default_deployment_profile_id='draft';assert.equal(storyboardProfile(cap,'final','ref').id,old.id);
-  assert.equal(storyboardProfile(cap,'final','ref',latest.id),null);
-  cap.default_deployment_profile_id=before.default_deployment_profile_id;assert.deepEqual(cap,before);
-});
-
-test('fallback excludes newer disabled, unconfigured, wrong-mode and different-precision profiles',()=>{
-  const cap=capabilities(),base=cap.deployment_profiles[1],copy=(id,change)=>{const p=structuredClone(base);p.id=id;change(p);return p;};
-  const latest=copy('latest-base-fl',p=>{p.generation_support.ref.enabled=false;});
-  cap.deployment_profiles.push(latest,
-    copy('disabled',p=>{p.generation_support.fl.enabled=false;}),
-    copy('unconfigured',p=>{p.generation_support.fl.configured=false;}),
-    copy('unknown-configuration',p=>{delete p.generation_support.fl.configured;}),
-    copy('ref-only',p=>{p.generation_support.fl.enabled=false;}),
-    copy('base-bf16',p=>{p.model_id='MiniMax-H3-Base-BF16';}));
-  cap.default_deployment_profile_id='unconfigured';
-  assert.equal(storyboardProfile(cap,'final','fl').id,latest.id);
-  assert.equal(storyboardProfile(cap,'final','fl','unconfigured'),null);
-  assert.equal(storyboardProfile(cap,'final','fl','disabled'),null);
-  assert.equal(storyboardProfile(cap,'draft','fl').id,'draft');
-  for(const p of cap.deployment_profiles)if(p.model_id==='MiniMax-H3-Base-INT8')p.generation_support.fl.enabled=false;
-  assert.equal(storyboardProfile(cap,'final','fl'),null);
-});
-
-test('Final regeneration reselects the latest Base FL context while preserving accepted Draft input history',()=>{
-  const p=fixture(),cap=capabilities(),latest=structuredClone(cap.deployment_profiles[1]);latest.id='base-144-single-fl';latest.generation_support.ref.enabled=false;cap.deployment_profiles.push(latest);
-  shotOf(p).data.storyboard.mode='fl';shotOf(p).data.h3={deploymentProfileId:'draft',controls:{steps:50}};
-  const request={deployment_profile_id:'draft',model:'MiniMax-H3-Pruned-Rank8-INT8',mode:'fl',prompt:'accepted action',steps:50,first_frame:'accepted-frame'};
-  p.jobs=[{id:'accepted',effective_request:request}];const before=structuredClone(p);
-  assert.equal(storyboardGenerationProfile(cap,view(p,cap).shots[0],{quality:'final',sourceRequest:request}).id,latest.id);
-  assert.deepEqual(p,before);
+test('quality label changes preserve exact profile and accepted recipe history',()=>{
+ const p=fixture(),cap=capabilities();shotOf(p).data.h3={deploymentProfileId:'draft',controls:{steps:50}};
+ const request={deployment_profile_id:'draft',mode:'ref',prompt:'original',seed:'123'};p.jobs=[{effective_request:request}];const before=structuredClone(p);
+ assert.equal(storyboardGenerationProfile(cap,view(p,cap).shots[0],{quality:'final',sourceRequest:request}).id,'draft');assert.deepEqual(p,before);
 });
 
 test('generation preserves a qualified exact profile even when another profile becomes default',()=>{
@@ -77,10 +49,10 @@ test('generation preserves a qualified exact profile even when another profile b
   shot.entity.data.h3.deploymentProfileId='retired';assert.equal(storyboardGenerationProfile(cap,shot),null);
   shot.entity.data.h3.deploymentProfileId=old.id;old.generation_support.ref.enabled=false;
   assert.equal(storyboardGenerationProfile(cap,shot),null);
-  assert.equal(storyboardGenerationProfile(cap,shot,{quality:'final'}).id,'final');
+  assert.equal(storyboardGenerationProfile(cap,shot,{quality:'final'}),null);
 });
 
-test('intentional mode/quality edits unset obsolete draft selection without changing accepted history or controls',()=>{
+test('intentional mode/quality edits retain explicit profile identity without changing accepted history or controls',()=>{
   const p=fixture(),shot=shotOf(p),cap=capabilities();
   cap.deployment_profiles[0].generation_support.fl.enabled=false;
   shot.data.h3={deploymentProfileId:'draft',controls:{steps:50,resolution:'480P'}};
@@ -88,9 +60,9 @@ test('intentional mode/quality edits unset obsolete draft selection without chan
   patchStoryboardShot(p,'shot',{mode:'REF'});assert.equal(shot.data.h3.deploymentProfileId,'draft');
   const incompatible={...view(p,cap).shots[0],mode:'FL'};
   assert.equal(storyboardGenerationProfile(cap,incompatible),null);
-  patchStoryboardShot(p,'shot',{mode:'FL'});assert.equal(shot.data.h3.deploymentProfileId,'');
+  patchStoryboardShot(p,'shot',{mode:'FL'});assert.equal(shot.data.h3.deploymentProfileId,'draft');
   shot.data.h3.deploymentProfileId='draft';patchStoryboardShot(p,'shot',{quality:'final'});
-  assert.equal(shot.data.h3.deploymentProfileId,'');assert.equal(storyboardGenerationProfile(cap,view(p,cap).shots[0]).id,'final');
+  assert.equal(shot.data.h3.deploymentProfileId,'draft');assert.equal(storyboardGenerationProfile(cap,view(p,cap).shots[0]),null);
   assert.deepEqual(shot.data.h3.controls,{steps:50,resolution:'480P'});assert.deepEqual(p.jobs,jobs);
 });
 test('mode changes preserve both inactive frame choices and reference clip metadata',()=>{
@@ -121,7 +93,7 @@ test('explicitly removed scene and inherited cast stay removed in the view',()=>
 });
 test('legacy frame inputs survive first storyboard edit of unrelated prompt',()=>{
   const p=fixture();delete shotOf(p).data.storyboard;p.entities.push(image('first'));p.links.push({id:'frame-link',source:'first',target:'shot',role:'firstFrame'});
-  assert.ok(applyStoryboardAction(p,{type:'update',id:'shot',patch:{prompt:'A new action'}}));assert.equal(view(p).shots[0].start,'first');assert.equal(shotOf(p).data.storyboard.firstFrameId,'first');
+  assert.ok(applyStoryboardAction(p,{type:'update',id:'shot',patch:{prompt:'A new action'}}));assert.equal(view(p).shots[0].start,'first');assert.equal(shotOf(p).data.storyboard,undefined);assert.equal(p.links.find(l=>l.id==='frame-link').source,'first');
 });
 test('REF duplicate references do not consume unique file or total capacity',()=>{
   const p=fixture();p.entities.push(image('shared'),image('extra'),character('a','shared'),character('b','shared'));shotOf(p).data.cast=[{characterId:'a',lookId:'look'},{characterId:'b',lookId:'look'}];shotOf(p).data.storyboard.extraRefs=[{entityId:'extra'}];

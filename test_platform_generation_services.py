@@ -13,7 +13,7 @@ from studio_platform.execution_policy import ExecutionPolicies
 from studio_platform.generation_admission import GenerationAdmission
 from studio_platform.generation_draft import plan_body
 from studio_platform.generation_services import GenerationAccess, GenerationPlanning, GenerationRead
-from studio_platform.repository import Conflict, NotFound, artifacts, attempts, jobs, plans
+from studio_platform.repository import Conflict, NotFound, artifacts, attempts, jobs, plans, request_hash
 from studio_platform.settings import Settings
 from studio_platform.storage import LocalObjectStore
 
@@ -62,8 +62,22 @@ class GenerationServicesTests(ledger.LedgerCase):
         direct = self.admission.plan(self.principal, self.direct_body())
         story = self.admission.preflight(self.principal, self.project, "shot-one", expected_version=1)
         self.assertNotEqual(direct["plan_id"], story["plan_id"])
-        for field in ("request_hash", "effective_request", "output_spec", "execution", "client_ref"):
+        for field in ("effective_request", "output_spec", "execution", "client_ref"):
             self.assertEqual(direct[field], story[field], field)
+        # Story preflight adds immutable authoring provenance. Its complete
+        # receipt hash differs while the original execution request stays exact.
+        direct_saved = self.access.plan(self.principal, direct["plan_id"])
+        story_saved = self.access.plan(self.principal, story["plan_id"])
+        authoring = {"authoring_recipe", "authoring_context", "authoring_defaults_version"}
+        self.assertTrue(authoring <= story_saved["request"].keys())
+        self.assertFalse(authoring & direct_saved["request"].keys())
+        self.assertEqual({k: v for k, v in story_saved["request"].items() if k not in authoring},
+                         direct_saved["request"])
+        self.assertEqual(story_saved["request"]["authoring_context"]["shot"], self.project["entities"][0])
+        self.assertEqual(story_saved["request"]["authoring_defaults_version"], 0)
+        for value, saved in ((direct, direct_saved), (story, story_saved)):
+            self.assertEqual(value["request_hash"], request_hash(saved["request"]))
+        self.assertNotEqual(direct["request_hash"], story["request_hash"])
         self.assertEqual(direct["effective_request"]["seed"], "18446744073709551615")
         self.assertTrue(direct["simulation"])
         self.assertEqual(self.count(plans), 2)

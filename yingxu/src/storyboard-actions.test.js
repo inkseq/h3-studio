@@ -117,3 +117,12 @@ test('invalid types, foreign references and out-of-range clips leave the input d
   const project=fixture();act(project,{type:'addVoice',pid:'hero',asset:'voice-one'});const before=structuredClone(project);
   assert.equal(act(project,{type:'voice',pid:'hero',asset:'voice-one',patch:{start:6}}),false);assert.deepEqual(project,before);
 });
+
+test('editing a restored exact recipe keeps raw inputs and immutable context without storyboard compilation',()=>{
+ const p=fixture(),shot=get(p,'shot-a');shot.data.h3={explicitReferences:true,recipeId:'h3-base-ref2va-v1',inputMode:'ref',deploymentProfileId:'exact-bf16',controls:{duration:5,seed:'123',steps:17},guides:[{media_id:'voice-one',use_audio:true}]};shot.data.referenceRanges={'voice-one':{start:1,end:4}};shot.data.restoredRecipeContext={artifact_id:'original',original_authoring_context:{prompt:'historical'}};
+ const h3=structuredClone(shot.data.h3),ranges=structuredClone(shot.data.referenceRanges),context=structuredClone(shot.data.restoredRecipeContext),links=structuredClone(p.links),jobs=structuredClone(p.jobs);
+ assert.ok(act(p,{type:'update',id:shot.id,patch:{prompt:'Edited prompt',duration:6,title:'Edited title',script:'Edited script'}}));
+ assert.equal(shot.data.storyboard,undefined);assert.equal(shot.data.prompt,'Edited prompt');assert.deepEqual(shot.data.h3,{...h3,controls:{...h3.controls,duration:6}});assert.deepEqual(shot.data.referenceRanges,ranges);assert.deepEqual(shot.data.restoredRecipeContext,context);assert.deepEqual(p.links,links);assert.deepEqual(p.jobs,jobs);
+ assert.equal(act(p,{type:'update',id:shot.id,patch:{cast:[{id:'hero',variant:'coat'}]}}),false);assert.equal(shot.data.storyboard,undefined);
+ act(p,{type:'update',id:shot.id,patch:{start:'image-two'}});assert.equal(p.links.find(l=>l.target===shot.id&&l.role==='firstFrame').source,'image-two');assert.deepEqual(shot.data.referenceRanges,ranges);assert.deepEqual(shot.data.h3.guides,h3.guides);
+});

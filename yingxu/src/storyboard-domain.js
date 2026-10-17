@@ -9,16 +9,13 @@ const list=value=>Array.isArray(value)?value:[];
 export function chapterShots(project,chapterId){return children(project,chapterId).filter(e=>e.type==='scene').flatMap(scene=>children(project,scene.id).filter(e=>e.type==='shot'));}
 export function storyboardProfile(capabilities,quality,inputMode,explicitId){
   const profiles=capabilities?.deployment_profiles||[],enabled=p=>p.generation_support?.[inputMode]?.configured===true&&p.generation_support?.[inputMode]?.enabled===true;
-  const matches=p=>quality==='final'?p.model_id==='MiniMax-H3-Base-INT8':p.model_id==='MiniMax-H3-Pruned-Rank8-INT8';
-  if(explicitId){const exact=profiles.find(p=>p.id===explicitId);if(!exact)return null;if(matches(exact))return enabled(exact)?exact:null;}
-  const preferred=profiles.find(p=>p.id===capabilities?.default_deployment_profile_id&&matches(p)&&enabled(p));
-  // The API catalogue appends newer profiles while retaining historical ones.
-  return preferred||profiles.findLast(p=>matches(p)&&enabled(p))||null;
+  const id=explicitId||capabilities?.default_deployment_profile_id;
+  const exact=profiles.find(p=>p.id===id);
+  return exact&&enabled(exact)?exact:null;
 }
 export function storyboardGenerationProfile(capabilities,shot,{quality,sourceRequest}={}){
   const targetQuality=quality||shot.quality,inputMode=sourceRequest?.mode||shot.mode.toLowerCase();
-  const changedContext=targetQuality!==shot.quality||inputMode!==shot.mode.toLowerCase();
-  return storyboardProfile(capabilities,targetQuality,inputMode,changedContext?undefined:shot.entity?.data.h3?.deploymentProfileId);
+  return storyboardProfile(capabilities,targetQuality,inputMode,sourceRequest?.deployment_profile_id||shot.entity?.data.h3?.deploymentProfileId);
 }
 export function storyboardView(project,{chapterId,capabilities,jobs=[],queue=null,busy=false,error=''}={}){
   const chapter=find(project,chapterId)||children(project,null).find(e=>e.type==='chapter');
@@ -113,11 +110,25 @@ export function storyboardDrop(shot,item,slot,state){
   return {patch:{refs:[...new Set([...shot.refs,a.id])]},msg:shot.mode==='FL'&&!supported?'参考已保存，切到全能参考时发送。':'已加入附加参考，控制方式由预检核对。',hint:'松开：加入参考'};
 }
 export function storyboardSnapshot(project,shotId){const shot=find(project,shotId),chap=ancestors(project,shotId).find(e=>e.type==='chapter'),shots=chap?chapterShots(project,chap.id):[],at=shots.findIndex(s=>s.id===shotId);return {shot,style:project.journey?.storyboard?.style||'',profiles:project.entities.filter(e=>['character','location','prop'].includes(e.type)),assets:project.entities.filter(e=>['image','video','audio'].includes(e.type)),previous:shot?.data.storyboard?.continuePrevious?shots[at-1]?.data.selectedAssetId:null};}
-export function patchStoryboardShot(project,id,patch){const shot=find(project,id);if(!shot)throw Error('镜头不存在。');const b={version:1,mode:mode(shot),quality:'draft',place:null,propIds:[],firstFrameId:'',lastFrameId:'',continuePrevious:false,extraRefs:[],...shot.data.storyboard};
-  // A deliberate mode/quality edit selects a new model context. A same-context
-  // edit must retain its exact deployment profile instead of reverting it.
-  const changedContext=Object.hasOwn(patch,'mode')&&patch.mode.toLowerCase()!==b.mode||Object.hasOwn(patch,'quality')&&patch.quality!==b.quality;
-  if(changedContext&&shot.data.h3)shot.data.h3={...shot.data.h3,deploymentProfileId:''};
+export function patchStoryboardShot(project,id,patch){const shot=find(project,id);if(!shot)throw Error('镜头不存在。');
+  if(!shot.data.storyboard&&!Object.keys(patch).some(key=>['cast','place','props','continuePrev'].includes(key))&&(!Object.hasOwn(patch,'mode')||shot.data.h3?.explicitReferences)){
+    for(const key of ['script','prompt'])if(Object.hasOwn(patch,key))shot.data[key]=patch[key];
+    if(Object.hasOwn(patch,'title'))shot.title=patch.title;
+    if(Object.hasOwn(patch,'quality'))shot.data.qualityIntent=patch.quality;
+    if(Object.hasOwn(patch,'duration')){shot.data.seconds=patch.duration;shot.data.h3={...shot.data.h3,controls:{...shot.data.h3?.controls,duration:patch.duration}};}
+    if(Object.hasOwn(patch,'seedLock'))shot.data.h3={...shot.data.h3,controls:{...shot.data.h3?.controls,seed:patch.seedLock?(shot.data.h3?.controls?.seed??project.jobs.findLast(j=>j.client_ref?.shot_id===id)?.effective_request?.seed??'1'):null}};
+    if(Object.hasOwn(patch,'mode'))shot.data.h3={...shot.data.h3,inputMode:patch.mode.toLowerCase(),recipeId:patch.mode.toLowerCase()==='ref'?'h3-base-ref2va-v1':'h3-base-fl2va-v1'};
+    for(const [field,role] of [['start','firstFrame'],['end','lastFrame']])if(Object.hasOwn(patch,field)){
+      project.links=project.links.filter(l=>!(l.target===id&&l.role===role));if(patch[field])project.links.push({id:uid('link'),source:patch[field],target:id,role});
+    }
+    if(Object.hasOwn(patch,'refs')){
+      const roles=['reference','identity','motion','audio'],old=project.links.filter(l=>l.target===id&&roles.includes(l.role));
+      project.links=project.links.filter(l=>!(l.target===id&&roles.includes(l.role))||patch.refs.includes(l.source));
+      for(const source of patch.refs)if(!old.some(l=>l.source===source))project.links.push({id:uid('link'),source,target:id,role:find(project,source)?.type==='audio'?'audio':'reference'});
+    }
+    shot.version++;if(shot.data.selectedAssetId)shot.status='review';return;
+  }
+const b={version:1,mode:mode(shot),quality:'draft',place:null,propIds:[],firstFrameId:'',lastFrameId:'',continuePrevious:false,extraRefs:[],...shot.data.storyboard};
   if(Object.hasOwn(patch,'title'))shot.title=patch.title;if(Object.hasOwn(patch,'script'))shot.data.script=patch.script;if(Object.hasOwn(patch,'prompt'))shot.data.prompt=patch.prompt;
   if(Object.hasOwn(patch,'duration')){shot.data.seconds=patch.duration;shot.data.h3={...shot.data.h3,controls:{...shot.data.h3?.controls,duration:patch.duration}};}
   for(const [from,to] of Object.entries({mode:'mode',quality:'quality',start:'firstFrameId',end:'lastFrameId',continuePrev:'continuePrevious',props:'propIds'}))if(Object.hasOwn(patch,from))b[to]=from==='mode'?patch[from].toLowerCase():patch[from];

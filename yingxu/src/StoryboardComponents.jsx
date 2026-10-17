@@ -470,6 +470,7 @@ export function ShotEditor({shotId, onClose, inline}) {const {t:tr,locale}=useI1
   const sf = startFrame(shot, db,locale), endA = shot.end && db.asset(shot.end);
   const viewing = shot.versions.find(v => v.id === preview) || chosenVersion(shot);
   const busy=state.busy||shot.versions.some(v=>['queued','generating','waiting_capacity','claimed','submitting','running','collecting','checking'].includes(v.status));
+  const restoredExact=!!shot.entity?.data.h3?.explicitReferences&&!shot.entity?.data.storyboard;
   const chosen=chosenVersion(shot),qualityLabel=QUALITY_LABEL[shot.quality]||tr('storyboard.detail48'),durationRange=info.durationRange;
 
   return (
@@ -493,7 +494,7 @@ export function ShotEditor({shotId, onClose, inline}) {const {t:tr,locale}=useI1
       <label className="field"><span>{tr('storyboard.copy85')}</span>
         <textarea rows={2} value={shot.prompt} onChange={e => upd({prompt: e.target.value})} placeholder={tr('storyboard.finish11')} /></label>
 
-      <Slot onFiles={files=>dispatch({type:'uploadFiles',files,target:{kind:'shot',shot:shot.id,slot:'smart'}})} id={'slot:cast:'+shot.id} className="castslot" label={tr('storyboard.detail77')} hint={tr('storyboard.detail78')} onPick={openPicker('cast')}>
+      {restoredExact?<p>{tr('workbench.restoredBindings')}</p>:<Slot onFiles={files=>dispatch({type:'uploadFiles',files,target:{kind:'shot',shot:shot.id,slot:'smart'}})} id={'slot:cast:'+shot.id} className="castslot" label={tr('storyboard.detail77')} hint={tr('storyboard.detail78')} onPick={openPicker('cast')}>
         {(shot.cast.length || shot.place || shot.props.length) ? <div className="castlist">
           {shot.cast.map(c => { const p = db.profile(c.id); if (!p) return null; const a=db.asset(variantOf(p,c.variant)?.images[0]); return (
             <div key={c.id} className="castitem character"><AssetThumb asset={a} size={34} /><div><button className="link" title={tr('storyboard.finish12')} onClick={() => dispatch({type: 'openProfile', id: p.id})}>{p.name}</button>
@@ -511,7 +512,7 @@ export function ShotEditor({shotId, onClose, inline}) {const {t:tr,locale}=useI1
             <div key={id} className="castitem prop"><AssetThumb asset={coverOf(db, p)} size={34} /><div><button className="link" title={tr('storyboard.finish12')} onClick={() => dispatch({type: 'openProfile', id: p.id})}>{p.name}</button><small>{tr('storyboard.copy88')}</small></div>
               <button className="x" onClick={() => dispatch({type: 'unprop', shot: shot.id, id})}>×</button></div>); })}
         </div> : null}
-      </Slot>
+      </Slot>}
 
       <div className="modetabs" role="tablist" aria-label={tr('storyboard.finish13')}>
         {['FL', 'REF'].map(k => (
@@ -522,14 +523,14 @@ export function ShotEditor({shotId, onClose, inline}) {const {t:tr,locale}=useI1
         {info.frameInputs && <>
           <div className="slots">
             <Slot onFiles={files=>dispatch({type:'uploadFiles',files,target:{kind:'shot',shot:shot.id,slot:'start'}})} id={'slot:start:'+shot.id} label={tr('storyboard.detail79')} hint={tr('storyboard.detail81')} onPick={openPicker('start')}
-              onClear={shot.start || shot.continuePrev ? () => upd({start: null, continuePrev: false}) : null}>
+              onClear={shot.start || shot.continuePrev ? () => upd(restoredExact?{start:null}:{start:null,continuePrev:false}) : null}>
               {sf&&(sf.asset?<figure><StoryboardAssetImage asset={sf.asset}/><figcaption>{sf.label}</figcaption></figure>:<div className="slot-empty">{sf.label}</div>)}
             </Slot>
             <Slot onFiles={files=>dispatch({type:'uploadFiles',files,target:{kind:'shot',shot:shot.id,slot:'end'}})} id={'slot:end:'+shot.id} label={tr('storyboard.detail80')} hint={tr('storyboard.detail81')} onPick={openPicker('end')} onClear={shot.end ? () => upd({end: null}) : null}>
               {endA && <figure><StoryboardAssetImage asset={endA}/><figcaption>{endA.name}</figcaption></figure>}
             </Slot>
           </div>
-          {index > 0 && <label className="check"><input type="checkbox" checked={shot.continuePrev}
+          {index > 0 && !restoredExact && <label className="check"><input type="checkbox" checked={shot.continuePrev}
             onChange={e => upd({continuePrev: e.target.checked, start: e.target.checked ? null : shot.start})} />
             {tr('storyboard.finish21',{title:state.shots[index-1].title})}</label>}
           <label className="field"><span>{tr('storyboard.finish22',{seconds:shot.duration})}</span><input type="number" min={durationRange?.minimum} max={durationRange?.maximum} step={durationRange?.step||'any'} value={shot.duration} disabled={!durationRange} onChange={event=>{const n=Number(event.target.value);if(Number.isFinite(n)&&n>0)upd({duration:n});}}/>{!durationRange&&<small>{tr('storyboard.copy89')}</small>}</label>
@@ -565,7 +566,6 @@ export function ShotEditor({shotId, onClose, inline}) {const {t:tr,locale}=useI1
       <WorkbenchCopies value={copies} onChange={setCopies} max={state.copiesMax}/><div className="ed-actions">
         <button className="primary" disabled={busy||!Number.isInteger(Number(copies))||Number(copies)<1||Number(copies)>state.copiesMax} onClick={()=>dispatch({type:'workbenchGenerate',ids:[shot.id],copies:Number(copies)})}>
           {shot.versions.length?tr('storyboard.detail67'):tr('storyboard.detail68')} · {qualityLabel}</button>
-        {chosen&&chosen.quality==='draft'&&<button disabled={busy} onClick={() => dispatch({type:'generate',ids:[shot.id],quality:'final',sourceVersion:chosen.id})}>{tr('storyboard.copy91')}</button>}
 
       </div>
       {picker && <AssetPicker shotId={shot.id} {...picker} onClose={() => setPicker(null)} />}
