@@ -8,6 +8,35 @@ import {createCloudClient,CloudError,safeCloudPath} from './cloud-client.js';
 import {blankCloudProject,freestyleProject,removeFreestyleInput,copyForCloud,controlsForRecipe,selectedProfileRecipe,buildPlanPayload,digest,shotSnapshot,mergeJobCandidate,estimateLabel,recoveryMessage} from './cloud-model.js';
 import {createCloudController} from './cloud-controller.js';
 
+test('native media targets stream through exact account-fenced routes without reading bytes or storing access links',async()=>{
+ let reads=0;const native=createCloudClient({fetcher:()=>{throw Error('native URL creation must not fetch');}});
+ const h=await harness({setAccount:native.setAccount,nativeContentURL:native.nativeContentURL,download:async()=>{reads++;return new Blob(['processing bytes']);}}).start();
+ try{
+  const preview=h.getHandlers().native('cloud_asset_reference'),attachment=h.getHandlers().native('cloud_artifact_video',{download:true});
+  assert.equal(preview.href,'/v1/assets/reference/content?expected_account=superdan');
+  assert.equal(attachment.href,'/v1/artifacts/video/content?expected_account=superdan&download=1');
+  assert.equal(preview.account,'superdan');assert.equal(preview.projectId,h.store.getState().project.id);assert.ok(Object.isFrozen(preview));
+  h.store.updateProject({logline:'An ordinary edit keeps the source valid'});assert.doesNotThrow(preview.assertCurrent);
+  for(const id of ['cloud_asset_bad/path','cloud_artifact_a?token=secret','cloud_asset_../foreign','local-file'])assert.throws(()=>h.getHandlers().native(id),/client.mediaPath/);
+  assert.throws(()=>h.getHandlers().native('cloud_asset_reference',{download:'yes'}));assert.equal(reads,0);
+  assert.doesNotMatch(JSON.stringify(h.store.exportProject()),/expected_account|r2\.cloudflarestorage|signature=/);
+  assert.equal(await(await h.getHandlers().read('cloud_artifact_video')).text(),'processing bytes');assert.equal(reads,1);
+ }finally{h.controller.destroy();}
+});
+
+for(const change of ['account','project','same-project reopening'])test(`native media target stays bound and rejects after ${change}`,async()=>{
+ const native=createCloudClient(),h=await harness({setAccount:native.setAccount,nativeContentURL:native.nativeContentURL}).start();
+ try{
+  const original=h.store.getState().project.id,target=h.getHandlers().native('cloud_artifact_original',{download:true});
+  if(change==='account'){h.api.me=async()=>({username:'supervan'});await h.controller.recheckSession();assert.equal(h.getHandlers().native,null);}
+  else if(change==='project')await h.controller.create('Another cloud story');
+  else{h.controller.leave();await h.controller.open(original);assert.equal(h.store.getState().project.id,original);}
+  assert.throws(target.assertCurrent,/账户或项目已经切换/);
+  assert.equal(target.href,'/v1/artifacts/original/content?expected_account=superdan&download=1');
+  assert.equal(target.projectId,original);
+ }finally{h.controller.destroy();}
+});
+
 function memory(){const map=new Map();return {map,getItem:key=>map.get(key)??null,setItem:(key,value)=>map.set(key,value)};}
 function fixture(){const storage=memory(),store=createStore({storage});store.newProject('原本机作品');const chapter=store.addEntity('chapter'),scene=store.addEntity('scene',chapter),shot=store.addEntity('shot',scene,{description:'雨夜女孩走入车站',data:{seconds:5}});return {storage,store,chapter,scene,shot};}
 const schema={duration:{type:'integer',minimum:4,maximum:15,default:5},resolution:{type:'string',enum:['768P','512P'],default:'768P'},seed:{type:['string','null'],default:null},generate_audio:{type:'boolean',default:true},shift_video:{type:['number','null'],default:null},guides:{type:'array',default:[]},video_audio:{type:'object',default:{}},audio_tile_size:{type:'integer',default:512,available:false}};

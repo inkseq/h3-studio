@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createStore} from './store.js';
-import {uploadFile,setCloudMediaHandlers} from './media.js';
+import {uploadFile,setCloudMediaHandlers,nativeMediaSource,getFile} from './media.js';
 import {captureWorkspace,assertWorkspace,createUploadGate} from './workspace-context.js';
 import {replaceEntityMedia,uploadLookImage,uploadFreestyleFiles} from './media-operations.js';
 
@@ -15,6 +15,19 @@ function fixture({cloud=false}={}){
 const file=()=>new File(['test-image-bytes'],'local-only.png',{type:'image/png'});
 const uploaded=()=>({type:'image',data:{fileId:'new-file',fileName:'new.png',mime:'image/png',bytes:16,source:'upload',missingFile:false}});
 const entity=(h,id)=>h.store.getState().project.entities.find(e=>e.id===id);
+test('native view resolver never replaces explicit byte reads and cloud rejection has no local fallback',async()=>{
+ let reads=0,resolutions=0;const source=Object.freeze({href:'/v1/assets/source/content?expected_account=superdan',assertCurrent(){}});
+ setCloudMediaHandlers({read:async()=>{reads++;return new Blob(['original bytes']);},native:()=>{resolutions++;return source;}});
+ try{
+  assert.equal(nativeMediaSource('local-file'),null);assert.equal(resolutions,0);
+  assert.equal(nativeMediaSource('cloud_asset_source'),source);assert.equal(reads,0);
+  assert.equal(await(await getFile('cloud_asset_source')).text(),'original bytes');assert.equal(reads,1);
+  assert.throws(()=>nativeMediaSource('cloud_asset_../foreign'),/client.mediaPath/);assert.equal(resolutions,1);
+  setCloudMediaHandlers({read:async()=>{reads++;return new Blob(['must not fall back']);},native:()=>{throw Error('source context changed');}});
+  assert.throws(()=>nativeMediaSource('cloud_asset_source'),/source context changed/);assert.equal(reads,1);
+  setCloudMediaHandlers();assert.throws(()=>nativeMediaSource('cloud_asset_source'),/client.mediaAccount/);
+ }finally{setCloudMediaHandlers();}
+});
 test('audio guide upload binds its own audio without requesting a nonexistent original video track',async()=>{
  const h=fixture();await uploadFreestyleFiles({store:h.store,shotId:h.shot,files:[new File(['audio'],'source.wav',{type:'audio/wav'})],guide:true,maximum:1,upload:async()=>({type:'audio',data:{fileId:'audio-file',mime:'audio/wav',bytes:5}})});
  const guide=entity(h,h.shot).data.h3.guides[0];assert.equal(guide.use_audio,false);assert.equal(h.store.getState().project.entities.find(item=>item.id===guide.media_id).type,'audio');
