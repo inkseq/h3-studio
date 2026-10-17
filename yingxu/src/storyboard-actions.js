@@ -73,11 +73,10 @@ function validShotPatch(project, patch) {
 }
 function patchShot(project, shot, patch) {
   if (!validShotPatch(project,patch)) return false;
-  if (!shot.data.storyboard && shot.data.h3?.explicitReferences && Object.keys(patch).some(key=>['cast','place','props','continuePrev'].includes(key))) return false;
   const clean = {...patch};
   for (const key of ['start','end']) if (clean[key] === null) clean[key] = '';
   // The first opt-in edit materializes legacy inherited context, then it is exact.
-  if (!shot.data.storyboard && !shot.data.h3?.explicitReferences && Object.keys(clean).some(key=>['mode','cast','place','props','continuePrev'].includes(key))) {
+  if (!shot.data.storyboard) {
     clean.cast ??= effectiveCast(project,shot).map(value => ({id:value.characterId,variant:value.lookId || ''}));
     const place = effectivePlace(project,shot);
     if (!owns(clean,'place')) clean.place = place ? {id:place.locationId,variant:place.versionId || ''} : null;
@@ -181,9 +180,6 @@ export function applyStoryboardAction(project, action, {chapterId,view} = {}) {
     const data = action.ptype === 'character' ? {looks:[{id:'main',name:'默认造型',description:'',gallery:{},imageIds:[],version:1}],defaultLookId:'main',voices:[],mainVoiceId:''}
       : action.ptype === 'location' ? {versions:[{id:'main',name:'默认',description:'',imageIds:[],version:1}],defaultVersionId:'main',ambient:null} : {imageIds:[]};
     return {id:newStoryboardEntity(project,action.ptype,action.name.trim(),null,data).id};
-  }
-  if (action.type === 'assetTitle') {
-    const asset=find(project,action.asset);if(!media(project,action.asset,['image','video','audio'])||typeof action.title!=='string'||!action.title.trim())return false;asset.title=action.title;asset.version++;return {id:asset.id};
   }
   if (action.type === 'dismissInbox') {
     if (!media(project,action.asset,['image','video','audio'])) return false;

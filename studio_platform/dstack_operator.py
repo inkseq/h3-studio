@@ -39,7 +39,7 @@ TERMINAL_JOBS = {"succeeded", "failed", "cancelled"}
 OBSERVATION_KEYS = {"run_id", "run_name", "state", "ready", "reason_code", "observed_at",
     "provider_instance_id", "runtime_incarnation", "dstack_status", "model_load_state",
     "billing_state", "estimated_cost_microusd", "bootstrap_phase", "preparation",
-    "host_observation", "host_failure", "no_allocation_proof"}
+    "host_observation", "host_failure", "no_allocation_proof", "provider_removal_proof"}
 IDENTITY_KEYS = {"run_id", "provider_instance_id", "runtime_incarnation"}
 REGISTRATION_REASON_CODES = frozenset({"global_capacity_exceeded"})
 
@@ -269,6 +269,27 @@ class LedgerDstackStore:
             if observation.get("run_name"):
                 require(observation["run_name"] == binding["run_name"], "dstack_observation_identity_changed")
             value = copy.deepcopy(observation)
+            removal = value.pop("provider_removal_proof", None)
+            if removal is not None:
+                require(isinstance(removal, dict) and set(removal) == {
+                    "version", "backend", "run_id", "provider_instance_id", "observed_at",
+                    "inventory_observed_at", "complete", "absent", "inventory_sha256"}
+                    and type(removal["version"]) is int and removal["version"] == 1
+                    and removal["complete"] is True and removal["absent"] is True
+                    and removal["backend"] == binding["backend"]
+                    and removal["run_id"] == binding.get("run_id")
+                    and removal["provider_instance_id"] == intent.get("provider_instance_id")
+                    and bool(intent.get("provider_instance_id"))
+                    and value.get("state") == "stopped"
+                    and value.get("dstack_status") in {"done", "failed", "terminated", "aborted"}
+                    and _finite(removal["observed_at"]) and _finite(removal["inventory_observed_at"])
+                    and 0 <= self.repo.clock()-removal["observed_at"] <= 30
+                    and 0 <= removal["observed_at"]-removal["inventory_observed_at"] <= 30
+                    and 0 <= self.repo.clock()-removal["inventory_observed_at"] <= 30
+                    and isinstance(removal["inventory_sha256"], str)
+                    and len(removal["inventory_sha256"]) == 64
+                    and all(c in "0123456789abcdef" for c in removal["inventory_sha256"]),
+                    "dstack_provider_removal_proof_invalid")
             no_allocation = value.pop("no_allocation_proof", None)
             if no_allocation is not None:
                 from .dstack_allocation_proof import validate_proof
@@ -341,6 +362,20 @@ class LedgerDstackStore:
                 "runtime_incarnation": binding.get("runtime_incarnation"),
                 "reason_code": value.get("reason_code"), "manifest_digest": binding["manifest_digest"]}
             self._advance(connection, intent, value)
+            if removal is not None:
+                # Record physical closure independently from invoices. Unknown
+                # actual cost stays unknown and retains its billing obligation.
+                self.repo.update_instance(intent_id, "destroyed", destruction_confirmed=True, connection=connection)
+                from .settlement_recovery import release_removed_instance
+                release_removed_instance(self.repo, connection, intent_id)
+                if not binding.get("provider_removal_proof"):
+                    binding["provider_removal_proof"] = removal
+                    self._receipt(connection, intent_id, "provider_removal", {"state": "destroyed", "proof": removal})
+                    self.repo._emit(connection, "dstack.provider_removal_confirmed", intent_id,
+                        {"intent_id": intent_id, "provider_instance_id": removal["provider_instance_id"],
+                         "inventory_sha256": removal["inventory_sha256"], "billing_status": "pending"})
+                connection.execute(update(operator_nodes).where(operator_nodes.c.intent_id == intent_id)
+                    .values(desired_state="stopped"))
             if no_allocation is not None:
                 # The complete typed native rejection list proves every PUT
                 # returned no contract. Settle this original reservation once;
@@ -358,6 +393,9 @@ class LedgerDstackStore:
                     self.repo._emit(connection, "dstack.no_allocation_confirmed", intent_id,
                         {"intent_id": intent_id, "run_id": no_allocation["run_id"],
                          "evidence_sha256": no_allocation["evidence_sha256"]})
+            if intent["state"] == "destroyed" and binding.get("provider_removal_proof"):
+                from .settlement_recovery import release_removed_instance
+                release_removed_instance(self.repo, connection, intent_id)
             self._save(connection, node, payload, runtime_state=value.get("state", "observation_unknown"))
             connection.execute(update(scaler_actions).where(scaler_actions.c.intent_id == intent_id)
                 .values(last_observation=value, last_observed_at=value["observed_at"]))

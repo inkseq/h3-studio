@@ -15,6 +15,7 @@ from pathlib import Path
 import stat
 import string
 
+from .budget_policy import effective_budget_limit
 from .capabilities import MODEL, RECIPES
 from .control import WorkerControl, REAL_GPU_BACKENDS
 from .inference.outputs import validate_delivery_policy, native_delivery_spec, delivery_spec, GPU_R2_DELIVERY
@@ -456,7 +457,7 @@ class ExecutionPolicies:
                         or account["owner_id"] is not None and account["owner_id"] != scope.owner_id
                         or account["project_id"] is not None and account["project_id"] != scope.project_id):
                     raise NotFound("budget_not_found")
-                if account["spent_microusd"] + account["reserved_microusd"] + quote["cost_microusd"] > account["limit_microusd"]:
+                if account["spent_microusd"] + account["reserved_microusd"] + quote["cost_microusd"] > effective_budget_limit(account):
                     raise BudgetExceeded("budget_exceeded")
             except BudgetExceeded:
                 base["budget_error_code"] = "budget_exceeded"

@@ -107,7 +107,7 @@ def daily_projection(connection, tenant, owner, now, *, actor_id=None):
         # be used to promise spare capacity on any individual connection.
         if actor_id and attribution not in (actor_id, None, "quick-chat-execution"):
             continue
-        if row["state"] == "reserved":
+        if row["state"] in {"reserved", "invoice_pending"}:
             amount = money(row["amount_microusd"])
             if row["actual_cost_microusd"] is not None:
                 raise BudgetExceeded("spending_usage_unconfirmed")

@@ -915,6 +915,7 @@ class DstackCapacity:
             if run.get("status") not in TERMINAL:
                 return None
             value = self._observation(run, binding)
+            self._confirm_provider_removal(run, binding, value)
         except Exception:
             return None
         self.store.record(intent_id, value)
@@ -967,6 +968,7 @@ class DstackCapacity:
             else:
                 _owns(run, binding, self.client.project)
                 value = self._observation(run, binding)
+                self._confirm_provider_removal(run, binding, value)
                 observed_run = run
         except DstackError as error:
             value = {"state": "observation_unknown", "ready": False, "reason_code": str(error), "observed_at": self.clock()}
@@ -978,6 +980,31 @@ class DstackCapacity:
         if observed_run is not None and _on_observed is not None:
             _on_observed(observed_run)
         return value
+
+    def _confirm_provider_removal(self, run, binding, value):
+        # Native terminal state alone is not physical removal. Consult
+        # the existing credential-bound complete provider inventory only
+        # for a known original instance, never an unknown allocation.
+        identity = binding.get("provider_instance_id")
+        if value.get("state") == "stopped" and identity and not binding.get("provider_removal_proof"):
+            try:
+                inventory = self.client.provider_inventory(binding["backend"])
+                ids = inventory.get("instance_ids")
+                at = self.clock()
+                if (inventory.get("backend") == binding["backend"] and inventory.get("complete") is True
+                        and isinstance(ids, list) and len(ids) <= 4096
+                        and all(isinstance(i, str) and IDENTIFIER.fullmatch(i) for i in ids)
+                        and len(set(ids)) == len(ids) and identity not in ids
+                        and type(inventory.get("observed_at")) in (int, float)
+                        and math.isfinite(inventory["observed_at"])
+                        and 0 <= at-inventory["observed_at"] <= 30):
+                    value["provider_removal_proof"] = {"version": 1, "backend": binding["backend"],
+                        "run_id": run["id"], "provider_instance_id": identity,
+                        "observed_at": at, "inventory_observed_at": inventory["observed_at"],
+                        "complete": True, "absent": True,
+                        "inventory_sha256": hashlib.sha256(json.dumps(sorted(ids), separators=(",", ":")).encode()).hexdigest()}
+            except Exception:
+                pass  # Failed reads never become absence or free billing.
 
     def _observation(self, run, binding):
         status = run.get("status")

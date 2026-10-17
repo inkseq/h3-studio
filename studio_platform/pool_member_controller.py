@@ -10,6 +10,8 @@ from contextlib import nullcontext
 import json
 import uuid
 
+from .budget_policy import effective_budget_limit
+
 from sqlalchemy import insert, select, update
 
 from .capacity import pool_member_ids, reserve_capacity_member
@@ -202,7 +204,7 @@ class MemberLaunchCoordinator:
             accounts = list(connection.execute(select(budget_accounts).where(
                 budget_accounts.c.id.in_(p["budget_account_ids"]))).mappings())
             if len(accounts) != len(p["budget_account_ids"]) or any(
-                    a["spent_microusd"]+a["reserved_microusd"] > min(a["limit_microusd"], self.budget_ceiling_microusd)
+                    a["spent_microusd"]+a["reserved_microusd"] > min(effective_budget_limit(a), self.budget_ceiling_microusd)
                     for a in accounts):
                 raise BudgetExceeded("capacity_pool_service_budget_exceeded")
             connection.execute(insert(scaler_actions).values(intent_id=intent["id"], pool=p["pool"],

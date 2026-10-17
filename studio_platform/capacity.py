@@ -12,6 +12,7 @@ import re
 from sqlalchemy import insert, or_, select, update
 from sqlalchemy.exc import IntegrityError
 
+from .budget_policy import effective_budget_limit
 from .autoscale import Demand, ScalePolicy, ScaleState, Slot, recommend
 from .repository import (BudgetExceeded, Conflict, NotFound, Scope, budget_accounts, budget_reservations,
     capacity_approvals, capacity_cycles, capacity_gate, capacity_waiters, capacity_pool_members, canonical,
@@ -325,7 +326,7 @@ def _approval_live(repo, connection, row):
         if (account is None or account["tenant_id"] != billing.tenant_id
                 or account["owner_id"] is not None and account["owner_id"] != billing.owner_id
                 or account["project_id"] is not None and account["project_id"] != billing.project_id
-                or account["spent_microusd"]+account["reserved_microusd"]+policy["instance_reservation_microusd"] > account["limit_microusd"]):
+                or account["spent_microusd"]+account["reserved_microusd"]+policy["instance_reservation_microusd"] > effective_budget_limit(account)):
             raise BudgetExceeded("capacity_instance_budget_unavailable")
     return None
 

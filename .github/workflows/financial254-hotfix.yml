@@ -1,0 +1,124 @@
+name: Publish the exact reviewed financial 254 hotfix
+
+on:
+  workflow_dispatch:
+    inputs:
+      ci_run_id:
+        description: Successful full CI preparation run on the one main-pinned financial hotfix source
+        type: string
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: sixnine-release-publication
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      source_commit: ${{ steps.binding.outputs.source_commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Read only the main-pinned source identity
+        id: binding
+        run: |
+          python - <<'PY'
+          import os
+          from tools.financial254_publication import binding, trusted_context
+          trusted_context(os.environ)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
+              out.write('source_commit='+binding()['source_commit']+'\n')
+          PY
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.binding.outputs.source_commit }}
+          path: hotfix-source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify complete source CI and exact financial-only diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.ci_run_id }}
+        run: |
+          [[ "$SOURCE_RUN" =~ ^[1-9][0-9]+$ ]]
+          gh api "repos/inkseq/h3-studio/actions/runs/$SOURCE_RUN" > source-run.json
+          gh api --paginate --slurp "repos/inkseq/h3-studio/actions/runs/$SOURCE_RUN/jobs?per_page=100&filter=latest" > source-jobs.json
+          gh api --paginate --slurp "repos/inkseq/h3-studio/actions/runs/$SOURCE_RUN/artifacts?per_page=100" > source-artifacts.json
+          python tools/financial254_publication.py verify --run-id "$SOURCE_RUN" --run source-run.json --jobs source-jobs.json --artifacts source-artifacts.json --source hotfix-source > verified-hotfix.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: financial254-source-provenance
+          path: verified-hotfix.json
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions: {contents: read, actions: read, id-token: write}
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.source_commit }}
+          path: hotfix-source
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Recheck original CI immediately before publication authority
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.ci_run_id }}
+        run: |
+          [[ "$SOURCE_RUN" =~ ^[1-9][0-9]+$ ]]
+          gh api "repos/inkseq/h3-studio/actions/runs/$SOURCE_RUN" > source-run.json
+          gh api --paginate --slurp "repos/inkseq/h3-studio/actions/runs/$SOURCE_RUN/jobs?per_page=100&filter=latest" > source-jobs.json
+          gh api --paginate --slurp "repos/inkseq/h3-studio/actions/runs/$SOURCE_RUN/artifacts?per_page=100" > source-artifacts.json
+          python tools/financial254_publication.py verify --run-id "$SOURCE_RUN" --run source-run.json --jobs source-jobs.json --artifacts source-artifacts.json --source hotfix-source > verified-hotfix.json
+      - run: python -m pip install --require-hashes -r requirements.dispatch.lock.txt
+      - name: Consume the verified immutable artifact IDs and verify ZIP bytes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.ci_run_id }}
+        run: |
+          python tools/financial254_publication.py download --run-id "$SOURCE_RUN" --run source-run.json --jobs source-jobs.json --artifacts source-artifacts.json --source hotfix-source
+          python tools/financial254_publication.py preflight --run-id "$SOURCE_RUN" --run source-run.json --jobs source-jobs.json --artifacts source-artifacts.json --source hotfix-source
+      - name: Assume the existing release-publication identity only
+        uses: aws-actions/configure-aws-credentials@ff717079ee2060e4bcee96c4779b553acc87447c
+        with:
+          role-to-assume: ${{ vars.SIXNINE_AWS_PUBLISH_ROLE }}
+          aws-region: ap-southeast-1
+      - run: python tools/check_aws_release_account.py
+      - name: Publish original immutable archives and the truthfully attributed tuple
+        env:
+          SOURCE_COMMIT: ${{ needs.verify.outputs.source_commit }}
+          SOURCE_RUN: ${{ inputs.ci_run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A changed attempt or artifact set refuses publication after download.
+          cp source-run.json original-source-run.json
+          cp source-jobs.json original-source-jobs.json
+          cp source-artifacts.json original-source-artifacts.json
+          gh api "repos/inkseq/h3-studio/actions/runs/$SOURCE_RUN" > source-run.json
+          gh api --paginate --slurp "repos/inkseq/h3-studio/actions/runs/$SOURCE_RUN/jobs?per_page=100&filter=latest" > source-jobs.json
+          gh api --paginate --slurp "repos/inkseq/h3-studio/actions/runs/$SOURCE_RUN/artifacts?per_page=100" > source-artifacts.json
+          python tools/financial254_publication.py verify --run-id "$SOURCE_RUN" --run source-run.json --jobs source-jobs.json --artifacts source-artifacts.json --source hotfix-source > current-verified-hotfix.json
+          cmp verified-hotfix.json current-verified-hotfix.json
+          python tools/financial254_publication.py preflight --run-id "$SOURCE_RUN" --run source-run.json --jobs source-jobs.json --artifacts source-artifacts.json --source hotfix-source
+          python tools/publish_aws_release.py "$SOURCE_COMMIT" platform-release --migration-directory migration-release
+          python tools/publish_frontend_release.py "$SOURCE_COMMIT" frontend-release
+          python tools/financial254_publication.py candidate --run-id "$SOURCE_RUN" --run source-run.json --jobs source-jobs.json --artifacts source-artifacts.json --source hotfix-source
+      # There is intentionally no host execution identity or deployment step.
+      # Root must staging-accept this exact tuple before normal protected promotion.

@@ -533,7 +533,7 @@ class WorkerTests(LedgerCase):
         done = self.repo.get_job(self.scope, job["id"])
         self.assertEqual(done["result"]["billing_status"], "pending")
         self.assertEqual(state["posts"], 1)
-        self.assertEqual(self.repo.get_budget("owner-budget")["reserved_microusd"], 100_000)
+        self.assertEqual(self.repo.get_budget("owner-budget")["reserved_microusd"], 0)  # Invoice remains pending; terminal admission hold is released.
         self.assertEqual(len(self.repo.list_artifacts(self.scope, job["id"])), 1)
 
     def test_invoice_timeout_preserves_verified_output_pending_budget_and_later_idempotent_settlement(self):
@@ -552,7 +552,7 @@ class WorkerTests(LedgerCase):
         evidence = outputs[0]["metadata"]
         self.assertTrue(evidence["validated"])
         self.assertEqual(self.store.stat(evidence["object_key"]).sha256, evidence["sha256"])
-        self.assertEqual(self.repo.get_budget("owner-budget")["reserved_microusd"], 100_000)
+        self.assertEqual(self.repo.get_budget("owner-budget")["reserved_microusd"], 0)  # Invoice remains pending; terminal admission hold is released.
         self.assertEqual(runner.run_once("worker", "worker-test")["state"], "idle")
         self.assertEqual(state["posts"], 1)
         for _ in range(2):
@@ -571,7 +571,7 @@ class WorkerTests(LedgerCase):
         runner = WorkerRunner(self.repo, self.store, self.work, backend=backend, submission_guard=lambda _: True)
         self.assertEqual(runner.run_once("worker", "worker-test")["state"], "succeeded")
         self.assertEqual(self.repo.get_job(self.scope, job["id"])["result"]["billing_status"], "pending")
-        self.assertEqual(self.repo.get_budget("owner-budget")["reserved_microusd"], 100_000)
+        self.assertEqual(self.repo.get_budget("owner-budget")["reserved_microusd"], 0)  # Invoice remains pending; terminal admission hold is released.
         self.assertEqual(len(self.repo.list_artifacts(self.scope, job["id"])), 1)
         self.assertEqual(state["posts"], 1)
         for invalid in ("0", True, -1, 0.0, float("nan"), 9_000_000_000_000_001):
