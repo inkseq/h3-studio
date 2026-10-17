@@ -117,6 +117,8 @@ def agent_contract():
                 "require": "Alternative to turn_to_card when explicit settings/references are needed. Replace controls with the selected JSON object, not a string. Copy profile/recipe/controls from session next_settings for a new card, or the current revision for a revision; preserve copies unless explicitly changed. Direct cards do not inherit an omitted deployment_profile_id. Read selected profile generation_support[fl|ref] for model/adapter limits and actual policy constraints; historical joint_cases do not restrict combinations; inputs can include first_frame:{asset_id:...} or last_frame:{asset_id:...}. Use selected profile input_support: native v2 REF can combine first/last frames and timed image guides with its references; retained legacy profiles keep their documented role restrictions. Null is only for an intentional legacy route. Authoring support does not qualify a recipe for execution."},
             "read_card": {"method": "GET", "path": PREFIX+"/{session_id}/cards/{card_id}",
                 "read_response": "Save this card's version and current_revision_id. It is a card version, not a session or revision counter."},
+            "card_history": {"method": "GET", "path": PREFIX+"/{session_id}/cards?limit=10&before_cursor={next_cursor}",
+                "read_response": "Omit before_cursor for the latest cards. Each page is chronological by immutable creation time and ID; next_cursor reads the preceding page. has_more=false and start_reached=true mean the beginning. Runtime event polling remains on timeline."},
             "read_revision": {"method": "GET", "path": PREFIX+"/{session_id}/revisions/{current_revision_id}",
                 "read_response": "Read the full immutable snapshot whose fields will be preserved in the new revision."},
             "revision": {"method": "POST", "path": PREFIX+"/{session_id}/cards/{card_id}/revisions",
@@ -339,6 +341,11 @@ def register_routes(app, *, hooks=None, assistant=None, assistant_enabled=False,
     app.router.add_api_route(PREFIX+"/{session_id}/cards", create_card, methods=["POST"], status_code=201,
         response_model=CardAuthoringResponse, response_model_exclude_unset=True, responses=AUTHORING_ERRORS,
         route_class_override=QuickChatAuthoringRoute)
+
+    @app.get(PREFIX+"/{session_id}/cards")
+    def card_history(session_id: str, request: Request, limit: int = Query(10, ge=1, le=50),
+                     before_cursor: str | None = None):
+        return service.list_cards(request.state.principal, session_id, limit=limit, before_cursor=before_cursor)
 
     @app.get(PREFIX+"/{session_id}/cards/{card_id}")
     def card(session_id: str, card_id: str, request: Request):
