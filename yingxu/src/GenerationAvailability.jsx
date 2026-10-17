@@ -1,12 +1,14 @@
+import {useI18n} from './i18n/I18nProvider.jsx';
 import React from 'react';
 import './generation-availability.css';
 import {MODE_LABELS,modeAvailability} from './generation-availability.js';
 
 export default function GenerationAvailability({snapshot,capabilities,settings,operator=false,compact=false,onRefresh,checking=false}){
-  const current=modeAvailability(snapshot,capabilities,settings);
-  return <section className={'qc-availability '+(compact?'qc-availability-compact':'')} aria-label="当前生成容量" role="status">
-    <div className="qc-availability-modes">{(compact?[current.mode]:['fl','ref']).filter(Boolean).map(mode=>{const item=modeAvailability(snapshot,capabilities,settings,mode);return <span key={mode} className={'qc-availability-mode '+(item.available?'available':'unavailable')} aria-current={mode===current.mode?'true':undefined}><b>{MODE_LABELS[mode]}</b><span>{item.label}</span></span>;})}</div>
+  const {t,locale}=useI18n();
+  const current=modeAvailability(snapshot,capabilities,settings,undefined,Date.now(),locale);
+  return <section className={'qc-availability '+(compact?'qc-availability-compact':'')} aria-label={t('availability.title')} role="status">
+    <div className="qc-availability-modes">{(compact?[current.mode]:['fl','ref']).filter(Boolean).map(mode=>{const item=modeAvailability(snapshot,capabilities,settings,mode,Date.now(),locale);return <span key={mode} className={'qc-availability-mode '+(item.available?'available':'unavailable')} aria-current={mode===current.mode?'true':undefined}><b>{t('availability.'+mode)}</b><span>{item.label}</span></span>;})}</div>
     <p>{current.message}</p>
-    <div className="qc-availability-actions">{onRefresh&&<button type="button" disabled={checking} onClick={onRefresh}>{checking?'核对中…':'刷新状态'}</button>}{operator&&!current.available&&<a href="/operator">打开 GPU 控制台 ↗</a>}</div>
+    <div className="qc-availability-actions">{onRefresh&&<button type="button" disabled={checking} onClick={onRefresh}>{checking?t('availability.checking'):t('availability.refresh')}</button>}{operator&&!current.available&&<a href="/operator">{t('availability.console')}</a>}</div>
   </section>;
 }

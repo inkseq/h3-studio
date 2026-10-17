@@ -48,7 +48,7 @@ test('opening an Agent quick link selects its second shot and preserves the prev
 });
 test('key creation is a single account-bound write and a late secret cannot return after account reset',async()=>{
   let resolve,calls=0,observed;const client=createCloudClient({fetcher:(path,options)=>{calls++;observed={path,options};return new Promise(r=>{resolve=r;});}});client.setAccount('superdan');
-  const body={name:'fixture',all_projects:true,project_ids:[],scopes:['projects:read'],expires_in_days:30};const result=client.createApiKey(body),rejected=assert.rejects(result,/账户已改变/);
+  const body={name:'fixture',all_projects:true,project_ids:[],scopes:['projects:read'],expires_in_days:30};const result=client.createApiKey(body),rejected=assert.rejects(result,/account has changed/);
   client.setAccount('supervan');resolve(new Response(JSON.stringify({api_key:'synthetic-test-key-never-valid'}),{status:200,headers:{'Content-Type':'application/json'}}));await rejected;
   assert.equal(calls,1);assert.equal(observed.path,'/v1/api-keys');assert.equal(observed.options.headers['X-Expected-Account'],'superdan');assert.equal(observed.options.method,'POST');assert.deepEqual(JSON.parse(observed.options.body),body);client.reset();
 });

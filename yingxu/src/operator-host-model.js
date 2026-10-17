@@ -1,3 +1,4 @@
+import {translate} from './i18n/locale.js';
 import {referenceOffers} from './operator-budget-model.js';
 
 export const hostPolicyOptions=[
@@ -6,21 +7,21 @@ export const hostPolicyOptions=[
   {value:'deny',label:'禁止选用',reason:'operator_host_denied'},
 ];
 export const physicalHostId=value=>typeof value==='string'&&/^[1-9][0-9]{0,17}$/.test(value)||Number.isSafeInteger(value)&&value>0;
-export const hostText=value=>typeof value==='string'&&value.trim().length>0&&value.length<=200&&!/[\r\n]/.test(value)?value:'未确认';
+export const hostText=(value,locale='zh')=>typeof value==='string'&&value.trim().length>0&&value.length<=200&&!/[\r\n]/.test(value)?value:translate(locale,'operatorPanel.unknown');
 const nonnegative=value=>typeof value==='number'&&Number.isFinite(value)&&value>=0;
 const count=value=>Number.isSafeInteger(value)&&value>=0;
 const snapshot=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 const policy=value=>hostPolicyOptions.some(option=>option.value===value);
 export const knownNumber=value=>nonnegative(value)?value:null;
-export const secondsLabel=value=>nonnegative(value)?Math.round(value)+' 秒':'未观测';
+export const secondsLabel=(value,locale='zh')=>nonnegative(value)?translate(locale,'operator.display.seconds',{value:Math.round(value)}):translate(locale,'operator.display.notObserved');
 export const policyLabel=value=>hostPolicyOptions.find(option=>option.value===value)?.label||'规则待核对';
-export function failureLabel(value){
-  if(!value)return '暂无已记录失败';
+export function failureLabel(value,locale='zh'){
+  if(!value)return translate(locale,'operatorPanel.noFailure');
   const stages={provision:'供应商准备',provisioning:'供应商准备',image_pull:'镜像下载',weights_download:'权重下载',model_load:'模型加载',generate:'生成',collect:'结果收集',validate:'媒体校验',upload:'结果上传',disconnect:'连接中断',ssh_loss:'SSH 连接丢失',oom:'内存不足'};
-  if(value.reason_code==='waiting_instance_limit_exceeded')return '供应商准备未完成（不等同空闲停止或模型失败）';
-  if(value.reason_code==='model_load_unconfirmed'||value.stage==='model_load_unconfirmed')return '模型加载原因未确认，不认定供应商故障';
-  if(value.reason_code==='wangp_profile_one_visible_gpu_required')return '原运行准备未通过，CUDA 原因未确认';
-  return stages[value.stage]||'失败阶段未确认';
+  if(value.reason_code==='waiting_instance_limit_exceeded')return translate(locale,'operatorPanel.waitingFailure');
+  if(value.reason_code==='model_load_unconfirmed'||value.stage==='model_load_unconfirmed')return translate(locale,'operatorPanel.modelFailure');
+  if(value.reason_code==='wangp_profile_one_visible_gpu_required')return translate(locale,'operatorPanel.cudaFailure');
+  return translate(locale,stages[value.stage]?'operatorPanel.failureStage.'+value.stage:'operatorPanel.unknownFailure');
 }
 export function inventoryOutcome(item){
   if(item.state==='pending')return {state:'pending',label:'查询中'};

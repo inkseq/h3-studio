@@ -1,3 +1,4 @@
+import {translate} from './i18n/locale.js';
 const copy=value=>structuredClone(value);
 const uid=prefix=>`${prefix}-${globalThis.crypto.randomUUID()}`;
 export const MAX_BREAKDOWN_SCENES=30;
@@ -54,20 +55,22 @@ export function mergeBreakdownSegment(draft,id){
   draft.segments.splice(next,1);
 }
 
-export function sourceLocation(source,range){
+export function sourceLocation(source,range,locale='zh'){
+ const t=(key,values)=>translate(locale,key,values);
   const first=source.slice(0,range.start).split('\n').length,last=source.slice(0,Math.max(range.start,range.end-1)).split('\n').length;
-  return `原文第 ${first}${last===first?'':`–${last}`} 行 · 字符 ${range.start+1}–${range.end}`;
+  return t('script.sourceLocation',{first,last:last===first?'':'–'+last,start:range.start+1,end:range.end});
 }
 
-export function breakdownIssues(project,draft){
-  if(!draft||draft.status!=='draft')return ['这份草案已经导入，不能再次应用。'];
+export function breakdownIssues(project,draft,locale='zh'){
+ const t=(key,values)=>translate(locale,key,values);
+  if(!draft||draft.status!=='draft')return [t('script.ui17')];
   const scenes=draft.segments.filter(s=>!s.omitted),issues=[];
-  if(!scenes.length)issues.push('至少保留一场戏。');
-  if(scenes.length>MAX_BREAKDOWN_SCENES)issues.push(`一次最多保留 ${MAX_BREAKDOWN_SCENES} 场。`);
-  scenes.forEach((scene,index)=>{if(!scene.title.trim())issues.push(`第 ${index+1} 场需要场名。`);if(!scene.script.trim())issues.push(`第 ${index+1} 场需要动作与台词。`);});
-  if(draft.targetChapterId&&!project.entities.some(e=>e.id===draft.targetChapterId&&e.type==='chapter'))issues.push('选择的章节已不存在，请重新选择或新建章节。');
-  if(!draft.targetChapterId&&!draft.chapterTitle.trim())issues.push('填写新章节名称。');
-  if(project.entities.length+scenes.length+(draft.targetChapterId?0:1)>5000)issues.push('项目节点超过上限，无法导入；草案已保留。');
+  if(!scenes.length)issues.push(t('script.ui14'));
+  if(scenes.length>MAX_BREAKDOWN_SCENES)issues.push(t('script.maxScenes',{count:MAX_BREAKDOWN_SCENES}));
+  scenes.forEach((scene,index)=>{if(!scene.title.trim())issues.push(t('script.needTitle',{number:index+1}));if(!scene.script.trim())issues.push(t('script.needScript',{number:index+1}));});
+  if(draft.targetChapterId&&!project.entities.some(e=>e.id===draft.targetChapterId&&e.type==='chapter'))issues.push(t('script.ui21'));
+  if(!draft.targetChapterId&&!draft.chapterTitle.trim())issues.push(t('script.ui6'));
+  if(project.entities.length+scenes.length+(draft.targetChapterId?0:1)>5000)issues.push(t('script.ui22'));
   return issues;
 }
 
@@ -88,12 +91,13 @@ export function applyBreakdown(project,batchId){
   return receipt;
 }
 
-export function importUndoIssues(project,receipt){
-  if(!receipt||receipt.undone)return [{id:null,title:'本次导入',reason:'这次导入已经撤销。'}];
+export function importUndoIssues(project,receipt,locale='zh'){
+ const t=(key,values)=>translate(locale,key,values);
+  if(!receipt||receipt.undone)return [{id:null,title:t('script.ui12'),reason:t('script.ui20')}];
   const ids=new Set(receipt.entities.map(e=>e.id)),issues=[];
-  for(const original of receipt.entities){const current=project.entities.find(e=>e.id===original.id);if(!current)issues.push({id:null,title:original.title,reason:'已被删除或合并'});else if(JSON.stringify(current)!==JSON.stringify(original))issues.push({id:current.id,title:current.title,reason:'导入后有修改'});}
-  for(const node of project.entities)if(!ids.has(node.id)&&ids.has(node.parentId))issues.push({id:node.id,title:node.title,reason:'在导入后添加了内容'});
-  for(const link of project.links)if(ids.has(link.source)||ids.has(link.target)){const node=project.entities.find(e=>e.id===(ids.has(link.target)?link.target:link.source));issues.push({id:node?.id||null,title:node?.title||'关联内容',reason:'导入后建立了参考关系'});}
+  for(const original of receipt.entities){const current=project.entities.find(e=>e.id===original.id);if(!current)issues.push({id:null,title:original.title,reason:t('script.ui9')});else if(JSON.stringify(current)!==JSON.stringify(original))issues.push({id:current.id,title:current.title,reason:t('script.ui8')});}
+  for(const node of project.entities)if(!ids.has(node.id)&&ids.has(node.parentId))issues.push({id:node.id,title:node.title,reason:t('script.ui5')});
+  for(const link of project.links)if(ids.has(link.source)||ids.has(link.target)){const node=project.entities.find(e=>e.id===(ids.has(link.target)?link.target:link.source));issues.push({id:node?.id||null,title:node?.title||t('script.ui2'),reason:t('script.ui7')});}
   return issues.filter((issue,index,items)=>items.findIndex(item=>item.id===issue.id&&item.title===issue.title&&item.reason===issue.reason)===index);
 }
 

@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import tempfile
@@ -65,6 +66,43 @@ class YingxuSnapshotTests(unittest.TestCase):
         release = self.target / "src" / "App.jsx"
         release.write_bytes(release.read_bytes().replace(b"\n", b"\r\n"))
         with self.assertRaisesRegex(ValueError, "modified"):
+            snapshot.verify_snapshot(self.target)
+
+    def test_approved_font_preserves_non_utf8_and_crlf_bytes_and_detects_edits(self):
+        name = "src/v2/fonts/inter-latin-v20.woff2"
+        canonical = self.source / name
+        canonical.parent.mkdir(parents=True)
+        raw = b"wOF2\x00\xff\x81\r\n\x00\rfont-bytes"
+        canonical.write_bytes(raw)
+        result = snapshot.synchronize(self.source, self.target, write=True)
+        self.assertEqual((self.target / name).read_bytes(), raw)
+        self.assertEqual(result["files"][name], hashlib.sha256(raw).hexdigest())
+        self.assertEqual(result, snapshot.synchronize(self.source, self.target))
+        self.assertEqual(result, snapshot.verify_snapshot(self.target))
+        canonical.write_bytes(raw + b"changed")
+        with self.assertRaisesRegex(ValueError, "Canonical source differs"):
+            snapshot.synchronize(self.source, self.target)
+        (self.target / name).write_bytes(raw.replace(b"\r\n", b"\n"))
+        with self.assertRaisesRegex(ValueError, "modified"):
+            snapshot.verify_snapshot(self.target)
+
+    def test_font_documents_are_explicit_and_arbitrary_binary_paths_are_rejected(self):
+        fonts = self.source / "src" / "v2" / "fonts"
+        fonts.mkdir(parents=True)
+        for name in ("README.md", "OFL-Inter.txt"):
+            (fonts / name).write_bytes(b"Font license/source\r\n")
+        (fonts / "private-notes.txt").write_text("exclude this document", encoding="utf-8")
+        (fonts / "other.woff2").write_bytes(b"exclude this binary")
+        result = snapshot.synchronize(self.source, self.target, write=True)
+        for name in ("README.md", "OFL-Inter.txt"):
+            relative = "src/v2/fonts/" + name
+            self.assertIn(relative, result["files"])
+            self.assertEqual((self.target / relative).read_bytes(), b"Font license/source\n")
+        self.assertFalse((self.target / "src/v2/fonts/private-notes.txt").exists())
+        self.assertFalse((self.target / "src/v2/fonts/other.woff2").exists())
+        result["files"]["src/v2/fonts/other.woff2"] = "0" * 64
+        (self.target / snapshot.MANIFEST).write_text(json.dumps(result), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "outside the source allowlist"):
             snapshot.verify_snapshot(self.target)
 
     def test_stale_managed_file_removed_but_unmanaged_not_overwritten(self):

@@ -1,0 +1,144 @@
+/* Real business forms and dialogs inside the prototype's page view layer. */
+.ops-adapter [hidden],.ops-dialog [hidden]{display:none!important}
+.ops-tab-panel{display:flex;flex-direction:column;gap:14px}
+.ops-adapter .ops-page-tabs{margin:0 0 18px;max-width:100%;overflow-x:auto;justify-content:flex-start}
+.ops-adapter .ops-page-tabs>button{flex:none;white-space:nowrap;font-size:12px}
+.ops-adapter .ops-gpu-page,.ops-adapter .spanel,.ops-adapter .snav{min-width:0}
+.ops-adapter .mrow{grid-template-columns:22px minmax(0,1.2fr) minmax(180px,1fr) auto}
+.ops-adapter .mrow-main b,.ops-adapter .mrow-main small{flex-wrap:wrap;overflow-wrap:anywhere}
+.ops-adapter .mrow-main b{font-size:14px}
+.ops-adapter .mrow-main small,.ops-adapter .mrow .mode,.ops-adapter .mrow .q,.ops-adapter .mrow .pill{font-size:11px}
+.ops-adapter .mrow-state{min-width:0;overflow-wrap:anywhere}
+.ops-adapter .mrow-actions{max-width:250px}
+.ops-adapter .p4-keep{display:inline;white-space:normal}
+.ops-adapter .mgroup>header{flex-wrap:wrap}
+.ops-adapter .p4-inventorybar{display:flex;align-items:flex-end;flex-wrap:wrap;gap:12px}
+.ops-adapter .p4-inventorybar>label{display:flex;flex:1;flex-direction:column;gap:6px;min-width:180px;max-width:360px;font-size:12px}
+.ops-adapter .p4-offers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}
+.ops-adapter .p4-offer{display:flex;flex-direction:column;gap:8px;margin:0}
+.ops-adapter .p4-offer>.p4-pill{align-self:flex-start}
+.ops-adapter .p4-offer h2{font-size:16px;margin:8px 0 0}
+.ops-adapter .p4-offer>small,.ops-adapter .p4-offer .p4-kv small{font-size:11px;color:var(--muted)}
+.ops-adapter .p4-offer-price{font-size:26px;font-weight:650;letter-spacing:-.02em;margin:8px 0}
+.ops-adapter .p4-offer-price small{margin-left:4px;font-size:11px;font-weight:400;letter-spacing:0;color:var(--muted)}
+.ops-adapter .p4-offer .p4-kv{font-size:12px}
+.ops-adapter .p4-offer>footer{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:auto;padding-top:12px;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
+.ops-adapter .p4-accountspend>section{display:flex;flex-direction:column;gap:6px}
+.ops-adapter .p4-accountspend strong{font-size:24px;font-weight:650}
+.ops-adapter .p4-accountspend small{font-size:11px;color:var(--muted)}
+.ops-adapter .settings-page .spanel>header{display:flex;align-items:center;gap:12px}
+.ops-adapter .limit-row{min-width:0;gap:14px}
+.ops-adapter .limit-row>div{min-width:0}
+.ops-adapter .limit-row b{font-size:13px}
+.ops-adapter .limit-input{flex-shrink:0}
+.ops-adapter .trash-row{grid-template-columns:22px 44px minmax(0,1fr) auto auto}
+.ops-adapter .trash-row .name small,.ops-adapter .trash-row .left{font-size:11px}
+.ops-adapter .trash-filter{max-width:100%;overflow-x:auto;justify-content:flex-start}
+.ops-adapter .trash-filter>button{white-space:nowrap;flex:none}
+.ops-tools{margin:12px 0;color:var(--muted);font-size:12px}
+.ops-tools>div{margin-top:10px}
+.ops-tools select{width:auto;max-width:100%}
+.ops-adapter .account-password form,.ops-adapter .assistant-connections form{display:flex;flex-direction:column;gap:12px}
+.ops-adapter .account-password label,.ops-adapter .assistant-connections label{display:flex;flex-direction:column;gap:6px}
+.ops-adapter .account-password h2{font-size:14px}
+.ops-item-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.ops-item-row>div{flex:1;min-width:0}
+.ops-adapter .account-password h2,.ops-adapter .account-password p{margin-top:0}
+.ops-adapter .account-password form>button{align-self:flex-end}
+.assistant-connections{display:flex;flex-direction:column;gap:14px;min-width:0}
+.assistant-connections>h2,.assistant-connections>h3{margin:0}
+.assistant-connections>form,.assistant-connections>article,.assistant-connections>aside,.assistant-connections>details{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px}
+.assistant-connections form,.assistant-connections fieldset{display:flex;flex-direction:column;gap:12px;min-width:0}
+.assistant-connections fieldset{border:0;padding:0;margin:0}
+.assistant-connections legend{font-weight:600;margin-bottom:10px}
+.assistant-connections label{display:flex;flex-direction:column;gap:6px}
+.assistant-connections small,.assistant-connections p{color:var(--muted);line-height:1.6}
+.assistant-connections article h3{margin:0 0 10px;font-size:14px}
+.assistant-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.assistant-badge{display:inline-flex;color:var(--accent);font-size:11px}
+.ops-adapter :is(.p4-dialog,.op-dialog),.ops-dialog{background:var(--surface);color:var(--ink);border:1px solid var(--line-2);border-radius:var(--r-lg);box-shadow:var(--shadow-lg);padding:22px;width:min(720px,94vw);max-height:88dvh;overflow:auto}
+.ops-adapter :is(.p4-dialog,.op-dialog).wide{width:min(1080px,96vw)}
+.ops-adapter :is(.p4-dialog,.op-dialog)::backdrop,.ops-dialog::backdrop{background:var(--bg);opacity:.78}
+.ops-adapter :is(.p4-dialog,.op-dialog)>header,.ops-adapter :is(.p4-dialog,.op-dialog)>footer,.ops-dialog .qc-dialog-head{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.ops-adapter :is(.p4-dialog,.op-dialog)>header,.ops-dialog .qc-dialog-head{margin-bottom:18px}
+.ops-adapter :is(.p4-dialog,.op-dialog) h2,.ops-dialog h2{margin:0;font-size:19px}
+.ops-adapter :is(.p4-dialog,.op-dialog)>header p{margin:5px 0 0;color:var(--muted)}
+.ops-adapter :is(.p4-dialog,.op-dialog)>footer{margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}
+.ops-adapter :is(.p4-dialog,.op-dialog)>footer>div{display:flex;flex-wrap:wrap;gap:8px}
+.ops-adapter :is(.p4-dialog,.op-dialog) label{display:flex;flex-direction:column;gap:6px;min-width:0}
+.ops-adapter :is(.p4-dialog,.op-dialog) fieldset{border:0;padding:0;margin:0;min-width:0}
+.ops-adapter .p4-primary{background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:600}
+.ops-adapter .p4-text{background:transparent;border-color:transparent;color:var(--ink-2)}
+.ops-adapter .p4-close{padding:3px;border:0;background:transparent;color:var(--muted)}
+.ops-adapter .p4-formgrid,.ops-adapter .p4-configfields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.ops-adapter .p4-configfields{grid-template-columns:minmax(0,2fr) minmax(100px,1fr) 70px minmax(110px,1fr)}
+.ops-adapter .p4-config,.ops-adapter .p4-panel,.ops-adapter .budget-account,.ops-adapter .budget-admin-row,.ops-adapter .p4-host-record{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px;margin:12px 0;min-width:0}
+.ops-adapter .p4-config>header,.ops-adapter .p4-between,.ops-adapter .operator-budget>header,.ops-adapter .p4-hosts>header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.ops-adapter .p4-config>header{margin-bottom:14px}
+.ops-adapter .p4-config>header>div,.ops-adapter .p4-policies,.ops-adapter .p4-policy-extra{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.ops-adapter .p4-policies [aria-pressed=true]{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+.ops-adapter .p4-policy-extra{margin-top:10px}
+.ops-adapter .p4-policy-extra label{flex:1;min-width:150px}
+.ops-adapter .p4-fieldheading{margin:18px 0 10px}
+.ops-adapter .p4-total{display:flex;justify-content:space-between;gap:14px;padding:16px 0}
+.ops-adapter .p4-note,.ops-adapter .p4-meta,.ops-adapter .p4-footer,.ops-adapter :is(.p4-dialog,.op-dialog) small{color:var(--muted);font-size:12px;line-height:1.6}
+.ops-adapter .p4-preview,.ops-adapter .p4-start-results{background:var(--surface-2);border:1px solid var(--line-2);border-radius:var(--r);padding:14px;margin:12px 0}
+.ops-adapter .p4-checklist>div,.ops-adapter .p4-start-results>div{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}
+.ops-adapter .p4-kv,.ops-adapter .p4-metrics,.ops-adapter .p4-host-summary,.ops-adapter .budget-accounts,.ops-adapter .p4-accountspend{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.ops-adapter .p4-kv>div,.ops-adapter .p4-metrics>div{display:flex;flex-direction:column;gap:5px;padding:12px;background:var(--surface-2);border-radius:var(--r-sm);overflow-wrap:anywhere}
+.ops-adapter .p4-pill{display:inline-flex;align-items:center;border:1px solid var(--line-2);padding:3px 8px;border-radius:var(--r-sm);font-size:11px}
+.ops-adapter .p4-pill.good{color:var(--good);background:var(--good-soft)}
+.ops-adapter .p4-pill.warm,.ops-adapter .ops-warning,.ops-adapter .p4-warning{color:var(--warn);background:var(--warn-soft)}
+.ops-adapter .p4-error,.ops-adapter [role=alert]{color:var(--bad)}
+.ops-adapter .ops-warning,.ops-adapter .p4-warning{border:1px solid var(--line);border-radius:var(--r-sm);padding:12px}
+.ops-adapter .p4-progress-summary{display:flex;flex-direction:column;gap:3px;color:var(--muted);font-size:11px;margin-top:6px}
+.ops-adapter .p4-progress-diagnostic{display:flex;flex-direction:column;gap:3px;color:var(--muted);font-size:11px;overflow-wrap:anywhere}
+.ops-adapter .p4-progress-amount{display:flex;flex-direction:column;gap:6px;margin:10px 0}
+.ops-adapter progress{width:100%;accent-color:var(--accent)}
+.ops-adapter .p4-preparation-steps{display:flex;gap:8px;flex-wrap:wrap;padding:0;list-style:none}
+.ops-adapter .p4-preparation-steps li{padding:6px 8px;border-bottom:2px solid var(--line)}
+.ops-adapter .p4-preparation-steps li.current{border-color:var(--accent);color:var(--accent)}
+.ops-adapter .p4-preparation-steps small{display:block}
+.ops-adapter .p4-admin-jobs-table,.ops-adapter .p4-host-samples{overflow:auto;max-width:100%}
+.ops-adapter table{width:100%;border-collapse:collapse;font-size:12px}
+.ops-adapter th,.ops-adapter td{text-align:start;vertical-align:top;padding:10px;border-bottom:1px solid var(--line)}
+.ops-adapter td small{display:block;color:var(--muted);font-size:11px}
+.ops-adapter .p4-admin-machine{display:flex;gap:10px;align-items:center}
+.ops-adapter .p4-admin-machine>.mrow{flex:1}
+.ops-adapter .p4-jobs-actions,.ops-adapter .p4-host-policy,.ops-adapter .p4-host-lookup form,.ops-adapter .budget-admin-row form{display:flex;align-items:flex-end;flex-wrap:wrap;gap:10px;margin-top:12px}
+.ops-adapter .p4-jobs-actions label,.ops-adapter .p4-host-policy label,.ops-adapter .p4-host-lookup label,.ops-adapter .budget-admin-row label{display:flex;flex-direction:column;gap:6px;flex:1;min-width:140px}
+.ops-adapter .budget-account dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.ops-adapter .budget-account dd{margin:4px 0;font-weight:600}
+.ops-adapter .budget-account dt{font-size:11px;color:var(--muted)}
+.ops-adapter .p4-empty{padding:28px;color:var(--muted);border:1px solid var(--line);border-radius:var(--r-lg)}
+.ops-adapter .p4-empty form{display:flex;flex-direction:column;gap:12px;max-width:360px;margin:16px auto}
+.ops-adapter .p4-empty label{display:flex;flex-direction:column;gap:6px}
+.ops-account-menu{position:relative}
+.ops-account-menu>summary{cursor:pointer;list-style:none}
+.ops-account-menu>div{position:absolute;right:0;top:100%;z-index:100;min-width:180px;padding:8px;border:1px solid var(--line-2);border-radius:var(--r);background:var(--surface);box-shadow:var(--shadow);display:flex;flex-direction:column;gap:5px}
+.ops-account-menu a{color:var(--ink);padding:7px 10px;text-decoration:none}
+.trash-notice{position:fixed;bottom:76px;left:50%;transform:translateX(-50%);max-width:calc(100vw - 24px);padding:12px;background:var(--surface);color:var(--ink);z-index:130;border:1px solid var(--line-2);border-radius:var(--r);display:flex;flex-wrap:wrap;gap:10px;align-items:center;box-shadow:var(--shadow)}
+.item-menu{position:relative;display:inline-flex}
+.item-menu-popover{position:absolute;z-index:100;right:0;top:100%;display:flex;flex-direction:column;min-width:180px;max-width:min(280px,90vw);padding:6px;border:1px solid var(--line-2);border-radius:var(--r);background:var(--surface);box-shadow:var(--shadow)}
+.item-menu-popover button{text-align:start;white-space:normal}
+@media(min-width:761px) and (max-width:1220px){
+  .ops-adapter .mrow{grid-template-columns:22px minmax(0,1.2fr) minmax(180px,1fr)}
+  .ops-adapter .mrow-actions{grid-column:2 / -1;justify-self:start;max-width:none}
+  .ops-adapter .p4-offers{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:760px){
+  .ops-adapter .mrow{grid-template-columns:22px minmax(0,1fr);gap:10px;padding:12px}
+  .ops-adapter .mrow-state,.ops-adapter .mrow-actions{grid-column:2;max-width:none;justify-content:flex-start}
+  .ops-adapter .p4-offers{grid-template-columns:1fr}
+  .ops-adapter .p4-inventorybar>label{min-width:0;max-width:none;flex-basis:100%}
+  .ops-adapter .snav{position:static}
+  .ops-adapter .trash-row{grid-template-columns:22px 36px minmax(0,1fr);gap:8px;padding:10px}
+  .ops-adapter .trash-row .thumb{width:36px}
+  .ops-adapter .trash-row .left,.ops-adapter .trash-row .acts{grid-column:3}
+  .ops-adapter .p4-configfields,.ops-adapter .p4-formgrid,.ops-adapter .p4-kv,.ops-adapter .p4-metrics,.ops-adapter .budget-accounts,.ops-adapter .p4-accountspend{grid-template-columns:1fr}
+  .ops-adapter :is(.p4-dialog,.op-dialog),.ops-dialog{padding:16px;width:94vw;max-height:86dvh}
+  .ops-adapter :is(.p4-dialog,.op-dialog)>footer{align-items:flex-start;flex-direction:column}
+  .ops-adapter :is(.p4-dialog,.op-dialog)>footer>div{width:100%;justify-content:flex-end}
+  .ops-adapter .p4-admin-machine{flex-wrap:wrap}
+  .ops-adapter .p4-admin-machine>.mrow{flex-basis:100%}
+}

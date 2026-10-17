@@ -15,7 +15,10 @@ from pathlib import Path
 
 ROOT_FILES = ("index.html", "package.json", "package-lock.json", "vite.config.js")
 SOURCE_SUFFIXES = {".js", ".jsx", ".css", ".json"}
-SOURCE_DOCUMENTS = {"src/NOVICE-STORIES-AC.md"}
+SOURCE_DOCUMENTS = {"src/NOVICE-STORIES-AC.md", "src/v2/fonts/README.md", "src/v2/fonts/OFL-Inter.txt"}
+# Only the reviewed, self-hosted prototype font is a binary source asset. Do
+# not broaden the source snapshot to arbitrary fonts, media or text documents.
+SOURCE_BINARIES = {"src/v2/fonts/inter-latin-v20.woff2"}
 MANIFEST = "source-manifest.json"
 SOURCE_REFERENCE = "../video-studio-design/studio-app"
 IGNORED_BUILD_DIRS = {"node_modules", "dist", ".npm-cache"}
@@ -27,7 +30,7 @@ def _safe_relative(value):
     path = Path(value)
     if path.is_absolute() or any(part in {"", ".", ".."} for part in value.split("/")) or ":" in value:
         raise ValueError("Snapshot manifest contains an unsafe path")
-    if value not in ROOT_FILES and value not in SOURCE_DOCUMENTS and not (value.startswith("src/") and path.suffix in SOURCE_SUFFIXES):
+    if value not in ROOT_FILES and value not in SOURCE_DOCUMENTS and value not in SOURCE_BINARIES and not (value.startswith("src/") and path.suffix in SOURCE_SUFFIXES):
         raise ValueError("Snapshot manifest path is outside the source allowlist")
     return value
 
@@ -36,10 +39,13 @@ def _hash(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _source_bytes(path):
+def _source_bytes(path, *, binary=False):
+    raw = path.read_bytes()
+    if binary:
+        return raw
     # Git and Linux releases use LF. Canonical Windows editor line endings do
-    # not change the semantic snapshot or its checksum. Reject non-UTF-8 files.
-    return path.read_bytes().decode("utf-8").replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+    # not change text source/checksums. Binary font bytes must remain exact.
+    return raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
 
 
 def source_files(source):
@@ -61,7 +67,7 @@ def source_files(source):
         for name in names:
             path = Path(directory) / name
             relative = path.relative_to(source).as_posix()
-            if path.suffix not in SOURCE_SUFFIXES and relative not in SOURCE_DOCUMENTS:
+            if path.suffix not in SOURCE_SUFFIXES and relative not in SOURCE_DOCUMENTS and relative not in SOURCE_BINARIES:
                 continue
             if path.is_symlink():
                 raise ValueError("Source symlinks are not included")
@@ -71,7 +77,7 @@ def source_files(source):
 
 def expected_manifest(files):
     return {"format": "yingxu-source-snapshot-v1", "canonical_source": SOURCE_REFERENCE,
-            "direction": "canonical-to-release-only", "files": {name: hashlib.sha256(_source_bytes(path)).hexdigest() for name, path in files.items()}}
+            "direction": "canonical-to-release-only", "files": {name: hashlib.sha256(_source_bytes(path, binary=name in SOURCE_BINARIES)).hexdigest() for name, path in files.items()}}
 
 
 def read_manifest(target):
@@ -110,7 +116,7 @@ def verify_snapshot(target):
     for name, checksum in manifest["files"].items():
         _check_target_links(target, name)
         path = target / name
-        if not path.is_file() or b"\r" in path.read_bytes() or _hash(path) != checksum:
+        if not path.is_file() or (name not in SOURCE_BINARIES and b"\r" in path.read_bytes()) or _hash(path) != checksum:
             problems.append(name)
     if problems:
         raise ValueError("Snapshot has missing/modified managed files: " + ", ".join(problems))
@@ -145,7 +151,7 @@ def synchronize(source, target, *, write=False):
     for name, path in files.items():
         destination = target / name
         destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(_source_bytes(path))
+        destination.write_bytes(_source_bytes(path, binary=name in SOURCE_BINARIES))
     for name in managed - set(files):
         path = target / name
         if path.is_file():

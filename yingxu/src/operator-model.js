@@ -1,3 +1,4 @@
+import {translate} from './i18n/locale.js';
 export const epochMs=value=>typeof value==='number'&&Number.isFinite(value)?value*1000:null;
 export const providerLabel=value=>({lium:'Lium',targon:'Targon'}[value]||value||'供应商未知');
 export function dollars(value,{digits=2}={}){return typeof value==='number'&&Number.isFinite(value)?'$'+(value/1e6).toFixed(digits):'尚未核对';}
@@ -6,9 +7,9 @@ export function age(value,now=Date.now()){
   const seconds=Math.max(0,Math.floor((now-time)/1000));
   return seconds<60?`${seconds} 秒前`:seconds<3600?`${Math.floor(seconds/60)} 分钟前`:`${Math.floor(seconds/3600)} 小时前`;
 }
-export function duration(value){
-  if(typeof value!=='number'||!Number.isFinite(value)||value<0)return '暂无实测';
-  return value<60?`${Math.round(value)} 秒`:`${Math.floor(value/60)} 分 ${Math.round(value%60)} 秒`;
+export function duration(value,locale='zh'){
+  if(typeof value!=='number'||!Number.isFinite(value)||value<0)return translate(locale,'duration.none');
+  return value<60?translate(locale,'duration.seconds',{seconds:Math.round(value)}):translate(locale,'duration.minutes',{minutes:Math.floor(value/60),seconds:Math.round(value%60)});
 }
 export function deadlineLabel(value,now=Date.now()){
   const time=epochMs(value);if(time===null)return '期限未知';

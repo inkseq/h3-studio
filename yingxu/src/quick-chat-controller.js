@@ -1,5 +1,5 @@
 import {createQuickChatClient} from './quick-chat-client.js';
-import {stableJSON} from './cloud-model.js';
+import {stableJSON,digest} from './cloud-model.js';
 import {bindingPayload} from './quick-chat-model.js';
 import {requireModeAvailable} from './generation-availability.js';
 import {rememberDraftOrigin,clearAcceptedDraft} from './quick-chat-draft.js';
@@ -60,11 +60,18 @@ export function createQuickChatController({client=createQuickChatClient(),storag
     guard(ctx,{session:false});closeArchivedSession(receipt.items);guard(ctx,{session:false});invalidateHistory({historyReceipt:receipt,historySelection:[],notice:receipt.state==='pending'?'永久删除已受理，仍在处理中；请核对原清理状态。':receipt.items.some(item=>item.state==='blocked')?'原清理操作已核对，受阻记录仍保留。':HISTORY_ACTIONS[receipt.action]+'已完成，任务和计费账本保留。'});guard(ctx,{session:false});
     await list();guard(ctx,{session:false});if(state.historyView==='trash')await list({view:'trash'});return receipt;
   }
+  async function historyFailure(error,operation,ctx){
+    guard(ctx,{session:false});const proof=error.detail?.detail||error.detail;
+    if(proof?.resource==='quick_chat_history'&&proof.action==='confirm'&&proof.no_mutation_committed===true&&['history_preview_expired','history_preview_changed','history_action_blocked'].includes(proof.code)&&proof.request_hash===await digest(operation.body)){
+      guard(ctx,{session:false});if(stableJSON(state.pending)!==stableJSON(operation))throw Error('原操作已变化，请核对原记录。');writePending(null);invalidateHistory();
+    }
+    throw error;
+  }
   async function recoverHistory(operation){
     const ctx=context();if(operation.account!==ctx.account||operation.method!=='actionHistory'||!operation.body?.preview_id||operation.body.confirmed!==true||!Array.isArray(operation.items))throw Error('原清理操作无法核对，请返回原账户。');
     // A known pending action is observed, never posted again. An unknown
     // response reuses precisely the persisted confirmation and key.
-    const value=operation.actionId?await client.historyAction(operation.actionId):await client.actionHistory(operation.body,operation.key);
+    let value;try{value=operation.actionId?await client.historyAction(operation.actionId):await client.actionHistory(operation.body,operation.key);}catch(error){return historyFailure(error,operation,ctx);}
     guard(ctx,{session:false});return finishHistory(value,operation,ctx);
   }
   const isHistoryMetadata=body=>['is_test','test_accepted','review_hold'].some(key=>Object.hasOwn(body||{},key));
@@ -121,12 +128,27 @@ export function createQuickChatController({client=createQuickChatClient(),storag
   }
   async function refresh(){if(!state.account||!state.session||refreshing)return;refreshing=true;const ctx={...context(),readGeneration};try{await loadResources(state.session.id);}catch(error){try{guard(ctx);emit({error:'云端状态暂未更新，保留原任务；稍后自动核对。'});}catch{}throw error;}finally{refreshing=false;}}
   async function act(fn,{success}={}){if(state.busy)throw Error('原操作仍在处理中，请等待。');const ctx=context();emit({busy:true,error:'',notice:''});try{const value=await fn();guard(ctx,{session:false});if(success)emit({notice:success});return value;}catch(error){if(ctx.epoch===epoch)emit({error:error.message||'操作没有完成。请核对原记录。'});throw error;}finally{if(ctx.epoch===epoch)emit({busy:false});}}
+  function transferIdentity(value,operation){return value&&typeof value.id==='string'&&(!operation.transferId||operation.transferId===value.id)&&value.source_session_id===operation.args[0]&&value.item_id===operation.args[1]&&value.project_id===operation.body.target_project_id&&value.expected_project_version===operation.body.expected_project_version&&value.parent_id===operation.body.parent_id&&value.seed_locked===true;}
+  function closedTransfer(value,operation){return transferIdentity(value,operation)&&value.status==='blocked'&&value.no_shot_committed===true&&value.error_code==='target_version_conflict'&&typeof value.shot_id==='string'&&value.web_url===null;}
+  function finishTransfer(value,operation){
+    if(!transferIdentity(value,operation))throw Error('takes.recipeMissing');
+    if(value.status!=='completed'){writePending({...operation,transferId:value.id,...(closedTransfer(value,operation)?{closedReceipt:value}:{})});return value;}
+    if(typeof value.shot_id!=='string'||!Number.isInteger(value.project_version)||value.project_version<=operation.body.expected_project_version||typeof value.web_url!=='string')throw Error('takes.recipeMissing');
+    const link=new URL(value.web_url,'https://local.invalid');if(link.origin!=='https://local.invalid'||link.pathname!=='/'||link.searchParams.get('project')!==value.project_id||link.searchParams.get('entity')!==value.shot_id)throw Error('takes.recipeMissing');
+    writePending(null);return value;
+  }
+  async function annotateTake(operation,ctx){
+    guard(ctx);try{const value=await client.starTake(...operation.args,operation.body,operation.key);guard(ctx);
+      if(value?.take_id!==operation.args[1]||!Number.isSafeInteger(value.version)||value.version<=operation.body.expected_version||Object.hasOwn(operation.body,'title')&&value.title!==operation.body.title||Object.hasOwn(operation.body,'starred')&&value.starred!==operation.body.starred)throw Error('trash.failed');
+      if(stableJSON(state.pending)!==stableJSON(operation))throw Error('trash.pending');writePending(null);return value;
+    }catch(error){guard(ctx);const proof=error.detail?.detail||error.detail;if(proof?.resource==='quick_chat_take'&&proof.code==='version_conflict'&&proof.session_id===operation.args[0]&&proof.take_id===operation.args[1]&&proof.no_mutation_committed===true&&proof.request_hash===await digest(operation.body)){guard(ctx);if(stableJSON(state.pending)===stableJSON(operation))writePending(null);}throw error;}
+  }
   async function command(method,args,body,{sessionId=state.session?.id,draft,validate}={}){
     if(state.pending)throw Error('有原操作结果待核对，请先恢复原操作，不要重复提交。');
     readGeneration++;
-    const ctx=context(),operation={id:uuid(),method,args,body:clone(body),sessionId,account:state.account,key:'quick-'+uuid(),created_at:Date.now(),...(draft?{draft:clone(draft)}:{})};writePending(operation);
-    try{guard(ctx,{session:!!sessionId});const value=await client[method](...args,body,operation.key);guard(ctx,{session:!!sessionId});if(validate)validate(value);if(method==='turn'&&draft)rememberDraftOrigin(storage,state.account,sessionId,draft,record(value,'turn').id);writePending(null);return value;}
-    catch(error){guard(ctx,{session:!!sessionId});if(error.status>=400&&error.status<500&&![408,429].includes(error.status))writePending(null);throw error;}
+    const ctx=context(),operation={id:uuid(),method,args,body:clone(body),sessionId,account:state.account,key:'quick-'+uuid(),created_at:Date.now(),...(draft?{draft:clone(draft)}:{})};writePending(operation);if(method==='starTake')return annotateTake(operation,ctx);
+    try{guard(ctx,{session:!!sessionId});const value=await client[method](...args,body,operation.key);guard(ctx,{session:!!sessionId});if(method==='takeToStory')return finishTransfer(value,operation);if(validate)validate(value);if(method==='turn'&&draft)rememberDraftOrigin(storage,state.account,sessionId,draft,record(value,'turn').id);writePending(null);return value;}
+    catch(error){guard(ctx,{session:!!sessionId});if(method!=='takeToStory'&&error.status>=400&&error.status<500&&![408,429].includes(error.status))writePending(null);throw error;}
   }
   return {client,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},getState:()=>state,
     async setAccount(account){if(account===state.account)return;epoch++;sessionEpoch++;historyEpoch++;listSequence={active:0,trash:0};availabilitySequence++;availabilityRequest=null;client.setAccount(account);emit({account,schema:null,capabilities:null,availability:null,availabilityChecking:false,operatorAccess:false,sessions:[],sessionsCursor:null,session:null,materials:[],timeline:[],historyCursor:null,forwardCursor:null,cards:{},revisions:{},preflights:{},submissions:{},imports:{},busy:false,error:'',notice:'',pending:readPending(account),lastUpdated:null,draftReset:null,...initialHistory()});if(!account)return;const ctx=context();const availabilityLoad=refreshAvailability().catch(()=>null);const operatorLoad=readOperatorAccess();try{const [schema,capabilities]=await Promise.all([client.schema(),client.capabilities()]);guard(ctx,{session:false});emit({schema,capabilities});await list();await Promise.all([availabilityLoad,operatorLoad]);}catch(error){try{guard(ctx,{session:false});emit({error:error.message});}catch{}}},
@@ -150,7 +172,7 @@ export function createQuickChatController({client=createQuickChatClient(),storag
       const ctx=context(),operation={id:uuid(),method:'actionHistory',args:[],body:{preview_id:preview.preview_id,confirmed:true},sessionId:null,account:state.account,key:'quick-history-'+uuid(),created_at:Date.now(),action:preview.action,items:preview.items.map(({id,expected_version})=>({id,expected_version}))};
       readGeneration++;writePending(operation);guard(ctx,{session:false});
       let value;try{value=await client.actionHistory(operation.body,operation.key);guard(ctx,{session:false});}
-      catch(error){guard(ctx,{session:false});if(error.status>=400&&error.status<500&&![408,429].includes(error.status)){writePending(null);invalidateHistory();}throw error;}
+      catch(error){return historyFailure(error,operation,ctx);}
       // A later list refresh is not the confirmation result. In particular,
       // a failed refresh must not erase an accepted pending purge journal.
       return finishHistory(value,operation,ctx);
@@ -167,6 +189,15 @@ export function createQuickChatController({client=createQuickChatClient(),storag
     turn:(text,model_id,assistant_mode='assist',{createCard=false,draft}={})=>act(async()=>{if(createCard&&assistant_mode!=='none')throw Error('直接出卡只用于原输入模式，不替代助手回复。');const result=await command('turn',[state.session.id],{expected_version:state.session.version,text,model_id,assistant_mode,...(createCard?{create_card:true}:{})},{draft});await loadResources(state.session.id);return result;},{success:'这一轮已保存；只有确认任务卡才会生成视频。'}),
     createCard:body=>act(async()=>{const result=await command('createCard',[state.session.id],body);await loadResources(state.session.id);const card=record(result,'card');if(card.id)await loadCard(card.id);return result;},{success:'任务卡已保存，尚未提交视频生成。'}),
     reviseCard:(card,body)=>act(async()=>{const result=await command('reviseCard',[state.session.id,card.id],{expected_card_version:card.version,...body});await loadCard(card.id);await loadResources(state.session.id);return result;},{success:'新版本已保存；旧版本及已提交输入保留。'}),
+    readTakes:async(card,options={})=>{const ctx=context(),value=await client.takes(ctx.sessionId,card.id,options);guard(ctx);return value;},
+    readPreferences:async()=>{const ctx=context(),value=await client.preferences();guard(ctx,{session:false});return value;},
+    savePreferences:body=>act(()=>command('savePreferences',[],body,{sessionId:null})),
+    renameTake:(take,title)=>act(()=>command('starTake',[state.session.id,take.id],{expected_version:take.annotation.version,title})),
+    starTake:(take,starred)=>act(()=>command('starTake',[state.session.id,take.id],{expected_version:take.annotation.version,starred})),
+    again:(card,take)=>act(async()=>{const result=await command('again',[state.session.id,card.id],{expected_card_version:card.version,source_revision_id:take.revision_id,item_id:take.id,copies:1});await loadCard(card.id);await loadResources(state.session.id);return result;}),
+    acknowledgeBlockedTransfer:()=>act(async()=>{const operation=state.pending,ctx=context();if(operation?.method!=='takeToStory'||operation.account!==ctx.account||operation.sessionId!==ctx.sessionId||!operation.transferId)throw Error('takes.wait');const value=await client.storyTransfer(operation.sessionId,operation.transferId);guard(ctx);if(!closedTransfer(value,operation))throw Error('takes.wait');writePending(null);return value;}),
+    resumeStoryTransfer:()=>act(async()=>{const operation=state.pending,ctx=context();if(operation?.method!=='takeToStory'||operation.account!==ctx.account||operation.sessionId!==ctx.sessionId||!operation.transferId)throw Error('takes.wait');const value=await client.takeToStory(...operation.args,operation.body,operation.key);guard(ctx);return finishTransfer(value,operation);}),
+    takeToStory:(take,body)=>act(()=>command('takeToStory',[state.session.id,take.id],body)),
     preflight:(revision,scope={})=>act(async()=>{await checkGeneration(revision);const response=await command('preflight',[state.session.id,revision.id],{capabilities_version:state.capabilities?.capabilities_version,revision_hash:revision.input_hash,...scope});const value=record(response,'preflight');emit({preflights:{...state.preflights,[value.id]:value}});return value;},{success:'输入与执行条件已检查。'}),
     submit:(revision,preflight)=>act(async()=>{await checkGeneration(revision);const response=await command('submit',[state.session.id,revision.id],{preflight_id:preflight.id,revision_hash:revision.input_hash,confirmed:true});const value=record(response,'submission');emit({submissions:{...state.submissions,[value.id]:value}});await loadResources(state.session.id);return value;},{success:'生成确认已接受，查看原任务进度，无需重复提交。'}),
     cancel:(submission,item_ids)=>act(async()=>{const value=await command('cancelSubmission',[state.session.id,submission.id],item_ids?{item_ids}:{});await refresh();return value;},{success:'取消意愿已记录；以最终停止状态为准，已执行部分可能计费。'}),
@@ -174,7 +205,7 @@ export function createQuickChatController({client=createQuickChatClient(),storag
     resume:(submission,item,preflight)=>act(async()=>{await checkGeneration(state.revisions[submission.revision_id]||{});const result=await command('resumeAdmission',[state.session.id,submission.id],{item_ids:[item.id],fresh_preflight_id:preflight.id,confirmed:true});await refresh();return result;},{success:'原未准入项已恢复；未创建第二批。'}),
     importResult:(artifact,purpose='reference')=>act(async()=>{const response=await command('importResult',[state.session.id],{source_artifact_id:artifact.id,purpose});const value=record(response,'import');emit({imports:{...state.imports,[value.id]:value}});await loadResources(state.session.id);return value;},{success:'已记录结果导入；校验完成后才能作为参考。'}),
     acknowledge:turn=>act(async()=>{const result=await command('acknowledgeUnknown',[state.session.id,turn.id],{acknowledged:true});await loadResources(state.session.id);return result;}),
-    async recover(){return act(async()=>{const operation=state.pending;if(!operation||operation.corrupt)throw Error('原操作记录无法读取，请管理员核对，不要重新创建任务。');if(operation.account!==state.account)throw Error('请登录原操作账户。');if(operation.method==='actionHistory')return recoverHistory(operation);if(operation.method==='patchSession'&&isHistoryMetadata(operation.body))return recoverMetadata(operation);if(operation.sessionId&&operation.sessionId!==state.session?.id)throw Error('请先打开原操作会话。');readGeneration++;const ctx=context();if(operation.sessionId)await loadResources(operation.sessionId);guard(ctx,{session:!!operation.sessionId});if(operation.method==='uploadMaterial'){const catalog=await client.sessionAssets(operation.sessionId,operation.body.client_asset_id);guard(ctx);if(!(catalog.assets||[]).length)throw Error('原上传收据暂未查到，保持原标识；未自动重新上传。请管理员核对后恢复。');writePending(null);await loadResources(operation.sessionId);return catalog;}const result=await client[operation.method](...operation.args,operation.body,operation.key);guard(ctx,{session:!!operation.sessionId});if(operation.method==='turn'&&operation.draft)rememberDraftOrigin(storage,state.account,operation.sessionId,operation.draft,record(result,'turn').id);writePending(null);if(operation.sessionId)await loadResources(operation.sessionId);else await list();return result;},{success:'已使用原标识核对操作；没有建立新的确认。'});},
+    async recover(){return act(async()=>{const operation=state.pending;if(!operation||operation.corrupt)throw Error('原操作记录无法读取，请管理员核对，不要重新创建任务。');if(operation.account!==state.account)throw Error('请登录原操作账户。');if(operation.method==='actionHistory')return recoverHistory(operation);if(operation.method==='patchSession'&&isHistoryMetadata(operation.body))return recoverMetadata(operation);if(operation.sessionId&&operation.sessionId!==state.session?.id)throw Error('请先打开原操作会话。');readGeneration++;const ctx=context();if(operation.method==='starTake')return annotateTake(operation,ctx);if(operation.method==='takeToStory'){const result=operation.transferId?await client.storyTransfer(operation.sessionId,operation.transferId):await client.takeToStory(...operation.args,operation.body,operation.key);guard(ctx);return finishTransfer(result,operation);}if(operation.sessionId)await loadResources(operation.sessionId);guard(ctx,{session:!!operation.sessionId});if(operation.method==='uploadMaterial'){const catalog=await client.sessionAssets(operation.sessionId,operation.body.client_asset_id);guard(ctx);if(!(catalog.assets||[]).length)throw Error('原上传收据暂未查到，保持原标识；未自动重新上传。请管理员核对后恢复。');writePending(null);await loadResources(operation.sessionId);return catalog;}const result=await client[operation.method](...operation.args,operation.body,operation.key);guard(ctx,{session:!!operation.sessionId});if(operation.method==='turn'&&operation.draft)rememberDraftOrigin(storage,state.account,operation.sessionId,operation.draft,record(result,'turn').id);writePending(null);if(operation.sessionId)await loadResources(operation.sessionId);else await list();return result;},{success:'已使用原标识核对操作；没有建立新的确认。'});},
     destroy(){epoch++;sessionEpoch++;availabilitySequence++;availabilityRequest=null;client.reset();listeners.clear();},
   };
 }

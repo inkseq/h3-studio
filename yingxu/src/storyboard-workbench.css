@@ -1,0 +1,7 @@
+.sb-workspace .drawer.workbench-expanded{width:calc(100% - var(--libw) - 8px)!important;max-width:none}.workbench-expand{min-height:44px;margin:8px}.sb-workspace .workbench-bulk{display:flex;flex-wrap:wrap;gap:8px;padding:10px;position:sticky;top:0;z-index:3;background:var(--panel,#202128)}.sb-workspace .workbench-select{position:absolute;top:8px;left:8px;z-index:4;min-width:44px;min-height:44px}.sb-workspace .workbench-takes{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.sb-workspace .workbench-take{min-width:0;padding:8px;border:1px solid #666;border-radius:10px}.sb-workspace .workbench-take video{width:100%;max-height:180px}.sb-workspace .workbench-take button{min-height:44px}.sb-workspace .workbench-compare{display:grid;grid-template-columns:1fr 1fr;gap:8px}@media(max-width:760px){.sb-workspace .drawer.workbench-expanded{width:100%!important}.sb-workspace .workbench-takes{grid-template-columns:repeat(2,minmax(0,1fr))}.sb-workspace .workbench-bulk select,.sb-workspace .workbench-bulk button{min-height:44px;max-width:100%}}
+
+.sb-workspace .workbench-defaults fieldset,.sb-workspace .workbench-compare section{min-width:0}
+.sb-workspace .workbench-defaults input,.sb-workspace .workbench-defaults select{max-width:100%}
+.sb-workspace .workbench-defaults button,.sb-workspace .workbench-bulk button{min-height:44px}
+.sb-workspace .workbench-take img,.sb-workspace .workbench-compare img,.sb-workspace .workbench-compare video{max-width:100%;height:auto}
+.sb-workspace .workbench-compare{overflow-wrap:anywhere}

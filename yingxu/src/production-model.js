@@ -1,3 +1,4 @@
+import {translate} from './i18n/locale.js';
 import {children} from './store.js';
 import {activeJobStatuses,shotSnapshot,stableJSON} from './cloud-model.js';
 
@@ -16,7 +17,7 @@ export function reviewProgress(project,shots,currentId,options){
   const ordered=[...shots.slice(index+1),...shots.slice(0,Math.max(0,index))];
   return {done:shots.length-remaining.length,total:shots.length,remaining:remaining.length,next:ordered.find(s=>remaining.some(r=>r.id===s.id))?.id||null};
 }
-export function productionRows(project,cloud,now=Date.now()){
+export function productionRows(project,cloud,now=Date.now(),locale='zh'){
   return children(project,null).filter(e=>e.type==='chapter').flatMap(chapter=>children(project,chapter.id).filter(e=>e.type==='scene').flatMap(scene=>children(project,scene.id).filter(e=>e.type==='shot').map(shot=>{
     const plan=cloud.plans?.[shot.id],jobs=(cloud.jobs||[]).filter(j=>j.client_ref?.project_id===project.id&&j.client_ref?.shot_id===shot.id).sort((a,b)=>(Number(b.created_at)||0)-(Number(a.created_at)||0)),latest=jobs[0];
     const current=!!plan&&plan.sourceSnapshot===stableJSON(shotSnapshot(project,shot.id));
@@ -28,7 +29,7 @@ export function productionRows(project,cloud,now=Date.now()){
     const waiting=jobs.some(j=>j.status==='waiting_capacity');
     const phase=held?'recovery_hold':pending?'unknown':waiting?'waiting_capacity':active?'active':error?'error':plan&&!current?'stale':plan&&expires&&expires<=now?'expired':plan?.status==='blocked'?'blocked':plan?.status==='ready'&&!submitted?'ready':latest?.status==='failed'?'failed':latest?.status==='blocked'?'blocked':latest?.status==='cancelled'?'cancelled':submitted||latest?.status==='succeeded'?'submitted':'unplanned';
     const labels={waiting_capacity:'等待计算容量',recovery_hold:'恢复后待核对',unknown:'提交结果待核对',active:'排队或运行中',error:'预检未完成',stale:'内容已改，需重检',expired:'计划过期，需重检',blocked:'有阻塞项',ready:'预检通过',failed:'最近任务失败',cancelled:'最近任务已取消',submitted:'已有任务结果',unplanned:'尚未预检'};
-    return {id:shot.id,shot,chapter,scene,plan,jobs,latest,current,phase,label:labels[phase],review:shotReviewState(project,shot),error,canSelect:!held&&!pending&&!active,canSubmit:phase==='ready',path:`${chapter.title} / ${scene.title}`};
+    return {id:shot.id,shot,chapter,scene,plan,jobs,latest,current,phase,label:translate(locale,'queue.phase.'+phase),review:shotReviewState(project,shot),error,canSelect:!held&&!pending&&!active,canSubmit:phase==='ready',path:`${chapter.title} / ${scene.title}`};
   })));
 }
 export function filterProductionRows(rows,{chapterId='',status='all',query=''}={}){

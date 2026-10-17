@@ -7,7 +7,7 @@ const busy=(headers={})=>new Response('{"detail":"busy"}',{status:429,headers:{'
 
 test('native private content URLs freeze the original owner and use only authenticated content routes without fetching',()=>{
   let calls=0;const api=createCloudClient({fetcher:async()=>{calls++;throw Error('native URL construction must not fetch');}});
-  assert.throws(()=>api.nativeContentURL('/v1/artifacts/original/content'),/核对登录账户/);api.setAccount('original-owner');
+  assert.throws(()=>api.nativeContentURL('/v1/artifacts/original/content'),/Confirm the signed-in account/);api.setAccount('original-owner');
   const preview=api.nativeContentURL('/v1/artifacts/original/content'),attachment=api.nativeContentURL('/v1/artifacts/original/content',{download:true});
   assert.equal(preview,'/v1/artifacts/original/content?expected_account=original-owner');assert.equal(attachment,preview+'&download=1');assert.equal(api.nativeContentURL('/v1/assets/source/content?download=1'),'/v1/assets/source/content?expected_account=original-owner&download=1');
   api.setAccount('new-owner');assert.equal(new URL(preview,'https://studio.invalid').searchParams.get('expected_account'),'original-owner');assert.equal(new URL(attachment,'https://studio.invalid').searchParams.get('expected_account'),'original-owner');assert.equal(api.nativeContentURL('/v1/artifacts/original/content'),'/v1/artifacts/original/content?expected_account=new-owner');
@@ -82,9 +82,9 @@ test('GET and media timeouts describe reads while a submit timeout keeps its ori
   const calls=[],api=createCloudClient({timeoutMs:5,downloadTimeoutMs:5,fetcher:(path,{signal})=>{
     calls.push(path);return new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError')),{once:true}));
   }});
-  await assert.rejects(api.projects(),error=>error.message.includes('云端内容读取等待超时')&&!error.message.includes('提交是否成功'));
-  await assert.rejects(api.download('/v1/artifacts/original/content'),error=>error.message.includes('媒体读取等待超时')&&!error.message.includes('提交是否成功'));
-  await assert.rejects(api.submit('original-plan','original-key'),/提交是否成功仍需核对/);assert.equal(calls.length,3);
+  await assert.rejects(api.projects(),error=>error.message.includes('cloud read timed out')&&!error.message.includes('Submission may have completed'));
+  await assert.rejects(api.download('/v1/artifacts/original/content'),error=>error.message.includes('media read timed out')&&!error.message.includes('Submission may have completed'));
+  await assert.rejects(api.submit('original-plan','original-key'),/Submission may have completed/);assert.equal(calls.length,3);
 });
 
 test('429 GET retry keeps exact path and owner and stops after three attempts',async()=>{

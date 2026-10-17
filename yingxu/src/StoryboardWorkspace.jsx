@@ -1,11 +1,17 @@
+import {WorkbenchBulk,WorkbenchFork} from './StoryboardWorkbench.jsx';
+import './v2/story-view.css';
+import {selectShot,emptySelection} from './storyboard-selection.js';
+import {useI18n} from './i18n/I18nProvider.jsx';
 import React,{useEffect,useRef,useState} from 'react';
+import {Plus,PanelLeftClose,PanelLeftOpen} from 'lucide-react';
+import {usePageActive,useAppLocation} from './AppRouteCache.jsx';
+import {navigateApp} from './app-navigation.js';
 import {DndContext,DragOverlay,PointerSensor,KeyboardSensor,closestCenter,pointerWithin,useSensor,useSensors} from '@dnd-kit/core';
 import {SortableContext,rectSortingStrategy,sortableKeyboardCoordinates} from '@dnd-kit/sortable';
 import {StoryboardUIProvider,useStoryboardUI} from './storyboard-ui-context.jsx';
 import {AssetLibrary,AssetThumb,AddCard,ProfileEditor,ShotCard,ShotEditor,Screen,Timeline,Transport,usePlayer} from './StoryboardComponents.jsx';
 import {StoryboardSplitter,useStoryboardPanelSize} from './StoryboardPanels.jsx';
 import {coverOf,fmt,planDrop,totalDuration,variantOf} from './storyboard-ui-model.js';
-import './storyboard-workspace.css';
 
 function collision(args){
   const id=String(args.active.id);
@@ -15,7 +21,7 @@ function collision(args){
   }
   return closestCenter({...args,droppableContainers:args.droppableContainers.filter(container=>String(container.id).startsWith('shot:'))});
 }
-function QueueSummary(){
+function QueueSummary(){const {t,locale}=useI18n();
   const {state}=useStoryboardUI(),queues=state.queue;
   const rows=['FL','REF'].map(mode=>{
     const row=Array.isArray(queues)?queues.find(item=>String(item.mode).toUpperCase()===mode):queues?.[mode];
@@ -26,24 +32,37 @@ function QueueSummary(){
     return {mode,row,waiting:Math.max(Number.isFinite(observed)?observed:0,waiting),running};
   }).filter(row=>row.waiting>0||row.running>0);
   if(!rows.length)return null;
-  return <div className="sb-queue" aria-label="当前生成队列">{rows.map(({mode,row,waiting,running})=><span key={mode}>{mode==='FL'?'首尾帧':'全能参考'}：{waiting} 等待{running>0&&` · ${running} 处理中`}{waiting>0&&Number.isFinite(row?.roughWaitSeconds)&&row.roughWaitSeconds>0&&` · 约等 ${Math.ceil(row.roughWaitSeconds/60)} 分钟`}</span>)}</div>;
+  return <div className="sb-queue" aria-label={t('storyboard.copy14')}>{rows.map(({mode,row,waiting,running})=><span key={mode}>{mode==='FL'?t('storyboard.copy15'):t('storyboard.copy16')}：{t('storyboard.copy34',{count:waiting})}{running>0&&t('storyboard.copy32',{count:running})}{waiting>0&&Number.isFinite(row?.roughWaitSeconds)&&row.roughWaitSeconds>0&&t('storyboard.copy33',{minutes:Math.ceil(row.roughWaitSeconds/60)})}</span>)}</div>;
 }
-function StoryboardLayoutA({selected,setSelected,pickAsset}){
-  const {state,dispatch}=useStoryboardUI(),player=usePlayer(state.shots),[libraryCollapsed,setLibraryCollapsed]=useState(false);
-  const library=useStoryboardPanelSize('library',280,140,560),dock=useStoryboardPanelSize('dock',190,110,460),drawer=useStoryboardPanelSize('drawer',440,340,820);
+function StoryboardLayoutA({selected,setSelected,pickAsset,onNewScene}){const {t,locale}=useI18n();
+  const {state,dispatch}=useStoryboardUI(),player=usePlayer(state.shots),[selection,setSelection]=useState(emptySelection),[expanded,setExpanded]=useState(false),[libraryCollapsed,setLibraryCollapsed]=useState(()=>globalThis.matchMedia?.('(max-width:760px)').matches??false);
+  useEffect(()=>{const media=globalThis.matchMedia?.('(max-width:760px)');if(!media)return;const change=()=>setLibraryCollapsed(media.matches);media.addEventListener('change',change);return()=>media.removeEventListener('change',change);},[]);
+  useEffect(()=>{if(libraryCollapsed)return;const close=event=>{if(event.key==='Escape')setLibraryCollapsed(true);};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close);},[libraryCollapsed]);
+  useEffect(()=>{setExpanded(false);},[selected]);
+  useEffect(()=>{const close=event=>{if(event.key!=='Escape'||document.querySelector('dialog[open]'))return;if(expanded){event.preventDefault();event.stopImmediatePropagation();setExpanded(false);}else if(selected)setSelected(null);};window.addEventListener('keydown',close,true);return()=>window.removeEventListener('keydown',close,true);},[expanded,selected]);
+  useEffect(()=>{setSelection(emptySelection());},[state.contextId]);
+  useEffect(()=>{setSelection(old=>({...old,ids:old.ids.filter(id=>state.shots.some(s=>s.id===id))}));},[state.shots.map(s=>s.id).join('|')]);
+  useEffect(()=>{const clear=e=>{if(e.key==='Escape'&&!expanded&&!selected&&!document.querySelector('dialog[open]'))setSelection(emptySelection());};window.addEventListener('keydown',clear);return()=>window.removeEventListener('keydown',clear);},[expanded,selected]);
+  const library=useStoryboardPanelSize('library',260,140,560),dock=useStoryboardPanelSize('dock',190,110,460),drawer=useStoryboardPanelSize('drawer',440,340,820);
+  const groups=(state.scenes||[]).filter(scene=>scene.parentId===state.project.chapterId).map(scene=>({id:scene.id,title:scene.title,shots:state.shots.filter(shot=>shot.entity?.parentId===scene.id)}));
+  for(const shot of state.shots){if(!groups.some(group=>group.id===shot.entity?.parentId)){const id=shot.entity?.parentId||null;let group=groups.find(row=>row.id===id);if(!group){group={id,title:state.project.chapter,shots:[]};groups.push(group);}group.shots.push(shot);}}
   const count=state.shots.filter(shot=>shot.chosen).length,pending=state.shots.filter(shot=>!shot.versions.length);
   return <div className={'layout A'+(libraryCollapsed?' library-collapsed':'')} data-testid="storyboard-layout-a" style={{gridTemplateColumns:libraryCollapsed?'44px minmax(0,1fr)':`${library.size}px 8px minmax(0,1fr)`,'--libw':(libraryCollapsed?44:library.size)+'px'}}>
+    {!libraryCollapsed&&<button type="button" className="sb-library-backdrop" aria-label={t('storyboard.detail15')} onClick={()=>setLibraryCollapsed(true)}/>}
     <AssetLibrary onPick={pickAsset} selectedShot={state.shots.find(shot=>shot.id===selected)} collapsed={libraryCollapsed} onToggle={()=>setLibraryCollapsed(value=>!value)}/>
-    {!libraryCollapsed&&<StoryboardSplitter panel={library} label="素材库宽度"/>}
-    <div className="col"><main className="main"><div className="chapter-head"><div className="chapter-summary"><small>{state.shots.length} 个镜头 · 总长 {fmt(totalDuration(state.shots))} · 已选定 {count}/{state.shots.length} · {state.project.aspect}</small><label className="style-field"><span>全片风格</span><input aria-label="全片风格" value={state.project.style||''} placeholder="例如：电影感，冷色调，胶片颗粒" onChange={event=>dispatch({type:'project',patch:{style:event.target.value}})}/></label></div><div className="chapter-actions"><QueueSummary/><button className="primary" disabled={state.busy||!pending.length} onClick={()=>dispatch({type:'generate',ids:pending.map(shot=>shot.id)})}>预检全部未生成 · {pending.length}</button></div></div>
-      <SortableContext items={state.shots.map(shot=>'shot:'+shot.id)} strategy={rectSortingStrategy}><div className="wall">{state.shots.map((shot,index)=><ShotCard key={shot.id} shot={shot} index={index} selected={selected===shot.id} onOpen={setSelected}/>)}<AddCard onAdd={()=>dispatch({type:'add'})}/></div></SortableContext>
-    </main><StoryboardSplitter panel={dock} axis="y" sign={-1} label="播放器和时间线高度"/><div className="dock" style={{height:dock.size}}><Screen player={player}/><div className="dock-right"><Transport player={player}/><Timeline player={player} selectedId={selected} onPick={setSelected}/><small className="muted">点击一段时间线，编辑对应镜头</small></div></div></div>
-    {selected&&<aside className="drawer" aria-label="镜头编辑器" style={{width:drawer.size}}><StoryboardSplitter panel={drawer} sign={-1} className="edge" label="镜头编辑器宽度"/><ShotEditor shotId={selected} onClose={()=>setSelected(null)}/></aside>}
+    {!libraryCollapsed&&<StoryboardSplitter panel={library} label={t('storyboard.copy17')}/>}
+    <div className="col"><main className="main"><div className="chapter-head"><div className="row tight chapter-summary"><button className="small ghost" title={t(libraryCollapsed?'storyboard.detail14':'storyboard.detail15')} onClick={()=>setLibraryCollapsed(v=>!v)}>{libraryCollapsed?<><PanelLeftOpen size={16}/>{t('library.title')}</>:<PanelLeftClose size={16}/>}</button><h1>{state.project.chapter}</h1><small className="muted">{t('storyboard.copy36',{shots:state.shots.length,duration:fmt(totalDuration(state.shots)),chosen:count,aspect:state.project.aspect})}</small></div><div className="row tight chapter-actions"><QueueSummary/>{onNewScene&&<button onClick={onNewScene}><Plus size={14}/>{t('v2.newScene')}</button>}<button className="primary" disabled={state.busy||!pending.length||!state.copiesMax} onClick={()=>dispatch({type:'workbenchGenerate',ids:pending.map(shot=>shot.id),copies:1})}>{t('storyboard.copy35',{count:pending.length})}</button></div></div>
+      <WorkbenchBulk ids={selection.ids} onClear={()=>setSelection(emptySelection())} onSelectAll={()=>setSelection({ids:state.shots.map(s=>s.id),anchor:state.shots[0]?.id})}/><WorkbenchFork ids={selection.ids}/><SortableContext items={state.shots.map(shot=>'shot:'+shot.id)} strategy={rectSortingStrategy}><div className="sb-scene-groups">{groups.map(group=><section className="scene" key={group.id||'unparented'}><div className="scene-head"><b>{group.title}</b><small>{group.shots.length} · {fmt(totalDuration(group.shots))}</small></div><div className="wall">{group.shots.map((shot)=><ShotCard key={shot.id} shot={shot} index={state.shots.indexOf(shot)} selected={selected===shot.id} checked={selection.ids.includes(shot.id)} onSelect={event=>setSelection(old=>selectShot(old,state.shots.map(s=>s.id),shot.id,{range:event.shiftKey,toggle:!event.shiftKey}))} onOpen={(id,event)=>event?.ctrlKey||event?.metaKey||event?.shiftKey?setSelection(old=>selectShot(old,state.shots.map(s=>s.id),id,{range:event.shiftKey,toggle:!event.shiftKey})):setSelected(id)}/>)}</div></section>)}<div className="wall sb-add-shot"><AddCard onAdd={()=>dispatch({type:'add'})}/></div></div></SortableContext>
+    </main><StoryboardSplitter panel={dock} axis="y" sign={-1} label={t('storyboard.copy20')}/><div className="dock" style={{height:dock.size}}><Screen player={player}/><div className="dock-right"><Transport player={player}/><Timeline player={player} selectedId={selected} onPick={setSelected}/><small className="muted sb-timeline-hint">{t('storyboard.copy21')}</small></div></div></div>
+    {selected&&<aside className={'drawer'+(expanded?' wide workbench-expanded':'')} aria-label={t('storyboard.copy22')} style={{width:drawer.size}}><StoryboardSplitter panel={drawer} sign={-1} className="edge" label={t('storyboard.copy23')}/><ShotEditor shotId={selected} wide={expanded} onWide={()=>setExpanded(v=>!v)} onClose={()=>expanded?setExpanded(false):setSelected(null)}/></aside>}
     <ProfileEditor/>
   </div>;
 }
-function StoryboardShell({onLegacyGuide,onCanvas}){
+function StoryboardShell({onLegacyGuide,onCanvas,onNewScene}){const {t,locale}=useI18n();
   const {state,dispatch,db,clearError}=useStoryboardUI(),[selected,setSelected]=useState(null),[dragging,setDragging]=useState(null),[toast,setToast]=useState('');
+  const pageActive=usePageActive(),location=useAppLocation();
+  const showSelected=id=>{setSelected(id);if(!pageActive)return;const url=new URL(window.location.href);url.searchParams.set('view','workspace');if(state.workspaceMode==='cloud'&&state.project.id)url.searchParams.set('project',state.project.id);else url.searchParams.delete('project');if(id)url.searchParams.set('entity',id);else url.searchParams.delete('entity');navigateApp(url.pathname+url.search,{restore:false});};
+  useEffect(()=>{if(!pageActive||location.path!=='/')return;const params=new URLSearchParams(location.search),id=params.get('entity');if(id&&state.shots.some(s=>s.id===id))setSelected(id);else if(!id)setSelected(null);},[pageActive,location.href,state.project.id,state.shots.map(s=>s.id).join('|')]);
   const container=useRef(),sensors=useSensors(useSensor(PointerSensor,{activationConstraint:{distance:6}}),useSensor(KeyboardSensor,{coordinateGetter:sortableKeyboardCoordinates}));
   useEffect(()=>{if(state.lastAdded)setSelected(state.lastAdded);},[state.lastAdded]);
   useEffect(()=>{if(selected&&!state.shots.some(shot=>shot.id===selected))setSelected(null);},[state.shots,selected]);
@@ -51,9 +70,9 @@ function StoryboardShell({onLegacyGuide,onCanvas}){
   const dropOnShot=async(item,shotId,slot='smart')=>{
     const shot=state.shots.find(s=>s.id===shotId),object=item.profile?{profile:db.profile(item.profile)}:{asset:db.asset(item.asset)};
     if(!shot||!(object.profile||object.asset))return;const plan=planDrop(shot,object,slot,db);if(!plan.patch){setToast(plan.msg);return;}
-    const receipt=await dispatch({type:'drop',...item,shot:shotId,slot});if(receipt?.ok!==false)setToast(plan.msg||'已加入镜头');
+    const receipt=await dispatch({type:'drop',...item,shot:shotId,slot});if(receipt?.ok!==false)setToast(plan.msg||t('storyboard.copy24'));
   };
-  const pick=item=>{if(!selected){if(item.profile)return dispatch({type:'openProfile',id:item.profile});setToast('先选中镜头，或把素材直接拖到镜头上');return;}return dropOnShot(item,selected);};
+  const pick=item=>{if(!selected){if(item.profile)return dispatch({type:'openProfile',id:item.profile});setToast(t('storyboard.copy25'));return;}return dropOnShot(item,selected);};
   const onDragStart=event=>{const id=String(event.active.id);setDragging(id.startsWith('asset:')?{asset:id.slice(6)}:id.startsWith('profile:')?{profile:id.slice(8)}:null);};
   const onDragEnd=async({active,over})=>{
     setDragging(null);if(!over)return;const a=String(active.id),o=String(over.id);
@@ -66,20 +85,21 @@ function StoryboardShell({onLegacyGuide,onCanvas}){
       if(asset.kind==='audio'){
         if(profile.type==='character')return dispatch({type:'addVoice',pid,asset:asset.id});
         if(profile.type==='location')return dispatch({type:'profile',id:pid,patch:{ambient:asset.id}});
-        setToast('道具档案不能放声音');return;
+        setToast(t('storyboard.copy26'));return;
       }
-      if(asset.kind!=='image'){setToast('动作视频请放进镜头的全能参考素材');return;}
-      if(kind==='voicedrop'){setToast('这里接收声音，照片请放到造型照片区');return;}
-      const variant=variantOf(profile,vid||profile.def);if(!variant){setToast('先建立造型或场景版本，再添加照片');return;}return dispatch({type:'fileImage',asset:item.asset,pid,vid:variant.id});
+      if(asset.kind!=='image'){setToast(t('storyboard.copy27'));return;}
+      if(kind==='voicedrop'){setToast(t('storyboard.copy28'));return;}
+      const variant=variantOf(profile,vid||profile.def);if(!variant){setToast(t('storyboard.copy29'));return;}return dispatch({type:'fileImage',asset:item.asset,pid,vid:variant.id});
     }
   };
   const dragged=dragging&&(dragging.asset?db.asset(dragging.asset):db.profile(dragging.profile)),thumb=dragging?.profile?coverOf(db,dragged,dragged?.def):dragged;
-  return <DndContext sensors={sensors} collisionDetection={collision} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={()=>setDragging(null)}><section ref={container} className="sb-workspace" aria-label="故事分镜工作台">
-    {state.error&&<div className="sb-error" role="alert"><span>{state.error}</span><button className="x" aria-label="关闭操作提示" onClick={clearError}>×</button></div>}
-    <StoryboardLayoutA selected={selected} setSelected={setSelected} pickAsset={pick}/>
+  return <DndContext sensors={sensors} collisionDetection={collision} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={()=>setDragging(null)}><section ref={container} className="sb-workspace" aria-label={t('storyboard.copy30')}>
+    {state.error&&<div className="sb-error" role="alert"><span>{state.error}</span><button className="x" aria-label={t('storyboard.copy31')} onClick={clearError}>×</button></div>}
+    {state.workbenchPending&&<div className="sb-error"><span>{t('workbench.pending')}</span><button disabled={state.busy} onClick={()=>dispatch({type:'workbenchRecover'})}>{t('workbench.recover')}</button></div>}
+    <StoryboardLayoutA onNewScene={onNewScene} selected={selected} setSelected={showSelected} pickAsset={pick}/>
     <DragOverlay dropAnimation={null}>{dragged?<div className="sb-portal achip overlay"><AssetThumb asset={thumb}/><b>{dragged.name}</b></div>:null}</DragOverlay>
     {toast&&<div className="sb-toast" role="status" aria-live="polite">{toast}</div>}
   </section></DndContext>;
 }
-export function StoryboardWorkspace({adapter,onLegacyGuide,onCanvas}){return <StoryboardUIProvider adapter={adapter}><StoryboardShell onLegacyGuide={onLegacyGuide} onCanvas={onCanvas}/></StoryboardUIProvider>;}
+export function StoryboardWorkspace({adapter,onLegacyGuide,onCanvas,onNewScene}){const {t,locale}=useI18n();return <StoryboardUIProvider adapter={adapter}><StoryboardShell onNewScene={onNewScene} onLegacyGuide={onLegacyGuide} onCanvas={onCanvas}/></StoryboardUIProvider>;}
 export default StoryboardWorkspace;

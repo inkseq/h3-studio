@@ -50,7 +50,11 @@ Owner v2 HANDOFF rule 4 supersedes the former five-day automatic trash expiry (D
 
 ## CR-20261017-24 — #251: visual parity before combined promotion
 
-The latest owner instruction supersedes the intervening proposal to promote the existing old-interface v2 build first. Finish #251 now: directly reuse the approved `design/inkseq-v2-prototype/src/styles.css` design system (dark default), centered top navigation and all page layouts, including phones; only its simulated data layer is replaced with real APIs. Attach prototype/staging comparison screenshots for every page at1440×900 and375×812. Accept the functional and visual batch together on staging, then promote identical accepted artifacts immediately, without waiting for the owner to preview staging. Preserve the existing functional APIs, original receipts/accounting, user data, single release lane and three-task limit.
+Finish #251 under CR-20261017-25 before promoting the v2 functional batch. Accept the functional and visual batch together on staging, then promote identical accepted artifacts immediately, without waiting for the owner to preview staging. Preserve the existing functional APIs, original receipts/accounting, user data, single release lane and three-task limit.
+
+## CR-20261017-25 — #251: prototype components and persistent internal navigation
+
+The owner rejected CSS-only approximation after reviewing local8914 and staging. Use the approved prototype's actual page components/DOM as the view layer for all seven pages, replacing only its simulated store with the existing real controllers/APIs. Remove replaced legacy page styles and remove the old seven-step story wizard from v2; new stories open the workspace directly. Preserve real path routes, shareable story/conversation/shot URLs, refresh and browser Back/Forward. Internal navigation must not reload the document; keep loaded data and drafts between pages, without loading the same data again on a return visit. Compare prototype and final staging at1440×900 and375×812 for every page, listing intentional real-data/safety differences. The currently deployed partial visual build is not accepted for promotion. Finish the component and navigation batch together, verify the staging lane is idle, accept on staging, then promote the same artifacts immediately without an owner preview gate.
 
 ## CR-20261017-26 — urgent #254 reservations and Settings authority
 

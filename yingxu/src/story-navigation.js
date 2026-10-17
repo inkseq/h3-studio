@@ -1,3 +1,4 @@
+import {translate} from './i18n/locale.js';
 import {validateProject} from './store.js';
 
 export const LOCAL_STORIES_KEY='yingxu-project-library-v1';
@@ -56,9 +57,9 @@ export function createLocalStory(title,{store,cloud,storage=globalThis.localStor
 
 // Library presentation derives from the owned story document. A list summary is
 // not an empty document: missing entities keeps counts and covers unknown.
-export function storyLibrarySummary(value){
+export function storyLibrarySummary(value,locale='zh'){
   const project=value?.project||value||{},entities=Array.isArray(project.entities)?project.entities:null;
-  const details={id:project.id||value?.id,title:project.title||value?.title||'未命名故事',updatedAt:project.updatedAt??value?.updated_at??value?.updatedAt??null,shotCount:null,chosenCount:null,cover:null};
+  const details={id:project.id||value?.id,title:project.title||value?.title||translate(locale,'legacy.visible24'),updatedAt:project.updatedAt??value?.updated_at??value?.updatedAt??null,shotCount:null,chosenCount:null,cover:null};
   if(!entities)return details;
   const byId=new Map(entities.map(entity=>[entity.id,entity])),shots=entities.filter(entity=>entity.type==='shot');
   const orderPath=entity=>{const path=[],seen=new Set();for(let item=entity;item&&!seen.has(item.id);item=byId.get(item.parentId)){seen.add(item.id);path.unshift(Number.isFinite(item.order)?item.order:0);}return path;};
