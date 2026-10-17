@@ -79,7 +79,7 @@ Example ready receipt projection: `{"asset_id":"ASSET","status":"ready"}`. Use t
 1. List sessions with `view=active` or `view=trash`; hiding tests is a view filter only.
 2. Request a trash/restore preview for exact IDs/versions and inspect eligibility/shared-reference warnings.
 3. Confirm the fresh preview with one saved key/body; read the original action until complete. Pending/unknown is not deletion success.
-4. Trash has no automatic expiry. Restore is unavailable once irreversible purge intent exists. Purge/empty-trash requires separate explicit authorization and preview. Generic entity deletion is not universal restorable trash (#236).
+4. Trash has no automatic expiry. Restore is unavailable once irreversible purge intent exists. Purge/empty-trash requires separate explicit authorization and preview. For stories, entities, looks, location versions, files and takes use `/v1/trash/preview` then `/v1/trash/actions`; exact CAS/recovery examples are in [API reference](reference/api.md#universal-trash). Do not substitute hard `entity.delete`.
 
 ```http
 POST /v1/quick-chat/sessions/history/preview
@@ -101,3 +101,11 @@ Example response projection: `{"preview_id":"PREVIEW","expires_at":1790000000}`;
 ```
 
 This is a user-facing summary example, not a fabricated API receipt. See recovery for stale settings, owner cap, human confirmation and unknown charges.
+
+
+### Find and import library references
+1. Read `GET /v1/library?tag=rain&type=file`; follow `next_offset`.
+2. Inspect `/v1/library/usage` for a returned target; unused is not purge permission.
+3. Tag/file with original story CAS or explicitly import to another authorized story.
+4. Keep the import key/body; observe its receipt before resuming. See [API](reference/api.md#project-scoped-library-and-explicit-imports-238).
+Example: `python scripts/sixnine.py request GET '/v1/library?tag=rain'`. Imports never generate.

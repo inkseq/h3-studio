@@ -723,6 +723,8 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
             if prior:
                 record = self._get(conn, principal, prior, session_id, "preflight")
             else:
+                from .universal_trash import assert_take_active
+                for item_id in selected:assert_take_active(conn,self.tenant,principal.owner,session_id,item_id)
                 existing = conn.execute(select(objects).where(objects.c.tenant == self.tenant, objects.c.owner == principal.owner,
                     objects.c.kind == "submission", objects.c.business_key == revision_id)).mappings().first()
                 if existing:
@@ -828,6 +830,8 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
                 if not prior:
                     self._remember(conn, principal, namespace, key, body, submission["id"])
             else:
+                from .universal_trash import assert_take_active
+                for item in revision["items"]:assert_take_active(conn,self.tenant,principal.owner,session_id,item["id"])
                 p = self._check_preflight(conn, principal, session_id, body["preflight_id"], revision_id, [i["id"] for i in revision["items"]])
                 submission = self._new(conn, principal, session_id, "submission", {"revision_id": revision_id,
                     "preflight_id": body["preflight_id"], "actor_id": principal.actor_id, "cancel_requested": False,
@@ -1023,6 +1027,8 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
             "web_url": "/quick-chat?session="+session_id+"&submission="+submission_id}
 
     def _safe_unexecuted_or_failed(self, conn, principal, item, *, allow_failed=False, lock=True):
+        from .universal_trash import assert_take_active
+        assert_take_active(conn,self.tenant,principal.owner,item["session_id"],item["id"])
         execution = self._get(conn, principal, item["payload"]["current_execution_id"], item["session_id"], "execution", lock=lock)
         p = execution["payload"]
         if p["status"] in {"unknown", "recovery_hold"}:

@@ -247,3 +247,7 @@ test('automatic operational settings require matching single-choice execution ev
  assert.equal(controlsForRecipe(automaticRecipe,saved).duration,9);
  assert.equal(controlsForRecipe({...automaticRecipe,deployment_preset:{...automaticRecipe.deployment_preset,controls:{encoder_device:'other',video_decode:'other'}}},saved).video_decode,'normal');
 });
+
+test('accepted project trash refresh explicitly replaces visible page while normal refresh keeps loaded history',async()=>{
+ const h=harness();await h.controller.login('superdan','test-only');h.api.projects=async()=>({projects:[{id:'kept',title:'Kept',version:1},{id:'gone',title:'Gone',version:1}]});await h.controller.list({replace:true});h.api.projects=async()=>({projects:[{id:'kept',title:'Kept',version:1}]});await h.controller.list();assert.equal(h.controller.getState().projects.some(p=>p.id==='gone'),true);await h.controller.list({replace:true});assert.deepEqual(h.controller.getState().projects.map(p=>p.id),['kept']);assert.equal(h.controller.getState().nextProjectOffset,1);assert.equal(h.controller.getState().moreProjects,false);h.controller.destroy();
+});

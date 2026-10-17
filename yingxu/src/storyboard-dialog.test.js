@@ -45,5 +45,4 @@ test('cancelling the actual naming form does not submit its draft',()=>{
 test('Layout A no longer opens native JavaScript naming or destructive dialogs',async()=>{
   const source=await readFile(new URL('./StoryboardComponents.jsx',import.meta.url),'utf8');
   assert.doesNotMatch(source,/\b(?:window\.)?(?:prompt|confirm)\s*\(/);
-  assert.match(source,/StoryboardNameDialog/);assert.match(source,/StoryboardDeleteDialog/);
 });

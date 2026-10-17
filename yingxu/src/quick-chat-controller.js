@@ -1,5 +1,5 @@
 import {createQuickChatClient} from './quick-chat-client.js';
-import {stableJSON} from './cloud-model.js';
+import {stableJSON,digest} from './cloud-model.js';
 import {bindingPayload} from './quick-chat-model.js';
 import {requireModeAvailable} from './generation-availability.js';
 import {rememberDraftOrigin,clearAcceptedDraft} from './quick-chat-draft.js';
@@ -60,11 +60,18 @@ export function createQuickChatController({client=createQuickChatClient(),storag
     guard(ctx,{session:false});closeArchivedSession(receipt.items);guard(ctx,{session:false});invalidateHistory({historyReceipt:receipt,historySelection:[],notice:receipt.state==='pending'?'永久删除已受理，仍在处理中；请核对原清理状态。':receipt.items.some(item=>item.state==='blocked')?'原清理操作已核对，受阻记录仍保留。':HISTORY_ACTIONS[receipt.action]+'已完成，任务和计费账本保留。'});guard(ctx,{session:false});
     await list();guard(ctx,{session:false});if(state.historyView==='trash')await list({view:'trash'});return receipt;
   }
+  async function historyFailure(error,operation,ctx){
+    guard(ctx,{session:false});const proof=error.detail?.detail||error.detail;
+    if(proof?.resource==='quick_chat_history'&&proof.action==='confirm'&&proof.no_mutation_committed===true&&['history_preview_expired','history_preview_changed','history_action_blocked'].includes(proof.code)&&proof.request_hash===await digest(operation.body)){
+      guard(ctx,{session:false});if(stableJSON(state.pending)!==stableJSON(operation))throw Error('原操作已变化，请核对原记录。');writePending(null);invalidateHistory();
+    }
+    throw error;
+  }
   async function recoverHistory(operation){
     const ctx=context();if(operation.account!==ctx.account||operation.method!=='actionHistory'||!operation.body?.preview_id||operation.body.confirmed!==true||!Array.isArray(operation.items))throw Error('原清理操作无法核对，请返回原账户。');
     // A known pending action is observed, never posted again. An unknown
     // response reuses precisely the persisted confirmation and key.
-    const value=operation.actionId?await client.historyAction(operation.actionId):await client.actionHistory(operation.body,operation.key);
+    let value;try{value=operation.actionId?await client.historyAction(operation.actionId):await client.actionHistory(operation.body,operation.key);}catch(error){return historyFailure(error,operation,ctx);}
     guard(ctx,{session:false});return finishHistory(value,operation,ctx);
   }
   const isHistoryMetadata=body=>['is_test','test_accepted','review_hold'].some(key=>Object.hasOwn(body||{},key));
@@ -130,10 +137,16 @@ export function createQuickChatController({client=createQuickChatClient(),storag
     const link=new URL(value.web_url,'https://local.invalid');if(link.origin!=='https://local.invalid'||link.pathname!=='/'||link.searchParams.get('project')!==value.project_id||link.searchParams.get('entity')!==value.shot_id)throw Error('takes.recipeMissing');
     writePending(null);return value;
   }
+  async function annotateTake(operation,ctx){
+    guard(ctx);try{const value=await client.starTake(...operation.args,operation.body,operation.key);guard(ctx);
+      if(value?.take_id!==operation.args[1]||!Number.isSafeInteger(value.version)||value.version<=operation.body.expected_version||Object.hasOwn(operation.body,'title')&&value.title!==operation.body.title||Object.hasOwn(operation.body,'starred')&&value.starred!==operation.body.starred)throw Error('trash.failed');
+      if(stableJSON(state.pending)!==stableJSON(operation))throw Error('trash.pending');writePending(null);return value;
+    }catch(error){guard(ctx);const proof=error.detail?.detail||error.detail;if(proof?.resource==='quick_chat_take'&&proof.code==='version_conflict'&&proof.session_id===operation.args[0]&&proof.take_id===operation.args[1]&&proof.no_mutation_committed===true&&proof.request_hash===await digest(operation.body)){guard(ctx);if(stableJSON(state.pending)===stableJSON(operation))writePending(null);}throw error;}
+  }
   async function command(method,args,body,{sessionId=state.session?.id,draft,validate}={}){
     if(state.pending)throw Error('有原操作结果待核对，请先恢复原操作，不要重复提交。');
     readGeneration++;
-    const ctx=context(),operation={id:uuid(),method,args,body:clone(body),sessionId,account:state.account,key:'quick-'+uuid(),created_at:Date.now(),...(draft?{draft:clone(draft)}:{})};writePending(operation);
+    const ctx=context(),operation={id:uuid(),method,args,body:clone(body),sessionId,account:state.account,key:'quick-'+uuid(),created_at:Date.now(),...(draft?{draft:clone(draft)}:{})};writePending(operation);if(method==='starTake')return annotateTake(operation,ctx);
     try{guard(ctx,{session:!!sessionId});const value=await client[method](...args,body,operation.key);guard(ctx,{session:!!sessionId});if(method==='takeToStory')return finishTransfer(value,operation);if(validate)validate(value);if(method==='turn'&&draft)rememberDraftOrigin(storage,state.account,sessionId,draft,record(value,'turn').id);writePending(null);return value;}
     catch(error){guard(ctx,{session:!!sessionId});if(method!=='takeToStory'&&error.status>=400&&error.status<500&&![408,429].includes(error.status))writePending(null);throw error;}
   }
@@ -159,7 +172,7 @@ export function createQuickChatController({client=createQuickChatClient(),storag
       const ctx=context(),operation={id:uuid(),method:'actionHistory',args:[],body:{preview_id:preview.preview_id,confirmed:true},sessionId:null,account:state.account,key:'quick-history-'+uuid(),created_at:Date.now(),action:preview.action,items:preview.items.map(({id,expected_version})=>({id,expected_version}))};
       readGeneration++;writePending(operation);guard(ctx,{session:false});
       let value;try{value=await client.actionHistory(operation.body,operation.key);guard(ctx,{session:false});}
-      catch(error){guard(ctx,{session:false});if(error.status>=400&&error.status<500&&![408,429].includes(error.status)){writePending(null);invalidateHistory();}throw error;}
+      catch(error){return historyFailure(error,operation,ctx);}
       // A later list refresh is not the confirmation result. In particular,
       // a failed refresh must not erase an accepted pending purge journal.
       return finishHistory(value,operation,ctx);
@@ -179,6 +192,7 @@ export function createQuickChatController({client=createQuickChatClient(),storag
     readTakes:async(card,options={})=>{const ctx=context(),value=await client.takes(ctx.sessionId,card.id,options);guard(ctx);return value;},
     readPreferences:async()=>{const ctx=context(),value=await client.preferences();guard(ctx,{session:false});return value;},
     savePreferences:body=>act(()=>command('savePreferences',[],body,{sessionId:null})),
+    renameTake:(take,title)=>act(()=>command('starTake',[state.session.id,take.id],{expected_version:take.annotation.version,title})),
     starTake:(take,starred)=>act(()=>command('starTake',[state.session.id,take.id],{expected_version:take.annotation.version,starred})),
     again:(card,take)=>act(async()=>{const result=await command('again',[state.session.id,card.id],{expected_card_version:card.version,source_revision_id:take.revision_id,item_id:take.id,copies:1});await loadCard(card.id);await loadResources(state.session.id);return result;}),
     acknowledgeBlockedTransfer:()=>act(async()=>{const operation=state.pending,ctx=context();if(operation?.method!=='takeToStory'||operation.account!==ctx.account||operation.sessionId!==ctx.sessionId||!operation.transferId)throw Error('takes.wait');const value=await client.storyTransfer(operation.sessionId,operation.transferId);guard(ctx);if(!closedTransfer(value,operation))throw Error('takes.wait');writePending(null);return value;}),
@@ -191,7 +205,7 @@ export function createQuickChatController({client=createQuickChatClient(),storag
     resume:(submission,item,preflight)=>act(async()=>{await checkGeneration(state.revisions[submission.revision_id]||{});const result=await command('resumeAdmission',[state.session.id,submission.id],{item_ids:[item.id],fresh_preflight_id:preflight.id,confirmed:true});await refresh();return result;},{success:'原未准入项已恢复；未创建第二批。'}),
     importResult:(artifact,purpose='reference')=>act(async()=>{const response=await command('importResult',[state.session.id],{source_artifact_id:artifact.id,purpose});const value=record(response,'import');emit({imports:{...state.imports,[value.id]:value}});await loadResources(state.session.id);return value;},{success:'已记录结果导入；校验完成后才能作为参考。'}),
     acknowledge:turn=>act(async()=>{const result=await command('acknowledgeUnknown',[state.session.id,turn.id],{acknowledged:true});await loadResources(state.session.id);return result;}),
-    async recover(){return act(async()=>{const operation=state.pending;if(!operation||operation.corrupt)throw Error('原操作记录无法读取，请管理员核对，不要重新创建任务。');if(operation.account!==state.account)throw Error('请登录原操作账户。');if(operation.method==='actionHistory')return recoverHistory(operation);if(operation.method==='patchSession'&&isHistoryMetadata(operation.body))return recoverMetadata(operation);if(operation.sessionId&&operation.sessionId!==state.session?.id)throw Error('请先打开原操作会话。');readGeneration++;const ctx=context();if(operation.method==='takeToStory'){const result=operation.transferId?await client.storyTransfer(operation.sessionId,operation.transferId):await client.takeToStory(...operation.args,operation.body,operation.key);guard(ctx);return finishTransfer(result,operation);}if(operation.sessionId)await loadResources(operation.sessionId);guard(ctx,{session:!!operation.sessionId});if(operation.method==='uploadMaterial'){const catalog=await client.sessionAssets(operation.sessionId,operation.body.client_asset_id);guard(ctx);if(!(catalog.assets||[]).length)throw Error('原上传收据暂未查到，保持原标识；未自动重新上传。请管理员核对后恢复。');writePending(null);await loadResources(operation.sessionId);return catalog;}const result=await client[operation.method](...operation.args,operation.body,operation.key);guard(ctx,{session:!!operation.sessionId});if(operation.method==='turn'&&operation.draft)rememberDraftOrigin(storage,state.account,operation.sessionId,operation.draft,record(result,'turn').id);writePending(null);if(operation.sessionId)await loadResources(operation.sessionId);else await list();return result;},{success:'已使用原标识核对操作；没有建立新的确认。'});},
+    async recover(){return act(async()=>{const operation=state.pending;if(!operation||operation.corrupt)throw Error('原操作记录无法读取，请管理员核对，不要重新创建任务。');if(operation.account!==state.account)throw Error('请登录原操作账户。');if(operation.method==='actionHistory')return recoverHistory(operation);if(operation.method==='patchSession'&&isHistoryMetadata(operation.body))return recoverMetadata(operation);if(operation.sessionId&&operation.sessionId!==state.session?.id)throw Error('请先打开原操作会话。');readGeneration++;const ctx=context();if(operation.method==='starTake')return annotateTake(operation,ctx);if(operation.method==='takeToStory'){const result=operation.transferId?await client.storyTransfer(operation.sessionId,operation.transferId):await client.takeToStory(...operation.args,operation.body,operation.key);guard(ctx);return finishTransfer(result,operation);}if(operation.sessionId)await loadResources(operation.sessionId);guard(ctx,{session:!!operation.sessionId});if(operation.method==='uploadMaterial'){const catalog=await client.sessionAssets(operation.sessionId,operation.body.client_asset_id);guard(ctx);if(!(catalog.assets||[]).length)throw Error('原上传收据暂未查到，保持原标识；未自动重新上传。请管理员核对后恢复。');writePending(null);await loadResources(operation.sessionId);return catalog;}const result=await client[operation.method](...operation.args,operation.body,operation.key);guard(ctx,{session:!!operation.sessionId});if(operation.method==='turn'&&operation.draft)rememberDraftOrigin(storage,state.account,operation.sessionId,operation.draft,record(result,'turn').id);writePending(null);if(operation.sessionId)await loadResources(operation.sessionId);else await list();return result;},{success:'已使用原标识核对操作；没有建立新的确认。'});},
     destroy(){epoch++;sessionEpoch++;availabilitySequence++;availabilityRequest=null;client.reset();listeners.clear();},
   };
 }

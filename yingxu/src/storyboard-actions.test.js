@@ -126,3 +126,5 @@ test('editing a restored exact recipe keeps raw inputs and immutable context wit
  assert.equal(act(p,{type:'update',id:shot.id,patch:{cast:[{id:'hero',variant:'coat'}]}}),false);assert.equal(shot.data.storyboard,undefined);
  act(p,{type:'update',id:shot.id,patch:{start:'image-two'}});assert.equal(p.links.find(l=>l.target===shot.id&&l.role==='firstFrame').source,'image-two');assert.deepEqual(shot.data.referenceRanges,ranges);assert.deepEqual(shot.data.h3.guides,h3.guides);
 });
+
+test('file display rename retains original media identity, metadata and links',()=>{const p=fixture(),before=structuredClone(p);const asset=p.entities.find(e=>e.id==='image-one');assert.ok(edit(p,{type:'assetTitle',asset:asset.id,title:'Renamed input'}));assert.equal(asset.title,'Renamed input');assert.deepEqual(asset.data,before.entities.find(e=>e.id===asset.id).data);assert.deepEqual(p.links,before.links);assert.equal(edit(p,{type:'assetTitle',asset:'missing',title:'No'}),false);});

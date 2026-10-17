@@ -587,6 +587,12 @@ class Repository:
                      if summary else select(documents))
         statement = statement.where(self._scope(documents, scope), documents.c.kind == kind)
         if exclude_managed:
+            trash=documents.alias("project_trash")
+            statement=statement.where(~documents.c.document_id.in_(select(trash.c.payload["target"]["id"].as_string()).where(
+                trash.c.tenant_id==scope.tenant_id,trash.c.owner_id==scope.owner_id,
+                trash.c.project_id=="__trash",trash.c.kind=="trash_item",
+                trash.c.payload["target"]["kind"].as_string()=="project",
+                trash.c.payload["state"].as_string().in_(("trashed","purging","purged")))))
             marker = documents.c.payload["integration_kind"].as_string()
             statement = statement.where(or_(marker.is_(None), marker != "quick_chat"))
         if allowed is not None:

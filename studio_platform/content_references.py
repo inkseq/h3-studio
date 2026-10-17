@@ -29,6 +29,14 @@ def history_blocker(connection, service, owner, session):
     from .storage_asset_journal import receipts
     from .artifact_writer import write_receipts
     project = session["payload"]["project_id"]
+    # Original owner reference gate also protects import recovery before uploads exist.
+    for row in connection.execute(select(documents).where(documents.c.tenant_id==service.tenant,
+            documents.c.owner_id==owner,documents.c.project_id=="__library",
+            documents.c.kind=="library_import")).mappings():
+        payload=row["payload"]; request=payload.get("request",{})
+        if payload.get("state") not in {"completed","blocked"} and project in {
+                request.get("source",{}).get("project_id"),request.get("target_project_id")}:
+            return "authoring_operation_unresolved"
     # The hidden projection is immutable to generic authoring. Include every
     # historical execution/revision, not only the latest card or displayed job.
     children = list(connection.execute(select(objects).where(objects.c.tenant == service.tenant,
@@ -91,7 +99,7 @@ def _object(spec):
     return {"object_key": key, "size_bytes": size, "sha256": sha}
 
 
-def cleanup_plan(connection, service, principal, sessions):
+def cleanup_plan(connection, service, principal, sessions, *, media_targets=None, ignored_trash_ids=(), purged_projects=()):
     from .quick_chat import objects
     from .assets import asset_table
     from .storage_asset_journal import receipts
@@ -106,9 +114,16 @@ def cleanup_plan(connection, service, principal, sessions):
     all_assets = list(connection.execute(select(asset_table)).mappings())
     candidate_assets = {row["id"]: json.loads(row["record"]) for row in all_assets
         if row["tenant"] == tenant and row["owner"] == owner and row["project_id"] in project_ids and row["status"] != "purged"}
+    if media_targets is not None:
+        candidate_assets = {row["id"]:json.loads(row["record"]) for row in all_assets if row["tenant"]==tenant
+            and row["owner"]==owner and row["id"] in media_targets["asset_ids"] and row["status"]!="purged"}
     all_artifacts = list(connection.execute(select(artifacts)).mappings())
     candidate_artifacts = {row["id"]: dict(row) for row in all_artifacts if row["job_id"] in job_ids
                            and not row["metadata"].get("content_deleted")}
+    if media_targets is not None:
+        owned_jobs={r["id"] for r in all_jobs if r["tenant_id"]==tenant and r["owner_id"]==owner}
+        candidate_artifacts={r["id"]:dict(r) for r in all_artifacts if r["job_id"] in owned_jobs
+            and r["id"] in media_targets["artifact_ids"] and not r["metadata"].get("content_deleted")}
     assets_kept, artifacts_kept, warnings = set(), set(), []
 
     def retain(value, reason, *, project_id=None, label=None):
@@ -125,6 +140,13 @@ def cleanup_plan(connection, service, principal, sessions):
 
     all_documents = list(connection.execute(select(documents)).mappings())
     for row in all_documents:
+        if media_targets is not None and row["tenant_id"]==tenant and row["owner_id"]==owner:
+            # Only explicit universal purge may ignore this owner's completed
+            # import audit capsule. Live documents and accepted inputs remain below.
+            if row["project_id"]=="__library" and row["kind"]=="library_import" and row["payload"].get("state")=="completed": continue
+            if row["project_id"]=="__trash" and (row["kind"]=="trash_action" or
+                    row["kind"]=="trash_item" and (row["document_id"] in ignored_trash_ids or row["payload"].get("state")=="purged")): continue
+            if row["project_id"]=="__projects" and row["document_id"] in purged_projects: continue
         if row["tenant_id"] == tenant and row["owner_id"] == owner and (
                 row["project_id"] in project_ids or row["project_id"] == "__projects" and row["document_id"] in project_ids):
             continue
@@ -133,7 +155,7 @@ def cleanup_plan(connection, service, principal, sessions):
                label=row["payload"].get("title") if visible else None)
     authoring = list(connection.execute(select(objects)).mappings())
     for row in authoring:
-        if row["kind"] in {"history_preview", "history_action", "content_tombstone"}:
+        if row["kind"] in {"history_preview", "history_action", "content_tombstone", "universal_purge"}:
             continue
         if row["tenant"] == tenant and row["owner"] == owner and row["session_id"] in session_ids:
             continue
@@ -145,7 +167,12 @@ def cleanup_plan(connection, service, principal, sessions):
         retain({"request": row["request"], "execution": row["execution_plan"]}, "other_plan_or_job")
     for row in all_jobs:
         if row["id"] not in job_ids:
-            retain({"request": row["request"], "execution": row["execution_plan"], "result": row["result"]}, "other_plan_or_job")
+            # A job's own output association is not a live input reference.
+            retained_job={"request":row["request"],"execution":row["execution_plan"]}
+            own_output = (media_targets is not None and row["tenant_id"]==tenant and row["owner_id"]==owner
+                and any(a["job_id"]==row["id"] for a in candidate_artifacts.values()))
+            if not own_output: retained_job["result"]=row["result"]
+            retain(retained_job, "other_plan_or_job")
     for row in all_assets:
         if row["id"] not in candidate_assets:
             retain(json.loads(row["record"]), "derived_asset_reference")
@@ -154,6 +181,7 @@ def cleanup_plan(connection, service, principal, sessions):
             retain(row["metadata"], "derived_asset_reference")
     from .guided import receipts as edit_receipts
     for row in rows_if_present(connection, edit_receipts):
+        if media_targets is not None and row["tenant"]==tenant and row["owner"]==owner: continue
         if not (row["tenant"] == tenant and row["owner"] == owner and row["project_id"] in project_ids):
             retain(row["response"], "other_story_revision")
 
@@ -249,7 +277,10 @@ def cleanup_plan(connection, service, principal, sessions):
     removed_artifacts = sorted(set(candidate_artifacts)-artifacts_kept)
     removed_refs = {("asset", ident) for ident in removed_assets} | {("artifact", ident) for ident in removed_artifacts}
     delete_specs = [spec for key, spec in sorted(specs.items()) if blob_owners[key] and blob_owners[key] <= removed_refs]
-    return {"session_ids": sorted(session_ids), "project_ids": sorted(project_ids), "job_ids": sorted(job_ids),
+    audit_jobs=job_ids if media_targets is None else {candidate_artifacts[i]["job_id"] for i in removed_artifacts}
+    audit_projects=project_ids if media_targets is None else ({r["project_id"] for r in all_jobs if r["id"] in audit_jobs}
+        | {r["project_id"] for r in all_assets if r["id"] in removed_assets})
+    return {"session_ids": sorted(session_ids), "project_ids": sorted(audit_projects), "job_ids": sorted(audit_jobs),
         "asset_ids": removed_assets, "artifact_ids": removed_artifacts, "objects": delete_specs,
         "warnings": warnings, "counts": {"sessions": len(sessions),
             "turns": sum(row["kind"] == "turn" and row["session_id"] in session_ids for row in authoring),

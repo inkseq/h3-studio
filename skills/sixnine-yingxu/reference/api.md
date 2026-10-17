@@ -128,6 +128,70 @@ Output duration is separate from the edit timeline and reference selections. Nat
 
 POST `/v1/assets` multipart uses client_project_id/client_asset_id/file; Quick Chat uses B`/assets` with client_asset_id/file. GET assets with original scope and stable client ID, then POST the original receipt resume endpoint if appropriate. No global tag/search endpoint exists (#238).
 
-History: GET sessions with view=active|trash; POST `/v1/quick-chat/sessions/history/preview` with action and exact `{id,expected_version}` targets; POST `/v1/quick-chat/sessions/history/actions` with `{preview_id,confirmed:true}` and saved key; GET `/v1/quick-chat/sessions/history/actions/ACTION`. Empty-trash preview uses an empty sessions list and returns the full target set. Trash never auto-expires; explicit irreversible purge prevents restore. Universal entity trash is separate (#236).
+History: GET sessions with view=active|trash; POST `/v1/quick-chat/sessions/history/preview` with action and exact `{id,expected_version}` targets; POST `/v1/quick-chat/sessions/history/actions` with `{preview_id,confirmed:true}` and saved key; GET `/v1/quick-chat/sessions/history/actions/ACTION`. Empty-trash preview uses an empty sessions list and returns the full target set. Trash never auto-expires; explicit irreversible purge prevents restore. Other content uses universal trash below.
 
 Owner/browser spending settings and confirmations are not machine-PAT controls. POST `/v1/account/spending-confirmations` accepts exactly `{plan_id:ID}` or `{plan_ids:[ID,...]}` and validates current quotes/settings. Group estimates expose cost_microusd and machine_seconds or null. Queue GET `/v1/generations/queue-position?job_id=OWNED_JOB` is advisory, no ETA. Limits include Sydney-day unresolved prior obligations.
+
+
+## Universal trash
+
+`GET /v1/trash?kind=shot&limit=100&offset=0` lists owner-scoped trashed/purging items; follow `next_offset`. `kind` filters the displayed entity type. Target identities are `{kind,project_id,id,parent_id?}`. Kinds: `project` (id equals project_id), `entity` (chapter/scene/shot/profile/file entity), `look` (parent_id character), `location_version` (parent_id location), `asset` (uploaded receipt), `artifact` (generated version receipt), `take` (parent_id Quick Chat session). Conversations retain the original history API above; do not claim one atomic transaction across the two APIs.
+
+1. Save a JSON preview request: `{"action":"trash","items":[{"kind":"entity","project_id":"RETURNED_PROJECT","id":"RETURNED_SHOT"}]}`. POST `/v1/trash/preview`. This only reads; it discovers exact `items[].expected_version` and `affected_project_versions`. A blocker rejects the entire selection; running/uncertain work and the last chapter/scene cannot be removed.
+2. Save the action body with the returned item versions and `expected_project_versions: PREVIEW.affected_project_versions`. POST `/v1/trash/actions` with one saved Idempotency-Key. Inspect `operation_id`, `request_hash`, `state` and every item; never fabricate success from HTTP timeout.
+3. Undo uses a new explicit `restore` preview for the same targets, then the new returned versions. Restoration uses a three-way reference merge, preserves unrelated edits and refuses conflicting changes. If the containing story is trashed, restore it first.
+4. Permanent deletion uses `purge` preview and explicit `confirmed:true`. It is asynchronous: GET `/v1/trash/actions/OPERATION_ID`. Same original body/key returns that operation; it does not start another purge. `pending`/unknown never means absent, no auto-retry with a new key. Restore is forbidden after purge intent. Emptying the trash is an explicit, fully paginated selection followed by this same atomic preview/action; newly arriving trash is not silently added.
+
+```sh
+python scripts/sixnine.py --base-url ORIGIN --connection CONNECTION_ID request POST /v1/trash/preview --json-file trash-preview.json --output preview.json
+python scripts/sixnine.py --base-url ORIGIN --connection CONNECTION_ID request POST /v1/trash/actions --json-file trash-action.json --idempotency-key saved-trash-key --output operation.json
+python scripts/sixnine.py --base-url ORIGIN --connection CONNECTION_ID request GET /v1/trash/actions/RETURNED_OPERATION_ID --output observed.json
+```
+
+Known closed refusals include matching `resource:"trash"`, canonical `request_hash` and `no_mutation_committed:true`; only that positive proof allows abandoning the saved command and explicitly selecting again. A bare 4xx/5xx is not that proof. `removed`/`kept` report actual media handling; immutable accepted inputs, current other references and accounting/audit identities remain. A completed purge may retain referenced media. Physical deletion uses the original activated reconciler, exact storage receipts, full SHA and confirmed absence; no prefix sweep. No automatic expiry, no background deletion merely because something is old. Replayed historical authoring receipts cannot reattach tombstoned content. Unsaved browser drafts are not server references.
+
+Rename/edit uses original `project.update`/`entity.update` actions and existing Quick Chat title/card APIs. Immutable takes and generated receipts are not rewritten to rename them. 中文：回收站可恢复且不会自动清空；永久删除须逐次明确确认，未决状态保留原操作身份。已接收输入与账务不改，仍被引用的媒体保留。
+
+
+### Reversible trash and display titles (#236)
+Permanent purge requires the original project/assets/jobs read+write cleanup scopes. A project with another recoverable child trash item cannot be purged (`trash_dependent_items_retained`): restore the parent and review each child explicitly. No automatic expiry or implicit child purge occurs. Asset display titles retain the original filename; generated versions use owner authoring titles or their original identifier.
+
+Rename a take through the existing annotation authority: `PATCH /v1/quick-chat/sessions/{session_id}/takes/{item_id}` with the original Idempotency-Key and JSON `{"expected_version":0,"title":"Chosen take"}`. `starred` and `title` are optional individually, at least one is required; omitted fields are preserved. Read `takes[].annotation.{version,title,starred}`. A positively closed CAS failure includes top-level `resource=quick_chat_take`, `session_id`, `take_id`, original `request_hash`, and `no_mutation_committed=true`; any other uncertain response retains the original body/key.
+
+Rename a generated story version with the existing project action `{"op":"storyboard.star","shot_id":"RETURNED_SHOT_ID","artifact_id":"RETURNED_ARTIFACT_ID","title":"Chosen version"}` inside `{expected_version,actions}` at `POST /v1/projects/{project_id}/actions`. Omitted `starred` is preserved; the title is an owner project annotation projected as `versions[].title`, never an edit to the immutable artifact, accepted recipe, or job. Existing configured project byte limits bound annotation data.
+
+Original conversation history remains its existing authority. Only `history_preview_expired`, `history_preview_changed`, or `history_action_blocked` from confirmation return a positively rolled-back `detail` proof (`resource=quick_chat_history`, `action=confirm`, original confirmation-body hash, `no_mutation_committed=true`). Original accepted action replay is checked before preview expiry. Do not treat arbitrary 4xx responses as proof of no write.
+
+中文：回收没有自动到期；永久删除沿用原完整清理权限，父故事存在可恢复子项时拒绝清空。试片与生成版本重命名只改可变标题标注，保留星标和原任务/配方/账务。未知响应保留原请求与幂等键，只有匹配原请求的明确未写入回执才允许重新选择。
+
+
+## Project-scoped library and explicit imports (#238)
+
+The storage decision is [the project-scoped storage decision](https://github.com/inkseq/h3-studio/blob/main/LIBRARY-STORAGE.md): keep original project ownership and upload accounting. `GET /v1/library` aggregates only authorized current projects. Filters are `project_id`, exact `type` (or `profile`/`file`), `work` (computed actual current-authoring usage, not owning story), `unused`, exact `tag`, text `q`, and transport pagination `limit/offset`. `GET /v1/library/usage?project_id=...&kind=entity|asset|artifact&id=...` returns shot links. `usage_kind=current_authoring`; historical accepted-input retention is explicitly unmeasured here and unused never authorizes purge. Profile filing alone is not shot usage. Original default/selected look, place, voice, audio, frame and guide compiler projections remain authoritative.
+
+Returned items contain `target={project_id,kind,id}`, type/title/tags, source story, original receipt identity when applicable, project_version, usage, work_ids, unused and optional import provenance. Attached media uses its entity target; unbound original receipts remain addressable. Aggregate reads do not grant write permission. No tag search over another owner's data exists.
+
+Use original `POST /v1/projects/{id}/actions`, expected project version and original Idempotency-Key:
+- `library.tag`: `{targets:[{kind,id}],tags:["rain","lead"]}` replaces tags; an empty array clears tags.
+- `library.rename`: `{target:{kind,id},title:"Chosen reference"}` changes display metadata, never original receipt filenames.
+- `library.file`: `{profile_id,targets:[{kind,id}],variant_id?}` (or existing `entity_ids`) attaches raw same-story receipts when needed and files in the same CAS. Ordinary image/video/audio filing is organizational. Optional look/location-version image slots require images; no silent voice/ambient selection. Original image controls remain unchanged except explicitly selected image filing.
+Mixed-story bulk requests must be separate per-story CAS operations with separate outcomes. Deletion uses #236 `/v1/trash` only.
+
+`POST /v1/library/imports` takes `{source:{project_id,kind,id,expected_version?},target_project_id,expected_project_version,title?}` and an Idempotency-Key. Source expected_version binds the selected library row; otherwise the server returns the exact accepted current-source snapshot version/hash. Both story permissions are checked before any intent or upload. Profiles and their files are copied into new destination IDs using original upload journals, original quotas and full SHA/size verification. Existing source bytes, tags and profile variants are retained; references are remapped rather than linked across story scope. No model job is submitted.
+
+Read `GET /v1/library/imports/{operation_id}` without advancing. Receipts bind original source/body/hash/destination, source_project_version/source_snapshot_sha256, state pending/completed/blocked, copied asset_ids and completed entity_ids/project_version. Explicitly resume only the original POST/body/key. Network uncertainty never allocates a new upload identity. A blocked destination CAS retains all copied assets and has `no_authoring_committed=true`; only an explicit new user intent may choose another target. Initial source/target version conflicts return a matching `resource=library_import`, request_hash and no_mutation_committed proof only before an operation exists. Other 4xx/unknown responses never imply no write.
+
+中文：素材和档案仍属于原故事；跨故事列表只聚合有权查看的内容。标签、归档、重命名复用故事版本CAS。导入复用原上传回执、配额和完整哈希，不迁移原数据、不自动生成或删除。用在哪里只表示当前创作引用，未使用不等于允许永久删除；未知结果保留原请求与键。
+
+
+Helper examples (authenticated original connection; use actual returned IDs/versions in JSON files):
+```sh
+python scripts/sixnine.py request GET '/v1/library?tag=rain&type=file'
+python scripts/sixnine.py request GET '/v1/library/usage?project_id=STORY&kind=entity&id=FILE'
+python scripts/sixnine.py request POST /v1/projects/STORY/actions --json-file tag.json --idempotency-key library-tags-1
+python scripts/sixnine.py request POST /v1/library/imports --json-file import.json --idempotency-key library-import-1
+python scripts/sixnine.py request GET /v1/library/imports/RETURNED_OPERATION_ID
+```
+For explicit recovery, repeat only the same import POST, JSON file and key. Do not chain this to paid generation. `tag.json` uses the original `{expected_version,actions}` envelope; `import.json` uses the import body above. Source/destination IDs are account data, never credentials.
+
+Pending library imports block source/destination lifecycle changes under the original owner reference gate, even before receiving bytes. Terminal receipt reads/replays retain current owner/scopes without requiring active project content. Only positively completed same-owner import audit capsules are excluded from an explicit universal-purge reference census; pending and blocked capsules remain conservative references. No audit rows are removed. Original guided validation rollback after verified copies produces `blocked`, `reason=library_authoring_validation_failed`, `no_authoring_committed=true`; retain original copies/key and explicitly choose a new intent if needed. / 未完成导入阻止相关生命周期变更；已确认的校验回滚保留原回执和副本，不自动重试或清理。

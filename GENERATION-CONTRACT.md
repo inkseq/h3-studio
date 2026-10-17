@@ -796,3 +796,43 @@ trash/undo remain separate dependencies. Public API/helper examples are in
 中文：版本配方只读原始不可变快照；旧记录缺失时明确未知。恢复、收藏、选择和批量
 编辑不生成、不删除。份数上限复用可编辑设置；全局→故事→镜头继承，时长和种子留在
 镜头。预检冻结原种子/计划，未知结果保留原请求；实际入队仍走原预算与整批确认。
+
+
+## Universal content lifecycle (#236)
+
+The original owner document authority stores reversible trash metadata and original action receipts; no second job or budget authority is introduced. `/v1/trash/preview`, `/v1/trash/actions`, `/v1/trash/actions/{operation_id}` and `/v1/trash` cover project/entity/look/location_version/asset/artifact/take identities. See `skills/sixnine-yingxu/reference/api.md#universal-trash` for exact bodies, CAS and helper commands. Conversations retain the existing Quick Chat history authority.
+
+Trash removes active authoring references atomically and preserves inverse reference capsules. Restore merges those capsules against the current project, refusing conflicts rather than overwriting newer edits. Active/unresolved execution, upload and collection obligations block removal; each retained container keeps at least one original chapter/scene. No automatic expiry or migration of historical user rows occurs. Explicit permanent deletion retains original accepted plan/job inputs, attempts, ledgers and receipt identities. The original activated object reconciler performs exact receipt-bound deletion and quota finalization; unknown remains the same pending operation. Unreferenced output associations alone do not make a binary an input forever. Deleting-owner historical guided edit responses remain byte-identical audit rows, while current drafts/other trash capsules/accepted inputs and other-owner references retain media. Backup expected-missing classification requires positively completed exact-object deletion evidence; incomplete or unrelated evidence remains unexpected.
+
+中文：所有回收/恢复使用原账号权限与版本 CAS。永久删除保留账务及已接收输入；不会自动过期、自动重试创建新删除操作或批量改写历史数据。
+
+
+### Reversible trash and display titles (#236)
+Permanent purge requires the original project/assets/jobs read+write cleanup scopes. A project with another recoverable child trash item cannot be purged (`trash_dependent_items_retained`): restore the parent and review each child explicitly. No automatic expiry or implicit child purge occurs. Asset display titles retain the original filename; generated versions use owner authoring titles or their original identifier.
+
+Rename a take through the existing annotation authority: `PATCH /v1/quick-chat/sessions/{session_id}/takes/{item_id}` with the original Idempotency-Key and JSON `{"expected_version":0,"title":"Chosen take"}`. `starred` and `title` are optional individually, at least one is required; omitted fields are preserved. Read `takes[].annotation.{version,title,starred}`. A positively closed CAS failure includes top-level `resource=quick_chat_take`, `session_id`, `take_id`, original `request_hash`, and `no_mutation_committed=true`; any other uncertain response retains the original body/key.
+
+Rename a generated story version with the existing project action `{"op":"storyboard.star","shot_id":"RETURNED_SHOT_ID","artifact_id":"RETURNED_ARTIFACT_ID","title":"Chosen version"}` inside `{expected_version,actions}` at `POST /v1/projects/{project_id}/actions`. Omitted `starred` is preserved; the title is an owner project annotation projected as `versions[].title`, never an edit to the immutable artifact, accepted recipe, or job. Existing configured project byte limits bound annotation data.
+
+Original conversation history remains its existing authority. Only `history_preview_expired`, `history_preview_changed`, or `history_action_blocked` from confirmation return a positively rolled-back `detail` proof (`resource=quick_chat_history`, `action=confirm`, original confirmation-body hash, `no_mutation_committed=true`). Original accepted action replay is checked before preview expiry. Do not treat arbitrary 4xx responses as proof of no write.
+
+中文：回收没有自动到期；永久删除沿用原完整清理权限，父故事存在可恢复子项时拒绝清空。试片与生成版本重命名只改可变标题标注，保留星标和原任务/配方/账务。未知响应保留原请求与幂等键，只有匹配原请求的明确未写入回执才允许重新选择。
+
+
+## Project-scoped library and explicit imports (#238)
+
+The storage decision is [LIBRARY-STORAGE.md](LIBRARY-STORAGE.md): keep original project ownership and upload accounting. `GET /v1/library` aggregates only authorized current projects. Filters are `project_id`, exact `type` (or `profile`/`file`), `work` (computed actual current-authoring usage, not owning story), `unused`, exact `tag`, text `q`, and transport pagination `limit/offset`. `GET /v1/library/usage?project_id=...&kind=entity|asset|artifact&id=...` returns shot links. `usage_kind=current_authoring`; historical accepted-input retention is explicitly unmeasured here and unused never authorizes purge. Profile filing alone is not shot usage. Original default/selected look, place, voice, audio, frame and guide compiler projections remain authoritative.
+
+Returned items contain `target={project_id,kind,id}`, type/title/tags, source story, original receipt identity when applicable, project_version, usage, work_ids, unused and optional import provenance. Attached media uses its entity target; unbound original receipts remain addressable. Aggregate reads do not grant write permission. No tag search over another owner's data exists.
+
+Use original `POST /v1/projects/{id}/actions`, expected project version and original Idempotency-Key:
+- `library.tag`: `{targets:[{kind,id}],tags:["rain","lead"]}` replaces tags; an empty array clears tags.
+- `library.rename`: `{target:{kind,id},title:"Chosen reference"}` changes display metadata, never original receipt filenames.
+- `library.file`: `{profile_id,targets:[{kind,id}],variant_id?}` (or existing `entity_ids`) attaches raw same-story receipts when needed and files in the same CAS. Ordinary image/video/audio filing is organizational. Optional look/location-version image slots require images; no silent voice/ambient selection. Original image controls remain unchanged except explicitly selected image filing.
+Mixed-story bulk requests must be separate per-story CAS operations with separate outcomes. Deletion uses #236 `/v1/trash` only.
+
+`POST /v1/library/imports` takes `{source:{project_id,kind,id,expected_version?},target_project_id,expected_project_version,title?}` and an Idempotency-Key. Source expected_version binds the selected library row; otherwise the server returns the exact accepted current-source snapshot version/hash. Both story permissions are checked before any intent or upload. Profiles and their files are copied into new destination IDs using original upload journals, original quotas and full SHA/size verification. Existing source bytes, tags and profile variants are retained; references are remapped rather than linked across story scope. No model job is submitted.
+
+Read `GET /v1/library/imports/{operation_id}` without advancing. Receipts bind original source/body/hash/destination, source_project_version/source_snapshot_sha256, state pending/completed/blocked, copied asset_ids and completed entity_ids/project_version. Explicitly resume only the original POST/body/key. Network uncertainty never allocates a new upload identity. A blocked destination CAS retains all copied assets and has `no_authoring_committed=true`; only an explicit new user intent may choose another target. Initial source/target version conflicts return a matching `resource=library_import`, request_hash and no_mutation_committed proof only before an operation exists. Other 4xx/unknown responses never imply no write.
+
+中文：素材和档案仍属于原故事；跨故事列表只聚合有权查看的内容。标签、归档、重命名复用故事版本CAS。导入复用原上传回执、配额和完整哈希，不迁移原数据、不自动生成或删除。用在哪里只表示当前创作引用，未使用不等于允许永久删除；未知结果保留原请求与键。

@@ -394,7 +394,7 @@ class QuickChatHistoryMixin:
         # Continue only previously confirmed durable actions below.
         with self.repo.engine.connect() as connection:
             pending = [dict(row) for row in connection.execute(select(objects).where(objects.c.tenant == self.tenant,
-                objects.c.kind == "history_action", objects.c.payload["state"].as_string() == "pending").order_by(objects.c.id).limit(limit)).mappings()]
+                objects.c.kind.in_(("history_action", "universal_purge")), objects.c.payload["state"].as_string() == "pending").order_by(objects.c.id).limit(limit)).mappings()]
         performed = 0
         for row in pending:
             for index, spec in enumerate(row["payload"]["plan"]["objects"]):
@@ -403,5 +403,9 @@ class QuickChatHistoryMixin:
                 if spec["state"] != "deleted":
                     self._cleanup_one_object(row, index)
                     performed += 1
-            self._finish_history_purge(row)
+            if row["kind"] == "universal_purge":
+                from .universal_trash import finish_purge
+                finish_purge(self, row)
+            else:
+                self._finish_history_purge(row)
         return {"actions_checked": len(pending), "objects_checked": performed}

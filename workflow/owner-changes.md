@@ -47,3 +47,7 @@ Append a numbered entry for a new owner decision and update affected current wor
 ## CR-20261017-23 — #239: no automatic creation purge
 
 Owner v2 HANDOFF rule 4 supersedes the former five-day automatic trash expiry (DEC-014). Stop creating time-triggered purge intents, including old consented deadlines; public expiry is absent. Preserve original explicit durable purge/empty-trash reconciliation, irreversible guards, ledgers, tombstones and completed deletions. No historical rows are migrated and no live cleanup is invoked by this source change.
+
+## CR-20261017-24 — #251: visual parity before combined promotion
+
+The latest owner instruction supersedes the intervening proposal to promote the existing old-interface v2 build first. Finish #251 now: directly reuse the approved `design/inkseq-v2-prototype/src/styles.css` design system (dark default), centered top navigation and all page layouts, including phones; only its simulated data layer is replaced with real APIs. Attach prototype/staging comparison screenshots for every page at1440×900 and375×812. Accept the functional and visual batch together on staging, then promote identical accepted artifacts immediately, without waiting for the owner to preview staging. Preserve the existing functional APIs, original receipts/accounting, user data, single release lane and three-task limit.

@@ -491,6 +491,8 @@ class AssetService:
             for raw in rows:
                 record = json.loads(raw)
                 keys = [record[role]["key"] for role in ("original", "model") if record.get(role, {}).get("key")]
+                from .universal_trash import active_target
+                if active_target(conn,self.tenant,owner,{"kind":"asset","project_id":project_id,"id":record["id"]}):continue
                 if (content_is_deleted(conn, self.tenant, owner, asset_id=record["id"])
                         or any(content_is_deleted(conn, self.tenant, owner, object_key=key) for key in keys)):
                     continue

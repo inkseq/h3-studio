@@ -38,13 +38,14 @@ def deletion_evidence(db, references):
         a, b = reference_ids(value)
         active_assets.update(a); active_artifacts.update(b)
     for row in objects.values():
-        if row['kind'] not in ('content_tombstone', 'history_action', 'history_preview'):
+        if row['kind'] not in ('content_tombstone', 'history_action', 'history_preview', 'universal_purge'):
             retain(row['payload'])
     for table, columns in (('platform_documents', ('payload',)),
-            ('platform_plans', ('request', 'execution_plan')),
-            ('platform_edit_receipts', ('response',))):
+            ('platform_plans', ('request', 'execution_plan')),):
         if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
-            for values in db.execute('SELECT '+','.join('"'+c+'"' for c in columns)+' FROM "'+table+'"'):
+            query='SELECT '+','.join('"'+c+'"' for c in columns)+' FROM "'+table+'"'
+            if table=='platform_documents': query+=" WHERE NOT (project_id='__trash' AND (kind='trash_action' OR (kind='trash_item' AND json_extract(payload,'$.state')='purged')))"
+            for values in db.execute(query):
                 for value in values:
                     if value is not None: retain(json.loads(value))
     for ident, tenant, owner, project, status, payload in db.execute(
@@ -73,7 +74,7 @@ def deletion_evidence(db, references):
     # every reference in large archives. Duplicate keys remain ambiguous.
     plans = {}
     for ident, row in objects.items():
-        if row['kind'] != 'history_action':
+        if row['kind'] not in ('history_action', 'universal_purge'):
             continue
         try:
             plan = row['payload']['plan']
@@ -100,7 +101,7 @@ def deletion_evidence(db, references):
                 if not identity or not key_proof or identity['session'] != key_proof['session']:
                     break
                 action = objects.get(identity['session'])
-                if not action or (action['tenant'], action['owner'], action['kind']) != (tenant, owner, 'history_action'):
+                if not action or (action['tenant'], action['owner']) != (tenant, owner) or action['kind'] not in ('history_action','universal_purge'):
                     break
                 p = action['payload']; object_index, plan = plans[action['id']]
                 if (p.get('state') != 'completed' or p.get('action') not in ('purge', 'empty_trash')
@@ -125,6 +126,21 @@ def deletion_evidence(db, references):
                 result[key] = proofs
         except (KeyError, TypeError, ValueError):
             continue
+    # Historical authoring replay receipts remain unchanged. Only a positive
+    # universal purge for the SAME owner may classify their stale output links
+    # as audit associations; current drafts and immutable inputs still retain.
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='platform_edit_receipts'").fetchone():
+        proven={}
+        for proofs in result.values():
+            for proof in proofs:
+                action=objects[proof['action_id']]
+                if action['kind']=='universal_purge':
+                    proven.setdefault((action['tenant'],action['owner'],proof['table']),set()).add(proof['id'])
+        for tenant,owner,raw in db.execute('SELECT tenant,owner,response FROM platform_edit_receipts'):
+            a,b=reference_ids(json.loads(raw))
+            active_assets.update(a-proven.get((tenant,owner,'assets'),set()))
+            active_artifacts.update(b-proven.get((tenant,owner,'artifacts'),set()))
+
     # Only the server-redacted original job may retain its own proven-deleted
     # artifact IDs as audit evidence. User-editable content_deleted flags in
     # documents, turns or edit receipts never bypass the active census above.
@@ -137,11 +153,14 @@ def deletion_evidence(db, references):
     for ident, tenant, owner, project, request, execution, response in db.execute(
             'SELECT id,tenant_id,owner_id,project_id,request,execution_plan,result FROM platform_jobs'):
         request, execution, response = (json.loads(v) if v is not None else None for v in (request, execution, response))
-        allowed = audit.get((tenant, owner, project, ident), set()) if request == {'content_deleted': True} else set()
+        proven=audit.get((tenant, owner, project, ident), set())
+        allowed = proven if request == {'content_deleted': True} else set()
+        universal={p['id'] for proofs in result.values() for p in proofs if p['id'] in proven
+            and objects[p['action_id']]['kind']=='universal_purge'}
         retain(request)
         for value, eligible in ((execution, True), (response, isinstance(response, dict) and response.get('content_deleted') is True)):
             a, b = reference_ids(value)
             active_assets.update(a)
-            active_artifacts.update(b - allowed if eligible else b)
+            active_artifacts.update((b - allowed if eligible else b) - (universal if value is response else set()))
     return {key: proofs for key, proofs in result.items() if all(
         p['id'] not in (active_assets if p['table'] == 'assets' else active_artifacts) for p in proofs)}

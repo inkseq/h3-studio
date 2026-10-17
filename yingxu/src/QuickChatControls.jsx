@@ -11,7 +11,8 @@ export function ChatDialog({title,onClose,children,wide=false,className='',eyebr
   const {t,locale}=useI18n();
   const ref=useRef(),opener=useRef(globalThis.document?.activeElement);
   useEffect(()=>{const dialog=ref.current;dialog.showModal();dialog.querySelector('button,input,textarea,select')?.focus();return()=>{dialog.close();if(opener.current?.isConnected)opener.current.focus();};},[]);
-  return <dialog className={'qc-dialog '+(wide?'qc-dialog-wide ':'')+className} ref={ref} aria-label={title} onCancel={e=>{e.preventDefault();onClose();}}><div className="qc-dialog-head"><div>{eyebrow&&<span className="qc-eyebrow">{eyebrow}</span>}<h2>{title}</h2></div><button type="button" aria-label={t('workspace.copy88')} onClick={onClose}><X size={18}/></button></div>{children}</dialog>;
+  useEffect(()=>{const dialog=ref.current,close=()=>onClose();dialog.addEventListener('inkseq-close-after-trash',close);return()=>dialog.removeEventListener('inkseq-close-after-trash',close);},[onClose]);
+  return <dialog className={'qc-dialog '+(wide?'qc-dialog-wide ':'')+className} ref={ref} aria-label={title} onCancel={e=>{e.preventDefault();if(!ref.current?.querySelector('.item-menu [aria-expanded="true"]'))onClose();}}><div className="qc-dialog-head"><div>{eyebrow&&<span className="qc-eyebrow">{eyebrow}</span>}<h2>{title}</h2></div><button type="button" aria-label={t('workspace.copy88')} onClick={onClose}><X size={18}/></button></div>{children}</dialog>;
 }
 function ProfileInputBoundary({support}){
   const {t,locale}=useI18n();

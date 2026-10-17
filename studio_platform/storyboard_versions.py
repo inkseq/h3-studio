@@ -136,9 +136,12 @@ def apply_action(project, action, resolved=None):
     if op in {"storyboard.star", "storyboard.restore"}:
         shot = shot_entity(project, action["shot_id"])
         if op == "storyboard.star":
-            if type(action.get("starred")) is not bool:
+            if not ({"starred","title"}&action.keys()) or ("starred" in action and type(action["starred"]) is not bool) or ("title" in action and not isinstance(action["title"],str)):
                 raise ValueError("Starred must be boolean / 星标须为布尔值")
-            project.setdefault("journey", {}).setdefault("storyboardStars", {}).setdefault(shot["id"], {})[action["artifact_id"]] = action["starred"]
+            if "starred" in action:
+                project.setdefault("journey", {}).setdefault("storyboardStars", {}).setdefault(shot["id"], {})[action["artifact_id"]] = action["starred"]
+            if "title" in action:
+                project.setdefault("journey", {}).setdefault("storyboardTitles", {}).setdefault(shot["id"], {})[action["artifact_id"]] = action["title"]
             return
         from .generation_draft import configure
         recipe, sources, context = resolved
@@ -262,6 +265,9 @@ class StoryboardVersions:
             rows = list(conn.execute(select(artifacts.c.id, artifacts.c.job_id, artifacts.c.metadata,
                 jobs.c.request, jobs.c.created_at).join(jobs, artifacts.c.job_id == jobs.c.id).where(*where)
                 .order_by(jobs.c.created_at.desc(), artifacts.c.id).limit(limit + 1).offset(offset)).mappings())
+            from .universal_trash import active_target
+            trash={r["id"]:active_target(conn,self.tenant,principal.owner,
+                {"kind":"artifact","project_id":project_id,"id":r["id"]}) for r in rows}
         values = []
         for row in rows[:limit]:
             if row["metadata"].get("content_deleted"):
@@ -269,9 +275,12 @@ class StoryboardVersions:
             entity = next((e for e in project["entities"] if e["data"].get("cloudArtifactId") == row["id"]), None)
             recipe = row["request"].get("authoring_recipe")
             values.append({"id": row["id"], "entity_id": entity["id"] if entity else None, "job_id": row["job_id"],
+                "trash_state":trash[row["id"]]["payload"]["state"] if trash[row["id"]] else "active",
+                "trash_version":trash[row["id"]]["version"] if trash[row["id"]] else record["version"],
                 "recipe_status": "known" if recipe is not None else "unknown", "recipe": recipe,
                 "authoring_context": row["request"].get("authoring_context"),
                 "starred": project.get("journey", {}).get("storyboardStars", {}).get(shot_id, {}).get(row["id"], False),
+                "title": project.get("journey",{}).get("storyboardTitles",{}).get(shot_id,{}).get(row["id"],entity.get("title","") if entity else ""),
                 "annotation_version": record["version"], "selected": bool(entity and shot["data"].get("selectedAssetId") == entity["id"]),
                 "created_at": row["created_at"], "kind": row["metadata"].get("kind"),
                 "content_url": f'/v1/artifacts/{row["id"]}/content'})

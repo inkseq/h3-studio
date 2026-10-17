@@ -4,10 +4,13 @@ from copy import deepcopy
 from .project_validation import ROLES, TYPES
 
 ACTION_FIELDS = {
+    "library.rename": {"target","title"},
+    "library.tag": {"targets","tags"},
+    "library.file": {"profile_id","entity_ids","targets","variant_id"},
     "storyboard.bulk": {"shot_ids", "operation", "parent_id"},
     "storyboard.defaults": {"value"},
     "storyboard.restore": {"shot_id", "artifact_id"},
-    "storyboard.star": {"shot_id", "artifact_id", "starred"},
+    "storyboard.star": {"shot_id", "artifact_id", "starred", "title"},
     "storyboard.select": {"shot_id", "artifact_id"},
     "storyboard.fork_profile": {"profile_id", "shot_ids", "new_profile_id", "title"},
     "entity.create": {"entity"}, "entity.update": {"entity_id", "patch"},
@@ -21,10 +24,13 @@ ACTION_FIELDS = {
     "sound.set": {"chapter_id", "tracks", "mode"}, "sound.generated": {"shot_id", "gain"},
 }
 ACTION_REQUIRED = {
+    "library.rename": {"target","title"},
+    "library.tag": {"targets","tags"},
+    "library.file": {"profile_id"},
     "storyboard.bulk": {"shot_ids", "operation"},
     "storyboard.defaults": {"value"},
     "storyboard.restore": {"shot_id", "artifact_id"},
-    "storyboard.star": {"shot_id", "artifact_id", "starred"},
+    "storyboard.star": {"shot_id", "artifact_id"},
     "storyboard.select": {"shot_id", "artifact_id"},
     "storyboard.fork_profile": {"profile_id", "shot_ids", "new_profile_id"},
     "entity.create": {"entity"}, "entity.update": {"entity_id", "patch"},
@@ -97,6 +103,9 @@ def operation_schemas():
     attach = {"entity_id": ID_SCHEMA, "title": TITLE, "parent_id": PARENT, "shot_id": ID_SCHEMA,
         "select": {"type": "boolean", "default": False, "description": "True requires shot_id and image/video media; explicitly selects this media for that shot."}}
     props = {
+        "library.rename": {"target":{"type":"object","required":["kind","id"],"additionalProperties":False,"properties":{"kind":{"enum":["entity","asset","artifact"]},"id":ID_SCHEMA}},"title":{"type":"string","minLength":1}},
+        "library.tag": {"targets":{"type":"array","items":{"type":"object","additionalProperties":False,"required":["kind","id"],"properties":{"kind":{"enum":["entity","asset","artifact"]},"id":ID_SCHEMA}}},"tags":{"type":"array","uniqueItems":True,"items":{"type":"string","minLength":1}}},
+        "library.file": {"profile_id":ID_SCHEMA,"entity_ids":{"type":"array","uniqueItems":True,"items":ID_SCHEMA},"variant_id":ID_SCHEMA,"targets":{"type":"array","items":{"type":"object","required":["kind","id"],"additionalProperties":False,"properties":{"kind":{"enum":["entity","asset","artifact"]},"id":ID_SCHEMA}}}},
         "storyboard.bulk": {"shot_ids": {"type": "array", "minItems": 1, "uniqueItems": True, "items": ID_SCHEMA},
             "operation": {"enum": ["draft", "final", "move"]}, "parent_id": ID_SCHEMA},
         "storyboard.defaults": {"value": {"type": "object", "additionalProperties": False, "properties": {
@@ -104,7 +113,7 @@ def operation_schemas():
             "controls": {"type": "object", "additionalProperties": False,
                 "properties": {k: v for k, v in editable_controls.items() if k not in {"duration", "seed"}}}}}},
         "storyboard.restore": {"shot_id": ID_SCHEMA, "artifact_id": ID_SCHEMA},
-        "storyboard.star": {"shot_id": ID_SCHEMA, "artifact_id": ID_SCHEMA, "starred": {"type": "boolean"}},
+        "storyboard.star": {"shot_id": ID_SCHEMA, "artifact_id": ID_SCHEMA, "starred": {"type": "boolean"}, "title": {"type":"string"}},
         "storyboard.select": {"shot_id": ID_SCHEMA, "artifact_id": ID_SCHEMA},
         "storyboard.fork_profile": {"profile_id": ID_SCHEMA, "new_profile_id": ID_SCHEMA, "title": TITLE,
             "shot_ids": {"type": "array", "minItems": 1, "uniqueItems": True, "items": ID_SCHEMA}},
@@ -147,6 +156,9 @@ def operation_schemas():
         "sound.generated": {"shot_id": ID_SCHEMA, "gain": {"type": "number", "minimum": 0, "maximum": 1, "default": .7}},
     }
     rules = {
+        "library.rename": ["Change mutable owner project display title only; receipt filenames and accepted inputs remain unchanged."],
+        "library.tag": ["Replace tags on authorized same-project library targets under original project CAS; no storage rewrite."],
+        "library.file": ["File existing same-story media/receipts into a profile without copying bytes. Optional look/location version image slot accepts images only; ordinary audio/video filing does not select voice/ambient generation inputs. Original files remain retained."],
         "storyboard.bulk": ["One project CAS changes all selected shots or none. Draft/final is intent only; move requires an existing scene. No enqueue or deletion."],
         "storyboard.defaults": ["Replace story defaults; omitted shot overrides keep inheriting. Duration and seed remain per shot."],
         "storyboard.restore": ["Only an original server-snapshotted recipe is restorable. Unknown history is refused. Exact effective inputs replace implicit current profile compilation; source assets, context and accepted jobs remain retained."],

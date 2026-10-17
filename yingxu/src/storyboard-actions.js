@@ -182,6 +182,9 @@ export function applyStoryboardAction(project, action, {chapterId,view} = {}) {
       : action.ptype === 'location' ? {versions:[{id:'main',name:'默认',description:'',imageIds:[],version:1}],defaultVersionId:'main',ambient:null} : {imageIds:[]};
     return {id:newStoryboardEntity(project,action.ptype,action.name.trim(),null,data).id};
   }
+  if (action.type === 'assetTitle') {
+    const asset=find(project,action.asset);if(!media(project,action.asset,['image','video','audio'])||typeof action.title!=='string'||!action.title.trim())return false;asset.title=action.title;asset.version++;return {id:asset.id};
+  }
   if (action.type === 'dismissInbox') {
     if (!media(project,action.asset,['image','video','audio'])) return false;
     const asset = find(project,action.asset);asset.data.storyboardInbox=false;asset.version++;return {id:asset.id};
