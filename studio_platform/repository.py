@@ -714,13 +714,14 @@ class Repository:
         committed = spent + reserved
         return {"id": row["id"], "tenant_id": row["tenant_id"],
             "owner_id": row["owner_id"], "project_id": row["project_id"],
-            "basis": "cumulative", "currency": "USD", "limit_microusd": None if retired else limit,
-            "limit_mode": "settings" if fixed_cap_retired(row) else "cumulative",
+            "basis": "cumulative", "currency": "USD", "limit_microusd": limit,
+            "limit_mode": "settings" if retired else "cumulative",
+            "legacy_projection_only": retired,
             "legacy_limit_microusd": row["limit_microusd"] if fixed_cap_retired(row) else None,
             "spent_microusd": spent, "reserved_microusd": reserved,
-            "remaining_microusd": None if retired else max(0, limit - committed),
-            "usage_percent": None if retired else min(100, committed * 100 / limit) if limit else 100,
-            "status": "settings" if retired else "exhausted" if committed >= limit else
+            "remaining_microusd": max(0, limit - committed),
+            "usage_percent": min(100, committed * 100 / limit) if limit else 100,
+            "status": "exhausted" if committed >= limit else
                       "warning" if committed * 5 >= limit * 4 else "ok",
             "snapshot": budget_snapshot(row), "as_of": now,
             "window": {"timezone": "UTC", "start_date": (today - timedelta(days=6)).isoformat(),
