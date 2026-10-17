@@ -51,6 +51,15 @@ CPU above 70% or memory above 85% for 900 seconds; unhealthy required processes
 for 900 seconds; app health down for 120 seconds; at least 3 server errors and
 5% error ratio in the rolling 300-second request window. GPU maximum runtime
 defaults to 7200 seconds, stuck work 1800 seconds, repeated wake count above 10.
+`terminal_reservation_stale` reports original terminal jobs or stopped/destroyed
+instances whose admission reservation is still held for more than
+`terminal_reservation_seconds` (default 3600 seconds). References are deduplicated
+across account layers. Age uses the retained terminal event or native stop time;
+if unavailable, the evaluator requires a sustained observed interval. Releasing
+an admission hold into `invoice_pending` ends this held-reservation condition,
+not the invoice obligation: its original estimate remains in Settings exposure
+until actual billing is reconciled. The alert never releases money or stops work.
+
 Existing business GPU idle limits and Sydney-day test-spend accounting remain
 the authority. Spend alerts represent **projected exposure / 保守预算占用**,
 including unresolved reservations; they do not represent an actually paid bill.
