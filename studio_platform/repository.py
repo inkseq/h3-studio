@@ -26,6 +26,8 @@ from sqlalchemy import (
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
 
+from .budget_policy import effective_budget_limit, fixed_cap_retired
+
 
 class LedgerError(Exception):
     """Safe, stable business error; never includes database URLs or payloads."""
@@ -681,14 +683,17 @@ class Repository:
                 confirmed, budget_reservations.c.settled_at.is_(None))).mappings().one()
         limit, spent, reserved = (row[name] for name in
             ("limit_microusd", "spent_microusd", "reserved_microusd"))
+        retired = fixed_cap_retired(row)
         committed = spent + reserved
         return {"id": row["id"], "tenant_id": row["tenant_id"],
             "owner_id": row["owner_id"], "project_id": row["project_id"],
-            "basis": "cumulative", "currency": "USD", "limit_microusd": limit,
+            "basis": "cumulative", "currency": "USD", "limit_microusd": None if retired else limit,
+            "limit_mode": "settings" if fixed_cap_retired(row) else "cumulative",
+            "legacy_limit_microusd": row["limit_microusd"] if fixed_cap_retired(row) else None,
             "spent_microusd": spent, "reserved_microusd": reserved,
-            "remaining_microusd": max(0, limit - committed),
-            "usage_percent": min(100, committed * 100 / limit) if limit else 100,
-            "status": "exhausted" if committed >= limit else
+            "remaining_microusd": None if retired else max(0, limit - committed),
+            "usage_percent": None if retired else min(100, committed * 100 / limit) if limit else 100,
+            "status": "settings" if retired else "exhausted" if committed >= limit else
                       "warning" if committed * 5 >= limit * 4 else "ok",
             "snapshot": budget_snapshot(row), "as_of": now,
             "window": {"timezone": "UTC", "start_date": (today - timedelta(days=6)).isoformat(),
@@ -806,7 +811,7 @@ class Repository:
                 row["owner_id"] is not None and row["owner_id"] != scope.owner_id) or (
                 row["project_id"] is not None and row["project_id"] != scope.project_id):
                 raise NotFound("budget_not_found")
-            if row["spent_microusd"] + row["reserved_microusd"] + amount > row["limit_microusd"]:
+            if row["spent_microusd"] + row["reserved_microusd"] + amount > effective_budget_limit(row):
                 raise BudgetExceeded("budget_exceeded")
             connection.execute(update(budget_accounts).where(budget_accounts.c.id == account_id)
                 .values(reserved_microusd=budget_accounts.c.reserved_microusd + amount))
@@ -886,7 +891,7 @@ class Repository:
         total = max(minimum, current)
         extra = total-current
         if any(account["reserved_microusd"] < current
-               or account["spent_microusd"]+account["reserved_microusd"]+extra > account["limit_microusd"]
+               or account["spent_microusd"]+account["reserved_microusd"]+extra > effective_budget_limit(account)
                for account in accounts):
             raise BudgetExceeded("instance_spend_limit_reached")
         if not extra:

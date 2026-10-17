@@ -21,6 +21,8 @@ import tempfile
 import time
 import uuid
 
+from .budget_policy import effective_budget_limit
+
 from sqlalchemy import and_, or_, select, update
 
 from .autoscale import Demand, ScalePolicy, Slot, recommend
@@ -526,10 +528,10 @@ class FiniteController:
             raise ScalerError("finite_existing_budget_scope_mismatch")
         if c.service_policy is not None:
             ceiling = c.service_policy["budget_ceiling_microusd"]
-            return min(max(0, min(a["limit_microusd"], ceiling)-a["spent_microusd"]-a["reserved_microusd"])
+            return min(max(0, min(effective_budget_limit(a), ceiling)-a["spent_microusd"]-a["reserved_microusd"])
                        for a in accounts)
         return min(c.scale_policy["approved_remaining_microusd"],
-                   *(max(0, a["limit_microusd"]-a["spent_microusd"]-a["reserved_microusd"]) for a in accounts))
+                   *(max(0, effective_budget_limit(a)-a["spent_microusd"]-a["reserved_microusd"]) for a in accounts))
 
     def port_for(self, intent_id):
         path = self.config.work_dir/"cycle-state.json"

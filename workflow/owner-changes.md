@@ -37,3 +37,8 @@ These entries record owner decisions, not task status. The latest applicable CR 
 低风险部分（文案、文档）直接做；域名切换按中风险处理：先确认新域名 HTTPS 和登录正常，再把旧域名改成跳转。
 
 Append a numbered entry for a new owner decision and update affected current wording in place. Do not copy operational receipts or routine implementation choices here.
+
+
+## CR-20261017-26 — urgent #254 reservations and Settings authority
+
+Owner prioritizes #254 ahead of the frozen #251 component batch. Confirm historical machines at Vast before app-native audited release/settlement; never mutate running instance56330848. Close terminal exposure without inventing zero invoices, repair recurring settlement and notify on terminal money held over one hour. Retire superdan/supervan bootstrap owner/project/shared fixed caps; editable Settings and forgot-to-stop protections remain authoritative. The owner explicitly authorizes reviewed production money operations now. Preserve the existing production frontend during this emergency; combined #251 staging acceptance and same-artifact promotion remains pending.

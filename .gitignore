@@ -558,3 +558,7 @@ inventory.json
 
 !studio_platform/backup_deletion.py
 !test_backup_expected_deletion.py
+
+# Incident 254 scoped policy regression
+!studio_platform/budget_policy.py
+!test_budget_policy254.py
