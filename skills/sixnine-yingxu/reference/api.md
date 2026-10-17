@@ -128,6 +128,26 @@ Output duration is separate from the edit timeline and reference selections. Nat
 
 POST `/v1/assets` multipart uses client_project_id/client_asset_id/file; Quick Chat uses B`/assets` with client_asset_id/file. GET assets with original scope and stable client ID, then POST the original receipt resume endpoint if appropriate. No global tag/search endpoint exists (#238).
 
-History: GET sessions with view=active|trash; POST `/v1/quick-chat/sessions/history/preview` with action and exact `{id,expected_version}` targets; POST `/v1/quick-chat/sessions/history/actions` with `{preview_id,confirmed:true}` and saved key; GET `/v1/quick-chat/sessions/history/actions/ACTION`. Empty-trash preview uses an empty sessions list and returns the full target set. Trash never auto-expires; explicit irreversible purge prevents restore. Universal entity trash is separate (#236).
+History: GET sessions with view=active|trash; POST `/v1/quick-chat/sessions/history/preview` with action and exact `{id,expected_version}` targets; POST `/v1/quick-chat/sessions/history/actions` with `{preview_id,confirmed:true}` and saved key; GET `/v1/quick-chat/sessions/history/actions/ACTION`. Empty-trash preview uses an empty sessions list and returns the full target set. Trash never auto-expires; explicit irreversible purge prevents restore. Other content uses universal trash below.
 
 Owner/browser spending settings and confirmations are not machine-PAT controls. POST `/v1/account/spending-confirmations` accepts exactly `{plan_id:ID}` or `{plan_ids:[ID,...]}` and validates current quotes/settings. Group estimates expose cost_microusd and machine_seconds or null. Queue GET `/v1/generations/queue-position?job_id=OWNED_JOB` is advisory, no ETA. Limits include Sydney-day unresolved prior obligations.
+
+
+## Universal trash
+
+`GET /v1/trash?kind=shot&limit=100&offset=0` lists owner-scoped trashed/purging items; follow `next_offset`. `kind` filters the displayed entity type. Target identities are `{kind,project_id,id,parent_id?}`. Kinds: `project` (id equals project_id), `entity` (chapter/scene/shot/profile/file entity), `look` (parent_id character), `location_version` (parent_id location), `asset` (uploaded receipt), `artifact` (generated version receipt), `take` (parent_id Quick Chat session). Conversations retain the original history API above; do not claim one atomic transaction across the two APIs.
+
+1. Save a JSON preview request: `{"action":"trash","items":[{"kind":"entity","project_id":"RETURNED_PROJECT","id":"RETURNED_SHOT"}]}`. POST `/v1/trash/preview`. This only reads; it discovers exact `items[].expected_version` and `affected_project_versions`. A blocker rejects the entire selection; running/uncertain work and the last chapter/scene cannot be removed.
+2. Save the action body with the returned item versions and `expected_project_versions: PREVIEW.affected_project_versions`. POST `/v1/trash/actions` with one saved Idempotency-Key. Inspect `operation_id`, `request_hash`, `state` and every item; never fabricate success from HTTP timeout.
+3. Undo uses a new explicit `restore` preview for the same targets, then the new returned versions. Restoration uses a three-way reference merge, preserves unrelated edits and refuses conflicting changes. If the containing story is trashed, restore it first.
+4. Permanent deletion uses `purge` preview and explicit `confirmed:true`. It is asynchronous: GET `/v1/trash/actions/OPERATION_ID`. Same original body/key returns that operation; it does not start another purge. `pending`/unknown never means absent, no auto-retry with a new key. Restore is forbidden after purge intent. Emptying the trash is an explicit, fully paginated selection followed by this same atomic preview/action; newly arriving trash is not silently added.
+
+```sh
+python scripts/sixnine.py --base-url ORIGIN --connection CONNECTION_ID request POST /v1/trash/preview --json-file trash-preview.json --output preview.json
+python scripts/sixnine.py --base-url ORIGIN --connection CONNECTION_ID request POST /v1/trash/actions --json-file trash-action.json --idempotency-key saved-trash-key --output operation.json
+python scripts/sixnine.py --base-url ORIGIN --connection CONNECTION_ID request GET /v1/trash/actions/RETURNED_OPERATION_ID --output observed.json
+```
+
+Known closed refusals include matching `resource:"trash"`, canonical `request_hash` and `no_mutation_committed:true`; only that positive proof allows abandoning the saved command and explicitly selecting again. A bare 4xx/5xx is not that proof. `removed`/`kept` report actual media handling; immutable accepted inputs, current other references and accounting/audit identities remain. A completed purge may retain referenced media. Physical deletion uses the original activated reconciler, exact storage receipts, full SHA and confirmed absence; no prefix sweep. No automatic expiry, no background deletion merely because something is old. Replayed historical authoring receipts cannot reattach tombstoned content. Unsaved browser drafts are not server references.
+
+Rename/edit uses original `project.update`/`entity.update` actions and existing Quick Chat title/card APIs. Immutable takes and generated receipts are not rewritten to rename them. 中文：回收站可恢复且不会自动清空；永久删除须逐次明确确认，未决状态保留原操作身份。已接收输入与账务不改，仍被引用的媒体保留。

@@ -85,6 +85,14 @@ def content_is_deleted(connection, tenant, owner, *, asset_id=None, artifact_id=
 
 def assert_content_available(connection, tenant, owner, *, asset_ids=(), artifact_ids=(),
                              object_keys=(), storage_binding=None):
+    from .universal_trash import where
+    selected = connection.execute(select(documents.c.payload).where(*where(tenant,owner,"trash_item"),
+        documents.c.payload["state"].as_string().in_(("trashed","purging","purged")))).scalars()
+    for payload in selected:
+        target=payload["target"]
+        if (target["kind"]=="asset" and target["id"] in asset_ids or
+                target["kind"]=="artifact" and target["id"] in artifact_ids):
+            raise Conflict("content_in_trash")
     tokens = [token("asset", value) for value in asset_ids]
     tokens += [token("artifact", value) for value in artifact_ids]
     if storage_binding is None:
@@ -97,6 +105,9 @@ def assert_content_available(connection, tenant, owner, *, asset_ids=(), artifac
 
 
 def assert_project_writable(connection, tenant, owner, project_id):
+    from .universal_trash import active_target
+    if inspect(connection).has_table(documents.name) and active_target(connection, tenant, owner, {"kind":"project","project_id":project_id,"id":project_id}):
+        raise Conflict("project_in_trash")
     table = _objects(connection)
     if table is None:
         return
@@ -159,6 +170,8 @@ def reference_ids(value):
 
 
 def assert_reference_payload(connection, tenant, owner, value):
+    from .universal_trash import assert_authoring_available
+    assert_authoring_available(connection,tenant,owner,value)
     assets, artifacts = reference_ids(value)
     assert_content_available(connection, tenant, owner, asset_ids=assets, artifact_ids=artifacts)
     # Whole-document saves must not introduce a new cross-owner reference that

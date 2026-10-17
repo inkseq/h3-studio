@@ -581,3 +581,6 @@ inventory.json
 !skills/sixnine-yingxu/reference/recovery.md
 !studio_platform/storyboard_versions.py
 !test_storyboard_versions.py
+
+!studio_platform/universal_trash.py
+!test_universal_trash.py

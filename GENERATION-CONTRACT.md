@@ -796,3 +796,12 @@ trash/undo remain separate dependencies. Public API/helper examples are in
 中文：版本配方只读原始不可变快照；旧记录缺失时明确未知。恢复、收藏、选择和批量
 编辑不生成、不删除。份数上限复用可编辑设置；全局→故事→镜头继承，时长和种子留在
 镜头。预检冻结原种子/计划，未知结果保留原请求；实际入队仍走原预算与整批确认。
+
+
+## Universal content lifecycle (#236)
+
+The original owner document authority stores reversible trash metadata and original action receipts; no second job or budget authority is introduced. `/v1/trash/preview`, `/v1/trash/actions`, `/v1/trash/actions/{operation_id}` and `/v1/trash` cover project/entity/look/location_version/asset/artifact/take identities. See `skills/sixnine-yingxu/reference/api.md#universal-trash` for exact bodies, CAS and helper commands. Conversations retain the existing Quick Chat history authority.
+
+Trash removes active authoring references atomically and preserves inverse reference capsules. Restore merges those capsules against the current project, refusing conflicts rather than overwriting newer edits. Active/unresolved execution, upload and collection obligations block removal; each retained container keeps at least one original chapter/scene. No automatic expiry or migration of historical user rows occurs. Explicit permanent deletion retains original accepted plan/job inputs, attempts, ledgers and receipt identities. The original activated object reconciler performs exact receipt-bound deletion and quota finalization; unknown remains the same pending operation. Unreferenced output associations alone do not make a binary an input forever. Deleting-owner historical guided edit responses remain byte-identical audit rows, while current drafts/other trash capsules/accepted inputs and other-owner references retain media. Backup expected-missing classification requires positively completed exact-object deletion evidence; incomplete or unrelated evidence remains unexpected.
+
+中文：所有回收/恢复使用原账号权限与版本 CAS。永久删除保留账务及已接收输入；不会自动过期、自动重试创建新删除操作或批量改写历史数据。

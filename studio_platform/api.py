@@ -359,6 +359,11 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
 
     @app.get("/v1/projects/{project_id}")
     def get_project(project_id: str, request: Request):
+        from .universal_trash import active_target
+        with repo.engine.connect() as connection:
+            if active_target(connection,settings.tenant_id,request.state.principal.owner,
+                    {"kind":"project","project_id":project_id,"id":project_id}):
+                raise HTTPException(404,"project_in_trash")
         record=authorized_project(request.state.principal, project_id)
         from .agent_management import doc_where,ATTRIBUTION_PROJECT
         from .repository import documents
@@ -701,4 +706,6 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
     app.add_middleware(RequestAdmissionMiddleware, admission=request_admission)
     from .alert_http import AlertCountersMiddleware
     app.add_middleware(AlertCountersMiddleware)
+    from .universal_trash import register_routes as register_trash_routes
+    register_trash_routes(app)
     return app
