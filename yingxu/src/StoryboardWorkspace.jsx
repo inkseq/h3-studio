@@ -2,15 +2,16 @@ import {WorkbenchBulk,WorkbenchFork} from './StoryboardWorkbench.jsx';
 import {selectShot,emptySelection} from './storyboard-selection.js';
 import {useI18n} from './i18n/I18nProvider.jsx';
 import React,{useEffect,useRef,useState} from 'react';
+import {Plus} from 'lucide-react';
 import {DndContext,DragOverlay,PointerSensor,KeyboardSensor,closestCenter,pointerWithin,useSensor,useSensors} from '@dnd-kit/core';
 import {SortableContext,rectSortingStrategy,sortableKeyboardCoordinates} from '@dnd-kit/sortable';
 import {StoryboardUIProvider,useStoryboardUI} from './storyboard-ui-context.jsx';
 import {AssetLibrary,AssetThumb,AddCard,ProfileEditor,ShotCard,ShotEditor,Screen,Timeline,Transport,usePlayer} from './StoryboardComponents.jsx';
 import {StoryboardSplitter,useStoryboardPanelSize} from './StoryboardPanels.jsx';
 import {coverOf,fmt,planDrop,totalDuration,variantOf} from './storyboard-ui-model.js';
+import './i18n/storyboard-language.css';
 import './storyboard-workspace.css';
 import './storyboard-workbench.css';
-import './i18n/storyboard-language.css';
 
 function collision(args){
   const id=String(args.active.id);
@@ -33,7 +34,7 @@ function QueueSummary(){const {t,locale}=useI18n();
   if(!rows.length)return null;
   return <div className="sb-queue" aria-label={t('storyboard.copy14')}>{rows.map(({mode,row,waiting,running})=><span key={mode}>{mode==='FL'?t('storyboard.copy15'):t('storyboard.copy16')}：{t('storyboard.copy34',{count:waiting})}{running>0&&t('storyboard.copy32',{count:running})}{waiting>0&&Number.isFinite(row?.roughWaitSeconds)&&row.roughWaitSeconds>0&&t('storyboard.copy33',{minutes:Math.ceil(row.roughWaitSeconds/60)})}</span>)}</div>;
 }
-function StoryboardLayoutA({selected,setSelected,pickAsset}){const {t,locale}=useI18n();
+function StoryboardLayoutA({selected,setSelected,pickAsset,onNewScene}){const {t,locale}=useI18n();
   const {state,dispatch}=useStoryboardUI(),player=usePlayer(state.shots),[selection,setSelection]=useState(emptySelection),[expanded,setExpanded]=useState(false),[libraryCollapsed,setLibraryCollapsed]=useState(()=>globalThis.matchMedia?.('(max-width:760px)').matches??false);
   useEffect(()=>{const media=globalThis.matchMedia?.('(max-width:760px)');if(!media)return;const change=()=>setLibraryCollapsed(media.matches);media.addEventListener('change',change);return()=>media.removeEventListener('change',change);},[]);
   useEffect(()=>{if(libraryCollapsed)return;const close=event=>{if(event.key==='Escape')setLibraryCollapsed(true);};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close);},[libraryCollapsed]);
@@ -42,20 +43,21 @@ function StoryboardLayoutA({selected,setSelected,pickAsset}){const {t,locale}=us
   useEffect(()=>{setSelection(emptySelection());},[state.contextId]);
   useEffect(()=>{setSelection(old=>({...old,ids:old.ids.filter(id=>state.shots.some(s=>s.id===id))}));},[state.shots.map(s=>s.id).join('|')]);
   useEffect(()=>{const clear=e=>{if(e.key==='Escape'&&!expanded&&!selected&&!document.querySelector('dialog[open]'))setSelection(emptySelection());};window.addEventListener('keydown',clear);return()=>window.removeEventListener('keydown',clear);},[expanded,selected]);
-  const library=useStoryboardPanelSize('library',280,140,560),dock=useStoryboardPanelSize('dock',190,110,460),drawer=useStoryboardPanelSize('drawer',440,340,820);
+  const library=useStoryboardPanelSize('library',260,140,560),dock=useStoryboardPanelSize('dock',190,110,460),drawer=useStoryboardPanelSize('drawer',440,340,820);
+  const groups=state.shots.reduce((rows,shot)=>{const id=shot.entity?.parentId||null;let group=rows.find(row=>row.id===id);if(!group){group={id,title:state.scenes?.find(scene=>scene.id===id)?.title||state.project.chapter,shots:[]};rows.push(group);}group.shots.push(shot);return rows;},[]);
   const count=state.shots.filter(shot=>shot.chosen).length,pending=state.shots.filter(shot=>!shot.versions.length);
   return <div className={'layout A'+(libraryCollapsed?' library-collapsed':'')} data-testid="storyboard-layout-a" style={{gridTemplateColumns:libraryCollapsed?'44px minmax(0,1fr)':`${library.size}px 8px minmax(0,1fr)`,'--libw':(libraryCollapsed?44:library.size)+'px'}}>
     {!libraryCollapsed&&<button type="button" className="sb-library-backdrop" aria-label={t('storyboard.detail15')} onClick={()=>setLibraryCollapsed(true)}/>}
     <AssetLibrary onPick={pickAsset} selectedShot={state.shots.find(shot=>shot.id===selected)} collapsed={libraryCollapsed} onToggle={()=>setLibraryCollapsed(value=>!value)}/>
     {!libraryCollapsed&&<StoryboardSplitter panel={library} label={t('storyboard.copy17')}/>}
-    <div className="col"><main className="main"><div className="chapter-head"><div className="chapter-summary"><small>{t('storyboard.copy36',{shots:state.shots.length,duration:fmt(totalDuration(state.shots)),chosen:count,aspect:state.project.aspect})}</small><label className="style-field"><span>{t('storyboard.copy18')}</span><input aria-label={t('storyboard.copy18')} value={state.project.style||''} placeholder={t('storyboard.copy19')} onChange={event=>dispatch({type:'project',patch:{style:event.target.value}})}/></label></div><div className="chapter-actions"><QueueSummary/><button className="primary" disabled={state.busy||!pending.length||!state.copiesMax} onClick={()=>dispatch({type:'workbenchGenerate',ids:pending.map(shot=>shot.id),copies:1})}>{t('storyboard.copy35',{count:pending.length})}</button></div></div>
-      <WorkbenchBulk ids={selection.ids} onClear={()=>setSelection(emptySelection())} onSelectAll={()=>setSelection({ids:state.shots.map(s=>s.id),anchor:state.shots[0]?.id})}/><WorkbenchFork ids={selection.ids}/><SortableContext items={state.shots.map(shot=>'shot:'+shot.id)} strategy={rectSortingStrategy}><div className="wall">{state.shots.map((shot,index)=><ShotCard key={shot.id} shot={shot} index={index} selected={selected===shot.id} checked={selection.ids.includes(shot.id)} onSelect={event=>setSelection(old=>selectShot(old,state.shots.map(s=>s.id),shot.id,{range:event.shiftKey,toggle:!event.shiftKey}))} onOpen={(id,event)=>event?.ctrlKey||event?.metaKey||event?.shiftKey?setSelection(old=>selectShot(old,state.shots.map(s=>s.id),id,{range:event.shiftKey,toggle:!event.shiftKey})):setSelected(id)}/>)}<AddCard onAdd={()=>dispatch({type:'add'})}/></div></SortableContext>
+    <div className="col"><main className="main"><div className="chapter-head"><div className="chapter-summary"><h1>{state.project.chapter}</h1><small>{t('storyboard.copy36',{shots:state.shots.length,duration:fmt(totalDuration(state.shots)),chosen:count,aspect:state.project.aspect})}</small><details className="sb-style-details"><summary>{t('storyboard.copy18')}</summary><label className="style-field"><span>{t('storyboard.copy18')}</span><input aria-label={t('storyboard.copy18')} value={state.project.style||''} placeholder={t('storyboard.copy19')} onChange={event=>dispatch({type:'project',patch:{style:event.target.value}})}/></label></details></div><div className="chapter-actions"><QueueSummary/>{onNewScene&&<button onClick={onNewScene}><Plus size={16}/><span>{t('v2.newScene')}</span></button>}<button className="primary" disabled={state.busy||!pending.length||!state.copiesMax} onClick={()=>dispatch({type:'workbenchGenerate',ids:pending.map(shot=>shot.id),copies:1})}>{t('storyboard.copy35',{count:pending.length})}</button></div></div>
+      <WorkbenchBulk ids={selection.ids} onClear={()=>setSelection(emptySelection())} onSelectAll={()=>setSelection({ids:state.shots.map(s=>s.id),anchor:state.shots[0]?.id})}/><WorkbenchFork ids={selection.ids}/><SortableContext items={state.shots.map(shot=>'shot:'+shot.id)} strategy={rectSortingStrategy}><div className="sb-scene-groups">{groups.map(group=><section className="sb-scene-group" key={group.id||'unparented'}><header className="scene-head"><b>{group.title}</b><small>{group.shots.length} · {fmt(totalDuration(group.shots))}</small></header><div className="wall">{group.shots.map((shot)=><ShotCard key={shot.id} shot={shot} index={state.shots.indexOf(shot)} selected={selected===shot.id} checked={selection.ids.includes(shot.id)} onSelect={event=>setSelection(old=>selectShot(old,state.shots.map(s=>s.id),shot.id,{range:event.shiftKey,toggle:!event.shiftKey}))} onOpen={(id,event)=>event?.ctrlKey||event?.metaKey||event?.shiftKey?setSelection(old=>selectShot(old,state.shots.map(s=>s.id),id,{range:event.shiftKey,toggle:!event.shiftKey})):setSelected(id)}/>)}</div></section>)}<div className="wall sb-add-shot"><AddCard onAdd={()=>dispatch({type:'add'})}/></div></div></SortableContext>
     </main><StoryboardSplitter panel={dock} axis="y" sign={-1} label={t('storyboard.copy20')}/><div className="dock" style={{height:dock.size}}><Screen player={player}/><div className="dock-right"><Transport player={player}/><Timeline player={player} selectedId={selected} onPick={setSelected}/><small className="muted">{t('storyboard.copy21')}</small></div></div></div>
     {selected&&<aside className={'drawer'+(expanded?' workbench-expanded':'')} aria-label={t('storyboard.copy22')} style={{width:drawer.size}}><StoryboardSplitter panel={drawer} sign={-1} className="edge" label={t('storyboard.copy23')}/><button className="workbench-expand" onClick={()=>setExpanded(value=>!value)}>{t(expanded?'workbench.collapse':'workbench.expand')}</button><ShotEditor shotId={selected} onClose={()=>expanded?setExpanded(false):setSelected(null)}/></aside>}
     <ProfileEditor/>
   </div>;
 }
-function StoryboardShell({onLegacyGuide,onCanvas}){const {t,locale}=useI18n();
+function StoryboardShell({onLegacyGuide,onCanvas,onNewScene}){const {t,locale}=useI18n();
   const {state,dispatch,db,clearError}=useStoryboardUI(),[selected,setSelected]=useState(null),[dragging,setDragging]=useState(null),[toast,setToast]=useState('');
   const container=useRef(),sensors=useSensors(useSensor(PointerSensor,{activationConstraint:{distance:6}}),useSensor(KeyboardSensor,{coordinateGetter:sortableKeyboardCoordinates}));
   useEffect(()=>{if(state.lastAdded)setSelected(state.lastAdded);},[state.lastAdded]);
@@ -90,10 +92,10 @@ function StoryboardShell({onLegacyGuide,onCanvas}){const {t,locale}=useI18n();
   return <DndContext sensors={sensors} collisionDetection={collision} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={()=>setDragging(null)}><section ref={container} className="sb-workspace" aria-label={t('storyboard.copy30')}>
     {state.error&&<div className="sb-error" role="alert"><span>{state.error}</span><button className="x" aria-label={t('storyboard.copy31')} onClick={clearError}>×</button></div>}
     {state.workbenchPending&&<div className="sb-error"><span>{t('workbench.pending')}</span><button disabled={state.busy} onClick={()=>dispatch({type:'workbenchRecover'})}>{t('workbench.recover')}</button></div>}
-    <StoryboardLayoutA selected={selected} setSelected={setSelected} pickAsset={pick}/>
+    <StoryboardLayoutA onNewScene={onNewScene} selected={selected} setSelected={setSelected} pickAsset={pick}/>
     <DragOverlay dropAnimation={null}>{dragged?<div className="sb-portal achip overlay"><AssetThumb asset={thumb}/><b>{dragged.name}</b></div>:null}</DragOverlay>
     {toast&&<div className="sb-toast" role="status" aria-live="polite">{toast}</div>}
   </section></DndContext>;
 }
-export function StoryboardWorkspace({adapter,onLegacyGuide,onCanvas}){const {t,locale}=useI18n();return <StoryboardUIProvider adapter={adapter}><StoryboardShell onLegacyGuide={onLegacyGuide} onCanvas={onCanvas}/></StoryboardUIProvider>;}
+export function StoryboardWorkspace({adapter,onLegacyGuide,onCanvas,onNewScene}){const {t,locale}=useI18n();return <StoryboardUIProvider adapter={adapter}><StoryboardShell onNewScene={onNewScene} onLegacyGuide={onLegacyGuide} onCanvas={onCanvas}/></StoryboardUIProvider>;}
 export default StoryboardWorkspace;

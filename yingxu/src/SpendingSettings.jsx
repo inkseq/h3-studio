@@ -4,6 +4,9 @@ import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {createCloudClient} from './cloud-client.js';
 import {LanguageSwitcher,useI18n} from './i18n/I18nProvider.jsx';
 import './spending-settings.css';
+import StudioHeader from './StudioHeader.jsx';
+import AccountPassword from './AccountPassword.jsx';
+import {UserRound,SlidersHorizontal,Bot,Wallet,ShieldCheck} from 'lucide-react';
 
 const dollars=microsToDollars;
 function micros(value){try{return dollarsToMicros(value);}catch{throw Error('settings.invalid');}}
@@ -12,6 +15,7 @@ const money=value=>'$'+microsToDollars(value);
 export default function SpendingSettings({account}){
   const {t}=useI18n(),api=useMemo(()=>{const client=createCloudClient();client.setAccount(account);return client;},[account]);
   useEffect(()=>{document.title=t('settings.documentTitle');},[t]);
+  const [section,setSection]=useState('account');
   const [user,setUser]=useState(null),[admin,setAdmin]=useState(null),[draft,setDraft]=useState(null),[adminDraft,setAdminDraft]=useState(null);
   const [busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[error,setError]=useState(''),epoch=useRef(0);
   const load=async()=>{
@@ -48,16 +52,16 @@ export default function SpendingSettings({account}){
     finally{if(current===epoch.current)setBusy(false);}
   }
   const field=(label,value,onChange)=><label className="spending-field"><span>{t(label)}</span><input inputMode="decimal" value={value} disabled={busy} onChange={event=>onChange(event.target.value)}/></label>;
-  return <main className="spending-page"><header><a href="/quick-chat">{t('settings.back')}</a><LanguageSwitcher/></header><h1>{t('settings.title')}</h1><p><a href="/quick-chat?preferences=takes">{t('takes.preferences')}</a></p>
+  return <div className="settings-shell"><StudioHeader account={account} active="settings"/><main className="spending-page"><nav className="settings-nav" aria-label={t('settings.title')}>{[['account','settings.account',UserRound],['defaults','settings.defaults',SlidersHorizontal],['assistants','assistants.title',Bot],['budget','settings.budget',Wallet],...(admin?[['admin','settings.admin',ShieldCheck]]:[])].map(([id,label,Icon])=><button key={id} className={section===id?'on':''} onClick={()=>setSection(id)}><Icon size={16}/>{t(label)}</button>)}</nav><div className="settings-panel"><h1>{t(section==='assistants'?'assistants.title':'settings.'+section)}</h1><section className="settings-account-card" hidden={section!=='account'}><div className="settings-identity"><span className="v2-avatar">{account?.slice(0,1).toLocaleUpperCase()||'·'}</span><strong>{account||t('settings.login')}</strong></div></section>{account&&<section className="settings-password-card" hidden={section!=='account'}><AccountPassword inline busy={busy}/></section>}<section className="settings-default-links" hidden={section!=='defaults'}><p>{t('settings.defaultsHelp')}</p><a className="settings-open-advanced" href="/quick-chat?preferences=takes">{t('takes.preferences')} →</a></section>
     {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{t(notice)}</p>}
-    {!user||!draft?<p role="status">{busy?t('settings.loading'):t('settings.login')}</p>:<>
-      <form onSubmit={event=>{event.preventDefault();void save();}}><section aria-labelledby="budget-settings-title"><h2 id="budget-settings-title">{t('settings.budget')}</h2>
+    {section==='budget'&&user&&<div className="settings-usage-card"><strong>{t('settings.usage',{amount:money(user.usage.projected_microusd)})}</strong>{user.value.daily_limit_microusd>0&&<progress max={user.value.daily_limit_microusd} value={Math.min(user.usage.projected_microusd,user.value.daily_limit_microusd)}/>}</div>}{!user||!draft?<p role="status">{busy?t('settings.loading'):t('settings.login')}</p>:<>
+      <form hidden={section!=='budget'} onSubmit={event=>{event.preventDefault();void save();}}><section id="my-budget" aria-labelledby="budget-settings-title"><h2 id="budget-settings-title">{t('settings.budget')}</h2>
         {field('settings.daily',draft.daily,value=>setDraft(previous=>({...previous,daily:value})))}
         {field('settings.ask',draft.ask,value=>setDraft(previous=>({...previous,ask:value})))}
         <p>{t('settings.zero')}</p><p>{t('settings.day')}</p><p>{t('settings.usage',{amount:money(user.usage.projected_microusd)})}</p>
       </section><button disabled={busy}>{t(busy?'settings.saving':'settings.save')}</button></form>
-      {admin&&adminDraft&&<form onSubmit={event=>{event.preventDefault();void save(true);}}><section aria-labelledby="admin-settings-title"><h2 id="admin-settings-title">{t('settings.admin')}</h2>
+      {admin&&adminDraft&&<form hidden={section!=='admin'} onSubmit={event=>{event.preventDefault();void save(true);}}><section id="my-admin" aria-labelledby="admin-settings-title"><h2 id="admin-settings-title">{t('settings.admin')}</h2>
         {[['settings.testDaily','testDaily'],['settings.hourly','hourly'],['settings.fleetHourly','fleetHourly'],['settings.idle','idle'],['settings.runtime','runtime']].map(([label,key])=><React.Fragment key={key}>{field(label,adminDraft[key],value=>setAdminDraft(previous=>({...previous,[key]:value})))}</React.Fragment>)}
         <p>{t('settings.adminHelp')}</p></section><button disabled={busy}>{t(busy?'settings.saving':'settings.save')}</button></form>}
-    </>}<AssistantConnections account={account} onLogin={()=>{window.location.href='/quick-chat';}}/><button disabled={busy} onClick={()=>void load()}>{t('settings.reload')}</button></main>;
+    </>}<div id="my-assistants" hidden={section!=='assistants'}><AssistantConnections account={account} onLogin={()=>{window.location.href='/quick-chat';}}/></div><button disabled={busy} onClick={()=>void load()}>{t('settings.reload')}</button></div></main></div>;
 }

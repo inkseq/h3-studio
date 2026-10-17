@@ -1,7 +1,8 @@
+import StudioHeader from './StudioHeader.jsx';
 import {AssistantBadge} from './AssistantConnections.jsx';
 import QuickChatPreferences from './QuickChatPreferences.jsx';
 import {checkedPreferences,createConversationFiles} from './quick-chat-takes.js';
-import {useI18n,LanguageSwitcher} from './i18n/I18nProvider.jsx';
+import {useI18n} from './i18n/I18nProvider.jsx';
 import React,{useEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react';
 import {Plus,ArrowUp,Settings2,Bot,Menu,X,RefreshCw,LogOut,Upload,Image,Video,Music} from 'lucide-react';
 import {useCloud} from './CloudStudio.jsx';
@@ -20,6 +21,7 @@ import {DeploymentProfileSelect} from './DeploymentProfile.jsx';
 import {draftKey,readDraft,saveDraft,draftSnapshot,carryDraft as carryPromptDraft} from './quick-chat-draft.js';
 import './quick-chat.css';
 import './i18n/workspace-language.css';
+import './quick-chat-v2.css';
 const quietly=promise=>promise.catch(()=>{}),date=value=>value?new Date(typeof value==='number'?value*1000:value).toLocaleString():'';
 const modeKey=(account,id)=>`yingxu:quick-chat:mode:${account||'anonymous'}:${id||'new'}`;
 function readMode(account,id,fallback='auto'){try{const value=localStorage.getItem(modeKey(account,id));return ['auto','fl','ref'].includes(value)?value:fallback;}catch{return fallback;}}
@@ -129,7 +131,8 @@ export default function QuickChatWorkspace(){
   }
   useEffect(()=>{if(new URLSearchParams(window.location.search).get('preferences')==='takes')setDialog('takes');},[]);
   const renderCard=card=><QuickChatCard key={card.id} card={card} state={state} controller={controller} takePreferences={takePreferences} onContinue={continueRevision} onUseResult={useResult} onUseMaterial={reuseMaterial}/>;
-  return <div className="qc-shell">
+  return <div className="qc-shell qc-v2">
+    <StudioHeader account={c.account} active="quick" accountMenu={<button className="qc-app-account" onClick={()=>setDialog('login')} aria-label={c.account||t('workspace.status32')}><span className="qc-avatar">{(c.account||t('workspace.status31')).slice(0,1).toUpperCase()}</span></button>}/>
     <a className="skip" href="#quick-chat-main">{t('workspace.copy7')}</a>
     {mobile&&<button className="qc-history-backdrop" aria-label={t('workspace.closeHistory')} onClick={()=>setMobile(false)}/>}
     <aside className={'qc-sidebar '+(mobile?'qc-sidebar-open':'')} aria-label={t('workspace.accessible1')}>
@@ -142,13 +145,13 @@ export default function QuickChatWorkspace(){
       <button className="qc-account" onClick={()=>setDialog('login')}><span className="qc-avatar">{(c.account||t('workspace.status31')).slice(0,1).toUpperCase()}</span><span><b>{c.account||t('workspace.status32')}</b><small>{c.account?t('workspace.status33'):t('workspace.status34')}</small></span></button>
     </aside>
     <main id="quick-chat-main" className="qc-main">
-      <header className="qc-header"><LanguageSwitcher/><a className="account-settings-link" href="/settings">{t('settings.title')}</a>
+      <header className="qc-header">
         <button className="qc-mobile-menu" aria-label={t('workspace.accessible2')} onClick={()=>setMobile(!mobile)}><Menu size={19}/></button>
         <span>{state.session?.title||t('workspace.status35')}<AssistantBadge createdBy={state.session?.created_by}/>{state.session?.version&&<button className="qc-rename" disabled={busy} aria-label={t('workspace.accessible3')} onClick={openRename}>{t('workspace.copy11')}</button>}</span>
-        <div><button className="qc-connection-state" onClick={()=>setDialog('status')} aria-label={t('workspace.accessible4')}>{connectionLabel}</button>{c.account&&<button disabled={busy} onClick={()=>quietly(controller.refresh())} aria-label={t('workspace.accessible5')}><RefreshCw size={15}/></button>}</div>
+        <div><button className="qc-connection-state" onClick={()=>setDialog('status')} aria-label={t('workspace.accessible4')} title={connectionLabel}><span className="qc-connection-dot" aria-hidden="true">●</span><span className="qc-connection-label">{connectionLabel}</span></button>{c.account&&<button disabled={busy} onClick={()=>quietly(controller.refresh())} aria-label={t('workspace.accessible5')}><RefreshCw size={15}/></button>}</div>
       </header>
       <div className="qc-thread" role="region" aria-label={t('workspace.accessible6')} tabIndex={0}>
-        <section className="qc-welcome" hidden={threadEntries.length>0}><span className="qc-eyebrow">FROM AN IDEA TO A SCENE</span><h1>{t('workspace.copy12')}</h1><p>{t('workspace.copy13')}</p><div className="qc-star" aria-hidden="true">✳</div></section>
+        <section className="qc-welcome" hidden={threadEntries.length>0}><h1>{t('workspace.copy12')}</h1><p>{t('workspace.copy13')}</p></section>
         {state.historyCursor&&<button disabled={busy} onClick={()=>quietly(controller.history())}>{t('workspace.copy14')}</button>}
         {threadEntries.map(entry=>entry.kind==='card'?renderCard(entry.record):(()=>{const turn=entry.record;return <article className="qc-turn" key={turn.id}>
           <div className="qc-user-message">{turn.text}</div>
@@ -170,16 +173,22 @@ export default function QuickChatWorkspace(){
           {availableMaterials.length>0&&<details className="qc-material-library"><summary>{at('adjunct.quickChatWorkspace.copy201')}{availableMaterials.length}{at('adjunct.quickChatWorkspace.copy202')}</summary><QuickChatMaterials availableModes={Object.fromEntries(['fl','ref'].map(mode=>[mode,modeAvailability(state.availability,state.capabilities,settings,mode).available]))} bindings={availableMaterials} recipe={recipe} client={controller.client} busy={busy} onChange={updateMaterials} onRoleChange={roleChange} onRemove={removeMaterial} compact showDisabled/></details>}
           {staged.length>0&&<div className="qc-staged">{staged.map(item=>{const Icon={image:Image,video:Video,audio:Music}[item.kind];return <div className="qc-staged-file" key={item.id}>{item.kind==='image'?<img src={item.url} alt={item.file.name}/>:<Icon size={22}/>}<div><b>{item.file.name}</b><small>{uploading.current?t('workspace.status56'):t('workspace.status57')}</small></div><button disabled={busy} aria-label={at('adjunct.quickChatWorkspace.copy203')+item.file.name} onClick={()=>{URL.revokeObjectURL(item.url);stagedRef.current=stagedRef.current.filter(file=>file.id!==item.id);setStaged(stagedRef.current);}}><X size={14}/></button></div>;})}{!uploading.current&&<button disabled={busy} onClick={()=>act(()=>uploadFiles())}><Upload size={14}/>{c.account?t('workspace.status23'):t('workspace.status58')}</button>}</div>}
           {recipe&&(visibleMaterials.length>0||modeIntent!=='auto')&&<div className="qc-mode-note"><span>{modeLabel}{at('adjunct.quickChatWorkspace.copy204')}{recipe.mode==='fl'?at('adjunct.quickChatWorkspace.copy205'):at('adjunct.quickChatWorkspace.copy206')}</span>{excluded.length>0&&<button disabled={busy||!modeAvailability(state.availability,state.capabilities,settings,recipe.mode==='fl'?'ref':'fl').available} onClick={()=>switchComposerMode(recipe.mode==='fl'?'ref':'fl')}>{at('adjunct.quickChatWorkspace.copy207')}{recipe.mode==='fl'?t('workspace.status14'):t('workspace.status13')}</button>}</div>}
-          {materialLimits&&<div className="qc-limits-summary">{materialLimits}</div>}
           {problems.length>0&&visibleMaterials.length>0&&<p className="qc-input-errors" role="alert">{problems.join(' ')}{at('adjunct.quickChatWorkspace.copy208')}</p>}
           {(localError||state.error)&&<p className="qc-input-errors" role="alert">{localError||state.error}</p>}
-          <textarea ref={textarea} className="qc-prompt" rows={2} maxLength={12000} aria-label={t('workspace.accessible7')} placeholder={t('workspace.accessible8')} value={prompt} onChange={event=>changePrompt(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();send(assistantEnabled?assistantMode:'none');}}}/>
+          <div className="qc-prompt-row"><textarea ref={textarea} className="qc-prompt" rows={2} maxLength={12000} aria-label={t('workspace.accessible7')} placeholder={t('workspace.accessible8')} value={prompt} onChange={event=>changePrompt(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();send(assistantEnabled?assistantMode:'none');}}}/>
+            <button className="qc-primary qc-send" disabled={busy||!prompt.trim()||!!pending} onClick={()=>send(assistantEnabled?assistantMode:'none')}>{busy?t('workspace.status59'):t('workspace.status60')}<ArrowUp size={15}/></button>
+          </div>
+          <details className="qc-composer-details"><summary>{t('availability.title')} · {t('deployment.title')}</summary>
           {c.account&&<GenerationAvailability snapshot={state.availability} capabilities={state.capabilities} settings={settings} operator={state.operatorAccess} onRefresh={()=>quietly(controller.refreshAvailability())} checking={state.availabilityChecking}/>}
-          <DeploymentProfileSelect capabilities={state.capabilities} value={settings.deployment_profile_id} mode={recipe?.mode} disabled={busy||!!pending} onChange={value=>setDraftSettings({...settings,deployment_profile_id:value})}/><div className="qc-composer-bottom">
+          <DeploymentProfileSelect capabilities={state.capabilities} value={settings.deployment_profile_id} mode={recipe?.mode} disabled={busy||!!pending} onChange={value=>setDraftSettings({...settings,deployment_profile_id:value})}/>          {materialLimits&&<div className="qc-limits-summary">{materialLimits}</div>}
+          </details><div className="qc-mode-options" aria-label={t('workspace.copy76')}>
+            <button type="button" disabled={busy||!!pending||!assistantEnabled} aria-pressed={assistantEnabled&&assistantMode!=='none'} aria-label={t('workspace.copy23')} title={t('workspace.copy23')} onClick={()=>setAssistantMode(assistantMode==='none'?'assist':'none')}><Bot size={14}/>{t('v2.assistant')} <span aria-hidden="true">{assistantMode!=='none'&&assistantEnabled?'●':'○'}</span></button>
+            {['auto','fl','ref'].map(mode=>{const effective=mode==='auto'?automaticMode(state.materials,state.capabilities,settings):mode,status=modeAvailability(state.availability,state.capabilities,settings,effective,undefined,locale);return <button type="button" key={mode} aria-pressed={modeIntent===mode} disabled={busy||!!pending||!state.session||!status.available} title={status.label} onClick={()=>mode==='auto'?act(()=>saveSelection(controller.getState().materials,{intent:'auto',validate:false})):switchComposerMode(mode)}>{t(mode==='auto'?'v2.auto':mode==='fl'?'v2.firstLast':'v2.reference')}</button>;})}
+          </div><div className="qc-composer-bottom">
             <label className="qc-model-label"><span>✧</span><select aria-label={t('workspace.accessible9')} value={model} disabled={busy} onChange={event=>{setModel(event.target.value);if(state.session)quietly(controller.patch({model_id:event.target.value}));}}>{CHAT_MODELS.map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
             <button className="qc-controls" disabled={busy||!recipe} onClick={openControls}><Settings2 size={14}/>{t('workspace.copy21')}</button>
             <span className="qc-settings-summary">{settingsSummary}</span>
-            <button className="qc-primary qc-send" disabled={busy||!prompt.trim()||!!pending} onClick={()=>send(assistantEnabled?assistantMode:'none')}>{busy?t('workspace.status59'):t('workspace.status60')}<ArrowUp size={15}/></button>
+
           </div>
         </div>
         <div className="qc-footnote">{t('workspace.copy22')}</div>
@@ -192,7 +201,7 @@ export default function QuickChatWorkspace(){
       <p>{assistantEnabled?at('adjunct.quickChatWorkspace.copy210'):at('adjunct.quickChatWorkspace.copy211')}</p>
       {modelSchema&&['image','video','audio'].some(kind=>modelSchema.inputs?.[kind]?.implemented===false)&&<p className="qc-muted">{at('adjunct.quickChatWorkspace.copy212')}{['image','video','audio'].filter(kind=>modelSchema.inputs?.[kind]?.implemented===false).map(kind=>({image:at('adjunct.quickChatWorkspace.copy213'),video:at('adjunct.quickChatWorkspace.copy214'),audio:at('adjunct.quickChatWorkspace.copy215')})[kind]).join('、')}{at('adjunct.quickChatWorkspace.copy216')}</p>}
       <p>{state.capabilities?.execution_enabled?t('workspace.status64'):t('workspace.status65')}</p>
-      {assistantEnabled&&<label className="qc-field">{t('workspace.copy23')}<select value={assistantMode} onChange={event=>setAssistantMode(event.target.value)}><option value="assist">{t('workspace.copy24')}</option><option value="discuss">{t('workspace.copy25')}</option></select></label>}
+      {assistantEnabled&&<label className="qc-field">{t('workspace.copy23')}<select value={assistantMode} onChange={event=>setAssistantMode(event.target.value)}><option value="none">{t('adjunct.option6')}</option><option value="assist">{t('workspace.copy24')}</option><option value="discuss">{t('workspace.copy25')}</option></select></label>}
       <p className="qc-muted">{t('workspace.copy134')}</p>
     </ChatDialog>}
     {dialog==='rename'&&<ChatDialog title={t('workspace.status68')} onClose={()=>setDialog(null)}><form onSubmit={event=>{event.preventDefault();saveRename();}}><label className="qc-field">{t('workspace.copy26')}<input aria-label={t('workspace.copy26')} value={rename} maxLength={160} required onChange={event=>setRename(event.target.value)}/></label>{renameError&&<p className="qc-error" role="alert">{renameError}</p>}<button className="qc-primary" disabled={busy||!rename.trim()}>{t('workspace.copy27')}</button></form></ChatDialog>}

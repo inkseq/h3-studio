@@ -1,3 +1,4 @@
+import {UserRound,MapPin,Box,Image as ImageIcon,Film,Music,Inbox} from 'lucide-react';
 import {TrashMenu,RenameDialog} from './UniversalTrash.jsx';
 import {WorkbenchTakes,WorkbenchCopies,WorkbenchDefaults} from './StoryboardWorkbench.jsx';
 import {AssistantBadge} from './AssistantConnections.jsx';
@@ -113,7 +114,7 @@ function ChooseFiles({kind, exclude, title, onPick, onFiles, onClose}) {const {t
 
 
 export function AssetLibrary({onPick, selectedShot, compact,collapsed=false,onToggle}) {const {t:tr,locale}=useI18n();const {TYPE_LABEL,VARIANT_LABEL,KIND_LABEL,MODE_LABEL,QUALITY_LABEL}=displayLabels(tr);
-const LIB_TABS = [['character', tr('storyboard.detail10')], ['location', tr('storyboard.detail11')], ['prop', tr('storyboard.copy88')], ['image', tr('storyboard.detail9')], ['video', tr('storyboard.detail12')], ['audio', tr('storyboard.copy51')], ['inbox', tr('storyboard.detail13')]];
+const LIB_TABS = [['character', tr('storyboard.detail10'),UserRound], ['location', tr('storyboard.detail11'),MapPin], ['prop', tr('storyboard.copy88'),Box], ['image', tr('storyboard.detail9'),ImageIcon], ['video', tr('storyboard.detail12'),Film], ['audio', tr('storyboard.copy51'),Music], ['inbox', tr('storyboard.detail13'),Inbox]];
 
   const {state, dispatch, db} = useStore();
   const [tab,setTab]=useState('character'),[q,setQ]=useState(''),[wide,setWide]=useState(false),[zoom,setZoom]=useState(null),[newProfileType,setNewProfileType]=useState(null);
@@ -132,9 +133,9 @@ const LIB_TABS = [['character', tr('storyboard.detail10')], ['location', tr('sto
         {onToggle?<button className="small ghost library-toggle" aria-label={collapsed?tr('storyboard.detail14'):tr('storyboard.detail15')} aria-expanded={!collapsed} onClick={onToggle} title={collapsed?tr('storyboard.detail14'):tr('storyboard.detail15')}>{collapsed?'›':'‹'}</button>:<button className="small ghost" onClick={() => setWide(!wide)}>{wide ? tr('storyboard.detail16') : tr('storyboard.detail17')}</button>}</div>
       <div className="row tight"><button className="small" onClick={()=>uploadInput.current.click()} disabled={state.busy}>{tr('storyboard.copy42')}</button><input ref={uploadInput} type="file" hidden multiple accept="image/*,video/*,audio/*" onChange={event=>{dispatch({type:'uploadFiles',files:[...event.target.files]});event.target.value='';}}/></div>
       <input className="lib-search" aria-label={tr('storyboard.detail72')} placeholder={tr('storyboard.detail73')} value={q} onChange={e => setQ(e.target.value)} />
-      <div className="lib-tabs">{LIB_TABS.map(([k, l], i) => (
+      <div className="lib-tabs">{LIB_TABS.map(([k, l,Icon], i) => (
         <React.Fragment key={k}>{i === 3 && <span className="lib-sep">{tr('storyboard.copy43')}</span>}
-          <button className={(tab === k ? 'on ' : '') + (k === 'inbox' && inbox.length ? 'alert' : '')} onClick={() => setTab(k)}>{l}<small>{count(k)}</small></button>
+          <button className={(tab === k ? 'on ' : '') + (k === 'inbox' && inbox.length ? 'alert' : '')} onClick={() => setTab(k)} title={l} aria-label={l} aria-pressed={tab===k}><Icon size={15}/><span>{l}</span><small>{count(k)}</small></button>
         </React.Fragment>))}</div>
       {selectedShot && <div className="lib-ctx">{tr('storyboard.mixed15',{title:selectedShot.title})}</div>}
 
