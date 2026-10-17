@@ -66,7 +66,7 @@ Read a shot's `/versions` for immutable recipes; old missing recipes stay unknow
 1. Identify the authorized session/project; read `capabilities.upload_constraints`. Preserve original media, with no silent cropping or transcoding.
 2. Save a stable client asset ID; upload once. An uncertain response requires finding/resuming that receipt, not uploading a replacement.
 3. Bind ready receipt IDs to intended card inputs, shots or character looks. Keep video soundtrack selection, audio and source ranges distinct.
-4. List assets within the original project/session. Global tagging, tag search, usage search and filing into global profiles await #238: report the limitation, never invent an endpoint or claim exhaustive search.
+4. Assets keep their original project/session ownership. Discover authorized projects' files with `GET /v1/library` filters and inspect current shot usage with `GET /v1/library/usage`. Tag/file through the original project's versioned actions; use explicit import for another story. See the [library contract](reference/api.md#project-scoped-library-and-explicit-imports-238).
 
 ```sh
 python scripts/sixnine.py --base-url ORIGIN --connection CONNECTION_ID upload --session SESSION --asset-id SAVED_CLIENT_ASSET_ID --file reference.png --output upload.json
