@@ -1,3 +1,4 @@
+import {WorkbenchTakes,WorkbenchCopies,WorkbenchDefaults} from './StoryboardWorkbench.jsx';
 import {AssistantBadge} from './AssistantConnections.jsx';
 import {useI18n} from './i18n/I18nProvider.jsx';
 import React, {useEffect, useMemo, useRef, useState} from 'react';
@@ -396,7 +397,7 @@ const dragItem = (active, db) => {
   return null;
 };
 
-export function ShotCard({shot, index, selected, onOpen}) {const {t:tr,locale}=useI18n();const {TYPE_LABEL,VARIANT_LABEL,KIND_LABEL,MODE_LABEL,QUALITY_LABEL}=displayLabels(tr);
+export function ShotCard({shot, index, selected, onOpen, checked=false, onSelect}) {const {t:tr,locale}=useI18n();const {TYPE_LABEL,VARIANT_LABEL,KIND_LABEL,MODE_LABEL,QUALITY_LABEL}=displayLabels(tr);
   const {state,db,dispatch}=useStore();
   const [picker, setPicker] = useState(null);
   const {setNodeRef, attributes, listeners, style, isOver, active} = useShotSortable(shot.id);
@@ -407,8 +408,8 @@ export function ShotCard({shot, index, selected, onOpen}) {const {t:tr,locale}=u
   const plan = item && (item.asset || item.profile) ? planDrop(shot, item, 'smart', db) : null;
   return (
     <div ref={setNodeRef} style={style} {...attributes} {...listeners} className={'card' + (selected ? ' selected' : '') + (plan ? ' drop-hot' : '')}
-      {...nativeDrop(files=>dispatch({type:'uploadFiles',files,target:{kind:'shot',shot:shot.id,slot:'smart'}}))} onClick={()=>onOpen(shot.id)} onContextMenu={e => { e.preventDefault(); setPicker({slot: 'smart', x: e.clientX, y: e.clientY}); }}>
-      <div className="card-media">
+      {...nativeDrop(files=>dispatch({type:'uploadFiles',files,target:{kind:'shot',shot:shot.id,slot:'smart'}}))} onClick={event=>onOpen(shot.id,event)} onContextMenu={e => { e.preventDefault(); setPicker({slot: 'smart', x: e.clientX, y: e.clientY}); }}>
+      <div className="card-media">{onSelect&&<button className="workbench-select" aria-label={tr('workbench.select')} aria-pressed={checked} onPointerDown={e=>e.stopPropagation()} onClick={e=>{e.stopPropagation();onSelect(e);}}>{checked?'●':'○'}</button>}
         <ShotThumb shot={shot} />
         <span className="card-no">{String(index + 1).padStart(2, '0')}</span>
         <span className="card-dur">{fmt(info.sec)}</span>
@@ -458,8 +459,9 @@ function SaveFrame({shot,version,onDone}){const {t:tr,locale}=useI18n();const {T
 export function ShotEditor({shotId, onClose, inline}) {const {t:tr,locale}=useI18n();const {TYPE_LABEL,VARIANT_LABEL,KIND_LABEL,MODE_LABEL,QUALITY_LABEL}=displayLabels(tr);
   const {state, dispatch, db} = useStore();
   const shot = state.shots.find(s => s.id === shotId);
+  const [copies,setCopies]=useState('1');
   const [preview, setPreview] = useState(null), [picker, setPicker] = useState(null), [saving, setSaving] = useState(false), [msg, setMsg] = useState(''),[deleting,setDeleting]=useState(false);
-  useEffect(() => { setPreview(null); setPicker(null); setSaving(false); setMsg(''); setDeleting(false); }, [shotId]);
+  useEffect(() => { setPreview(null); setPicker(null); setSaving(false); setMsg(''); setDeleting(false); setCopies('1'); }, [shotId,state.contextId]);
   if (!shot) return null;
   const index = state.shots.indexOf(shot);
   const info = expand(shot, db,locale);
@@ -486,16 +488,7 @@ export function ShotEditor({shotId, onClose, inline}) {const {t:tr,locale}=useI1
       {['done','succeeded'].includes(viewing?.status)&& (saving ? <SaveFrame shot={shot} version={viewing} onDone={t => { setSaving(false); setMsg(t); }} />
         : <div className="row tight"><StoryboardDownloads version={viewing} title={shot.title}/><button className="small" onClick={() => { setSaving(true); setMsg(''); }}>{tr('storyboard.copy81')}</button>{msg && <small className="okmsg">{msg}</small>}</div>)}
 
-      {shot.versions.length > 0 && <div className="versions">
-        {shot.versions.map(v => (
-          <button key={v.id} className={'ver' + (v.id === shot.chosen ? ' chosen' : '') + (v.id === viewing?.id ? ' viewing' : '')} onClick={() => ['done','succeeded'].includes(v.status)&&setPreview(v.id)}>
-            {['done','succeeded'].includes(v.status)?<StoryboardAssetImage asset={v.asset||v}/>:<div className="ver-wait">{v.status==='queued'?tr('storyboard.detail51'):Number.isFinite(v.progress)?`${Math.round(v.progress*100)}%`:v.message||({running:tr('storyboard.detail52'),collecting:tr('storyboard.detail53')}[v.status]||tr('storyboard.detail54'))}</div>}
-            <span>v{v.n} · {QUALITY_LABEL[v.quality]||tr('storyboard.detail55')}{v.sameSeedAs ? tr('storyboard.detail56') : ''}</span>
-            {v.id === shot.chosen && <em>{tr('storyboard.copy82')}</em>}
-            {v.status === 'queued' && <i className="x" onClick={e => { e.stopPropagation(); dispatch({type:'cancel',shot:shot.id,version:v.id,jobId:v.jobId}); }}>{tr('storyboard.copy83')}</i>}
-          </button>))}
-      </div>}
-
+      <WorkbenchTakes shot={shot}/><WorkbenchDefaults shotId={shot.id}/>
       <label className="field"><span>{tr('storyboard.copy84')}</span><textarea rows={2} value={shot.script} onChange={e => upd({script: e.target.value})} /></label>
       <label className="field"><span>{tr('storyboard.copy85')}</span>
         <textarea rows={2} value={shot.prompt} onChange={e => upd({prompt: e.target.value})} placeholder={tr('storyboard.finish11')} /></label>
@@ -569,11 +562,11 @@ export function ShotEditor({shotId, onClose, inline}) {const {t:tr,locale}=useI1
       </div>
       {shot.versions.length > 0 && <label className="check"><input type="checkbox" checked={shot.seedLock} onChange={e => upd({seedLock: e.target.checked})} />
         {tr('storyboard.mixed21')}</label>}
-      <div className="ed-actions">
-        <button className="primary" disabled={busy} onClick={()=>dispatch({type:'generate',ids:[shot.id]})}>
+      <WorkbenchCopies value={copies} onChange={setCopies} max={state.copiesMax}/><div className="ed-actions">
+        <button className="primary" disabled={busy||!Number.isInteger(Number(copies))||Number(copies)<1||Number(copies)>state.copiesMax} onClick={()=>dispatch({type:'workbenchGenerate',ids:[shot.id],copies:Number(copies)})}>
           {shot.versions.length?tr('storyboard.detail67'):tr('storyboard.detail68')} · {qualityLabel}</button>
         {chosen&&chosen.quality==='draft'&&<button disabled={busy} onClick={() => dispatch({type:'generate',ids:[shot.id],quality:'final',sourceVersion:chosen.id})}>{tr('storyboard.copy91')}</button>}
-        <button className="ghost danger" onClick={() => setDeleting(true)}>{tr('storyboard.copy92')}</button>
+
       </div>
       {picker && <AssetPicker shotId={shot.id} {...picker} onClose={() => setPicker(null)} />}
       {deleting&&<StoryboardDeleteDialog onConfirm={async()=>{const receipt=await dispatch({type:'remove',id:shot.id});if(receipt?.ok!==false)onClose?.();return receipt;}} onClose={()=>setDeleting(false)}/>}

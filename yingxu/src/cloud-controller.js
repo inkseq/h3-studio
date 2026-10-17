@@ -1,3 +1,4 @@
+import {storyboardCommandStore,verifyStoryboardReceipt} from './storyboard-commands.js';
 import {boundVideoRange,videoBinding} from './video-cut-model.js';
 import {createCloudClient,safeCloudPath} from './cloud-client.js';
 import {store as defaultStore} from './store.js';
@@ -237,10 +238,87 @@ export function createCloudController({store=defaultStore,client,storage=globalT
     try{const meta=await api.projectMeta(ctx.projectId);guard(ctx);if(meta.id!==ctx.projectId||!Number.isInteger(meta.version)||meta.version<1)throw Error('Invalid project metadata');emit({remoteUpdate:meta.version>current().workspace.serverVersion?meta:null,remoteUpdateError:''});return meta;}
     catch(error){try{guard(ctx);}catch{return;}emit({remoteUpdateError:'暂时无法检查云端新版本，当前编辑仍保留。'});}
   }
+  const storyboardPending=()=>storyboardCommandStore({storage,account:state.account,projectId:current().project.id});
+  // Prepare ordinary owned inputs only. Aggregate preflight remains the sole
+  // plan writer for this flow; inherited defaults are never written to a shot.
+  async function prepareWorkbenchInputs(shotIds, ctx) {
+    await reloadCapabilities(); guard(ctx);
+    for (const shotId of shotIds) {
+      assertNotHeld('shot_id', shotId);
+      if (readPending()[shotId] || readBatchPending()?.shotIds.includes(shotId)
+        || state.jobs.some(job => job.client_ref?.shot_id === shotId && activeJobStatuses.has(job.status))) throw Error('workbench.existingJob');
+      if (current().workspace.dirty) { await save(); guard(ctx); }
+      let preview = await api.generationDraft(ctx.projectId, shotId); guard(ctx);
+      const recipe = state.capabilities?.recipes?.find(row => row.id === preview.draft?.recipe_id);
+      const profile = state.capabilities?.deployment_profiles?.find(row => row.id === preview.draft?.deployment_profile_id);
+      if (!recipe || (preview.draft.deployment_profile_id && !profile)) throw Error('workbench.capabilities');
+      const mode = recipe.mode, support = profile ? profile.generation_support?.[mode] : recipe;
+      const shot = current().project.entities.find(row => row.id === shotId), b = shot?.data.storyboard;
+      if (!shot) throw Error('workbench.changed');
+      if (shot.data.h3?.explicitReferences) {
+        if (preview.project_version !== current().workspace.serverVersion || preview.issues?.length) throw Error('workbench.inputsInvalid');
+        continue;
+      }
+      if (!b) throw Error('workbench.changed');
+      if (b.continuePrevious && (mode === 'fl' || support?.input_support?.first_frame === true)) {
+        const project = current().project, chapter = project.entities.find(row => row.type === 'chapter' && chapterShots(project, row.id).some(row => row.id === shotId));
+        const shots = chapter ? chapterShots(project, chapter.id) : [], previous = shots[shots.findIndex(row => row.id === shotId) - 1];
+        const chosen = project.entities.find(row => row.id === previous?.data.selectedAssetId);
+        if (!chosen?.data.cloudArtifactId || chosen.type !== 'video') throw Error('workbench.previousMissing');
+        if (b.previousFrame?.selectedAssetId !== chosen.id || !project.entities.some(row => row.id === b.previousFrame?.frameAssetId)) {
+          const before = stableJSON(shot.data.storyboard);
+          const frameId = await extractFrame(chosen.data.cloudArtifactId, {position:'last'}); guard(ctx);
+          if (current().project.entities.find(row => row.id === previous.id)?.data.selectedAssetId !== chosen.id
+            || stableJSON(current().project.entities.find(row => row.id === shotId)?.data.storyboard) !== before) throw Error('workbench.changed');
+          if (!store.updateEntity(shotId, {data:{storyboard:{...b,previousFrame:{shotId:previous.id,selectedAssetId:chosen.id,frameAssetId:frameId}}}})) throw Error('workbench.changed');
+        }
+      }
+      const project = current().project, chapter = project.entities.find(row => row.type === 'chapter' && chapterShots(project, row.id).some(row => row.id === shotId));
+      const view = storyboardView(project, {chapterId:chapter?.id,capabilities:state.capabilities,jobs:state.jobs});
+      const projected = view.shots.find(row => row.id === shotId);
+      // Select uploads with the server's effective profile, without persisting it.
+      const effective = {...projected,mode:mode.toUpperCase(),quality:projected.quality,entity:{...projected.entity,data:{...projected.entity.data,h3:{...projected.entity.data.h3,deploymentProfileId:profile?.id}}}};
+      for (const id of new Set(expandStoryboard(effective,view,{forSync:true,effectiveProfile:profile,effectiveRecipe:recipe}).items.filter(item=>item.sent&&item.a?.id).map(item=>item.a.id))) {
+        if (!current().project.entities.find(row=>row.id===id)?.data.cloudAssetId) { await syncEntity(id); guard(ctx); }
+      }
+      if (current().workspace.dirty) { await save(); guard(ctx); }
+      preview = await api.generationDraft(ctx.projectId, shotId); guard(ctx);
+      if (preview.project_version !== current().workspace.serverVersion || preview.issues?.length) throw Error('workbench.inputsInvalid');
+    }
+  }
+  async function workbenchRead(suffix){requireCloud();const ctx=context();const value=await api.request(`/v1/projects/${encodeURIComponent(ctx.projectId)}/${suffix}`);guard(ctx);return value;}
+  async function workbenchCommand(kind,body,{recover=false}={}){
+    if(!recover)body=JSON.parse(JSON.stringify(body));
+    requireCloud();const ctx=context(),journal=storyboardPending();let op=journal.read();
+    if(!recover){if(op)throw Error('workbench.pending');if(kind==='preflight'){await prepareWorkbenchInputs(body.shot_ids,ctx);guard(ctx);body={...body,capabilities_version:state.capabilities?.capabilities_version};}if(['preferences','copies'].includes(kind)){op=journal.begin(kind,body);}else if(kind==='batch'){if(current().workspace.serverVersion!==body.projectVersion||current().workspace.dirty)throw Error('workbench.changed');op=journal.begin(kind,{client_project_id:ctx.projectId,plan_ids:[...body.plan_ids]});}else{if(body.expected_version!==undefined){if(current().workspace.dirty||body.expected_version!==current().workspace.serverVersion)throw Error('workbench.changed');}else if(current().workspace.dirty){await save();guard(ctx);}const frozen={...body,expected_version:body.expected_version??current().workspace.serverVersion};op=journal.begin(kind,frozen);}}
+    const beforeProject=JSON.parse(JSON.stringify(current().project));
+    if(!op||op.account!==ctx.account||op.projectId!==ctx.projectId)throw Error('workbench.pending');
+    const route=op.kind==='actions'?`/v1/projects/${encodeURIComponent(ctx.projectId)}/actions`:op.kind==='preflight'?`/v1/projects/${encodeURIComponent(ctx.projectId)}/storyboard/preflights`:op.kind==='batch'?'/v1/batches':op.kind==='preferences'?'/v1/storyboard/preferences':op.kind==='copies'?'/v1/quick-chat/preferences':null;
+    if(!route)throw Error('workbench.pendingCorrupt');
+    let value;try{value=await api.request(route,{method:['preferences','copies'].includes(op.kind)?'PATCH':'POST',body:op.body,key:op.key});guard(ctx);}catch(error){guard(ctx);const proof=typeof error.detail?.detail==='object'?error.detail.detail:error.detail;if(proof?.no_mutation_committed===true&&((proof.code==='document_version_conflict'&&((['actions','preflight'].includes(op.kind)&&proof.project_id===ctx.projectId)||(op.kind==='preferences'&&proof.resource==='storyboard_preferences')))||(op.kind==='copies'&&proof.code==='version_conflict'&&proof.resource==='quick_chat_preferences'))&&proof.request_hash===await digest(op.body)){guard(ctx);journal.clear(op);throw Error('workbench.closed');}throw error;}
+    if(op.kind==='preflight'){
+      if(typeof value?.id!=='string'||!value.id||value.project_id!==ctx.projectId||value.project_version!==op.body.expected_version||value.request_hash!==await digest(op.body)||op.receiptId&&op.receiptId!==value.id)throw Error('workbench.receipt');guard(ctx);
+      if(value.no_generation_submitted===true&&(value.closed_preflight===true||value.status==='pending')){journal.recordReceipt(op,value.id);return value;}
+      if(value.status!=='completed'||value.items?.some(item=>!item.plan))throw Error('workbench.receipt');
+    }
+    if(!verifyStoryboardReceipt(op,value))throw Error('workbench.receipt');
+    if(op.kind==='actions'){
+      const alreadyObserved=!current().workspace.dirty&&current().workspace.serverVersion===value.version&&stableJSON(current().project)===stableJSON(value.project);
+      if(!alreadyObserved&&(current().workspace.dirty||!store.applyCloudCommand(value.project,{account:ctx.account,expectedVersion:op.body.expected_version,version:value.version,expectedProject:beforeProject})))throw Error('workbench.changed');
+    }
+    journal.clear(op);if(op.kind==='batch'){try{await refreshJobs();}catch{/* The verified submission remains accepted even if its list refresh fails. */}}
+    return value;
+  }
   const unsubscribe=store.subscribe(installMedia);
   return {subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},getState:()=>state,
     async initialize(){const observedEpoch=epoch;try{const auth=await api.authConfig();if(observedEpoch!==epoch)return;emit({auth});await recheckSession({loadLists:true});}catch(error){if(observedEpoch===epoch)emit({error:error.message});}},
     recheckSession:()=>recheckSession(),checkRemoteVersion,
+    workbenchAbandonClosed:id=>action(async()=>{requireCloud();const ctx=context(),journal=storyboardPending(),op=journal.read();if(op?.kind!=='preflight')throw Error('workbench.pending');const value=await api.request(`/v1/projects/${encodeURIComponent(ctx.projectId)}/storyboard/preflights/${encodeURIComponent(id)}`);guard(ctx);if(op.receiptId!==id||value.id!==id||value.project_version!==op.body.expected_version||value.project_id!==ctx.projectId||value.closed_preflight!==true||value.no_generation_submitted!==true||value.request_hash!==await digest(op.body))throw Error('workbench.receipt');guard(ctx);journal.clear(op);return value;}),
+    workbenchCopies:async()=>{requireCloud();const ctx=context();const value=await api.request('/v1/quick-chat/preferences');guard(ctx);return value;},
+    workbenchPreferences:async()=>{requireCloud();const ctx=context();const value=await api.request('/v1/storyboard/preferences');guard(ctx);return value;},
+    workbenchRead: suffix=>workbenchRead(suffix),
+    workbenchCommand:(kind,body,options)=>action(()=>workbenchCommand(kind,body,options)),
+    workbenchPending:()=>state.account&&current().workspace.mode==='cloud'?storyboardPending().read():null,
     async readProjectActivity(options={}){requireCloud();const ctx=context();const result=await api.projectActivity(ctx.projectId,options);guard(ctx);return result;},
     login:(username,password)=>action(async()=>{const observedEpoch=epoch,result=await api.login(username,password);if(observedEpoch!==epoch)throw Error('登录期间会话已经改变，请重新核对。');const me=identity(result);if(typeof me!=='string')throw Error('登录响应缺少账户身份。');replaceIdentity(me);announceSession();await reloadProjects();await reloadCapabilities();offerResume();}),
     changePassword:(previous,next)=>action(async()=>{const ctx=accountContext();await api.changePassword(previous,next);guardAccount(ctx);rememberVisit({mode:'local'});replaceIdentity(null,'密码已修改，请重新登录；原 API Key 已撤销，云草稿仍按账户保留。');announceSession();}),
