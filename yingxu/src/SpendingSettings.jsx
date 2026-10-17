@@ -1,4 +1,4 @@
-import {microsToDollars,dollarsToMicros} from './money.js';
+import {microsToDollars,dollarsToMicros,formatMoneyMicros} from './money.js';
 import AssistantConnections from './AssistantConnections.jsx';
 import React,{useEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react';
 import {createCloudClient} from './cloud-client.js';
@@ -6,7 +6,7 @@ import {useI18n} from './i18n/I18nProvider.jsx';
 import {readBrowserLocale} from './i18n/locale.js';
 import StudioHeader from './StudioHeader.jsx';
 import AccountPassword from './AccountPassword.jsx';
-import {UserRound,SlidersHorizontal,Bot,Wallet,ShieldCheck,LogOut,RefreshCw} from 'lucide-react';
+import {UserRound,SlidersHorizontal,Bot,Wallet,ShieldCheck,LogOut,RefreshCw,BookOpen,ArrowUpRight} from 'lucide-react';
 import {cloudController as cloud} from './cloud-controller.js';
 import {useAppLocation,usePageActive} from './AppRouteCache.jsx';
 import {navigateApp} from './app-navigation.js';
@@ -16,7 +16,7 @@ import './v2/ops-adapter.css';
 
 const dollars=microsToDollars;
 function micros(value){try{return dollarsToMicros(value);}catch{throw Error('settings.invalid');}}
-const money=value=>'$'+microsToDollars(value);
+const money=formatMoneyMicros;
 const settingsSection=search=>{const value=new URLSearchParams(search).get('tab');return ({account:'account',defaults:'defaults',gen:'defaults',assistants:'assistants',agent:'assistants',budget:'budget',admin:'admin'})[value]||'account';};
 
 function BudgetAdministration({account}){const {t}=useI18n();
@@ -74,8 +74,8 @@ export default function SpendingSettings({account}){
     <aside className="snav" aria-label={t('settings.title')}>{[['account','settings.account',UserRound],['defaults','settings.defaults',SlidersHorizontal],['assistants','assistants.title',Bot],['budget','settings.budget',Wallet],...(admin?[['admin','settings.admin',ShieldCheck]]:[])].map(([id,label,Icon])=><button key={id} className={section===id?'on':''} aria-current={section===id?'page':undefined} onClick={()=>openSection(id)}><Icon size={16}/>{t(label)}</button>)}</aside>
     <section className="spanel"><div className="row tight"><h2>{t(section==='assistants'?'assistants.title':'settings.'+section)}</h2><div className="spacer"/><button className="small ghost" title={t('settings.reload')} aria-label={t('settings.reload')} disabled={busy} onClick={()=>void load()}><RefreshCw size={14}/></button></div>
       {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{t(notice)}</p>}
-      <div className="ops-tab-panel" hidden={section!=='account'}><div className="card-box"><div className="row tight"><span className="avatar big">{account?.slice(0,1).toLocaleUpperCase()||'·'}</span><div><b>{account||t('settings.login')}</b>{admin&&<small className="muted"> · {t('settings.admin')}</small>}<br/><small className="muted">{t('settings.account')}</small></div></div></div>{account&&<><div className="card-box"><AccountPassword inline busy={busy}/></div><button className="ghost danger" disabled={busy} onClick={()=>void cloud.logout().catch(failure=>setError(failure.message))}><LogOut size={15}/>{t('operator.status117')}</button></>}</div>
-      <div className="ops-tab-panel" hidden={section!=='defaults'}><p className="muted">{t('settings.defaultsHelp')}</p><div className="card-box"><div className="row tight"><SlidersHorizontal size={18}/><div><b>{t('takes.preferences')}</b><br/><small className="muted">{t('settings.defaults')}</small></div><div className="spacer"/><button className="primary" onClick={()=>navigateApp('/quick-chat?preferences=takes')}>{t('takes.preferences')}</button></div></div><button className="ghost" onClick={()=>navigateApp('/')}>{t('settings.storyDefaults')}</button></div>
+      <div className="ops-tab-panel" hidden={section!=='account'}><div className="card-box"><div className="row tight"><span className="avatar big">{account?.slice(0,1).toLocaleUpperCase()||<UserRound size={21}/>}</span><div><b>{account||t('settings.login')}</b>{admin&&<small className="muted"> · {t('settings.admin')}</small>}</div></div></div>{account&&<><div className="card-box"><AccountPassword inline busy={busy}/></div><button className="ghost danger" disabled={busy} onClick={()=>void cloud.logout().catch(failure=>setError(failure.message))}><LogOut size={15}/>{t('operator.status117')}</button></>}</div>
+      <div className="ops-tab-panel" hidden={section!=='defaults'}><p className="muted">{t('settings.defaultsHelp')}</p><div className="card-box"><div className="row tight"><SlidersHorizontal size={18}/><div><b>{t('takes.preferences')}</b><br/><small className="muted">{t('settings.defaults')}</small></div><div className="spacer"/><button className="primary" onClick={()=>navigateApp('/quick-chat?preferences=takes')}>{t('takes.preferences')}</button></div></div><a className="settings-story-defaults" href="/"><BookOpen size={17}/><span>{t('settings.storyDefaults')}</span><ArrowUpRight size={15}/></a></div>
       {(!user||!draft)&&section!=='account'&&section!=='defaults'&&section!=='assistants'&&<p role="status">{busy?t('settings.loading'):t('settings.login')}</p>}
       {user&&draft&&<form className="ops-tab-panel" hidden={section!=='budget'} onSubmit={event=>{event.preventDefault();void save();}}><div className="card-box"><div className="agent-spend"><span>{t('settings.usage',{amount:money(user.usage.projected_microusd)})}{user.value.daily_limit_microusd>0?' / '+money(user.value.daily_limit_microusd):''}</span>{user.value.daily_limit_microusd>0&&<i><b style={{width:Math.min(100,user.usage.projected_microusd/user.value.daily_limit_microusd*100)+'%'}}/></i>}</div></div><section id="my-budget" className="card-box limits" aria-label={t('settings.budget')}>
         {field('settings.daily',draft.daily,value=>setDraft(previous=>({...previous,daily:value})))}{field('settings.ask',draft.ask,value=>setDraft(previous=>({...previous,ask:value})))}

@@ -246,7 +246,9 @@ test('machine rows and detail share live amounts, elapsed, safe causes and disti
   assert.match(detail,/将在首个任务加载/);assert.match(detail,/progress aria-label="权重下载进度" max="100" value="50"/);
   const loading={...base,current_job:{job_id:'first-original-job'},preparation:progress({phase:'loading_model',model:{state:'loading'}})};
   const loadingRow=renderWithLocale(module,React.createElement(module.exports.MachineRow,{node:loading,profiles:[],onDetail:()=>{}}));
-  assert.match(loadingRow,/加载模型中/);assert.match(loadingRow,/正在加载模型到 GPU/);assert.match(loadingRow,/#first-or/);
+  assert.match(loadingRow,/加载模型中/);assert.match(loadingRow,/正在加载模型到 GPU/);assert.doesNotMatch(loadingRow,/#first-or/);
+  const loadingDetail=renderWithLocale(module,React.createElement(module.exports.MachineDetail,{node:loading,profiles:[],groups:[],onClose:()=>{}}));
+  assert.match(loadingDetail,/#first-or/);
   const missing=renderWithLocale(module,React.createElement(module.exports.MachinePreparation,{node:base,detail:true}));
   assert.match(missing,/下载量尚未上报/);assert.match(missing,/尚未收到详细准备观测/);assert.doesNotMatch(missing,/<progress/);
   const ended=renderWithLocale(module,React.createElement(module.exports.MachinePreparation,{node:{...node,state:'stopped'},detail:true}));

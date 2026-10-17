@@ -1,0 +1,17 @@
+/* Works-page refinements; story opening/creation still use the original commands. */
+.works-page .home-search-row>.item-menu{flex:none}
+.works-page .home-search-row>.item-menu>button{width:32px;height:32px;min-width:32px;min-height:32px;padding:0}
+.works-page :is(.v2-home-new,.v2-home-quick){height:36px;min-height:36px;box-sizing:border-box;padding-block:0;border-radius:var(--r-sm)}
+.works-page .v2-home-search{height:36px;min-height:36px;box-sizing:border-box}
+.works-page .v2-home-search input{height:100%;padding-block:0}
+.works-page .story-card{min-width:0;overflow:visible}
+.works-page .story-card>small.story-logline{font-weight:400;min-height:1.5em}
+.works-page .story-card>small.story-logline.muted{color:var(--muted)}
+.works-page .story-card>small.story-card-meta{display:flex;flex-direction:column;gap:4px;white-space:normal;overflow:visible;text-overflow:clip;line-height:1.5;min-height:3.4em;font-size:11px}
+.works-page .story-card-meta>time{white-space:nowrap;color:var(--muted);font-variant-numeric:tabular-nums}
+.story-library-create-form{display:flex;flex-direction:column;gap:18px}
+.story-library-create-form>label{display:flex;flex-direction:column;gap:8px;font-size:13px;color:var(--ink-2)}
+.story-library-create-form :is(input,select){height:36px;min-height:36px;margin:0;padding:0 10px;border:1px solid var(--line-2);border-radius:var(--r-sm);background:var(--surface);color:var(--ink)}
+.story-library-create-form>button.primary{height:36px;min-height:36px;align-self:flex-end;background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:600;padding:0 18px}
+.story-library-create-form>button.primary:disabled{opacity:.45}
+@media(max-width:760px){.works-page .home-head{gap:10px}.works-page .home-search-row{width:100%;min-width:0}.works-page :is(.v2-home-new,.v2-home-quick){width:36px;min-width:36px}.works-page .story-card>small.story-card-meta{font-size:11px}}

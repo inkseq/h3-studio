@@ -30,3 +30,10 @@ export function shotStatus(shot,position,locale='zh'){
 }
 export function segments(shots){let t=0;return shots.map(shot=>{const version=chosenVersion(shot),dur=Number.isFinite(version?.duration)&&version.duration>0?version.duration:Number.isFinite(shot.duration)&&shot.duration>0?shot.duration:0;const seg={shot,start:t,dur,version};t+=dur;return seg;});}
 export const totalDuration=shots=>segments(shots).reduce((sum,s)=>sum+s.dur,0);
+// Keep a useful wall above the dock; automatic sizing yields space to a long
+// chapter, while an explicit drag remains the user's preference on resize.
+export function storyboardDockLayout({height=0,content=0,manual=null}={}){
+  const compact=190,large=Math.max(compact,Math.round(height*.58)),max=Math.max(compact,height-140);
+  const automatic=Math.min(large,Math.max(compact,height-content-8));
+  return {compact,large,max,size:Math.min(max,manual===null?automatic:Math.max(110,manual))};
+}

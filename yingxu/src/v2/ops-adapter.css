@@ -116,7 +116,7 @@
 .ops-account-menu{position:relative}
 .ops-account-menu>summary{cursor:pointer;list-style:none}
 .ops-account-menu>div{position:absolute;right:0;top:100%;z-index:100;min-width:180px;padding:8px;border:1px solid var(--line-2);border-radius:var(--r);background:var(--surface);box-shadow:var(--shadow);display:flex;flex-direction:column;gap:5px}
-.ops-account-menu a{color:var(--ink);padding:7px 10px;text-decoration:none;min-height:34px;display:flex;align-items:center}
+.ops-account-menu a{color:var(--ink);padding:7px 10px;text-decoration:none;min-height:32px;display:flex;align-items:center}
 .trash-notice{position:fixed;bottom:76px;left:50%;transform:translateX(-50%);max-width:calc(100vw - 24px);padding:12px;background:var(--surface);color:var(--ink);z-index:130;border:1px solid var(--line-2);border-radius:var(--r);display:flex;flex-wrap:wrap;gap:10px;align-items:center;box-shadow:var(--shadow)}
 .item-menu{position:relative;display:inline-flex}
 .item-menu-popover{position:absolute;z-index:100;right:0;top:100%;display:flex;flex-direction:column;min-width:180px;max-width:min(280px,90vw);padding:6px;border:1px solid var(--line-2);border-radius:var(--r);background:var(--surface);box-shadow:var(--shadow)}
@@ -148,4 +148,38 @@
   .ops-adapter :is(.p4-dialog,.op-dialog)>footer>div{width:100%;justify-content:flex-end}
   .ops-adapter .p4-admin-machine{flex-wrap:wrap}
   .ops-adapter .p4-admin-machine>.mrow{flex-basis:100%}
+}
+
+/* #277: active real-service page controls use the same three sizes as the demo.
+   Machine rows are navigable content surfaces, not toolbar-sized buttons. */
+.ops-adapter button:not([data-ui-surface]),.ops-dialog button{height:32px;min-height:32px;box-sizing:border-box;padding-block:0;border-radius:var(--r-sm)}
+.ops-adapter button.small,.ops-adapter .mrow-actions button{height:28px;min-height:28px}
+.ops-adapter :is(.p4-page-launch,.assistant-connect,.snav button){height:36px;min-height:36px}
+.ops-adapter :is(input:not([type=checkbox]):not([type=radio]),select){height:36px;min-height:36px;box-sizing:border-box;padding-block:0}
+.ops-adapter .mrow-main[data-ui-surface]{height:auto;min-height:0;border-radius:0}
+.ops-adapter .settings-page{grid-template-columns:200px minmax(0,1fr)}
+.ops-adapter .settings-page .snav{top:0;align-self:start}
+.ops-adapter .settings-page .spanel{min-width:0}
+.ops-adapter .settings-page .limits{background:var(--surface);color:var(--ink);padding:16px}
+.ops-adapter .settings-page .limit-row b{color:var(--ink);font-weight:500}
+.ops-adapter .settings-story-defaults{display:flex;align-items:center;gap:10px;min-height:36px;padding:12px 16px;border:1px solid var(--line);border-radius:var(--r);color:var(--ink);background:var(--surface);text-decoration:none}
+.ops-adapter .settings-story-defaults>span{flex:1}
+.ops-adapter .assistant-badge{align-items:center;gap:4px}
+.ops-adapter .assistant-usage{color:var(--ink-2);font-size:12px}
+.ops-adapter .budget-cost-details>summary{cursor:pointer;color:var(--muted);font-size:12px;min-height:32px;align-content:center}
+.ops-adapter .ops-tools>summary{display:flex;align-items:center;gap:7px;min-height:32px;cursor:pointer;list-style:none}
+.ops-adapter .trash-tab-count{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.item-menu>button{width:28px;height:28px;min-width:28px;min-height:28px;padding:0;justify-content:center;border-radius:var(--r-sm)}
+.item-menu-popover button{height:32px;min-height:32px;padding:0 10px;align-items:center;gap:8px;display:flex}
+@media(max-width:760px){
+ .ops-adapter .settings-page{grid-template-columns:1fr}
+ .ops-adapter .settings-page .snav{position:static;flex-direction:row;overflow-x:auto}
+ .ops-adapter .snav button{flex:none;white-space:nowrap}
+ .ops-adapter :is(.trash-filter button,.ops-page-tabs button){height:36px;min-height:36px}
+ .ops-adapter .trash-row{grid-template-columns:20px 32px minmax(0,1fr) auto;gap:8px}
+ .ops-adapter .trash-row .left{grid-column:3;grid-row:2}
+ .ops-adapter .trash-row .acts{grid-column:4;grid-row:1 / span 2}
+ .ops-adapter .trash-row .thumb{width:32px;height:32px}
+ .ops-adapter .settings-page .limit-row{align-items:flex-start;flex-wrap:wrap}
+ .ops-adapter .limit-input{max-width:100%}
 }

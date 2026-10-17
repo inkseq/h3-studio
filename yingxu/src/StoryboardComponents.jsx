@@ -1,4 +1,4 @@
-import {UserRound,MapPin,Box,Image as ImageIcon,Film,Music,Inbox} from 'lucide-react';
+import {UserRound,MapPin,Box,Image as ImageIcon,Film,Music,Inbox,Circle,CheckCircle2,Play,Pause,SkipBack,Plus,X,Search,Maximize2,Check,Pin,AlertTriangle,ChevronLeft,ChevronRight,Upload} from 'lucide-react';
 import {TrashMenu,RenameDialog} from './UniversalTrash.jsx';
 import {WorkbenchTakes,WorkbenchCopies,WorkbenchDefaults} from './StoryboardWorkbench.jsx';
 import {AssistantBadge} from './AssistantConnections.jsx';
@@ -21,7 +21,7 @@ function displayLabels(tr){return {TYPE_LABEL:{character:tr('storyboard.labels.T
 
 export function AssetThumb({asset,size=36}) {const {t:tr,locale}=useI18n();const {TYPE_LABEL,VARIANT_LABEL,KIND_LABEL,MODE_LABEL,QUALITY_LABEL}=displayLabels(tr);
   if(!asset)return <span className="athumb empty" style={{width:size,height:size}}/>;
-  if(asset.kind==='audio')return <span className="athumb audio" style={{width:size,height:size}}>♪</span>;
+  if(asset.kind==='audio')return <span className="athumb audio" style={{width:size,height:size}}><Music size={16}/></span>;
   return <StoryboardAssetImage asset={asset} className="athumb" style={{width:size,height:size}}/>;
 }
 
@@ -30,15 +30,15 @@ function Tile({asset, used, onClick, onZoom, dragId, children}) {const {state,di
   return (
     <div ref={setNodeRef} {...listeners} {...attributes} className={'tile' + (isDragging ? ' dragging' : '') + (used ? ' used' : '')}
       onClick={onClick} title={tr('storyboard.mixed1',{p0:asset.name})}>
-      {asset.kind === 'audio' ? <div className="tile-audio">♪<small>{asset.seconds}s</small></div>
+      {asset.kind === 'audio' ? <div className="tile-audio"><Music size={22}/><small>{asset.seconds}s</small></div>
         : <StoryboardAssetImage asset={asset}/>}
-      {asset.kind === 'video' && <span className="tile-badge">▶ {asset.seconds}s</span>}
+      {asset.kind === 'video' && <span className="tile-badge"><Play size={11}/> {asset.seconds}s</span>}
       {asset.kind === 'audio' && <span className="tile-play"><PlayButton asset={asset} /></span>}
       {asset.source === 'ai' && <span className="tile-badge ai">AI</span>}
       {asset.source === 'frame' && <span className="tile-badge">{tr('storyboard.copy37')}</span>}
-      {used && <span className="tile-used">✓</span>}
+      {used && <span className="tile-used"><Check size={12}/></span>}
       <span className="tile-name">{asset.name}</span>
-      {onZoom && asset.kind !== 'audio' && <button className="tile-zoom" onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onZoom(asset); }}>⤢</button>}
+      {onZoom && asset.kind !== 'audio' && <button className="tile-zoom" onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onZoom(asset); }} aria-label={tr('storyboard.zoomAsset')}><Maximize2 size={14}/></button>}
       {asset.entity?.id&&<TrashMenu target={{kind:'entity',project_id:state.project.id,id:asset.entity.id}} onRename={()=>setRenaming(true)} onEdit={()=>setRenaming(true)}/> }
       {renaming&&<RenameDialog key={state.contextId+':'+asset.id} title={asset.name} onClose={()=>setRenaming(false)} onSave={async title=>{const result=await dispatch({type:'assetTitle',asset:asset.id,title});if(result?.ok===false||result===false)throw Error('trash.changed');}}/>}
       {children}
@@ -63,9 +63,9 @@ function ProfileCard({p, used, onOpen, onAdd}) {const {t:tr,locale}=useI18n();co
       onClick={onOpen} title={tr('storyboard.detail82')}>
       {cover?<AssetThumb asset={cover} size={38}/>:<span className="profile-initial" aria-hidden="true">{Array.from((p.name||tr('storyboard.detail4')).trim())[0]?.toLocaleUpperCase()||tr('storyboard.detail5')}</span>}
       <div className="pcard-body"><b title={p.name}>{p.name}</b>
-        <small>{p.type === 'prop' ? tr('storyboard.mixed4',{p0:count}) : tr('storyboard.mixed5',{p0:p.variants.length,p1:VARIANT_LABEL[p.type],p2:count})}{p.voices?.length ? tr('storyboard.mixed6',{p0:p.voices.length}) : ''}{p.ambient ? tr('storyboard.detail6') : ''}</small>
+        <small>{p.type!=='prop'&&<>{tr('storyboard.'+(p.type==='character'?(p.variants.length===1?'oneLook':'looks'):(p.variants.length===1?'oneVersion':'versions')),{count:p.variants.length})} · </>}{tr(count===1?'storyboard.oneImage':'storyboard.images',{count})}{!!p.voices?.length&&<> · {tr(p.voices.length===1?'storyboard.oneVoice':'storyboard.voices',{count:p.voices.length})}</>}{p.ambient ? tr('storyboard.detail6') : ''}</small>
         <small className="muted clip">{p.desc}</small></div>
-      {onAdd && <button className="pcard-open" aria-label={used?tr('storyboard.mixed7',{p0:p.name}):tr('storyboard.mixed8',{p0:p.name})} title={used?tr('storyboard.detail7'):tr('storyboard.detail8')} onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onAdd(); }}>{used ? '✓' : '＋'}</button>}
+      {onAdd && <button className="pcard-open" aria-label={used?tr('storyboard.mixed7',{p0:p.name}):tr('storyboard.mixed8',{p0:p.name})} title={used?tr('storyboard.detail7'):tr('storyboard.detail8')} onPointerDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); onAdd(); }}>{used ? <Check size={14}/> : <Plus size={14}/>}</button>}
       <TrashMenu target={{kind:'entity',project_id:state.project.id,id:p.id}} onRename={onOpen} onEdit={onOpen}/>
       {fileOver && <div className={'drop-hint' + (dragged.kind === 'video' || (dragged.kind === 'audio' && p.type === 'prop') ? ' warn' : '')}>{hint}</div>}
     </div>
@@ -92,7 +92,7 @@ function ChooseFiles({kind, exclude, title, onPick, onFiles, onClose}) {const {t
   return createPortal(
     <div className="sb-portal choose-overlay" onClick={onClose} onKeyDown={e => e.key === 'Escape' && onClose()}>
       <div className="choose" onClick={e => e.stopPropagation()} {...nativeDrop(files => { onFiles(files); onClose(); })}>
-        <div className="picker-head"><b>{title}</b><button className="x" onClick={onClose}>×</button></div>
+        <div className="picker-head"><b>{title}</b><button className="x" onClick={onClose} aria-label={tr('storyboard.copy58')}><X size={14}/></button></div>
         <div className="row tight">
           <input className="lib-search" autoFocus placeholder={tr('storyboard.finish1')} value={q} onChange={e => setQ(e.target.value)} />
           <button className="primary" onClick={() => input.current.click()}>{tr('storyboard.copy38')}</button>
@@ -129,9 +129,9 @@ const LIB_TABS = [['character', tr('storyboard.detail10'),UserRound], ['location
   const isProfileTab = ['character', 'location', 'prop'].includes(tab);
   return (
     <aside className={'library' + (wide ? ' wide' : '') + (compact ? ' compact' : '')+(collapsed?' collapsed':'')} aria-label={tr('storyboard.copy41')}>
-      <div className="lib-head">{!collapsed&&<><b>{tr('storyboard.copy41')}</b><small>{tr('storyboard.mixed14',{profiles:state.profiles.length,assets:state.assets.length})}</small></>}
-        {onToggle?<button className="small ghost library-toggle" aria-label={collapsed?tr('storyboard.detail14'):tr('storyboard.detail15')} aria-expanded={!collapsed} onClick={onToggle} title={collapsed?tr('storyboard.detail14'):tr('storyboard.detail15')}>{collapsed?'›':'‹'}</button>:<button className="small ghost" onClick={() => setWide(!wide)}>{wide ? tr('storyboard.detail16') : tr('storyboard.detail17')}</button>}</div>
-      <div className="row tight"><button className="small" onClick={()=>uploadInput.current.click()} disabled={state.busy}>{tr('storyboard.copy42')}</button><input ref={uploadInput} type="file" hidden multiple accept="image/*,video/*,audio/*" onChange={event=>{dispatch({type:'uploadFiles',files:[...event.target.files]});event.target.value='';}}/></div>
+      <div className="lib-head">{!collapsed&&<><b>{tr('storyboard.copy41')}</b><small>{tr('storyboard.libraryCounts',{profiles:tr(state.profiles.length===1?'storyboard.oneProfile':'storyboard.profiles',{count:state.profiles.length}),assets:tr(state.assets.length===1?'storyboard.oneFile':'storyboard.files',{count:state.assets.length})})}</small></>}
+        {onToggle?<button className="small ghost library-toggle" aria-label={collapsed?tr('storyboard.detail14'):tr('storyboard.detail15')} aria-expanded={!collapsed} onClick={onToggle} title={collapsed?tr('storyboard.detail14'):tr('storyboard.detail15')}>{collapsed?<ChevronRight size={15}/>:<ChevronLeft size={15}/>}</button>:<button className="small ghost" onClick={() => setWide(!wide)}>{wide ? tr('storyboard.detail16') : tr('storyboard.detail17')}</button>}</div>
+      <div className="row tight"><button className="small" onClick={()=>uploadInput.current.click()} disabled={state.busy}><Upload size={14}/>{tr('storyboard.copy42')}</button><input ref={uploadInput} type="file" hidden multiple accept="image/*,video/*,audio/*" onChange={event=>{dispatch({type:'uploadFiles',files:[...event.target.files]});event.target.value='';}}/></div>
       <input className="lib-search" aria-label={tr('storyboard.detail72')} placeholder={tr('storyboard.detail73')} value={q} onChange={e => setQ(e.target.value)} />
       <div className="lib-tabs">{LIB_TABS.map(([k,l,Icon])=>(
         <button key={k} type="button" className={'sb-library-tab'+(tab===k?' on':'')+(k==='inbox'&&inbox.length?' alert':'')} onClick={()=>setTab(k)} title={l} aria-label={l} aria-pressed={tab===k}><Icon size={13}/><span>{l}</span><small>{count(k)}</small></button>
@@ -143,7 +143,7 @@ const LIB_TABS = [['character', tr('storyboard.detail10'),UserRound], ['location
           <ProfileCard key={p.id} p={p} used={usedP.has(p.id)} onOpen={() => dispatch({type: 'openProfile', id: p.id})}
             onAdd={selectedShot ? () => onPick({profile: p.id}) : null} />))}</div>
         <button className="small add-profile" disabled={state.busy} onClick={() => setNewProfileType(tab)}>
-          {tr('storyboard.mixed16',{kind:TYPE_LABEL[tab]})}</button>
+          <Plus size={14}/>{tr('storyboard.mixed16',{kind:TYPE_LABEL[tab]})}</button>
         <div className="lib-tip">{tab === 'character' ? tr('storyboard.detail18')
           : tab === 'location' ? tr('storyboard.detail19') : tr('storyboard.detail20')}
           {tr('storyboard.mixed20')}</div>
@@ -154,7 +154,7 @@ const LIB_TABS = [['character', tr('storyboard.detail10'),UserRound], ['location
           <Tile key={a.id} asset={a} used={usedA.has(a.id)} onClick={() => onPick?.({asset: a.id})} onZoom={setZoom} />)}</div>}
 
       {tab === 'inbox' && <div className="inbox">
-        <button className="small" onClick={()=>uploadInput.current.click()} disabled={state.busy}>{tr('storyboard.copy44')}</button>
+        <button className="small" onClick={()=>uploadInput.current.click()} disabled={state.busy}><Upload size={14}/>{tr('storyboard.copy44')}</button>
         {!inbox.length && <p className="muted">{tr('storyboard.copy45')}</p>}
         {inbox.map(a => <InboxRow key={a.id} a={a} />)}
       </div>}
@@ -213,7 +213,7 @@ function VoiceSection({p}) {const {t:tr,locale}=useI18n();const {TYPE_LABEL,VARI
             <label className="check"><input type="radio" checked={p.voice === v.asset} onChange={() => dispatch({type: 'profile', id: p.id, patch: {voice: v.asset}})} />{tr('storyboard.copy56')}</label>
             <span className="clip"><b>{a.name}</b> · {Number.isFinite(a.seconds)?a.seconds+tr('storyboard.detail22'):tr('storyboard.detail23')}{a.source === 'upload' ? tr('storyboard.detail24') : ''}</span>
             <PlayButton asset={a} label={tr('storyboard.finish2')} />
-            <button className="x" title={tr('storyboard.finish3')} onClick={() => dispatch({type: 'removeVoice', pid: p.id, asset: v.asset})}>×</button>
+            <button className="x" title={tr('storyboard.finish3')} onClick={() => dispatch({type: 'removeVoice', pid: p.id, asset: v.asset})} aria-label={tr('storyboard.remove')}><X size={14}/></button>
           </div>
           <div className="row tight">
             <span className="muted">{tr('storyboard.copy57')}</span>
@@ -247,14 +247,14 @@ export function ProfileEditor() {const {t:tr,locale}=useI18n();const {TYPE_LABEL
       <section className="profile" onClick={e => e.stopPropagation()}>
         <header className="ed-head">
           <div><small>{tr('storyboard.finish17',{kind:TYPE_LABEL[p.type]})}</small><input className="ed-title" aria-label={tr('storyboard.finish5')} value={p.name} onChange={e => dispatch({type: 'profile', id: p.id, patch: {name: e.target.value}})} /></div>
-          <TrashMenu target={{kind:'entity',project_id:state.project.id,id:p.id}}/><button className="x big" onClick={close}>×</button>
+          <TrashMenu target={{kind:'entity',project_id:state.project.id,id:p.id}}/><button className="x big" onClick={close} aria-label={tr('storyboard.copy58')}><X size={14}/></button>
         </header>
         <label className="field"><span>{p.type === 'character' ? tr('storyboard.detail26') : p.type === 'location' ? tr('storyboard.detail27') : tr('storyboard.detail28')}{tr('storyboard.finish24')}</span>
           <textarea rows={2} value={p.desc} onChange={e => dispatch({type: 'profile', id: p.id, patch: {desc: e.target.value}})} /></label>
 
         {p.type !== 'prop' && <div className="vtabs">{p.variants.map(x => (
           <button key={x.id} className={x.id === v.id ? 'on' : ''} onClick={() => setVid(x.id)}>{x.name}{x.id === p.def && <em>{tr('storyboard.copy59')}</em>}<small>{x.images.length}</small></button>))}
-          <button className="ghost" disabled={state.busy} onClick={() => setNewVariant(true)}>＋ {VARIANT_LABEL[p.type]}</button>
+          <button className="ghost" disabled={state.busy} onClick={() => setNewVariant(true)}><Plus size={14}/>{VARIANT_LABEL[p.type]}</button>
         </div>}
 
         <div className="variant">
@@ -273,7 +273,7 @@ export function ProfileEditor() {const {t:tr,locale}=useI18n();const {TYPE_LABEL
                 <StoryboardAssetImage asset={a}/>
                 {i === 0 ? <em>{tr('storyboard.copy64')}</em> : <button className="small" onClick={() => dispatch({type: 'coverImage', pid: p.id, vid: v.id, asset: id})}>{tr('storyboard.copy65')}</button>}
                 {a.source === 'ai' && <span className="tile-badge ai">AI</span>}
-                <button className="x" onClick={() => dispatch({type: 'unfileImage', pid: p.id, vid: v.id, asset: id})}>×</button>
+                <button className="x" onClick={() => dispatch({type: 'unfileImage', pid: p.id, vid: v.id, asset: id})} aria-label={tr('storyboard.remove')}><X size={14}/></button>
                 <small className="clip">{a.name}</small>
               </div>); })}
             <div className="vimg add" onClick={() => setChoose(true)}>{tr('storyboard.copy63')}<br /><small>{tr('storyboard.copy66')}</small></div>
@@ -290,7 +290,7 @@ export function ProfileEditor() {const {t:tr,locale}=useI18n();const {TYPE_LABEL
             <option value="">{tr('storyboard.copy71')}</option>{audios.map(a => <option key={a.id} value={a.id}>{a.name}（{Number.isFinite(a.seconds)?a.seconds+tr('storyboard.detail22'):tr('storyboard.detail23')}）</option>)}</select>
           {p.ambient&&<PlayButton asset={db.asset(p.ambient)}/>}<button className="small" onClick={()=>setAmbientChoose(true)}>{tr('storyboard.copy72')}</button><small className="muted">{tr('storyboard.copy73')}</small></label>}
 
-        <div className="usedin"><b>{tr('storyboard.finish18',{count:usedIn.length})}</b>{usedIn.map(s => <span key={s.id} className="chip">{s.title}</span>)}
+        <div className="usedin"><b>{tr(usedIn.length===1?'storyboard.usedInOne':'storyboard.finish18',{count:usedIn.length})}</b>{usedIn.map(s => <span key={s.id} className="chip">{s.title}</span>)}
           {usedIn.length > 0 && <small className="muted">{tr('storyboard.copy74')}</small>}</div>
         {ambientChoose&&<ChooseFiles kind="audio" title={tr('storyboard.finish26',{name:p.name})} exclude={new Set()} onPick={asset=>{dispatch({type:'profile',id:p.id,patch:{ambient:asset}});setAmbientChoose(false);}} onFiles={files=>dispatch({type:'uploadFiles',files,target:{kind:'ambient',pid:p.id}})} onClose={()=>setAmbientChoose(false)}/>}
         {choose && <ChooseFiles kind="image" title={tr('storyboard.mixed11',{p0:p.name,p1:v.name})} exclude={new Set(v.images)}
@@ -344,7 +344,7 @@ const SLOT_TITLE = {start: tr('storyboard.detail33'), end: tr('storyboard.detail
     <div ref={box} className="sb-portal picker" style={{left, top}} role="dialog" aria-label={SLOT_TITLE[slot]}
       onContextMenu={e => { e.preventDefault(); e.stopPropagation(); }} onClick={e => e.stopPropagation()} onPointerDown={e => e.stopPropagation()}
       onKeyDown={e => { e.stopPropagation(); if (e.key === 'Escape') onClose(); }}>
-      <div className="picker-head"><b>{SLOT_TITLE[slot]}</b><small>「{shot.title}」</small><button className="x" onClick={onClose}>×</button></div>
+      <div className="picker-head"><b>{SLOT_TITLE[slot]}</b><small>「{shot.title}」</small><button className="x" onClick={onClose} aria-label={tr('storyboard.copy58')}><X size={14}/></button></div>
       <input ref={input} className="lib-search" placeholder={tr('storyboard.finish7')} value={q} onChange={e => setQ(e.target.value)}
         onKeyDown={e => { if (e.key === 'Enter' && results[0]) pick(results[0]); }} />
       <div className="lib-tabs">{tabs.map(k => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{label(k)}</button>)}</div>
@@ -353,12 +353,12 @@ const SLOT_TITLE = {start: tr('storyboard.detail33'), end: tr('storyboard.detail
         {profiles.map(p => { const c = coverOf(db, p, p.def); return (
           <button key={p.id} className={'tile prof ' + p.type + (usedP.has(p.id) ? ' used' : '')} onClick={() => pick({profile: p})} title={p.desc}>
             {c ? <StoryboardAssetImage asset={c}/> : <div className="tile-audio">{TYPE_LABEL[p.type]}</div>}
-            <span className="tile-badge">{TYPE_LABEL[p.type]}</span>{usedP.has(p.id) && <span className="tile-used">✓</span>}
+            <span className="tile-badge">{TYPE_LABEL[p.type]}</span>{usedP.has(p.id) && <span className="tile-used"><Check size={12}/></span>}
             <span className="tile-name">{p.name}</span></button>); })}
         {files.map(a => (
           <button key={a.id} className={'tile' + (usedA.has(a.id) ? ' used' : '')} onClick={() => pick({asset: a})} title={a.name}>
-            {a.kind === 'audio' ? <div className="tile-audio">♪<small>{a.seconds}s</small></div> : <StoryboardAssetImage asset={a}/>}
-            {a.kind === 'video' && <span className="tile-badge">▶ {a.seconds}s</span>}{usedA.has(a.id) && <span className="tile-used">✓</span>}
+            {a.kind === 'audio' ? <div className="tile-audio"><Music size={22}/><small>{a.seconds}s</small></div> : <StoryboardAssetImage asset={a}/>}
+            {a.kind === 'video' && <span className="tile-badge"><Play size={11}/> {a.seconds}s</span>}{usedA.has(a.id) && <span className="tile-used"><Check size={12}/></span>}
             <span className="tile-name">{a.name}</span></button>))}
       </div>
       {!results.length && <p className="muted">{tr('storyboard.copy76')}</p>}
@@ -374,14 +374,14 @@ export function useShotSortable(id) {
 }
 
 export function ModeChip({info}) {const {t:tr,locale}=useI18n();const {TYPE_LABEL,VARIANT_LABEL,KIND_LABEL,MODE_LABEL,QUALITY_LABEL}=displayLabels(tr);
-  return <span className={'mode ' + info.mode.toLowerCase()} title={info.machine}>{MODE_LABEL[info.mode]||info.kind}</span>;
+  return <span className={'mode ' + info.mode.toLowerCase()} title={MODE_LABEL[info.mode]||info.kind}>{MODE_LABEL[info.mode]||info.kind}</span>;
 }
 const Pill = ({status}) => <span className={'pill ' + status.tone}>{status.label}</span>;
 function Progress({v}) {const {t:tr,locale}=useI18n();const {TYPE_LABEL,VARIANT_LABEL,KIND_LABEL,MODE_LABEL,QUALITY_LABEL}=displayLabels(tr);
   if(!v||!Number.isFinite(v.progress)||!['generating','running','queued'].includes(v.status))return null;
   return <div className="progress"><i style={{width: `${Math.round(v.progress * 100)}%`}} /></div>;
 }
-export function ShotThumb({shot}){const {t:tr,locale}=useI18n();const {TYPE_LABEL,VARIANT_LABEL,KIND_LABEL,MODE_LABEL,QUALITY_LABEL}=displayLabels(tr);const v=chosenVersion(shot);return v?<StoryboardAssetImage asset={v.asset||v} className="sthumb"/>:<div className="sthumb empty" role="img" aria-label={tr('storyboard.detail75')}><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m9 14 3-3 5 5M7 8h.01"/></svg></div>;}
+export function ShotThumb({shot}){const {t:tr,locale}=useI18n();const {TYPE_LABEL,VARIANT_LABEL,KIND_LABEL,MODE_LABEL,QUALITY_LABEL}=displayLabels(tr);const v=chosenVersion(shot);return v?<StoryboardAssetImage asset={v.asset||v} className="sthumb" retryable/>:<div className="sthumb empty" role="img" aria-label={tr('storyboard.detail75')}><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m9 14 3-3 5 5M7 8h.01"/></svg></div>;}
 
 export function WhoChips({shot, small}) {const {t:tr,locale}=useI18n();const {TYPE_LABEL,VARIANT_LABEL,KIND_LABEL,MODE_LABEL,QUALITY_LABEL}=displayLabels(tr);
   const {db} = useStore();
@@ -401,7 +401,7 @@ const dragItem = (active, db) => {
   return null;
 };
 
-export function ShotCard({shot, index, selected, onOpen, checked=false, onSelect}) {const {t:tr,locale}=useI18n();const {TYPE_LABEL,VARIANT_LABEL,KIND_LABEL,MODE_LABEL,QUALITY_LABEL}=displayLabels(tr);
+export function ShotCard({shot, index, selected, onOpen, checked=false, picking=false, onSelect}) {const {t:tr,locale}=useI18n();const {TYPE_LABEL,VARIANT_LABEL,KIND_LABEL,MODE_LABEL,QUALITY_LABEL}=displayLabels(tr);
   const {state,db,dispatch}=useStore();
   const [picker, setPicker] = useState(null);
   const {setNodeRef, attributes, listeners, style, isOver, active} = useShotSortable(shot.id);
@@ -411,9 +411,9 @@ export function ShotCard({shot, index, selected, onOpen, checked=false, onSelect
   const item = isOver ? dragItem(active, db) : null;
   const plan = item && (item.asset || item.profile) ? planDrop(shot, item, 'smart', db) : null;
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners} className={'card' + (selected ? ' selected' : '') + (plan ? ' drop-hot' : '')}
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners} className={'card' + (selected ? ' selected' : '') + (picking ? ' picking' : '') + (plan ? ' drop-hot' : '')}
       {...nativeDrop(files=>dispatch({type:'uploadFiles',files,target:{kind:'shot',shot:shot.id,slot:'smart'}}))} onClick={event=>onOpen(shot.id,event)} onContextMenu={e => { e.preventDefault(); setPicker({slot: 'smart', x: e.clientX, y: e.clientY}); }}>
-      <div className="card-media">{onSelect&&<button className="workbench-select" aria-label={tr('workbench.select')} aria-pressed={checked} onPointerDown={e=>e.stopPropagation()} onClick={e=>{e.stopPropagation();onSelect(e);}}>{checked?'●':'○'}</button>}
+      <div className="card-media">{onSelect&&<button className={'workbench-select'+(checked?' checked':'')} aria-label={tr('workbench.select')} aria-pressed={checked} onPointerDown={e=>e.stopPropagation()} onClick={e=>{e.stopPropagation();onSelect(e);}}>{checked?<CheckCircle2 size={18}/>:<Circle size={18}/>}</button>}
         <ShotThumb shot={shot} />
         <span className="card-no">{String(index + 1).padStart(2, '0')}</span>
         <span className="card-dur">{fmt(info.sec)}</span>
@@ -445,8 +445,8 @@ function Slot({id,label,hint,children,onClear,onPick,onFiles,className=''}) {con
   const open = e => { e.preventDefault(); onPick?.(e); };
   return (
     <div ref={setNodeRef} {...(onFiles?nativeDrop(onFiles):{})} className={'slot '+className + (hot ? ' drop-hot' : '')} onContextMenu={open} title={tr('storyboard.finish8')}>
-      <div className="slot-label">{label}<span>{onPick && <button className="x" title={tr('storyboard.finish9')} onClick={open}>⌕</button>}
-        {onClear && <button className="x" onClick={onClear}>×</button>}</span></div>
+      <div className="slot-label">{label}<span>{onPick && <button className="x" title={tr('storyboard.finish9')} onClick={open}><Search size={14}/></button>}
+        {onClear && <button className="x" onClick={onClear} aria-label={tr('storyboard.remove')}><X size={14}/></button>}</span></div>
       {children || <div className="slot-empty clickable" onClick={open}>{hint}<br /><small>{tr('storyboard.copy77')}</small></div>}
     </div>
   );
@@ -481,7 +481,7 @@ export function ShotEditor({shotId, onClose, inline,wide,onWide}) {const {t:tr,l
     <section className={'editor' + (inline ? ' inline' : '')+(wide?' wide':'')}>
       <header className="ed-head">
         <div><small>{tr('storyboard.finish19',{number:String(index+1).padStart(2,'0')})}</small><input className="ed-title" aria-label={tr('storyboard.finish10')} value={shot.title} onChange={e => upd({title: e.target.value})} /></div>
-        <TrashMenu target={{kind:'entity',project_id:state.project.id,id:shot.id}} onRename={()=>document.querySelector('.ed-title')?.focus()}/>{onClose && <button className="x big" aria-label={tr('storyboard.closeEditor')} onClick={onClose}>×</button>}
+        <TrashMenu target={{kind:'entity',project_id:state.project.id,id:shot.id}} onRename={()=>document.querySelector('.ed-title')?.focus()}/>{onClose && <button className="x big" aria-label={tr('storyboard.closeEditor')} onClick={onClose}><X size={14}/></button>}
       </header>
 
       <div className="ed-media"><div className="ed-preview">
@@ -491,7 +491,7 @@ export function ShotEditor({shotId, onClose, inline,wide,onWide}) {const {t:tr,l
           <button className="primary use" onClick={() => dispatch({type: 'choose', shot: shot.id, version: viewing.id})}>{tr('storyboard.finish20',{number:chosen?.n})}</button>}
       </div>
       {['done','succeeded'].includes(viewing?.status)&& (saving ? <SaveFrame shot={shot} version={viewing} onDone={t => { setSaving(false); setMsg(t); }} />
-        : <div className="row tight"><StoryboardDownloads version={viewing} title={shot.title}/><button className="small" onClick={() => { setSaving(true); setMsg(''); }}>{tr('storyboard.copy81')}</button>{msg && <small className="okmsg">{msg}</small>}</div>)}
+        : <div className="row tight"><StoryboardDownloads version={viewing} title={shot.title}/><button className="small" onClick={() => { setSaving(true); setMsg(''); }}><Pin size={14}/>{tr('storyboard.copy81')}</button>{msg && <small className="okmsg">{msg}</small>}</div>)}
 
       <WorkbenchTakes shot={shot} wide={wide} onWide={onWide} previewId={viewing?.id} onPreview={row=>setPreview(row.entity_id||row.id)}/>
       </div><div className="ed-form"><WorkbenchDefaults shotId={shot.id}/>
@@ -506,16 +506,16 @@ export function ShotEditor({shotId, onClose, inline,wide,onWide}) {const {t:tr,l
               <select aria-label={p.name+tr('storyboard.detail57')} value={variantOf(p,c.variant)?.id||''} onChange={e => dispatch({type: 'castVariant', shot: shot.id, id: c.id, variant: e.target.value})}>
                 {!p.variants.length&&<option value="">{tr('storyboard.copy86')}</option>}
                 {p.variants.map(v => <option key={v.id} value={v.id}>{v.name}{v.images.length ? '' : tr('storyboard.detail58')}</option>)}</select></div>
-              <button className="x" onClick={() => dispatch({type: 'uncast', shot: shot.id, id: c.id})}>×</button></div>); })}
+              <button className="x" onClick={() => dispatch({type: 'uncast', shot: shot.id, id: c.id})} aria-label={tr('storyboard.remove')}><X size={14}/></button></div>); })}
           {shot.place && (() => { const p = db.profile(shot.place.id); if (!p) return null; return (
             <div className="castitem location"><AssetThumb asset={coverOf(db, p, shot.place.variant)} size={34} /><div><button className="link" title={tr('storyboard.finish12')} onClick={() => dispatch({type: 'openProfile', id: p.id})}>{p.name}</button>
               <select aria-label={p.name+tr('storyboard.detail59')} value={variantOf(p,shot.place.variant)?.id||''} onChange={e => dispatch({type: 'placeVariant', shot: shot.id, variant: e.target.value})}>
                 {!p.variants.length&&<option value="">{tr('storyboard.copy87')}</option>}
                 {p.variants.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}</select></div>
-              <button className="x" onClick={() => dispatch({type: 'unplace', shot: shot.id})}>×</button></div>); })()}
+              <button className="x" onClick={() => dispatch({type: 'unplace', shot: shot.id})} aria-label={tr('storyboard.remove')}><X size={14}/></button></div>); })()}
           {shot.props.map(id => { const p = db.profile(id); return p && (
             <div key={id} className="castitem prop"><AssetThumb asset={coverOf(db, p)} size={34} /><div><button className="link" title={tr('storyboard.finish12')} onClick={() => dispatch({type: 'openProfile', id: p.id})}>{p.name}</button><small>{tr('storyboard.copy88')}</small></div>
-              <button className="x" onClick={() => dispatch({type: 'unprop', shot: shot.id, id})}>×</button></div>); })}
+              <button className="x" onClick={() => dispatch({type: 'unprop', shot: shot.id, id})} aria-label={tr('storyboard.remove')}><X size={14}/></button></div>); })}
         </div> : null}
       </Slot>}
 
@@ -544,27 +544,27 @@ export function ShotEditor({shotId, onClose, inline,wide,onWide}) {const {t:tr,l
           <Slot onFiles={files=>dispatch({type:'uploadFiles',files,target:{kind:'shot',shot:shot.id,slot:'refs'}})} id={'slot:refs:'+shot.id} label={info.mode==='FL'?tr('storyboard.detail62'):tr('storyboard.detail63')} hint={info.mode==='FL'?tr('storyboard.detail64'):tr('storyboard.detail65')} onPick={openPicker('refs')}>
             {shot.refs.length > 0 && <div className="refs">{shot.refs.map(id => db.asset(id)).filter(Boolean).map(a => (
               <span key={a.id} className="ref"><AssetThumb asset={a} size={28} />{a.name}
-                <button className="x" onClick={() => dispatch({type: 'unref', shot: shot.id, asset: a.id})}>×</button></span>))}</div>}
+                <button className="x" onClick={() => dispatch({type: 'unref', shot: shot.id, asset: a.id})} aria-label={tr('storyboard.remove')}><X size={14}/></button></span>))}</div>}
           </Slot>
           {info.limitsLabel&&<div className="limits">{info.limitsLabel}</div>}
 
         </>}
       </div>
 
-      <div className="sent">
+      <details className="sent"><summary>{tr('storyboard.details')}</summary>
         <div className="sent-head"><b>{tr('storyboard.copy90')}</b><ModeChip info={info} /><span className="muted">{info.machine} · {info.res} · {info.sec} {tr('storyboard.secondsUnit')}</span></div>
         <div className="sent-prompt">{info.parts.map((x, i) => <div key={i}><em>{x.label}</em>{x.text}</div>)}</div>
         {info.items.length > 0 && <div className="sent-items">{info.items.map((x, i) => (
           <div key={i} className={'sent-item' + (x.sent ? '' : ' off')} title={x.reason}>
             <AssetThumb asset={x.a} size={40}/>
             <span><b>{x.kind}</b><small>{x.why}</small>{!x.sent && <small className="warn">{tr('storyboard.finish23',{reason:x.reason})}</small>}</span></div>))}</div>}
-        {info.warnings.map(w => <div key={w} className="warn">⚠ {w}</div>)}
+        {info.warnings.map(w => <div key={w} className="warn"><AlertTriangle size={13}/> {w}</div>)}
         {info.notes.map(w => <div key={w} className="note">· {w}</div>)}
-      </div>
+      </details>
 
-      <div className="row">
+      <div className="row quality-row">
         <div className="seg">{['draft', 'final'].map(q => (
-          <button key={q} className={shot.quality === q ? 'on' : ''} onClick={() => upd({quality: q})}>{QUALITY_LABEL[q]}<small>{state.modelLabelKeys?.[q]?tr(state.modelLabelKeys[q]):typeof state.models?.[q]==='string'?state.models[q]:state.models?.[q]?.label||tr('storyboard.detail66')}</small></button>))}</div>
+          <button key={q} className={shot.quality === q ? 'on' : ''} onClick={() => upd({quality: q})}>{QUALITY_LABEL[q]}</button>))}</div><small className="muted">{info.res} · {info.sec} {tr('storyboard.secondsUnit')}</small>
       </div>
       {shot.versions.length > 0 && <label className="check"><input type="checkbox" checked={shot.seedLock} onChange={e => upd({seedLock: e.target.checked})} />
         {tr('storyboard.mixed21')}</label>}
@@ -614,8 +614,8 @@ export function Transport({player}) {const {t:tr,locale}=useI18n();const {TYPE_L
   const {playing, setPlaying, t, total, setT} = player;
   return (
     <div className="transport">
-      <button className="primary round" aria-label={playing?tr('storyboard.detail69'):tr('storyboard.detail70')} disabled={!total} onClick={() => setPlaying(!playing)}>{playing ? '❚❚' : '▶'}</button>
-      <button className="ghost" onClick={() => { setPlaying(false); setT(0); }}>⏮</button>
+      <button className="primary round" aria-label={playing?tr('storyboard.detail69'):tr('storyboard.detail70')} disabled={!total} onClick={() => setPlaying(!playing)}>{playing?<Pause size={16}/>:<Play size={16}/>}</button>
+      <button className="ghost" aria-label={tr('storyboard.restart')} onClick={() => { setPlaying(false); setT(0); }}><SkipBack size={16}/></button>
       <span className="time">{fmt(t)} / {fmt(total)}</span>
     </div>
   );

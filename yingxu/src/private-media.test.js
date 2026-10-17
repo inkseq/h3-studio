@@ -13,7 +13,7 @@ const component=(async()=>{
   const result=await build({stdin:{contents:contents+"\nexport {I18nProvider as TestI18nProvider} from './i18n/I18nProvider.jsx';\nexport {StoryboardAssetImage,StoryboardVideo,StoryboardPlayButton,StoryboardDownloads} from './StoryboardMedia.jsx';\nexport {setCloudMediaHandlers as setTestMediaHandlers} from './media.js';\n",resolveDir:path.replace(/[/\\][^/\\]+$/,''),loader:'jsx'},bundle:true,write:false,platform:'node',format:'cjs',packages:'external',loader:{'.css':'empty'}});
   const module=new Module(path);module.filename=path;module.paths=Module._nodeModulePaths(path.replace(/[/\\][^/\\]+$/,''));module._compile(result.outputFiles[0].text,path);
   const wrap=Component=>props=>React.createElement(module.exports.TestI18nProvider,null,React.createElement(Component,props));
-  return Object.assign(wrap(module.exports.PrivateMedia),{story:Object.fromEntries(['StoryboardAssetImage','StoryboardVideo','StoryboardPlayButton','StoryboardDownloads'].map(name=>[name,wrap(module.exports[name])])),rawVideo:module.exports.StoryboardVideo,setMediaHandlers:module.exports.setTestMediaHandlers});
+  return Object.assign(wrap(module.exports.PrivateMedia),{story:Object.fromEntries(['StoryboardAssetImage','StoryboardVideo','StoryboardPlayButton','StoryboardDownloads'].map(name=>[name,wrap(module.exports[name])])),rawImage:module.exports.StoryboardAssetImage,rawVideo:module.exports.StoryboardVideo,setMediaHandlers:module.exports.setTestMediaHandlers});
 })();
 
 // Exercise the real hook and its media event handlers without a DOM or network.
@@ -47,6 +47,20 @@ test('Story player retry leaves an externally owned local Blob source intact and
   h.render();let view=h.render();assert.equal(view.video.props.src,'blob:owned-by-upload-control');view.video.props.ref({load(){loads++;}});
   view.video.props.onError({});view=h.render();assert.equal(view.video.props.src,'blob:owned-by-upload-control');view.retry.props.onClick({preventDefault(){},stopPropagation(){}});view=h.render();assert.equal(loads,1);assert.equal(view.alert,undefined);h.unmount();assert.deepEqual(revoked,[]);
  }finally{h.unmount();URL.revokeObjectURL=original;}
+});
+
+test('shot thumbnail retries only explicitly and never rebinds a failed source after an account change',async()=>{
+ const kit=await component;let scope='owner',reads=0,resolutions=0;
+ kit.setMediaHandlers({read:async()=>{reads++;throw Error('native thumbnail must not fetch bytes');},native:()=>{resolutions++;const original=scope;return {href:'/v1/artifacts/shot/content?expected_account=owner',assertCurrent(){if(scope!==original)throw Error('client.accountChanged');}};}});
+ const asset={fileId:'cloud_artifact_shot',kind:'video'},h=mediaLifecycle(kit.rawImage,{asset,retryable:true});
+ try{
+  let view=h.render();const source=view.video.props.src;
+  view.video.props.onError({});view=h.render();assert.equal(view.video,undefined);assert.ok(view.alert);assert.ok(view.retry);assert.equal(resolutions,1);assert.equal(reads,0);
+  view=h.render();assert.equal(view.video,undefined);assert.equal(resolutions,1);
+  view.retry.props.onClick({stopPropagation(){}});view=h.render();assert.equal(view.video.props.src,source);view.video.props.onLoadedMetadata({});assert.equal(h.render().alert,undefined);
+  view.video.props.onError({});const staleRetry=h.render().retry;scope='other';view=h.render();assert.equal(view.retry,undefined);assert.equal(view.video,undefined);
+  staleRetry.props.onClick({stopPropagation(){}});assert.equal(h.render().video,undefined);assert.equal(resolutions,1);assert.equal(reads,0);
+ }finally{h.unmount();kit.setMediaHandlers();}
 });
 
 test('Story cloud image/video/audio controls and both attachments render native routes, not Blob downloads',async()=>{

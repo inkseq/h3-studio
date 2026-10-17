@@ -23,6 +23,23 @@ function fixture(){return {schemaVersion:4,id:'project',title:'Storyboard',logli
 const get=(project,id)=>project.entities.find(value=>value.id===id);
 const act=(project,action)=>edit(project,action,{chapterId:'chapter'});
 
+test('scene header adds to the requested earlier scene without moving existing shots or results',()=>{
+  const project=fixture(),before=structuredClone(project.jobs),media=structuredClone(get(project,'result'));
+  const added=act(project,{type:'add',sceneId:'scene-a',title:'Earlier scene shot'});
+  assert.equal(get(project,added.id).parentId,'scene-a');
+  assert.equal(get(project,added.id).title,'Earlier scene shot');
+  assert.deepEqual(children(project,'scene-b').filter(row=>row.type==='shot').map(row=>row.id),['shot-c']);
+  assert.deepEqual(project.jobs,before);assert.deepEqual(get(project,'result'),media);
+  assert.equal(validateProject(project).ok,true);
+});
+test('scene header rejects foreign, absent and non-scene targets without changing the document',()=>{
+  const project=fixture();project.entities.push(entity('other-chapter','chapter'),entity('foreign-scene','scene','other-chapter'));
+  for(const sceneId of ['foreign-scene','unknown-scene','shot-a',null]){
+    const before=structuredClone(project);
+    assert.equal(act(project,{type:'add',sceneId}),false);assert.deepEqual(project,before);
+  }
+});
+
 test('first opt-in materializes inherited context; FL/REF switching keeps all inputs and preferences',()=>{
   const project=fixture(),job=structuredClone(project.jobs);
   assert.ok(act(project,{type:'update',id:'shot-a',patch:{mode:'REF'}}));

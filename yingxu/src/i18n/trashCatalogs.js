@@ -11,3 +11,6 @@ Object.assign(trashCatalogs.en,{'trash.manage':'Manage story items','trash.searc
 Object.assign(trashCatalogs.en,{'trash.selectAll':'Select loaded items','trash.emptyFiltered':'Delete all items of this kind'});Object.assign(trashCatalogs.zh,{'trash.selectAll':'选择已加载内容','trash.emptyFiltered':'永久删除此类型的全部内容'});
 
 trashCatalogs.en['trash.kind.conversation']='Conversation';trashCatalogs.zh['trash.kind.conversation']='对话';
+
+trashCatalogs.en['trash.filters']='Filters and selection';
+trashCatalogs.zh['trash.filters']='筛选与选择';
