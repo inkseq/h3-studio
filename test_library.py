@@ -299,3 +299,214 @@ class LibraryTests(unittest.TestCase):
         self.assertEqual(response.status_code,200,response.text)
         rows=self.client.get('/v1/library?project_id=story-one&work=target&type=file').json()['items']
         self.assertTrue(any(row['asset_id']==self.asset and 'target' in row['work_ids'] for row in rows))
+
+    def test_large_owner_projection_has_bounded_reads_and_single_shot_render_copies(self):
+        from sqlalchemy import event,insert,update
+        from studio_platform.auth import Principal
+        from studio_platform.storyboard_versions import effective_project
+        self.prepare();repo=self.app.state.repository;tenant=self.settings.tenant_id
+        principal=Principal('superdan','library-read')
+        base=copy.deepcopy(self.current()['project'])
+        next(e for e in base['entities'] if e['id']=='shot-one')['data']['storyboard']={'version':1,'mode':'fl','quality':'draft'}
+        with repo.transaction() as conn:
+            conn.execute(update(documents).where(documents.c.tenant_id==tenant,documents.c.owner_id=='superdan',
+                documents.c.project_id=='__projects',documents.c.document_id=='story-one').values(payload=base))
+        def measure():
+            statements=[];copies=[]
+            def sql(conn,cursor,statement,parameters,context,executemany):statements.append(statement)
+            def render(project,*args,**kwargs):
+                copies.append(len(project['entities']));return effective_project(project,*args,**kwargs)
+            event.listen(repo.engine,'before_cursor_execute',sql)
+            try:
+                with patch('studio_platform.storyboard_versions.effective_project',side_effect=render),patch.object(
+                        self.app.state.generation_admission,'capabilities_provider',wraps=self.app.state.generation_admission.capabilities_provider) as caps:
+                    rows=self.app.state.library.listing(principal,type='image',limit=100)
+                return rows,len(statements),copies,caps.call_count
+            finally:event.remove(repo.engine,'before_cursor_execute',sql)
+        small,small_reads,_,_=measure()
+        projects=[]
+        for number in range(6):
+            project=copy.deepcopy(base);project['id']='large-'+str(number)
+            # Local authoring media remain valid library rows without claiming
+            # another project's uploaded receipt. They never touch storage.
+            project['entities']=[e for e in project['entities'] if e['id'] not in {'file-one','hero'}]
+            prototype=next(e for e in project['entities'] if e['type']=='shot')
+            for n in range(10):
+                shot=copy.deepcopy(prototype);shot['id']='shot-extra-'+str(n);project['entities'].append(shot)
+            for n in range(180):
+                project['entities'].append({'id':'local-image-'+str(n),'type':'image','title':'Image '+str(n),
+                    'parentId':None,'description':'','version':1,'order':n,'status':'draft',
+                    'data':{'fileId':'local-file-'+str(n)}})
+            projects.append(project)
+        with repo.transaction() as conn:
+            conn.execute(insert(documents),[{'tenant_id':tenant,'owner_id':'superdan','project_id':'__projects',
+                'kind':'project','document_id':p['id'],'payload':p,'version':1,'updated_at':1} for p in projects])
+        before=[copy.deepcopy(p) for p in projects]
+        large,large_reads,copies,cap_reads=measure()
+        self.assertEqual(len(large['items']),100);self.assertEqual(large['next_offset'],100)
+        self.assertEqual(large_reads,small_reads);self.assertLessEqual(large_reads,8)
+        self.assertEqual(len(copies),67);self.assertEqual(set(copies),{1});self.assertEqual(cap_reads,1)
+        with repo.engine.connect() as conn:
+            after=list(conn.execute(select(documents.c.payload).where(documents.c.tenant_id==tenant,
+                documents.c.owner_id=='superdan',documents.c.document_id.in_([p['id'] for p in projects])).order_by(documents.c.document_id)).scalars())
+        self.assertEqual(after,before)
+        print(f'Library scale: {small_reads} -> {large_reads} SQL statements; 1080 extra files, 66 extra shots; capabilities={cap_reads}; copied shot entities={len(copies)}')
+
+    def test_read_snapshot_matches_canonical_asset_lifecycle_fences(self):
+        import json,uuid
+        from sqlalchemy import insert,update
+        from studio_platform.assets import asset_table
+        from studio_platform.auth import Principal
+        from studio_platform.content_lifecycle import token
+        from studio_platform.library import _LibraryRead
+        from studio_platform.quick_chat import objects
+        from studio_platform.repository import Conflict,NotFound
+        from studio_platform.universal_trash import target_key
+        self.prepare();repo=self.app.state.repository;tenant=self.settings.tenant_id
+        assets=[]
+        for n in range(9):
+            ident=f'{n+1:032x}';asset=fixture.GenerationDraftTests.source(self,ident,'image')
+            asset['original']['key']='original/'+ident;asset['model']['key']='model/'+ident
+            if n==2:asset['parent_id']='deleted-parent'
+            if n==3:asset['selection']={'artifact_id':'deleted-selection'}
+            assets.append(asset)
+        with repo.transaction() as conn:
+            for asset in assets:conn.execute(update(asset_table).where(asset_table.c.id==asset['id']).values(record=json.dumps(asset)))
+            def tombstone(kind,ident,owner='superdan',other_tenant=tenant,payload=None):
+                conn.execute(insert(objects).values(id='delete-'+uuid.uuid4().hex,tenant=other_tenant,owner=owner,
+                    session_id='__content',kind='content_tombstone',business_key=token(kind,ident),version=1,
+                    payload=payload or {},created_at=1,updated_at=1))
+            tombstone('asset',assets[1]['id']);tombstone('asset','deleted-parent');tombstone('artifact','deleted-selection')
+            tombstone('key','bound-key',payload={'object_key':assets[4]['original']['key']})
+            tombstone('asset',assets[0]['id'],owner='supervan');tombstone('asset',assets[0]['id'],other_tenant='other-tenant')
+            for n,state in ((5,'trashed'),(6,'purging'),(7,'purged'),(8,'active')):
+                target={'kind':'asset','project_id':'story-one','id':assets[n]['id']}
+                conn.execute(insert(documents).values(tenant_id=tenant,owner_id='superdan',project_id='__trash',
+                    kind='trash_item',document_id=target_key(target),payload={'state':state,'target':target},version=1,updated_at=1))
+        principal=Principal('superdan','snapshot');snapshot=_LibraryRead(self.app.state.library,principal)
+        expected=[]
+        for asset in assets:
+            try:self.app.state.library.authorize_target(principal,'story-one',{'kind':'asset','id':asset['id']});visible=True
+            except (LookupError,Conflict,NotFound):visible=False
+            self.assertEqual(('story-one',asset['id']) in snapshot.assets,visible,asset['id'])
+            if visible:expected.append(asset['id'])
+        self.assertEqual(expected,[assets[0]['id'],assets[8]['id']])
+        restricted=Principal('superdan','projects-only',machine=True,project_ids=('story-one',),scopes=('projects:read',))
+        self.assertEqual(_LibraryRead(self.app.state.library,restricted).assets,{})
+        self.assertEqual(_LibraryRead(self.app.state.library,Principal('supervan','other-owner')).assets,{})
+
+    def test_read_snapshot_matches_canonical_artifact_owner_scope_and_lifecycle(self):
+        import uuid
+        from sqlalchemy import insert,update
+        from studio_platform.auth import Principal
+        from studio_platform.content_lifecycle import token
+        from studio_platform.library import _LibraryRead
+        from studio_platform.quick_chat import objects
+        from studio_platform.repository import Scope,artifacts,attempts,Conflict,NotFound
+        from studio_platform.universal_trash import target_key
+        self.prepare();repo=self.app.state.repository;tenant=self.settings.tenant_id
+        scope=Scope(tenant,'superdan','story-one')
+        plan=repo.create_plan(scope,{}, {'pool':'test-pool'},expires_at=repo.clock()+1000)
+        job=repo.create_job(scope,plan['id'],'synthetic-availability',initial_status='planned')
+        ids=[str(uuid.uuid4()) for _ in range(8)];attempt=str(uuid.uuid4())
+        with repo.transaction() as conn:
+            conn.execute(update(jobs).where(jobs.c.id==job['id']).values(status='succeeded'))
+            conn.execute(insert(attempts).values(id=attempt,job_id=job['id'],number=1,status='succeeded',
+                fence=1,worker_id='synthetic',created_at=1,updated_at=1))
+            for n,ident in enumerate(ids):
+                metadata={'kind':'video','object_key':'synthetic/'+ident,'size_bytes':1,'sha256':'0'*64}
+                if n==1:metadata['content_deleted']=True
+                conn.execute(insert(artifacts).values(id=ident,job_id=job['id'],attempt_id=attempt,
+                    metadata=metadata,created_at=1))
+                if n==2:conn.execute(insert(objects).values(id='delete-'+uuid.uuid4().hex,tenant=tenant,
+                    owner='superdan',session_id='__content',kind='content_tombstone',business_key=token('artifact',ident),
+                    version=1,payload={},created_at=1,updated_at=1))
+                if 3<=n<=6:
+                    target={'kind':'artifact','project_id':'story-one','id':ident}
+                    conn.execute(insert(documents).values(tenant_id=tenant,owner_id='superdan',project_id='__trash',
+                        kind='trash_item',document_id=target_key(target),payload={'state':['trashed','purging','purged','active'][n-3],
+                        'target':target},version=1,updated_at=1))
+                if n==7:conn.execute(insert(objects).values(id='delete-key-'+uuid.uuid4().hex,tenant=tenant,
+                    owner='superdan',session_id='__content',kind='content_tombstone',business_key=token('key',metadata['object_key']),
+                    version=1,payload={'object_key':metadata['object_key']},created_at=1,updated_at=1))
+        principal=Principal('superdan','snapshot');snapshot=_LibraryRead(self.app.state.library,principal)
+        expected=[]
+        for ident in ids:
+            try:self.app.state.library.authorize_target(principal,'story-one',{'kind':'artifact','id':ident});visible=True
+            except (LookupError,Conflict,NotFound):visible=False
+            self.assertEqual(('story-one',ident) in snapshot.artifacts,visible)
+            if visible:expected.append(ident)
+        # GenerationAccess.artifact fences artifact identity; its canonical
+        # read does not additionally gate an artifact by metadata.object_key.
+        self.assertEqual(expected,[ids[0],ids[6],ids[7]])
+        restricted=Principal('superdan','assets-only',machine=True,project_ids=('story-one',),scopes=('projects:read','assets:read'))
+        self.assertEqual(_LibraryRead(self.app.state.library,restricted).artifacts,{})
+        self.assertEqual(_LibraryRead(self.app.state.library,Principal('supervan','foreign')).artifacts,{})
+
+    def test_projection_uses_identical_effective_drafts_and_no_capabilities_for_empty_stories(self):
+        from sqlalchemy import update
+        from studio_platform.auth import Principal
+        from studio_platform.generation_draft import read_draft
+        from studio_platform.repository import Scope
+        from studio_platform.storyboard_versions import effective_project
+        self.prepare();repo=self.app.state.repository;tenant=self.settings.tenant_id
+        project=copy.deepcopy(self.current()['project'])
+        project.setdefault('journey',{})['storyboard']={'defaults':{'recipe_id':'h3-base-fl2va-v1','controls':{'steps':20}}}
+        first=next(e for e in project['entities'] if e['id']=='shot-one')
+        first['data'].update(storyboard={'version':1,'mode':'ref','quality':'draft'},cast=['hero'])
+        for n in range(3):
+            shot=copy.deepcopy(first);shot['id']='variant-'+str(n)
+            if n!=0:shot['data'].pop('storyboard')
+            shot['data']['h3']={'recipeId':'h3-base-ref2va-v1','explicitReferences':n==2,'controls':{'steps':22+n}}
+            project['entities'].append(shot)
+        defaults={'recipe_id':'h3-base-ref2va-v1','controls':{'resolution':'720P'}}
+        repo.put_document(Scope(tenant,'superdan','__preferences'),'storyboard_preferences','defaults',defaults)
+        with repo.transaction() as conn:
+            conn.execute(update(documents).where(documents.c.tenant_id==tenant,documents.c.owner_id=='superdan',
+                documents.c.project_id=='__projects',documents.c.document_id=='story-one').values(payload=project))
+        seen=[]
+        def compare(render,shot_id,**kwargs):
+            expected,_=effective_project(project,shot_id,defaults)
+            actual=read_draft(render,shot_id,**kwargs)
+            self.assertEqual(actual,read_draft(expected,shot_id,**kwargs));seen.append(shot_id)
+            return actual
+        before=copy.deepcopy(project)
+        with patch('studio_platform.generation_draft.read_draft',side_effect=compare):
+            self.app.state.library.listing(Principal('superdan','snapshot'))
+        self.assertEqual(len(seen),4);self.assertEqual(self.current()['project'],before)
+        empty=Principal('superdan','empty',machine=True,project_ids=('target',),scopes=('projects:read',))
+        with patch.object(self.app.state.generation_admission,'capabilities_provider',side_effect=AssertionError('not needed')):
+            self.assertEqual(self.app.state.library.listing(empty)['items'],[])
+
+    def test_duplicate_assets_and_legacy_or_deleted_project_shapes_keep_existing_read_semantics(self):
+        from sqlalchemy import insert,update
+        from studio_platform.assets import asset_table
+        from studio_platform.auth import Principal
+        self.prepare();repo=self.app.state.repository;tenant=self.settings.tenant_id
+        duplicate=fixture.GenerationDraftTests.source(self,'d'*32,'image')
+        legacy={'id':'old-shape','schemaVersion':1,'title':None,'entities':[{'id':'old-image','type':'image',
+            'title':'Legacy image','data':{'fileId':'old-local-file'}}],'links':[]}
+        with repo.transaction() as conn:
+            conn.execute(update(asset_table).where(asset_table.c.id.in_((self.asset,duplicate['id']))).values(status='duplicate'))
+            for ident,payload in (('old-shape',legacy),('deleted-shape',{'content_deleted':True})):
+                conn.execute(insert(documents).values(tenant_id=tenant,owner_id='superdan',project_id='__projects',
+                    kind='project',document_id=ident,payload=payload,version=1,updated_at=1))
+        principal=Principal('superdan','snapshot')
+        rows=self.app.state.library.listing(principal)['items'];ids={r['target']['id'] for r in rows}
+        self.assertIn('file-one',ids)  # Attached duplicate is still authorized by AssetService.get.
+        self.assertNotIn(self.asset,ids);self.assertNotIn(duplicate['id'],ids)  # Raw duplicate enumeration stays excluded.
+        self.assertIn('old-image',ids);self.assertFalse(any(r['target']['project_id']=='deleted-shape' for r in rows))
+
+    def test_read_snapshot_rechecks_project_trash_and_has_no_cross_request_cache(self):
+        from sqlalchemy import insert
+        from studio_platform.auth import Principal
+        from studio_platform.library import _LibraryRead
+        from studio_platform.universal_trash import target_key
+        self.prepare();repo=self.app.state.repository;principal=Principal('superdan','snapshot')
+        self.assertIn('story-one',_LibraryRead(self.app.state.library,principal).rows)
+        target={'kind':'project','project_id':'story-one','id':'story-one'}
+        with repo.transaction() as conn:
+            conn.execute(insert(documents).values(tenant_id=self.settings.tenant_id,owner_id='superdan',project_id='__trash',
+                kind='trash_item',document_id=target_key(target),payload={'state':'trashed','target':target},version=1,updated_at=1))
+        self.assertNotIn('story-one',_LibraryRead(self.app.state.library,principal).rows)
+        self.assertEqual(self.app.state.library.listing(principal)['items'],[])

@@ -2,12 +2,87 @@
 import copy
 import json
 from urllib.parse import urlencode
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from .repository import documents, jobs, artifacts, NotFound, Conflict
 from .content_lifecycle import reference_ids
 
 PROFILES={'character','location','prop'}
 FILES={'image','video','audio'}
+
+class _LibraryRead:
+    """One owner-scoped read snapshot, never a cache between requests.
+
+    Listing used to call the normal single-target authorizer for every item.
+    Those write/import fences remain unchanged. This projection loads the same
+    owner/scope/trash/content facts once before applying their read predicates.
+    """
+    def __init__(self,library,principal):
+        from .assets import asset_table
+        from .universal_trash import where,target_key
+        from .content_lifecycle import token
+        self.principal=principal;self.rows={};self.assets={};self.artifacts={}
+        with library.repo.engine.connect() as conn:
+            rows=list(conn.execute(select(documents).where(documents.c.tenant_id==library.tenant,
+                documents.c.owner_id==principal.owner,documents.c.project_id=='__projects',
+                documents.c.kind=='project')).mappings())
+            trash=list(conn.execute(select(documents.c.document_id,documents.c.payload).where(
+                *where(library.tenant,principal.owner,'trash_item'))).mappings())
+            inactive={row['document_id'] for row in trash if row['payload']['state']!='active'}
+            blocked_assets=set();blocked_artifacts=set()
+            for row in trash:
+                payload=row['payload'];target=payload['target']
+                if payload['state'] in {'trashed','purging','purged'}:
+                    if target['kind']=='asset':blocked_assets.add(target['id'])
+                    elif target['kind']=='artifact':blocked_artifacts.add(target['id'])
+            for row in rows:
+                pid=row['document_id']
+                if (principal.allows(pid,'projects:read') and not row['payload'].get('content_deleted')
+                        and target_key({'kind':'project','project_id':pid,'id':pid}) not in inactive):
+                    self.rows[pid]=row
+            tombstones=set();deleted_keys=set()
+            if self.rows and inspect(conn).has_table('platform_quick_chat_objects'):
+                from .quick_chat import objects
+                for row in conn.execute(select(objects.c.business_key,objects.c.payload).where(
+                        objects.c.tenant==library.tenant,objects.c.owner==principal.owner,
+                        objects.c.kind=='content_tombstone')).mappings():
+                    tombstones.add(row['business_key'])
+                    if row['payload'].get('object_key'):deleted_keys.add(row['payload']['object_key'])
+            def available(asset_ids=(),artifact_ids=(),keys=()):
+                return (not blocked_assets.intersection(asset_ids) and not blocked_artifacts.intersection(artifact_ids)
+                    and not deleted_keys.intersection(keys)
+                    and not any(token('asset',ident) in tombstones for ident in asset_ids)
+                    and not any(token('artifact',ident) in tombstones for ident in artifact_ids))
+            asset_projects=[pid for pid in self.rows if principal.allows(pid,'assets:read')]
+            if asset_projects:
+                for row in conn.execute(select(asset_table).where(asset_table.c.tenant==library.tenant,
+                        asset_table.c.owner==principal.owner,asset_table.c.project_id.in_(asset_projects))).mappings():
+                    asset=json.loads(row['record']);selection=asset.get('selection') or {}
+                    keys=[asset[role]['key'] for role in ('original','model')
+                        if isinstance(asset.get(role),dict) and asset[role].get('key')]
+                    if available(tuple(value for value in (asset.get('id'),asset.get('parent_id')) if value),
+                            (selection['artifact_id'],) if selection.get('artifact_id') else (),keys):
+                        self.assets[(row['project_id'],row['id'])]=(asset,row['status'])
+            artifact_projects=[pid for pid in self.rows if principal.allows(pid,'jobs:read')]
+            if artifact_projects:
+                for row in conn.execute(select(artifacts.c.id,artifacts.c.metadata,jobs.c.project_id).join(
+                        jobs,jobs.c.id==artifacts.c.job_id).where(jobs.c.tenant_id==library.tenant,
+                        jobs.c.owner_id==principal.owner,jobs.c.project_id.in_(artifact_projects),
+                        jobs.c.status=='succeeded')).mappings():
+                    if not row['metadata'].get('content_deleted') and available(artifact_ids=(row['id'],)):
+                        self.artifacts[(row['project_id'],row['id'])]=row
+
+    def project(self,principal,ident,operation='projects:read'):
+        if principal is not self.principal or not principal.allows(ident,operation) or ident not in self.rows:
+            raise NotFound('project_not_found')
+        return self.rows[ident]
+
+    def entity_available(self,pid,entity):
+        if entity['type'] not in FILES:return True
+        data=entity['data']
+        if data.get('cloudAssetId'):return (pid,data['cloudAssetId']) in self.assets
+        if data.get('cloudArtifactId'):return (pid,data['cloudArtifactId']) in self.artifacts
+        return True
+
 
 def contract():
     return {'storage':'project_scoped','aggregate':'authorized read projection only',
@@ -120,28 +195,36 @@ class Library:
                 resolved.append({'id':ident,'entity':value})
             return resolved
     def entries(self,principal):
-        with self.repo.engine.connect() as conn:
-            rows=list(conn.execute(select(documents).where(documents.c.tenant_id==self.tenant,documents.c.owner_id==principal.owner,
-                documents.c.project_id=='__projects',documents.c.kind=='project')).mappings())
+        snapshot=_LibraryRead(self,principal)
+        # The existing profile projection is pure after its project read. Reuse
+        # it against this request's authorized document versions.
+        profiles_reader=copy.copy(self.app.state.storyboard_versions);profiles_reader.access=snapshot
+        from .generation_draft import read_draft
+        from .storyboard_versions import effective_project,preferences
+        defaults=None;caps=None
         results=[];global_usage={}
-        for row in rows:
+        for row in snapshot.rows.values():
             pid=row['document_id']
-            if not principal.allows(pid,'projects:read'):continue
-            try:self.project(principal,pid)
-            except NotFound:continue
             project=row['payload'];lookup={e['id']:e for e in project['entities']}
             usage={e['id']:[] for e in project['entities']};receipt_usage={}
-            projection=self.app.state.storyboard_versions.profiles(principal,pid)
+            projection=profiles_reader.profiles(principal,pid)
             if projection['project_version']!=row['version']:raise Conflict('library_projection_changed')
             profiles=projection['profiles']
             for profile in profiles:usage[profile['id']]=list(profile['shot_ids'])
-            from .generation_draft import read_draft
-            from .storyboard_versions import effective_project,preferences
-            defaults=preferences(self.repo,self.tenant,principal.owner)['defaults']
-            caps=self.app.state.generation_admission.capabilities_provider()
-            for shot in (e for e in project['entities'] if e['type']=='shot'):
-                render,_=effective_project(project,shot['id'],defaults)
-                draft,_=read_draft(render,shot['id'],capabilities=caps)
+            render={**project,'entities':list(project['entities'])}
+            for index,shot in enumerate(project['entities']):
+                if shot['type']!='shot':continue
+                if defaults is None:defaults=preferences(self.repo,self.tenant,principal.owner)['defaults']
+                if 'storyboard' in shot['data'] and caps is None:
+                    caps=self.app.state.generation_admission.capabilities_provider()
+                # effective_project only mutates the selected shot and reads
+                # storyboard defaults. Copy those, not every entity per shot.
+                miniature={'entities':[shot],'journey':{'storyboard':{'defaults':
+                    project.get('journey',{}).get('storyboard',{}).get('defaults',{})}}}
+                effective,_=effective_project(miniature,shot['id'],defaults)
+                render['entities'][index]=effective['entities'][0]
+                try:draft,_=read_draft(render,shot['id'],capabilities=caps)
+                finally:render['entities'][index]=shot
                 a_ids,r_ids=reference_ids(draft.get('inputs',{}))
                 for ident in a_ids:receipt_usage.setdefault(('asset',ident),[]).append(shot['id'])
                 for ident in r_ids:receipt_usage.setdefault(('artifact',ident),[]).append(shot['id'])
@@ -172,25 +255,16 @@ class Library:
                     'work_ids':[pid] if used else [],'unused':not used,'source':data.get('source','upload' if kind=='asset' else 'generation' if kind=='artifact' else 'authoring'),**(extra or {})})
             for entity in project['entities']:
                 if entity['type'] not in PROFILES|FILES:continue
-                try:self.authorize_target(principal,pid,{'kind':'entity','id':entity['id']})
-                except (NotFound,LookupError,Conflict):continue
+                if not snapshot.entity_available(pid,entity):continue
                 append('entity',entity['id'],entity['type'],entity['title'],entity['data'])
             if principal.allows(pid,'assets:read'):
-                from .assets import asset_table
-                with self.repo.engine.connect() as conn:
-                    ids=list(conn.execute(select(asset_table.c.id).where(asset_table.c.tenant==self.tenant,asset_table.c.owner==principal.owner,asset_table.c.project_id==pid,asset_table.c.status!='duplicate')).scalars())
-                for aid in ids:
-                    try:asset=self.app.state.assets.get(principal.owner,aid,pid)
-                    except (LookupError,Conflict):continue
+                for (asset_pid,_),(asset,status) in snapshot.assets.items():
+                    if asset_pid!=pid or status=='duplicate':continue
                     if ('asset',asset['id']) not in attached:append('asset',asset['id'],asset['kind'],asset.get('file_name',''),asset)
             if principal.allows(pid,'jobs:read'):
-                with self.repo.engine.connect() as conn:
-                    outputs=list(conn.execute(select(artifacts.c.id,artifacts.c.metadata).join(jobs,jobs.c.id==artifacts.c.job_id).where(
-                        jobs.c.tenant_id==self.tenant,jobs.c.owner_id==principal.owner,jobs.c.project_id==pid,jobs.c.status=='succeeded')).mappings())
-                for output in outputs:
+                for (artifact_pid,_),output in snapshot.artifacts.items():
+                    if artifact_pid!=pid:continue
                     if ('artifact',output['id']) in attached or output['metadata'].get('kind') not in FILES:continue
-                    try:self.access.artifact(principal,output['id'])
-                    except (NotFound,Conflict):continue
                     append('artifact',output['id'],output['metadata']['kind'],output['id'],{})
         for entry in results:
             links={(v['project_id'],v['shot_id']) for v in entry['usage']}
