@@ -2,6 +2,16 @@ import {mergeTimelineTurns} from './quick-chat-model.js';
 
 export const CARD_HISTORY_PAGE_SIZE=10;
 export const emptyCardHistory=()=>({cardHistoryCursor:null,cardHistoryLoaded:false,cardHistoryHasMore:false,cardHistoryLoading:false,cardHistoryError:null,textHistoryLoading:false,textHistoryError:null,cardTurns:{},liveCardIds:[]});
+// A saved conversation is not an empty new creation while auth, selection or
+// its first card page is pending. Errors must remain actionable, never shimmer.
+export function initialThreadLoading({requestedSession,sessionReady,account,readyAccount,state,entryCount}){
+  if(entryCount||state.error||state.cardHistoryError)return false;
+  if(!sessionReady)return !!requestedSession;
+  if(!account)return false;
+  if(readyAccount!==account)return !!(requestedSession||state.session);
+  if(requestedSession&&requestedSession!==state.session?.id)return true;
+  return !!state.session&&!state.cardHistoryLoaded;
+}
 const id=value=>typeof value==='string'&&value.length>0&&value.length<=160;
 export function checkedCardPage(value,sessionId,beforeCursor,limit=CARD_HISTORY_PAGE_SIZE){
   if(value?.session_id!==sessionId||value.limit!==limit||!Array.isArray(value.cards)||value.cards.length>limit||typeof value.has_more!=='boolean'||value.start_reached!==!value.has_more||value.has_more&&(typeof value.next_cursor!=='string'||!value.next_cursor||value.next_cursor.length>4096||value.next_cursor===beforeCursor)||!value.has_more&&value.next_cursor!=null)throw Error('quickHistory.invalid');

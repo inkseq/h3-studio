@@ -1,5 +1,6 @@
 export const quickViewCatalogs={
  en:{
+  'quickHistory.initialLoading':'Loading this creation…',
   'quickHistory.added':'{count} earlier cards loaded above. Scroll up to view them.',
   "quickHistory.more":"Load 10 earlier cards",
   "quickHistory.loading":"Loading earlier cards…",
@@ -14,6 +15,7 @@ export const quickViewCatalogs={
   "quickHistory.textLoading":"Loading conversation text…",
 'quickView.oneTake':'1 take',"quickView.example.rain":"Rainy night street corner, swordsman turns back, neon reflections","quickView.example.station":"Early morning at the old station, a girl pushes the door open and walks in","quickView.example.dragon":"Mecha dragon peeks from behind building, sparks flying","quickView.duration":"Duration","quickView.resolution":"Resolution","quickView.aspect_ratio":"Aspect ratio","quickView.copies":"Take count","quickView.editParameter":"Edit {name} in the complete generation controls","quickView.parameterValue":"{name}: {value}","quickView.takeCount":"{count} takes",'quickView.handOff':'Hand off to AI','quickView.advanced':'Advanced','quickView.emptyTitle':'What do you want to shoot?','quickView.emptyHelp':'Just describe the visual. The assistant will propose a shot plan before generating.','quickView.availableMachines':'Available machines'},
  zh:{
+  'quickHistory.initialLoading':'正在加载这次创作…',
   'quickHistory.added':'已加载上方的 {count} 张更早卡片，向上滚动即可查看。',
   "quickHistory.more":"加载更早的 10 张卡片",
   "quickHistory.loading":"正在加载更早卡片…",

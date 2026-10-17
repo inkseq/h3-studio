@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createQuickChatController} from './quick-chat-controller.js';
 import {createQuickChatClient} from './quick-chat-client.js';
-import {checkedCardPage,quickThreadEntries,captureThreadAnchor,restoreThreadAnchor} from './quick-chat-history.js';
+import {checkedCardPage,quickThreadEntries,initialThreadLoading,captureThreadAnchor,restoreThreadAnchor} from './quick-chat-history.js';
 import {build} from 'esbuild';
 import {Module} from 'node:module';
 import {fileURLToPath} from 'node:url';
@@ -141,4 +141,18 @@ test('history toolbar distinguishes loading, failure with retry and actual card 
     const failed=render({cardHistoryError:{key:'quickHistory.failed',status:'503'}});assert.equal((failed.match(/role="alert"/g)||[]).length,1);assert.match(failed,/Retry loading cards/);assert.doesNotMatch(failed,/All task cards loaded/);
     const end=render({cardHistoryLoaded:true,cardHistoryHasMore:false,historyCursor:'older-events'});assert.match(end,/All task cards loaded/);assert.match(end,/Load earlier conversation text/);assert.doesNotMatch(end,/data-history-load/);
   }finally{if(original)Object.defineProperty(globalThis,'localStorage',original);else delete globalThis.localStorage;}
+});
+
+test('opening saved history shows loading through auth and first-page hydration, never a false empty creation',()=>{
+  const base={requestedSession:'long',sessionReady:false,account:null,readyAccount:null,state:{},entryCount:0};
+  assert.equal(initialThreadLoading(base),true);
+  assert.equal(initialThreadLoading({...base,sessionReady:true}),false);
+  const signed={...base,sessionReady:true,account:'owner'};
+  assert.equal(initialThreadLoading(signed),true);
+  assert.equal(initialThreadLoading({...signed,readyAccount:'owner',state:{session:{id:'long'}}}),true);
+  assert.equal(initialThreadLoading({...signed,readyAccount:'owner',state:{session:{id:'long'},cardHistoryLoaded:true}}),false);
+  assert.equal(initialThreadLoading({...signed,entryCount:10}),false);
+  assert.equal(initialThreadLoading({...signed,state:{error:'Not found'}}),false);
+  assert.equal(initialThreadLoading({...signed,state:{cardHistoryError:{status:503}}}),false);
+  assert.equal(initialThreadLoading({...base,requestedSession:null}),false);
 });
