@@ -411,6 +411,7 @@ body.resizing video, body.resizing-y video { pointer-events: none; }
 .hbar nav { display: flex; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 3px; }
 .hbar nav button { background: transparent; border: 0; color: var(--ink-2); padding: 5px 14px; border-radius: 7px; }
 .hbar nav button.on { background: var(--surface-4); color: var(--ink); }
+.hbar nav .nav-ico { display: none; }
 .home-main { padding: 34px 28px 60px; max-width: 1360px; width: 100%; margin: 0 auto; }
 .home-head { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
 .home-head .lib-search { max-width: 280px; margin: 0 0 0 auto; background: var(--surface); }
@@ -1075,18 +1076,25 @@ input::placeholder, textarea::placeholder { color: #6c746f; }
   .hbar { padding: 8px 14px; gap: 10px; backdrop-filter: none; background: var(--bg); } /* a filter would trap the fixed tab bar inside the header */
   .hbar nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 60; border-radius: 0; border-width: 1px 0 0; padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
     display: grid; grid-template-columns: repeat(5, 1fr); background: rgba(20,22,21,.96); backdrop-filter: blur(10px); }
-  .hbar nav button { padding: 9px 2px; font-size: 12px; white-space: nowrap; justify-content: center; }
-  .home { padding-bottom: 62px; }
+  .hbar nav { background: rgba(16,18,17,.94); backdrop-filter: blur(16px) saturate(1.4); border-color: var(--line); }
+  .hbar nav button { position: relative; flex-direction: column; gap: 3px; padding: 6px 2px 4px; min-height: 50px; font-size: 10.5px; font-weight: 500; letter-spacing: .01em; white-space: nowrap; justify-content: center; color: var(--muted); background: transparent !important; box-shadow: none !important; }
+  .hbar nav button.on { color: var(--accent); }
+  .hbar nav .nav-ico { display: block; }
+  .hbar nav .navdot { position: absolute; top: 3px; left: calc(50% + 6px); }
+  .home { padding-bottom: calc(74px + env(safe-area-inset-bottom)); }
   .toast { bottom: 76px; max-width: calc(100vw - 32px); }
 
   /* 作品 */
   .home-main { padding: 18px 16px 40px; }
-  .home-head { flex-wrap: wrap; }
+  .home-head { flex-wrap: wrap; gap: 8px 10px; }
+  .home-head .page-title { flex: 1; min-width: 0; font-size: 24px; }
   .home-head .lib-search { order: 3; max-width: none; width: 100%; margin: 0; }
   .story-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .story-wrap, .story-card { min-width: 0; }
   .story-card small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .story-card.new { min-height: 140px; }
+  .story-card.new { min-height: 0; gap: 4px; }
+  .story-card.new small { white-space: normal; text-align: center; line-height: 1.35; }
+  .story-card .cover .aspect { top: auto; bottom: 10px; }
   .story-card b { font-size: 13px; }
   .card-dots { opacity: 1; }
 
