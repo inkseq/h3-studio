@@ -1,5 +1,11 @@
 export const operatorPanelCatalogs = {
   "en": {
+    "operatorPanel.confirmedJobInvoices": "Confirmed generation invoices",
+    "operatorPanel.confirmedRentalInvoices": "Confirmed GPU rental invoices",
+    "operatorPanel.pendingJobInvoices": "{count} generation invoices pending · Original estimates {amount}",
+    "operatorPanel.pendingRentalInvoices": "{count} rental invoices pending · Original estimates {amount}",
+    "operatorPanel.pendingCostsUnknown": "Actual charges are unknown. Estimates are not invoices; a confirmed total of zero does not mean free generation.",
+    "operatorPanel.separateCostLayers": "GPU rental and generation invoices are separate. Overlapping account layers must not be added together.",
     "operatorPanel.inventoryPending": "Checking",
     "operatorPanel.inventoryEmpty": "No compatible reference offer this time",
     "operatorPanel.inventoryHostEmpty": "No jointly eligible host this time",
@@ -91,6 +97,12 @@ export const operatorPanelCatalogs = {
     "operatorPanel.failureStage.oom": "Out of memory"
   },
   "zh": {
+    "operatorPanel.confirmedJobInvoices": "已确认生成账单",
+    "operatorPanel.confirmedRentalInvoices": "已确认 GPU 租金账单",
+    "operatorPanel.pendingJobInvoices": "{count} 笔生成账单待出账 · 原预估 {amount}",
+    "operatorPanel.pendingRentalInvoices": "{count} 笔租金账单待出账 · 原预估 {amount}",
+    "operatorPanel.pendingCostsUnknown": "实际费用未知。预估不是账单；已确认金额为零不代表免费生成。",
+    "operatorPanel.separateCostLayers": "GPU 租金与生成账单分别记录，重叠的账户层级不能相加。",
     "operatorPanel.inventoryPending": "查询中",
     "operatorPanel.inventoryEmpty": "本次没有兼容参考配置",
     "operatorPanel.inventoryHostEmpty": "本次没有共同符合条件的主机",

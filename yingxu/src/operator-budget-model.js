@@ -20,6 +20,13 @@ export function budgetUsage(budget){
   return {used,percent:Math.min(100,Math.round(ratio*100)),status:ratio>=1?'exhausted':ratio>=.8?'warning':'ok'};
 }
 export function budgetLabel(budget,locale='zh'){return budget?.label||budget?.name||(budget?.owner_id?translate(locale,budget.project_id?'operatorPanel.projectBudget':'operatorPanel.ownerBudget',{owner:budget.owner_id,project:budget.project_id}):translate(locale,'operatorPanel.'+(budget?.id?.includes('-gpu-')?'sharedGpuBudget':budget?.id?.includes('-job-')?'sharedJobBudget':'sharedBudget')));}
+export function budgetCosts(budget){
+  const costs=budget?.cost_breakdown;
+  if(costs?.basis!=='original_account_reservations'||costs.account_layers_not_additive!==true)return [];
+  const rows=['job','instance'].map(kind=>({...costs[kind],kind}));
+  if(!rows.every(row=>['confirmed_cost_microusd','confirmed_reservation_count','pending_invoice_count','pending_estimate_microusd'].every(key=>amount(row[key]))&&row.pending_actual_cost_microusd===null))return [];
+  return rows.filter(row=>row.confirmed_reservation_count>0||row.pending_invoice_count>0);
+}
 export function validBudgetPage(value,account,{admin=false}={}){
   return value?.account===account&&value.basis==='cumulative'&&value.currency==='USD'&&value.timezone==='UTC'&&Array.isArray(value.budgets)&&value.budgets.length<=100&&value.budgets.every(budget=>typeof budget.id==='string'&&budget.id&&amount(budget.limit_microusd)&&amount(budget.spent_microusd)&&amount(budget.reserved_microusd)&&Number.isSafeInteger(budget.remaining_microusd)&&['ok','warning','exhausted'].includes(budget.status)&&typeof budget.snapshot==='string'&&budget.snapshot&&Array.isArray(budget.daily7)&&budget.daily7.length<=7&&budget.daily7.every(day=>/^\d{4}-\d{2}-\d{2}$/.test(day.date)&&amount(day.cost_microusd))&&(admin||budget.owner_id===account));
 }

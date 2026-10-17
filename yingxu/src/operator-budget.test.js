@@ -9,7 +9,7 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {createP4OperatorClient} from './p4-operator-client.js';
 import {createP4OperatorController} from './p4-operator-controller.js';
 import {batchRows,previewCurrent} from './p4-operator-model.js';
-import {budgetLabel,budgetUsage,priceRows,referenceOffers,rowPrice,usdInput,usdMicrousd,validBudgetPage,wholeGiB,withDefaultPrices} from './operator-budget-model.js';
+import {budgetCosts,budgetLabel,budgetUsage,priceRows,referenceOffers,rowPrice,usdInput,usdMicrousd,validBudgetPage,wholeGiB,withDefaultPrices} from './operator-budget-model.js';
 
 const memory=()=>{const values=new Map();return {getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)};};
 const row=(patch={})=>({id:'owner-budget',owner_id:'superdan',limit_microusd:100000000,spent_microusd:20000000,reserved_microusd:60000000,remaining_microusd:20000000,status:'warning',snapshot:'a'.repeat(64),daily7:[{date:'2026-10-14',cost_microusd:1000000}],unattributed_legacy:{cost_microusd:2000000,reservation_count:1},...patch});
@@ -36,6 +36,19 @@ test('retained financial labels distinguish owners, projects, shared accounts an
   assert.equal(budgetLabel(row({owner_id:null,id:'demand-gpu-remaining-20261004'}),'en'),'Shared GPU budget');
   assert.equal(budgetUsage(row({limit_mode:'settings',status:'exhausted'})),null);
   assert.equal(budgetUsage(row({legacy_projection_only:true,status:'exhausted'})),null);
+});
+
+const costBreakdown=()=>({basis:'original_account_reservations',account_layers_not_additive:true,
+  job:{confirmed_cost_microusd:0,confirmed_reservation_count:0,pending_invoice_count:181,pending_estimate_microusd:162400000,pending_actual_cost_microusd:null},
+  instance:{confirmed_cost_microusd:84715946,confirmed_reservation_count:12,pending_invoice_count:9,pending_estimate_microusd:27759169,pending_actual_cost_microusd:null}});
+test('invoice display keeps pending generation and known rental in their original non-additive account layer',()=>{
+  const costs=costBreakdown(),before=structuredClone(costs),view=budgetCosts(row({cost_breakdown:costs}));
+  assert.equal(view[0].confirmed_cost_microusd,0);assert.equal(view[0].pending_invoice_count,181);
+  assert.equal(view[0].pending_estimate_microusd,162400000);assert.equal(view[0].pending_actual_cost_microusd,null);
+  assert.equal(view[1].confirmed_cost_microusd,84715946);assert.deepEqual(costs,before);
+  assert.deepEqual(budgetCosts(row()),[]);
+  assert.deepEqual(budgetCosts(row({cost_breakdown:{...costs,job:{...costs.job,pending_actual_cost_microusd:0}}})),[]);
+  assert.deepEqual(budgetCosts(row({cost_breakdown:{...costs,account_layers_not_additive:false}})),[]);
 });
 
 test('admin account pagination retains the original F guards and reaches shared rows after the first hundred',async()=>{
@@ -138,6 +151,12 @@ test('actual budget cards show sparse recorded dates and legacy uncertainty with
   const ordinary=renderWithLocale(module,React.createElement(module.exports.BudgetWorkspace,{account:'supervan',controller,state:{...state,account:'supervan',snapshot:{operator:{account:'supervan',admin:false}}},busy:false}));
   assert.doesNotMatch(ordinary,/预算与价格管理|共享 GPU 预算|共享生成预算|settings\?tab=admin/);
   const english=renderWithLocale(module,React.createElement(module.exports.BudgetAccounts,{budgets:[retiredRow],compact:true}),'en');
+  const originalCosts=row({cost_breakdown:costBreakdown(),spent_microusd:84715946,reserved_microusd:0});
+  const pendingCosts=renderWithLocale(module,React.createElement(module.exports.BudgetAccounts,{budgets:[originalCosts],compact:true}));
+  assert.match(pendingCosts,/已确认生成账单.*\$0\.00/);assert.match(pendingCosts,/181 笔生成账单待出账.*\$162\.40/);
+  assert.match(pendingCosts,/已确认 GPU 租金账单.*\$84\.72/);assert.match(pendingCosts,/实际费用未知/);assert.match(pendingCosts,/不代表免费生成/);assert.match(pendingCosts,/账户层级不能相加/);
+  const pendingEnglish=renderWithLocale(module,React.createElement(module.exports.BudgetAccounts,{budgets:[originalCosts],compact:true}),'en');
+  assert.match(pendingEnglish,/181 generation invoices pending/);assert.match(pendingEnglish,/Actual charges are unknown/);assert.match(pendingEnglish,/Confirmed GPU rental invoices/);assert.doesNotMatch(pendingEnglish,/operatorPanel\./);
   assert.match(english,/original fixed cap is retired/);assert.match(english,/Pending invoice estimate/);assert.doesNotMatch(english,/原固定额度|operatorPanel\./);
 });
 
