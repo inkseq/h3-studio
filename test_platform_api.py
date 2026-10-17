@@ -712,5 +712,99 @@ class NativeMediaAccountTests(unittest.TestCase):
             self.assertEqual(fake.calls, [])
 
 
+    def test_only_authorized_r2_artifact_video_get_can_cache_its_exact_private_redirect(self):
+        from types import SimpleNamespace
+        from urllib.parse import parse_qs, urlsplit
+        from sqlalchemy import update
+        from studio_platform.repository import artifacts
+        from studio_platform.storage import S3ObjectStore, S3Credentials, StorageError, VIDEO_SIGNING_BUCKET_SECONDS
+        from test_platform_storage import config, FakeS3
+
+        paths, raw, key = self.content_fixture()
+        with self.app.state.repository.engine.begin() as connection:
+            connection.execute(update(artifacts).where(artifacts.c.id == "native-artifact").values(metadata={
+                "kind": "video", "mime": "video/mp4", "object_key": key, "filename": "owner-video.mp4",
+                "size_bytes": len(raw), "sha256": __import__("hashlib").sha256(raw).hexdigest()}))
+        selected = config()
+        fake = FakeS3(selected)
+        store = S3ObjectStore(selected, S3Credentials("fake-access", "fake-secret"), client=fake)
+        store.put(key, io.BytesIO(raw), content_type="video/mp4")
+        remote_app = create_app(self.settings, repository=self.app.state.repository, storage=store)
+        start = 1760572800 // VIDEO_SIGNING_BUCKET_SECONDS * VIDEO_SIGNING_BUCKET_SECONDS
+        now = start + 123
+        with TestClient(remote_app, follow_redirects=False) as remote, \
+             mock.patch("studio_platform.storage.time", SimpleNamespace(time=lambda: now)), \
+             mock.patch("studio_platform.api.time", SimpleNamespace(time=lambda: now)):
+            remote.post("/api/auth/login", json={"username": "superdan"}).raise_for_status()
+            first = remote.get(paths[1], params={"expected_account": "superdan"})
+            second = remote.get(paths[1], params={"expected_account": "superdan"})
+            self.assertEqual(first.status_code, 307)
+            self.assertEqual(first.headers["location"], second.headers["location"])
+            self.assertEqual(first.headers["cache-control"], "private, max-age=43077")
+            self.assertEqual(set(first.headers["vary"].lower().replace(" ", "").split(",")),
+                             {"authorization", "cookie", "x-expected-account"})
+            self.assertEqual(first.headers["referrer-policy"], "no-referrer")
+            self.assertEqual(first.headers["x-authenticated-account"], "superdan")
+            query = parse_qs(urlsplit(first.headers["location"]).query)
+            self.assertEqual(query["response-cache-control"], ["private, max-age=86400, immutable"])
+            self.assertEqual(query["X-Amz-Expires"], ["86400"])
+            now = start + VIDEO_SIGNING_BUCKET_SECONDS - 1
+            last = remote.get(paths[1])
+            self.assertEqual(first.headers["location"], last.headers["location"])
+            self.assertEqual(last.headers["cache-control"], "private, max-age=1")
+            now += 1
+            rolled = remote.get(paths[1])
+            self.assertNotEqual(first.headers["location"], rolled.headers["location"])
+            self.assertEqual(rolled.headers["cache-control"], "private, max-age=43200")
+            # If signing crossed the boundary, the old bucket redirect cannot
+            # become cacheable through the entire next bucket.
+            with mock.patch("studio_platform.storage.time", SimpleNamespace(time=lambda: now - 1)):
+                crossed = remote.get(paths[1])
+            self.assertEqual(crossed.headers["cache-control"], "private, max-age=0")
+            attachment = remote.get(paths[1], params={"download": 1})
+            self.assertIn("attachment;", parse_qs(urlsplit(attachment.headers["location"]).query)["response-content-disposition"][0])
+            # HEAD and owner-uploaded assets retain their existing no-store policy.
+            self.assertEqual(remote.head(paths[1]).headers["cache-control"], "no-store")
+            asset = remote.get(paths[0])
+            self.assertEqual(asset.headers["cache-control"], "no-store")
+            self.assertEqual(fake.calls[-1][1]["ExpiresIn"], 300)
+            self.assertNotIn("ResponseCacheControl", fake.calls[-1][1]["Params"])
+            self.assertEqual(remote.get("/v1/projects/story-one").headers["cache-control"], "no-store")
+            # Every server fetch still checks the original cookie/PAT and owner.
+            with mock.patch.object(store, "presign_immutable_video", side_effect=AssertionError("No signing before auth")):
+                changed = remote.get(paths[1], params={"expected_account": "supervan"})
+                self.assertEqual(changed.status_code, 409)
+                self.assertEqual(changed.headers["cache-control"], "no-store")
+                remote.post("/api/auth/login", json={"username": "supervan"}).raise_for_status()
+                foreign = remote.get(paths[1], params={"expected_account": "supervan"})
+                self.assertEqual(foreign.status_code, 404)
+                self.assertEqual(foreign.headers["cache-control"], "no-store")
+                remote.cookies.clear()
+                anonymous = remote.get(paths[1])
+                self.assertEqual(anonymous.status_code, 401)
+                # Existing early authentication failures carry no cache allowance.
+                self.assertNotIn("max-age", anonymous.headers.get("cache-control", ""))
+                self.assertNotIn("location", anonymous.headers)
+            remote.post("/api/auth/login", json={"username": "superdan"}).raise_for_status()
+            with mock.patch.object(store, "presign_immutable_video", side_effect=StorageError("Signing unavailable")):
+                failed = remote.get(paths[1])
+                self.assertGreaterEqual(failed.status_code, 400)
+                self.assertEqual(failed.headers["cache-control"], "no-store")
+                self.assertNotIn("location", failed.headers)
+            for metadata in (
+                {"kind": "audio", "mime": "audio/flac", "object_key": key, "size_bytes": len(raw)},
+                {"kind": "video", "mime": "video/mp4", "object_key": key, "size_bytes": len(raw)},
+            ):
+                with self.app.state.repository.engine.begin() as connection:
+                    connection.execute(update(artifacts).where(artifacts.c.id == "native-artifact").values(metadata=metadata))
+                self.assertEqual(remote.get(paths[1]).headers["cache-control"], "no-store")
+            with self.app.state.repository.engine.begin() as connection:
+                connection.execute(update(artifacts).where(artifacts.c.id == "native-artifact").values(metadata={
+                    **metadata, "content_deleted": True}))
+            deleted = remote.get(paths[1])
+            self.assertEqual(deleted.status_code, 404)
+            self.assertEqual(deleted.headers["cache-control"], "no-store")
+
+
 if __name__ == "__main__":
     unittest.main()

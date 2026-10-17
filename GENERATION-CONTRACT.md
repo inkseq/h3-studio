@@ -836,3 +836,30 @@ Mixed-story bulk requests must be separate per-story CAS operations with separat
 Read `GET /v1/library/imports/{operation_id}` without advancing. Receipts bind original source/body/hash/destination, source_project_version/source_snapshot_sha256, state pending/completed/blocked, copied asset_ids and completed entity_ids/project_version. Explicitly resume only the original POST/body/key. Network uncertainty never allocates a new upload identity. A blocked destination CAS retains all copied assets and has `no_authoring_committed=true`; only an explicit new user intent may choose another target. Initial source/target version conflicts return a matching `resource=library_import`, request_hash and no_mutation_committed proof only before an operation exists. Other 4xx/unknown responses never imply no write.
 
 中文：素材和档案仍属于原故事；跨故事列表只聚合有权查看的内容。标签、归档、重命名复用故事版本CAS。导入复用原上传回执、配额和完整哈希，不迁移原数据、不自动生成或删除。用在哪里只表示当前创作引用，未使用不等于允许永久删除；未知结果保留原请求与键。
+
+
+## Private immutable video HTTP caching (#272 step 1)
+
+An authenticated GET of a retained generated MP4 artifact with a complete immutable
+size/hash receipt may redirect to the same private R2 URL throughout a 12-hour UTC
+bucket. Its SigV4 signing date is that bucket start and its validity is 24 hours
+from that start (never more than 24 hours from issue). Content type, inline versus
+attachment disposition, and `private, max-age=86400, immutable` are signed response
+overrides. The signer is local to that request; ordinary SDK clocks, uploads and
+short asset signatures do not change.
+
+Only the exact successful authenticated artifact-video GET redirect can override
+the API's default `no-store`: its private max-age is the smaller of remaining
+signature validity minus a 600-second margin and seconds until its 12-hour bucket
+ends (never below zero), with `Vary: Authorization, Cookie, X-Expected-Account`
+and `Referrer-Policy: no-referrer`. Every server request still performs the existing
+owner/project/scope, account-fence and deleted-content checks before signing; a
+browser can reuse its already authorized private redirect during that cache period.
+At the next bucket its redirect must be authorized again. An already issued R2 URL
+is a bearer grant until signature expiry; this does not promise immediate link
+revocation or removal of already downloaded private bytes.
+HEAD, local storage, assets, other media, incomplete legacy receipts, errors and
+other API responses retain their previous behavior. Storage keys, metadata, bucket
+privacy and CORS are unchanged. This server step does not install a Service Worker
+or claim per-account local cache eviction on sign-out; bounded client caching and
+its sign-out cleanup are the subsequent independently accepted step.

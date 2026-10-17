@@ -16,6 +16,7 @@ import tempfile
 import time
 import uuid
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import BinaryIO, Protocol, runtime_checkable
 from urllib.parse import quote, urlsplit
@@ -24,6 +25,9 @@ from .storage_config import (LOCAL_CAPABILITIES, S3Credentials, S3StorageConfig,
                              StorageCapabilities, StorageConfigurationError)
 
 DEFAULT_MAX_BYTES = 100 * 1024 * 1024
+VIDEO_SIGNING_BUCKET_SECONDS = 12 * 3600
+VIDEO_SIGNING_VALIDITY_SECONDS = 24 * 3600
+VIDEO_OBJECT_CACHE_CONTROL = "private, max-age=86400, immutable"
 _CHUNK = 1024 * 1024
 _PART = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 _RESERVED = re.compile(r"(?:CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(?:\.|$)", re.I)
@@ -416,6 +420,7 @@ class S3ObjectStore:
             # Reject SDK region/redirect middleware changing the configured host.
             events.register_first("before-send.s3", self._guard_endpoint)
         self._client = client
+        self._video_credentials = credentials if isinstance(credentials, S3Credentials) else None
 
     def _guard_endpoint(self, request, **kwargs):
         try:
@@ -498,16 +503,64 @@ class S3ObjectStore:
     def delete(self, key: str) -> None:
         self._call("delete_object", key)
 
+    def _download_disposition(self, filename):
+        if filename is None:
+            return None
+        if (not isinstance(filename, str) or not 1 <= len(filename) <= 255
+                or any(ord(c) < 32 or ord(c) == 127 or c in "/\\" for c in filename)):
+            raise StorageError("Invalid download filename")
+        if self.config.provider == "hippius":
+            raise UnsupportedStorageOperation("Attachment response override has not been qualified for Hippius")
+        return "attachment; filename*=UTF-8''"+quote(filename, safe="")
+
     def presign_download(self, key: str, *, expires_seconds=300, download_filename=None) -> SecretURL:
-        disposition = None
-        if download_filename is not None:
-            if (not isinstance(download_filename, str) or not 1 <= len(download_filename) <= 255
-                    or any(ord(c) < 32 or ord(c) == 127 or c in "/\\" for c in download_filename)):
-                raise StorageError("Invalid download filename")
-            if self.config.provider == "hippius":
-                raise UnsupportedStorageOperation("Attachment response override has not been qualified for Hippius")
-            disposition = "attachment; filename*=UTF-8''"+quote(download_filename, safe="")
+        disposition = self._download_disposition(download_filename)
         return self._presign(key, "GET", expires_seconds, {}, disposition=disposition)
+
+    def presign_immutable_video(self, key: str, *, content_type: str, download_filename=None) -> SecretURL:
+        """Only the authorized immutable artifact-video route uses this R2 policy.
+
+        One request-local signer changes its own timestamp before canonicalization;
+        ordinary asset GET/PUT signers and the process clock remain untouched.
+        Pinned source: https://github.com/boto/botocore/blob/1.43.108/botocore/auth.py,
+        SigV4Auth.add_auth -> S3SigV4QueryAuth._modify_request_before_signing.
+        """
+        validate_key(key)
+        if self.config.provider != "r2":
+            raise UnsupportedStorageOperation("Immutable video caching requires the selected R2 store")
+        if content_type != "video/mp4":
+            raise StorageError("Immutable video caching requires an MP4 artifact")
+        disposition = self._download_disposition(download_filename) or "inline"
+        if self._video_credentials is None:
+            raise StorageError("Explicit storage credentials are required for immutable video signing")
+        now = int(time.time())
+        bucket = now // VIDEO_SIGNING_BUCKET_SECONDS * VIDEO_SIGNING_BUCKET_SECONDS
+        try:
+            from botocore.auth import S3SigV4QueryAuth
+            from botocore.awsrequest import AWSRequest
+            from botocore.credentials import Credentials
+
+            class BucketedVideoAuth(S3SigV4QueryAuth):
+                def _modify_request_before_signing(self, request):
+                    request.context["timestamp"] = datetime.fromtimestamp(bucket, timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+                    super()._modify_request_before_signing(request)
+
+            credentials = self._video_credentials
+            frozen = Credentials(credentials._access, credentials._secret, credentials._token).get_frozen_credentials()
+            request = AWSRequest(method="GET", url=f"{self.config.endpoint_url}/{self.config.bucket}/{key}", params={
+                "response-cache-control": VIDEO_OBJECT_CACHE_CONTROL,
+                "response-content-type": content_type,
+                "response-content-disposition": disposition,
+            })
+            BucketedVideoAuth(frozen, "s3", self.config.region, expires=VIDEO_SIGNING_VALIDITY_SECONDS).add_auth(request)
+            url = request.url
+            parsed, endpoint = urlsplit(url), urlsplit(self.config.endpoint_url)
+            if (parsed.scheme != "https" or parsed.netloc != endpoint.netloc or parsed.fragment
+                    or parsed.path != f"/{self.config.bucket}/{key}" or not parsed.query):
+                raise ValueError
+        except Exception:
+            raise StorageError("Could not create immutable video access for the selected storage endpoint") from None
+        return SecretURL(url, "GET", bucket + VIDEO_SIGNING_VALIDITY_SECONDS, {})
 
     def presign_upload(self, key: str, *, content_type: str, expires_seconds=300) -> SecretURL:
         if not self.capabilities.presigned_upload:
