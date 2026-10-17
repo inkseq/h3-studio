@@ -479,6 +479,79 @@ class DomainOriginTests(unittest.TestCase):
             replace(self.settings, local_ui_origins=("http://127.0.0.1:8870",))
 
 
+class ProjectCatalogTombstoneTests(unittest.TestCase):
+    """Purged authoring is absent from discovery/open; audit rows stay intact."""
+    setUp = ApiTests.setUp
+    login = ApiTests.login
+
+    def seed(self, owner, ident, payload):
+        from studio_platform.repository import Scope
+        return self.app.state.repository.put_document(
+            Scope(self.settings.tenant_id, owner, "__projects"), "project", ident, payload)
+
+    def test_browser_catalog_and_open_preserve_owner_isolation_and_nullable_live_titles(self):
+        from studio_platform.repository import Scope
+        tombstone = self.seed("superdan", "a-purged", {"id": "a-purged", "title": "", "content_deleted": True})
+        active = self.seed("superdan", "b-active", project("b-active"))
+        nullable = self.seed("superdan", "c-null-title", {**project("c-null-title"), "title": None})
+        other = self.seed("supervan", "a-purged", project("a-purged"))
+        self.login()
+        for offset, original in enumerate((active, nullable)):
+            response = self.client.get("/v1/projects", params={"limit": 1, "offset": offset})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["projects"], [{"id": original["document_id"],
+                "title": original["payload"]["title"], "version": original["version"],
+                "updated_at": original["updated_at"]}])
+            opened = self.client.get("/v1/projects/"+original["document_id"])
+            self.assertEqual(opened.status_code, 200, opened.text)
+            self.assertEqual(opened.json()["project"], original["payload"])
+        response = self.client.get("/v1/projects/a-purged")
+        self.assertEqual(response.status_code, 404, response.text)
+        self.assertEqual(response.json(), {"detail": "project_not_found"})
+        self.login("supervan")
+        self.assertEqual(self.client.get("/v1/projects/a-purged").json()["project"], other["payload"])
+        self.assertEqual([row["id"] for row in self.client.get("/v1/projects").json()["projects"]], ["a-purged"])
+        self.assertEqual(self.client.get("/v1/projects/b-active").status_code, 404)
+        repo = self.app.state.repository
+        self.assertEqual(repo.get_document(Scope(self.settings.tenant_id, "superdan", "__projects"),
+            "project", "a-purged"), tombstone)
+
+    def test_pat_catalog_skips_tombstone_before_authorized_pagination_and_keeps_financial_history(self):
+        from studio_platform.repository import Scope
+        scope = Scope(self.settings.tenant_id, "superdan", "__projects")
+        tombstone = self.seed("superdan", "a-purged", {"id": "a-purged", "title": "", "content_deleted": True})
+        active = self.seed("superdan", "z-active", project("z-active"))
+        self.seed("superdan", "b-not-granted", project("b-not-granted"))
+        self.seed("supervan", "z-active", project("z-active"))
+        repo = self.app.state.repository
+        repo.configure_budget("catalog-budget", tenant_id=self.settings.tenant_id,
+            owner_id="superdan", limit_microusd=10_000_000)
+        job_scope = Scope(self.settings.tenant_id, "superdan", "a-purged")
+        plan = repo.create_plan(job_scope, {"retained": "original accepted request"},
+            {"pool": "cpu-fixture"}, expires_at=repo.clock()+1000, estimated_cost_microusd=100_000)
+        job = repo.create_job(job_scope, plan["id"], "retained-catalog-history",
+            budget_account_ids=("catalog-budget",))
+        job_before = repo.get_job(job_scope, job["id"])
+        budget_before = repo.get_budget("catalog-budget")
+        token = secrets.token_urlsafe(32)
+        self.app.state.auth.register_client("catalog-read", token, "superdan", ["a-purged", "z-active"],
+            ["projects:read", "jobs:read"])
+        headers = {"Authorization": "Bearer "+token}
+        response = self.client.get("/v1/projects", params={"limit": 1}, headers=headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual([row["id"] for row in response.json()["projects"]], ["z-active"])
+        self.assertEqual(self.client.get("/v1/projects?limit=1&offset=1", headers=headers).json(), {"projects": []})
+        self.assertEqual(self.client.get("/v1/projects/z-active", headers=headers).json()["project"], active["payload"])
+        for ident in ("a-purged", "b-not-granted"):
+            self.assertEqual(self.client.get("/v1/projects/"+ident, headers=headers).status_code, 404)
+        # Project authoring discovery must not alter accepted jobs or money, or
+        # block the existing authorized historical job read path.
+        self.assertEqual(self.client.get("/v1/jobs/"+job["id"], headers=headers).status_code, 200)
+        self.assertEqual(repo.get_document(scope, "project", "a-purged"), tombstone)
+        self.assertEqual(repo.get_job(job_scope, job["id"]), job_before)
+        self.assertEqual(repo.get_budget("catalog-budget"), budget_before)
+
+
 class NativeMediaAccountTests(unittest.TestCase):
     """Native browser content keeps the same cookie/owner boundary as fetch."""
     setUp = ApiTests.setUp

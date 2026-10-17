@@ -61,6 +61,34 @@ class ReliabilityTests(LedgerCase):
         with self.assertRaisesRegex(ValueError, "invalid_document_summary"):
             self.repo.list_documents(scope, "note", summary=True)
 
+    def test_project_catalog_excludes_purged_content_before_pagination_without_erasing_history(self):
+        scope = Scope(self.scope.tenant_id, self.scope.owner_id, "__projects")
+        source = {
+            "a-purged": {"id": "a-purged", "title": "", "content_deleted": True},
+            "b-managed": {"title": "Managed", "integration_kind": "quick_chat"},
+            "c-active": {"title": "Active", "content_deleted": False},
+            "d-null-title": {"title": None},
+            "e-missing-title": {},
+        }
+        originals = {key: self.repo.put_document(scope, "project", key, payload)
+                     for key, payload in source.items()}
+        for foreign_scope in (Scope(scope.tenant_id, "supervan", scope.project_id),
+                              Scope("other-tenant", scope.owner_id, scope.project_id)):
+            self.repo.put_document(foreign_scope, "project", "a-purged", {"title": "Foreign live story"})
+            self.repo.put_document(foreign_scope, "project", "c-active", {"content_deleted": True})
+        allowed = ("a-purged", "c-active", "d-null-title", "e-missing-title")
+        for summary in (False, True):
+            for offset, expected in enumerate(("c-active", "d-null-title", "e-missing-title")):
+                rows = self.repo.list_documents(scope, "project", exclude_managed=True,
+                    summary=summary, allowed_ids=allowed, limit=1, offset=offset)
+                self.assertEqual([row["document_id"] for row in rows], [expected])
+                self.assertEqual(rows[0]["payload"].get("title"), source[expected].get("title"))
+        self.assertEqual(self.repo.list_documents(scope, "project", exclude_managed=True,
+            allowed_ids=("a-purged",), limit=1), [])
+        for key, original in originals.items():
+            self.assertEqual(self.repo.get_document(scope, "project", key), original)
+        self.assertEqual(len(self.repo.list_documents(scope, "project")), len(source))
+
     def test_job_project_authorization_precedes_limit_offset_and_preserves_summaries(self):
         authorized = self.scope
         excluded = Scope(self.scope.tenant_id, self.scope.owner_id, "excluded-project")
