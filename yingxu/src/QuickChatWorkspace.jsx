@@ -8,6 +8,7 @@ import React,{useEffect,useLayoutEffect,useMemo,useRef,useState,useSyncExternalS
 import {Plus,ArrowUp,Settings2,Bot,Menu,X,RefreshCw,LogOut,Upload,Image,Video,Music,Paperclip,Send,Trash2,SlidersHorizontal,UserRound,Sparkles} from 'lucide-react';
 import {useCloud} from './CloudStudio.jsx';
 import {cloudController as cloud} from './cloud-controller.js';
+import {cloudSystemMessage} from './cloud-model.js';
 import {createQuickChatController,saveMaterialSelection} from './quick-chat-controller.js';
 import {CHAT_MODELS,defaultsFor,nextSettingsFor,recipeFor,clone,bindingPayload,bindingParticipates,bindingProblems,bindingsForInputs,mergeTimelineTurns,sessionHref,safeSessionId,effectiveLimits,displaySeconds,effectiveControlSchema,hasOriginalAudio,isInternalDerivedInventory,roleSupported,automaticInputMode} from './quick-chat-model.js';
 import QuickChatControls,{ChatDialog} from './QuickChatControls.jsx';
@@ -201,7 +202,7 @@ export default function QuickChatWorkspace(){
 
       </div>
     </main></div>
-    {toast&&<div className="qc-toast" role="status"><span>{toast}</span><button aria-label={t('workspace.accessible10')} onClick={()=>setToast('')}><X size={12}/></button></div>}
+    {toast&&<div className="qc-toast" role="status"><span>{cloudSystemMessage(toast,locale)}</span><button aria-label={t('workspace.accessible10')} onClick={()=>setToast('')}><X size={12}/></button></div>}
     <div className="quick-sidebar-feedback"><HistoryFeedback state={state} controller={controller} busy={busy}/></div>
     {dialog==='takes'&&<ChatDialog title={t('takes.preferences')} onClose={()=>setDialog(null)}>{takePreferences?<QuickChatPreferences controller={controller} value={takePreferences} busy={busy||!!state.pending} onSaved={value=>{setTakePreferences(checkedPreferences(value));setDialog(null);}}/>:<p role="alert">{t('takes.preferencesError')}</p>}</ChatDialog>}
     {dialog==='materials'&&<ChatDialog title={t('quickView.reuseMaterials',{count:availableMaterials.length})} onClose={()=>setDialog(null)}><QuickChatMaterials availableModes={Object.fromEntries(['fl','ref'].map(mode=>[mode,modeAvailability(state.availability,state.capabilities,settings,mode).available]))} bindings={availableMaterials} recipe={recipe} client={controller.client} busy={busy} onChange={updateMaterials} onRoleChange={roleChange} onRemove={removeMaterial} compact showDisabled/><details><summary>{t('quickView.inputDetails')}</summary><p>{materialLimits}</p>{recipe&&(visibleMaterials.length>0||modeIntent!=='auto')&&<div className="qc-mode-note"><span>{modeLabel} · {at('adjunct.quickChatWorkspace.copy204')}{recipe.mode==='fl'?at('adjunct.quickChatWorkspace.copy205'):at('adjunct.quickChatWorkspace.copy206')}</span>{excluded.length>0&&<button disabled={busy||!modeAvailability(state.availability,state.capabilities,settings,recipe.mode==='fl'?'ref':'fl').available} onClick={()=>switchComposerMode(recipe.mode==='fl'?'ref':'fl')}>{at('adjunct.quickChatWorkspace.copy207')}{recipe.mode==='fl'?t('workspace.status14'):t('workspace.status13')}</button>}</div>}</details></ChatDialog>}

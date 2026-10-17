@@ -618,6 +618,29 @@ class NativeMediaAccountTests(unittest.TestCase):
             for path in paths:
                 self.assertEqual(self.client.get(path, params={"expected_account": "superdan"}).status_code, 401)
 
+    def test_generated_download_names_use_inkseq_without_rewriting_stored_metadata_or_assets(self):
+        from sqlalchemy import select, update
+        from studio_platform.repository import artifacts
+
+        paths, raw, _ = self.content_fixture()
+        for stored_name, advertised in (("sixnine-original-image.png", "inkseq-original-image.png"),
+                                         ("Sixnine-Original.png", "inkseq-Original.png"),
+                                         ("owner-custom.png", "owner-custom.png")):
+            with self.subTest(stored_name=stored_name):
+                with self.app.state.repository.engine.begin() as connection:
+                    original = connection.execute(select(artifacts).where(artifacts.c.id == "native-artifact")).mappings().one()
+                    metadata = {**original["metadata"], "filename": stored_name}
+                    connection.execute(update(artifacts).where(artifacts.c.id == "native-artifact").values(metadata=metadata))
+                response = self.client.get(paths[1], params={"download": 1, "expected_account": "superdan"})
+                self.assertEqual(response.content, raw)
+                self.assertIn(advertised, response.headers["content-disposition"])
+                with self.app.state.repository.engine.connect() as connection:
+                    actual = connection.execute(select(artifacts.c.metadata).where(artifacts.c.id == "native-artifact")).scalar_one()
+                self.assertEqual(actual, metadata)
+        asset = self.client.get(paths[0], params={"download": 1})
+        self.assertIn("native.png", asset.headers["content-disposition"])
+        self.assertEqual(asset.content, raw)
+
     def test_native_account_hint_rejects_ambiguity_only_on_exact_content_reads(self):
         paths, _, _ = self.content_fixture()
         invalid = [({"expected_account": ""}, {}), ({"expected_account": " "}, {}),

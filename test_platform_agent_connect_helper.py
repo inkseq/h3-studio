@@ -17,7 +17,7 @@ from studio_platform.agent_connect import AgentConnect, ConnectError, PROFILE_ID
 from studio_platform.auth import Auth, digest
 from studio_platform.repository import Repository
 
-HELPER_PATH = Path(__file__).resolve().parent / "skills" / "sixnine-yingxu" / "scripts" / "connect.py"
+HELPER_PATH = Path(__file__).resolve().parent / "skills" / "inkseq" / "scripts" / "connect.py"
 spec = spec_from_file_location("sixnine_connect_test", HELPER_PATH)
 helper = module_from_spec(spec)
 spec.loader.exec_module(helper)

@@ -4,7 +4,7 @@ Read this file, the assigned issue's latest owner comments and current claims be
 
 ## Authority and coordination
 
-- Backend/issues: `inkseq/h3-studio`; canonical frontend: `../video-studio-design/studio-app` in `inkseq/sixnine-design`; board: https://github.com/orgs/inkseq/projects/1. Project IDs/fields are in `workflow/project.json`, read when updating the board.
+- Backend/issues: `inkseq/h3-studio`; canonical frontend: `../video-studio-design/studio-app` in `inkseq/inkseq-design`; board: https://github.com/orgs/inkseq/projects/1. Project IDs/fields are in `workflow/project.json`, read when updating the board.
 - Latest human instructions win. Record mid-course decisions as numbered entries in [workflow/owner-changes.md](workflow/owner-changes.md); the latest applicable CR supersedes older plan/contract wording. Update conflicting current text in place, rather than adding overrides. The CR log records decisions, not a second task board.
 - Claim a bounded scope with integration owner, branch/worktree, base revision and affected contracts. Inspect concurrent claims/PRs. Preserve other sessions' changes; never reset a shared checkout or develop on shared main. Agents manage routine PRs, checks and merges.
 - Complete the related batch locally, then run the affected checks once. Do not trigger full CI/CD for each small change. Source merged, released and usable are separate outcomes.

@@ -7,6 +7,7 @@ import {createStore,validateProject} from './store.js';
 import {createCloudClient,CloudError,safeCloudPath} from './cloud-client.js';
 import {cloudSystemMessage,blankCloudProject,freestyleProject,removeFreestyleInput,copyForCloud,controlsForRecipe,selectedProfileRecipe,buildPlanPayload,digest,shotSnapshot,mergeJobCandidate,estimateLabel,recoveryMessage} from './cloud-model.js';
 import {createCloudController} from './cloud-controller.js';
+import {HISTORY_ACTIONS} from './creation-history-model.js';
 
 test('native media targets stream through exact account-fenced routes without reading bytes or storing access links',async()=>{
  let reads=0;const native=createCloudClient({fetcher:()=>{throw Error('native URL creation must not fetch');}});
@@ -294,4 +295,17 @@ test('cloud system notices follow locale without translating user text or diagno
  assert.equal(cloudSystemMessage('已恢复尚未同步的云草稿。','zh'),'已恢复尚未同步的云草稿。');
  assert.equal(cloudSystemMessage('我的故事：夜雨','en'),'我的故事：夜雨');
  assert.equal(cloudSystemMessage('HTTP 429 · provider detail','en'),'HTTP 429 · provider detail');
+});
+
+test('history receipt notices use the active language for pending blocked and every completed action',()=>{
+ const expected={trash:'Moved to trash.',restore:'Creation restored.',purge:'Permanently deleted.',empty_trash:'Trash emptied.'};
+ for(const [action,english] of Object.entries(expected)){
+  const notice=HISTORY_ACTIONS[action]+'已完成，任务和计费账本保留。';
+  assert.equal(cloudSystemMessage(notice,'en'),english+' Task and spending records are retained.');
+  assert.match(cloudSystemMessage(notice,'zh'),/任务和计费账本保留/);
+  const authored='My prompt quotes: '+notice;
+  assert.equal(cloudSystemMessage(authored,'en'),authored);
+ }
+ assert.equal(cloudSystemMessage('永久删除已受理，仍在处理中；请核对原清理状态。','en'),'Permanent deletion accepted; still processing. Check the original cleanup status.');
+ assert.equal(cloudSystemMessage('原清理操作已核对，受阻记录仍保留。','en'),'Original cleanup checked; blocked items are retained.');
 });

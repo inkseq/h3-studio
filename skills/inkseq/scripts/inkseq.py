@@ -40,7 +40,7 @@ def api_path(value):
 
 def credential(args):
     if getattr(args, "connection", None):
-        if args.profile or args.registry_root or os.environ.get("SIXNINE_API_KEY"):
+        if args.profile or args.registry_root or os.environ.get("INKSEQ_API_KEY") or os.environ.get("SIXNINE_API_KEY"):
             raise ValueError("Choose one explicit credential source; connection cannot be combined with environment or registry credentials")
         import importlib.util
         spec = importlib.util.spec_from_file_location("sixnine_os_connection", Path(__file__).with_name("connect.py"))
@@ -61,7 +61,7 @@ def credential(args):
             raise ValueError("Registry profile endpoint does not match the chosen origin")
         value = config.api_key
     else:
-        value = os.environ.get("SIXNINE_API_KEY")
+        value = os.environ.get("INKSEQ_API_KEY", os.environ.get("SIXNINE_API_KEY"))
     if not value or not value.isascii() or any(c.isspace() for c in value):
         raise ValueError("A valid process-only credential or existing registry profile is required")
     return value

@@ -10,7 +10,15 @@ const clone=value=>structuredClone(value);
 // Translate only known system notices; user-authored text and diagnostics stay intact.
 export function cloudSystemMessage(message,locale='zh'){
   const key={'云项目已打开。':'workspace.notice.cloudOpened','云项目已打开；原本机作品保留。':'workspace.notice.localPreserved','已恢复尚未同步的云草稿。':'workspace.notice.draftRestored','项目版本已保存。':'workspace.notice.saved','素材已加入当前项目素材库，请明确选择镜头和用途；尚未提交生成。':'workspace.notice.assetAdded','预检已完成，请核对实际发送输入和预算后确认。':'workspace.notice.preflightReady','批次已记录。可查看任务进度和逐镜审核；不会自动采用结果。':'workspace.notice.batchSaved','粗剪任务已提交，可在本章粗剪版本查看进度；结果不替换镜头或时间线。':'workspace.notice.roughCutSubmitted','可读取的本机素材已同步，项目版本已保存。':'workspace.notice.materialsSynced','取消请求已提交。以任务最终状态为准，已执行部分可能已产生费用。':'workspace.notice.cancelRequested','暂无已登记且心跳有效的匹配工作机，也无有效的独立冷启动审批':'availability.unavailableMessage'}[message];
-  return key?translate(locale,key):message;
+  const historyKey={
+    '永久删除已受理，仍在处理中；请核对原清理状态。':'quickHistory.noticePending',
+    '原清理操作已核对，受阻记录仍保留。':'quickHistory.noticeBlocked',
+    '移到回收站已完成，任务和计费账本保留。':'quickHistory.noticeTrash',
+    '恢复创作已完成，任务和计费账本保留。':'quickHistory.noticeRestore',
+    '永久删除已完成，任务和计费账本保留。':'quickHistory.noticePurge',
+    '清空回收站已完成，任务和计费账本保留。':'quickHistory.noticeEmpty',
+  }[message];
+  return key||historyKey?translate(locale,key||historyKey):message;
 }
 export const jobLabels={planned:'等待批次确认',waiting_capacity:'等待计算容量',queued:'等待执行',claimed:'已分配',submitting:'正在提交',running:'生成中',collecting:'保存与核验结果',checking:'检查成片',succeeded:'已完成',failed:'失败',cancel_requested:'正在确认取消',cancelled:'已取消',blocked:'等待条件满足',submission_unknown:'提交结果待核对',recovery_hold:'恢复后待核对'};
 export const jobStatusLabel=(status,locale='zh')=>Object.hasOwn(jobLabels,status)?translate(locale,'jobs.status.'+status):status;

@@ -35,7 +35,7 @@ class CompatibilityFingerprints(unittest.TestCase):
 
     def test_reference_changes_are_in_api_source_identity(self):
         before = build_contracts(self.root)
-        reference = self.root / 'skills/sixnine-yingxu/reference/api.md'
+        reference = self.root / 'skills/inkseq/reference/api.md'
         reference.write_text('changed supported task contract')
         after = build_contracts(self.root)
         self.assertNotEqual(before['api_compatibility'], after['api_compatibility'])

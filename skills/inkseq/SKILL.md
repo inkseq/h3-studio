@@ -1,6 +1,6 @@
 ---
-name: sixnine-yingxu
-description: Use an Inkseq or Yingxu link to create video takes, organise an authorized story and references, and return editable drafts and results through the same business API as the website.
+name: inkseq
+description: Use an Inkseq / 映序 link to create video takes, organise an authorized story and references, and return editable drafts and results through the same business API as the website.
 ---
 
 # Inkseq / 映序
@@ -19,7 +19,7 @@ Read [API fields/examples](reference/api.md) when constructing requests and [rec
 ```sh
 python scripts/connect.py connect --server ORIGIN --connection CONNECTION_ID --account OWNER --tenant TENANT --fingerprint FINGERPRINT
 python scripts/connect.py whoami --server ORIGIN --connection CONNECTION_ID
-python scripts/sixnine.py --base-url ORIGIN --connection CONNECTION_ID request GET /v1/agent-guide
+python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID request GET /v1/agent-guide
 ```
 
 Replace placeholders with actual returned values. Example safe response projection: `{"status":"connected","connection_id":"CONNECTION_ID","owner":"OWNER"}`; never a token. Lost exchange? Resume the same saved connection; see recovery.
@@ -69,7 +69,7 @@ Read a shot's `/versions` for immutable recipes; old missing recipes stay unknow
 4. Assets keep their original project/session ownership. Discover authorized projects' files with `GET /v1/library` filters and inspect current shot usage with `GET /v1/library/usage`. Tag/file through the original project's versioned actions; use explicit import for another story. See the [library contract](reference/api.md#project-scoped-library-and-explicit-imports-238).
 
 ```sh
-python scripts/sixnine.py --base-url ORIGIN --connection CONNECTION_ID upload --session SESSION --asset-id SAVED_CLIENT_ASSET_ID --file reference.png --output upload.json
+python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID upload --session SESSION --asset-id SAVED_CLIENT_ASSET_ID --file reference.png --output upload.json
 ```
 
 Example ready receipt projection: `{"asset_id":"ASSET","status":"ready"}`. Use that `asset_id`, not filename or document entity ID.
@@ -108,4 +108,4 @@ This is a user-facing summary example, not a fabricated API receipt. See recover
 2. Inspect `/v1/library/usage` for a returned target; unused is not purge permission.
 3. Tag/file with original story CAS or explicitly import to another authorized story.
 4. Keep the import key/body; observe its receipt before resuming. See [API](reference/api.md#project-scoped-library-and-explicit-imports-238).
-Example: `python scripts/sixnine.py request GET '/v1/library?tag=rain'`. Imports never generate.
+Example: `python scripts/inkseq.py request GET '/v1/library?tag=rain'`. Imports never generate.

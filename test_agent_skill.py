@@ -11,13 +11,53 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+import zipfile
 
 import httpx
 
-SCRIPT = Path(__file__).parent / "skills/sixnine-yingxu/scripts/sixnine.py"
+SCRIPT = Path(__file__).parent / "skills/inkseq/scripts/sixnine.py"
 spec = importlib.util.spec_from_file_location("sixnine_skill", SCRIPT)
 skill = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(skill)
+
+
+class AgentHelperCompatibilityTests(unittest.TestCase):
+    def test_shipped_helpers_prefer_inkseq_and_keep_silent_legacy_fallback(self):
+        # Test the downloaded layout, including the old entry point's sibling import.
+        # No registry, OS credential store or remote service is consulted.
+        from studio_platform.agent_discovery import skill_bundle
+
+        with tempfile.TemporaryDirectory() as folder:
+            with zipfile.ZipFile(io.BytesIO(skill_bundle())) as bundle:
+                bundle.extractall(folder)
+            for entry in ("inkseq.py", "sixnine.py"):
+                path = Path(folder) / "inkseq/scripts" / entry
+                spec = importlib.util.spec_from_file_location("downloaded_"+entry[:-3], path)
+                helper = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(helper)
+                for environment, expected in (({"INKSEQ_API_KEY": "new-key", "SIXNINE_API_KEY": "old-key"}, "new-key"),
+                                               ({"SIXNINE_API_KEY": "old-key"}, "old-key")):
+                    seen = []
+                    def handle(request):
+                        seen.append((request.method, request.url.path, request.headers["Authorization"]))
+                        return httpx.Response(200, json={"status": "read"})
+                    args = argparse.Namespace(base_url="https://studio.example.test", registry_root=None,
+                        profile=None, connection=None, command="request", method="GET", path="/v1/agent-guide",
+                        json_file=None, output=None, idempotency_key=None)
+                    with self.subTest(entry=entry, environment=list(environment)), patch.dict("os.environ", environment, clear=True), \
+                         contextlib.redirect_stdout(io.StringIO()) as output, contextlib.redirect_stderr(io.StringIO()) as error:
+                        helper.run(args, httpx.MockTransport(handle))
+                        self.assertEqual(seen, [("GET", "/v1/agent-guide", "Bearer "+expected)])
+                        self.assertEqual(json.loads(output.getvalue()), {"status": "read"})
+                        self.assertEqual(error.getvalue(), "")
+                for invalid in ("", "not a token", "非ASCII"):
+                    with self.subTest(entry=entry, invalid=invalid), patch.dict("os.environ",
+                            {"INKSEQ_API_KEY": invalid, "SIXNINE_API_KEY": "old-key"}, clear=True), \
+                         self.assertRaisesRegex(ValueError, "valid process-only credential"):
+                        helper.credential(args)
+                with patch.dict("os.environ", {"INKSEQ_API_KEY": "new-key"}, clear=True), \
+                     self.assertRaisesRegex(ValueError, "cannot be combined"):
+                    helper.credential(argparse.Namespace(connection="original-connection", profile=None, registry_root=None))
 
 
 class AgentClientTests(unittest.TestCase):

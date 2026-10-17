@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 import copy
 import io
 import json
+from pathlib import Path
 import re
 import secrets
 import unittest
@@ -421,8 +422,12 @@ class GuidedTests(unittest.TestCase):
         result = self.client.get("/v1/agent-skill.zip", headers=headers)
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.headers["cache-control"], "no-store")
+        self.assertIn('filename="inkseq-agent-skill.zip"', result.headers["content-disposition"])
         with zipfile.ZipFile(io.BytesIO(result.content)) as bundle:
-            self.assertEqual(set(bundle.namelist()), {"sixnine-yingxu/SKILL.md", "sixnine-yingxu/scripts/sixnine.py"})
+            from studio_platform.agent_discovery import SKILL_FILES
+            self.assertEqual(set(bundle.namelist()), {"inkseq/README.md", *("inkseq/"+name for name in SKILL_FILES)})
+            self.assertEqual(bundle.read("inkseq/scripts/inkseq.py"),
+                (Path(__file__).parent / "skills/inkseq/scripts/inkseq.py").read_bytes())
         _, restricted = self.key(scopes=["jobs:read"])
         self.assertEqual(self.client.get("/v1/agent-skill.zip", headers=restricted).status_code, 403)
 

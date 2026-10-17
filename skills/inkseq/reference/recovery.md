@@ -13,7 +13,15 @@ python scripts/connect.py whoami --server ORIGIN --connection CONNECTION_ID
 
 Resume uses saved token/verifier/code/fingerprint. It never regenerates them. The exchange validates the full authorization hash, exact origin/owner/scopes/projects/expiry, matching key prefix and connected state; a raw token response is forbidden. A local connected record is historical evidence, not fresh online health. Unknown responses stay protected locally. Code/recovery/key TTLs come from issuance policy and are frozen for that grant; later settings cannot broaden it.
 
-An existing old-domain connection may use the helper's explicit `migrate-origin` operation only from its exact saved old origin to the supported canonical origin. It verifies the original immutable grant and the same PAT's target identity, retains the old encrypted record and creates an encrypted one-hop reference. No redirect-based credential forwarding, token copying, fresh grant or expiry extension. See existing `/for-agents/guide.json` connection.origin_migration for exact supported domains; do not infer migration for other origins.
+### Existing connection origin migration
+
+An existing connected `creator-full-v1` record saved for `https://sixnine.art` or `https://www.sixnine.art` can explicitly migrate to `https://inkseq.com`. Use the **exact origin in the saved connection**, not an inferred redirect:
+
+```sh
+python scripts/connect.py migrate-origin --server https://www.sixnine.art --to-server https://inkseq.com --connection CONNECTION_ID
+```
+
+Use the old apex only if that is the saved origin. The helper verifies the original immutable grant/fingerprint and the same PAT's direct target identity, retains the old encrypted record and creates only an encrypted one-hop reference. Subsequent old/new-origin helper commands resolve that verified reference. It never forwards credentials through redirects, copies tokens, exchanges a fresh grant or extends expiry. Conflicting, pending or expired records are refused. Keep the original encrypted credential; do not infer migration for other origins. Existing storage identities, tenant identifiers and legacy helper/environment aliases remain compatibility details.
 
 ## Closed versus uncertain writes
 
@@ -74,11 +82,11 @@ Preflight items expose static `error_code`, `error_stage` and safe `error_messag
 The helper has GET-only `availability`, generic `request` (including PATCH), `upload`, `resume-upload`, bounded GET-only `poll`, and `download`; none chains generation or adoption automatically. Examples below use returned IDs and files containing non-secret request JSON:
 
 ```sh
-python scripts/sixnine.py --base-url https://inkseq.com request POST /v1/projects --json-file create.json --idempotency-key UNIQUE-QUICK-CREATE --output created.json
-python scripts/sixnine.py --base-url https://inkseq.com upload --project PROJECT_ID --asset-id UNIQUE-INPUT-ID --file portrait.png --output upload.json
-python scripts/sixnine.py --base-url https://inkseq.com resume-upload --project PROJECT_ID --asset-id UNIQUE-INPUT-ID --output recovered-upload.json
-python scripts/sixnine.py --base-url https://inkseq.com poll --job JOB_ID --max-wait 600 --output poll.json
-python scripts/sixnine.py --base-url https://inkseq.com download /v1/artifacts/ARTIFACT_ID/content --output take.mp4 --sha256 MANIFEST_SHA256
+python scripts/inkseq.py --base-url https://inkseq.com request POST /v1/projects --json-file create.json --idempotency-key UNIQUE-QUICK-CREATE --output created.json
+python scripts/inkseq.py --base-url https://inkseq.com upload --project PROJECT_ID --asset-id UNIQUE-INPUT-ID --file portrait.png --output upload.json
+python scripts/inkseq.py --base-url https://inkseq.com resume-upload --project PROJECT_ID --asset-id UNIQUE-INPUT-ID --output recovered-upload.json
+python scripts/inkseq.py --base-url https://inkseq.com poll --job JOB_ID --max-wait 600 --output poll.json
+python scripts/inkseq.py --base-url https://inkseq.com download /v1/artifacts/ARTIFACT_ID/content --output take.mp4 --sha256 MANIFEST_SHA256
 ```
 
 `resume-upload` locates exactly one original client ID and makes at most one resume request; it does not send file bytes again. `poll` respects Retry-After, stops on terminal or reconciliation states, and returns `poll_status=waiting` when its bounded wait ends. Continue GET polling that same job later. No success is implied by a zero exit code; inspect the returned state.

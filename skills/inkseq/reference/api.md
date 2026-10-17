@@ -4,7 +4,7 @@ Read this for exact request construction; the [task guide](../SKILL.md) chooses 
 
 ## Helper and credentials
 
-`scripts/sixnine.py --base-url ORIGIN --connection ID request METHOD /v1/PATH --json-file body.json --idempotency-key SAVED_KEY --output receipt.json` supports GET/POST/PUT/PATCH/DELETE. Omit body/key for reads. Save the exact body/key before writes. Each independently intended write needs its own key; original-request recovery reuses it. Output files are exclusive. Use a new output filename for another observation, not a new paid request. Python/httpx are required; connect.py is standard-library only. Choose one credential source: activated OS-protected connection, process-only `SIXNINE_API_KEY`, or an already configured explicit registry profile. Never copy secrets into project files.
+`scripts/inkseq.py --base-url ORIGIN --connection ID request METHOD /v1/PATH --json-file body.json --idempotency-key SAVED_KEY --output receipt.json` supports GET/POST/PUT/PATCH/DELETE. Omit body/key for reads. Save the exact body/key before writes. Each independently intended write needs its own key; original-request recovery reuses it. Output files are exclusive. Use a new output filename for another observation, not a new paid request. Python/httpx are required; connect.py is standard-library only. Choose one credential source: activated OS-protected connection, process-only `INKSEQ_API_KEY`, or an already configured explicit registry profile. Never copy secrets into project files.
 
 ## Connection owner controls (browser-only)
 
@@ -42,26 +42,26 @@ The variables below are actual returned values. Create each JSON file from the t
 
 ```powershell
 $base = "/v1/quick-chat/sessions/$session"
-python scripts/sixnine.py --base-url $origin --connection $connection request GET "$base/cards/$card/takes?limit=20" --output takes.json
-python scripts/sixnine.py --base-url $origin --connection $connection request PATCH "$base/takes/$item" --json-file star.json --idempotency-key saved-star-key
-python scripts/sixnine.py --base-url $origin --connection $connection request POST "$base/cards/$card/again" --json-file again.json --idempotency-key saved-again-key --output again.json.receipt
+python scripts/inkseq.py --base-url $origin --connection $connection request GET "$base/cards/$card/takes?limit=20" --output takes.json
+python scripts/inkseq.py --base-url $origin --connection $connection request PATCH "$base/takes/$item" --json-file star.json --idempotency-key saved-star-key
+python scripts/inkseq.py --base-url $origin --connection $connection request POST "$base/cards/$card/again" --json-file again.json --idempotency-key saved-again-key --output again.json.receipt
 # Read the new revision; set $revision to that returned ID.
-python scripts/sixnine.py --base-url $origin --connection $connection request POST "$base/revisions/$revision/preflights" --json-file preflight.json --idempotency-key saved-preflight-key --output preflight.receipt.json
+python scripts/inkseq.py --base-url $origin --connection $connection request POST "$base/revisions/$revision/preflights" --json-file preflight.json --idempotency-key saved-preflight-key --output preflight.receipt.json
 ```
 
 Stop and inspect readiness/quote and any human-only approval. Only then, within explicit generation authority:
 
 ```powershell
-python scripts/sixnine.py --base-url $origin --connection $connection request POST "$base/revisions/$revision/submissions" --json-file confirm.json --idempotency-key saved-submit-key --output submission.json
+python scripts/inkseq.py --base-url $origin --connection $connection request POST "$base/revisions/$revision/submissions" --json-file confirm.json --idempotency-key saved-submit-key --output submission.json
 ```
 
 Transfer is separately authorized authoring:
 
 ```powershell
-python scripts/sixnine.py --base-url $origin --connection $connection request POST "$base/takes/$item/story" --json-file story.json --idempotency-key saved-story-key --output transfer.json
-python scripts/sixnine.py --base-url $origin --connection $connection request GET "$base/story-transfers/$transfer" --output transfer-status.json
+python scripts/inkseq.py --base-url $origin --connection $connection request POST "$base/takes/$item/story" --json-file story.json --idempotency-key saved-story-key --output transfer.json
+python scripts/inkseq.py --base-url $origin --connection $connection request GET "$base/story-transfers/$transfer" --output transfer-status.json
 # Only explicit reconciliation, same body/key, never automatic retarget:
-python scripts/sixnine.py --base-url $origin --connection $connection request POST "$base/takes/$item/story" --json-file story.json --idempotency-key saved-story-key --output transfer-resumed.json
+python scripts/inkseq.py --base-url $origin --connection $connection request POST "$base/takes/$item/story" --json-file story.json --idempotency-key saved-story-key --output transfer-resumed.json
 ```
 
 ## Story authoring and generation
@@ -91,8 +91,8 @@ GET/PATCH `/v1/storyboard/preferences` reads/replaces account defaults with `{ex
 POST `/v1/projects/PROJECT/storyboard/preflights` with saved body `{"expected_version":7,"shot_ids":["SHOT"],"copies":2}` and key creates an unpaid durable operation. GET the returned `/storyboard/preflights/ID` to observe; explicit same-body/key POST resumes missing plan projections. Items retain `shot_id,index,seed,plan_id,plan`; a fixed seed applies only to copy zero, other seeds are distinct in the selected runtime domain. Never redraw after timeout. `estimate.cost_microusd` and `machine_seconds` are nullable; machine allowance is not ETA. Only explicitly approved ready plan IDs go to original `/v1/batches`; aggregate spending confirmation and partial batch recovery stay unchanged.
 
 ```sh
-python scripts/sixnine.py --base-url ORIGIN --connection CONNECTION_ID request POST /v1/projects/PROJECT/storyboard/preflights --json-file storyboard-preflight.json --idempotency-key saved-preflight-key --output preflight.json
-python scripts/sixnine.py --base-url ORIGIN --connection CONNECTION_ID request GET /v1/projects/PROJECT/storyboard/preflights/RETURNED_ID --output observed.json
+python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID request POST /v1/projects/PROJECT/storyboard/preflights --json-file storyboard-preflight.json --idempotency-key saved-preflight-key --output preflight.json
+python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID request GET /v1/projects/PROJECT/storyboard/preflights/RETURNED_ID --output observed.json
 ```
 
 Do not automatically chain admission. Pending/unknown retains the original key/body. A matching `closed_preflight:true,status:"blocked",no_generation_submitted:true` permits explicitly abandoning that unpaid preflight; original partial plans remain retained. New storyboard-only action CAS failures positively report `no_mutation_committed` with canonical `request_hash`; generic errors are not proof of no write.
@@ -143,9 +143,9 @@ Owner/browser spending settings and confirmations are not machine-PAT controls. 
 4. Permanent deletion uses `purge` preview and explicit `confirmed:true`. It is asynchronous: GET `/v1/trash/actions/OPERATION_ID`. Same original body/key returns that operation; it does not start another purge. `pending`/unknown never means absent, no auto-retry with a new key. Restore is forbidden after purge intent. Emptying the trash is an explicit, fully paginated selection followed by this same atomic preview/action; newly arriving trash is not silently added.
 
 ```sh
-python scripts/sixnine.py --base-url ORIGIN --connection CONNECTION_ID request POST /v1/trash/preview --json-file trash-preview.json --output preview.json
-python scripts/sixnine.py --base-url ORIGIN --connection CONNECTION_ID request POST /v1/trash/actions --json-file trash-action.json --idempotency-key saved-trash-key --output operation.json
-python scripts/sixnine.py --base-url ORIGIN --connection CONNECTION_ID request GET /v1/trash/actions/RETURNED_OPERATION_ID --output observed.json
+python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID request POST /v1/trash/preview --json-file trash-preview.json --output preview.json
+python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID request POST /v1/trash/actions --json-file trash-action.json --idempotency-key saved-trash-key --output operation.json
+python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID request GET /v1/trash/actions/RETURNED_OPERATION_ID --output observed.json
 ```
 
 Known closed refusals include matching `resource:"trash"`, canonical `request_hash` and `no_mutation_committed:true`; only that positive proof allows abandoning the saved command and explicitly selecting again. A bare 4xx/5xx is not that proof. `removed`/`kept` report actual media handling; immutable accepted inputs, current other references and accounting/audit identities remain. A completed purge may retain referenced media. Physical deletion uses the original activated reconciler, exact storage receipts, full SHA and confirmed absence; no prefix sweep. No automatic expiry, no background deletion merely because something is old. Replayed historical authoring receipts cannot reattach tombstoned content. Unsaved browser drafts are not server references.
@@ -186,11 +186,11 @@ Read `GET /v1/library/imports/{operation_id}` without advancing. Receipts bind o
 
 Helper examples (authenticated original connection; use actual returned IDs/versions in JSON files):
 ```sh
-python scripts/sixnine.py request GET '/v1/library?tag=rain&type=file'
-python scripts/sixnine.py request GET '/v1/library/usage?project_id=STORY&kind=entity&id=FILE'
-python scripts/sixnine.py request POST /v1/projects/STORY/actions --json-file tag.json --idempotency-key library-tags-1
-python scripts/sixnine.py request POST /v1/library/imports --json-file import.json --idempotency-key library-import-1
-python scripts/sixnine.py request GET /v1/library/imports/RETURNED_OPERATION_ID
+python scripts/inkseq.py request GET '/v1/library?tag=rain&type=file'
+python scripts/inkseq.py request GET '/v1/library/usage?project_id=STORY&kind=entity&id=FILE'
+python scripts/inkseq.py request POST /v1/projects/STORY/actions --json-file tag.json --idempotency-key library-tags-1
+python scripts/inkseq.py request POST /v1/library/imports --json-file import.json --idempotency-key library-import-1
+python scripts/inkseq.py request GET /v1/library/imports/RETURNED_OPERATION_ID
 ```
 For explicit recovery, repeat only the same import POST, JSON file and key. Do not chain this to paid generation. `tag.json` uses the original `{expected_version,actions}` envelope; `import.json` uses the import body above. Source/destination IDs are account data, never credentials.
 

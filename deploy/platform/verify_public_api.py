@@ -96,8 +96,13 @@ def verify():
             assert ident in json.dumps(exported)
             skill = request(agent, 'GET', '/v1/agent-skill.zip', headers=headers, binary=True)
             with zipfile.ZipFile(io.BytesIO(skill)) as archive:
-                assert len(archive.namelist()) == 2
-                assert all('..' not in name for name in archive.namelist())
+                expected = {'inkseq/' + name for name in (
+                    'README.md', 'SKILL.md', 'scripts/inkseq.py', 'scripts/sixnine.py',
+                    'scripts/connect.py', 'reference/api.md', 'reference/recovery.md')}
+                assert set(archive.namelist()) == expected and len(archive.namelist()) == len(expected)
+                assert all(0 < item.file_size <= 512 * 1024 for item in archive.infolist())
+                assert sum(item.file_size for item in archive.infolist()) <= 512 * 1024
+                assert archive.testzip() is None
             checks.append(username + '_login_key_creation_story_actions_export_skill_browser_consistency')
         for username, _, headers in keys:
             other = 'supervan' if username == 'superdan' else 'superdan'

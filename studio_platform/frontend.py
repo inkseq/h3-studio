@@ -121,7 +121,7 @@ def register_routes(app):
         try:
             _regular_file(settings.frontend_dir, "index.html")
         except (OSError, ValueError):
-            raise ValueError("Configured frontend build is missing or invalid; build the reviewed Yingxu source snapshot first") from None
+            raise ValueError("Configured frontend build is missing or invalid; build the reviewed Inkseq source snapshot first") from None
 
     def html(request: Request):
         try:

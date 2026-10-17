@@ -685,7 +685,7 @@ fairness only, revealing neither other owners nor an ETA. Preflight's nullable
 historical timing or promised completion. Original cost/admission truth is
 unchanged. Strict write DTOs and safe field diagnostics are published in OpenAPI
 and `/v1/quick-chat/schema`; runnable generic-helper examples are in
-[the public Skill](skills/sixnine-yingxu/SKILL.md#take-groups-and-explicit-recipe-transfer-233).
+[the public Skill](skills/inkseq/SKILL.md#take-groups-and-explicit-recipe-transfer-233).
 
 中文：候选组沿用原任务、预检和计费权威。偏好修改不改历史；转入故事只复制完整配方与素材，
 不启动生成。未知结果保留原操作并显式续办，不自动重试、不清理复制资产。
@@ -791,7 +791,7 @@ Bulk draft/final/move and project-local profile fork run in one project CAS.
 Fork rewires selected shots only, including inherited/string cast bindings;
 unselected shots and shared originals remain unchanged. Global usage/search and
 trash/undo remain separate dependencies. Public API/helper examples are in
-`skills/sixnine-yingxu/reference/api.md`; no helper authentication bytes changed.
+`skills/inkseq/reference/api.md`; no helper authentication bytes changed.
 
 中文：版本配方只读原始不可变快照；旧记录缺失时明确未知。恢复、收藏、选择和批量
 编辑不生成、不删除。份数上限复用可编辑设置；全局→故事→镜头继承，时长和种子留在
@@ -800,7 +800,7 @@ trash/undo remain separate dependencies. Public API/helper examples are in
 
 ## Universal content lifecycle (#236)
 
-The original owner document authority stores reversible trash metadata and original action receipts; no second job or budget authority is introduced. `/v1/trash/preview`, `/v1/trash/actions`, `/v1/trash/actions/{operation_id}` and `/v1/trash` cover project/entity/look/location_version/asset/artifact/take identities. See `skills/sixnine-yingxu/reference/api.md#universal-trash` for exact bodies, CAS and helper commands. Conversations retain the existing Quick Chat history authority.
+The original owner document authority stores reversible trash metadata and original action receipts; no second job or budget authority is introduced. `/v1/trash/preview`, `/v1/trash/actions`, `/v1/trash/actions/{operation_id}` and `/v1/trash` cover project/entity/look/location_version/asset/artifact/take identities. See `skills/inkseq/reference/api.md#universal-trash` for exact bodies, CAS and helper commands. Conversations retain the existing Quick Chat history authority.
 
 Trash removes active authoring references atomically and preserves inverse reference capsules. Restore merges those capsules against the current project, refusing conflicts rather than overwriting newer edits. Active/unresolved execution, upload and collection obligations block removal; each retained container keeps at least one original chapter/scene. No automatic expiry or migration of historical user rows occurs. Explicit permanent deletion retains original accepted plan/job inputs, attempts, ledgers and receipt identities. The original activated object reconciler performs exact receipt-bound deletion and quota finalization; unknown remains the same pending operation. Unreferenced output associations alone do not make a binary an input forever. Deleting-owner historical guided edit responses remain byte-identical audit rows, while current drafts/other trash capsules/accepted inputs and other-owner references retain media. Backup expected-missing classification requires positively completed exact-object deletion evidence; incomplete or unrelated evidence remains unexpected.
 
