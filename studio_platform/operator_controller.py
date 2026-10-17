@@ -22,7 +22,7 @@ from .autoscale import ScalePolicy
 from .operator_capacity import (ACTIVE_COMMANDS, OperatorError, operator_commands,
     operator_heartbeats, operator_nodes, require, safe_id, public_bootstrap, offer_fingerprint, command_binding_fingerprint,
     MANUAL_REVIEW_CONTROLLER_PREFIX)
-from .repository import (BudgetExceeded, Conflict, LeaseLost, instance_intents, outbox, registered_workers,
+from .repository import (BudgetExceeded, Conflict, LeaseLost, instance_intents, registered_workers,
                          scaler_actions, manually_reviewed_inactive)
 from .scaler import ScaleCoordinator
 
@@ -341,19 +341,13 @@ class OperatorController:
     def _observe(self,node):
         with self.repo.engine.connect() as connection:
             intent=connection.execute(select(instance_intents).where(instance_intents.c.id==node["intent_id"])).mappings().one()
-            fence=node["payload"].get("settlement_recovery",{})
-            if (intent["state"]=="destroyed" and fence.get("version")==2
-                    and fence.get("intent_id")==intent["id"] and fence.get("command_id")==node["command_id"]
-                    and node["desired_state"]=="stopped" and node["runtime_state"]=="stopped"):
-                audit=connection.execute(select(outbox.c.payload).where(
-                    outbox.c.event_type=="budget.recovery_completed",outbox.c.aggregate_id==fence.get("operation_id"))).scalar()
-                if (isinstance(audit,dict) and audit.get("state")=="applied" and audit.get("source")==fence.get("source")
-                        and any(entry.get("reference_type")=="instance" and entry.get("reference_id")==intent["id"]
-                            and entry.get("actual_cost_microusd") is None
-                            and entry.get("evidence_sha256")==fence.get("evidence_sha256")
-                            and entry.get("capacity_fence",{}).get("command_id")==node["command_id"]
-                            for entry in audit.get("entries",[]))):
-                    return "stopped"  # Audited ended history owns no provider observation work.
+            # tick() can have cached this node before the recovery transaction
+            # committed. Bind the destroyed-intent fence to the current journal.
+            if intent["state"]=="destroyed":
+                node=connection.execute(select(operator_nodes).where(operator_nodes.c.intent_id==intent["id"])).mappings().one()
+            from .settlement_recovery import reviewed_instance_fenced
+            if reviewed_instance_fenced(connection,intent,node):
+                return "stopped"
             if manually_reviewed_inactive(connection,intent):
                 return "manually_reviewed"
         binding=self.service.registry.get(node["binding_id"])
@@ -438,8 +432,12 @@ class OperatorController:
         if intent["state"] in {"creating","creation_unknown"}: runtime="creation_unknown"
         if stopping and runtime=="ready": runtime="draining"
         with self.repo.transaction() as connection:
+            self.repo._lock_capacity(connection)
             current=self.repo._locked(connection,select(operator_nodes).where(operator_nodes.c.intent_id==intent_id))
             current_intent=self.repo._locked(connection,select(instance_intents).where(instance_intents.c.id==intent_id))
+            from .settlement_recovery import reviewed_instance_fenced
+            if reviewed_instance_fenced(connection,current_intent,current):
+                return "stopped"
             if manually_reviewed_inactive(connection,current_intent):
                 return "manually_reviewed"
             values={"runtime_state":runtime,"updated_at":self.repo.clock()}
@@ -524,8 +522,14 @@ class OperatorController:
             except LeaseLost:
                 continue
             except Exception:
-                errors+=1
                 with self.repo.transaction() as connection:
+                    self.repo._lock_capacity(connection)
+                    current=self.repo._locked(connection,select(operator_nodes).where(operator_nodes.c.intent_id==node["intent_id"]))
+                    intent=self.repo._locked(connection,select(instance_intents).where(instance_intents.c.id==node["intent_id"]))
+                    from .settlement_recovery import reviewed_instance_fenced
+                    if reviewed_instance_fenced(connection,intent,current):
+                        continue
+                    errors+=1
                     connection.execute(update(operator_nodes).where(operator_nodes.c.intent_id==node["intent_id"]).values(
                         runtime_state="observation_failed",updated_at=self.repo.clock()))
         self._summarize_commands()

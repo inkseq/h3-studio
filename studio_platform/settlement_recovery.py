@@ -190,6 +190,23 @@ def validate_reviewed_instance(value, proof, now, accounts, selected, excluded):
             and proof["owned_run"] is None, "settlement_legacy_review_required")
 
 
+def reviewed_instance_fenced(conn, intent, node):
+    """Only a committed original recovery audit can fence later observations."""
+    fence = node["payload"].get("settlement_recovery", {})
+    if not (intent["state"] == "destroyed" and isinstance(fence, dict) and fence.get("version") == 2
+            and fence.get("intent_id") == intent["id"] and fence.get("command_id") == node["command_id"]
+            and node["desired_state"] == "stopped" and node["runtime_state"] == "stopped"):
+        return False
+    audit = conn.execute(select(outbox.c.payload).where(outbox.c.event_type == "budget.recovery_completed",
+        outbox.c.aggregate_id == fence.get("operation_id"))).scalar()
+    return (isinstance(audit, dict) and audit.get("state") == "applied" and audit.get("source") == fence.get("source")
+        and any(entry.get("reference_type") == "instance" and entry.get("reference_id") == intent["id"]
+            and entry.get("actual_cost_microusd") is None and entry.get("billing_status") == "pending"
+            and entry.get("evidence_sha256") == fence.get("evidence_sha256")
+            and entry.get("capacity_fence", {}).get("command_id") == node["command_id"]
+            for entry in audit.get("entries", [])))
+
+
 def fence_reviewed_instance(repo, conn, value, request):
     """Close original capacity journals atomically with releasing their hold."""
     row, node = value["reference"], value["node"]

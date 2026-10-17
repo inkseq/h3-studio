@@ -433,6 +433,8 @@ class ReviewedHistoricalRemovalTests(LedgerCase):
     def test_only_audited_ended_legacy_fence_skips_provider_observation(self):
         from studio_platform.operator_controller import OperatorController
         identity = self.ended(legacy='targon', state='destroying')
+        with self.repo.engine.connect() as conn:
+            stale_node = dict(conn.execute(select(operator_nodes).where(operator_nodes.c.intent_id == identity)).mappings().one())
         reconcile(self.repo, self.reviewed_request(identity), apply=True)
         controller = object.__new__(OperatorController)
         controller.repo, controller.service = self.repo, Mock()
@@ -440,10 +442,13 @@ class ReviewedHistoricalRemovalTests(LedgerCase):
         with self.repo.engine.connect() as conn:
             node = dict(conn.execute(select(operator_nodes).where(operator_nodes.c.intent_id == identity)).mappings().one())
         self.assertEqual(controller._observe(node), 'stopped')
+        self.assertEqual(controller._observe(stale_node), 'stopped')
         controller.service.registry.get.assert_not_called()
         for changes in ({'operation_id': str(uuid.uuid4())}, {'intent_id': str(uuid.uuid4())}):
             altered = {**node, 'payload': {**node['payload'], 'settlement_recovery': {
                 **node['payload']['settlement_recovery'], **changes}}}
+            with self.repo.transaction() as conn:
+                conn.execute(update(operator_nodes).where(operator_nodes.c.intent_id == identity).values(payload=altered['payload']))
             with self.assertRaisesRegex(RuntimeError, 'original observation reached'):
                 controller._observe(altered)
         with self.repo.transaction() as conn:
@@ -463,3 +468,85 @@ class ReviewedHistoricalRemovalTests(LedgerCase):
             with self.assertRaisesRegex(Conflict, 'absence_unconfirmed'):
                 reconcile(self.repo, request, apply=True)
         self.assertGreater(self.repo.get_budget('owner-budget')['reserved_microusd'], 0)
+
+    def test_late_dstack_observation_cannot_zero_invoice_or_revive_reviewed_history(self):
+        from studio_platform.dstack_controller import DstackController
+        identity = self.ended()
+        with self.repo.engine.connect() as conn:
+            stale_node = dict(conn.execute(select(operator_nodes).where(operator_nodes.c.intent_id == identity)).mappings().one())
+        reconcile(self.repo, self.reviewed_request(identity), apply=True)
+        # Even a late native rejection observation must not forgive this
+        # deliberately retained unknown invoice after the reviewed operation.
+        self.store.record(identity, {'state': 'stopped', 'ready': False, 'observed_at': self.now,
+            'dstack_status': 'failed', 'no_allocation_proof': {'late': 'must not be interpreted'}})
+        self.store.record(identity, {'state': 'creation_unknown', 'ready': False, 'observed_at': self.now})
+        with self.repo.engine.connect() as conn:
+            reservation = conn.execute(select(budget_reservations)).mappings().one()
+            node = conn.execute(select(operator_nodes)).mappings().one()
+            self.assertEqual((reservation['state'], reservation['actual_cost_microusd']), ('invoice_pending', None))
+            self.assertEqual(node['runtime_state'], 'stopped')
+        controller = object.__new__(DstackController)
+        controller.repo, controller.capacity = self.repo, Mock()
+        self.assertEqual(controller._tick_node(stale_node), {'node_id': identity, 'state': 'stopped'})
+        controller.capacity.store.load.assert_not_called()
+
+    def test_delayed_dstack_start_callback_preserves_completed_original_command(self):
+        from studio_platform.dstack_capacity import DstackError
+        original_start = self.capacity.start
+        for lost in (False, True):
+            def complete_during_http(request, pub):
+                observation = original_start(request, pub)
+                with self.repo.transaction() as conn:
+                    conn.execute(update(instance_intents).where(instance_intents.c.id == request.intent_id)
+                        .values(state='creation_unknown'))
+                reconcile(self.repo, self.reviewed_request(request.intent_id), apply=True)
+                if lost:
+                    raise DstackError('dstack_api_unavailable')
+                return observation
+            with patch.object(self.capacity, 'start', side_effect=complete_during_http):
+                result = self.start('delayed-'+str(lost))
+            self.assertEqual(result['state'], 'completed')
+            with self.repo.engine.connect() as conn:
+                command = conn.execute(select(operator_commands).where(operator_commands.c.id == result['command_id'])).mappings().one()
+                reservation = conn.execute(select(budget_reservations).where(budget_reservations.c.reference_id == result['node_id'])).mappings().one()
+            self.assertEqual(command['state'], 'completed')
+            self.assertEqual((reservation['state'], reservation['actual_cost_microusd']), ('invoice_pending', None))
+
+    def test_legacy_observation_result_and_failure_cannot_overwrite_a_recovery_committed_during_io(self):
+        from studio_platform.operator_controller import OperatorController
+        for failure in (False, True):
+            identity = self.ended('legacy-race-'+str(failure), legacy='targon', state='destroying')
+            request = self.reviewed_request(identity)
+            with self.repo.engine.connect() as conn:
+                node = dict(conn.execute(select(operator_nodes).where(operator_nodes.c.intent_id == identity)).mappings().one())
+            controller = object.__new__(OperatorController)
+            controller.repo, controller.service = self.repo, Mock()
+            controller.leader_id, controller.boots = 'test-review-race', {}
+            controller._policy = Mock(return_value=None)
+            controller.service.registry.get.return_value.fingerprint = node['binding_hash']
+            coordinator = Mock()
+            def callback(*args, **kwargs):
+                reconcile(self.repo, request, apply=True)
+                return {'state': 'observed'}
+            coordinator.observe_manual_instance.side_effect = callback
+            controller._coordinator = Mock(return_value=coordinator)
+            if failure:
+                controller.enabled, controller.shutting_down = True, False
+                controller.inventory_refresh = controller.status_writer = None
+                controller._start = Mock(return_value='waiting')
+                controller._summarize_commands = Mock()
+                def failed_observation(cached):
+                    reconcile(self.repo, request, apply=True)
+                    raise RuntimeError('late provider failure')
+                controller._observe = Mock(side_effect=failed_observation)
+                self.assertEqual(controller.tick()['errors'], 0)
+            else:
+                # Simulate entry preceding the earlier manual review, with the
+                # private recovery committing inside the original provider I/O.
+                with patch('studio_platform.operator_controller.manually_reviewed_inactive', return_value=None):
+                    self.assertEqual(controller._observe(node), 'stopped')
+            with self.repo.engine.connect() as conn:
+                current = conn.execute(select(operator_nodes).where(operator_nodes.c.intent_id == identity)).mappings().one()
+                reservation = conn.execute(select(budget_reservations).where(budget_reservations.c.reference_id == identity)).mappings().one()
+            self.assertEqual(current['runtime_state'], 'stopped')
+            self.assertEqual((reservation['state'], reservation['actual_cost_microusd']), ('invoice_pending', None))

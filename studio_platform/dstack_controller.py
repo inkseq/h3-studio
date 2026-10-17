@@ -302,6 +302,14 @@ class DstackController:
 
     def _tick_node(self, node):
         intent_id = node["intent_id"]
+        # A node cached by tick() may predate an atomic reviewed recovery.
+        # Read the committed fence before any provider observation/bootstrap.
+        with self.repo.engine.connect() as connection:
+            current = dict(connection.execute(select(operator_nodes).where(operator_nodes.c.intent_id == intent_id)).mappings().one())
+            intent = connection.execute(select(instance_intents).where(instance_intents.c.id == intent_id)).mappings().one()
+            from .settlement_recovery import reviewed_instance_fenced
+            if reviewed_instance_fenced(connection, intent, current):
+                return {"node_id": intent_id, "state": "stopped"}
         binding = self.capacity.store.load(intent_id)
         funded = True
         if node["payload"].get("lifecycle", {}).get("version") == 2 and node["desired_state"] == "running":
