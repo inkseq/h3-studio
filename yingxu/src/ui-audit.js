@@ -14,7 +14,7 @@ export function auditVisibleUI({locale='en'}={}){
   if(own&&/\$\s*\d+\.\d{3,}/.test(own))issues.push({type:'money-precision',label:label(el)});
   if(locale==='en'&&/[\u3400-\u9fff]/.test(own)&&!el.closest(dataSelector)&&!el.closest('.language-switch,.account-avatar,.avatar,input,textarea,option,[data-user-content]'))issues.push({type:'mixed-language',label:label(el)});
   if(own&&el.clientWidth>0&&el.scrollWidth>el.clientWidth+2&&['hidden','clip'].includes(s.overflowX)){
-   if(s.textOverflow==='ellipsis'&&(el.title||el.getAttribute('aria-label')||el.closest(dataSelector)))exceptions.push({type:'intentional-ellipsis',label:label(el)});
+   if(s.textOverflow==='ellipsis'&&(el.title||el.getAttribute('aria-label')||el.closest('button[aria-label]')?.getAttribute('aria-label')?.includes(own)||el.closest(dataSelector)))exceptions.push({type:'intentional-ellipsis',label:label(el)});
    else if(Number(s.webkitLineClamp)>0)exceptions.push({type:'expandable-clamp',label:label(el)});
    else issues.push({type:'clipped-text',label:label(el),width:Math.round(rect.width)});
   }

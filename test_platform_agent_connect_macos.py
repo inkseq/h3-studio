@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-HELPER_PATH = Path(__file__).resolve().parent / "skills" / "sixnine-yingxu" / "scripts" / "connect.py"
+HELPER_PATH = Path(__file__).resolve().parent / "skills" / "inkseq" / "scripts" / "connect.py"
 spec = spec_from_file_location("sixnine_connect_macos_test", HELPER_PATH)
 helper = module_from_spec(spec)
 spec.loader.exec_module(helper)

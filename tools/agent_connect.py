@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def main():
-    source = Path(__file__).resolve().parent.parent / "skills" / "sixnine-yingxu" / "scripts" / "connect.py"
+    source = Path(__file__).resolve().parent.parent / "skills" / "inkseq" / "scripts" / "connect.py"
     spec = spec_from_file_location("sixnine_public_agent_connect", source)
     module = module_from_spec(spec)
     spec.loader.exec_module(module)

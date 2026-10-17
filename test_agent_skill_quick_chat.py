@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import httpx
 
-ROOT = Path(__file__).parent / "skills/sixnine-yingxu/scripts"
+ROOT = Path(__file__).parent / "skills/inkseq/scripts"
 def module(name, filename):
     spec = importlib.util.spec_from_file_location(name, ROOT / filename)
     result = importlib.util.module_from_spec(spec)

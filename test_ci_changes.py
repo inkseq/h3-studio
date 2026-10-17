@@ -24,7 +24,7 @@ class ChangeClassificationTests(unittest.TestCase):
         result = ci.classify([("M", "README.md"), ("M", "deploy/platform/RELEASE.zh-CN.md")])
         self.assertEqual(result["category"], "docs")
         self.assertFalse(any(result[gate] for gate in ci.GATES))
-        for path in ("new-guide.md", "skills/sixnine-yingxu/SKILL.md", "tools/README.md"):
+        for path in ("new-guide.md", "skills/inkseq/SKILL.md", "tools/README.md"):
             with self.subTest(path=path):
                 self.assert_full(ci.classify([("M", path)]))
 
@@ -52,7 +52,7 @@ class ChangeClassificationTests(unittest.TestCase):
             "studio_platform/auth.py", "studio_platform/settings.py", "studio_platform/queue.py",
             "studio_platform/on_demand_scaler.py", "tools/ci_changes.py",
             ".github/workflows/ci.yml", "workflow/project.json", ".gitignore", ".dockerignore",
-            "skills/sixnine-yingxu/SKILL.md", "new-policy.md",
+            "skills/inkseq/SKILL.md", "new-policy.md",
         ):
             with self.subTest(path=path):
                 self.assert_full(ci.classify([("M", "AGENTS.md"), ("M", "WORKFLOW.md"), ("M", path)]))
@@ -97,7 +97,7 @@ class ChangeClassificationTests(unittest.TestCase):
         self.assertTrue(combined["python"])
 
     def test_native_keychain_gate_cannot_be_skipped_for_helper_or_unknown_changes(self):
-        for path in ("skills/sixnine-yingxu/scripts/connect.py", "test_agent_connect_macos_native.py",
+        for path in ("skills/inkseq/scripts/connect.py", "test_agent_connect_macos_native.py",
                      ".github/workflows/ci.yml", "new-security-code.py"):
             self.assertTrue(ci.classify([("M", path)])["macos_helper"])
         for changes in ([("M", "README.md")], [("M", "yingxu/src/App.jsx")],

@@ -1,4 +1,4 @@
-# Sixnine delivery workflow
+# Inkseq delivery workflow
 
 Current owner process: 2026-10-15, #200. Start with [AGENTS.md](AGENTS.md); read this only when delivery coordination needs detail. Latest owner decisions are in [workflow/owner-changes.md](workflow/owner-changes.md).
 

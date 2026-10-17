@@ -11,10 +11,8 @@ from datetime import datetime, timezone
 import io
 import json
 import math
-from pathlib import Path
 import re
 import uuid
-import zipfile
 
 from fastapi import Header, HTTPException, Query, Request
 from fastapi.responses import Response
@@ -605,17 +603,9 @@ def register_routes(app):
         principal = request.state.principal
         if principal.machine and "projects:read" not in principal.scopes:
             raise HTTPException(403, "下载Agent Skill需要projects:read权限")
-        root = Path(__file__).resolve().parent.parent / "skills" / "sixnine-yingxu"
-        files = ("SKILL.md", "scripts/sixnine.py")
-        output = io.BytesIO()
-        with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
-            for name in files:
-                source = root / name
-                if source.is_symlink() or not source.is_file() or source.stat().st_size > 512*1024:
-                    raise HTTPException(503, "当前发布包未包含完整Agent Skill")
-                bundle.writestr("sixnine-yingxu/"+name, source.read_bytes())
-        return Response(output.getvalue(), media_type="application/zip",
-            headers={"Content-Disposition": 'attachment; filename="sixnine-yingxu-agent-skill.zip"'})
+        from .agent_discovery import skill_bundle
+        return Response(skill_bundle(), media_type="application/zip",
+            headers={"Content-Disposition": 'attachment; filename="inkseq-agent-skill.zip"'})
 
     @app.get("/v1/projects/{project_id}/export")
     def export_project(project_id: str, request: Request, format: str = "json"):

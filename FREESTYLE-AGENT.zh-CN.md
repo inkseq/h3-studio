@@ -6,7 +6,7 @@
 
 用户打开 `/freestyle`，进入云作品，点击 **连接 AI**。复制说明会带当前项目与镜头链接，不包含 API Key。按需要选择“编写与调整”或“编写并生成”，进入现有 Key 管理，默认建议当前作品、7 天。新建其他作品需要单独的 `projects:create` 与全项目授权；当前作品 Key 不自动扩大权限。
 
-公开发现：`/for-agents`、`/for-agents/guide.json`、`/for-agents/SKILL.md`、`/llms.txt`。完整说明与命令见 `skills/sixnine-yingxu/SKILL.md`、`API-USAGE.zh-CN.md`。
+公开发现：`/for-agents`、`/for-agents/guide.json`、`/for-agents/SKILL.md`、`/llms.txt`。完整说明与命令见 `skills/inkseq/SKILL.md`、`API-USAGE.zh-CN.md`。
 
 ## 同一份草稿的调用顺序
 

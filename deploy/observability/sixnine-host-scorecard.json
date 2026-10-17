@@ -1,6 +1,6 @@
 {
   "uid": "sixnine-host-scorecard",
-  "title": "机器排行 · Sixnine Vast 宿主",
+  "title": "机器排行 · Inkseq Vast 宿主",
   "description": "Observed physical host histories from existing Grafana Cloud logs; original ledger remains authoritative for policy, jobs and billing.",
   "schemaVersion": 39,
   "version": 1,

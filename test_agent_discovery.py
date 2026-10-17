@@ -48,9 +48,16 @@ class AgentDiscoveryTests(unittest.TestCase):
         guide = self.client.get("/for-agents/guide.json").json()
         self.assertEqual(guide["name"], "Inkseq / 映序")
         self.assertEqual(guide["connection"]["origin_migration"]["target"], "https://inkseq.com")
+        self.assertEqual(guide["authentication"]["credential_environment"], "INKSEQ_API_KEY")
         document = self.client.get("/for-agents/guide.md").text
         self.assertIn("--base-url https://inkseq.com", document)
-        self.assertIn("migrate-origin --server https://www.sixnine.art --to-server https://inkseq.com", document)
+        self.assertIn("scripts/inkseq.py", document)
+        self.assertNotIn("SIXNINE_API_KEY", document)
+        self.assertNotIn("sixnine.art", document)
+        recovery = self.client.get(guide["connection"]["origin_migration"]["reference"])
+        self.assertEqual(recovery.status_code, 200)
+        self.assertIn("migrate-origin --server https://www.sixnine.art --to-server https://inkseq.com", recovery.text)
+        self.assertIn("Keep the original encrypted credential", recovery.text)
         contract = guide["generation_availability"]
         self.assertEqual(contract["path"], guide["authenticated_resources"]["generation_availability"])
         self.assertEqual(contract["method"], "GET")
@@ -82,15 +89,15 @@ class AgentDiscoveryTests(unittest.TestCase):
         response = self.client.get("/for-agents/skill.zip")
         self.assertEqual(response.headers["content-type"], "application/zip")
         with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
-            self.assertEqual(set(archive.namelist()), {"sixnine-yingxu/SKILL.md", "sixnine-yingxu/README.md",
-                "sixnine-yingxu/scripts/sixnine.py", "sixnine-yingxu/scripts/connect.py",
-                "sixnine-yingxu/reference/api.md", "sixnine-yingxu/reference/recovery.md"})
-            self.assertEqual(archive.read("sixnine-yingxu/SKILL.md"), self.client.get("/for-agents/SKILL.md").content)
-            self.assertEqual(archive.read("sixnine-yingxu/README.md"), self.client.get("/for-agents/guide.md").content)
+            self.assertEqual(set(archive.namelist()), {"inkseq/SKILL.md", "inkseq/README.md",
+                "inkseq/scripts/inkseq.py", "inkseq/scripts/sixnine.py", "inkseq/scripts/connect.py",
+                "inkseq/reference/api.md", "inkseq/reference/recovery.md"})
+            self.assertEqual(archive.read("inkseq/SKILL.md"), self.client.get("/for-agents/SKILL.md").content)
+            self.assertEqual(archive.read("inkseq/README.md"), self.client.get("/for-agents/guide.md").content)
             for name in agent_discovery.SKILL_FILES:
-                self.assertEqual(archive.read("sixnine-yingxu/"+name), (agent_discovery.SKILL_ROOT/name).read_bytes())
-            bundled_helper = archive.read("sixnine-yingxu/scripts/connect.py")
-            bundled_guide = archive.read("sixnine-yingxu/README.md").decode("utf-8")
+                self.assertEqual(archive.read("inkseq/"+name), (agent_discovery.SKILL_ROOT/name).read_bytes())
+            bundled_helper = archive.read("inkseq/scripts/connect.py")
+            bundled_guide = archive.read("inkseq/README.md").decode("utf-8")
         manifest = self.client.get("/for-agents/connect-manifest.json").json()
         helper = self.client.get(manifest["helper"]).content
         self.assertEqual(manifest["sha256"], hashlib.sha256(helper).hexdigest())
@@ -109,7 +116,7 @@ class AgentDiscoveryTests(unittest.TestCase):
                 response = self.client.get("/for-agents/" + path)
                 self.assertEqual(response.headers["content-type"], "text/markdown; charset=utf-8")
                 self.assertEqual(response.content, (agent_discovery.SKILL_ROOT / path).read_bytes())
-                self.assertEqual(response.content, archive.read("sixnine-yingxu/" + path))
+                self.assertEqual(response.content, archive.read("inkseq/" + path))
         self.assertLessEqual(len(self.client.get("/for-agents/SKILL.md").content), 10 * 1024)
 
     def test_storage_manifest_is_additive_and_matches_full_public_connection_contract(self):

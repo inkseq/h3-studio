@@ -223,10 +223,11 @@ inventory.json
 !studio_platform/lium_identity.py
 !LIUM-PRODUCTION-INTEGRATION.zh-CN.md
 !skills/
-!skills/sixnine-yingxu/
-!skills/sixnine-yingxu/SKILL.md
-!skills/sixnine-yingxu/scripts/
-!skills/sixnine-yingxu/scripts/sixnine.py
+!skills/inkseq/
+!skills/inkseq/SKILL.md
+!skills/inkseq/scripts/
+!skills/inkseq/scripts/sixnine.py
+!skills/inkseq/scripts/inkseq.py
 !tools/publish_aws_release.py
 !.github/workflows/archive-diagnostic.yml
 !deploy/platform/runtime_secrets_aws.py
@@ -377,7 +378,7 @@ inventory.json
 !studio_platform/agent_connect_routes.py
 !tools/agent_connect.py
 !tools/run_quick_chat_preview.py
-!skills/sixnine-yingxu/scripts/connect.py
+!skills/inkseq/scripts/connect.py
 !AGENT-CONNECT-CONTRACT.md
 
 # Explicit encrypted business-backup copies; no backup data or receipts.
@@ -576,9 +577,9 @@ inventory.json
 !test_agent_management.py
 
 # Exact public Agent task references.
-!skills/sixnine-yingxu/reference/
-!skills/sixnine-yingxu/reference/api.md
-!skills/sixnine-yingxu/reference/recovery.md
+!skills/inkseq/reference/
+!skills/inkseq/reference/api.md
+!skills/inkseq/reference/recovery.md
 !studio_platform/storyboard_versions.py
 !test_storyboard_versions.py
 

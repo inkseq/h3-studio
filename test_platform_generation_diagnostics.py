@@ -35,7 +35,7 @@ def failure_request():
             'audio-PRIVATE': {'metadata': {'kind': 'audio', 'duration': 2}}}}
 
 spec=importlib.util.spec_from_file_location('diagnostic_public_helper',
-    Path(__file__).parent/'skills/sixnine-yingxu/scripts/sixnine.py')
+    Path(__file__).parent/'skills/inkseq/scripts/sixnine.py')
 helper=importlib.util.module_from_spec(spec); spec.loader.exec_module(helper)
 
 

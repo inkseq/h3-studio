@@ -41,6 +41,15 @@ test('credential-bearing and non-web origins fail closed without an alternative 
   assert.equal(agentOrigin('http://127.0.0.1:8843/path?token=example'),'http://127.0.0.1:8843');
 });
 
+test('English and Chinese handoffs use the current helper credential name without adding a tenant prompt',()=>{
+  for(const locale of ['en','zh']){
+    const {brief}=agentHandoff({...ready,locale});
+    assert.match(brief,/INKSEQ_API_KEY/);
+    assert.ok(!brief.includes('SIXNINE_API_KEY'));
+    assert.ok(!/Tenant:|租户：/.test(brief));
+  }
+});
+
 test('key suggestions stay within one existing story, expire in seven days, and default to no generation',()=>{
   const value=agentKeySuggestion('story-1');assert.deepEqual(value.projectIds,['story-1']);assert.equal(value.allProjects,false);assert.equal(value.expiresInDays,7);
   assert.ok(!value.scopes.includes('projects:create'));assert.ok(!value.scopes.includes('jobs:write'));assert.ok(value.scopes.includes('projects:write'));

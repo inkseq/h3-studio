@@ -16,7 +16,7 @@ EXCHANGE_PATH = "/v1/agent-connect/exchange"
 HELPER_PATH = "/for-agents/connect.py"
 MANIFEST_PATH = "/for-agents/connect-manifest.json"
 PUBLIC_GET_PATHS = frozenset({HELPER_PATH, MANIFEST_PATH})
-HELPER_SOURCE = Path(__file__).resolve().parent.parent / "skills" / "sixnine-yingxu" / "scripts" / "connect.py"
+HELPER_SOURCE = Path(__file__).resolve().parent.parent / "skills" / "inkseq" / "scripts" / "connect.py"
 MAX_BODY_BYTES = AGENT_CONNECT_BODY_BYTES
 CONNECTION_STORAGE_REQUIREMENTS = {
     "windows-user-dpapi": "Current Windows user DPAPI and access to that user's encrypted connection store.",

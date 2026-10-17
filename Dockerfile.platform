@@ -33,7 +33,7 @@ COPY studio_platform/ ./studio_platform/
 # Immutable public recipe/evidence metadata used by API and CPU workers.
 # Protected execution policies and provider configuration remain runtime mounts.
 COPY deploy/wangp/profiles/ ./deploy/wangp/profiles/
-COPY skills/sixnine-yingxu/ ./skills/sixnine-yingxu/
+COPY skills/inkseq/ ./skills/inkseq/
 COPY --from=frontend /build/output/ ./yingxu-dist/
 USER 10001:10001
 # Public proxy is the only published service. This port stays on the app network.

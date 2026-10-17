@@ -17,8 +17,8 @@ PUBLIC_PATHS = frozenset({"/for-agents", "/for-agents/", "/llms.txt",
     "/for-agents/reference/api.md", "/for-agents/reference/recovery.md",
     "/for-agents/guide.json", "/for-agents/guide.md", "/for-agents/SKILL.md", "/for-agents/skill.zip"}) | PUBLIC_GET_PATHS
 DISCOVERY_LINK = '</for-agents>; rel="service-doc"; type="text/html", </llms.txt>; rel="alternate"; type="text/plain", </for-agents/guide.md>; rel="alternate"; type="text/markdown"'
-SKILL_ROOT = Path(__file__).resolve().parent.parent / "skills" / "sixnine-yingxu"
-SKILL_FILES = ("SKILL.md", "scripts/sixnine.py", "scripts/connect.py",
+SKILL_ROOT = Path(__file__).resolve().parent.parent / "skills" / "inkseq"
+SKILL_FILES = ("SKILL.md", "scripts/inkseq.py", "scripts/sixnine.py", "scripts/connect.py",
     "reference/api.md", "reference/recovery.md")
 MAX_SKILL_BYTES = 512 * 1024
 
@@ -119,7 +119,7 @@ def public_guide():
             "verification_limits": CONNECTION_VERIFICATION_LIMITS,
             "recovery": "After a lost response, resume the same connection and locally saved verifier/token. Do not generate replacement material or request another grant. Code consumption is atomic; scopes, owner, origin and key expiry remain frozen.",
             "origin_migration": {
-                "target": "https://inkseq.com", "legacy_origins": ["https://sixnine.art", "https://www.sixnine.art"],
+                "target": "https://inkseq.com", "reference": "/for-agents/reference/recovery.md",
                 "activation": "Explicit connect.py migrate-origin from the exact saved old origin. Verify the immutable creator-full-v1 grant and the same PAT's direct target /api/auth/me identity before saving an encrypted one-hop route reference.",
                 "preserved": "Original encrypted credential, owner, key ID, tenant, scopes, authorization fingerprint and expiry. No token copy, exchange, redirect following or new grant. Both helpers resolve only this verified alias; no alias means no automatic migration.",
             },
@@ -127,9 +127,9 @@ def public_guide():
             "publication": "The API/helper contract and the approved Connect UI have separate release gates. If this deployment does not serve the connection UI, use the explicit manual PAT fallback; do not assume a button is present.",
         },
         "authentication": {
-            "type": "Bearer", "header": "Authorization", "credential_environment": "SIXNINE_API_KEY",
+            "type": "Bearer", "header": "Authorization", "credential_environment": "INKSEQ_API_KEY",
             "provisioning": "Prefer the owner's explicit one-time connection grant described in connection. A machine key cannot issue another grant. Manual scoped PAT creation remains an advanced fallback; existing PAT permissions do not expand.",
-            "storage": "Prefer the helper's OS-protected connection store and scripts/sixnine.py --connection ID. Manual fallback uses process-only SIXNINE_API_KEY or an already configured secret manager. Do not put permanent credentials in URLs, prompts, chat, ordinary project files or logs. Internal AI Registry is optional and not required for external users.",
+            "storage": "Prefer the helper's OS-protected connection store and scripts/inkseq.py --connection ID. Manual fallback uses process-only INKSEQ_API_KEY or an already configured secret manager. Do not put permanent credentials in URLs, prompts, chat, ordinary project files or logs. Internal AI Registry is optional and not required for external users.",
             "origin_policy": "Use the origin supplied by the user. HTTPS is required except loopback. Never forward credentials through redirects. Only the download helper can follow one signed public HTTPS storage hop using a separate credential-free client with a pinned public IP.",
             "scopes": {
                 "read_story": ["projects:read"],
@@ -241,8 +241,8 @@ def skill_bundle():
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
         for name in SKILL_FILES:
-            bundle.writestr("sixnine-yingxu/" + name, read_skill_file(name))
-        bundle.writestr("sixnine-yingxu/README.md", guide_markdown().encode("utf-8"))
+            bundle.writestr("inkseq/" + name, read_skill_file(name))
+        bundle.writestr("inkseq/README.md", guide_markdown().encode("utf-8"))
     return output.getvalue()
 
 
@@ -259,7 +259,7 @@ def llms_text():
 - [Skill instructions](/for-agents/SKILL.md): How to work safely on the user's story.
 - [API reference](/for-agents/reference/api.md): Exact task request fields and examples.
 - [Recovery reference](/for-agents/reference/recovery.md): Original-operation reconciliation and refusal handling.
-- [Skill download](/for-agents/skill.zip): README.md, SKILL.md, both reference files, scripts/sixnine.py and scripts/connect.py. The README contains the complete public guide and API examples. The connection helper uses the Python standard library; the API/media helper also requires httpx.
+- [Skill download](/for-agents/skill.zip): README.md, SKILL.md, both reference files, scripts/inkseq.py and scripts/connect.py. The README contains the complete public guide and API examples. The connection helper uses the Python standard library; the API/media helper also requires httpx.
 
 If a browsing/search tool cannot open these public documents, retrieve them directly over HTTPS from the user's supplied website origin, or ask the user to attach the downloaded guide. A tool-specific reading failure is not evidence that the documents require login. Public reads need no cookie or API key; account/business API calls do require authentication. Resolve all / paths against the same user-supplied origin and never forward credentials through redirects.
 
@@ -288,7 +288,7 @@ A URL is a discovery link, not permission to edit or spend. The owner explicitly
 
 For macOS, use an existing default file-based user Keychain, already unlocked and accessible to the calling process. Native operations bind to that same Keychain and suppress authentication UI; locked, denied or interaction-required access stops the helper. Any unlock/access authorization must happen separately through trusted system UI. Retry the original connection/grant; if material was already saved, resume with that same material within the recovery window. The helper never collects a Keychain password, changes access controls, auto-unlocks/creates a Keychain or passes secrets through command arguments. The manifest includes per-OS storage requirements and a verification checklist. Fake OS tests do not prove native store access or live external onboarding; actual OS access and frontend/production publication need separate evidence.
 
-The production origin is https://inkseq.com. Browser users sign in there once because cookies are host-bound. Existing PATs and Agent permissions/expiry remain unchanged. For an existing connected creator-full-v1 record at its exact old origin, explicitly run `python scripts/connect.py migrate-origin --server https://www.sixnine.art --to-server https://inkseq.com --connection CONNECTION_ID` (use the old apex instead only if that is the saved origin). The reviewed helper checks the original fingerprint and the same PAT's direct canonical identity, then saves only an encrypted reference to the unchanged old record. It never follows a redirect, exchanges another code, copies the key or extends authority. Subsequent old/new-origin helper commands use that verified route. Conflicting, pending or expired records are refused. Keep the original encrypted credential. The skill folder, tenant and SIXNINE_API_KEY names remain compatibility identifiers.
+The production origin is https://inkseq.com. Browser users sign in there once because cookies are host-bound. Existing PATs and Agent permissions/expiry remain unchanged. To migrate an existing connection from an older origin, use the explicit recovery procedure in [the recovery reference](/for-agents/reference/recovery.md); keep its original encrypted credential and immutable authorization.
 
 After authorization, read GET /v1/agent-guide, /v1/guided-schema, /v1/capabilities and /openapi.json. Static documentation is not proof that generation is enabled. An actual plan may be blocked; do not invent successful media.
 
@@ -317,8 +317,8 @@ Optional `source_revision_id` names an authorized revision in this same session 
 Example using the downloaded helper (replace IDs with returned IDs; `CURRENT_REVISION_ID` comes from the first GET). These commands only read and save the revised draft:
 
 ```sh
-python scripts/sixnine.py --base-url https://inkseq.com --connection CONNECTION_ID request GET /v1/quick-chat/sessions/SESSION_ID/cards/CARD_ID --output card-current.json
-python scripts/sixnine.py --base-url https://inkseq.com --connection CONNECTION_ID request GET /v1/quick-chat/sessions/SESSION_ID/revisions/CURRENT_REVISION_ID --output revision-current.json
+python scripts/inkseq.py --base-url https://inkseq.com --connection CONNECTION_ID request GET /v1/quick-chat/sessions/SESSION_ID/cards/CARD_ID --output card-current.json
+python scripts/inkseq.py --base-url https://inkseq.com --connection CONNECTION_ID request GET /v1/quick-chat/sessions/SESSION_ID/revisions/CURRENT_REVISION_ID --output revision-current.json
 ```
 
 Build the complete request from those two responses; the JSON values remain their actual object/integer types, not strings containing JSON:
@@ -350,7 +350,7 @@ with Path("revision-request.json").open("x", encoding="utf-8") as target:
 Persist one unique logical-write key with that exact body before sending it:
 
 ```sh
-python scripts/sixnine.py --base-url https://inkseq.com --connection CONNECTION_ID request POST /v1/quick-chat/sessions/SESSION_ID/cards/CARD_ID/revisions --json-file revision-request.json --idempotency-key UNIQUE-CARD-REVISION-001 --output revision-saved.json
+python scripts/inkseq.py --base-url https://inkseq.com --connection CONNECTION_ID request POST /v1/quick-chat/sessions/SESSION_ID/cards/CARD_ID/revisions --json-file revision-request.json --idempotency-key UNIQUE-CARD-REVISION-001 --output revision-saved.json
 ```
 
 HTTP 201 returns `card` and `revision`; read the saved card's `version`/`current_revision_id` and the new revision's `id`/`input_hash`. Existing snapshots, submissions and jobs remain attached to their original revision. Session `expected_version` is used only by its own session/turn operations; card `expected_card_version` is used here.
@@ -367,7 +367,7 @@ def guide_markdown():
     return llms_text() + card_revision_markdown() + """
 ## Using the downloaded package
 
-Start with this guide (`README.md` in the ZIP), then read the adjacent `SKILL.md` in that package. `scripts/connect.py` is the connection helper and `scripts/sixnine.py` is the API/media helper. Downloading the guide or ZIP does not install software, authorize a connection, call a model, start a GPU or submit generation.
+Start with this guide (`README.md` in the ZIP), then read the adjacent `SKILL.md` in that package. `scripts/connect.py` is the connection helper and `scripts/inkseq.py` is the API/media helper. Downloading the guide or ZIP does not install software, authorize a connection, call a model, start a GPU or submit generation.
 
 All endpoint paths in this document are relative to the HTTPS website origin supplied by the user (loopback HTTP is allowed only for a local preview). The package contains no credential, private account data or current GPU observations. Once connected, refresh the authenticated schemas, capabilities and exact profile/mode availability before creating or submitting work. Offline examples describe the contract, not current availability.
 
@@ -402,7 +402,7 @@ def landing_html():
 <h2>原有快速草稿与故事接口</h2><p>使用本人全部项目范围和 projects:create 权限。为每次新建保存唯一的幂等键；重试原请求沿用原键。返回的 project.journey.reviewShotId 是单镜头 ID。随后用 shot.configure_generation 保存生成设置；创建草稿不会启动 GPU。</p><pre>''' + example + '''</pre><p>完整的纯文字、参考素材、预检、提交和候选采用示例见<a href="/for-agents/guide.json">机器可读指南</a>。</p>
 <h2>真实边界</h2><p>网站公开说明与已授权 API 文档分开。认证后的 <code>/v1/agent-guide</code>、<code>/v1/guided-schema</code>、<code>/v1/capabilities</code> 和 <code>/openapi.json</code> 是调用依据。若生成计划返回阻塞，保留草稿并说明原因；不要把演示素材当成生成成功。</p>
 <p>网站聊天助手默认关闭；不支持未配置的图像/音乐/Marble 生成、团队成员共享权限或服务器媒体 ZIP。外部 Agent 可以自行编写完整提示词并保存为任务卡或故事草稿；已有 API Key 不会扩大这些能力。</p>
-<p><small>Skill 包包含完整指南 README.md、SKILL.md、scripts/sixnine.py 和 scripts/connect.py；连接脚本只需 Python 标准库与 Windows 用户 DPAPI、Linux Secret Service 或 macOS 用户 Keychain。macOS 须已有解锁且允许当前进程访问的默认用户 Keychain；脚本不会弹出解锁/授权提示或收集密码，锁定或拒绝访问时会停止。API/媒体辅助脚本还需要 httpx。你也可以直接使用同源 HTTP API，无需安装 Skill。下载不会自动安装或授权。</small></p></main></body></html>'''
+<p><small>Skill 包包含完整指南 README.md、SKILL.md、scripts/inkseq.py 和 scripts/connect.py；连接脚本只需 Python 标准库与 Windows 用户 DPAPI、Linux Secret Service 或 macOS 用户 Keychain。macOS 须已有解锁且允许当前进程访问的默认用户 Keychain；脚本不会弹出解锁/授权提示或收集密码，锁定或拒绝访问时会停止。API/媒体辅助脚本还需要 httpx。你也可以直接使用同源 HTTP API，无需安装 Skill。下载不会自动安装或授权。</small></p></main></body></html>'''
 
 
 def register_routes(app):

@@ -81,7 +81,7 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
             if repository is None:
                 repo.close()
 
-    app = FastAPI(title="Sixnine video platform", version="1.0.0-dev", lifespan=lifespan)
+    app = FastAPI(title="Inkseq video platform", version="1.0.0-dev", lifespan=lifespan)
     app.add_middleware(BodyLimitMiddleware, project_bytes=settings.max_project_bytes,
                        upload_bytes=settings.max_upload_bytes)
     app.state.repository, app.state.auth, app.state.storage = repo, auth, storage
@@ -652,7 +652,9 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
         row = generation_access.artifact(principal, artifact_id)
         value = row["metadata"]
         extension = {"video": "mp4", "audio": "flac", "image": "png"}.get(value.get("kind"), "bin")
-        filename = value.get("filename", f'sixnine-{row["job_id"][:8]}-{value.get("kind", "result")}.{extension}')
+        filename = value.get("filename", f'inkseq-{row["job_id"][:8]}-{value.get("kind", "result")}.{extension}')
+        if isinstance(filename, str) and filename.lower().startswith("sixnine-"):
+            filename = "inkseq-" + filename[len("sixnine-"):]
         return object_content(value["object_key"], value.get("mime", value.get("content_type", "application/octet-stream")),
                               filename, request, download=download)
 
