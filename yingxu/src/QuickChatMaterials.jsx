@@ -4,19 +4,21 @@ import React,{useEffect,useMemo,useRef,useState} from 'react';
 import {Image,Video,Music,X,Check,Upload} from 'lucide-react';
 import {ChatDialog} from './QuickChatControls.jsx';
 import {bindingParticipates,bindingPayload,effectiveLimits,clipLimits,displaySeconds,mediaDuration,hasOriginalAudio,roleSupported} from './quick-chat-model.js';
+import {useThumbnailSource} from './use-thumbnail-source.js';
 export function PrivateMedia({client,path,kind,name='',compact=false,hoverPlay=false}){
   const {t:at}=useI18n();
   const {t,locale}=useI18n();
   const [error,setError]=useState(''),player=useRef(null);
   // Freeze the originating account with this media source. A later cookie
   // change must reject this URL, not rebind an old source during a poll render.
-  const native=useMemo(()=>{if(!path||compact&&kind!=='image'||!['image','video','audio'].includes(kind))return null;try{return {url:client.nativeContentURL(path)};}catch(error){return {error:error.message};}},[client,path,kind,compact]);
+  const native=useMemo(()=>{if(!path||compact&&kind!=='image'||!['image','video','audio'].includes(kind))return null;try{return {url:client.nativeContentURL(path,{rendition:kind==='image'?(compact?'thumb':'preview'):null})};}catch(error){return {error:error.message};}},[client,path,kind,compact]);
+  const small=useThumbnailSource(client,native?.url,{enabled:compact&&kind==='image'}),setImageRef=node=>{player.current=node;small.ref.current=node;};
   useEffect(()=>{setError('');},[client,path,compact,kind]);
   if(compact&&kind!=='image'){const Icon=kind==='audio'?Music:Video;return <div className="qc-media-placeholder qc-compact" aria-label={kind==='audio'?at('adjunct.quickChatMaterials.copy217'):at('adjunct.quickChatMaterials.copy218')}><Icon size={22}/></div>;}
-  const source=native?.url,issue=native?.error||error;
-  if(!source){const Icon={image:Image,video:Video,audio:Music}[kind]||Image;return <div className={'qc-media-placeholder '+(compact?'qc-compact':'')} title={issue||at('adjunct.quickChatMaterials.copy219')}><Icon size={22}/>{!compact&&<small>{issue||at('adjunct.quickChatMaterials.copy220')}</small>}</div>;}
-  const failed=()=>setError(at('adjunct.quickChatMaterials.copy221'));
-  return <>{kind==='image'?<img ref={player} className={compact?'qc-media-thumb':'qc-media-full'} src={source} alt={name} referrerPolicy="no-referrer" onError={failed}/>:kind==='video'?<video ref={player} className="qc-media-full" src={source} data-video-cache-play={!compact&&!hoverPlay?'true':undefined} controls={!hoverPlay} muted={hoverPlay} playsInline preload="metadata" onMouseEnter={hoverPlay?()=>{player.current?.play()?.catch(()=>{});}:undefined} onMouseLeave={hoverPlay?()=>player.current?.pause():undefined} onError={failed}/>:<audio ref={player} src={source} controls preload="metadata" onError={failed}/>} {issue&&<p className="qc-error" role="alert">{issue}<button type="button" onClick={event=>{event.stopPropagation();setError('');if(kind==='image'&&player.current)player.current.src=source;else player.current?.load();}}>{t('workspace.copy60')}</button></p>}</>;
+  const source=compact&&kind==='image'?small.src:native?.url,issue=native?.error||error;
+  if(!source){const Icon={image:Image,video:Video,audio:Music}[kind]||Image;return <div ref={small.ref} className={'qc-media-placeholder '+(compact?'qc-compact':'')} title={issue||at('adjunct.quickChatMaterials.copy219')}><Icon size={22}/>{!compact&&<small>{issue||at('adjunct.quickChatMaterials.copy220')}</small>}</div>;}
+  const failed=()=>{small.finish();setError(at('adjunct.quickChatMaterials.copy221'));};
+  return <>{kind==='image'?<img ref={setImageRef} className={compact?'qc-media-thumb':'qc-media-full'} src={source} alt={name} referrerPolicy="no-referrer" loading="lazy" decoding="async" onLoad={small.finish} onError={failed}/>:kind==='video'?<video ref={player} className="qc-media-full" src={source} data-video-cache-play={!compact&&!hoverPlay?'true':undefined} controls={!hoverPlay} muted={hoverPlay} playsInline preload="metadata" onMouseEnter={hoverPlay?()=>{player.current?.play()?.catch(()=>{});}:undefined} onMouseLeave={hoverPlay?()=>player.current?.pause():undefined} onError={failed}/>:<audio ref={player} src={source} controls preload="metadata" onError={failed}/>} {issue&&<p className="qc-error" role="alert">{issue}<button type="button" onClick={event=>{event.stopPropagation();setError('');if(kind==='image'&&player.current)player.current.src=source;else player.current?.load();}}>{t('workspace.copy60')}</button></p>}</>;
 }
 export function MaterialClip({binding,limits,client,onSave,onClose}){
   const {t:at}=useI18n();

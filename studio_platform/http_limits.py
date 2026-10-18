@@ -30,13 +30,15 @@ class RequestAdmission:
     allowance. A reverse proxy/shared limiter is still needed across processes.
     """
     def __init__(self, *, total=32, authentication=8, login=2, per_owner=8,
-                 downloads=4, downloads_per_owner=2):
-        values = (total, authentication, login, per_owner, downloads, downloads_per_owner)
+                 downloads=4, downloads_per_owner=2, thumbnails=8, thumbnails_per_owner=8):
+        values = (total, authentication, login, per_owner, downloads, downloads_per_owner,
+                  thumbnails, thumbnails_per_owner)
         if any(type(x) is not int or x < 1 for x in values):
             raise ValueError("Invalid request admission limit")
         self.limits = {"total": total, "authentication": authentication, "login": login,
                        "owner": per_owner, "downloads": downloads,
-                       "owner_downloads": downloads_per_owner}
+                       "owner_downloads": downloads_per_owner,
+                       "thumbnails": thumbnails, "owner_thumbnails": thumbnails_per_owner}
         self.counts = Counter()
         self.lock = threading.Lock()
 

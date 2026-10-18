@@ -10,24 +10,23 @@ import {cloudController as cloud} from './cloud-controller.js';
 import {UserRound,MapPin,Box,Files,Image as ImageIcon,Film,Music,SlidersHorizontal,X} from 'lucide-react';
 import StudioHeader from './StudioHeader.jsx';
 import LibraryView from './v2/LibraryView.jsx';
-import {thumbnailQueue} from './library-thumbnails.js';
+import {useThumbnailSource} from './use-thumbnail-source.js';
 const TYPE_ICONS={character:UserRound,location:MapPin,prop:Box,file:Files,image:ImageIcon,video:Film,audio:Music};
 function LibraryPanel({detail,title,onClose,children}){const {t}=useI18n(),[mobile,setMobile]=useState(()=>typeof window!=='undefined'&&window.matchMedia('(max-width:760px)').matches);useEffect(()=>{const q=window.matchMedia('(max-width:760px)'),update=()=>setMobile(q.matches);q.addEventListener('change',update);return()=>q.removeEventListener('change',update);},[]);useEffect(()=>{if(!detail||mobile)return;const escape=e=>{if(e.key==='Escape'){e.preventDefault();onClose();}};window.addEventListener('keydown',escape);return()=>window.removeEventListener('keydown',escape);},[detail,mobile,onClose]);return detail&&!mobile?<aside className="libp-detail" aria-label={title}><header><strong>{title}</strong><button onClick={onClose} aria-label={t('trash.close')}><X size={16}/></button></header>{children}</aside>:<ChatDialog title={title} onClose={onClose} className={detail?'library-detail-dialog':''}>{children}</ChatDialog>;}
 const copy=value=>structuredClone(value),link=(project,entity)=>'/?'+new URLSearchParams({project,...(entity?{entity}:{})});
 export function LibraryMedia({row,api,detail=false}){
- const {t}=useI18n(),[failed,setFailed]=useState(false),[started,setStarted]=useState(null),release=useRef(null);
+ const {t}=useI18n(),[failed,setFailed]=useState('');
  const id=row.artifact_id||row.asset_id,kind=row.artifact_id?'artifacts':'assets';
- let url='';try{if(id&&['image','video','audio'].includes(row.type))url=api.nativeContentURL(`/v1/${kind}/${encodeURIComponent(id)}/content`);}catch{}
- useEffect(()=>{setFailed(false);setStarted(null);release.current=null;if(!url||detail||!['image','video'].includes(row.type))return;let live=true;const cancel=thumbnailQueue(api).enqueue(done=>{if(!live){done();return;}release.current=done;setStarted({api,url});});return()=>{live=false;cancel();release.current=null;};},[api,url,detail,row.type]);
- const finish=()=>{release.current?.();release.current=null;};
- const onError=()=>{setFailed(true);finish();};
- const ready=detail||started?.api===api&&started?.url===url;
- if(!url)return null;
- if(failed)return <span className={detail?'library-preview-error detail':'library-preview-error'}>{t('library.previewUnavailable')}</span>;
- if(!ready&&['image','video'].includes(row.type))return <span className="library-preview-error" aria-hidden="true"/>;
- if(row.type==='image')return <img className="library-media" src={url} alt={row.title||''} loading="eager" onLoad={finish} onError={onError}/>;
- if(row.type==='audio')return detail?<audio className="library-media" src={url} controls preload="none" onError={()=>setFailed(true)}/>:null;
- return <video className="library-media" src={url} controls={detail} muted={!detail} playsInline preload="metadata" onLoadedMetadata={finish} onError={onError}/>;
+ const imageRead=row.type==='image'||!detail&&row.type==='video';
+ const path=imageRead?(detail?row.preview_url:row.thumbnail_url):detail&&id?`/v1/${kind}/${encodeURIComponent(id)}/content`:null;
+ let url='';try{if(path)url=api.nativeContentURL(path);}catch{}
+ const thumbnail=useThumbnailSource(api,url,{enabled:!detail&&imageRead}),src=detail?url:thumbnail.src;
+ const onError=()=>{setFailed(url);thumbnail.finish();};
+ if(!imageRead&&!detail)return null;
+ if(!url||failed===url)return <span ref={thumbnail.ref} className={detail?'library-preview-error detail':'library-preview-error'}>{t('library.previewUnavailable')}</span>;
+ if(imageRead)return src?<img ref={thumbnail.ref} className="library-media" src={src} alt={row.title||''} loading="lazy" decoding="async" onLoad={thumbnail.finish} onError={onError}/>:<span ref={thumbnail.ref} className="library-preview-error" aria-hidden="true"/>;
+ if(row.type==='audio')return <audio className="library-media" src={url} controls preload="none" onError={onError}/>;
+ return <video className="library-media" src={url} controls playsInline preload="metadata" onError={onError}/>;
 }
 export default function Library({account,active=true}){
  const {t}=useI18n(),trash=useTrash(),identity=useRef(account);identity.current=account;

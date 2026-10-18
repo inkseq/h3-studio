@@ -5,6 +5,8 @@ Unknown historical storage identities are retained rather than guessed.
 """
 from __future__ import annotations
 
+from .asset_objects import ASSET_OBJECT_ROLES
+
 import hashlib
 import json
 import re
@@ -79,7 +81,8 @@ def history_blocker(connection, service, owner, session):
                 return "upload_unresolved"
     for row in rows_if_present(connection, write_receipts):
         if row["tenant"] == service.tenant and row["owner"] == owner and row["job_id"] in ids:
-            if json.loads(row["record"]).get("phase") != "settled":
+            record = json.loads(row["record"])
+            if record.get("phase") != "settled" or record.get("display",{}).get("phase") not in (None,"complete","missing"):
                 return "collection_unresolved"
     # Legacy rows without a journal must already be durable/ready.
     if any(row["status"] not in {"ready", "duplicate", "purged"} for row in
@@ -221,8 +224,18 @@ def cleanup_plan(connection, service, principal, sessions, *, media_targets=None
     for ident, asset in candidate_assets.items():
         receipt = uploads.get(ident)
         bound = receipt and receipt.get("storage_binding") == service.assets.storage_binding
+        # A ready original can have an explicitly running display backfill.
+        # Preserve the entire asset while any original-receipt write outcome
+        # is unknown; do not delete only the visible subset of its keys.
+        if receipt and (receipt.get('busy') or receipt.get('rendition_backfill',{}).get('phase') not in (None,'complete')
+                or set(receipt.get('objects',{})) != {role for role in ASSET_OBJECT_ROLES if asset.get(role)}
+                or any(spec.get('phase')!='verified' or any(spec.get(k)!=asset.get(role,{}).get(k)
+                    for k in ('key','size_bytes','sha256','content_type'))
+                    for role,spec in receipt.get('objects',{}).items())):
+            retain({'asset_id':ident},'original_upload_unconfirmed')
+            bound=False
         valid = bool(bound) and all(add("asset", ident, asset[role], service.assets.storage_binding)
-            for role in ("original", "model") if asset.get(role))
+            for role in ASSET_OBJECT_ROLES if asset.get(role))
         if not valid or not asset.get("original"):
             retain({"asset_id": ident}, "unknown_storage_binding")
     for ident, row in candidate_artifacts.items():
@@ -230,23 +243,39 @@ def cleanup_plan(connection, service, principal, sessions, *, media_targets=None
         spec = row["metadata"]
         valid = (receipt and receipt.get("phase") == "settled" and receipt.get("binding") == writer_binding
             and any(_object(role) == _object(spec) for role in receipt.get("roles", {}).values()))
+        display = receipt.get('display',{}) if receipt else {}
+        if display and (display.get('phase') not in {'complete','missing'}
+                or display.get('reserved_bytes',0) != sum(v.get('size_bytes',0) for v in display.get('objects',{}).values())
+                or display.get('scratch_cleanup',{}).get('phase') not in (None,'complete')):
+            valid = False
         if not valid or not add("artifact", ident, spec, writer_binding):
             retain({"artifact_id": ident}, "unknown_storage_binding")
+        elif spec.get('kind') == 'video':
+            from .artifact_renditions import physical_objects
+            published = physical_objects(spec)
+            frozen = display.get('objects',{})
+            if (len(published) != len(frozen) or any(role.get('status') != 'verified'
+                    or not any(_object(role)==_object(item) for item in published) for role in frozen.values())
+                    or not all(add('artifact',ident,item,writer_binding) for item in published)):
+                retain({'artifact_id':ident},'original_poster_unconfirmed')
     # Cross-ID/owner aliases conservatively retain the physical object. No
     # prefix sweep or assumption that a session's project owns every key.
     for row in all_assets:
         if row["id"] in candidate_assets:
             continue
         asset = json.loads(row["record"])
-        for role in ("original", "model"):
+        for role in ASSET_OBJECT_ROLES:
             spec = _object(asset.get(role, {}))
             if spec and spec["object_key"] in blob_owners:
                 for kind, ident in blob_owners[spec["object_key"]]:
                     retain({kind+"_id": ident}, "shared_object_key")
     for row in all_artifacts:
-        if row["id"] not in candidate_artifacts and row["metadata"].get("object_key") in blob_owners:
-            for kind, ident in blob_owners[row["metadata"]["object_key"]]:
-                retain({kind+"_id": ident}, "shared_object_key")
+        from .artifact_renditions import physical_objects
+        for item in (row['metadata'],*physical_objects(row['metadata'])):
+            key=item.get('object_key',item.get('key'))
+            if row["id"] not in candidate_artifacts and key in blob_owners:
+                for kind, ident in blob_owners[key]:
+                    retain({kind+"_id": ident}, "shared_object_key")
     # Retain mixed accounting aliases before closing sources and companion
     # outputs. A kept original/model key retains its whole original asset.
     for aliases in blob_owners.values():
@@ -259,7 +288,7 @@ def cleanup_plan(connection, service, principal, sessions, *, media_targets=None
         for ident in list(assets_kept):
             record = candidate_assets[ident]
             retain(record, "derived_asset_reference")
-            for role in ("original", "model"):
+            for role in ASSET_OBJECT_ROLES:
                 spec = _object(record.get(role, {}))
                 if spec:
                     for kind, alias in blob_owners.get(spec["object_key"], ()):
@@ -270,8 +299,9 @@ def cleanup_plan(connection, service, principal, sessions, *, media_targets=None
             if (record["job_id"], record["attempt_id"]) in paired:
                 retain({"artifact_id": ident}, "same_generated_version")
             if ident in artifacts_kept:
-                for kind, alias in blob_owners.get(record["metadata"].get("object_key"), ()):
-                    retain({kind+"_id": alias}, "shared_object_key")
+                for item in (record['metadata'],*physical_objects(record['metadata'])):
+                    for kind, alias in blob_owners.get(item.get('object_key',item.get('key')), ()):
+                        retain({kind+"_id": alias}, "shared_object_key")
         changed = before != (len(assets_kept), len(artifacts_kept))
     removed_assets = sorted(set(candidate_assets)-assets_kept)
     removed_artifacts = sorted(set(candidate_artifacts)-artifacts_kept)

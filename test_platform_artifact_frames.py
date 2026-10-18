@@ -82,6 +82,32 @@ class ArtifactFrameTests(unittest.TestCase):
             self.assertEqual(image.size, (256, 256))
             return image.convert("RGB").getpixel((128, 128))
 
+    def assert_frame_objects(self, receipt, store, public):
+        """Display copies share the frame's original receipt, not new assets."""
+        self.assertEqual(set(receipt["objects"]), {"original", "model", "thumb", "preview"})
+        self.assertEqual(len({spec["key"] for spec in receipt["objects"].values()}), 4)
+        self.assertTrue(public["rendition_ready"])
+        self.assertEqual(public["rendition_status"], "ready")
+        self.assertEqual(receipt["asset"]["rendition_metadata"]["source_sha256"],
+                         receipt["objects"]["original"]["sha256"])
+        self.assertEqual(public["metadata"]["sha256"], receipt["objects"]["original"]["sha256"])
+        for role, spec in receipt["objects"].items():
+            with self.subTest(role=role), store.open(spec["key"]) as stream:
+                body = stream.read()
+                self.assertEqual(spec["phase"], "verified")
+                self.assertEqual((len(body), hashlib.sha256(body).hexdigest()),
+                                 (spec["size_bytes"], spec["sha256"]))
+                self.assertEqual(receipt["asset"][role]["sha256"], spec["sha256"])
+                with Image.open(io.BytesIO(body)) as image:
+                    self.assertEqual(image.size, (256, 256))
+                    self.assertEqual(image.format, "WEBP" if role in {"thumb", "preview"} else "PNG")
+                    self.assertGreater(image.convert("RGB").getpixel((128, 128))[2], 240)
+                if role in {"thumb", "preview"}:
+                    self.assertEqual(spec["content_type"], "image/webp")
+                    self.assertEqual(public["renditions"][role]["sha256"], spec["sha256"])
+                    self.assertEqual(public["renditions"][role]["content_url"],
+                                     public["content_url"] + "?rendition=" + role)
+
     def test_real_first_and_true_last_frame_preserve_original_and_execution_ledgers(self):
         job, original = self.fixture()
         before = self.counts()
@@ -180,9 +206,14 @@ class ArtifactFrameTests(unittest.TestCase):
         self.assertEqual(receipt["scratch_cleanup"]["phase"], "complete")
         self.assertFalse(service._stage(receipt).exists())
         self.assertEqual(fake.objects[source["object_key"]], before[source["object_key"]])
-        self.assertEqual(len(fake.objects), 3)
+        self.assert_frame_objects(receipt, store, frame.json())
+        self.assertEqual(set(fake.objects), set(before) | {spec["key"] for spec in receipt["objects"].values()})
         self.assertEqual(service.usage("superdan")["active_uploads"], 0)
-        self.assertEqual(service.resume("superdan", frame.json()["id"])["id"], frame.json()["id"])
+        puts_before_replay = [args["Key"] for op, args in fake.calls if op == "put"]
+        with mock.patch.object(service, "_prepare", side_effect=AssertionError("Ready replay must not re-encode")), \
+                mock.patch("studio_platform.artifact_frames.extract", side_effect=AssertionError("Ready replay must not decode")):
+            self.assertEqual(service.resume("superdan", frame.json()["id"])["id"], frame.json()["id"])
+        self.assertEqual([args["Key"] for op, args in fake.calls if op == "put"], puts_before_replay)
         self.assertNotIn("fake-secret", frame.text)
         self.assertFalse(any(op == "delete" for op, _ in fake.calls))
 
@@ -228,11 +259,23 @@ class ArtifactFrameTests(unittest.TestCase):
             known = self.app.state.assets.list("superdan", "story-one")
             self.assertEqual(len(known), 1)
             self.assertEqual(known[0]["status"], "storage_unknown")
-            with mock.patch("studio_platform.artifact_frames.extract", side_effect=AssertionError("Already decoded")):
+            service = self.app.state.assets
+            pending = service.journal.get("superdan", known[0]["id"])
+            frozen = {role: {name: spec[name] for name in ("filename", "size_bytes", "sha256", "content_type")}
+                      for role, spec in pending["objects"].items()}
+            original_key = pending["objects"]["original"]["key"]  # Only attempted PUTs have a frozen key yet.
+            with mock.patch.object(service, "_prepare", side_effect=AssertionError("Already prepared frame and display copies")), \
+                    mock.patch("studio_platform.artifact_frames.extract", side_effect=AssertionError("Already decoded")):
                 recovered = self.save()
         self.assertEqual(recovered.status_code, 201, recovered.text)
         self.assertEqual(recovered.json()["id"], known[0]["id"])
-        self.assertEqual(len(calls), 2)  # Original once; model PNG once.
+        receipt = service.journal.get("superdan", known[0]["id"])
+        self.assert_frame_objects(receipt, self.app.state.storage, recovered.json())
+        self.assertEqual({role: {name: spec[name] for name in ("filename", "size_bytes", "sha256", "content_type")}
+                          for role, spec in receipt["objects"].items()}, frozen)
+        self.assertEqual(receipt["objects"]["original"]["key"], original_key)
+        self.assertEqual(calls[0], original_key)
+        self.assertCountEqual(calls, [spec["key"] for spec in receipt["objects"].values()])  # Each key PUT once.
         self.assertEqual(self.counts()[-2:], (1, 1))
 
     def test_live_operation_lock_never_taken_over(self):

@@ -6,6 +6,8 @@ writers. A timer, browser request or local lock alone is not that proof.
 """
 from __future__ import annotations
 
+from .asset_objects import ASSET_OBJECT_ROLES
+
 import argparse
 from dataclasses import replace
 import json
@@ -54,7 +56,7 @@ def list_receipts(engine, *, tenant, owner, project_id=None, limit=20, offset=0)
             "storage_binding_known": isinstance(record.get("storage_binding"), str),
             "reserved_bytes": record.get("reserved"), "updated_at": record.get("updated_at"),
             "object_phases": {k: v.get("phase", "unknown") for k, v in record.get("objects", {}).items()
-                if k in {"original", "model"}}})
+                if k in ASSET_OBJECT_ROLES}})
     return {"state": "read_only", "tenant": tenant, "owner": owner, "items": items,
         "has_more": len(rows) > limit, "next_offset": offset+limit if len(rows) > limit else None,
         "cloud_calls_enabled": False}

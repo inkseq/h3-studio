@@ -57,7 +57,7 @@ class R2AssetScratchTests(LedgerCase):
         self.assertFalse(self.service._stage(receipt).exists())
         self.assertEqual(receipt["scratch_cleanup"]["phase"], "complete")
         self.assertEqual(self.service.usage(self.scope.owner_id)["accounted_bytes"], remote_bytes)
-        self.assertEqual(len(self.fake.objects), 2)
+        self.assertEqual(len(self.fake.objects), 4)
         self.assertEqual(retained.read_bytes(), b"must retain")
         self.assertEqual(self.service.resume(self.scope.owner_id, asset["id"])["status"], "ready")
         self.assertEqual(self.service.usage(self.scope.owner_id)["accounted_bytes"], remote_bytes)
@@ -199,7 +199,7 @@ class AssetRecoveryTests(LedgerCase):
         result = self.recover(asset, restarted)
         self.assertEqual((result["asset_id"], result["status"], result["busy"]), (asset["id"], "ready", False))
         self.assertEqual(restarted.usage("superdan")["active_uploads"], 0)
-        self.assertEqual(len(self.store.calls), 2)
+        self.assertEqual(len(self.store.calls), 4)
         self.assertEqual(restarted._file(before, "source.png").read_bytes(), png())
 
     def test_ready_busy_quota_window_recovers_by_verified_release_without_decoding_or_put(self):
@@ -253,7 +253,7 @@ class AssetRecoveryTests(LedgerCase):
             result = self.recover(asset)
         self.assertEqual(result["status"], "ready")
         self.assertEqual(self.store.calls[0], key)
-        self.assertEqual(len(self.store.calls), 2)
+        self.assertEqual(len(self.store.calls), 4)
         self.assertEqual(self.service.get("superdan", asset["id"])["original"]["key"], key)
 
     def test_missing_unknown_original_retains_reservation_and_never_blind_put(self):
@@ -335,7 +335,7 @@ class AssetRecoveryTests(LedgerCase):
         with ThreadPoolExecutor(max_workers=2) as executor:
             results = list(executor.map(lambda _: recover(), range(2)))
         self.assertEqual(sorted(results), ["recovered", "refused"])
-        self.assertEqual(len(self.store.calls), 2)
+        self.assertEqual(len(self.store.calls), 4)
         self.assertEqual(service.usage("superdan")["active_uploads"], 0)
 
     def test_default_cli_is_read_only_bounded_scoped_and_excludes_private_content(self):

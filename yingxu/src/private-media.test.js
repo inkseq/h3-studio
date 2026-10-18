@@ -23,8 +23,12 @@ function mediaLifecycle(Component,initialProps){
  const same=(a,b)=>a?.length===b?.length&&a.every((v,i)=>Object.is(v,b[i]));
  const hooks={useContext:()=>({t:key=>key}),useState(initial){const i=cursor++;slots[i]??={value:typeof initial==='function'?initial():initial};return [slots[i].value,value=>{slots[i].value=typeof value==='function'?value(slots[i].value):value;}];},useRef(value){return hooks.useMemo(()=>({current:value}),[]);},useMemo(fn,deps){const i=cursor++;if(!slots[i]||!same(slots[i].deps,deps))slots[i]={deps,value:fn()};return slots[i].value;},useCallback(fn,deps){return hooks.useMemo(()=>fn,deps);},useEffect(fn,deps){const i=cursor++;if(!slots[i]||!same(slots[i].deps,deps))effects.push(()=>{slots[i]?.cleanup?.();slots[i]={deps,cleanup:fn()};});}};
  const flatten=value=>Array.isArray(value)?value.flatMap(flatten):!value||typeof value!=='object'?[]:[value,...flatten(value.props?.children)];
- return {render(next=props){props=next;cursor=0;effects=[];const internals=React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE,previous=internals.H;let tree;internals.H=hooks;try{tree=Component(props);}finally{internals.H=previous;}const nodes=flatten(tree);for(const effect of effects)effect();return {nodes,video:nodes.find(node=>node.type==='video'),retry:nodes.find(node=>node.type==='button'),alert:nodes.find(node=>node.props?.role==='alert')};},unmount(){for(const slot of slots)slot?.cleanup?.();}};
+ return {render(next=props,{mountRefs=false}={}){props=next;cursor=0;effects=[];const internals=React.__CLIENT_INTERNALS_DO_NOT_USE_OR_WARN_USERS_THEY_CANNOT_UPGRADE,previous=internals.H;let tree;internals.H=hooks;try{tree=Component(props);}finally{internals.H=previous;}const nodes=flatten(tree);if(mountRefs)for(const node of nodes){const ref=node.props?.ref;if(typeof node.type==='string'&&ref&&typeof ref==='object'&&!ref.current)ref.current={nodeName:node.type};}for(const effect of effects)effect();return {nodes,video:nodes.find(node=>node.type==='video'),image:nodes.find(node=>node.type==='img'),retry:nodes.find(node=>node.type==='button'),alert:nodes.find(node=>node.props?.role==='alert')};},unmount(){for(const slot of slots)slot?.cleanup?.();}};
 }
+
+// A thumbnail starts only after its placeholder is mounted, visibility is
+// observed and its bounded queue admits it. SSR intentionally has no image.
+async function mountedThumbnail(h){h.render(undefined,{mountRefs:true});await Promise.resolve();h.render(undefined,{mountRefs:true});await Promise.resolve();return h.render(undefined,{mountRefs:true});}
 
 test('PrivateMedia retry stops the click before reloading and does not activate an enclosing reuse/take control',async()=>{
  const kit=await component;
@@ -33,8 +37,9 @@ test('PrivateMedia retry stops the click before reloading and does not activate 
   const client={nativeContentURL(){resolutions++;return '/v1/artifacts/original/content?expected_account=superdan';}};
   const h=mediaLifecycle(kit.rawPrivateMedia,{client,path:'/v1/artifacts/original/content',...props});
   try{
-   let view=h.render();const tag=props.kind==='image'?'img':'video',media=view.nodes.find(node=>node.type===tag),source=media.props.src;
-   media.props.ref.current=props.kind==='image'?{set src(value){assert.equal(event.cancelBubble,true);assert.equal(value,source);reloads++;}}:{load(){assert.equal(event.cancelBubble,true);reloads++;}};
+   let view=props.kind==='image'?await mountedThumbnail(h):h.render();const tag=props.kind==='image'?'img':'video',media=view.nodes.find(node=>node.type===tag),source=media.props.src;
+   const element=props.kind==='image'?{set src(value){assert.equal(event.cancelBubble,true);assert.equal(value,source);reloads++;}}:{load(){assert.equal(event.cancelBubble,true);reloads++;}};
+   if(typeof media.props.ref==='function')media.props.ref(element);else media.props.ref.current=element;
    media.props.onError();view=h.render();assert.ok(view.alert);assert.ok(view.retry);assert.equal(view.retry.props.type,'button');
    event=new Event('click',{bubbles:true,cancelable:true});view.retry.props.onClick(event);
    // The existing parent click dispatch must see a stopped native event.
@@ -83,17 +88,17 @@ test('Story player retry leaves an externally owned local Blob source intact and
  }finally{h.unmount();URL.revokeObjectURL=original;}
 });
 
-test('shot thumbnail retries only explicitly and never rebinds a failed source after an account change',async()=>{
+test('shot poster retries only explicitly and never rebinds a failed source after an account change',async()=>{
  const kit=await component;let scope='owner',reads=0,resolutions=0;
  kit.setMediaHandlers({read:async()=>{reads++;throw Error('native thumbnail must not fetch bytes');},native:()=>{resolutions++;const original=scope;return {href:'/v1/artifacts/shot/content?expected_account=owner',assertCurrent(){if(scope!==original)throw Error('client.accountChanged');}};}});
  const asset={fileId:'cloud_artifact_shot',kind:'video'},h=mediaLifecycle(kit.rawImage,{asset,retryable:true});
  try{
-  let view=h.render();const source=view.video.props.src;
-  view.video.props.onError({});view=h.render();assert.equal(view.video,undefined);assert.ok(view.alert);assert.ok(view.retry);assert.equal(resolutions,1);assert.equal(reads,0);
-  view=h.render();assert.equal(view.video,undefined);assert.equal(resolutions,1);
-  view.retry.props.onClick({stopPropagation(){}});view=h.render();assert.equal(view.video.props.src,source);view.video.props.onLoadedMetadata({});assert.equal(h.render().alert,undefined);
-  view.video.props.onError({});const staleRetry=h.render().retry;scope='other';view=h.render();assert.equal(view.retry,undefined);assert.equal(view.video,undefined);
-  staleRetry.props.onClick({stopPropagation(){}});assert.equal(h.render().video,undefined);assert.equal(resolutions,1);assert.equal(reads,0);
+  let view=h.render();const source=view.image.props.src;assert.equal(view.video,undefined);
+  view.image.props.onError({});view=h.render();assert.equal(view.image,undefined);assert.ok(view.alert);assert.ok(view.retry);assert.equal(resolutions,1);assert.equal(reads,0);
+  view=h.render();assert.equal(view.image,undefined);assert.equal(resolutions,1);
+  view.retry.props.onClick({stopPropagation(){}});view=h.render();assert.equal(view.image.props.src,source);view.image.props.onLoad({});assert.equal(h.render().alert,undefined);
+  view.image.props.onError({});const staleRetry=h.render().retry;scope='other';view=h.render();assert.equal(view.retry,undefined);assert.equal(view.image,undefined);
+  staleRetry.props.onClick({stopPropagation(){}});assert.equal(h.render().image,undefined);assert.equal(resolutions,1);assert.equal(reads,0);
  }finally{h.unmount();kit.setMediaHandlers();}
 });
 
@@ -106,7 +111,7 @@ test('Story cloud image/video/audio controls and both attachments render native 
  try{
   for(const [name,kind] of [['StoryboardAssetImage','image'],['StoryboardVideo','video'],['StoryboardPlayButton','audio']]){
    const html=renderToStaticMarkup(React.createElement(kit.story[name],{asset:{fileId:'cloud_asset_reference',kind}}));
-   if(kind!=='audio')assert.match(html,/src="\/v1\/assets\/reference\/content\?expected_account=story-owner"/);
+   if(kind!=='audio')assert.match(html,new RegExp('src="/v1/assets/reference/content\\?expected_account=story-owner'+(kind==='image'?'&amp;rendition=thumb':'')+'"'));
    else assert.doesNotMatch(html,/disabled/);
    assert.doesNotMatch(html,/blob:|crossorigin/i);
   }
@@ -126,15 +131,17 @@ test('Story native source failure stays explicit and cannot fall through to a Bl
  }finally{kit.setMediaHandlers();}
 });
 
-test('private reference images render native owner-bound routes at thumbnail and full size without Blob reads',async()=>{
+test('private reference images wait for thumbnail admission and use preview copies at full size without Blob reads',async()=>{
   const PrivateMedia=await component;let calls=0;
   const client=createCloudClient({fetcher:()=>{calls++;throw Error('must not read a whole Blob');}});client.setAccount('original-owner');
   for(const compact of [true,false]){
     const html=renderToStaticMarkup(React.createElement(PrivateMedia,{client,path:'/v1/assets/reference/content',kind:'image',name:'Original reference',compact}));
-    assert.match(html,/<img /);assert.match(html,/src="\/v1\/assets\/reference\/content\?expected_account=original-owner"/);
-    assert.match(html,/referrerPolicy="no-referrer"/);assert.match(html,/alt="Original reference"/);
-    assert.match(html,new RegExp(compact?'qc-media-thumb':'qc-media-full'));assert.doesNotMatch(html,/blob:|正在载入预览/);
+    if(compact){assert.match(html,/qc-media-placeholder qc-compact/);assert.doesNotMatch(html,/<img |\/v1\/assets\//);}
+    else{assert.match(html,/<img /);assert.match(html,/src="\/v1\/assets\/reference\/content\?expected_account=original-owner&amp;rendition=preview"/);assert.match(html,/referrerPolicy="no-referrer"/);assert.match(html,/alt="Original reference"/);assert.match(html,/qc-media-full/);}
+    assert.doesNotMatch(html,/blob:|正在载入预览/);
   }
+  const h=mediaLifecycle(PrivateMedia.rawPrivateMedia,{client,path:'/v1/assets/reference/content',kind:'image',compact:true});
+  try{const view=await mountedThumbnail(h);assert.equal(view.image.props.src,'/v1/assets/reference/content?expected_account=original-owner&rendition=thumb');assert.equal(view.image.props.loading,'lazy');assert.equal(view.image.props.decoding,'async');assert.equal(view.image.props.referrerPolicy,'no-referrer');}finally{h.unmount();}
   assert.equal(calls,0);
 });
 

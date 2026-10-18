@@ -269,6 +269,7 @@ class StoryboardVersions:
             trash={r["id"]:active_target(conn,self.tenant,principal.owner,
                 {"kind":"artifact","project_id":project_id,"id":r["id"]}) for r in rows}
         values = []
+        from .media_renditions import public_artifact_renditions
         for row in rows[:limit]:
             if row["metadata"].get("content_deleted"):
                 continue
@@ -283,7 +284,8 @@ class StoryboardVersions:
                 "title": project.get("journey",{}).get("storyboardTitles",{}).get(shot_id,{}).get(row["id"],entity.get("title","") if entity else ""),
                 "annotation_version": record["version"], "selected": bool(entity and shot["data"].get("selectedAssetId") == entity["id"]),
                 "created_at": row["created_at"], "kind": row["metadata"].get("kind"),
-                "content_url": f'/v1/artifacts/{row["id"]}/content'})
+                "content_url": f'/v1/artifacts/{row["id"]}/content',
+                **public_artifact_renditions(row)})
         setting = preferences(self.repo, self.tenant, principal.owner)
         _, defaults = effective_project(project, shot_id, setting["defaults"])
         return {"project_id": project_id, "shot_id": shot_id, "project_version": record["version"],

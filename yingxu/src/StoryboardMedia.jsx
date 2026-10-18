@@ -3,6 +3,7 @@ import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {RefreshCw,Image as ImageIcon,Play,Pause,Download} from 'lucide-react';
 import {getFile,nativeMediaSource} from './media.js';
 import {artifactMedia} from './artifact-media.js';
+import {useThumbnailSource} from './use-thumbnail-source.js';
 
 export function StoryboardDownloads({version,title}){
  const {t}=useI18n();
@@ -25,7 +26,7 @@ export function useStoryboardMediaUrl(asset,{thumbnail=false}={}){
  const {t}=useI18n();
   const [value,setValue]=useState({url:'',error:''}),[failure,setFailure]=useState(null);
   const direct=thumbnail?(asset?.thumb||asset?.src):(asset?.src||asset?.thumb),fileId=asset?.fileId||asset?.entity?.data?.fileId;
-  const native=useMemo(()=>{try{const target=nativeMediaSource(fileId);return target?{target}:null;}catch(error){return {error};}},[fileId]);
+  const native=useMemo(()=>{try{const target=nativeMediaSource(fileId,{rendition:thumbnail?'thumb':null});return target?{target}:null;}catch(error){return {error};}},[fileId,thumbnail]);
   useEffect(()=>{let alive=true,owned='';setValue({url:'',error:''});
     if(native)return()=>{alive=false;};
     if(direct){setValue({url:direct,error:''});return;}
@@ -43,15 +44,17 @@ export function useStoryboardMediaUrl(asset,{thumbnail=false}={}){
   if(native){let error=native.error?t(native.error.message?.startsWith('client.')?native.error.message:'client.accountChanged'):'';try{native.target?.assertCurrent();}catch{error=t('client.accountChanged');}
     const playbackUrl=error?'':native.target?.href||'';
     if(failure?.source===native)error=failure.message;
-    return {url:error?'':playbackUrl,playbackUrl,error,onError,onReady,retry,assertCurrent:()=>native.target?.assertCurrent()};}
+    return {url:error?'':playbackUrl,playbackUrl,error,onError,onReady,retry,thumbnailOwner:thumbnail?native.target?.queueOwner:null,thumbnailImage:thumbnail,assertCurrent:()=>native.target?.assertCurrent()};}
   const error=failure?.source===source?failure.message:value.error;
   return {...value,url:error?'':value.url,playbackUrl:value.url,error,onError,onReady,retry,assertCurrent:()=>{}};
 }
 export function StoryboardAssetImage({asset,className='',style,alt='',retryable=false}){
  const {t}=useI18n();
-  const {url,playbackUrl,error,onError,onReady,retry}=useStoryboardMediaUrl(asset,{thumbnail:true});
-  if(!url)return <span className={className+' media-empty storyboard-thumbnail-empty'} style={style} role={error?'alert':undefined} title={error||t('legacy.visible41')}><ImageIcon size={20} aria-hidden="true"/>{error&&<small>{t('library.previewUnavailable')}</small>}{error&&retryable&&playbackUrl&&<button className="small ghost" type="button" onPointerDown={e=>e.stopPropagation()} onClick={e=>{e.stopPropagation();try{retry();}catch{onError();}}}><RefreshCw size={13}/>{t('workspace.copy60')}</button>}</span>;
-  return asset?.kind==='video'&&!asset?.thumb?<video className={className} style={style} src={url} muted preload="metadata" playsInline aria-label={asset.name||t('legacy.visible42')} onLoadedMetadata={onReady} onError={onError}/>:<img className={className} style={style} src={url} alt={alt} draggable={false} onLoad={onReady} onError={onError}/>;
+  const {url,playbackUrl,error,onError,onReady,retry,thumbnailOwner,thumbnailImage}=useStoryboardMediaUrl(asset,{thumbnail:true});
+  const small=useThumbnailSource(thumbnailOwner,url),src=thumbnailOwner?small.src:url;
+  const ready=()=>{small.finish();onReady();},failed=()=>{small.finish();onError();};
+  if(!src)return <span ref={small.ref} className={className+' media-empty storyboard-thumbnail-empty'} style={style} role={error?'alert':undefined} title={error||t('legacy.visible41')}><ImageIcon size={20} aria-hidden="true"/>{error&&<small>{t('library.previewUnavailable')}</small>}{error&&retryable&&playbackUrl&&<button className="small ghost" type="button" onPointerDown={e=>e.stopPropagation()} onClick={e=>{e.stopPropagation();try{retry();}catch{onError();}}}><RefreshCw size={13}/>{t('workspace.copy60')}</button>}</span>;
+  return asset?.kind==='video'&&!asset?.thumb&&!thumbnailImage?<video ref={small.ref} className={className} style={style} src={src} muted preload="metadata" playsInline aria-label={asset.name||t('legacy.visible42')} onLoadedMetadata={ready} onError={failed}/>:<img ref={small.ref} className={className} style={style} src={src} alt={alt} draggable={false} loading="lazy" decoding="async" onLoad={ready} onError={failed}/>;
 }
 export function StoryboardVideo({asset,className='',onTimeUpdate,onLoadedMetadata,videoRef,...props}){
  const {t}=useI18n();

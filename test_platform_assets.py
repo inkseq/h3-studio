@@ -84,7 +84,7 @@ class AssetTests(OfflineTest):
         used = self.service.usage("owner")["accounted_bytes"]
         second = self.upload()
         self.assertEqual(first["id"], second["id"])
-        self.assertEqual(len(self.store.calls), 2)
+        self.assertEqual(len(self.store.calls), 4)
         self.assertEqual(len(self.service.list("owner", "project")), 1)
         self.assertEqual(self.service.usage("owner")["accounted_bytes"], used)
         self.assertEqual(self.service.usage("owner")["active_uploads"], 0)
@@ -138,7 +138,7 @@ class AssetTests(OfflineTest):
         first = self.upload()
         with self.assertRaises(AssetConflict):
             self.upload(png("red"))
-        self.assertEqual(len(self.store.calls), 2)
+        self.assertEqual(len(self.store.calls), 4)
         with self.engine.connect() as conn:
             failed = conn.execute(select(asset_table.c.id).where(asset_table.c.status == "failed")).scalar_one()
         with self.assertRaises(AssetConflict):
@@ -172,7 +172,7 @@ class AssetTests(OfflineTest):
         self.assertEqual(len(self.store.calls), 1)
         recovered = self.make_service().resume("owner", asset["id"])
         self.assertEqual(recovered["status"], "ready")
-        self.assertEqual(len(self.store.calls), 2)  # original once, normalized once
+        self.assertEqual(len(self.store.calls), 4)  # Original, model and two display copies once each.
 
     def test_missing_unknown_object_never_causes_blind_retry(self):
         self.store.failure = "before"
@@ -196,7 +196,7 @@ class AssetTests(OfflineTest):
         self.assertIn("original", internal)
         self.assertNotIn("model", internal)
         self.assertEqual(self.make_service().resume("owner", asset["id"])["status"], "ready")
-        self.assertEqual(len(self.store.calls), 2)
+        self.assertEqual(len(self.store.calls), 4)
 
     def test_upload_receipt_and_quotas_are_added_without_mutating_legacy_schema(self):
         columns = {column["name"] for column in inspect(self.engine).get_columns("platform_assets")}
@@ -223,7 +223,7 @@ class AssetTests(OfflineTest):
         with self.assertRaises(AssetConflict):
             resumed.resume("owner", asset["id"])
         self.assertEqual(resumed.reconcile("owner", asset["id"], interrupted=True)["status"], "ready")
-        self.assertEqual(len(self.store.calls), 2)
+        self.assertEqual(len(self.store.calls), 4)
         self.assertEqual(resumed.usage("owner")["active_uploads"], 0)
 
     def test_cpu_preparation_failure_preserves_source_and_can_resume(self):
@@ -282,7 +282,7 @@ class AssetTests(OfflineTest):
         with ThreadPoolExecutor(max_workers=2) as pool:
             result = list(pool.map(lambda _: self.upload(), range(2)))
         self.assertEqual(result[0]["id"], result[1]["id"])
-        self.assertEqual(len(self.store.calls), 2)
+        self.assertEqual(len(self.store.calls), 4)
         self.assertEqual(len(self.service.list("owner", "project")), 1)
         self.assertEqual(self.service.usage("owner")["active_uploads"], 0)
 
@@ -298,8 +298,8 @@ class AssetTests(OfflineTest):
         self.assertEqual(asset["status"], "storage_unknown")
         result = self.make_service().resume("owner", asset["id"])
         self.assertEqual(result["status"], "ready")
-        self.assertEqual(sum(op == "create" for op, _ in fake.calls), 2)
-        self.assertEqual(sum(op == "complete" for op, _ in fake.calls), 2)
+        self.assertEqual(sum(op == "create" for op, _ in fake.calls), 4)
+        self.assertEqual(sum(op == "complete" for op, _ in fake.calls), 4)
         self.assertEqual(sum(op == "put" for op, _ in fake.calls), 0)
 
     def test_existing_assets_are_not_recreated_and_known_legacy_bytes_are_accounted(self):

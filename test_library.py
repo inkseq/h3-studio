@@ -53,6 +53,23 @@ class LibraryTests(unittest.TestCase):
         self.assertTrue(all(value==0 for value in foreign['counts'].values()))
     def importing(self,body,key='import'):
         return self.client.post('/v1/library/imports',json=body,headers={'Idempotency-Key':key})
+    def test_display_renditions_follow_original_authorized_asset_and_import_receipt(self):
+        self.prepare()
+        before=self.app.state.assets.usage('superdan')
+        values=self.client.get('/v1/library?type=image').json()['items']
+        self.assertEqual(len(values),1)
+        entry=values[0];asset=self.app.state.assets.get('superdan',self.asset)
+        self.assertTrue(entry['rendition_ready'])
+        self.assertEqual(entry['thumbnail_url'],f'/v1/assets/{self.asset}/content?rendition=thumb')
+        self.assertEqual(entry['renditions']['thumb']['sha256'],asset['thumb']['sha256'])
+        self.assertEqual(self.app.state.assets.usage('superdan'),before)  # GET never generates/writes.
+        imported=self.importing(self.import_body()).json()
+        self.assertEqual(imported['state'],'completed')
+        target=self.current('target')['project'];file=next(e for e in target['entities'] if e['type']=='image')
+        copied=self.app.state.assets.public(self.app.state.assets.get('superdan',file['data']['cloudAssetId']))
+        self.assertTrue(copied['rendition_ready'])
+        self.assertNotEqual(copied['thumbnail_url'],entry['thumbnail_url'])
+        self.login('supervan');self.assertEqual(self.client.get('/v1/library?type=image').json()['items'],[])
     def test_tags_usage_scope_filters_and_atomic_file_into_profile(self):
         self.prepare()
         self.action([{'op':'library.tag','targets':[{'kind':'entity','id':'hero'},{'kind':'entity','id':'file-one'}],'tags':['blue','hero']},
@@ -459,9 +476,9 @@ class LibraryTests(unittest.TestCase):
             except (LookupError,Conflict,NotFound):visible=False
             self.assertEqual(('story-one',ident) in snapshot.artifacts,visible)
             if visible:expected.append(ident)
-        # GenerationAccess.artifact fences artifact identity; its canonical
-        # read does not additionally gate an artifact by metadata.object_key.
-        self.assertEqual(expected,[ids[0],ids[6],ids[7]])
+        # Original and auxiliary physical-key tombstones now share the same
+        # canonical artifact availability fence, not only artifact-ID tokens.
+        self.assertEqual(expected,[ids[0],ids[6]])
         restricted=Principal('superdan','assets-only',machine=True,project_ids=('story-one',),scopes=('projects:read','assets:read'))
         self.assertEqual(_LibraryRead(self.app.state.library,restricted).artifacts,{})
         self.assertEqual(_LibraryRead(self.app.state.library,Principal('supervan','foreign')).artifacts,{})

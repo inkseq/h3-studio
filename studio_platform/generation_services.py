@@ -53,7 +53,10 @@ class GenerationAccess:
             raise NotFound("artifact_not_found")
         from .content_lifecycle import assert_content_available
         with self.repo.engine.connect() as connection:
-            assert_content_available(connection, self.tenant_id, principal.owner, artifact_ids=(artifact_id,))
+            from .artifact_renditions import physical_objects
+            assert_content_available(connection, self.tenant_id, principal.owner, artifact_ids=(artifact_id,),
+                object_keys=tuple(value.get("key",value.get("object_key")) for value in
+                    (row["metadata"], *physical_objects(row["metadata"]))))
         return row
 
 
@@ -79,13 +82,15 @@ class GenerationRead:
 
     @staticmethod
     def artifact(record):
+        from .media_renditions import public_artifact_renditions
         value = record["metadata"]
         return {"id": record["id"], "job_id": record["job_id"], "kind": value["kind"],
                 "mime": value.get("mime", value.get("content_type", "application/octet-stream")),
                 "size_bytes": value["size_bytes"], "sha256": value["sha256"],
-                "metadata": {k: v for k, v in value.items() if k not in {"object_key", "provider", "storage_profile"}},
+                "metadata": {k: v for k, v in value.items() if k not in {"object_key", "provider", "storage_profile", "display_renditions"}},
                 "content_url": f'/v1/artifacts/{record["id"]}/content',
-                "download_url": f'/v1/artifacts/{record["id"]}/content?download=1'}
+                "download_url": f'/v1/artifacts/{record["id"]}/content?download=1',
+                **public_artifact_renditions(record)}
 
     def public_job(self, job, *, artifact_records=None, cancellation=None):
         stored_request = job["request"]

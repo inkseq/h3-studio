@@ -6,6 +6,8 @@ never exported. Recovery is an isolated, disabled copy, not automatic failover.
 """
 from __future__ import annotations
 
+from .asset_objects import ASSET_OBJECT_ROLES
+
 import csv
 from contextlib import closing
 import hashlib
@@ -244,9 +246,9 @@ def _media_references(db, provider_bindings=None, *, offline=False):
         entry["references"].append(reference)
     for ident, owner, project, status, raw in db.execute("SELECT id,owner,project_id,status,record FROM platform_assets"):
         record = json.loads(raw)
-        if status != "ready":
+        if status != "ready" or record.get("rendition_status") == "pending":
             pending += 1
-        for role in ("original", "model"):
+        for role in ASSET_OBJECT_ROLES:
             if record.get(role):
                 add(owner, record[role], {"table": "assets", "id": ident, "project_id": project, "role": role})
     receipt_table = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='platform_artifact_write_receipts'").fetchone()
@@ -291,6 +293,27 @@ def _media_references(db, provider_bindings=None, *, offline=False):
                 raise BackupError("backup_artifact_receipt_mismatch")
             spec = dict(spec, provider="r2", storage_binding=remote[0])
         add(owner, spec, {"table": "artifacts", "id": ident, "project_id": project, "role": spec["kind"]})
+        if spec.get('kind') == 'video':
+            # Auxiliary copies are held by the SAME original output receipt.
+            # Frozen unresolved keys are included, not silently omitted by a
+            # backup that happens between PUT and publication.
+            for receipt_id, receipt_tenant, receipt_owner, record_raw in rows:
+                record = json.loads(record_raw)
+                display = record.get('display',{})
+                if not display:
+                    continue
+                if (record.get('roles',{}).get('video',{}).get('key') != spec.get('object_key')
+                        or receipt_tenant != tenant or receipt_owner != owner):
+                    raise BackupError('backup_artifact_receipt_mismatch')
+                if display.get('phase') not in {'complete','missing'} or display.get('scratch_cleanup',{}).get('phase') != 'complete':
+                    pending += 1
+                for role, item in display.get('objects',{}).items():
+                    if role not in {'thumb','preview'} or item.get('content_type') != 'image/webp':
+                        raise BackupError('backup_artifact_receipt_mismatch')
+                    auxiliary = dict(item,object_key=item['key'],validated=True)
+                    if remote:
+                        auxiliary.update(provider='r2',storage_binding=remote[0])
+                    add(owner, auxiliary, {'table':'artifacts','id':ident,'project_id':project,'role':role})
     return found, pending
 
 
@@ -739,13 +762,15 @@ def _restore_local_provider_metadata(path, manifest):
     with closing(sqlite3.connect(path)) as db, db:
         for ident, raw in db.execute("SELECT id,record FROM platform_assets").fetchall():
             value = json.loads(raw)
-            for role in ("original", "model"):
+            for role in ASSET_OBJECT_ROLES:
                 if value.get(role):
                     convert(value[role])
             db.execute("UPDATE platform_assets SET record=? WHERE id=?", (json.dumps(value), ident))
         for ident, raw in db.execute("SELECT id,metadata FROM platform_artifacts").fetchall():
             value = json.loads(raw)
             convert(value)
+            for item in value.get('display_renditions',{}).get('objects',{}).values():
+                convert(item)
             db.execute("UPDATE platform_artifacts SET metadata=? WHERE id=?", (json.dumps(value), ident))
 
 

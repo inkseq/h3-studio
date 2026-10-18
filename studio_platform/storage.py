@@ -525,11 +525,20 @@ class S3ObjectStore:
         Pinned source: https://github.com/boto/botocore/blob/1.43.108/botocore/auth.py,
         SigV4Auth.add_auth -> S3SigV4QueryAuth._modify_request_before_signing.
         """
-        validate_key(key)
-        if self.config.provider != "r2":
-            raise UnsupportedStorageOperation("Immutable video caching requires the selected R2 store")
         if content_type != "video/mp4":
             raise StorageError("Immutable video caching requires an MP4 artifact")
+        return self._presign_immutable_media(key, content_type=content_type, download_filename=download_filename)
+
+    def presign_immutable_rendition(self, key: str, *, content_type: str, download_filename=None) -> SecretURL:
+        """Only a verified owner-authorized display rendition may use this signer."""
+        if content_type != "image/webp":
+            raise StorageError("Immutable rendition caching requires a WebP display copy")
+        return self._presign_immutable_media(key, content_type=content_type, download_filename=download_filename)
+
+    def _presign_immutable_media(self, key, *, content_type, download_filename):
+        validate_key(key)
+        if self.config.provider != "r2":
+            raise UnsupportedStorageOperation("Immutable media caching requires the selected R2 store")
         disposition = self._download_disposition(download_filename) or "inline"
         if self._video_credentials is None:
             raise StorageError("Explicit storage credentials are required for immutable video signing")

@@ -43,11 +43,11 @@ export function createCloudController({store=defaultStore,client,storage=globalT
   const sessionChanged=event=>{if(event.key===sessionEvent&&state.account)expire();};
   globalThis.window?.addEventListener('storage',sessionChanged);
   function installMedia(){api.setAccount?.(state.account);mediaHandlers({maxBytes:state.capabilities?.upload_max_bytes,read:state.account?async fileId=>{const match=/^cloud_(asset|artifact)_([A-Za-z0-9_-]+)$/.exec(fileId);if(!match)throw Error('云素材标识无效。');const ctx=context(),blob=await api.download(`/v1/${match[1]}s/${match[2]}/content`);guard(ctx);return blob;}:null,
-    native:state.account&&current().workspace.mode==='cloud'?(fileId,{download=false}={})=>{
+    native:state.account&&current().workspace.mode==='cloud'?(fileId,{download=false,rendition=null}={})=>{
       requireCloud();const ctx=context(),match=/^cloud_(asset|artifact)_([A-Za-z0-9_-]+)$/.exec(fileId);
       if(!match)throw Error('client.mediaPath');
-      const href=api.nativeContentURL(`/v1/${match[1]}s/${match[2]}/content`,{download});guard(ctx);
-      return Object.freeze({href,account:ctx.account,projectId:ctx.projectId,workspaceEpoch:ctx.workspaceEpoch,assertCurrent:()=>guard(ctx)});
+      const href=api.nativeContentURL(`/v1/${match[1]}s/${match[2]}/content`,{download,rendition});guard(ctx);
+      return Object.freeze({href,queueOwner:api,account:ctx.account,projectId:ctx.projectId,workspaceEpoch:ctx.workspaceEpoch,assertCurrent:()=>guard(ctx)});
     }:null,upload:state.account&&current().workspace.mode==='cloud'?upload:null});}
   function replaceIdentity(account,message=''){
     videoCacheIdentity(account);

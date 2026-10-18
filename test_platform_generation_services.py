@@ -170,7 +170,8 @@ class GenerationServicesTests(ledger.LedgerCase):
             "metadata": {"kind": "video", "content_type": "video/mp4", "size_bytes": 123,
                 "sha256": "a"*64, "duration_s": 124/24},
             "content_url": f"/v1/artifacts/{artifact_id}/content",
-            "download_url": f"/v1/artifacts/{artifact_id}/content?download=1"}])
+            "download_url": f"/v1/artifacts/{artifact_id}/content?download=1",
+            "renditions": {}, "rendition_ready": False, "rendition_status": "missing"}])
         self.assertEqual(self.access.artifact(self.principal, artifact_id)["job_id"], ident)
         self.assertEqual(self.read.list_jobs(self.principal, offset=1), {"jobs": []})
 

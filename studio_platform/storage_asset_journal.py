@@ -1,6 +1,8 @@
 """Private upload receipts and atomic capacity counters; no storage/network IO."""
 from __future__ import annotations
 
+from .asset_objects import ASSET_OBJECT_ROLES
+
 import json
 import hashlib
 import re
@@ -81,7 +83,7 @@ class AssetUploadJournal:
         if acquire_gate:
             owner_reference_gate(conn, self.tenant, owner)
         selection = asset.get("selection") or {}
-        keys = [asset[role]["key"] for role in ("original", "model")
+        keys = [asset[role]["key"] for role in ASSET_OBJECT_ROLES
                 if isinstance(asset.get(role), dict) and asset[role].get("key")]
         if receipt is not None:
             keys.extend(spec["key"] for spec in receipt.get("objects", {}).values() if spec.get("key"))
@@ -109,7 +111,7 @@ class AssetUploadJournal:
                     known_bytes = 0
                     for raw in legacy:
                         record = json.loads(raw)
-                        for role in ("original", "model"):
+                        for role in ASSET_OBJECT_ROLES:
                             size = record.get(role, {}).get("size_bytes", 0)
                             if type(size) is not int or size < 0:
                                 raise AssetConflict("旧素材大小元信息需要核对，未重置配额")
@@ -136,6 +138,10 @@ class AssetUploadJournal:
             with self.engine.connect() as conn:
                 rows = list(conn.execute(select(artifacts.c.id, artifacts.c.metadata, jobs.c.owner_id)
                     .select_from(artifacts.join(jobs, artifacts.c.job_id == jobs.c.id)).where(*clauses)))
+            from .artifact_renditions import physical_objects
+            rows = [(ident, value, who) for ident, spec, who in rows
+                for value in (spec, *(dict(item, object_key=item['key'],validated=True)
+                    for item in physical_objects(spec)))]
             for artifact_id, spec, artifact_owner in rows:
                 try:
                     with self.engine.begin() as conn:

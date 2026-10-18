@@ -96,7 +96,15 @@ class ArtifactWriter:
         if job is None or job["tenant_id"] != self.tenant or job["owner_id"] != record["owner"]:
             raise ArtifactWritePending("artifact_receipt_identity_mismatch")
         assert_content_available(conn, self.tenant, record["owner"],
-            object_keys=[role["key"] for role in record["roles"].values()], storage_binding=self.binding)
+            object_keys=[role["key"] for role in (*record["roles"].values(),
+                *record.get("display", {}).get("objects", {}).values())], storage_binding=self.binding)
+        if record.get("phase") == "settled":
+            from .repository import artifacts
+            ids = tuple(conn.execute(select(artifacts.c.id).join(write_receipts,
+                (artifacts.c.job_id == write_receipts.c.job_id)
+                & (artifacts.c.attempt_id == write_receipts.c.attempt_id)).where(
+                    write_receipts.c.id == record["id"])).scalars())
+            assert_content_available(conn, self.tenant, record["owner"], artifact_ids=ids)
         if writable:
             assert_project_writable(conn, self.tenant, record["owner"], job["project_id"])
 
@@ -333,9 +341,13 @@ class ArtifactWriter:
         if record["phase"] == "settled" and any(role["status"] != "verified" for role in record["roles"].values()):
             raise ArtifactWritePending("artifact_settlement_evidence_missing")
         missing = False
-        for role in record["roles"].values():
+        for kind, role in record["roles"].items():
             try:
-                self._verify_remote(role, heartbeat)
+                import io
+                prefix = io.BytesIO() if kind == "video" else None
+                self._verify_remote(role, heartbeat, prefix=prefix)
+                if prefix is not None:
+                    self._poster_prefix = {(role["key"],role["sha256"]): prefix.getvalue()}
             except ObjectNotFound:
                 # Preserve complete roles even if the missing role sorts first.
                 # Their own readback may resolve an unknown upload acknowledgement.
@@ -451,7 +463,7 @@ class ArtifactWriter:
                 raise ArtifactWritePending("artifact_collection_already_in_progress")
         record["version"] += 1
 
-    def _verify_remote(self, role, heartbeat):
+    def _verify_remote(self, role, heartbeat, *, prefix=None):
         info = self.store.stat(role["key"])
         if info.size_bytes != role["size_bytes"] or info.content_type != role["content_type"]:
             raise IntegrityError("artifact_remote_metadata_mismatch")
@@ -462,6 +474,9 @@ class ArtifactWriter:
                 if count > role["size_bytes"]:
                     raise IntegrityError("artifact_remote_size_mismatch")
                 digest.update(chunk)
+                if prefix is not None:
+                    from .media_renditions import POSTER_PREFIX_BYTES
+                    prefix.write(chunk[:max(0, POSTER_PREFIX_BYTES-prefix.tell())])
                 heartbeat()
         if count != role["size_bytes"] or digest.hexdigest() != role["sha256"]:
             raise IntegrityError("artifact_remote_hash_mismatch")

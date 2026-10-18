@@ -108,12 +108,14 @@ export function createCloudClient({fetcher=(...args)=>fetch(...args),onUnauthori
     }catch(error){if(error instanceof CloudError)throw error;if(timedOut)throw new CloudError(ui(multipart?'client.uploadTimeout':method==='GET'?(blob?'client.mediaTimeout':'client.readTimeout'):'client.writeTimeout',expectedAccount));if(error.name==='AbortError')throw new CloudError(ui('client.aborted',expectedAccount));throw new CloudError(ui('client.offline',expectedAccount));}
     finally{clearTimeout(timer);signal?.removeEventListener('abort',cancelRead);inflight.delete(controller);if(releaseRead)releaseRead();}
   }
-  function nativeContentURL(path,{download=false}={}){
+  function nativeContentURL(path,{download=false,rendition=null}={}){
     if(!account)throw new CloudError(ui('client.mediaAccount',account));
     if(typeof path!=='string'||!/^\/v1\/(?:assets|artifacts)\/[A-Za-z0-9_-]{1,200}\/content$/.test(path.split('?')[0])||typeof download!=='boolean')throw new CloudError(ui('client.mediaPath',account));
     const parsed=new URL(safeCloudPath(path),'https://studio.invalid'),entries=[...parsed.searchParams];
-    if(entries.length>1||entries.some(([key,value])=>key!=='download'||value!=='1'))throw new CloudError(ui('client.mediaQuery',account));
-    const query=new URLSearchParams({expected_account:account,...(download||entries.length?{download:'1'}:{})});
+    if(entries.length>1||entries.some(([key,value])=>!(key==='download'&&value==='1'||key==='rendition'&&['thumb','preview'].includes(value)))||rendition!==null&&!['thumb','preview'].includes(rendition))throw new CloudError(ui('client.mediaQuery',account));
+    const role=parsed.searchParams.get('rendition')||rendition,wantsDownload=download||parsed.searchParams.has('download');
+    if(role&&(wantsDownload||rendition&&role!==rendition))throw new CloudError(ui('client.mediaQuery',account));
+    const query=new URLSearchParams({expected_account:account,...(role?{rendition:role}:wantsDownload?{download:'1'}:{})});
     return parsed.pathname+'?'+query;
   }
   const id=value=>encodeURIComponent(value);
