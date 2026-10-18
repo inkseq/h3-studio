@@ -67,6 +67,19 @@ class ManagementTests(ledger.LedgerCase):
         self.assertEqual(replay['key']['id'],result['key']['id']);self.assertEqual(replay['connection']['authorization'],frozen)
         with self.assertRaises(ConnectError):self.service.exchange(**body)
 
+    def test_unexchanged_connection_has_explicit_empty_display_shape(self):
+        pending=self.issue()['connection']
+        value=self.service.get(self.principal,pending['id'])['usage']['breakdown']
+        self.assertEqual(value['attribution_scope'],'connection')
+        self.assertEqual(value['attribution_status'],'not_connected')
+        self.assertEqual(value['exposure_microusd'],0)
+        self.assertEqual(set(value['by_kind']),{'job','instance'})
+        self.assertNotIn('unattributed_exposure_microusd',value)
+        grant,_,_,_,_,_=self.connect()
+        connected=self.service.get(self.principal,grant['connection']['id'])['usage']['breakdown']
+        self.assertEqual(set(value),set(connected))
+        self.assertEqual(connected['attribution_status'],'recorded')
+
     def test_pause_resume_revoke_stale_principal_and_accepted_replay(self):
         grant,result,agent,token,_,_=self.connect();ident=grant['connection']['id']
         plan=self.plan();original=self.repo.create_job(self.scope,plan['id'],'accepted',budget_account_ids=('owner-budget',),spending_actor=agent.actor_id)

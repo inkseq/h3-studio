@@ -4,7 +4,7 @@ import json
 import uuid
 from sqlalchemy import select, insert, update, inspect
 from .repository import documents, Scope, request_hash, money, spending_settings
-from .spending_limits import lock_owner, read_settings, public_usage
+from .spending_limits import lock_owner, read_settings, public_usage, empty_usage_breakdown
 
 DEFAULTS = {'code_ttl_seconds':600,'recovery_ttl_seconds':300,'key_lifetime_days':90,'max_pending_connections':5}
 CONTROL_PROJECT='__agent_control'
@@ -177,7 +177,8 @@ class AgentManagementMixin:
         config=read_settings(conn,self.tenant,row['owner']) if key_id else None
         cap=config['value']['connection_limits'].get('key:'+key_id,0) if key_id else authorization.get('daily_limit_microusd',0)
         usage=public_usage(conn,self.tenant,row['owner'],self.clock(),actor_id='key:'+key_id) if key_id else {
-            'projected_microusd':0,'day':None,'timezone':'Australia/Sydney','includes_unresolved_prior_days':True}
+            'projected_microusd':0,'day':None,'timezone':'Australia/Sydney','includes_unresolved_prior_days':True,
+            'breakdown':empty_usage_breakdown(actor_id='not-connected',connected=False)}
         is_paused=bool(state.get('paused'))
         return {**value,'scope':authorization.get('scope',{'kind':'all'}),'permission':authorization.get('permission','generate'),
             'paused':is_paused,'state_version':control['version'] if control else 0,'daily_limit_microusd':cap,'usage':usage,

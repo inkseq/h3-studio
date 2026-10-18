@@ -27,6 +27,8 @@ class SpendingRouteTests(unittest.TestCase):
         path='/v1/account/spending-settings'
         original=self.client.get(path).json()
         self.assertEqual(original['value']['daily_limit_microusd'],0)
+        self.assertEqual(original['usage']['breakdown']['schema_version'],1)
+        self.assertEqual(original['usage']['breakdown']['attribution_scope'],'account')
         value={**original['value'],'daily_limit_microusd':2_000_000}
         self.assertEqual(self.client.put(path,json={'expected_version':0,'value':value}).status_code,200)
         self.assertEqual(self.client.put(path,json={'expected_version':0,'value':value}).status_code,409)
