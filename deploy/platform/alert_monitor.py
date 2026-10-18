@@ -279,13 +279,18 @@ def tick(settings, state, snapshot, host, cpu, *, evaluator, sns, cloudwatch, sa
                        host=host, thresholds=settings['thresholds'])
     require(type(result) is dict and set(result) == {'state', 'notifications'} and type(result['state']) is dict
             and type(result['notifications']) is list, 'alert_evaluation_invalid')
-    require(len(state['pending']) + len(result['notifications']) <= MAX_PENDING, 'alert_pending_full')
-    for item in result['notifications']:
-        notification(item, settings['environment'])
-        state['sequence'] += 1
-        identity = hashlib.sha256(encode({'sequence': state['sequence'], 'notification': item})).hexdigest()
-        state['pending'].append({'id': identity, 'notification': item, 'attempts': 0, 'retry_at': now})
-    state.update(evaluator=result['state'], cpu=cpu)
+    deferred = len(state['pending']) + len(result['notifications']) > MAX_PENDING
+    if not deferred:
+        for item in result['notifications']:
+            notification(item, settings['environment'])
+            state['sequence'] += 1
+            identity = hashlib.sha256(encode({'sequence': state['sequence'], 'notification': item})).hexdigest()
+            state['pending'].append({'id': identity, 'notification': item, 'attempts': 0, 'retry_at': now})
+        state['evaluator'] = result['state']
+    # Keep the original transition checkpoint on overflow, including a proposed
+    # batch larger than MAX_PENDING. Reevaluate it next tick while the ordinary
+    # bounded delivery path below makes room; never discard pending alerts.
+    state['cpu'] = cpu
     save(state)  # Persist transitions before any possibly-ambiguous remote write.
     delivery_healthy = True
     from botocore.exceptions import BotoCoreError, ClientError
@@ -316,7 +321,7 @@ def tick(settings, state, snapshot, host, cpu, *, evaluator, sns, cloudwatch, sa
          'Value': 1, 'Unit': 'Count'},
         {'MetricName': 'DeliveryHealthy', 'Dimensions': [{'Name': 'Environment', 'Value': settings['environment']},
             {'Name': 'InstanceId', 'Value': settings['instance_id']}], 'Timestamp': datetime.fromtimestamp(now, timezone.utc),
-         'Value': int(delivery_healthy and not state['pending']), 'Unit': 'Count'},
+         'Value': int(delivery_healthy and not state['pending'] and not deferred), 'Unit': 'Count'},
         {'MetricName': 'SnapshotHealthy', 'Dimensions': [{'Name': 'Environment', 'Value': settings['environment']},
             {'Name': 'InstanceId', 'Value': settings['instance_id']}], 'Timestamp': datetime.fromtimestamp(now, timezone.utc),
          'Value': int(fresh), 'Unit': 'Count'}]}

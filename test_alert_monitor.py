@@ -1,5 +1,6 @@
 """Finite monitor tests: no AWS, Docker, provider or business database writes."""
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -70,6 +71,56 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(self.saved[-2]['pending'][0]['id'], event_id)
         self.tick(1120, http_requests=10, http_5xx=5)
         self.assertEqual(self.sns.publish.call_count, 2)
+
+    def test_overflow_drains_original_pending_without_advancing_transitions_then_admits(self):
+        message = {'code': 'job_stuck', 'environment': 'staging', 'resource_id': None,
+            'duration_seconds': 1800, 'console_link': 'https://staging.inkseq.com/freestyle', 'transition': 'firing'}
+        pending = [{'id': hashlib.sha256(f'original-{index}'.encode()).hexdigest(),
+            'notification': {**message, 'duration_seconds': 1800 + index}, 'attempts': 0, 'retry_at': 1000}
+            for index in range(40)]
+        original = {**self.state, 'sequence': 40, 'evaluator': {'checkpoint': 'original'}, 'pending': pending}
+        untouched = copy.deepcopy(original)
+        proposals = [{**message, 'duration_seconds': 2000 + index} for index in range(117)]
+        evaluator = Mock(return_value={'state': {'checkpoint': 'next'}, 'notifications': proposals})
+        state = original
+        for now in range(1000, 1010):
+            before = self.sns.publish.call_count
+            state = monitor.tick(SETTINGS, state, None, {}, None, evaluator=evaluator,
+                sns=self.sns, cloudwatch=self.cloud,
+                save=lambda value: self.saved.append(copy.deepcopy(value)), now=now)
+            self.assertEqual(self.sns.publish.call_count - before, 3)
+            self.assertEqual((state['evaluator'], state['sequence']), ({'checkpoint': 'original'}, 40))
+        self.assertEqual(self.saved[0]['pending'], pending)
+        self.assertEqual(original, untouched)
+        self.assertEqual(len(state['pending']), 10)
+        self.assertEqual(state['pending'], pending[30:])
+        state = monitor.tick(SETTINGS, state, None, {}, None, evaluator=evaluator,
+            sns=self.sns, cloudwatch=self.cloud, save=lambda value: None, now=1010)
+        self.assertEqual((state['evaluator'], state['sequence']), ({'checkpoint': 'next'}, 157))
+        self.assertEqual(len(state['pending']), 124)  # seven originals plus all117 new transitions
+        self.assertEqual([item['id'] for item in state['pending'][:7]], [item['id'] for item in pending[33:]])
+        self.assertEqual([item['notification'] for item in state['pending'][7:]], proposals)
+
+    def test_oversize_proposal_batch_is_deferred_and_revisited_without_false_delivery_health(self):
+        message = {'code': 'health_down', 'environment': 'staging', 'resource_id': None,
+            'duration_seconds': 120, 'console_link': 'https://staging.inkseq.com/freestyle', 'transition': 'firing'}
+        original = {**self.state, 'sequence': 1, 'evaluator': {'checkpoint': 'original'},
+            'pending': [{'id': 'a' * 64, 'notification': message, 'attempts': 0, 'retry_at': 1000}]}
+        proposals = [{**message, 'duration_seconds': 120 + index} for index in range(monitor.MAX_PENDING + 1)]
+        evaluator = Mock(return_value={'state': {'checkpoint': 'next'}, 'notifications': proposals})
+        state = original
+        for now in (1000, 1060):
+            state = monitor.tick(SETTINGS, state, None, {}, None, evaluator=evaluator,
+                sns=self.sns, cloudwatch=self.cloud,
+                save=lambda value: self.saved.append(copy.deepcopy(value)), now=now)
+            self.assertEqual((state['evaluator'], state['sequence']), ({'checkpoint': 'original'}, 1))
+            self.assertFalse(state['pending'])
+            metrics = {item['MetricName']: item['Value'] for item in self.cloud.put_metric_data.call_args.kwargs['MetricData']}
+            self.assertEqual(metrics['DeliveryHealthy'], 0)
+        self.assertEqual(self.saved[0]['pending'], original['pending'])
+        self.assertEqual(self.sns.publish.call_count, 1)
+        self.assertEqual(evaluator.call_count, 2)
+        self.assertTrue(all(call.args[1] == {'checkpoint': 'original'} for call in evaluator.call_args_list))
 
     def test_unknown_observation_does_not_clear_active_alarm(self):
         self.tick(1000, health_ok=False)
