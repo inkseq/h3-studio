@@ -16,6 +16,8 @@ from .media import MediaError
 from .asset_objects import ASSET_OBJECT_ROLES
 
 RENDITIONS = {"thumb": (320, 64 * 1024), "preview": (1280, 512 * 1024)}
+POSTER_PREFIX_BYTES = 8 * 1024 * 1024
+POSTER_FRAME_BYTES = 8 * 1024 * 1024
 _HASH = re.compile(r"[0-9a-f]{64}")
 
 
@@ -66,9 +68,28 @@ def create_image_renditions(source, directory, *, max_bytes):
     return results
 
 
+def create_video_renditions(source, directory, *, max_bytes):
+    """Decode one frame only; a faststart prefix may be supplied by the writer.
+
+    The existing media runner restricts demuxers, protocols, memory and time.
+    A truncated/late-moov prefix is unsupported, never a reason to read an
+    unbounded source or decode the complete video. The original is untouched.
+    """
+    from . import media
+    info = media.inspect(source, "video")  # Metadata only; validates dimensions/stream/rotation bounds.
+    target = directory / "poster-frame.png"
+    media.ffmpeg(["-i", source, "-map", f'0:{info["video_stream_index"]}', "-an", "-sn", "-dn",
+        "-frames:v", "1", "-vf", "scale=w='min(1280,iw)':h='min(1280,ih)':force_original_aspect_ratio=decrease",
+        "-c:v", "png", "-threads", "1", "-fs", min(POSTER_FRAME_BYTES,max_bytes), target], timeout=30)
+    if not target.is_file() or not 0 < target.stat().st_size <= POSTER_FRAME_BYTES:
+        raise MediaError("视频封面未完整提取；原视频已保留")
+    media.inspect(target, "image")
+    return create_image_renditions(target, directory, max_bytes=max_bytes)
+
+
 def public_renditions(record):
     """Safe metadata only; malformed/missing copies never fall back to originals."""
-    if record.get("kind") != "image":
+    if record.get("kind") not in {"image", "video"}:
         return {}
     metadata = record.get("rendition_metadata")
     metadata = metadata if isinstance(metadata, dict) else {}
@@ -101,3 +122,24 @@ def public_renditions(record):
         if role in result:
             public[field] = result[role]["content_url"]
     return public
+
+
+def public_artifact_renditions(record):
+    """Same display validation, rooted in an original validated video artifact."""
+    value = record.get("metadata", {})
+    if value.get("kind") != "video":
+        return {}
+    display = value.get("display_renditions", {})
+    display = display if isinstance(display,dict) else {}
+    objects = display.get("objects",{})
+    objects = objects if isinstance(objects,dict) else {}
+    view = dict(id=record["id"], kind="video", status="ready" if value.get("validated") is True else "pending",
+        original=value, rendition_metadata=display.get("metadata"),
+        **{role: objects.get(role) for role in RENDITIONS})
+    result = public_renditions(view)
+    for role, item in result.get("renditions", {}).items():
+        item["content_url"] = f'/v1/artifacts/{record["id"]}/content?rendition={role}'
+    for role, field in (("thumb", "thumbnail_url"), ("preview", "preview_url")):
+        if role in result.get("renditions", {}):
+            result[field] = result["renditions"][role]["content_url"]
+    return result

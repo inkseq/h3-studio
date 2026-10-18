@@ -262,6 +262,13 @@ class WorkerRunner:
             # Acceptance already committed. Retained scratch is a cleanup
             # obligation, never a reason to resubmit or fail the original job.
             logging.getLogger(__name__).warning("r2_artifact_scratch_cleanup_pending")
+            return  # The original manifest must complete before display scratch is introduced.
+        try:
+            from .artifact_renditions import ensure
+            ensure(writer, job, lease.attempt_id, tag)
+        except Exception:
+            # Display failures never invalidate acceptance or trigger replay.
+            logging.getLogger(__name__).warning("artifact_poster_pending_original_receipt")
 
     def _complete_collection(self, writer, job, lease, tag, specs, cost, receipt):
         result = self._commit_result(job, lease, specs, cost, writer.settlement(receipt))

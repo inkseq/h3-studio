@@ -453,9 +453,9 @@ class LibraryTests(unittest.TestCase):
             except (LookupError,Conflict,NotFound):visible=False
             self.assertEqual(('story-one',ident) in snapshot.artifacts,visible)
             if visible:expected.append(ident)
-        # GenerationAccess.artifact fences artifact identity; its canonical
-        # read does not additionally gate an artifact by metadata.object_key.
-        self.assertEqual(expected,[ids[0],ids[6],ids[7]])
+        # Original and auxiliary physical-key tombstones now share the same
+        # canonical artifact availability fence, not only artifact-ID tokens.
+        self.assertEqual(expected,[ids[0],ids[6]])
         restricted=Principal('superdan','assets-only',machine=True,project_ids=('story-one',),scopes=('projects:read','assets:read'))
         self.assertEqual(_LibraryRead(self.app.state.library,restricted).artifacts,{})
         self.assertEqual(_LibraryRead(self.app.state.library,Principal('supervan','foreign')).artifacts,{})

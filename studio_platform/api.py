@@ -245,8 +245,7 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
             # Only the strict small-copy selector enters this gate. The route
             # still authorizes its original owner/project and verifies the
             # <=64KiB role; invalid/missing selectors never serve originals.
-            thumbnail = (request.url.path.startswith("/v1/assets/")
-                and request.query_params.getlist("rendition") == ["thumb"])
+            thumbnail = request.query_params.getlist("rendition") == ["thumb"]
             global_gate, owner_gate = (("thumbnails", "owner_thumbnails") if thumbnail
                                       else ("downloads", "owner_downloads"))
             if not lease.acquire(global_gate) or not lease.acquire(owner_gate, principal.owner):
@@ -687,10 +686,21 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
 
     @app.api_route("/v1/artifacts/{artifact_id}/content", methods=["GET", "HEAD"])
     def artifact_content(artifact_id: str, request: Request, download: bool = False,
+                         rendition: str | None = Query(None),
                          expected_account: str | None = Query(None, description="Optional browser account fence for native media/navigation; does not grant access")):
         principal = request.state.principal
         row = generation_access.artifact(principal, artifact_id)
         value = row["metadata"]
+        if "rendition" in request.query_params:
+            from .media_renditions import public_artifact_renditions
+            if request.query_params.getlist("rendition") != [rendition] or rendition not in RENDITIONS:
+                raise HTTPException(400, "invalid_rendition")
+            advertised = public_artifact_renditions(row).get("renditions", {}).get(rendition)
+            if advertised is None:
+                raise HTTPException(404, "rendition_not_ready")
+            item = value["display_renditions"]["objects"][rendition]
+            return object_content(item["key"], "image/webp", f'{artifact_id}-{rendition}.webp',
+                request, download=download, immutable_rendition=True)
         extension = {"video": "mp4", "audio": "flac", "image": "png"}.get(value.get("kind"), "bin")
         filename = value.get("filename", f'inkseq-{row["job_id"][:8]}-{value.get("kind", "result")}.{extension}')
         if isinstance(filename, str) and filename.lower().startswith("sixnine-"):

@@ -1,6 +1,6 @@
 """Authorized library projection and original project-CAS metadata actions."""
 from .asset_objects import ASSET_OBJECT_ROLES
-from .media_renditions import public_renditions
+from .media_renditions import public_renditions, public_artifact_renditions
 import copy
 import json
 from urllib.parse import urlencode
@@ -70,7 +70,10 @@ class _LibraryRead:
                         jobs,jobs.c.id==artifacts.c.job_id).where(jobs.c.tenant_id==library.tenant,
                         jobs.c.owner_id==principal.owner,jobs.c.project_id.in_(artifact_projects),
                         jobs.c.status=='succeeded')).mappings():
-                    if not row['metadata'].get('content_deleted') and available(artifact_ids=(row['id'],)):
+                    from .artifact_renditions import physical_objects
+                    if not row['metadata'].get('content_deleted') and available(artifact_ids=(row['id'],),
+                            keys=tuple(value.get('key',value.get('object_key')) for value in
+                                (row['metadata'],*physical_objects(row['metadata'])))):
                         self.artifacts[(row['project_id'],row['id'])]=row
 
     def project(self,principal,ident,operation='projects:read'):
@@ -258,7 +261,9 @@ class Library:
                 asset_id=results[-1]['asset_id']
                 if asset_id and (pid,asset_id) in snapshot.assets:
                     results[-1].update(public_renditions(snapshot.assets[(pid,asset_id)][0]))
-                elif typ=='image':
+                elif results[-1]['artifact_id'] and (pid,results[-1]['artifact_id']) in snapshot.artifacts:
+                    results[-1].update(public_artifact_renditions(snapshot.artifacts[(pid,results[-1]['artifact_id'])]))
+                elif typ in {'image','video'}:
                     results[-1].update(rendition_ready=False,rendition_status='missing',renditions={})
             for entity in project['entities']:
                 if entity['type'] not in PROFILES|FILES:continue

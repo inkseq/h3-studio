@@ -138,6 +138,10 @@ class AssetUploadJournal:
             with self.engine.connect() as conn:
                 rows = list(conn.execute(select(artifacts.c.id, artifacts.c.metadata, jobs.c.owner_id)
                     .select_from(artifacts.join(jobs, artifacts.c.job_id == jobs.c.id)).where(*clauses)))
+            from .artifact_renditions import physical_objects
+            rows = [(ident, value, who) for ident, spec, who in rows
+                for value in (spec, *(dict(item, object_key=item['key'],validated=True)
+                    for item in physical_objects(spec)))]
             for artifact_id, spec, artifact_owner in rows:
                 try:
                     with self.engine.begin() as conn:

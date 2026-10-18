@@ -15,7 +15,8 @@ import uuid
 from sqlalchemy import Column, Float, MetaData, String, Table, Text, delete, select
 
 from . import media
-from .media_renditions import ASSET_OBJECT_ROLES, RENDITIONS, create_image_renditions, public_renditions
+from .media_renditions import (ASSET_OBJECT_ROLES, RENDITIONS, POSTER_FRAME_BYTES,
+    create_image_renditions, create_video_renditions, public_renditions)
 from .storage import (IntegrityError, LocalObjectStore, ObjectAlreadyExists, ObjectInfo, S3ObjectStore,
     StorageWriteUncertain, UnsupportedStorageOperation, _check_ancestors, _copy,
     _no_links, _part, _sync_directory, make_object_key)
@@ -106,7 +107,7 @@ class AssetService:
 
     def _file(self, receipt, name):
         names = {"source"+receipt["suffix"], "normalized.png", "normalized.wav", "normalized.mp4", "receiving",
-                 "thumb-v1.webp", "preview-v1.webp", "rendition-source"+receipt["suffix"], "rendition-receiving"}
+                 "thumb-v1.webp", "preview-v1.webp", "poster-frame.png", "rendition-source"+receipt["suffix"], "rendition-receiving"}
         if receipt.get("derivation"):
             names.update({receipt["derivation"]["input_name"], "trimmed.mp4", "trimmed.wav"})
         if receipt.get("frame_extraction"):
@@ -200,6 +201,8 @@ class AssetService:
                      if not backfill or (directory / spec["filename"]).exists()]
             if backfill and (directory / backfill["source_name"]).exists():
                 paths.append(self._file(receipt, backfill["source_name"]))
+            if (directory / "poster-frame.png").exists():
+                paths.append(self._file(receipt, "poster-frame.png"))
             files = scratch_retention.manifest(directory, paths, self.max_bytes)
             if any((files[spec["filename"]]["size_bytes"], files[spec["filename"]]["sha256"])
                    != (spec["size_bytes"], spec["sha256"]) for spec in receipt["objects"].values()
@@ -311,7 +314,7 @@ class AssetService:
                 os.fsync(stream.fileno())
             specs["model"] = dict(filename=path.name, size_bytes=model_size, sha256=model_hash,
                                   content_type=media.MIMES[path.suffix], phase="planned")
-        if receipt["asset"]["kind"] == "image":
+        if receipt["asset"]["kind"] in {"image", "video"}:
             specs.update(self._prepare_renditions(receipt, source, checksum))
         # Existing reservations normally cover these small copies. A worst
         # case full-size original+model must reserve the extra exact bytes
@@ -331,7 +334,16 @@ class AssetService:
             path = self._stage(receipt) / f"{role}-v1.webp"
             if path.exists():
                 self._file(receipt, path.name)  # Reject links before replacing an unpublished copy.
-        specs = create_image_renditions(source, self._stage(receipt), max_bytes=self.max_bytes)
+        if receipt["asset"]["kind"] == "video":
+            frame = self._stage(receipt) / "poster-frame.png"
+            if frame.exists() or frame.is_symlink():
+                self._file(receipt, frame.name)
+            self._reserve_to(receipt, max(receipt["reserved"], self._stage_bytes(receipt)
+                + min(POSTER_FRAME_BYTES, self.max_bytes) + 2*sum(cap for _,cap in RENDITIONS.values())))
+            specs = create_video_renditions(source, self._stage(receipt), max_bytes=self.max_bytes)
+            self._file(receipt, frame.name).unlink()  # Only this unpublished derived scratch.
+        else:
+            specs = create_image_renditions(source, self._stage(receipt), max_bytes=self.max_bytes)
         receipt["asset"]["rendition_metadata"] = dict(version=1, source_sha256=source_hash,
             **{role: {key: spec[key] for key in ("width", "height")} for role, spec in specs.items()})
         return specs
@@ -445,6 +457,10 @@ class AssetService:
         return self.reconcile(owner, asset_id)
 
     def ensure_image_renditions(self, owner, asset_id, *, expected_version=None, interrupted=False):
+        """Compatibility entry for the original image-only backfill command."""
+        return self.ensure_renditions(owner, asset_id, expected_version=expected_version, interrupted=interrupted)
+
+    def ensure_renditions(self, owner, asset_id, *, expected_version=None, interrupted=False):
         """Explicit offline backfill, on the original receipt and quota authority.
 
         Never called by GET. A legacy asset without an original bound upload
@@ -454,8 +470,8 @@ class AssetService:
         """
         with self._operation(asset_id):
             asset = self.get(owner, asset_id)
-            if asset.get("kind") != "image" or asset.get("status") != "ready":
-                raise AssetConflict("rendition_requires_ready_image")
+            if asset.get("kind") not in {"image", "video"} or asset.get("status") != "ready":
+                raise AssetConflict("rendition_requires_ready_media")
             receipt = self.journal.get(owner, asset_id)
             if expected_version is not None and (type(expected_version) is not int
                     or receipt["version"] != expected_version):
@@ -520,8 +536,8 @@ class AssetService:
                         if size != original["size_bytes"]:
                             raise IntegrityError("rendition_original_copy_incomplete")
                         receiving.rename(source_path)
-                    with media.PROCESSING_ADMISSION.acquire("image"):
-                        media.inspect(source_path, "image")
+                    with media.PROCESSING_ADMISSION.acquire(asset["kind"]):
+                        media.inspect(source_path, asset["kind"])
                         specs = self._prepare_renditions(receipt, source_path, original["sha256"])
                     # Do not replace a frozen unknown PUT. A prepared backfill
                     # only resumes its original specs and exact object keys.

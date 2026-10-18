@@ -591,6 +591,8 @@ inventory.json
 !LIBRARY-STORAGE.md
 !studio_platform/library.py
 !studio_platform/library_imports.py
+!studio_platform/artifact_renditions.py
+!test_platform_video_posters.py
 !test_library.py
 
 # Incident 254 scoped policy regression
