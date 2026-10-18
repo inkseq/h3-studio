@@ -38,6 +38,36 @@ incomplete writes retain scratch and conservative quota; interrupted cleanup
 retries the same receipt under its original operation/slot lock. There is no
 timer, separate reconciler or general historical-media cleaner.
 
+## Display scratch for an old settled artifact
+
+The existing `studio_platform.rendition_backfill apply` command accepts the
+explicit artifact-only flag `--use-data-display-scratch`. Keep `--work-dir` equal
+to the original output receipt's `staging_root`, and supply that receipt's current
+`--receipt-version`. The flag uses the current configured data directory only for
+poster processing, under
+`artifact-display/<tenant>/<owner>/<original-receipt-id>/display-v1`. It does not
+remap or create the old output root, change storage identity, or rewrite original
+roles, accepted jobs or accounting. Default collection and CLI paths are unchanged.
+
+Before processing or storage IO, the original receipt CAS freezes the selected
+data directory in its auxiliary `display` state. Retry and cleanup must use the
+same explicit flag and data directory; even completed or missing display states
+cannot be moved. Unknown writes keep the original body, keys and reservation.
+The stopped-writer assertion does not override path, version or ownership checks.
+Only the exact auxiliary scratch manifest is cleaned; old source/tag directories
+and local originals remain untouched.
+
+This option does not relax a legacy Local storage binding. An operator may use
+the original CLI with a process-scoped `SIXNINE_STORAGE_PROVIDER=local` only after
+proving the original Local identity and retained objects. That creates Local
+display objects, **not R2 publication**. For an R2 site, subsequently create a new
+private immutable copy plan and apply/verify it through the existing migration
+tool, with the same keys, full readback hashes and all local copies retained.
+Keep the earlier migration plans intact; do not reuse their frozen inventories
+after adding new display objects. Do not declare R2 thumbnails ready until that
+copy is verified: between Local publication and completed copy, the R2 route may
+correctly report that the new object is absent.
+
 Example (replace the uppercase bucket placeholder with the approved name):
 
 ```sh

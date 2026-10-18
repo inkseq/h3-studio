@@ -95,6 +95,8 @@ def main(argv=None, *, credentials_loader=load_configured_storage_credentials, s
     parser.add_argument("--asset-id")
     parser.add_argument("--artifact-id")
     parser.add_argument("--work-dir",type=Path,help="Existing original artifact writer staging root; exact receipt match required")
+    parser.add_argument('--use-data-display-scratch', action='store_true',
+        help='Explicit artifact-only auxiliary scratch under the current data directory; original writer root is unchanged')
     parser.add_argument("--receipt-version", type=int)
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--offset", type=int, default=0)
@@ -103,9 +105,11 @@ def main(argv=None, *, credentials_loader=load_configured_storage_credentials, s
     repo = None
     try:
         if args.action == "apply" and (bool(args.asset_id)==bool(args.artifact_id) or args.receipt_version is None
-                or args.artifact_id and args.work_dir is None or args.asset_id and args.work_dir is not None):
+                or args.artifact_id and args.work_dir is None or args.asset_id and args.work_dir is not None
+                or args.use_data_display_scratch and not args.artifact_id):
             raise ValueError("rendition_exact_receipt_required")
-        if args.action == "plan" and (args.asset_id or args.artifact_id or args.work_dir or args.receipt_version is not None or args.assert_writers_stopped):
+        if args.action == "plan" and (args.asset_id or args.artifact_id or args.work_dir or args.receipt_version is not None
+                or args.assert_writers_stopped or args.use_data_display_scratch):
             raise ValueError("rendition_plan_must_be_read_only")
         settings = Settings.from_environment()
         _check_ancestors(settings.data_dir)
@@ -169,7 +173,8 @@ def main(argv=None, *, credentials_loader=load_configured_storage_credentials, s
                 job=repo.get_job_for_owner(settings.tenant_id,args.owner,row['job_id'])
                 writer=ArtifactWriter(repo.engine,store,args.work_dir,tenant=settings.tenant_id)
                 value=ensure(writer,job,row['attempt_id'],record['tag'],expected_version=args.receipt_version,
-                    interrupted=args.assert_writers_stopped)
+                    interrupted=args.assert_writers_stopped,
+                    display_data_dir=settings.data_dir if args.use_data_display_scratch else None)
                 result=dict(state=value['display']['phase'],artifact_id=args.artifact_id,receipt_version=value['version'],
                     reason_code=value['display'].get('error_code'),same_receipt=True,originals_retained=True)
         print(json.dumps(result, sort_keys=True))
