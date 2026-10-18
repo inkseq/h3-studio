@@ -25,7 +25,8 @@ No inference provider calls, workers or app servers start in that container.
 
 The timer runs daily at 16:30 UTC, with up to five minutes jitter and a persistent
 catch-up after downtime. One UTC-day directory in `/var/lib/inkseq-business-backup`
-records intent before work. A completed same-day run is a no-op; any unfinished
+records intent before work. A completed same-day run does not recapture or upload
+again; it performs only the verified local-retention pass. Any unfinished
 prior intent blocks future prefixes until the original remote reconciliation
 workflow resolves it. Do not delete intents or rerun a copy with a new prefix to
 hide an unknown write. This file tracks backup operation outcomes, not tasks,
@@ -34,7 +35,7 @@ GPU costs or business ownership. No application accounting is changed.
 During snapshot/copy, the existing release lock prevents image replacement.
 The helper validates the protected accepted manifest, current app image ID and
 `/data` bind, then executes a read-only consistent business snapshot in that app.
-It retains snapshots under `/srv/sixnine/platform-data/business-backups/<uuid>`.
+It captures snapshots under `/srv/sixnine/platform-data/business-backups/<uuid>`.
 Before upload, Docker copies that snapshot into the root-controlled operation
 directory without following symlinks. The helper rejects links/nonregular files
 and gives only the transport UID (10001) read access: files 0400 and directories
@@ -42,11 +43,35 @@ and gives only the transport UID (10001) read access: files 0400 and directories
 cannot traverse or replace this host copy even though it shares that UID. The
 transport receives only a read-only bind mount of the exact snapshot. The configured snapshot is limited to 2 GiB media plus
 the existing 256 MiB DB limit; less than 5 GiB available disk refuses a new run.
-Both local copies, outputs and S3
-versions are retained: monitor space and plan reviewed archival/cleanup before
-growth fills the host. The service may run up to 65 minutes; individual SDK
+After remote verification, local retention keeps the newest daily run's
+application-side payload and removes older verified payloads plus their redundant
+private transport snapshots. All operation intents, outputs, completion/transfer
+receipts and S3 versions remain. Unknown, unmatched, manual or active copies are
+never treated as disposable because of age or directory name. The service may run
+up to 65 minutes; individual SDK
 calls and child processes are bounded. An uncertain process/write preserves its
 container and intent, with a fixed nonzero service result. No automatic restart.
+
+The retention pass uses the same exclusive release lock and current independently
+approved image. The existing read-only reconciliation transport reads the exact
+pinned remote object versions and verifies every body/hash against the original
+copy intent and receipt. The newest local payload must also match that inventory
+before any older payload can be removed; each deletion candidate is independently
+matched, bounded and checked for links, extra files or changes. A local cleanup
+failure does not erase a completed backup or trigger another capture/upload.
+Retention evidence is appended before removal; unknown outcomes remain explicit.
+Only the exact `platform-data/business-backups` subtree is added to the backup
+service's writable paths; the database and other application data are not writable
+through the host helper.
+
+The fixed `--retention-plan` and `--retention-apply` modes run this same path for
+catch-up without taking a database snapshot, issuing a cloud write or changing
+the UTC-day calendar. The plan does not delete payloads. After installation,
+inspect the plan and original verification evidence before the first catch-up
+apply. Existing80/90% alerts sample filesystem usage at `/srv/sixnine`; local
+backup and transport payload bytes on that filesystem are included, not excluded
+as release-cache accounting. Verify mount/device identity on both hosts rather
+than adding directory sizes a second time.
 
 After a successful first staging copy, explicitly run the protected helper as
 root with `--restore-day YYYY-MM-DD`. This is allowed only on the staging host.
