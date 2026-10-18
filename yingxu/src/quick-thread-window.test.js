@@ -64,3 +64,34 @@ test('the actual virtual thread component omits offscreen media while keeping an
   assert.match(markup,/data-card-id="card-001"/);assert.match(markup,/data-card-id="card-065"/);assert.doesNotMatch(markup,/data-card-id="card-030"/);
   assert.equal((markup.match(/<video /g)||[]).length,mounted);assert.match(markup,/aria-hidden="true"/);
 });
+
+
+test('pre-mutation thread snapshot preserves the visible row across 20-to-30 prepend and measured-window unpin',async()=>{
+  const directory=fileURLToPath(new URL('.',import.meta.url)),filename=directory+'thread-snapshot-test.cjs';
+  const compiled=await build({stdin:{contents:"export {ThreadScrollSnapshot} from './QuickChatThread.jsx';",resolveDir:directory,loader:'jsx'},bundle:true,write:false,format:'cjs',platform:'node',external:['react','react-dom']});
+  const module=new Module(filename);module.filename=filename;module.paths=Module._nodeModulePaths(directory);module._compile(compiled.outputFiles[0].text,filename);
+  const {ThreadScrollSnapshot}=module.exports;
+  let contentTop=158.796875,connected=true;
+  const row={get isConnected(){return connected;},getAttribute:()=> 'card:card-047',getBoundingClientRect:()=>({top:contentTop-root.scrollTop,bottom:contentTop-root.scrollTop+320})};
+  let mounted=[row];
+  const root={scrollTop:0,scrollHeight:20*738,clientHeight:700,getBoundingClientRect:()=>({top:0}),querySelectorAll:()=>mounted,contains:node=>mounted.includes(node)};
+  const view=new ThreadScrollSnapshot({scrollRef:{current:root}}),initialOffset=row.getBoundingClientRect().top;
+  // First commit: prepend ten rows while all old rows remain pinned.
+  const prepend=view.getSnapshotBeforeUpdate();contentTop+=10*738;root.scrollHeight+=10*738;view.componentDidUpdate(null,null,prepend);
+  assert.equal(row.getBoundingClientRect().top,initialOffset);
+  // Next commit: unpin the old window and replace measured/estimated prefixes
+  // by spacers. Capturing only in ResizeObserver would see the shifted 243px.
+  const unpin=view.getSnapshotBeforeUpdate();contentTop+=84.203125;root.scrollHeight+=84.203125;
+  assert.equal(row.getBoundingClientRect().top,243);
+  view.componentDidUpdate(null,null,unpin);assert.equal(row.getBoundingClientRect().top,initialOffset);
+  // A stable row key also survives a DOM-node replacement during virtualization.
+  const replaced=view.getSnapshotBeforeUpdate();connected=false;contentTop+=53.5;
+  const replacement={isConnected:true,getAttribute:()=> 'card:card-047',getBoundingClientRect:row.getBoundingClientRect};mounted=[replacement];
+  view.componentDidUpdate(null,null,replaced);assert.equal(replacement.getBoundingClientRect().top,initialOffset);
+  // Capture happens at commit time, after a user's actual scroll, not at request
+  // start: a later viewport change is respected instead of restoring stale state.
+  root.scrollTop+=125;const scrolledOffset=replacement.getBoundingClientRect().top,snapshot=view.getSnapshotBeforeUpdate();contentTop+=30;
+  view.componentDidUpdate(null,null,snapshot);assert.equal(replacement.getBoundingClientRect().top,scrolledOffset);
+  view.props={...view.props,active:false};assert.equal(view.getSnapshotBeforeUpdate({active:true}),null,'a route-cached hidden thread must not reset its scroll');
+  view.props={...view.props,active:true};assert.equal(view.getSnapshotBeforeUpdate({active:false}),null,'reactivation must not snapshot zero-sized hidden geometry');
+});

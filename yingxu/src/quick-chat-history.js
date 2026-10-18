@@ -47,10 +47,11 @@ export function quickThreadEntries(timeline,cards,cardTurns={}){
 export function captureThreadAnchor(container){
   if(!container)return null;const top=container.getBoundingClientRect().top;
   const row=[...container.querySelectorAll('[data-history-entry]')].find(node=>node.getBoundingClientRect().bottom>top);
-  return {element:row,offset:row?row.getBoundingClientRect().top-top:0,scrollTop:container.scrollTop,scrollHeight:container.scrollHeight};
+  return {element:row,key:row?.getAttribute?.('data-history-entry')||null,offset:row?row.getBoundingClientRect().top-top:0,scrollTop:container.scrollTop,scrollHeight:container.scrollHeight};
 }
 export function restoreThreadAnchor(container,anchor){
   if(!container||!anchor)return;
-  if(anchor.element?.isConnected&&container.contains(anchor.element))container.scrollTop+=anchor.element.getBoundingClientRect().top-container.getBoundingClientRect().top-anchor.offset;
+  const row=anchor.element?.isConnected&&container.contains(anchor.element)?anchor.element:anchor.key?[...container.querySelectorAll('[data-history-entry]')].find(node=>node.getAttribute('data-history-entry')===anchor.key):null;
+  if(row)container.scrollTop+=row.getBoundingClientRect().top-container.getBoundingClientRect().top-anchor.offset;
   else container.scrollTop=anchor.scrollTop+container.scrollHeight-anchor.scrollHeight;
 }
