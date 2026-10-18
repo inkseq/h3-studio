@@ -11,6 +11,7 @@ import json
 import os
 import re
 import stat
+from pathlib import Path
 
 from sqlalchemy import insert, select, update
 
@@ -30,10 +31,29 @@ def physical_objects(value):
     return list(objects.values()) if isinstance(objects,dict) else []
 
 
+def _data_root(value):
+    if (not isinstance(value, str) or not value or str(Path(value)) != value
+            or not Path(value).is_absolute() or '..' in Path(value).parts):
+        raise IntegrityError('artifact_poster_scratch_root_invalid')
+    root = Path(value)
+    _check_ancestors(root)
+    if not root.is_dir():
+        raise IntegrityError('artifact_poster_scratch_root_invalid')
+    return root
+
+
+def _directory(writer, record):
+    display = record.get('display', {})
+    if 'scratch_data_dir' not in display:
+        return writer.work_dir / _part(record['tag']) / 'display-v1'
+    return (_data_root(display['scratch_data_dir']) / 'artifact-display' / _part(writer.tenant)
+        / _part(record['owner']) / _part(record['id']) / 'display-v1')
+
+
 def _file(writer, record, name):
     if name not in {"poster-source.mp4", "poster-frame.png", "thumb-v1.webp", "preview-v1.webp"}:
         raise IntegrityError("artifact_poster_path_invalid")
-    path = writer.work_dir / _part(record["tag"]) / "display-v1" / name
+    path = _directory(writer, record) / name
     _check_ancestors(path)
     if path.exists() or path.is_symlink():
         info = _no_links(path)
@@ -52,6 +72,14 @@ def _validate(writer, record):
             or not isinstance(display.get('objects'),dict)
             or set(display['objects']) not in (set(),set(RENDITIONS))):
         raise IntegrityError('artifact_poster_receipt_invalid')
+    if 'scratch_data_dir' in display:
+        directory = _directory(writer, record)
+        _check_ancestors(directory)
+        if directory.exists():
+            if not directory.is_dir():
+                raise IntegrityError('artifact_poster_file_invalid')
+            for path in directory.iterdir():
+                _file(writer, record, path.name)
     for name,role in display['objects'].items():
         edge,cap=RENDITIONS[name]
         if (role.get('filename')!=f'{name}-v1.webp' or role.get('key')!=
@@ -155,7 +183,8 @@ def cleanup(writer, record):
         directory.parent.rmdir()
 
 
-def ensure(writer, job, attempt_id, tag, *, expected_version=None, interrupted=False, heartbeat=lambda: None):
+def ensure(writer, job, attempt_id, tag, *, expected_version=None, interrupted=False,
+           heartbeat=lambda: None, display_data_dir=None):
     """Called after accepted collection or explicit exact-version offline apply.
 
     An unresolved old display writer is never taken over based on age. The
@@ -169,7 +198,14 @@ def ensure(writer, job, attempt_id, tag, *, expected_version=None, interrupted=F
         raise ArtifactWritePending("artifact_poster_version_changed")
     if interrupted and expected_version is None:
         raise ArtifactWritePending("artifact_poster_exact_version_required")
+    requested_root = None
+    if display_data_dir is not None:
+        if expected_version is None:
+            raise ArtifactWritePending('artifact_poster_exact_version_required')
+        requested_root = str(_data_root(str(display_data_dir)))
     existing = record.get("display")
+    if existing and existing.get('scratch_data_dir') != requested_root:
+        raise ArtifactWritePending('artifact_poster_scratch_root_changed')
     _validate(writer,record)
     if existing and existing.get("phase") == "complete":
         cleanup(writer, record)
@@ -183,6 +219,13 @@ def ensure(writer, job, attempt_id, tag, *, expected_version=None, interrupted=F
         raise ArtifactWritePending("artifact_poster_original_unconfirmed")
     writer.quota._ensure(record["owner"])
     display = record.setdefault("display", dict(version=1, phase="planned", source_sha256=source["sha256"], objects={}, reserved_bytes=0))
+    if existing is None and requested_root is not None:
+        display['scratch_data_dir'] = requested_root
+        directory = _directory(writer, record)
+        _check_ancestors(directory)
+        # A fresh auxiliary intent cannot adopt unexplained old scratch.
+        if directory.exists() and (not directory.is_dir() or any(directory.iterdir())):
+            raise IntegrityError('artifact_poster_scratch_unconfirmed')
     if display.get("source_sha256") != source["sha256"] or display.get("version") != 1:
         raise IntegrityError("artifact_poster_source_changed")
     if display['phase'] == 'missing':

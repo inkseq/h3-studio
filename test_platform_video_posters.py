@@ -303,6 +303,148 @@ class PosterWriterTests(ledger_fixture.LedgerCase):
             sum(role['size_bytes'] for role in completed['display']['objects'].values()))
         self.assertEqual(self.repo.get_job(self.scope,job['id'])['status'],'succeeded')
 
+    def test_explicit_cli_auxiliary_scratch_keeps_unwritable_original_root_and_local_to_r2_identity(self):
+        from contextlib import redirect_stdout
+        from studio_platform.rendition_backfill import main
+        from studio_platform.settings import Settings
+        from studio_platform.storage_migration import create_plan, apply_plan, verify_plan
+        from test_platform_storage import FakeS3
+        job,attempt,tag=self.settled();before=self.writer.get(job,attempt,tag)
+        original_job=self.repo.get_job(self.scope,job['id'])
+        # A regular file makes every old-root descendant actually unwritable on
+        # Windows and root-run POSIX, without deleting the original scratch.
+        retained=self.work.with_name('retained-original-work');self.work.rename(retained)
+        self.work.write_bytes(b'original root unavailable; do not replace')
+        settings=Settings(Path(self.temp.name),tenant_id=self.scope.tenant_id,database_url=self.url,storage_provider='local')
+        argv=['apply','--owner',self.scope.owner_id,'--artifact-id',self.row(job)['id'],
+            '--work-dir',str(self.work),'--receipt-version',str(before['version']),'--use-data-display-scratch']
+        stdout=io.StringIO()
+        with mock.patch.object(Settings,'from_environment',return_value=settings),redirect_stdout(stdout):
+            self.assertEqual(main(argv,credentials_loader=mock.Mock(side_effect=AssertionError('local needs no credentials'))),0)
+        self.assertEqual(json.loads(stdout.getvalue())['state'],'complete')
+        after=self.writer.get(job,attempt,tag)
+        for key in ('id','owner','tag','fingerprint','binding','staging_root','roles','phase'):
+            self.assertEqual(after[key],before[key],key)
+        self.assertEqual(self.repo.get_job(self.scope,job['id']),original_job)
+        self.assertEqual(self.work.read_bytes(),b'original root unavailable; do not replace')
+        self.assertTrue((retained/tag/'verified.mp4').is_file())
+        self.assertEqual(after['display']['scratch_data_dir'],str(settings.data_dir))
+        self.assertEqual(after['display']['scratch_cleanup']['phase'],'complete')
+        self.assertFalse((settings.data_dir/'artifact-display'/self.scope.tenant_id/self.scope.owner_id/after['id']).exists())
+        # Local success is NOT an R2 publication claim. The existing immutable
+        # copy must verify all identical keys/bytes before the R2 site can use it.
+        fake=FakeS3(config());remote=S3ObjectStore(config(),client=fake)
+        receipt_dir=Path(self.temp.name)/'copy-receipt'
+        copied=create_plan(self.store.root,config(),receipt_dir)
+        self.assertEqual(copied['objects'],3)
+        apply_plan(receipt_dir,remote);verify_plan(receipt_dir,remote)
+        for role in (*after['roles'].values(),*after['display']['objects'].values()):
+            with self.store.open(role['key']) as local,remote.open(role['key']) as target:
+                body=local.read();self.assertEqual(target.read(),body)
+                self.assertEqual(hashlib.sha256(body).hexdigest(),role['sha256'])
+        self.assertEqual(self.writer.get(job,attempt,tag),after,'copy has no database mutation')
+        # Even a completed operation cannot be replayed through a different path.
+        current=list(argv);current[current.index('--receipt-version')+1]=str(after['version'])
+        for change in (current[:-1],current[:]):
+            with mock.patch.object(Settings,'from_environment',return_value=settings),redirect_stdout(io.StringIO()):
+                if change==current:
+                    change[change.index('--work-dir')+1]=str(retained)
+                self.assertEqual(main(change),1)
+
+    def test_auxiliary_claim_is_durable_before_io_and_rejects_a_second_writer_or_different_root(self):
+        from studio_platform import artifact_renditions as module
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+        job,attempt,tag=self.settled();original=self.writer.get(job,attempt,tag)
+        root=Path(self.temp.name);other=root/'other-data';other.mkdir()
+        claimed,release=threading.Event(),threading.Event();save=self.writer._save
+        def held(record,**kwargs):
+            save(record,**kwargs)
+            if record['display']['phase']=='planned' and not claimed.is_set():
+                claimed.set()
+                if not release.wait(5):raise AssertionError('writer not released')
+        with mock.patch.object(self.writer,'_save',side_effect=held),ThreadPoolExecutor(max_workers=1) as pool:
+            first=pool.submit(ensure,self.writer,job,attempt,tag,expected_version=original['version'],display_data_dir=root)
+            try:
+                self.assertTrue(claimed.wait(5));frozen=self.writer.get(job,attempt,tag)
+                self.assertEqual(frozen['display']['scratch_data_dir'],str(root))
+                self.assertFalse(module._directory(self.writer,frozen).exists())
+                for selected in (root,other,None):
+                    with mock.patch.object(self.store,'open',side_effect=AssertionError('second writer cannot read')):
+                        with self.assertRaises(ArtifactWritePending):
+                            ensure(self.writer,job,attempt,tag,expected_version=frozen['version'],display_data_dir=selected)
+                self.assertEqual(self.writer.get(job,attempt,tag),frozen)
+            finally:release.set()
+            self.assertEqual(first.result(timeout=10)['display']['phase'],'complete')
+
+    def test_auxiliary_unknown_put_preserves_same_keys_and_cleanup_crash_replays_once(self):
+        from studio_platform import artifact_renditions as module
+        job,attempt,tag=self.settled();root=Path(self.temp.name)
+        original=self.writer.get(job,attempt,tag);self.store.failure='after'
+        with self.assertRaises(ArtifactWritePending):
+            ensure(self.writer,job,attempt,tag,expected_version=original['version'],display_data_dir=root)
+        pending=self.writer.get(job,attempt,tag);objects=json.loads(json.dumps(pending['display']['objects']))
+        resize=module._resize_reservation
+        def crash(writer,record,size):
+            if record['display'].get('phase')=='complete' and record['display'].get('scratch_cleanup',{}).get('phase')=='complete':
+                raise ProcessStopped()
+            return resize(writer,record,size)
+        with mock.patch.object(module,'create_video_renditions',side_effect=AssertionError('no second decode')),mock.patch.object(module,'_resize_reservation',side_effect=crash):
+            with self.assertRaises(ProcessStopped):
+                ensure(self.writer,job,attempt,tag,interrupted=True,expected_version=pending['version'],display_data_dir=root)
+        complete=self.writer.get(job,attempt,tag);calls=list(self.store.calls)
+        before=self.writer.quota.usage(self.scope.owner_id)['accounted_bytes'];released=complete['display']['scratch_cleanup']['bytes']
+        after=ensure(self.writer,job,attempt,tag,expected_version=complete['version'],display_data_dir=root)
+        self.assertEqual(self.store.calls,calls)
+        self.assertEqual(self.writer.quota.usage(self.scope.owner_id)['accounted_bytes'],before-released)
+        ensure(self.writer,job,attempt,tag,expected_version=after['version'],display_data_dir=root)
+        self.assertEqual(self.writer.quota.usage(self.scope.owner_id)['accounted_bytes'],before-released)
+        self.assertEqual({k:v['sha256'] for k,v in after['display']['objects'].items()},{k:v['sha256'] for k,v in objects.items()})
+        self.assertEqual(self.store.calls.count(objects['thumb']['key']),1)
+        self.assertTrue((self.work/tag/'verified.mp4').exists(),'aux cleanup never removes the original tag')
+
+    def test_auxiliary_scratch_refuses_malformed_escape_and_unexplained_files_without_io(self):
+        from studio_platform import artifact_renditions as module
+        job,attempt,tag=self.settled();before=self.writer.get(job,attempt,tag)
+        planned=dict(before,display=dict(version=1,phase='planned',source_sha256=before['roles']['video']['sha256'],objects={},reserved_bytes=0))
+        for value in (None,0,'relative',str(Path(self.temp.name)/'..'),str(Path(self.temp.name))+'/'):
+            with self.subTest(value=value):
+                planned['display']['scratch_data_dir']=value
+                with self.assertRaises(IntegrityError):module._validate(self.writer,planned)
+        planned['display']['scratch_data_dir']=self.temp.name
+        folder=module._directory(self.writer,planned);folder.mkdir(parents=True)
+        unexpected=folder/'unexplained';unexpected.write_bytes(b'preserve')
+        with mock.patch.object(self.store,'open',side_effect=AssertionError('no store reads')):
+            with self.assertRaisesRegex(IntegrityError,'artifact_poster_scratch_unconfirmed'):
+                ensure(self.writer,job,attempt,tag,expected_version=before['version'],display_data_dir=Path(self.temp.name))
+        self.assertEqual(self.writer.get(job,attempt,tag),before)
+        self.assertEqual(unexpected.read_bytes(),b'preserve')
+        with self.assertRaises(ArtifactWritePending):
+            ensure(self.writer,job,attempt,tag,display_data_dir=Path(self.temp.name))
+        with self.assertRaises(ArtifactWritePending):
+            ensure(self.writer,dict(job,owner_id='other'),attempt,tag,expected_version=before['version'],display_data_dir=Path(self.temp.name))
+
+    def test_auxiliary_scratch_refuses_symlinked_data_or_receipt_directories(self):
+        from studio_platform.storage import StorageError
+        job,attempt,tag=self.settled();before=self.writer.get(job,attempt,tag)
+        root=Path(self.temp.name);outside=root/'outside';outside.mkdir();link=root/'linked'
+        try:link.symlink_to(outside,target_is_directory=True)
+        except OSError:self.skipTest('symlink creation unavailable')
+        for data in (link,root):
+            if data==root:(root/'artifact-display').symlink_to(outside,target_is_directory=True)
+            with self.assertRaises(StorageError):
+                ensure(self.writer,job,attempt,tag,expected_version=before['version'],display_data_dir=data)
+        self.assertEqual(self.writer.get(job,attempt,tag),before)
+        self.assertEqual(list(outside.iterdir()),[])
+
+    def test_data_scratch_cli_rejects_plan_and_asset_before_settings_or_storage(self):
+        from contextlib import redirect_stdout
+        from studio_platform.rendition_backfill import main
+        with mock.patch('studio_platform.rendition_backfill.Settings.from_environment',side_effect=AssertionError('invalid flag cannot initialize')):
+            for argv in (['plan','--owner','superdan','--use-data-display-scratch'],
+                    ['apply','--owner','superdan','--asset-id','original','--receipt-version','1','--use-data-display-scratch']):
+                with redirect_stdout(io.StringIO()):self.assertEqual(main(argv),1)
+
 
 @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg required")
 class PosterApiTests(unittest.TestCase):
