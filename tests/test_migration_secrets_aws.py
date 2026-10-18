@@ -1,4 +1,5 @@
 """Synthetic managed secrets and isolated root filesystem; never call AWS/GPU."""
+
 import base64
 import contextlib
 import copy
@@ -17,28 +18,52 @@ from deploy.platform import migration_secrets_aws as target
 
 
 def seed():
-    return {"schema_version": 1,
-        "providers": {"vastai": {"profile_id": "vastai--synthetic-test",
-            "base_url": "https://console.vast.ai/api", "api_key": "SYNTHETIC_VAST_"+"x"*40}},
-        "grafana_cloud": {"schema_version": 1, "enabled": True,
+    return {
+        "schema_version": 1,
+        "providers": {
+            "vastai": {
+                "profile_id": "vastai--synthetic-test",
+                "base_url": "https://console.vast.ai/api",
+                "api_key": "SYNTHETIC_VAST_" + "x" * 40,
+            }
+        },
+        "grafana_cloud": {
+            "schema_version": 1,
+            "enabled": True,
             "endpoint": "https://otlp-gateway-synthetic.grafana.net/otlp",
-            "authorization": "Basic "+base64.b64encode(b"123:SYNTHETIC_ONLY").decode(),
-            "service_name": "sixnine-worker", "service_version": "a"*40, "environment": "staging"}}
+            "authorization": "Basic "
+            + base64.b64encode(b"123:SYNTHETIC_ONLY").decode(),
+            "service_name": "sixnine-worker",
+            "service_version": "a" * 40,
+            "environment": "staging",
+        },
+    }
 
 
 def initialized():
     value = seed()
-    value["infrastructure"] = {"dstack_admin_token": "SYNTHETIC_"+"t"*40,
-        "dstack_database_url": "postgresql+asyncpg://dstack_control:"+"p"*48+"@db:5432/sixnine_dstack",
-        "hatchet_database_password": "d"*48, "hatchet_administrator_password": "a"*48}
+    value["infrastructure"] = {
+        "dstack_admin_token": "SYNTHETIC_" + "t" * 40,
+        "dstack_database_url": "postgresql+asyncpg://dstack_control:"
+        + "p" * 48
+        + "@db:5432/sixnine_dstack",
+        "hatchet_database_password": "d" * 48,
+        "hatchet_administrator_password": "a" * 48,
+    }
     return value
 
 
 def r2_storage():
-    return {"schema_version": 1, "service": "cloudflare-r2", "profile": "cloudflare-r2--rig-root",
-        "endpoint_url": "https://"+"a"*32+".r2.cloudflarestorage.com", "region": "auto",
-        "bucket": "sixnine-synthetic-media", "access_key_id": "SYNTHETIC_R2_ACCESS",
-        "secret_access_key": "SYNTHETIC_R2_SECRET"}
+    return {
+        "schema_version": 1,
+        "service": "cloudflare-r2",
+        "profile": "cloudflare-r2--rig-root",
+        "endpoint_url": "https://" + "a" * 32 + ".r2.cloudflarestorage.com",
+        "region": "auto",
+        "bucket": "sixnine-synthetic-media",
+        "access_key_id": "SYNTHETIC_R2_ACCESS",
+        "secret_access_key": "SYNTHETIC_R2_SECRET",
+    }
 
 
 class FakeAPI:
@@ -55,12 +80,18 @@ class FakeAPI:
         self.lost_put_ack = False
 
     def get_secret_value(self, **kwargs):
-        assert kwargs.get("SecretId") == target.SECRET and not set(kwargs) - {"SecretId", "VersionId"}
+        assert kwargs.get("SecretId") == target.SECRET and not set(kwargs) - {
+            "SecretId",
+            "VersionId",
+        }
         self.gets += 1
         if "VersionId" in kwargs:
             if kwargs["VersionId"] not in self.versions:
                 raise self.exceptions.ResourceNotFoundException()
-            return {"SecretString": json.dumps(self.versions[kwargs["VersionId"]]), "VersionId": kwargs["VersionId"]}
+            return {
+                "SecretString": json.dumps(self.versions[kwargs["VersionId"]]),
+                "VersionId": kwargs["VersionId"],
+            }
         return {"SecretString": json.dumps(self.value), "VersionId": self.version}
 
     def put_secret_value(self, **kwargs):
@@ -97,11 +128,13 @@ class ManagedSecretTests(unittest.TestCase):
 
     def test_postgres_layout_projects_existing_credentials_without_rotation(self):
         value = initialized()
-        value['hatchet_api_token'] = 'a'*32+'.'+'b'*32+'.'+'c'*32
+        value['hatchet_api_token'] = 'a' * 32 + '.' + 'b' * 32 + '.' + 'c' * 32
         original = copy.deepcopy(value)
         old = target.outputs(value)
         result = target.outputs(value, transport='postgres-notify')
-        self.assertEqual(result, {k: v for k, v in old.items() if not k.startswith('hatchet')})
+        self.assertEqual(
+            result, {k: v for k, v in old.items() if not k.startswith('hatchet')}
+        )
         self.assertEqual(value, original)
         api = FakeAPI(value)
         self.assertEqual(self.load(api), original)
@@ -110,18 +143,27 @@ class ManagedSecretTests(unittest.TestCase):
     def test_postgres_schema_has_exact_existing_infrastructure_pair(self):
         value = initialized()
         value['schema_version'] = 2
-        value['infrastructure'] = {k: value['infrastructure'][k] for k in target.POSTGRES_INFRASTRUCTURE}
+        value['infrastructure'] = {
+            k: value['infrastructure'][k] for k in target.POSTGRES_INFRASTRUCTURE
+        }
         target.validate(value)
         self.assertFalse(any(k.startswith('hatchet') for k in target.outputs(value)))
         api = FakeAPI(value)
         self.assertEqual(self.load(api), value)
         self.assertEqual(api.puts, [])
-        for change in ('extra_infrastructure', 'broker_token', 'missing_database', 'uninitialized'):
+        for change in (
+            'extra_infrastructure',
+            'broker_token',
+            'missing_database',
+            'uninitialized',
+        ):
             invalid = copy.deepcopy(value)
             if change == 'extra_infrastructure':
-                invalid['infrastructure']['hatchet_database_password'] = 'p'*48
+                invalid['infrastructure']['hatchet_database_password'] = 'p' * 48
             elif change == 'broker_token':
-                invalid['hatchet_api_token'] = 'a'*32+'.'+'b'*32+'.'+'c'*32
+                invalid['hatchet_api_token'] = (
+                    'a' * 32 + '.' + 'b' * 32 + '.' + 'c' * 32
+                )
             elif change == 'missing_database':
                 del invalid['infrastructure']['dstack_database_url']
             else:
@@ -133,30 +175,50 @@ class ManagedSecretTests(unittest.TestCase):
 
     def test_postgres_schema_retains_original_initialization_identity(self):
         original = initialized()
-        self.store.value = {'schema_version': 1, 'source_version_id': 'original-version',
+        self.store.value = {
+            'schema_version': 1,
+            'source_version_id': 'original-version',
             'client_request_token': '00000000-0000-0000-0000-000000000001',
-            'infrastructure': original['infrastructure']}
+            'infrastructure': original['infrastructure'],
+        }
         value = copy.deepcopy(original)
         value['schema_version'] = 2
-        value['infrastructure'] = {k: value['infrastructure'][k] for k in target.POSTGRES_INFRASTRUCTURE}
+        value['infrastructure'] = {
+            k: value['infrastructure'][k] for k in target.POSTGRES_INFRASTRUCTURE
+        }
         self.assertEqual(self.load(FakeAPI(value)), value)
-        value['infrastructure']['dstack_admin_token'] = 'CHANGED_'+'x'*40
+        value['infrastructure']['dstack_admin_token'] = 'CHANGED_' + 'x' * 40
         with self.assertRaisesRegex(RuntimeError, 'identity_conflict'):
             self.load(FakeAPI(value))
 
     def test_hydration_transport_uses_protected_version_and_rejects_unknown(self):
         for version, expected in ((1, 'hatchet'), (2, 'postgres-notify')):
-            with patch.object(target, '_protected_json', return_value={
-                    'version': version, 'environment': {}, 'host_memory_mib': 1911}):
+            with patch.object(
+                target,
+                '_protected_json',
+                return_value={
+                    'version': version,
+                    'environment': {},
+                    'host_memory_mib': 1911,
+                },
+            ):
                 self.assertEqual(target.hydration_transport(), expected)
         for version in (True, 3, '2'):
-            with patch.object(target, '_protected_json', return_value={
-                    'version': version, 'environment': {}, 'host_memory_mib': 1911}):
+            with patch.object(
+                target,
+                '_protected_json',
+                return_value={
+                    'version': version,
+                    'environment': {},
+                    'host_memory_mib': 1911,
+                },
+            ):
                 with self.assertRaisesRegex(ValueError, 'transport_invalid'):
                     target.hydration_transport()
 
     def test_r2_opt_in_is_additive_closed_and_never_rotates_existing_secret(self):
-        value = initialized(); before = target.outputs(value)
+        value = initialized()
+        before = target.outputs(value)
         value["r2_storage"] = r2_storage()
         api = FakeAPI(value)
         self.assertEqual(self.load(api), value)
@@ -168,26 +230,42 @@ class ManagedSecretTests(unittest.TestCase):
         self.assertEqual(json.loads(content), value["r2_storage"])
         self.assertNotIn("r2_storage", before)
         # Validate optional credentials even before infrastructure initialization.
-        uninitialized = seed(); uninitialized["r2_storage"] = value["r2_storage"]
+        uninitialized = seed()
+        uninitialized["r2_storage"] = value["r2_storage"]
         target.validate(uninitialized, allow_uninitialized=True)
-        for change in ({"profile": "cloudflare-r2--another-account"}, {"service": "aws-s3"},
-                {"endpoint_url": "https://outside.example"}, {"region": "us-east-1"},
-                {"bucket": "BadBucket"}, {"schema_version": True}, {"session_token": None},
-                {"secret_access_key": "private\nvalue"}, {"extra": "not-allowed"},
-                {"access_key_id": "x"*8192, "secret_access_key": "y"*8192}):
+        for change in (
+            {"profile": "cloudflare-r2--another-account"},
+            {"service": "aws-s3"},
+            {"endpoint_url": "https://outside.example"},
+            {"region": "us-east-1"},
+            {"bucket": "BadBucket"},
+            {"schema_version": True},
+            {"session_token": None},
+            {"secret_access_key": "private\nvalue"},
+            {"extra": "not-allowed"},
+            {"access_key_id": "x" * 8192, "secret_access_key": "y" * 8192},
+        ):
             with self.subTest(field=next(iter(change))):
-                changed = copy.deepcopy(value); changed["r2_storage"].update(change)
-                with self.assertRaisesRegex(ValueError, "r2_storage_configuration_invalid"):
+                changed = copy.deepcopy(value)
+                changed["r2_storage"].update(change)
+                with self.assertRaisesRegex(
+                    ValueError, "r2_storage_configuration_invalid"
+                ):
                     target.validate(changed)
 
     def test_optional_stage_read_mount_preserves_every_existing_identity(self):
         from studio_platform.stage_metrics import read_config
+
         value = initialized()
         before = target.outputs(value)
-        stage = {"schema_version": 1, "enabled": True,
+        stage = {
+            "schema_version": 1,
+            "enabled": True,
             "endpoint": "https://logs-prod-synthetic.grafana.net",
-            "authorization": "Basic "+base64.b64encode(b"123:SYNTHETIC_READ_ONLY").decode(),
-            "scope": "logs:read"}
+            "authorization": "Basic "
+            + base64.b64encode(b"123:SYNTHETIC_READ_ONLY").decode(),
+            "scope": "logs:read",
+        }
         value["grafana_stage_query"] = stage
         api = FakeAPI(value)
         self.assertEqual(self.load(api), value)
@@ -197,31 +275,44 @@ class ManagedSecretTests(unittest.TestCase):
         content, uid, gid, mode = output["grafana_stage_query"]
         self.assertEqual((uid, gid, mode), (10001, 10001, 0o600))
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory)/"reader.json"
+            path = Path(directory) / "reader.json"
             path.write_text(content, encoding="utf-8")
             path.chmod(mode)
             config = read_config(path)
             self.assertEqual(config.scope, "logs:read")
             self.assertEqual(config.endpoint, stage["endpoint"])
-        for key, bad in (("scope", "logs:write"), ("endpoint", "https://outside.example"),
-                ("endpoint", "https://logs-prod-synthetic.grafana.net/private"),
-                ("authorization", "Basic invalid"), ("schema_version", True)):
+        for key, bad in (
+            ("scope", "logs:write"),
+            ("endpoint", "https://outside.example"),
+            ("endpoint", "https://logs-prod-synthetic.grafana.net/private"),
+            ("authorization", "Basic invalid"),
+            ("schema_version", True),
+        ):
             with self.subTest(key=key, bad=bad):
                 changed = copy.deepcopy(value)
                 changed["grafana_stage_query"][key] = bad
-                with self.assertRaisesRegex(ValueError, "stage_query_configuration_invalid"):
+                with self.assertRaisesRegex(
+                    ValueError, "stage_query_configuration_invalid"
+                ):
                     target.validate(changed)
 
     def test_inert_import_and_existing_identity_never_rotates(self):
         api = FakeAPI(initialized())
-        with patch.object(target, "client", side_effect=AssertionError("network prohibited")):
+        with patch.object(
+            target, "client", side_effect=AssertionError("network prohibited")
+        ):
             self.assertEqual(self.load(api, initialize=True), initialized())
         self.assertEqual(api.puts, [])
 
     def test_explicit_fresh_initialization_retains_provider_cloud(self):
         api = FakeAPI(seed())
         checker = unittest.mock.Mock()
-        actual = self.load(api, initialize=True, bootstrap_checks="/protected/receipt.json", checker=checker)
+        actual = self.load(
+            api,
+            initialize=True,
+            bootstrap_checks="/protected/receipt.json",
+            checker=checker,
+        )
         checker.assert_called_once_with("/protected/receipt.json")
         self.assertEqual(actual["providers"], seed()["providers"])
         self.assertEqual(actual["grafana_cloud"], seed()["grafana_cloud"])
@@ -242,36 +333,58 @@ class ManagedSecretTests(unittest.TestCase):
         del value["infrastructure"]["hatchet_database_password"]
         api = FakeAPI(value)
         with self.assertRaisesRegex(ValueError, "recovery_required"):
-            self.load(api, initialize=True, bootstrap_checks="unused", checker=lambda _: None)
+            self.load(
+                api, initialize=True, bootstrap_checks="unused", checker=lambda _: None
+            )
         self.assertEqual(api.puts, [])
 
     def test_get_error_never_creates_replacement_credentials(self):
         api = FakeAPI(seed())
-        for error in (api.exceptions.ResourceNotFoundException(), TimeoutError("private")):
+        for error in (
+            api.exceptions.ResourceNotFoundException(),
+            TimeoutError("private"),
+        ):
             with self.subTest(kind=type(error).__name__):
                 with patch.object(api, "get_secret_value", side_effect=error):
                     with self.assertRaises((RuntimeError, TimeoutError)):
-                        self.load(api, initialize=True, bootstrap_checks="unused", checker=lambda _: None)
+                        self.load(
+                            api,
+                            initialize=True,
+                            bootstrap_checks="unused",
+                            checker=lambda _: None,
+                        )
                 self.assertEqual(api.puts, [])
 
     def test_lost_put_acknowledgement_reconciles_once(self):
-        api = FakeAPI(seed()); api.lost_put_ack = True
-        actual = self.load(api, initialize=True, bootstrap_checks="unused", checker=lambda _: None)
+        api = FakeAPI(seed())
+        api.lost_put_ack = True
+        actual = self.load(
+            api, initialize=True, bootstrap_checks="unused", checker=lambda _: None
+        )
         self.assertEqual(actual, api.value)
         self.assertEqual(len(api.puts), 1)
 
     def test_unconfirmed_put_fails_without_second_mint(self):
         api = FakeAPI(seed())
-        with patch.object(api, "put_secret_value", side_effect=TimeoutError("private")) as put:
+        with patch.object(
+            api, "put_secret_value", side_effect=TimeoutError("private")
+        ) as put:
             with self.assertRaisesRegex(RuntimeError, "initialization_unconfirmed"):
-                self.load(api, initialize=True, bootstrap_checks="unused", checker=lambda _: None)
+                self.load(
+                    api,
+                    initialize=True,
+                    bootstrap_checks="unused",
+                    checker=lambda _: None,
+                )
             self.assertEqual(put.call_count, 1)
         self.assertNotIn("infrastructure", api.value)
 
     def test_managed_version_changed_before_put_preserves_new_version(self):
         api = FakeAPI(seed())
+
         def changed(_):
             api.version = "concurrent-version"
+
         with self.assertRaisesRegex(RuntimeError, "managed_version_changed"):
             self.load(api, initialize=True, bootstrap_checks="unused", checker=changed)
         self.assertEqual(api.puts, [])
@@ -282,85 +395,161 @@ class ManagedSecretTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "endpoint_or_identity_invalid"):
             target.validate(value)
         api = FakeAPI(seed())
-        with patch.object(api, "get_secret_value", return_value={"SecretString": '{"schema_version":1,"schema_version":1}'}):
+        with patch.object(
+            api,
+            "get_secret_value",
+            return_value={"SecretString": '{"schema_version":1,"schema_version":1}'},
+        ):
             with self.assertRaisesRegex(ValueError, "duplicate_field"):
                 self.load(api)
 
     def test_two_invocations_unknown_put_and_stale_get_reuse_original_identity(self):
         api = FakeAPI(seed())
         first_payload = []
+
         def lost_and_not_yet_visible(**kwargs):
             first_payload.append(copy.deepcopy(kwargs))
             raise TimeoutError("private")
-        with patch.object(api, "put_secret_value", side_effect=lost_and_not_yet_visible):
+
+        with patch.object(
+            api, "put_secret_value", side_effect=lost_and_not_yet_visible
+        ):
             with self.assertRaisesRegex(RuntimeError, "initialization_unconfirmed"):
-                self.load(api, initialize=True, bootstrap_checks="unused", checker=lambda _: None)
+                self.load(
+                    api,
+                    initialize=True,
+                    bootstrap_checks="unused",
+                    checker=lambda _: None,
+                )
         pending = self.store.read()
         # New invocation: old AWSCURRENT seed remains visible, original exact
         # target version is not yet visible. No approval recheck or new mint.
-        with patch.object(target.secrets, "token_urlsafe", side_effect=AssertionError("second mint prohibited")):
-            actual = self.load(api, initialize=True, bootstrap_checks="expired", checker=lambda _: self.fail("must reconcile pending intent"))
+        with patch.object(
+            target.secrets,
+            "token_urlsafe",
+            side_effect=AssertionError("second mint prohibited"),
+        ):
+            actual = self.load(
+                api,
+                initialize=True,
+                bootstrap_checks="expired",
+                checker=lambda _: self.fail("must reconcile pending intent"),
+            )
         self.assertEqual(api.puts[0], first_payload[0])
         self.assertEqual(actual["infrastructure"], pending["infrastructure"])
-        self.assertEqual(api.puts[0]["ClientRequestToken"], pending["client_request_token"])
+        self.assertEqual(
+            api.puts[0]["ClientRequestToken"], pending["client_request_token"]
+        )
 
     def test_unknown_put_then_get_failure_retains_intent_across_invocations(self):
         api = FakeAPI(seed())
         original_get = api.get_secret_value
+
         def put_then_failure(**kwargs):
             api.put_secret_value_original(**kwargs)
             raise TimeoutError("private")
+
         api.put_secret_value_original = api.put_secret_value
+
         def unavailable_after_put(**kwargs):
-            if "VersionId" in kwargs and kwargs["VersionId"] != "original-version" and api.puts:
+            if (
+                "VersionId" in kwargs
+                and kwargs["VersionId"] != "original-version"
+                and api.puts
+            ):
                 raise TimeoutError("private")
             return original_get(**kwargs)
-        with patch.object(api, "put_secret_value", side_effect=put_then_failure), patch.object(api, "get_secret_value", side_effect=unavailable_after_put):
+
+        with (
+            patch.object(api, "put_secret_value", side_effect=put_then_failure),
+            patch.object(api, "get_secret_value", side_effect=unavailable_after_put),
+        ):
             with self.assertRaises(TimeoutError):
-                self.load(api, initialize=True, bootstrap_checks="unused", checker=lambda _: None)
+                self.load(
+                    api,
+                    initialize=True,
+                    bootstrap_checks="unused",
+                    checker=lambda _: None,
+                )
         pending = self.store.read()
-        with patch.object(target.secrets, "token_urlsafe", side_effect=AssertionError("second mint prohibited")):
+        with patch.object(
+            target.secrets,
+            "token_urlsafe",
+            side_effect=AssertionError("second mint prohibited"),
+        ):
             result = self.load(api)
         self.assertEqual(result["infrastructure"], pending["infrastructure"])
         self.assertEqual(len(api.puts), 1)
 
     def test_cloud_validator_matches_existing_exporter_destination_rules(self):
         from studio_platform.telemetry import CloudTelemetryConfig
-        fields = {"endpoint", "authorization", "service_name", "service_version", "environment"}
-        cases = [({}, True), ({"endpoint": "http://otlp-gateway-synthetic.grafana.net/otlp"}, False),
+
+        fields = {
+            "endpoint",
+            "authorization",
+            "service_name",
+            "service_version",
+            "environment",
+        }
+        cases = [
+            ({}, True),
+            ({"endpoint": "http://otlp-gateway-synthetic.grafana.net/otlp"}, False),
             ({"endpoint": "https://collector.example.org/otlp"}, False),
-            ({"endpoint": "https://otlp-gateway-synthetic.grafana.net/otlp?key=x"}, False),
+            (
+                {"endpoint": "https://otlp-gateway-synthetic.grafana.net/otlp?key=x"},
+                False,
+            ),
             ({"authorization": "Bearer SYNTHETIC"}, False),
-            ({"service_name": "arbitrary"}, False), ({"service_version": "branch-main"}, False),
-            ({"environment": "arbitrary"}, False)]
+            ({"service_name": "arbitrary"}, False),
+            ({"service_version": "branch-main"}, False),
+            ({"environment": "arbitrary"}, False),
+        ]
         for update, allowed in cases:
             with self.subTest(update=update):
-                value = initialized(); value["grafana_cloud"].update(update)
+                value = initialized()
+                value["grafana_cloud"].update(update)
                 cloud = {key: value["grafana_cloud"][key] for key in fields}
                 if allowed:
-                    target.validate(value); CloudTelemetryConfig(**cloud)
+                    target.validate(value)
+                    CloudTelemetryConfig(**cloud)
                 else:
-                    with self.assertRaises(ValueError): target.validate(value)
-                    with self.assertRaises(ValueError): CloudTelemetryConfig(**cloud)
+                    with self.assertRaises(ValueError):
+                        target.validate(value)
+                    with self.assertRaises(ValueError):
+                        CloudTelemetryConfig(**cloud)
 
     def test_output_mounts_match_cpu_users_and_contain_no_gpu_secret(self):
-        value = initialized(); value["hatchet_api_token"] = "a"*16+"."+"b"*16+"."+"c"*16
-        value["providers"]["runpod"] = {"profile_id": "runpod--synthetic-test",
-            "base_url": target.ENDPOINTS["runpod"], "api_key": "SYNTHETIC_RUNPOD_"+"r"*40}
+        value = initialized()
+        value["hatchet_api_token"] = "a" * 16 + "." + "b" * 16 + "." + "c" * 16
+        value["providers"]["runpod"] = {
+            "profile_id": "runpod--synthetic-test",
+            "base_url": target.ENDPOINTS["runpod"],
+            "api_key": "SYNTHETIC_RUNPOD_" + "r" * 40,
+        }
         result = target.outputs(value)
         self.assertEqual(result["grafana_cloud"][1:], (10001, 10001, 0o600))
         self.assertEqual(result["hatchet_api_token"][1:], (10001, 10001, 0o600))
         self.assertEqual(result["dstack_api_token"][1:], (0, 10001, 0o640))
         self.assertEqual(result["dstack_database_url"][1:], (0, 0, 0o600))
         server = json.loads(result["dstack-server-config.yml"][0])
-        self.assertEqual({row["type"] for row in server["projects"][0]["backends"]}, {"vastai", "runpod"})
+        self.assertEqual(
+            {row["type"] for row in server["projects"][0]["backends"]},
+            {"vastai", "runpod"},
+        )
         self.assertEqual(result["dstack-server-config.yml"][1:], (0, 0, 0o600))
         self.assertNotIn("gpu_ssh_key", result)
         self.assertNotIn("app_database_url", result)
 
     def test_cli_suppresses_exception_and_accidental_argument_values(self):
         output = io.StringIO()
-        with contextlib.redirect_stderr(output), patch.object(target, "hydrate", side_effect=RuntimeError("SYNTHETIC_PRIVATE_RESPONSE")):
+        with (
+            contextlib.redirect_stderr(output),
+            patch.object(
+                target,
+                "hydrate",
+                side_effect=RuntimeError("SYNTHETIC_PRIVATE_RESPONSE"),
+            ),
+        ):
             self.assertEqual(target.main([]), 1)
         self.assertNotIn("SYNTHETIC_PRIVATE", output.getvalue())
         output = io.StringIO()
@@ -369,35 +558,59 @@ class ManagedSecretTests(unittest.TestCase):
         self.assertNotIn("SYNTHETIC_PRIVATE", output.getvalue())
 
 
-@unittest.skipUnless(os.name == "posix" and os.geteuid() == 0, "Linux root required for real UID/mode proof")
+@unittest.skipUnless(
+    os.name == "posix" and os.geteuid() == 0,
+    "Linux root required for real UID/mode proof",
+)
 class ProtectedHostTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="sixnine-hydrate-test-", dir="/root")
+        self.temporary = tempfile.TemporaryDirectory(
+            prefix="sixnine-hydrate-test-", dir="/root"
+        )
         self.root = Path(self.temporary.name)
         self.mounts = self.root / "secrets"
-        self.patch_root = patch.object(target, "ROOT", self.mounts); self.patch_root.start()
-        self.host = self.root / "instance-id"; self.host.write_text("i-0123456789abcdef0\n")
-        self.patch_host = patch.object(target, "HOST_ID", self.host); self.patch_host.start()
-        self.patch_intent = patch.object(target, "INTENT", self.root / "durable" / "intent.json"); self.patch_intent.start()
+        self.patch_root = patch.object(target, "ROOT", self.mounts)
+        self.patch_root.start()
+        self.host = self.root / "instance-id"
+        self.host.write_text("i-0123456789abcdef0\n")
+        self.patch_host = patch.object(target, "HOST_ID", self.host)
+        self.patch_host.start()
+        self.patch_intent = patch.object(
+            target, "INTENT", self.root / "durable" / "intent.json"
+        )
+        self.patch_intent.start()
         self.now = datetime.now(timezone.utc)
         self.receipt = self.root / "receipt.json"
-        self.checks = {"schema_version": 1, "infrastructure_database_absent": True,
-            "checked_at": self.now.isoformat(), "host_id": self.host.read_text().strip(),
-            "hatchet_postgres_volume": "synthetic-hatchet-db", "hatchet_config_volume": "synthetic-hatchet-config",
-            "dstack_state_dir": str(self.root / "dstack"), "dstack_runtime_dir": str(self.root / "runtime")}
+        self.checks = {
+            "schema_version": 1,
+            "infrastructure_database_absent": True,
+            "checked_at": self.now.isoformat(),
+            "host_id": self.host.read_text().strip(),
+            "hatchet_postgres_volume": "synthetic-hatchet-db",
+            "hatchet_config_volume": "synthetic-hatchet-config",
+            "dstack_state_dir": str(self.root / "dstack"),
+            "dstack_runtime_dir": str(self.root / "runtime"),
+        }
         self.write_receipt()
 
     def tearDown(self):
-        self.patch_root.stop(); self.patch_host.stop(); self.patch_intent.stop(); self.temporary.cleanup()
+        self.patch_root.stop()
+        self.patch_host.stop()
+        self.patch_intent.stop()
+        self.temporary.cleanup()
 
     def write_receipt(self):
-        self.receipt.write_text(json.dumps(self.checks)); self.receipt.chmod(0o600)
+        self.receipt.write_text(json.dumps(self.checks))
+        self.receipt.chmod(0o600)
 
     def runner(self, output="", code=0):
         def run(command, **kwargs):
-            self.assertEqual(command, ["docker", "volume", "ls", "--format", "{{.Name}}"])
+            self.assertEqual(
+                command, ["docker", "volume", "ls", "--format", "{{.Name}}"]
+            )
             self.assertTrue(kwargs["capture_output"])
             return SimpleNamespace(returncode=code, stdout=output)
+
         return run
 
     def test_fresh_receipt_and_absent_host_state_accepts(self):
@@ -406,99 +619,174 @@ class ProtectedHostTests(unittest.TestCase):
     def test_existing_runtime_identity_forbids_initialization(self):
         target.write_outputs(target.outputs(initialized()))
         with self.assertRaisesRegex(RuntimeError, "existing_engine_recovery"):
-            target.check_fresh_bootstrap(self.receipt, runner=self.runner(), now=self.now)
+            target.check_fresh_bootstrap(
+                self.receipt, runner=self.runner(), now=self.now
+            )
 
     def test_durable_intent_precedes_aws_put_and_survives_new_store(self):
         api = FakeAPI(seed())
+
         def assert_persisted(**kwargs):
             record = target.ProtectedIntent().read()
             info = target.INTENT.stat()
-            self.assertEqual((info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)), (0, 0, 0o600))
-            self.assertEqual(record["client_request_token"], kwargs["ClientRequestToken"])
-            self.assertNotIn("providers", record); self.assertNotIn("grafana_cloud", record)
-            self.assertEqual(record["infrastructure"], json.loads(kwargs["SecretString"])["infrastructure"])
+            self.assertEqual(
+                (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)), (0, 0, 0o600)
+            )
+            self.assertEqual(
+                record["client_request_token"], kwargs["ClientRequestToken"]
+            )
+            self.assertNotIn("providers", record)
+            self.assertNotIn("grafana_cloud", record)
+            self.assertEqual(
+                record["infrastructure"],
+                json.loads(kwargs["SecretString"])["infrastructure"],
+            )
             raise TimeoutError("private")
+
         with patch.object(api, "put_secret_value", side_effect=assert_persisted):
             with self.assertRaisesRegex(RuntimeError, "initialization_unconfirmed"):
-                target.load(api, initialize=True, bootstrap_checks=self.receipt,
-                    checker=lambda filename: target.check_fresh_bootstrap(filename, runner=self.runner(), now=self.now))
+                target.load(
+                    api,
+                    initialize=True,
+                    bootstrap_checks=self.receipt,
+                    checker=lambda filename: target.check_fresh_bootstrap(
+                        filename, runner=self.runner(), now=self.now
+                    ),
+                )
         record = target.ProtectedIntent().read()
-        with patch.object(target.secrets, "token_urlsafe", side_effect=AssertionError("second mint prohibited")):
+        with patch.object(
+            target.secrets,
+            "token_urlsafe",
+            side_effect=AssertionError("second mint prohibited"),
+        ):
             result = target.load(api)
         self.assertEqual(result["infrastructure"], record["infrastructure"])
         self.assertEqual(len(api.puts), 1)
 
     def test_existing_volumes_failed_listing_and_existing_state_fail_closed(self):
         with self.assertRaisesRegex(RuntimeError, "existing_engine_recovery"):
-            target.check_fresh_bootstrap(self.receipt, runner=self.runner("synthetic-hatchet-db\n"), now=self.now)
+            target.check_fresh_bootstrap(
+                self.receipt, runner=self.runner("synthetic-hatchet-db\n"), now=self.now
+            )
         with self.assertRaisesRegex(RuntimeError, "state_unconfirmed"):
-            target.check_fresh_bootstrap(self.receipt, runner=self.runner(code=1), now=self.now)
-        state = self.root / "dstack"; state.mkdir(mode=0o700); (state / "existing-state").write_text("synthetic")
+            target.check_fresh_bootstrap(
+                self.receipt, runner=self.runner(code=1), now=self.now
+            )
+        state = self.root / "dstack"
+        state.mkdir(mode=0o700)
+        (state / "existing-state").write_text("synthetic")
         with self.assertRaisesRegex(RuntimeError, "existing_engine_recovery"):
-            target.check_fresh_bootstrap(self.receipt, runner=self.runner(), now=self.now)
+            target.check_fresh_bootstrap(
+                self.receipt, runner=self.runner(), now=self.now
+            )
 
     def test_stale_cross_host_false_db_and_unprotected_receipts_rejected(self):
-        for update in ({"checked_at": "2020-01-01T00:00:00Z"}, {"host_id": "i-00000000000000000"},
-                {"infrastructure_database_absent": False}):
-            old = copy.deepcopy(self.checks); self.checks.update(update); self.write_receipt()
+        for update in (
+            {"checked_at": "2020-01-01T00:00:00Z"},
+            {"host_id": "i-00000000000000000"},
+            {"infrastructure_database_absent": False},
+        ):
+            old = copy.deepcopy(self.checks)
+            self.checks.update(update)
+            self.write_receipt()
             with self.assertRaises(ValueError):
-                target.check_fresh_bootstrap(self.receipt, runner=self.runner(), now=self.now)
+                target.check_fresh_bootstrap(
+                    self.receipt, runner=self.runner(), now=self.now
+                )
             self.checks = old
-        self.write_receipt(); self.receipt.chmod(0o644)
+        self.write_receipt()
+        self.receipt.chmod(0o644)
         with self.assertRaises(ValueError):
-            target.check_fresh_bootstrap(self.receipt, runner=self.runner(), now=self.now)
+            target.check_fresh_bootstrap(
+                self.receipt, runner=self.runner(), now=self.now
+            )
 
     def test_permissions_and_bound_inode_preserved_on_rehydration(self):
-        files = target.outputs(initialized()); target.write_outputs(files)
+        files = target.outputs(initialized())
+        target.write_outputs(files)
         inodes = {}
         for name, (content, uid, gid, mode) in files.items():
-            path = self.mounts / name; info = path.stat()
-            self.assertEqual((info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)), (uid, gid, mode))
-            self.assertEqual(path.read_text(), content); inodes[name] = info.st_ino
+            path = self.mounts / name
+            info = path.stat()
+            self.assertEqual(
+                (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)), (uid, gid, mode)
+            )
+            self.assertEqual(path.read_text(), content)
+            inodes[name] = info.st_ino
         target.write_outputs(files)
-        self.assertEqual({name: (self.mounts / name).stat().st_ino for name in files}, inodes)
+        self.assertEqual(
+            {name: (self.mounts / name).stat().st_ino for name in files}, inodes
+        )
 
     def test_additive_r2_file_is_readable_by_runtime_and_old_inodes_are_preserved(self):
-        from studio_platform.storage_config import S3StorageConfig, load_runtime_storage_credentials
-        original = target.outputs(initialized()); target.write_outputs(original)
+        from studio_platform.storage_config import (
+            S3StorageConfig,
+            load_runtime_storage_credentials,
+        )
+
+        original = target.outputs(initialized())
+        target.write_outputs(original)
         inodes = {name: (self.mounts / name).stat().st_ino for name in original}
-        value = initialized(); value["r2_storage"] = r2_storage()
+        value = initialized()
+        value["r2_storage"] = r2_storage()
         target.write_outputs(target.outputs(value))
-        self.assertEqual({name: (self.mounts / name).stat().st_ino for name in original}, inodes)
-        path = self.mounts / "r2_storage"; info = path.stat()
-        self.assertEqual((info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)), (0, 10001, 0o440))
+        self.assertEqual(
+            {name: (self.mounts / name).stat().st_ino for name in original}, inodes
+        )
+        path = self.mounts / "r2_storage"
+        info = path.stat()
+        self.assertEqual(
+            (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)), (0, 10001, 0o440)
+        )
         selected = value["r2_storage"]
-        config = S3StorageConfig("r2", selected["endpoint_url"], "auto", selected["bucket"],
-            "cloudflare-r2", selected["profile"], enabled=True)
+        config = S3StorageConfig(
+            "r2",
+            selected["endpoint_url"],
+            "auto",
+            selected["bucket"],
+            "cloudflare-r2",
+            selected["profile"],
+            enabled=True,
+        )
         self.assertIn("redacted", repr(load_runtime_storage_credentials(config, path)))
-        changed = copy.deepcopy(value); changed["r2_storage"]["bucket"] = "different-bucket"
+        changed = copy.deepcopy(value)
+        changed["r2_storage"]["bucket"] = "different-bucket"
         with self.assertRaisesRegex(RuntimeError, "rotation_requires"):
             target.write_outputs(target.outputs(changed))
         self.assertEqual(path.stat().st_ino, info.st_ino)
         self.assertEqual(json.loads(path.read_text()), selected)
 
     def test_rotation_preflight_writes_nothing_new(self):
-        files = target.outputs(initialized()); target.write_outputs(files)
-        missing = self.mounts / "grafana_cloud"; missing.unlink()
+        files = target.outputs(initialized())
+        target.write_outputs(files)
+        missing = self.mounts / "grafana_cloud"
+        missing.unlink()
         changed = copy.deepcopy(files)
         content, uid, gid, mode = changed["dstack_api_token"]
-        changed["dstack_api_token"] = (content+"changed", uid, gid, mode)
+        changed["dstack_api_token"] = (content + "changed", uid, gid, mode)
         with self.assertRaisesRegex(RuntimeError, "rotation_requires"):
             target.write_outputs(changed)
         self.assertFalse(missing.exists())
-        self.assertEqual((self.mounts / "dstack_api_token").read_text(), files["dstack_api_token"][0])
+        self.assertEqual(
+            (self.mounts / "dstack_api_token").read_text(), files["dstack_api_token"][0]
+        )
 
     def test_symlink_hardlink_and_wrong_owner_rejected(self):
-        files = target.outputs(initialized()); target.write_outputs(files)
+        files = target.outputs(initialized())
+        target.write_outputs(files)
         token = self.mounts / "dstack_api_token"
         os.link(token, self.root / "linked")
-        with self.assertRaisesRegex(RuntimeError, "file_invalid"): target.write_outputs(files)
+        with self.assertRaisesRegex(RuntimeError, "file_invalid"):
+            target.write_outputs(files)
         (self.root / "linked").unlink()
         os.chown(token, 10001, 10001)
-        with self.assertRaisesRegex(RuntimeError, "file_invalid"): target.write_outputs(files)
+        with self.assertRaisesRegex(RuntimeError, "file_invalid"):
+            target.write_outputs(files)
         os.chown(token, 0, 10001)
-        token.unlink(); token.symlink_to(self.root / "outside")
-        with self.assertRaises(OSError): target.write_outputs(files)
+        token.unlink()
+        token.symlink_to(self.root / "outside")
+        with self.assertRaises(OSError):
+            target.write_outputs(files)
 
 
 if __name__ == "__main__":

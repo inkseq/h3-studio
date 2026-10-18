@@ -1,58 +1,122 @@
-import {createCloudClient,safeCloudPath} from './cloud-client.js';
-const enc=value=>encodeURIComponent(value);
-const base=id=>`/v1/quick-chat/sessions/${enc(id)}`;
+import { createCloudClient, safeCloudPath } from './cloud-client.js';
+const enc = (value) => encodeURIComponent(value);
+const base = (id) => `/v1/quick-chat/sessions/${enc(id)}`;
 /** Same authenticated HTTP client as stories. No provider or GPU credentials. */
-export function createQuickChatClient(options={}){
-  const api=createCloudClient(options),write=(path,body,key,method='POST')=>api.request(path,{method,body,key});
-  return {...api,
-    schema:()=>api.request('/v1/quick-chat/schema'),
-    preferences:()=>api.request('/v1/quick-chat/preferences'),
-    savePreferences:(body,key)=>write('/v1/quick-chat/preferences',body,key,'PATCH'),
-    takes:(id,card,{before_cursor,limit=20}={})=>api.request(base(id)+`/cards/${enc(card)}/takes?`+new URLSearchParams({limit,...(before_cursor?{before_cursor}:{})})),
-    sessionTakes:(id,{before_cursor,limit=40,signal}={})=>api.request(base(id)+'/takes?'+new URLSearchParams({limit,...(before_cursor?{before_cursor}:{})}),{signal}),
-    starTake:(id,take,body,key)=>write(base(id)+`/takes/${enc(take)}`,body,key,'PATCH'),
-    again:(id,card,body,key)=>write(base(id)+`/cards/${enc(card)}/again`,body,key),
-    takeToStory:(id,take,body,key)=>write(base(id)+`/takes/${enc(take)}/story`,body,key),
-    storyTransfer:(id,transfer)=>api.request(base(id)+`/story-transfers/${enc(transfer)}`),
-    queuePosition:job=>api.request('/v1/generations/queue-position?'+new URLSearchParams({job_id:job})),
-    sessions:({cursor,limit=30,view='active',hideTests=false}={})=>api.request('/v1/quick-chat/sessions?'+new URLSearchParams({limit,view,hide_tests:String(hideTests),...(cursor?{cursor}:{})})),
-    previewHistory:body=>write('/v1/quick-chat/sessions/history/preview',body),
-    actionHistory:(body,key)=>write('/v1/quick-chat/sessions/history/actions',body,key),
-    historyAction:id=>api.request('/v1/quick-chat/sessions/history/actions/'+enc(id)),
-    createSession:(body,key)=>write('/v1/quick-chat/sessions',body,key),
-    session:id=>api.request(base(id)),
-    patchSession:(id,body,key)=>write(base(id),body,key,'PATCH'),
-    materials:(id,{cursor,limit=50}={})=>api.request(base(id)+'/materials?'+new URLSearchParams({limit,...(cursor?{cursor}:{})})),
-    saveMaterials:(id,body,key)=>write(base(id)+'/materials',body,key,'PUT'),
-    uploadMaterial:(id,file,assetId,key)=>{const body=new FormData();body.append('file',file,file.name||'reference');body.append('client_asset_id',assetId);return write(base(id)+'/assets',body,key);},
-    sessionAssets:(id,assetId)=>api.request(base(id)+'/assets'+(assetId?'?client_asset_id='+enc(assetId):'')),
-    resumeMaterial:(id,assetId,body,key)=>write(base(id)+`/assets/${enc(assetId)}/resume`,body||{},key),
-    timeline:(id,{before_cursor,after_cursor,limit=30}={})=>api.request(base(id)+'/timeline?'+new URLSearchParams({limit,...(before_cursor?{before_cursor}:{}),...(after_cursor?{after_cursor}:{})})),
-    turn:(id,body,key)=>write(base(id)+'/turns',body,key),
-    getTurn:(id,turn)=>api.request(base(id)+`/turns/${enc(turn)}`),
-    acknowledgeUnknown:(id,turn,body,key)=>write(base(id)+`/turns/${enc(turn)}/acknowledge-unknown`,body||{},key),
-    createCard:(id,body,key)=>write(base(id)+'/cards',body,key),
-    card:(id,card)=>api.request(base(id)+`/cards/${enc(card)}`),
-    cards:(id,{before_cursor,limit=10}={})=>api.request(base(id)+'/cards?'+new URLSearchParams({limit,...(before_cursor?{before_cursor}:{})})),
-    revision:(id,revision)=>api.request(base(id)+`/revisions/${enc(revision)}`),
-    reviseCard:(id,card,body,key)=>write(base(id)+`/cards/${enc(card)}/revisions`,body,key),
-    preflight:(id,revision,body,key)=>write(base(id)+`/revisions/${enc(revision)}/preflights`,body,key),
-    getPreflight:(id,preflight)=>api.request(base(id)+`/preflights/${enc(preflight)}`),
-    submit:(id,revision,body,key)=>write(base(id)+`/revisions/${enc(revision)}/submissions`,body,key),
-    submission:(id,submission)=>api.request(base(id)+`/submissions/${enc(submission)}`),
-    cancelSubmission:(id,submission,body,key)=>write(base(id)+`/submissions/${enc(submission)}/cancel`,body,key),
-    retryItem:(id,submission,item,body,key)=>write(base(id)+`/submissions/${enc(submission)}/items/${enc(item)}/retry`,body,key),
-    resumeAdmission:(id,submission,body,key)=>write(base(id)+`/submissions/${enc(submission)}/resume-admission`,body,key),
-    importResult:(id,body,key)=>write(base(id)+'/result-imports',body,key),
-    getResultImport:(id,importId)=>api.request(base(id)+`/result-imports/${enc(importId)}`),
-    connections:(offset=0)=>api.request('/v1/account/agent-connections?'+new URLSearchParams({limit:50,offset})),
-    connection:id=>api.request('/v1/account/agent-connections/'+enc(id)),
-    updateConnection:(id,body,key)=>write('/v1/account/agent-connections/'+enc(id),body,key,'PATCH'),
-    connectionActivity:(id,offset=0)=>api.request('/v1/account/agent-connections/'+enc(id)+'/activity?'+new URLSearchParams({limit:20,offset})),
-    connectionSettings:()=>api.request('/v1/account/agent-connection-settings'),
-    saveConnectionSettings:(body,key)=>write('/v1/account/agent-connection-settings',body,key,'PATCH'),
-    createConnection:(body,key)=>write('/v1/account/agent-connections',body,key),
-    revokeConnection:(id,key)=>write(`/v1/account/agent-connections/${enc(id)}`,undefined,key,'DELETE'),
-    safeContent:safeCloudPath,
+export function createQuickChatClient(options = {}) {
+  const api = createCloudClient(options),
+    write = (path, body, key, method = 'POST') => api.request(path, { method, body, key });
+  return {
+    ...api,
+    schema: () => api.request('/v1/quick-chat/schema'),
+    preferences: () => api.request('/v1/quick-chat/preferences'),
+    savePreferences: (body, key) => write('/v1/quick-chat/preferences', body, key, 'PATCH'),
+    takes: (id, card, { before_cursor, limit = 20 } = {}) =>
+      api.request(
+        base(id) +
+          `/cards/${enc(card)}/takes?` +
+          new URLSearchParams({ limit, ...(before_cursor ? { before_cursor } : {}) }),
+      ),
+    sessionTakes: (id, { before_cursor, limit = 40, signal } = {}) =>
+      api.request(
+        base(id) +
+          '/takes?' +
+          new URLSearchParams({ limit, ...(before_cursor ? { before_cursor } : {}) }),
+        { signal },
+      ),
+    starTake: (id, take, body, key) => write(base(id) + `/takes/${enc(take)}`, body, key, 'PATCH'),
+    again: (id, card, body, key) => write(base(id) + `/cards/${enc(card)}/again`, body, key),
+    takeToStory: (id, take, body, key) => write(base(id) + `/takes/${enc(take)}/story`, body, key),
+    storyTransfer: (id, transfer) => api.request(base(id) + `/story-transfers/${enc(transfer)}`),
+    queuePosition: (job) =>
+      api.request('/v1/generations/queue-position?' + new URLSearchParams({ job_id: job })),
+    sessions: ({ cursor, limit = 30, view = 'active', hideTests = false } = {}) =>
+      api.request(
+        '/v1/quick-chat/sessions?' +
+          new URLSearchParams({
+            limit,
+            view,
+            hide_tests: String(hideTests),
+            ...(cursor ? { cursor } : {}),
+          }),
+      ),
+    previewHistory: (body) => write('/v1/quick-chat/sessions/history/preview', body),
+    actionHistory: (body, key) => write('/v1/quick-chat/sessions/history/actions', body, key),
+    historyAction: (id) => api.request('/v1/quick-chat/sessions/history/actions/' + enc(id)),
+    createSession: (body, key) => write('/v1/quick-chat/sessions', body, key),
+    session: (id) => api.request(base(id)),
+    patchSession: (id, body, key) => write(base(id), body, key, 'PATCH'),
+    materials: (id, { cursor, limit = 50 } = {}) =>
+      api.request(
+        base(id) + '/materials?' + new URLSearchParams({ limit, ...(cursor ? { cursor } : {}) }),
+      ),
+    saveMaterials: (id, body, key) => write(base(id) + '/materials', body, key, 'PUT'),
+    uploadMaterial: (id, file, assetId, key) => {
+      const body = new FormData();
+      body.append('file', file, file.name || 'reference');
+      body.append('client_asset_id', assetId);
+      return write(base(id) + '/assets', body, key);
+    },
+    sessionAssets: (id, assetId) =>
+      api.request(base(id) + '/assets' + (assetId ? '?client_asset_id=' + enc(assetId) : '')),
+    resumeMaterial: (id, assetId, body, key) =>
+      write(base(id) + `/assets/${enc(assetId)}/resume`, body || {}, key),
+    timeline: (id, { before_cursor, after_cursor, limit = 30 } = {}) =>
+      api.request(
+        base(id) +
+          '/timeline?' +
+          new URLSearchParams({
+            limit,
+            ...(before_cursor ? { before_cursor } : {}),
+            ...(after_cursor ? { after_cursor } : {}),
+          }),
+      ),
+    turn: (id, body, key) => write(base(id) + '/turns', body, key),
+    getTurn: (id, turn) => api.request(base(id) + `/turns/${enc(turn)}`),
+    acknowledgeUnknown: (id, turn, body, key) =>
+      write(base(id) + `/turns/${enc(turn)}/acknowledge-unknown`, body || {}, key),
+    createCard: (id, body, key) => write(base(id) + '/cards', body, key),
+    card: (id, card) => api.request(base(id) + `/cards/${enc(card)}`),
+    cards: (id, { before_cursor, limit = 10 } = {}) =>
+      api.request(
+        base(id) +
+          '/cards?' +
+          new URLSearchParams({ limit, ...(before_cursor ? { before_cursor } : {}) }),
+      ),
+    revision: (id, revision) => api.request(base(id) + `/revisions/${enc(revision)}`),
+    reviseCard: (id, card, body, key) =>
+      write(base(id) + `/cards/${enc(card)}/revisions`, body, key),
+    preflight: (id, revision, body, key) =>
+      write(base(id) + `/revisions/${enc(revision)}/preflights`, body, key),
+    getPreflight: (id, preflight) => api.request(base(id) + `/preflights/${enc(preflight)}`),
+    submit: (id, revision, body, key) =>
+      write(base(id) + `/revisions/${enc(revision)}/submissions`, body, key),
+    submission: (id, submission) => api.request(base(id) + `/submissions/${enc(submission)}`),
+    cancelSubmission: (id, submission, body, key) =>
+      write(base(id) + `/submissions/${enc(submission)}/cancel`, body, key),
+    retryItem: (id, submission, item, body, key) =>
+      write(base(id) + `/submissions/${enc(submission)}/items/${enc(item)}/retry`, body, key),
+    resumeAdmission: (id, submission, body, key) =>
+      write(base(id) + `/submissions/${enc(submission)}/resume-admission`, body, key),
+    importResult: (id, body, key) => write(base(id) + '/result-imports', body, key),
+    getResultImport: (id, importId) => api.request(base(id) + `/result-imports/${enc(importId)}`),
+    connections: (offset = 0) =>
+      api.request('/v1/account/agent-connections?' + new URLSearchParams({ limit: 50, offset })),
+    connection: (id) => api.request('/v1/account/agent-connections/' + enc(id)),
+    updateConnection: (id, body, key) =>
+      write('/v1/account/agent-connections/' + enc(id), body, key, 'PATCH'),
+    connectionActivity: (id, offset = 0) =>
+      api.request(
+        '/v1/account/agent-connections/' +
+          enc(id) +
+          '/activity?' +
+          new URLSearchParams({ limit: 20, offset }),
+      ),
+    connectionSettings: () => api.request('/v1/account/agent-connection-settings'),
+    saveConnectionSettings: (body, key) =>
+      write('/v1/account/agent-connection-settings', body, key, 'PATCH'),
+    createConnection: (body, key) => write('/v1/account/agent-connections', body, key),
+    revokeConnection: (id, key) =>
+      write(`/v1/account/agent-connections/${enc(id)}`, undefined, key, 'DELETE'),
+    safeContent: safeCloudPath,
   };
 }

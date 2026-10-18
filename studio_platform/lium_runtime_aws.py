@@ -6,6 +6,7 @@ imports, construction, files or environment changes load a credential. Only a
 matching explicit load reads one pinned managed secret version into memory.
 Never enable botocore HTTP/debug response logging in this process.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -18,7 +19,9 @@ from .lium_identity import BASE_URL, KEY_VARIABLE, PROFILE, SERVICE
 
 REGION = "ap-southeast-1"
 SECRET_NAME = "/sixnine/platform/lium"
-SECRET_ARN = re.compile(r"arn:aws:secretsmanager:ap-southeast-1:[0-9]{12}:secret:/sixnine/platform/lium-[A-Za-z0-9]{6}")
+SECRET_ARN = re.compile(
+    r"arn:aws:secretsmanager:ap-southeast-1:[0-9]{12}:secret:/sixnine/platform/lium-[A-Za-z0-9]{6}"
+)
 VERSION_ID = re.compile(r"[A-Za-z0-9-]{32,64}")
 
 
@@ -41,9 +44,17 @@ def _client():
     # prevent environment endpoint overrides from changing the destination.
     import boto3
     from botocore.config import Config
-    return boto3.client("secretsmanager", region_name=REGION,
+
+    return boto3.client(
+        "secretsmanager",
+        region_name=REGION,
         endpoint_url="https://secretsmanager.ap-southeast-1.amazonaws.com",
-        config=Config(connect_timeout=5, read_timeout=20, retries={"mode": "standard", "total_max_attempts": 2}))
+        config=Config(
+            connect_timeout=5,
+            read_timeout=20,
+            retries={"mode": "standard", "total_max_attempts": 2},
+        ),
+    )
 
 
 class AwsLiumLoader:
@@ -53,12 +64,21 @@ class AwsLiumLoader:
     explicit VersionId avoids switching a running controller to another account
     after a mutable AWSCURRENT change. This class performs no writes to AWS.
     """
+
     service, profile, base_url, key_variable = SERVICE, PROFILE, BASE_URL, KEY_VARIABLE
-    secret_name, secret_arn_pattern, config_type = SECRET_NAME, SECRET_ARN, LiumRuntimeConfig
+    secret_name, secret_arn_pattern, config_type = (
+        SECRET_NAME,
+        SECRET_ARN,
+        LiumRuntimeConfig,
+    )
 
     def __init__(self, secret_arn, version_id, *, client_factory=None):
-        if (not isinstance(secret_arn, str) or not self.secret_arn_pattern.fullmatch(secret_arn)
-                or not isinstance(version_id, str) or not VERSION_ID.fullmatch(version_id)):
+        if (
+            not isinstance(secret_arn, str)
+            or not self.secret_arn_pattern.fullmatch(secret_arn)
+            or not isinstance(version_id, str)
+            or not VERSION_ID.fullmatch(version_id)
+        ):
             raise RuntimeCredentialError("lium_runtime_secret_identity_invalid")
         self._arn, self._version = secret_arn, version_id
         self._factory = client_factory or _client
@@ -74,32 +94,63 @@ class AwsLiumLoader:
             try:
                 if self._client is None:
                     self._client = self._factory()
-                response = self._client.get_secret_value(SecretId=self._arn, VersionId=self._version)
-                if (not isinstance(response, dict) or response.get("ARN") != self._arn
-                        or response.get("Name") != self.secret_name or response.get("VersionId") != self._version
-                        or "SecretBinary" in response):
-                    raise RuntimeCredentialError("lium_runtime_secret_response_identity_mismatch")
+                response = self._client.get_secret_value(
+                    SecretId=self._arn, VersionId=self._version
+                )
+                if (
+                    not isinstance(response, dict)
+                    or response.get("ARN") != self._arn
+                    or response.get("Name") != self.secret_name
+                    or response.get("VersionId") != self._version
+                    or "SecretBinary" in response
+                ):
+                    raise RuntimeCredentialError(
+                        "lium_runtime_secret_response_identity_mismatch"
+                    )
                 raw = response.get("SecretString")
                 if not isinstance(raw, str) or not 1 <= len(raw) <= 16384:
                     raise RuntimeCredentialError("lium_runtime_secret_payload_invalid")
+
                 # Reject duplicate JSON keys instead of quietly choosing one.
                 def unique(pairs):
                     value = {}
                     for key, item in pairs:
                         if key in value:
-                            raise RuntimeCredentialError("lium_runtime_secret_duplicate_field")
+                            raise RuntimeCredentialError(
+                                "lium_runtime_secret_duplicate_field"
+                            )
                         value[key] = item
                     return value
+
                 value = json.loads(raw, object_pairs_hook=unique)
-                expected = {"schema_version", "service", "profile", "base_url", "primary_key_variable", "api_key"}
-                if (not isinstance(value, dict) or set(value) != expected
-                        or type(value["schema_version"]) is not int or value["schema_version"] != 1
-                        or value["service"] != self.service or value["profile"] != self.profile
-                        or value["base_url"] != self.base_url or value["primary_key_variable"] != self.key_variable):
-                    raise RuntimeCredentialError("lium_runtime_profile_metadata_mismatch")
+                expected = {
+                    "schema_version",
+                    "service",
+                    "profile",
+                    "base_url",
+                    "primary_key_variable",
+                    "api_key",
+                }
+                if (
+                    not isinstance(value, dict)
+                    or set(value) != expected
+                    or type(value["schema_version"]) is not int
+                    or value["schema_version"] != 1
+                    or value["service"] != self.service
+                    or value["profile"] != self.profile
+                    or value["base_url"] != self.base_url
+                    or value["primary_key_variable"] != self.key_variable
+                ):
+                    raise RuntimeCredentialError(
+                        "lium_runtime_profile_metadata_mismatch"
+                    )
                 token = value["api_key"]
-                if (not isinstance(token, str) or not 1 <= len(token) <= 8192
-                        or token != token.strip() or any(c in token for c in "\r\n\x00")):
+                if (
+                    not isinstance(token, str)
+                    or not 1 <= len(token) <= 8192
+                    or token != token.strip()
+                    or any(c in token for c in "\r\n\x00")
+                ):
                     raise RuntimeCredentialError("lium_runtime_key_invalid")
                 self._config = self.config_type(api_key=token)
                 return self._config
@@ -108,7 +159,9 @@ class AwsLiumLoader:
             except Exception:
                 # SDK/JSON errors may contain response data. No fallback to
                 # DPAPI, environment API keys, another secret/profile or URL.
-                raise RuntimeCredentialError("lium_runtime_secret_unavailable_or_invalid") from None
+                raise RuntimeCredentialError(
+                    "lium_runtime_secret_unavailable_or_invalid"
+                ) from None
 
     def close(self):
         with self._lock:

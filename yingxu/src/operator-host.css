@@ -1,4 +1,172 @@
-.p4-hosts>header{align-items:flex-start;margin:18px 0}.p4-hosts>header p{max-width:760px}.p4-host-record{padding:20px;margin:16px 0}.p4-host-record h3{margin:0}.p4-host-record>header small,.p4-host-failure small,.p4-host-audits small{display:block;margin-top:5px;font-size:11px;color:#748177;overflow-wrap:anywhere}.p4-host-summary{display:flex;flex-wrap:wrap;gap:20px;font-size:12px;margin:17px 0}.p4-host-summary b{font-size:18px}.p4-host-failure{font-size:12px;margin:10px 0}.p4-host-record details,.p4-offer-hosts{font-size:12px;margin-top:15px}.p4-host-record summary,.p4-offer-hosts summary,.p4-host-audits summary{cursor:pointer}.p4-host-samples{overflow:auto;margin:12px 0}.p4-host-samples table{border-collapse:collapse;width:100%;font-size:12px;text-align:left}.p4-host-samples th,.p4-host-samples td{padding:10px 9px;border-bottom:1px solid #e5eadd;vertical-align:top;min-width:115px}.p4-host-samples td:first-child{max-width:330px;overflow-wrap:anywhere}.p4-host-samples td small{display:block;font-size:10px;margin-top:4px;color:#748177}.p4-offer-hosts>section{padding:12px 0;border-bottom:1px solid #e5eadd}.p4-offer-hosts>section>small,.p4-offer-hosts>section>span,.p4-offer-hosts>small{display:block;margin-top:6px;color:#748177}.p4-offer-hosts .p4-host-samples{max-height:220px}.p4-host-policy{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px;border-top:1px solid #e5eadd;margin-top:18px;padding-top:16px}.p4-host-policy label{font-size:12px;min-width:180px}.p4-host-policy small{width:100%;font-size:11px;color:#748177}.p4-host-audits{font-size:12px;margin:20px 0}.p4-host-audits ul{padding-left:18px}.p4-host-audits li{padding:8px 0}@media(max-width:760px){.p4-host-record{padding:16px}.p4-hosts>header{flex-wrap:wrap}.p4-host-summary{gap:12px}.p4-host-policy label{flex:1}.p4-host-samples th,.p4-host-samples td{padding:8px 6px}}
-.p4-host-rentals{display:grid;gap:10px;margin:12px 0}.p4-host-rentals>section{padding:10px;background:#f4f6ef;border-radius:7px}.p4-host-rentals small{display:block;line-height:1.7;overflow-wrap:anywhere}
-.p4-host-lookup{padding:18px;margin:16px 0}.p4-host-lookup>form{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px}.p4-host-lookup label{font-size:12px;min-width:210px}.p4-host-lookup label input{font-variant-numeric:tabular-nums}
-.p4-tabs{overflow-x:auto}.p4-tabs>button{flex-shrink:0}
+.p4-hosts > header {
+  align-items: flex-start;
+  margin: 18px 0;
+}
+.p4-hosts > header p {
+  max-width: 760px;
+}
+.p4-host-record {
+  padding: 20px;
+  margin: 16px 0;
+}
+.p4-host-record h3 {
+  margin: 0;
+}
+.p4-host-record > header small,
+.p4-host-failure small,
+.p4-host-audits small {
+  display: block;
+  margin-top: 5px;
+  font-size: 11px;
+  color: #748177;
+  overflow-wrap: anywhere;
+}
+.p4-host-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  font-size: 12px;
+  margin: 17px 0;
+}
+.p4-host-summary b {
+  font-size: 18px;
+}
+.p4-host-failure {
+  font-size: 12px;
+  margin: 10px 0;
+}
+.p4-host-record details,
+.p4-offer-hosts {
+  font-size: 12px;
+  margin-top: 15px;
+}
+.p4-host-record summary,
+.p4-offer-hosts summary,
+.p4-host-audits summary {
+  cursor: pointer;
+}
+.p4-host-samples {
+  overflow: auto;
+  margin: 12px 0;
+}
+.p4-host-samples table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+  text-align: left;
+}
+.p4-host-samples th,
+.p4-host-samples td {
+  padding: 10px 9px;
+  border-bottom: 1px solid #e5eadd;
+  vertical-align: top;
+  min-width: 115px;
+}
+.p4-host-samples td:first-child {
+  max-width: 330px;
+  overflow-wrap: anywhere;
+}
+.p4-host-samples td small {
+  display: block;
+  font-size: 10px;
+  margin-top: 4px;
+  color: #748177;
+}
+.p4-offer-hosts > section {
+  padding: 12px 0;
+  border-bottom: 1px solid #e5eadd;
+}
+.p4-offer-hosts > section > small,
+.p4-offer-hosts > section > span,
+.p4-offer-hosts > small {
+  display: block;
+  margin-top: 6px;
+  color: #748177;
+}
+.p4-offer-hosts .p4-host-samples {
+  max-height: 220px;
+}
+.p4-host-policy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  border-top: 1px solid #e5eadd;
+  margin-top: 18px;
+  padding-top: 16px;
+}
+.p4-host-policy label {
+  font-size: 12px;
+  min-width: 180px;
+}
+.p4-host-policy small {
+  width: 100%;
+  font-size: 11px;
+  color: #748177;
+}
+.p4-host-audits {
+  font-size: 12px;
+  margin: 20px 0;
+}
+.p4-host-audits ul {
+  padding-left: 18px;
+}
+.p4-host-audits li {
+  padding: 8px 0;
+}
+@media (max-width: 760px) {
+  .p4-host-record {
+    padding: 16px;
+  }
+  .p4-hosts > header {
+    flex-wrap: wrap;
+  }
+  .p4-host-summary {
+    gap: 12px;
+  }
+  .p4-host-policy label {
+    flex: 1;
+  }
+  .p4-host-samples th,
+  .p4-host-samples td {
+    padding: 8px 6px;
+  }
+}
+.p4-host-rentals {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+}
+.p4-host-rentals > section {
+  padding: 10px;
+  background: #f4f6ef;
+  border-radius: 7px;
+}
+.p4-host-rentals small {
+  display: block;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.p4-host-lookup {
+  padding: 18px;
+  margin: 16px 0;
+}
+.p4-host-lookup > form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+.p4-host-lookup label {
+  font-size: 12px;
+  min-width: 210px;
+}
+.p4-host-lookup label input {
+  font-variant-numeric: tabular-nums;
+}
+.p4-tabs {
+  overflow-x: auto;
+}
+.p4-tabs > button {
+  flex-shrink: 0;
+}

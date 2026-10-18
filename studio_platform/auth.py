@@ -1,4 +1,5 @@
 """Shared SQL authentication, scoped machine clients, and revocable sessions."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -10,38 +11,93 @@ import time
 import uuid
 
 import bcrypt
-from sqlalchemy import Column, Float, Integer, MetaData, String, Table, Text, delete, insert, select, update
+from sqlalchemy import (
+    Column,
+    Float,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    Text,
+    delete,
+    insert,
+    select,
+    update,
+)
 from sqlalchemy.exc import IntegrityError
 
 metadata = MetaData()
-accounts = Table("platform_accounts", metadata,
+accounts = Table(
+    "platform_accounts",
+    metadata,
     Column("tenant", String(200), primary_key=True),
-    Column("username", String(80), primary_key=True), Column("password_hash", Text, nullable=False),
-    Column("disabled", Integer, nullable=False, default=0), Column("updated", Float, nullable=False))
-sessions = Table("platform_sessions", metadata,
+    Column("username", String(80), primary_key=True),
+    Column("password_hash", Text, nullable=False),
+    Column("disabled", Integer, nullable=False, default=0),
+    Column("updated", Float, nullable=False),
+)
+sessions = Table(
+    "platform_sessions",
+    metadata,
     Column("tenant", String(200), primary_key=True),
-    Column("token_hash", String(64), primary_key=True), Column("username", String(80), nullable=False),
-    Column("auth_mode", String(20), nullable=False), Column("created", Float, nullable=False),
-    Column("expires", Float, nullable=False), Column("password_version", Float, nullable=False))
-login_limits = Table("platform_login_limits", metadata,
+    Column("token_hash", String(64), primary_key=True),
+    Column("username", String(80), nullable=False),
+    Column("auth_mode", String(20), nullable=False),
+    Column("created", Float, nullable=False),
+    Column("expires", Float, nullable=False),
+    Column("password_version", Float, nullable=False),
+)
+login_limits = Table(
+    "platform_login_limits",
+    metadata,
     Column("tenant", String(200), primary_key=True),
-    Column("source_hash", String(64), primary_key=True), Column("window_start", Float, nullable=False),
-    Column("attempts", Integer, nullable=False))
-clients = Table("platform_service_clients", metadata,
+    Column("source_hash", String(64), primary_key=True),
+    Column("window_start", Float, nullable=False),
+    Column("attempts", Integer, nullable=False),
+)
+clients = Table(
+    "platform_service_clients",
+    metadata,
     Column("tenant", String(200), primary_key=True),
-    Column("id", String(80), primary_key=True), Column("token_hash", String(64), unique=True, nullable=False),
-    Column("owner", String(80), nullable=False), Column("projects", Text, nullable=False),
-    Column("scopes", Text, nullable=False), Column("disabled", Integer, nullable=False, default=0))
+    Column("id", String(80), primary_key=True),
+    Column("token_hash", String(64), unique=True, nullable=False),
+    Column("owner", String(80), nullable=False),
+    Column("projects", Text, nullable=False),
+    Column("scopes", Text, nullable=False),
+    Column("disabled", Integer, nullable=False, default=0),
+)
 
-personal_keys = Table("platform_personal_api_keys", metadata,
-    Column("tenant", String(200), primary_key=True), Column("id", String(80), primary_key=True),
-    Column("token_hash", String(64), unique=True, nullable=False), Column("prefix", String(20), nullable=False),
-    Column("owner", String(80), nullable=False), Column("name", String(80), nullable=False),
-    Column("projects", Text, nullable=False), Column("scopes", Text, nullable=False),
-    Column("all_projects", Integer, nullable=False), Column("auth_mode", String(20), nullable=False),
-    Column("password_version", Float, nullable=False), Column("created_at", Float, nullable=False),
-    Column("expires_at", Float, nullable=False), Column("last_used_at", Float), Column("revoked_at", Float))
-API_SCOPES = frozenset({"projects:read", "projects:create", "projects:write", "assets:read", "assets:write", "jobs:read", "jobs:write", "assistant:run"})
+personal_keys = Table(
+    "platform_personal_api_keys",
+    metadata,
+    Column("tenant", String(200), primary_key=True),
+    Column("id", String(80), primary_key=True),
+    Column("token_hash", String(64), unique=True, nullable=False),
+    Column("prefix", String(20), nullable=False),
+    Column("owner", String(80), nullable=False),
+    Column("name", String(80), nullable=False),
+    Column("projects", Text, nullable=False),
+    Column("scopes", Text, nullable=False),
+    Column("all_projects", Integer, nullable=False),
+    Column("auth_mode", String(20), nullable=False),
+    Column("password_version", Float, nullable=False),
+    Column("created_at", Float, nullable=False),
+    Column("expires_at", Float, nullable=False),
+    Column("last_used_at", Float),
+    Column("revoked_at", Float),
+)
+API_SCOPES = frozenset(
+    {
+        "projects:read",
+        "projects:create",
+        "projects:write",
+        "assets:read",
+        "assets:write",
+        "jobs:read",
+        "jobs:write",
+        "assistant:run",
+    }
+)
 
 USERS = frozenset({"superdan", "supervan"})
 TOKEN = re.compile(r"^[A-Za-z0-9_-]{43,128}$")
@@ -74,8 +130,11 @@ class Principal:
     session_hash: str | None = field(default=None, repr=False)
 
     def allows(self, project_id: str, scope: str) -> bool:
-        return not self.machine or ((self.all_projects or project_id in self.project_ids) and scope in self.scopes
-            and (scope != "projects:write" or "projects:read" in self.scopes))
+        return not self.machine or (
+            (self.all_projects or project_id in self.project_ids)
+            and scope in self.scopes
+            and (scope != "projects:write" or "projects:read" in self.scopes)
+        )
 
 
 def digest(value: str) -> str:
@@ -83,20 +142,31 @@ def digest(value: str) -> str:
 
 
 class Auth:
-    def __init__(self, engine, *, tenant="sixnine", mode="password", session_seconds=7*86400, clock=time.time):
+    def __init__(
+        self,
+        engine,
+        *,
+        tenant="sixnine",
+        mode="password",
+        session_seconds=7 * 86400,
+        clock=time.time,
+    ):
         self.engine = engine
         self.tenant = tenant
         self.mode = mode
-        if type(session_seconds) is not int or not 1 <= session_seconds <= 365*86400:
+        if type(session_seconds) is not int or not 1 <= session_seconds <= 365 * 86400:
             raise ValueError("Invalid browser session duration")
         self.session_seconds = session_seconds
         self.clock = clock
         with engine.begin() as connection:
             if engine.dialect.name == "postgresql":
-                connection.exec_driver_sql("SELECT pg_advisory_xact_lock(685939796868749721)")
+                connection.exec_driver_sql(
+                    "SELECT pg_advisory_xact_lock(685939796868749721)"
+                )
             metadata.create_all(connection)
             from .repository import documents
-            documents.create(connection,checkfirst=True)
+
+            documents.create(connection, checkfirst=True)
 
     def ready(self, connection=None):
         if self.mode == "local-test":
@@ -104,44 +174,101 @@ class Auth:
         if connection is None:
             with self.engine.connect() as conn:
                 return self.ready(conn)
-        rows = connection.execute(select(accounts.c.username, accounts.c.password_hash, accounts.c.disabled).where(
-            accounts.c.tenant == self.tenant)).all()
-        present = {name for name, encoded, _ in rows if PASSWORD_HASH.fullmatch(encoded)}
+        rows = connection.execute(
+            select(
+                accounts.c.username, accounts.c.password_hash, accounts.c.disabled
+            ).where(accounts.c.tenant == self.tenant)
+        ).all()
+        present = {
+            name for name, encoded, _ in rows if PASSWORD_HASH.fullmatch(encoded)
+        }
         # Disabling one account must not log out the other configured account.
         return USERS.issubset(present) and any(not disabled for _, _, disabled in rows)
 
     def set_password(self, username: str, password: str, *, expected_version=None):
         if username not in USERS:
             raise ValueError("Unsupported account")
-        if not isinstance(password, str) or len(password) < 12 or len(password.encode("utf-8")) > 72:
-            raise ValueError("Password must have at least 12 characters and at most 72 UTF-8 bytes")
-        encoded = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("ascii")
+        if (
+            not isinstance(password, str)
+            or len(password) < 12
+            or len(password.encode("utf-8")) > 72
+        ):
+            raise ValueError(
+                "Password must have at least 12 characters and at most 72 UTF-8 bytes"
+            )
+        encoded = bcrypt.hashpw(
+            password.encode("utf-8"), bcrypt.gensalt(rounds=12)
+        ).decode("ascii")
         with self.engine.begin() as conn:
-            existing = conn.execute(select(accounts.c.updated).where(accounts.c.tenant == self.tenant,
-                accounts.c.username == username).with_for_update()).first()
-            if expected_version is not None and (not existing or existing[0] != expected_version):
+            existing = conn.execute(
+                select(accounts.c.updated)
+                .where(
+                    accounts.c.tenant == self.tenant, accounts.c.username == username
+                )
+                .with_for_update()
+            ).first()
+            if expected_version is not None and (
+                not existing or existing[0] != expected_version
+            ):
                 raise AuthenticationError("账户状态已改变，请重新登录")
-            changed_at = max(self.clock(), existing[0] + .000001) if existing else self.clock()
+            changed_at = (
+                max(self.clock(), existing[0] + 0.000001) if existing else self.clock()
+            )
             values = {"password_hash": encoded, "disabled": 0, "updated": changed_at}
             if existing:
-                conn.execute(update(accounts).where(accounts.c.tenant == self.tenant, accounts.c.username == username).values(**values))
+                conn.execute(
+                    update(accounts)
+                    .where(
+                        accounts.c.tenant == self.tenant,
+                        accounts.c.username == username,
+                    )
+                    .values(**values)
+                )
             else:
-                conn.execute(insert(accounts).values(tenant=self.tenant, username=username, **values))
-            conn.execute(delete(sessions).where(sessions.c.tenant == self.tenant, sessions.c.username == username))
-            conn.execute(update(personal_keys).where(personal_keys.c.tenant == self.tenant,
-                personal_keys.c.owner == username, personal_keys.c.revoked_at.is_(None)).values(revoked_at=changed_at))
+                conn.execute(
+                    insert(accounts).values(
+                        tenant=self.tenant, username=username, **values
+                    )
+                )
+            conn.execute(
+                delete(sessions).where(
+                    sessions.c.tenant == self.tenant, sessions.c.username == username
+                )
+            )
+            conn.execute(
+                update(personal_keys)
+                .where(
+                    personal_keys.c.tenant == self.tenant,
+                    personal_keys.c.owner == username,
+                    personal_keys.c.revoked_at.is_(None),
+                )
+                .values(revoked_at=changed_at)
+            )
 
     def change_password(self, username, old_password, new_password):
         if self.mode != "password":
             raise ValueError("当前测试登录模式不支持修改密码")
-        self.reserve_login("password-change:"+username)
+        self.reserve_login("password-change:" + username)
         with self.engine.connect() as conn:
-            row = conn.execute(select(accounts).where(accounts.c.tenant == self.tenant,
-                accounts.c.username == username)).mappings().first()
+            row = (
+                conn.execute(
+                    select(accounts).where(
+                        accounts.c.tenant == self.tenant,
+                        accounts.c.username == username,
+                    )
+                )
+                .mappings()
+                .first()
+            )
             eligible = row is not None and not row["disabled"] and self.ready(conn)
-        valid = isinstance(old_password, str) and 0 < len(old_password.encode("utf-8")) <= 72
+        valid = (
+            isinstance(old_password, str)
+            and 0 < len(old_password.encode("utf-8")) <= 72
+        )
         hashed = row["password_hash"].encode("ascii") if eligible else _DUMMY
-        matched = bcrypt.checkpw(old_password.encode("utf-8") if valid else b"invalid", hashed)
+        matched = bcrypt.checkpw(
+            old_password.encode("utf-8") if valid else b"invalid", hashed
+        )
         if not valid or not eligible or not matched:
             raise AuthenticationError("原密码不正确")
         self.set_password(username, new_password, expected_version=row["updated"])
@@ -152,16 +279,42 @@ class Auth:
         # when two API processes see the first attempt at the same time.
         try:
             with self.engine.begin() as conn:
-                conn.execute(insert(login_limits).values(tenant=self.tenant, source_hash=key, window_start=now, attempts=0))
+                conn.execute(
+                    insert(login_limits).values(
+                        tenant=self.tenant,
+                        source_hash=key,
+                        window_start=now,
+                        attempts=0,
+                    )
+                )
         except IntegrityError:
             pass
         with self.engine.begin() as conn:
-            conn.execute(update(login_limits).where(login_limits.c.tenant == self.tenant, login_limits.c.source_hash == key,
-                login_limits.c.window_start <= now - 300).values(window_start=now, attempts=0))
-            changed = conn.execute(update(login_limits).where(login_limits.c.tenant == self.tenant, login_limits.c.source_hash == key,
-                login_limits.c.attempts < 5).values(attempts=login_limits.c.attempts + 1))
+            conn.execute(
+                update(login_limits)
+                .where(
+                    login_limits.c.tenant == self.tenant,
+                    login_limits.c.source_hash == key,
+                    login_limits.c.window_start <= now - 300,
+                )
+                .values(window_start=now, attempts=0)
+            )
+            changed = conn.execute(
+                update(login_limits)
+                .where(
+                    login_limits.c.tenant == self.tenant,
+                    login_limits.c.source_hash == key,
+                    login_limits.c.attempts < 5,
+                )
+                .values(attempts=login_limits.c.attempts + 1)
+            )
             if changed.rowcount != 1:
-                start = conn.execute(select(login_limits.c.window_start).where(login_limits.c.tenant == self.tenant, login_limits.c.source_hash == key)).scalar_one()
+                start = conn.execute(
+                    select(login_limits.c.window_start).where(
+                        login_limits.c.tenant == self.tenant,
+                        login_limits.c.source_hash == key,
+                    )
+                ).scalar_one()
                 raise LoginLimited(max(1, int(start + 300 - now)))
 
     def login(self, username, password, source="local"):
@@ -172,12 +325,30 @@ class Auth:
             version = 0.0
         else:
             with self.engine.connect() as conn:
-                row = conn.execute(select(accounts).where(accounts.c.tenant == self.tenant,
-                    accounts.c.username == (username if isinstance(username, str) else ""))).mappings().first()
-            valid = isinstance(password, str) and 0 < len(password.encode("utf-8")) <= 72
-            eligible = username in USERS and row is not None and not row["disabled"] and self.ready()
+                row = (
+                    conn.execute(
+                        select(accounts).where(
+                            accounts.c.tenant == self.tenant,
+                            accounts.c.username
+                            == (username if isinstance(username, str) else ""),
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+            valid = (
+                isinstance(password, str) and 0 < len(password.encode("utf-8")) <= 72
+            )
+            eligible = (
+                username in USERS
+                and row is not None
+                and not row["disabled"]
+                and self.ready()
+            )
             hashed = row["password_hash"].encode("ascii") if eligible else _DUMMY
-            matched = bcrypt.checkpw(password.encode("utf-8") if valid else b"invalid", hashed)
+            matched = bcrypt.checkpw(
+                password.encode("utf-8") if valid else b"invalid", hashed
+            )
             if not valid or not eligible or not matched:
                 raise AuthenticationError("用户名或密码不正确")
             version = row["updated"]
@@ -185,12 +356,27 @@ class Auth:
         now = self.clock()
         with self.engine.begin() as conn:
             if self.mode == "password":
-                current = conn.execute(select(accounts.c.updated, accounts.c.disabled).where(accounts.c.tenant == self.tenant,
-                    accounts.c.username == username).with_for_update()).first()
+                current = conn.execute(
+                    select(accounts.c.updated, accounts.c.disabled)
+                    .where(
+                        accounts.c.tenant == self.tenant,
+                        accounts.c.username == username,
+                    )
+                    .with_for_update()
+                ).first()
                 if not current or current[1] or current[0] != version:
                     raise AuthenticationError("账户状态已改变，请重新登录")
-            conn.execute(insert(sessions).values(tenant=self.tenant, token_hash=digest(token), username=username,
-                auth_mode=self.mode, created=now, expires=now+self.session_seconds, password_version=version))
+            conn.execute(
+                insert(sessions).values(
+                    tenant=self.tenant,
+                    token_hash=digest(token),
+                    username=username,
+                    auth_mode=self.mode,
+                    created=now,
+                    expires=now + self.session_seconds,
+                    password_version=version,
+                )
+            )
         return token
 
     def session(self, token):
@@ -198,87 +384,219 @@ class Auth:
             return None
         now = self.clock()
         with self.engine.begin() as conn:
-            row = conn.execute(select(sessions).where(sessions.c.tenant == self.tenant, sessions.c.token_hash == digest(token),
-                sessions.c.expires > now, sessions.c.auth_mode == self.mode)).mappings().first()
+            row = (
+                conn.execute(
+                    select(sessions).where(
+                        sessions.c.tenant == self.tenant,
+                        sessions.c.token_hash == digest(token),
+                        sessions.c.expires > now,
+                        sessions.c.auth_mode == self.mode,
+                    )
+                )
+                .mappings()
+                .first()
+            )
             if not row:
                 return None
             if self.mode == "password":
-                account = conn.execute(select(accounts).where(accounts.c.tenant == self.tenant, accounts.c.username == row["username"])).mappings().first()
-                if not account or account["disabled"] or account["updated"] != row["password_version"] or not self.ready(conn):
+                account = (
+                    conn.execute(
+                        select(accounts).where(
+                            accounts.c.tenant == self.tenant,
+                            accounts.c.username == row["username"],
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+                if (
+                    not account
+                    or account["disabled"]
+                    or account["updated"] != row["password_version"]
+                    or not self.ready(conn)
+                ):
                     return None
             # Slide at most hourly (half the TTL for short explicit test/config
             # durations). Polling and media reads do not write on every request.
             interval = min(3600, self.session_seconds / 2)
             if row["expires"] <= now + self.session_seconds - interval:
-                statement = update(sessions).where(sessions.c.tenant == self.tenant,
-                    sessions.c.token_hash == row["token_hash"], sessions.c.expires > now,
+                statement = update(sessions).where(
+                    sessions.c.tenant == self.tenant,
+                    sessions.c.token_hash == row["token_hash"],
+                    sessions.c.expires > now,
                     sessions.c.auth_mode == self.mode,
-                    sessions.c.password_version == row["password_version"])
+                    sessions.c.password_version == row["password_version"],
+                )
                 if self.mode == "password":
-                    statement = statement.where(select(accounts.c.username).where(
-                        accounts.c.tenant == self.tenant, accounts.c.username == row["username"],
-                        accounts.c.disabled == 0, accounts.c.updated == row["password_version"]).exists())
+                    statement = statement.where(
+                        select(accounts.c.username)
+                        .where(
+                            accounts.c.tenant == self.tenant,
+                            accounts.c.username == row["username"],
+                            accounts.c.disabled == 0,
+                            accounts.c.updated == row["password_version"],
+                        )
+                        .exists()
+                    )
                 # Update-only: a concurrent logout/password change cannot
                 # recreate a deleted session. Never shorten a concurrent renewal.
-                conn.execute(statement.where(sessions.c.expires < now+self.session_seconds)
-                    .values(expires=now+self.session_seconds))
-        return Principal(row["username"], "browser:"+row["username"], auth_mode=row["auth_mode"],
-            password_version=row["password_version"], session_hash=row["token_hash"])
+                conn.execute(
+                    statement.where(
+                        sessions.c.expires < now + self.session_seconds
+                    ).values(expires=now + self.session_seconds)
+                )
+        return Principal(
+            row["username"],
+            "browser:" + row["username"],
+            auth_mode=row["auth_mode"],
+            password_version=row["password_version"],
+            session_hash=row["token_hash"],
+        )
 
     def logout(self, token):
         if isinstance(token, str) and TOKEN.fullmatch(token):
             with self.engine.begin() as conn:
-                conn.execute(delete(sessions).where(sessions.c.tenant == self.tenant, sessions.c.token_hash == digest(token)))
+                conn.execute(
+                    delete(sessions).where(
+                        sessions.c.tenant == self.tenant,
+                        sessions.c.token_hash == digest(token),
+                    )
+                )
 
     def register_client(self, client_id, token, owner, project_ids, scopes):
         if not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", client_id) or owner not in USERS:
             raise ValueError("Invalid client identity")
         if not isinstance(token, str) or not TOKEN.fullmatch(token):
             raise ValueError("Client token must be a high entropy URL-safe value")
-        allowed = {"projects:read", "assets:read", "assets:write", "jobs:read", "jobs:write"}
-        if (not isinstance(project_ids, (list, tuple)) or not 1 <= len(project_ids) <= 4096
-                or any(not isinstance(x, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", x) for x in project_ids)
-                or not isinstance(scopes, (list, tuple)) or any(not isinstance(s, str) or s not in allowed for s in scopes)):
+        allowed = {
+            "projects:read",
+            "assets:read",
+            "assets:write",
+            "jobs:read",
+            "jobs:write",
+        }
+        if (
+            not isinstance(project_ids, (list, tuple))
+            or not 1 <= len(project_ids) <= 4096
+            or any(
+                not isinstance(x, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", x)
+                for x in project_ids
+            )
+            or not isinstance(scopes, (list, tuple))
+            or any(not isinstance(s, str) or s not in allowed for s in scopes)
+        ):
             raise ValueError("Client must have explicit projects and scopes")
         with self.engine.begin() as conn:
             # Rotation changes the hash atomically and invalidates the old token.
-            values = dict(token_hash=digest(token), owner=owner, projects=json.dumps(project_ids), scopes=json.dumps(scopes), disabled=0)
-            if conn.execute(select(clients.c.id).where(clients.c.tenant == self.tenant, clients.c.id == client_id)).first():
-                conn.execute(update(clients).where(clients.c.tenant == self.tenant, clients.c.id == client_id).values(**values))
+            values = dict(
+                token_hash=digest(token),
+                owner=owner,
+                projects=json.dumps(project_ids),
+                scopes=json.dumps(scopes),
+                disabled=0,
+            )
+            if conn.execute(
+                select(clients.c.id).where(
+                    clients.c.tenant == self.tenant, clients.c.id == client_id
+                )
+            ).first():
+                conn.execute(
+                    update(clients)
+                    .where(clients.c.tenant == self.tenant, clients.c.id == client_id)
+                    .values(**values)
+                )
             else:
-                conn.execute(insert(clients).values(tenant=self.tenant, id=client_id, **values))
+                conn.execute(
+                    insert(clients).values(tenant=self.tenant, id=client_id, **values)
+                )
 
     @staticmethod
     def public_key(row):
-        return {k: row[k] for k in ("id", "name", "prefix", "created_at", "expires_at", "last_used_at", "revoked_at")} | {
-            "scopes": json.loads(row["scopes"]), "project_ids": json.loads(row["projects"]), "all_projects": bool(row["all_projects"])}
+        return {
+            k: row[k]
+            for k in (
+                "id",
+                "name",
+                "prefix",
+                "created_at",
+                "expires_at",
+                "last_used_at",
+                "revoked_at",
+            )
+        } | {
+            "scopes": json.loads(row["scopes"]),
+            "project_ids": json.loads(row["projects"]),
+            "all_projects": bool(row["all_projects"]),
+        }
 
     def list_keys(self, owner):
         with self.engine.connect() as conn:
-            return [self.public_key(r) for r in conn.execute(select(personal_keys).where(
-                personal_keys.c.tenant == self.tenant, personal_keys.c.owner == owner)
-                .order_by(personal_keys.c.created_at.desc(), personal_keys.c.id)).mappings()]
+            return [
+                self.public_key(r)
+                for r in conn.execute(
+                    select(personal_keys)
+                    .where(
+                        personal_keys.c.tenant == self.tenant,
+                        personal_keys.c.owner == owner,
+                    )
+                    .order_by(personal_keys.c.created_at.desc(), personal_keys.c.id)
+                ).mappings()
+            ]
 
-    def create_key(self, owner, *, authenticated_session: Principal, name, scopes, project_ids=(), all_projects=False, expires_in_days=90):
-        if owner not in USERS or not isinstance(name, str) or not 1 <= len(name.strip()) <= 80:
+    def create_key(
+        self,
+        owner,
+        *,
+        authenticated_session: Principal,
+        name,
+        scopes,
+        project_ids=(),
+        all_projects=False,
+        expires_in_days=90,
+    ):
+        if (
+            owner not in USERS
+            or not isinstance(name, str)
+            or not 1 <= len(name.strip()) <= 80
+        ):
             raise ValueError("API key名称须为1至80字符")
-        if (not isinstance(scopes, (list, tuple)) or not scopes or len(scopes) > len(API_SCOPES)
-                or any(not isinstance(s, str) or s not in API_SCOPES for s in scopes) or len(set(scopes)) != len(scopes)):
+        if (
+            not isinstance(scopes, (list, tuple))
+            or not scopes
+            or len(scopes) > len(API_SCOPES)
+            or any(not isinstance(s, str) or s not in API_SCOPES for s in scopes)
+            or len(set(scopes)) != len(scopes)
+        ):
             raise ValueError("API key权限无效")
         if "projects:write" in scopes and "projects:read" not in scopes:
-            raise ValueError("创作修改权限同时需要projects:read，因为编辑响应包含完整故事")
-        if (type(all_projects) is not bool or not isinstance(project_ids, (list, tuple)) or len(project_ids) > 4096
-                or any(not isinstance(p, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", p) for p in project_ids)
-                or len(set(project_ids)) != len(project_ids) or (all_projects and project_ids)
-                or (not all_projects and not project_ids)):
+            raise ValueError(
+                "创作修改权限同时需要projects:read，因为编辑响应包含完整故事"
+            )
+        if (
+            type(all_projects) is not bool
+            or not isinstance(project_ids, (list, tuple))
+            or len(project_ids) > 4096
+            or any(
+                not isinstance(p, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", p)
+                for p in project_ids
+            )
+            or len(set(project_ids)) != len(project_ids)
+            or (all_projects and project_ids)
+            or (not all_projects and not project_ids)
+        ):
             raise ValueError("明确选择全部本人项目或现有项目列表")
         if "projects:create" in scopes and not all_projects:
             raise ValueError("创建故事权限需要选择全部本人项目（包含未来项目）")
         if type(expires_in_days) is not int or not 1 <= expires_in_days <= 365:
             raise ValueError("有效期须为1至365天")
-        if (not isinstance(authenticated_session, Principal) or authenticated_session.machine
-                or authenticated_session.owner != owner or authenticated_session.auth_mode != self.mode
-                or authenticated_session.password_version is None or not authenticated_session.session_hash):
+        if (
+            not isinstance(authenticated_session, Principal)
+            or authenticated_session.machine
+            or authenticated_session.owner != owner
+            or authenticated_session.auth_mode != self.mode
+            or authenticated_session.password_version is None
+            or not authenticated_session.session_hash
+        ):
             raise AuthenticationError("登录状态已改变，请重新登录")
         token, now = "sxp_" + secrets.token_urlsafe(32), self.clock()
         with self.engine.begin() as conn:
@@ -289,37 +607,99 @@ class Auth:
             # Same lock order as password rotation: account, then session/key.
             # A request authenticated before rotation/logout must not mint a key
             # stamped with the replacement password's newer authority.
-            account = conn.execute(select(accounts).where(accounts.c.tenant == self.tenant,
-                accounts.c.username == owner).with_for_update()).mappings().first()
-            session = conn.execute(select(sessions.c.token_hash).where(sessions.c.tenant == self.tenant,
-                sessions.c.token_hash == authenticated_session.session_hash, sessions.c.username == owner,
-                sessions.c.auth_mode == self.mode, sessions.c.expires > self.clock(),
-                sessions.c.password_version == authenticated_session.password_version).with_for_update()).first()
-            if (not session or self.mode == "password" and (not account or account["disabled"]
-                    or account["updated"] != authenticated_session.password_version or not self.ready(conn))):
+            account = (
+                conn.execute(
+                    select(accounts)
+                    .where(
+                        accounts.c.tenant == self.tenant, accounts.c.username == owner
+                    )
+                    .with_for_update()
+                )
+                .mappings()
+                .first()
+            )
+            session = conn.execute(
+                select(sessions.c.token_hash)
+                .where(
+                    sessions.c.tenant == self.tenant,
+                    sessions.c.token_hash == authenticated_session.session_hash,
+                    sessions.c.username == owner,
+                    sessions.c.auth_mode == self.mode,
+                    sessions.c.expires > self.clock(),
+                    sessions.c.password_version
+                    == authenticated_session.password_version,
+                )
+                .with_for_update()
+            ).first()
+            if (
+                not session
+                or self.mode == "password"
+                and (
+                    not account
+                    or account["disabled"]
+                    or account["updated"] != authenticated_session.password_version
+                    or not self.ready(conn)
+                )
+            ):
                 raise AuthenticationError("账户状态已改变，请重新登录")
-            active = conn.execute(select(personal_keys.c.id).where(personal_keys.c.tenant == self.tenant,
-                personal_keys.c.owner == owner, personal_keys.c.revoked_at.is_(None), personal_keys.c.expires_at > now)).all()
+            active = conn.execute(
+                select(personal_keys.c.id).where(
+                    personal_keys.c.tenant == self.tenant,
+                    personal_keys.c.owner == owner,
+                    personal_keys.c.revoked_at.is_(None),
+                    personal_keys.c.expires_at > now,
+                )
+            ).all()
             if len(active) >= 50:
                 raise ValueError("每个账户最多50个有效API key，请先撤销不再使用的key")
-            row = dict(tenant=self.tenant, id="key-"+uuid.uuid4().hex, token_hash=digest(token), prefix=token[:12],
-                owner=owner, name=name.strip(), scopes=json.dumps(scopes), projects=json.dumps(project_ids),
-                all_projects=int(all_projects), auth_mode=self.mode, password_version=authenticated_session.password_version,
-                created_at=now, expires_at=now+expires_in_days*86400, last_used_at=None, revoked_at=None)
+            row = dict(
+                tenant=self.tenant,
+                id="key-" + uuid.uuid4().hex,
+                token_hash=digest(token),
+                prefix=token[:12],
+                owner=owner,
+                name=name.strip(),
+                scopes=json.dumps(scopes),
+                projects=json.dumps(project_ids),
+                all_projects=int(all_projects),
+                auth_mode=self.mode,
+                password_version=authenticated_session.password_version,
+                created_at=now,
+                expires_at=now + expires_in_days * 86400,
+                last_used_at=None,
+                revoked_at=None,
+            )
             conn.execute(insert(personal_keys).values(**row))
         return {**self.public_key(row), "api_key": token}
 
     def revoke_key(self, owner, key_id):
         with self.engine.begin() as conn:
             from .spending_limits import lock_owner
-            lock_owner(conn,self.tenant,owner)
-            row = conn.execute(select(personal_keys).where(personal_keys.c.tenant == self.tenant,
-                personal_keys.c.owner == owner, personal_keys.c.id == key_id)).mappings().first()
+
+            lock_owner(conn, self.tenant, owner)
+            row = (
+                conn.execute(
+                    select(personal_keys).where(
+                        personal_keys.c.tenant == self.tenant,
+                        personal_keys.c.owner == owner,
+                        personal_keys.c.id == key_id,
+                    )
+                )
+                .mappings()
+                .first()
+            )
             if not row:
                 return None
             if row["revoked_at"] is None:
-                conn.execute(update(personal_keys).where(personal_keys.c.tenant == self.tenant,
-                    personal_keys.c.owner == owner, personal_keys.c.id == key_id).values(revoked_at=self.clock()))
+                conn.execute(
+                    update(personal_keys)
+                    .where(
+                        personal_keys.c.tenant == self.tenant,
+                        personal_keys.c.owner == owner,
+                        personal_keys.c.id == key_id,
+                    )
+                    .values(revoked_at=self.clock())
+                )
             return {"id": key_id, "revoked": True}
 
     def bearer(self, token):
@@ -328,46 +708,121 @@ class Auth:
         legacy = self.static_bearer(token)
         if legacy:
             return legacy
-        return self.personal_bearer(token) if isinstance(token, str) and token.startswith("sxp_") else None
+        return (
+            self.personal_bearer(token)
+            if isinstance(token, str) and token.startswith("sxp_")
+            else None
+        )
 
     def personal_bearer(self, token):
         if not isinstance(token, str) or not TOKEN.fullmatch(token):
             return None
         now = self.clock()
         with self.engine.begin() as conn:
-            row = conn.execute(select(personal_keys).where(personal_keys.c.tenant == self.tenant,
-                personal_keys.c.token_hash == digest(token), personal_keys.c.revoked_at.is_(None),
-                personal_keys.c.expires_at > now, personal_keys.c.auth_mode == self.mode)).mappings().first()
+            row = (
+                conn.execute(
+                    select(personal_keys).where(
+                        personal_keys.c.tenant == self.tenant,
+                        personal_keys.c.token_hash == digest(token),
+                        personal_keys.c.revoked_at.is_(None),
+                        personal_keys.c.expires_at > now,
+                        personal_keys.c.auth_mode == self.mode,
+                    )
+                )
+                .mappings()
+                .first()
+            )
             if not row:
                 return None
             if self.mode == "password":
-                account = conn.execute(select(accounts).where(accounts.c.tenant == self.tenant,
-                    accounts.c.username == row["owner"])).mappings().first()
-                if not account or account["disabled"] or account["updated"] != row["password_version"] or not self.ready(conn):
+                account = (
+                    conn.execute(
+                        select(accounts).where(
+                            accounts.c.tenant == self.tenant,
+                            accounts.c.username == row["owner"],
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+                if (
+                    not account
+                    or account["disabled"]
+                    or account["updated"] != row["password_version"]
+                    or not self.ready(conn)
+                ):
                     return None
-            from .agent_management import paused,doc_where
+            from .agent_management import paused, doc_where
             from .repository import documents
-            if paused(conn,self.tenant,row['owner'],row['id']):return None
-            pause_exists=select(documents.c.document_id).where(*doc_where(self.tenant,row['owner'],'connection_key_state',row['id']),
-                documents.c.payload['paused'].as_boolean()==True).exists()
+
+            if paused(conn, self.tenant, row['owner'], row['id']):
+                return None
+            pause_exists = (
+                select(documents.c.document_id)
+                .where(
+                    *doc_where(
+                        self.tenant, row['owner'], 'connection_key_state', row['id']
+                    ),
+                    documents.c.payload['paused'].as_boolean() == True,
+                )
+                .exists()
+            )
             # Conditional update makes revocation racing authentication fail closed.
-            changed = conn.execute(update(personal_keys).where(personal_keys.c.tenant == self.tenant,
-                personal_keys.c.id == row["id"], personal_keys.c.revoked_at.is_(None),
-                personal_keys.c.expires_at > now, ~pause_exists).values(last_used_at=now))
+            changed = conn.execute(
+                update(personal_keys)
+                .where(
+                    personal_keys.c.tenant == self.tenant,
+                    personal_keys.c.id == row["id"],
+                    personal_keys.c.revoked_at.is_(None),
+                    personal_keys.c.expires_at > now,
+                    ~pause_exists,
+                )
+                .values(last_used_at=now)
+            )
             if changed.rowcount != 1:
                 return None
-            return Principal(row["owner"], "key:"+row["id"], True, tuple(json.loads(row["projects"])),
-                tuple(json.loads(row["scopes"])), bool(row["all_projects"]))
+            return Principal(
+                row["owner"],
+                "key:" + row["id"],
+                True,
+                tuple(json.loads(row["projects"])),
+                tuple(json.loads(row["scopes"])),
+                bool(row["all_projects"]),
+            )
 
     def static_bearer(self, token):
         if not isinstance(token, str) or not TOKEN.fullmatch(token):
             return None
         with self.engine.connect() as conn:
-            row = conn.execute(select(clients).where(clients.c.tenant == self.tenant,
-                clients.c.token_hash == digest(token), clients.c.disabled == 0)).mappings().first()
+            row = (
+                conn.execute(
+                    select(clients).where(
+                        clients.c.tenant == self.tenant,
+                        clients.c.token_hash == digest(token),
+                        clients.c.disabled == 0,
+                    )
+                )
+                .mappings()
+                .first()
+            )
             if row and self.mode == "password":
-                active = conn.execute(select(accounts.c.username).where(accounts.c.tenant == self.tenant,
-                    accounts.c.username == row["owner"], accounts.c.disabled == 0)).first()
+                active = conn.execute(
+                    select(accounts.c.username).where(
+                        accounts.c.tenant == self.tenant,
+                        accounts.c.username == row["owner"],
+                        accounts.c.disabled == 0,
+                    )
+                ).first()
                 if not active or not self.ready(conn):
                     return None
-        return Principal(row["owner"], "client:"+row["id"], True, tuple(json.loads(row["projects"])), tuple(json.loads(row["scopes"]))) if row else None
+        return (
+            Principal(
+                row["owner"],
+                "client:" + row["id"],
+                True,
+                tuple(json.loads(row["projects"])),
+                tuple(json.loads(row["scopes"])),
+            )
+            if row
+            else None
+        )

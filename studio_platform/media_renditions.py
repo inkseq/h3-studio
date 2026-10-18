@@ -3,6 +3,7 @@
 All objects remain part of the original immutable asset and upload receipt.
 This module neither reads credentials nor performs storage or database IO.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -41,8 +42,14 @@ def create_image_renditions(source, directory, *, max_bytes):
             for _ in range(6):
                 for quality in (80, 50, 20):
                     output = io.BytesIO()
-                    small.save(output, format="WEBP", quality=quality, method=4,
-                               exif=b"", icc_profile=b"")
+                    small.save(
+                        output,
+                        format="WEBP",
+                        quality=quality,
+                        method=4,
+                        exif=b"",
+                        icc_profile=b"",
+                    )
                     if 0 < output.tell() <= limit:
                         encoded = output.getvalue()
                         break
@@ -51,8 +58,10 @@ def create_image_renditions(source, directory, *, max_bytes):
                 # Noisy lossless alpha alone can exceed the byte cap at320px.
                 # Reduce display dimensions, retaining alpha/aspect and the
                 # original, instead of dropping transparency or serving it raw.
-                small.thumbnail((max(1,small.width*3//4),max(1,small.height*3//4)),
-                                Image.Resampling.LANCZOS)
+                small.thumbnail(
+                    (max(1, small.width * 3 // 4), max(1, small.height * 3 // 4)),
+                    Image.Resampling.LANCZOS,
+                )
             if encoded is None:
                 raise MediaError("图片预览超过容量上限；原件已保留")
             path = directory / f"{role}-v1.webp"
@@ -62,9 +71,15 @@ def create_image_renditions(source, directory, *, max_bytes):
                 target.write(encoded)
                 target.flush()
                 os.fsync(target.fileno())
-            results[role] = dict(filename=path.name, size_bytes=len(encoded),
-                sha256=hashlib.sha256(encoded).hexdigest(), content_type="image/webp",
-                width=small.width, height=small.height, phase="planned")
+            results[role] = dict(
+                filename=path.name,
+                size_bytes=len(encoded),
+                sha256=hashlib.sha256(encoded).hexdigest(),
+                content_type="image/webp",
+                width=small.width,
+                height=small.height,
+                phase="planned",
+            )
     return results
 
 
@@ -76,11 +91,34 @@ def create_video_renditions(source, directory, *, max_bytes):
     unbounded source or decode the complete video. The original is untouched.
     """
     from . import media
-    info = media.inspect(source, "video")  # Metadata only; validates dimensions/stream/rotation bounds.
+
+    info = media.inspect(
+        source, "video"
+    )  # Metadata only; validates dimensions/stream/rotation bounds.
     target = directory / "poster-frame.png"
-    media.ffmpeg(["-i", source, "-map", f'0:{info["video_stream_index"]}', "-an", "-sn", "-dn",
-        "-frames:v", "1", "-vf", "scale=w='min(1280,iw)':h='min(1280,ih)':force_original_aspect_ratio=decrease",
-        "-c:v", "png", "-threads", "1", "-fs", min(POSTER_FRAME_BYTES,max_bytes), target], timeout=30)
+    media.ffmpeg(
+        [
+            "-i",
+            source,
+            "-map",
+            f'0:{info["video_stream_index"]}',
+            "-an",
+            "-sn",
+            "-dn",
+            "-frames:v",
+            "1",
+            "-vf",
+            "scale=w='min(1280,iw)':h='min(1280,ih)':force_original_aspect_ratio=decrease",
+            "-c:v",
+            "png",
+            "-threads",
+            "1",
+            "-fs",
+            min(POSTER_FRAME_BYTES, max_bytes),
+            target,
+        ],
+        timeout=30,
+    )
     if not target.is_file() or not 0 < target.stat().st_size <= POSTER_FRAME_BYTES:
         raise MediaError("视频封面未完整提取；原视频已保留")
     media.inspect(target, "image")
@@ -96,27 +134,56 @@ def public_renditions(record):
     original = record.get("original")
     original = original if isinstance(original, dict) else {}
     source = metadata.get("source_sha256")
-    valid_source = (record.get("status") == "ready" and type(metadata.get("version")) is int and metadata["version"] == 1
-        and isinstance(source, str) and _HASH.fullmatch(source)
-        and source == original.get("sha256"))
+    valid_source = (
+        record.get("status") == "ready"
+        and type(metadata.get("version")) is int
+        and metadata["version"] == 1
+        and isinstance(source, str)
+        and _HASH.fullmatch(source)
+        and source == original.get("sha256")
+    )
     result = {}
     for role, (edge, cap) in RENDITIONS.items():
         item, info = record.get(role), metadata.get(role)
         item = item if isinstance(item, dict) else {}
         info = info if isinstance(info, dict) else {}
-        width, height, size, sha = (info.get("width"), info.get("height"),
-                                  item.get("size_bytes"), item.get("sha256"))
-        if (not valid_source or not item.get("key") or item.get("content_type") != "image/webp"
-                or type(width) is not int or type(height) is not int
-                or not 1 <= width <= edge or not 1 <= height <= edge
-                or type(size) is not int or not 1 <= size <= cap
-                or not isinstance(sha, str) or not _HASH.fullmatch(sha)):
+        width, height, size, sha = (
+            info.get("width"),
+            info.get("height"),
+            item.get("size_bytes"),
+            item.get("sha256"),
+        )
+        if (
+            not valid_source
+            or not item.get("key")
+            or item.get("content_type") != "image/webp"
+            or type(width) is not int
+            or type(height) is not int
+            or not 1 <= width <= edge
+            or not 1 <= height <= edge
+            or type(size) is not int
+            or not 1 <= size <= cap
+            or not isinstance(sha, str)
+            or not _HASH.fullmatch(sha)
+        ):
             continue
-        result[role] = dict(content_url=f'/v1/assets/{record["id"]}/content?rendition={role}',
-            width=width, height=height, size_bytes=size, sha256=sha,
-            content_type="image/webp", immutable=True)
+        result[role] = dict(
+            content_url=f'/v1/assets/{record["id"]}/content?rendition={role}',
+            width=width,
+            height=height,
+            size_bytes=size,
+            sha256=sha,
+            content_type="image/webp",
+            immutable=True,
+        )
     ready = len(result) == len(RENDITIONS)
-    status = "ready" if ready else "pending" if record.get("rendition_status") == "pending" else "missing"
+    status = (
+        "ready"
+        if ready
+        else "pending"
+        if record.get("rendition_status") == "pending"
+        else "missing"
+    )
     public = dict(renditions=result, rendition_ready=ready, rendition_status=status)
     for role, field in (("thumb", "thumbnail_url"), ("preview", "preview_url")):
         if role in result:
@@ -130,12 +197,17 @@ def public_artifact_renditions(record):
     if value.get("kind") != "video":
         return {}
     display = value.get("display_renditions", {})
-    display = display if isinstance(display,dict) else {}
-    objects = display.get("objects",{})
-    objects = objects if isinstance(objects,dict) else {}
-    view = dict(id=record["id"], kind="video", status="ready" if value.get("validated") is True else "pending",
-        original=value, rendition_metadata=display.get("metadata"),
-        **{role: objects.get(role) for role in RENDITIONS})
+    display = display if isinstance(display, dict) else {}
+    objects = display.get("objects", {})
+    objects = objects if isinstance(objects, dict) else {}
+    view = dict(
+        id=record["id"],
+        kind="video",
+        status="ready" if value.get("validated") is True else "pending",
+        original=value,
+        rendition_metadata=display.get("metadata"),
+        **{role: objects.get(role) for role in RENDITIONS},
+    )
     result = public_renditions(view)
     for role, item in result.get("renditions", {}).items():
         item["content_url"] = f'/v1/artifacts/{record["id"]}/content?rendition={role}'

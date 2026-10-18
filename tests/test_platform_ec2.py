@@ -1,4 +1,5 @@
 """Offline checks for the explicitly reviewed small EC2 host profile."""
+
 import json
 from pathlib import Path
 import unittest
@@ -9,7 +10,9 @@ ROOT = Path(__file__).resolve().parents[1] / 'deploy' / 'platform' / 'ec2'
 
 class EC2HostSpecTests(unittest.TestCase):
     def setUp(self):
-        self.spec = json.loads((ROOT / 'launch-spec.json').read_text())['LaunchTemplateData']
+        self.spec = json.loads((ROOT / 'launch-spec.json').read_text())[
+            'LaunchTemplateData'
+        ]
 
     def test_no_ssh_or_container_instance_identity(self):
         self.assertNotIn('KeyName', self.spec)

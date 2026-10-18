@@ -1,4 +1,5 @@
 """Finite pilot guard tests. Fake credentials, HTTP and provider time only."""
+
 import base64
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -12,15 +13,26 @@ import unittest
 import httpx
 from studio_platform.lium_provider import LiumError
 from tools.h3_5090_pilot_cloud import (
-    ExactPilotProvider, Pilot, PilotError, POLICY_5090, POLICY_PRO6000, number, qualify, public_rows,
+    ExactPilotProvider,
+    Pilot,
+    PilotError,
+    POLICY_5090,
+    POLICY_PRO6000,
+    number,
+    qualify,
+    public_rows,
 )
 
 EXECUTOR = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 SECOND = "abababab-abab-4bab-8bab-abababababab"
 POD = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 TEMPLATE = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
-PUBLIC_KEY = "ssh-ed25519 " + base64.b64encode(
-    (11).to_bytes(4, "big") + b"ssh-ed25519" + (32).to_bytes(4, "big") + b"x"*32).decode()
+PUBLIC_KEY = (
+    "ssh-ed25519 "
+    + base64.b64encode(
+        (11).to_bytes(4, "big") + b"ssh-ed25519" + (32).to_bytes(4, "big") + b"x" * 32
+    ).decode()
+)
 
 
 def stamp(value):
@@ -28,11 +40,20 @@ def stamp(value):
 
 
 def node(executor=EXECUTOR, **changes):
-    return {"id": executor, "gpu_model": "RTX 5090", "gpu_count": 1,
-        "available_gpu_count": 1, "min_rentable_gpu_count": 1,
-        "gpu_memory_gb": 32, "cpu_count": 18, "ram_gb": 110,
-        "disk_free_gb": 500, "network_download_mbps": 900,
-        "price_per_gpu_hour": "0.75", **changes}
+    return {
+        "id": executor,
+        "gpu_model": "RTX 5090",
+        "gpu_count": 1,
+        "available_gpu_count": 1,
+        "min_rentable_gpu_count": 1,
+        "gpu_memory_gb": 32,
+        "cpu_count": 18,
+        "ram_gb": 110,
+        "disk_free_gb": 500,
+        "network_download_mbps": 900,
+        "price_per_gpu_hour": "0.75",
+        **changes,
+    }
 
 
 class PilotTests(unittest.TestCase):
@@ -51,7 +72,9 @@ class PilotTests(unittest.TestCase):
         self.expected_gpu_count = 1
         self.auth_price = "0.75"
         self.folder = Path(self.temp.name).resolve() / "pilot"
-        self.pilot = Pilot(self.folder, fetch=self.feed, factory=self.factory, clock=lambda: self.now)
+        self.pilot = Pilot(
+            self.folder, fetch=self.feed, factory=self.factory, clock=lambda: self.now
+        )
 
     def tearDown(self):
         self.temp.cleanup()
@@ -61,10 +84,17 @@ class PilotTests(unittest.TestCase):
 
     def factory(self, **kwargs):
         def loader(service, *, profile):
-            return SimpleNamespace(service="lium", profile="lium--rig-root",
-                base_url="https://lium.io/api", primary_key_variable="LIUM_API_KEY",
-                api_key="fake-key-for-offline-tests")
-        return ExactPilotProvider(**kwargs, loader=loader, transport=httpx.MockTransport(self.http))
+            return SimpleNamespace(
+                service="lium",
+                profile="lium--rig-root",
+                base_url="https://lium.io/api",
+                primary_key_variable="LIUM_API_KEY",
+                api_key="fake-key-for-offline-tests",
+            )
+
+        return ExactPilotProvider(
+            **kwargs, loader=loader, transport=httpx.MockTransport(self.http)
+        )
 
     def http(self, request):
         body = json.loads(request.content) if request.content else None
@@ -74,33 +104,72 @@ class PilotTests(unittest.TestCase):
             if route == "pods":
                 return httpx.Response(200, json=[] if self.removed else self.pods)
             if route == "executors":
-                return httpx.Response(200, json=[{"id": n["id"], "gpu_count": n["gpu_count"],
-                    "available_gpu_count": n["available_gpu_count"], "price_per_gpu": self.auth_price,
-                    "specs": {"gpu": {"details": [{"name": self.auth_gpu, "capacity": self.auth_capacity}
-                                                   for _ in range(n["gpu_count"])]}}}
-                    for n in self.nodes])
+                return httpx.Response(
+                    200,
+                    json=[
+                        {
+                            "id": n["id"],
+                            "gpu_count": n["gpu_count"],
+                            "available_gpu_count": n["available_gpu_count"],
+                            "price_per_gpu": self.auth_price,
+                            "specs": {
+                                "gpu": {
+                                    "details": [
+                                        {
+                                            "name": self.auth_gpu,
+                                            "capacity": self.auth_capacity,
+                                        }
+                                        for _ in range(n["gpu_count"])
+                                    ]
+                                }
+                            },
+                        }
+                        for n in self.nodes
+                    ],
+                )
             if route == "templates":
-                return httpx.Response(200, json=[{"id": TEMPLATE, "name": "offline-template"}])
+                return httpx.Response(
+                    200, json=[{"id": TEMPLATE, "name": "offline-template"}]
+                )
             if route == "pods/" + POD:
                 return httpx.Response(200, json=self.pods[0])
             if route == "pods/" + POD + "/statement":
                 if not self.removed:
                     return httpx.Response(404)
-                return httpx.Response(200, json={"pod_id": POD, "pod_name": self.pods[0]["name"],
-                    "created_at": stamp(1000), "removed_at": stamp(self.now),
-                    "removed": True, "total": "0.012345", "billed_seconds": self.now-1000})
+                return httpx.Response(
+                    200,
+                    json={
+                        "pod_id": POD,
+                        "pod_name": self.pods[0]["name"],
+                        "created_at": stamp(1000),
+                        "removed_at": stamp(self.now),
+                        "removed": True,
+                        "total": "0.012345",
+                        "billed_seconds": self.now - 1000,
+                    },
+                )
         if request.method == "POST" and route.endswith("/rent"):
             # Both durable records must predate the sole mutating rent request.
             state = json.loads((self.folder / "pilot.json").read_text())
             record = state["records"][-1]
-            marker = json.loads((self.folder / "rent-journal" / (record["tag"] + ".json")).read_text())
+            marker = json.loads(
+                (self.folder / "rent-journal" / (record["tag"] + ".json")).read_text()
+            )
             self.assertEqual(marker["phase"], "post_started")
             self.assertEqual(body["termination_hours"], 2)
             self.assertEqual(body["gpu_count"], self.expected_gpu_count)
-            self.pods = [{"id": POD, "name": body["pod_name"], "status": "PENDING",
-                "created_at": stamp(self.now), "removal_scheduled_at": stamp(self.now+7300),
-                "termination_hours": 2, "executor": {"id": EXECUTOR, "executor_ip_address": "8.8.8.8"},
-                "ports_mapping": {"22": 12345}}]
+            self.pods = [
+                {
+                    "id": POD,
+                    "name": body["pod_name"],
+                    "status": "PENDING",
+                    "created_at": stamp(self.now),
+                    "removal_scheduled_at": stamp(self.now + 7300),
+                    "termination_hours": 2,
+                    "executor": {"id": EXECUTOR, "executor_ip_address": "8.8.8.8"},
+                    "ports_mapping": {"22": 12345},
+                }
+            ]
             if self.rent_timeout:
                 raise httpx.ReadTimeout("fake upstream secret must not escape")
             return httpx.Response(200, json={"success": True, "pod_id": POD})
@@ -130,7 +199,9 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(self.count("POST", "/rent"), 1)
         self.assertEqual(self.count("POST", "/schedule-removal"), 0)
         self.now += 120
-        self.pods[0].update(status="RUNNING", removal_scheduled_at=stamp(self.now+7200))
+        self.pods[0].update(
+            status="RUNNING", removal_scheduled_at=stamp(self.now + 7200)
+        )
         verified = self.pilot.ensure_ttl(result["tag"])
         self.assertTrue(verified["ttl_verified"])
         self.assertEqual(verified["deadline"], 8200)
@@ -148,7 +219,10 @@ class PilotTests(unittest.TestCase):
         self.assertFalse((self.folder / "pilot.json").exists())
 
     def test_authenticated_gpu_or_price_mismatch_blocks_before_post(self):
-        for gpu, price in (("NVIDIA RTX 4090", "0.75"), ("NVIDIA GeForce RTX 5090", "0.86")):
+        for gpu, price in (
+            ("NVIDIA RTX 4090", "0.75"),
+            ("NVIDIA GeForce RTX 5090", "0.86"),
+        ):
             self.auth_gpu, self.auth_price = gpu, price
             with self.assertRaises(PilotError):
                 self.rent()
@@ -175,12 +249,14 @@ class PilotTests(unittest.TestCase):
     def test_candidate_change_after_preflight_is_proven_not_submitted(self):
         original = self.feed
         count = 0
+
         def changing():
             nonlocal count
             count += 1
             if count > 1:
                 self.nodes[0]["ram_gb"] = 64
             return original()
+
         self.pilot.fetch = changing
         result = self.rent()
         self.assertEqual(result["phase"], "not_created")
@@ -252,15 +328,21 @@ class PilotTests(unittest.TestCase):
         result = self.rent()
         self.delete_timeout = True
         self.pilot.destroy(result["tag"], idle_confirmed=True)
-        restarted = Pilot(self.folder, fetch=self.feed, factory=self.factory, clock=lambda: self.now)
-        self.assertTrue(restarted.destroy(result["tag"], idle_confirmed=True)["replay_refused"])
+        restarted = Pilot(
+            self.folder, fetch=self.feed, factory=self.factory, clock=lambda: self.now
+        )
+        self.assertTrue(
+            restarted.destroy(result["tag"], idle_confirmed=True)["replay_refused"]
+        )
         self.assertEqual(self.count("DELETE", POD), 1)
         self.nodes.append(node(SECOND))
         with self.assertRaisesRegex(PilotError, "unknown_outcome_hold"):
             restarted.rent(SECOND, TEMPLATE, PUBLIC_KEY)
 
     def test_other_sixnine_pod_blocks_new_pilot(self):
-        self.pods = [{"id": POD, "name": "sixnine-existing-production", "status": "RUNNING"}]
+        self.pods = [
+            {"id": POD, "name": "sixnine-existing-production", "status": "RUNNING"}
+        ]
         with self.assertRaisesRegex(PilotError, "existing_sixnine"):
             self.rent()
         self.assertEqual(self.count("POST", "/rent"), 0)
@@ -294,10 +376,14 @@ class PilotTests(unittest.TestCase):
         self.assertTrue(original["ttl_verified"])
         self.assertEqual(original["phase"], "running")
         self.now += 60
-        self.pods[0].update(status="RUNNING", removal_scheduled_at=stamp(self.now + 7200))
+        self.pods[0].update(
+            status="RUNNING", removal_scheduled_at=stamp(self.now + 7200)
+        )
         self.nodes.append(node(SECOND))
         before = len(self.calls)
-        restarted = Pilot(self.folder, fetch=self.feed, factory=self.factory, clock=lambda: self.now)
+        restarted = Pilot(
+            self.folder, fetch=self.feed, factory=self.factory, clock=lambda: self.now
+        )
         with self.assertRaisesRegex(PilotError, "unknown_outcome_hold"):
             restarted.rent(SECOND, TEMPLATE, PUBLIC_KEY)
         self.assertTrue(self.calls[before:])
@@ -308,7 +394,9 @@ class PilotTests(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["tag"], original["tag"])
         self.assertEqual(records[0]["deadline"], original["deadline"])
-        self.assertEqual(records[0]["collection_deadline"], original["collection_deadline"])
+        self.assertEqual(
+            records[0]["collection_deadline"], original["collection_deadline"]
+        )
         self.assertEqual(records[0]["phase"], "running")
         self.assertFalse(records[0]["ttl_verified"])
 
@@ -333,9 +421,19 @@ class Pro6000PolicyTests(unittest.TestCase):
 
     def setUp(self):
         PilotTests.setUp(self)
-        self.nodes = [node(gpu_model="RTX PRO 6000 Blackwell Server Edition", gpu_count=2,
-            available_gpu_count=2, min_rentable_gpu_count=2, gpu_memory_gb=96,
-            ram_gb=283, disk_free_gb=1269, network_download_mbps=2300, price_per_gpu_hour=1.19)]
+        self.nodes = [
+            node(
+                gpu_model="RTX PRO 6000 Blackwell Server Edition",
+                gpu_count=2,
+                available_gpu_count=2,
+                min_rentable_gpu_count=2,
+                gpu_memory_gb=96,
+                ram_gb=283,
+                disk_free_gb=1269,
+                network_download_mbps=2300,
+                price_per_gpu_hour=1.19,
+            )
+        ]
         self.auth_gpu = "NVIDIA RTX PRO 6000 Blackwell Server Edition"
         self.auth_capacity = 97887
         self.auth_price = 1.19
@@ -343,7 +441,13 @@ class Pro6000PolicyTests(unittest.TestCase):
         self.pilot = self.restart()
 
     def restart(self, policy="pro6000-comparison"):
-        return Pilot(self.folder, policy=policy, fetch=self.feed, factory=self.factory, clock=lambda: self.now)
+        return Pilot(
+            self.folder,
+            policy=policy,
+            fetch=self.feed,
+            factory=self.factory,
+            clock=lambda: self.now,
+        )
 
     def test_dual_card_manifest_reserves_eight_dollars_and_original_two_hour_ttl(self):
         result = self.rent()
@@ -355,21 +459,38 @@ class Pro6000PolicyTests(unittest.TestCase):
         self.pods[0]["status"] = "RUNNING"
         verified = self.pilot.ensure_ttl(result["tag"])
         self.assertTrue(verified["ttl_verified"])
-        self.assertEqual((verified["deadline"], verified["reservation_microusd"]), (8200, 8_000_000))
+        self.assertEqual(
+            (verified["deadline"], verified["reservation_microusd"]), (8200, 8_000_000)
+        )
         state = self.pilot.read()
         self.assertEqual(state["policy"], POLICY_PRO6000.snapshot())
         provider = self.pilot.provider(state["records"][0], PUBLIC_KEY)
         try:
             manifest = next(iter(provider._manifests.values()))
             self.assertEqual(manifest.max_price_per_gpu_hour_microusd, 2_000_000)
-            self.assertEqual((manifest.gpu_count, manifest.execution_slots, manifest.termination_hours), (2, 2, 2))
-            self.assertEqual(manifest.max_price_per_gpu_hour_microusd * manifest.gpu_count
-                             * manifest.termination_hours, result["reservation_microusd"])
+            self.assertEqual(
+                (
+                    manifest.gpu_count,
+                    manifest.execution_slots,
+                    manifest.termination_hours,
+                ),
+                (2, 2, 2),
+            )
+            self.assertEqual(
+                manifest.max_price_per_gpu_hour_microusd
+                * manifest.gpu_count
+                * manifest.termination_hours,
+                result["reservation_microusd"],
+            )
             with self.assertRaisesRegex(PilotError, "manifest_policy_mismatch"):
-                provider._select_offer(replace(manifest, gpu_count=1, execution_slots=1))
+                provider._select_offer(
+                    replace(manifest, gpu_count=1, execution_slots=1)
+                )
         finally:
             provider.close()
-        self.assertTrue(self.restart().rent(EXECUTOR, TEMPLATE, PUBLIC_KEY)["replay_refused"])
+        self.assertTrue(
+            self.restart().rent(EXECUTOR, TEMPLATE, PUBLIC_KEY)["replay_refused"]
+        )
         with self.assertRaisesRegex(PilotError, "rental_count_limit"):
             self.restart().rent(SECOND, TEMPLATE, PUBLIC_KEY)
         self.assertEqual(self.count("POST", "/rent"), 1)
@@ -379,11 +500,20 @@ class Pro6000PolicyTests(unittest.TestCase):
         self.assertEqual(qualify(good, POLICY_PRO6000), [])
         for name in POLICY_PRO6000.gpu_names:
             self.assertEqual(qualify({**good, "gpu_model": name}, POLICY_PRO6000), [])
-        for changes in ({"gpu_model": "RTX 6000 Ada"}, {"gpu_model": "RTX PRO 6000 Blackwell"},
-                        {"gpu_count": 1}, {"gpu_count": 4}, {"min_rentable_gpu_count": 1},
-                        {"available_gpu_count": 1}, {"gpu_memory_gb": 80}, {"ram_gb": 256},
-                        {"disk_free_gb": 350}, {"cpu_count": 11}, {"network_download_mbps": 499},
-                        {"price_per_gpu_hour": "2.000001"}):
+        for changes in (
+            {"gpu_model": "RTX 6000 Ada"},
+            {"gpu_model": "RTX PRO 6000 Blackwell"},
+            {"gpu_count": 1},
+            {"gpu_count": 4},
+            {"min_rentable_gpu_count": 1},
+            {"available_gpu_count": 1},
+            {"gpu_memory_gb": 80},
+            {"ram_gb": 256},
+            {"disk_free_gb": 350},
+            {"cpu_count": 11},
+            {"network_download_mbps": 499},
+            {"price_per_gpu_hour": "2.000001"},
+        ):
             with self.subTest(changes=changes):
                 self.assertTrue(qualify({**good, **changes}, POLICY_PRO6000))
         self.assertEqual(qualify({**good, "price_per_gpu_hour": 2}, POLICY_PRO6000), [])
@@ -392,10 +522,16 @@ class Pro6000PolicyTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
 
     def test_authenticated_card_identity_capacity_and_price_fail_before_rent(self):
-        for gpu, capacity, price in (("NVIDIA RTX 6000 Ada Generation", 97887, 1.19),
-                                    (self.auth_gpu, 81920, 1.19), (self.auth_gpu, 97887, 2.01)):
+        for gpu, capacity, price in (
+            ("NVIDIA RTX 6000 Ada Generation", 97887, 1.19),
+            (self.auth_gpu, 81920, 1.19),
+            (self.auth_gpu, 97887, 2.01),
+        ):
             self.auth_gpu, self.auth_capacity, self.auth_price = gpu, capacity, price
-            with self.subTest(gpu=gpu, capacity=capacity, price=price), self.assertRaises(PilotError):
+            with (
+                self.subTest(gpu=gpu, capacity=capacity, price=price),
+                self.assertRaises(PilotError),
+            ):
                 self.rent()
         self.assertEqual(self.count("POST", "/rent"), 0)
         self.assertFalse((self.folder / "pilot.json").exists())
@@ -412,8 +548,14 @@ class Pro6000PolicyTests(unittest.TestCase):
         state = self.pilot.read()
         self.assertEqual(state["policy"], POLICY_PRO6000.snapshot())
         with self.assertRaisesRegex(PilotError, "policy_mismatch"):
-            self.restart("5090").save({"version": 2, "purpose": POLICY_5090.purpose,
-                                      "policy": POLICY_5090.snapshot(), "records": []})
+            self.restart("5090").save(
+                {
+                    "version": 2,
+                    "purpose": POLICY_5090.purpose,
+                    "policy": POLICY_5090.snapshot(),
+                    "records": [],
+                }
+            )
         self.assertEqual(len(self.calls), before)
         self.assertEqual(len(self.pilot.read()["records"]), 1)
 
@@ -426,10 +568,14 @@ class Pro6000PolicyTests(unittest.TestCase):
             self.pilot.rent(EXECUTOR, TEMPLATE, PUBLIC_KEY)
         self.assertEqual(self.calls, [])
 
-    def test_pro_ttl_drift_requires_explicit_shortening_without_renewal_or_new_rent(self):
+    def test_pro_ttl_drift_requires_explicit_shortening_without_renewal_or_new_rent(
+        self,
+    ):
         result = self.rent()
         self.now += 60
-        self.pods[0].update(status="RUNNING", removal_scheduled_at=stamp(self.now + 7200))
+        self.pods[0].update(
+            status="RUNNING", removal_scheduled_at=stamp(self.now + 7200)
+        )
         before = len(self.calls)
         record = self.restart().reconcile(result["tag"])["records"][0]
         self.assertFalse(record["ttl_verified"])
@@ -438,7 +584,9 @@ class Pro6000PolicyTests(unittest.TestCase):
         fixed = self.restart().ensure_ttl(result["tag"])
         self.assertTrue(fixed["ttl_verified"])
         self.assertEqual(fixed["deadline"], result["deadline"])
-        self.assertLessEqual(self.pilot.read()["records"][0]["verified_removal_at"], result["deadline"])
+        self.assertLessEqual(
+            self.pilot.read()["records"][0]["verified_removal_at"], result["deadline"]
+        )
         self.assertEqual(self.count("POST", "/rent"), 1)
 
     def test_unknown_dual_card_post_keeps_full_reservation_and_cannot_replay(self):
@@ -448,7 +596,9 @@ class Pro6000PolicyTests(unittest.TestCase):
         self.assertEqual(result["reservation_microusd"], 8_000_000)
         self.assertFalse(result["ttl_verified"])
         before = len(self.calls)
-        self.assertTrue(self.restart().rent(EXECUTOR, TEMPLATE, PUBLIC_KEY)["replay_refused"])
+        self.assertTrue(
+            self.restart().rent(EXECUTOR, TEMPLATE, PUBLIC_KEY)["replay_refused"]
+        )
         with self.assertRaisesRegex(PilotError, "rental_count_limit"):
             self.restart().rent(SECOND, TEMPLATE, PUBLIC_KEY)
         self.assertEqual(len(self.calls), before)

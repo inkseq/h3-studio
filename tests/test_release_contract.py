@@ -10,8 +10,13 @@ class CompatibilityFingerprints(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        for name in (*FIXED, *AGENT_FILES, 'studio_platform/api.py',
-                     'studio_platform/frontend.py', 'studio_platform/agent_discovery.py'):
+        for name in (
+            *FIXED,
+            *AGENT_FILES,
+            'studio_platform/api.py',
+            'studio_platform/frontend.py',
+            'studio_platform/agent_discovery.py',
+        ):
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b'first\nsecond\n')
@@ -31,7 +36,9 @@ class CompatibilityFingerprints(unittest.TestCase):
         (self.root / 'studio_platform/api.py').write_text('new admission contract')
         after = build_contracts(self.root)
         self.assertNotEqual(middle['api_compatibility'], after['api_compatibility'])
-        self.assertNotEqual(middle['worker_compatibility'], after['worker_compatibility'])
+        self.assertNotEqual(
+            middle['worker_compatibility'], after['worker_compatibility']
+        )
 
     def test_reference_changes_are_in_api_source_identity(self):
         before = build_contracts(self.root)
@@ -48,9 +55,14 @@ class CompatibilityFingerprints(unittest.TestCase):
         before = build_contracts(self.root)
         (self.root / 'studio_platform/new_worker.py').write_text('new code')
         after = build_contracts(self.root)
-        self.assertNotEqual(before['worker_compatibility'], after['worker_compatibility'])
+        self.assertNotEqual(
+            before['worker_compatibility'], after['worker_compatibility']
+        )
         (self.root / 'tools/release_contract.py').write_text('new exclusion policy')
-        self.assertNotEqual(after['worker_compatibility'], build_contracts(self.root)['worker_compatibility'])
+        self.assertNotEqual(
+            after['worker_compatibility'],
+            build_contracts(self.root)['worker_compatibility'],
+        )
 
     def test_normalized_line_endings_are_cross_platform(self):
         before = build_contracts(self.root)
@@ -65,7 +77,9 @@ class CompatibilityFingerprints(unittest.TestCase):
             (self.root / name).write_text('changed model/component/runtime binding')
             after = build_contracts(self.root)
             self.assertNotEqual(before['api_compatibility'], after['api_compatibility'])
-            self.assertNotEqual(before['worker_compatibility'], after['worker_compatibility'])
+            self.assertNotEqual(
+                before['worker_compatibility'], after['worker_compatibility']
+            )
 
     def test_missing_required_input_fails_closed(self):
         (self.root / 'requirements.lock.txt').unlink()

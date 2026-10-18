@@ -1,4 +1,5 @@
 """Bounded copy safety with isolated local files and fake R2; never DB/cloud IO."""
+
 import io
 import json
 import os
@@ -8,8 +9,12 @@ import tempfile
 from unittest import mock
 
 from studio_platform.storage import LocalObjectStore, S3ObjectStore
-from studio_platform.storage_migration import (MigrationError, apply_plan, create_plan,
-                                             verify_plan)
+from studio_platform.storage_migration import (
+    MigrationError,
+    apply_plan,
+    create_plan,
+    verify_plan,
+)
 from studio_platform.storage_migration_cli import main as migration_main
 from test_platform_storage import FakeClientError, FakeS3, OfflineTest, config
 
@@ -36,8 +41,13 @@ class StorageMigrationTests(OfflineTest):
         self.fake = FakeS3(self.config)
         self.remote = S3ObjectStore(self.config, client=self.fake)
         self.receipts = self.root / "private-plan"
-        self.item = self.local.write_new("supervan", "original", io.BytesIO(b"private-original-bytes"),
-                                         filename="source.png", content_type="image/png")
+        self.item = self.local.write_new(
+            "supervan",
+            "original",
+            io.BytesIO(b"private-original-bytes"),
+            filename="source.png",
+            content_type="image/png",
+        )
 
     def plan(self):
         return create_plan(self.local.root, self.config, self.receipts)
@@ -46,8 +56,13 @@ class StorageMigrationTests(OfflineTest):
         return sum(name == "put" for name, _ in self.fake.calls)
 
     def test_plan_is_offline_then_copy_uses_same_key_hash_mime_and_keeps_local(self):
-        second = self.local.write_new("superdan", "output", io.BytesIO(b"separate-audio"),
-                                      filename="verified.flac", content_type="audio/flac")
+        second = self.local.write_new(
+            "superdan",
+            "output",
+            io.BytesIO(b"separate-audio"),
+            filename="verified.flac",
+            content_type="audio/flac",
+        )
         planned = self.plan()
         self.assertEqual(self.fake.calls, [])
         self.assertEqual(planned["objects"], 2)
@@ -59,9 +74,18 @@ class StorageMigrationTests(OfflineTest):
         for item in (self.item, second):
             self.assertEqual(self.remote.stat(item.key).sha256, item.sha256)
             self.assertEqual(self.remote.stat(item.key).content_type, item.content_type)
-            with self.local.open(item.key) as source, self.remote.open(item.key) as target:
+            with (
+                self.local.open(item.key) as source,
+                self.remote.open(item.key) as target,
+            ):
                 self.assertEqual(source.read(), target.read())
-        self.assertTrue(all(call["IfNoneMatch"] == "*" for name, call in self.fake.calls if name == "put"))
+        self.assertTrue(
+            all(
+                call["IfNoneMatch"] == "*"
+                for name, call in self.fake.calls
+                if name == "put"
+            )
+        )
         self.assertEqual(apply_plan(self.receipts, self.remote)["objects"], 2)
         self.assertEqual(self.puts(), 2)
         self.assertEqual(verify_plan(self.receipts, self.remote)["objects"], 2)
@@ -70,15 +94,21 @@ class StorageMigrationTests(OfflineTest):
     def test_existing_identical_object_is_adopted_without_put(self):
         self.plan()
         with self.local.open(self.item.key) as source:
-            self.remote.put(self.item.key, source, content_type=self.item.content_type,
-                            expected_sha256=self.item.sha256)
+            self.remote.put(
+                self.item.key,
+                source,
+                content_type=self.item.content_type,
+                expected_sha256=self.item.sha256,
+            )
         before = self.puts()
         apply_plan(self.receipts, self.remote)
         self.assertEqual(self.puts(), before)
 
     def test_existing_different_object_is_never_overwritten(self):
         self.plan()
-        self.remote.put(self.item.key, io.BytesIO(b"other"), content_type=self.item.content_type)
+        self.remote.put(
+            self.item.key, io.BytesIO(b"other"), content_type=self.item.content_type
+        )
         before = self.puts()
         with self.assertRaisesRegex(MigrationError, "remote_metadata_mismatch"):
             apply_plan(self.receipts, self.remote)
@@ -88,8 +118,12 @@ class StorageMigrationTests(OfflineTest):
     def test_matching_head_metadata_does_not_replace_full_get_hash(self):
         self.plan()
         with self.local.open(self.item.key) as source:
-            self.remote.put(self.item.key, source, content_type=self.item.content_type,
-                            expected_sha256=self.item.sha256)
+            self.remote.put(
+                self.item.key,
+                source,
+                content_type=self.item.content_type,
+                expected_sha256=self.item.sha256,
+            )
         self.fake.objects[self.item.key]["body"] = b"x" * self.item.size_bytes
         before = self.puts()
         with self.assertRaisesRegex(MigrationError, "remote_hash_mismatch"):
@@ -104,7 +138,9 @@ class StorageMigrationTests(OfflineTest):
             apply_plan(self.receipts, self.remote)
         receipt = json.loads((self.receipts / "copy-receipt.json").read_text())
         self.assertEqual(receipt["objects"][self.item.key], "unknown")
-        self.assertEqual(apply_plan(self.receipts, self.remote)["state"], "migration_copy_verified")
+        self.assertEqual(
+            apply_plan(self.receipts, self.remote)["state"], "migration_copy_verified"
+        )
         self.assertEqual(self.puts(), 1)
 
     def test_uncertain_missing_object_never_retries_put(self):
@@ -120,7 +156,9 @@ class StorageMigrationTests(OfflineTest):
 
     def test_changed_source_refuses_before_remote_access(self):
         self.plan()
-        (self.local._directory(self.item.key) / "blob").write_bytes(b"x" * self.item.size_bytes)
+        (self.local._directory(self.item.key) / "blob").write_bytes(
+            b"x" * self.item.size_bytes
+        )
         with self.assertRaises(Exception):
             apply_plan(self.receipts, self.remote)
         self.assertEqual(self.fake.calls, [])
@@ -138,11 +176,15 @@ class StorageMigrationTests(OfflineTest):
         objects = json.loads((self.receipts / "plan.json").read_text())["objects"]
         first = objects[0]
         original = self.fake.put_object
+
         def change_prior(**kwargs):
             response = original(**kwargs)
             if kwargs["Key"] == objects[1]["key"]:
-                (self.local._directory(first["key"]) / "blob").write_bytes(b"x" * first["size_bytes"])
+                (self.local._directory(first["key"]) / "blob").write_bytes(
+                    b"x" * first["size_bytes"]
+                )
             return response
+
         self.fake.put_object = change_prior
         with self.assertRaises(MigrationError):
             apply_plan(self.receipts, self.remote)
@@ -170,15 +212,30 @@ class StorageMigrationTests(OfflineTest):
         self.assertFalse(self.receipts.exists())
 
     def arguments(self, action):
-        return [action, "--receipt-dir", str(self.receipts), "--endpoint", self.config.endpoint_url,
-                "--bucket", self.config.bucket, "--profile", self.config.profile]
+        return [
+            action,
+            "--receipt-dir",
+            str(self.receipts),
+            "--endpoint",
+            self.config.endpoint_url,
+            "--bucket",
+            self.config.bucket,
+            "--profile",
+            self.config.profile,
+        ]
 
     def test_cli_offline_plan_never_loads_credentials_or_initializes_client(self):
-        loader, factory = mock.Mock(side_effect=AssertionError()), mock.Mock(side_effect=AssertionError())
+        loader, factory = (
+            mock.Mock(side_effect=AssertionError()),
+            mock.Mock(side_effect=AssertionError()),
+        )
         output = io.StringIO()
         with redirect_stdout(output):
-            code = migration_main(self.arguments("plan") + ["--source-root", str(self.local.root)],
-                                  credentials_loader=loader, store_factory=factory)
+            code = migration_main(
+                self.arguments("plan") + ["--source-root", str(self.local.root)],
+                credentials_loader=loader,
+                store_factory=factory,
+            )
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(output.getvalue())["state"], "migration_planned")
         loader.assert_not_called()
@@ -191,8 +248,12 @@ class StorageMigrationTests(OfflineTest):
         for action in ("apply", "verify"):
             output = io.StringIO()
             with redirect_stdout(output):
-                code = migration_main(self.arguments(action) + ["--credentials-file", str(self.root / "protected")],
-                                      credentials_loader=loader, store_factory=factory)
+                code = migration_main(
+                    self.arguments(action)
+                    + ["--credentials-file", str(self.root / "protected")],
+                    credentials_loader=loader,
+                    store_factory=factory,
+                )
             self.assertEqual(code, 0)
             self.assertEqual(json.loads(output.getvalue())["objects"], 1)
             self.assertNotIn(self.item.key, output.getvalue())
@@ -200,13 +261,24 @@ class StorageMigrationTests(OfflineTest):
 
     def test_cli_secret_loader_failure_is_redacted_and_never_calls_client(self):
         self.plan()
-        loader = mock.Mock(side_effect=RuntimeError("SECRET-fake-key https://private.invalid?signature=secret"))
+        loader = mock.Mock(
+            side_effect=RuntimeError(
+                "SECRET-fake-key https://private.invalid?signature=secret"
+            )
+        )
         factory, output = mock.Mock(), io.StringIO()
         with redirect_stdout(output):
-            code = migration_main(self.arguments("apply") + ["--credentials-file", str(self.root / "protected")],
-                                  credentials_loader=loader, store_factory=factory)
+            code = migration_main(
+                self.arguments("apply")
+                + ["--credentials-file", str(self.root / "protected")],
+                credentials_loader=loader,
+                store_factory=factory,
+            )
         self.assertEqual(code, 1)
-        self.assertEqual(json.loads(output.getvalue())["reason_code"], "migration_configuration_or_transport_failed")
+        self.assertEqual(
+            json.loads(output.getvalue())["reason_code"],
+            "migration_configuration_or_transport_failed",
+        )
         self.assertNotIn("SECRET", output.getvalue())
         self.assertNotIn("signature", output.getvalue())
         factory.assert_not_called()

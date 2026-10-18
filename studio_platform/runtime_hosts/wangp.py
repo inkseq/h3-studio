@@ -3,6 +3,7 @@
 No WanGP imports, listener, model loading, background polling or automatic retry.
 The caller supplies a protected output directory and a pinned runtime manifest.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -15,29 +16,57 @@ import uuid
 
 from ..inference.protocol import BackendError, NotReady, safe_failure_code
 from ..inference.wangp_contract import (
-    ArtifactDescriptor, EngineManifest, HostReadiness, PreparedRequest,
-    RuntimeObservation, RuntimeOutput, TERMINAL, canonical_json, _object,
+    ArtifactDescriptor,
+    EngineManifest,
+    HostReadiness,
+    PreparedRequest,
+    RuntimeObservation,
+    RuntimeOutput,
+    TERMINAL,
+    canonical_json,
+    _object,
     safe_model_progress,
 )
-from .wangp_receipts import ReceiptJournal, checked_directory, checked_reader, sync_directory
+from .wangp_receipts import (
+    ReceiptJournal,
+    checked_directory,
+    checked_reader,
+    sync_directory,
+)
 
 
 class WanGPHost:
-    def __init__(self, *, session, journal: ReceiptJournal, manifest: EngineManifest,
-                 output_root: Path, sealed_root: Path, settings_resolver: Callable | None = None,
-                 max_artifact_bytes=512 * 1024 * 1024, max_transfer_seconds=180,
-                 fault_hook: Callable[[str], None] | None = None, delivery_processor=None):
-        if (manifest.digest != journal.manifest_digest or type(max_artifact_bytes) is not int
-                or max_artifact_bytes <= 0 or not 0 < max_transfer_seconds < float("inf")):
+    def __init__(
+        self,
+        *,
+        session,
+        journal: ReceiptJournal,
+        manifest: EngineManifest,
+        output_root: Path,
+        sealed_root: Path,
+        settings_resolver: Callable | None = None,
+        max_artifact_bytes=512 * 1024 * 1024,
+        max_transfer_seconds=180,
+        fault_hook: Callable[[str], None] | None = None,
+        delivery_processor=None,
+    ):
+        if (
+            manifest.digest != journal.manifest_digest
+            or type(max_artifact_bytes) is not int
+            or max_artifact_bytes <= 0
+            or not 0 < max_transfer_seconds < float("inf")
+        ):
             raise ValueError("wangp_invalid_host_configuration")
         if manifest.document.get('deployment_profile_id') is not None:
             from ..runtime_catalog import validate_manifest
+
             validate_manifest(manifest)
         self.session, self.journal, self.manifest = session, journal, manifest
         self.output_root = checked_directory(output_root)
         self.sealed_root = checked_directory(sealed_root, create=True)
-        if (self.output_root.is_relative_to(self.sealed_root)
-                or self.sealed_root.is_relative_to(self.output_root)):
+        if self.output_root.is_relative_to(
+            self.sealed_root
+        ) or self.sealed_root.is_relative_to(self.output_root):
             raise ValueError("wangp_sealed_root_must_be_separate")
         self.settings_resolver = settings_resolver
         self.max_bytes, self.max_seconds = max_artifact_bytes, max_transfer_seconds
@@ -86,13 +115,23 @@ class WanGPHost:
             try:
                 probe = getattr(self.session, "preparation", None)
                 source = probe() if callable(probe) else None
-                model = safe_model_progress(source.get("model")) if type(source) is dict else None
+                model = (
+                    safe_model_progress(source.get("model"))
+                    if type(source) is dict
+                    else None
+                )
                 if model is not None:
                     preparation = {"model": model}
             except Exception:
                 pass  # Optional telemetry cannot alter slot/obligation checks.
-            return HostReadiness(self.manifest.digest, self.journal.slot_key, self.incarnation,
-                                 idle, "" if idle else "wangp_slot_obligation_or_runtime_busy", preparation)
+            return HostReadiness(
+                self.manifest.digest,
+                self.journal.slot_key,
+                self.incarnation,
+                idle,
+                "" if idle else "wangp_slot_obligation_or_runtime_busy",
+                preparation,
+            )
 
     def submit(self, prepared: PreparedRequest):
         if not isinstance(prepared, PreparedRequest):
@@ -118,9 +157,13 @@ class WanGPHost:
             try:
                 if self.manifest.document.get('deployment_profile_id') is not None:
                     from ..inference.wangp_profile_dispatch import validate_prepared
+
                     validate_prepared(prepared, self.manifest)
-                settings = (self.settings_resolver(prepared) if self.settings_resolver
-                            else prepared.settings)
+                settings = (
+                    self.settings_resolver(prepared)
+                    if self.settings_resolver
+                    else prepared.settings
+                )
                 settings = _object(canonical_json(settings))
             except Exception:
                 raise BackendError("wangp_settings_resolution_failed") from None
@@ -132,24 +175,38 @@ class WanGPHost:
             self._fault("after_prepared")
             receipt = self.journal.get(prepared.operation_id)
             if receipt.cancel_requested:
-                return self.journal.transition(prepared.operation_id, expected={"prepared"},
-                    state="cancelled", stop_proven=True, reason="wangp_cancelled_before_dispatch")
-            receipt = self.journal.transition(prepared.operation_id, expected={"prepared"},
-                                              state="dispatch_intent")
+                return self.journal.transition(
+                    prepared.operation_id,
+                    expected={"prepared"},
+                    state="cancelled",
+                    stop_proven=True,
+                    reason="wangp_cancelled_before_dispatch",
+                )
+            receipt = self.journal.transition(
+                prepared.operation_id, expected={"prepared"}, state="dispatch_intent"
+            )
             if receipt.state != "dispatch_intent" or receipt.hold_reason:
                 return receipt
             # Journal transaction is committed and closed before the external call.
             self._fault("after_intent")
             try:
                 handle = self.session.submit_task(settings)
-                if not callable(getattr(handle, "observe", None)) or not callable(getattr(handle, "cancel", None)):
+                if not callable(getattr(handle, "observe", None)) or not callable(
+                    getattr(handle, "cancel", None)
+                ):
                     raise ValueError
             except Exception:
-                return self.journal.transition(prepared.operation_id, expected={"dispatch_intent"},
-                    state="unknown", reason="wangp_dispatch_unknown")
+                return self.journal.transition(
+                    prepared.operation_id,
+                    expected={"dispatch_intent"},
+                    state="unknown",
+                    reason="wangp_dispatch_unknown",
+                )
             self._handles[prepared.operation_id] = handle
             self._fault("after_handle")
-            return self.journal.transition(prepared.operation_id, expected={"dispatch_intent"}, state="running")
+            return self.journal.transition(
+                prepared.operation_id, expected={"dispatch_intent"}, state="running"
+            )
 
     def inspect(self, operation_id):
         with self._lock:
@@ -165,25 +222,48 @@ class WanGPHost:
                 if not isinstance(observation, RuntimeObservation):
                     raise ValueError
                 if observation.state == "running" and observation.stopped is False:
-                    return self.journal.transition(operation_id, expected={"running", "unknown"}, state="running")
+                    return self.journal.transition(
+                        operation_id, expected={"running", "unknown"}, state="running"
+                    )
                 if observation.state not in TERMINAL or observation.stopped is not True:
-                    return self.journal.transition(operation_id, expected={"running", "unknown", "sealing"},
-                        state="unknown", reason="wangp_stop_unproven")
+                    return self.journal.transition(
+                        operation_id,
+                        expected={"running", "unknown", "sealing"},
+                        state="unknown",
+                        reason="wangp_stop_unproven",
+                    )
                 if observation.state in {"failed", "cancelled"}:
-                    reason = (safe_failure_code(observation.error_code)
-                        if observation.state == "failed" else None) or "wangp_runtime_stop_confirmed"
-                    result = self.journal.transition(operation_id, expected={"running", "unknown"},
-                        state=observation.state, stop_proven=True, reason=reason)
+                    reason = (
+                        safe_failure_code(observation.error_code)
+                        if observation.state == "failed"
+                        else None
+                    ) or "wangp_runtime_stop_confirmed"
+                    result = self.journal.transition(
+                        operation_id,
+                        expected={"running", "unknown"},
+                        state=observation.state,
+                        stop_proven=True,
+                        reason=reason,
+                    )
                     # Retain the original handle/diagnostic if persistence fails.
                     self._handles.pop(operation_id, None)
                     return result
-                self.journal.transition(operation_id, expected={"running", "unknown"},
-                                        state="sealing", stop_proven=True)
+                self.journal.transition(
+                    operation_id,
+                    expected={"running", "unknown"},
+                    state="sealing",
+                    stop_proven=True,
+                )
                 self._fault("after_sealing")
                 descriptors = self._seal(receipt, dict(observation.outputs))
                 self._fault("after_seal_before_commit")
-                result = self.journal.transition(operation_id, expected={"sealing"}, state="succeeded",
-                                                 stop_proven=True, artifacts=descriptors)
+                result = self.journal.transition(
+                    operation_id,
+                    expected={"sealing"},
+                    state="succeeded",
+                    stop_proven=True,
+                    artifacts=descriptors,
+                )
                 self._fault("after_success")
                 self._handles.pop(operation_id, None)
                 return result
@@ -191,62 +271,80 @@ class WanGPHost:
                 # Output-copy failure is recoverable from the same handle/result.
                 # Never expose raw upstream errors or declare stopped from an error.
                 latest = self.journal.get(operation_id)
-                return self.journal.transition(operation_id, expected={"running", "unknown", "sealing"},
-                    state="unknown", stop_proven=latest.stop_proven,
-                    reason="wangp_observation_or_collection_unknown")
-
+                return self.journal.transition(
+                    operation_id,
+                    expected={"running", "unknown", "sealing"},
+                    state="unknown",
+                    stop_proven=latest.stop_proven,
+                    reason="wangp_observation_or_collection_unknown",
+                )
 
     def _delivery_original(self, identity):
         from ..inference.wangp_delivery import POLICY, validate_identity
-        identity=validate_identity(identity)
+
+        identity = validate_identity(identity)
         with self._lock:
             self._open()
-            if self.manifest.document.get('output_delivery')!=POLICY:
+            if self.manifest.document.get('output_delivery') != POLICY:
                 raise NotReady('wangp_delivery_capability_unavailable')
-            original=self.journal.get(identity['operation_id'])
-            if original is None or original.state!='succeeded' or not original.stop_proven or original.hold_reason:
+            original = self.journal.get(identity['operation_id'])
+            if (
+                original is None
+                or original.state != 'succeeded'
+                or not original.stop_proven
+                or original.hold_reason
+            ):
                 raise NotReady('wangp_delivery_original_output_unavailable')
-            if identity!={name:getattr(original,name) for name in identity} or original.incarnation!=self.incarnation:
+            if (
+                identity != {name: getattr(original, name) for name in identity}
+                or original.incarnation != self.incarnation
+            ):
                 raise NotReady('wangp_delivery_identity_mismatch')
             return original
 
-    def _delivery_lock(self,op):
+    def _delivery_lock(self, op):
         with self._lock:
-            return self._delivery_locks.setdefault(op,threading.Lock())
+            return self._delivery_locks.setdefault(op, threading.Lock())
 
     def _delivery_engine(self):
         with self._lock:
             if self._delivery_processor is None:
                 from .wangp_delivery import GPUDelivery
-                self._delivery_processor=GPUDelivery(self.sealed_root)
+
+                self._delivery_processor = GPUDelivery(self.sealed_root)
             return self._delivery_processor
 
-    def prepare_delivery(self,request):
+    def prepare_delivery(self, request):
         from ..inference.wangp_delivery import validate_delivery_request
-        request=validate_delivery_request(request)
-        original=self._delivery_original(request['identity'])
+
+        request = validate_delivery_request(request)
+        original = self._delivery_original(request['identity'])
         if request['generate_audio'] is not original.generate_audio:
             raise NotReady('wangp_delivery_audio_mismatch')
         with self._delivery_lock(original.operation_id):
             # Only the per-operation lock spans FFmpeg, never the readiness lock.
             self._delivery_original(request['identity'])
-            return self._delivery_engine().prepare(request,original,
-                self.journal.delivery_context(original.operation_id),self.journal)
+            return self._delivery_engine().prepare(
+                request,
+                original,
+                self.journal.delivery_context(original.operation_id),
+                self.journal,
+            )
 
-    def delivery_status(self,identity):
-        original=self._delivery_original(identity)
+    def delivery_status(self, identity):
+        original = self._delivery_original(identity)
         with self._delivery_lock(original.operation_id):
             self._delivery_original(identity)
             return self.journal.delivery(original.operation_id)
 
-    def upload_delivery(self,identity,fingerprint,targets):
-        original=self._delivery_original(identity)
+    def upload_delivery(self, identity, fingerprint, targets):
+        original = self._delivery_original(identity)
         with self._delivery_lock(original.operation_id):
             self._delivery_original(identity)
-            value=self.journal.delivery(original.operation_id)
-            if value is None or value['fingerprint']!=fingerprint:
+            value = self.journal.delivery(original.operation_id)
+            if value is None or value['fingerprint'] != fingerprint:
                 raise NotReady('wangp_delivery_fingerprint_mismatch')
-            return self._delivery_engine().upload(original,targets,self.journal)
+            return self._delivery_engine().upload(original, targets, self.journal)
 
     def cancel(self, operation_id):
         with self._lock:
@@ -255,8 +353,13 @@ class WanGPHost:
             if receipt is None or receipt.state in TERMINAL:
                 return False
             if receipt.state == "prepared":
-                self.journal.transition(operation_id, expected={"prepared"}, state="cancelled",
-                    stop_proven=True, reason="wangp_cancelled_before_dispatch")
+                self.journal.transition(
+                    operation_id,
+                    expected={"prepared"},
+                    state="cancelled",
+                    stop_proven=True,
+                    reason="wangp_cancelled_before_dispatch",
+                )
                 return True
             handle = self._handles.get(operation_id)
             if handle is None or receipt.hold_reason:
@@ -268,7 +371,9 @@ class WanGPHost:
 
     def _seal(self, receipt, outputs):
         expected = {"video", "audio"} if receipt.generate_audio else {"video"}
-        if set(outputs) != expected or any(not isinstance(v, RuntimeOutput) for v in outputs.values()):
+        if set(outputs) != expected or any(
+            not isinstance(v, RuntimeOutput) for v in outputs.values()
+        ):
             raise BackendError("wangp_incomplete_outputs")
         folder = checked_directory(self.sealed_root / receipt.operation_id, create=True)
         descriptors = []
@@ -279,16 +384,24 @@ class WanGPHost:
             temporary = folder / (uuid.uuid4().hex + ".part")
             total, hasher, start = 0, hashlib.sha256(), time.monotonic()
             try:
-                with checked_reader(output.path, self.output_root) as source, temporary.open("xb") as target:
+                with (
+                    checked_reader(output.path, self.output_root) as source,
+                    temporary.open("xb") as target,
+                ):
                     while chunk := source.read(1024 * 1024):
                         total += len(chunk)
-                        if total > self.max_bytes or time.monotonic() - start > self.max_seconds:
+                        if (
+                            total > self.max_bytes
+                            or time.monotonic() - start > self.max_seconds
+                        ):
                             raise BackendError("wangp_artifact_limit")
                         hasher.update(chunk)
                         target.write(chunk)
                     target.flush()
                     os.fsync(target.fileno())
-                descriptor = ArtifactDescriptor(kind, hasher.hexdigest(), total, output.media_type)
+                descriptor = ArtifactDescriptor(
+                    kind, hasher.hexdigest(), total, output.media_type
+                )
                 final = folder / (kind + "-" + descriptor.sha256 + ".bin")
                 if final.exists():
                     self._verify_sealed(final, descriptor)
@@ -321,13 +434,18 @@ class WanGPHost:
         descriptor = next((v for v in receipt.artifacts if v.kind == kind), None)
         if descriptor is None:
             raise BackendError("wangp_artifact_missing")
-        path = self.sealed_root / operation_id / (kind + "-" + descriptor.sha256 + ".bin")
+        path = (
+            self.sealed_root / operation_id / (kind + "-" + descriptor.sha256 + ".bin")
+        )
         size, hasher, start = 0, hashlib.sha256(), time.monotonic()
         with checked_reader(path, self.sealed_root) as stream:
             while chunk := stream.read(1024 * 1024):
                 size += len(chunk)
-                if (size > descriptor.size_bytes or size > self.max_bytes
-                        or time.monotonic() - start > self.max_seconds):
+                if (
+                    size > descriptor.size_bytes
+                    or size > self.max_bytes
+                    or time.monotonic() - start > self.max_seconds
+                ):
                     raise BackendError("wangp_artifact_limit")
                 hasher.update(chunk)
                 yield chunk

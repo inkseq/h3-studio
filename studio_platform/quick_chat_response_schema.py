@@ -1,4 +1,5 @@
 """Public card authoring readback shapes; no additional state or side effects."""
+
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
@@ -79,7 +80,16 @@ class AccessError(BaseModel):
 
 AUTHORING_ERRORS = {
     401: {"model": AccessError, "description": "Authentication is required."},
-    404: {"model": AccessError, "description": "Resource is absent or inaccessible to this owner."},
-    409: {"model": AuthoringError, "description": "Stale card version or conflicting idempotency key. Reconcile the current card before a new logical edit."},
-    422: {"model": AuthoringError, "description": "Invalid authoring fields. field_errors contains bounded field paths and static reasons, never submitted values."},
+    404: {
+        "model": AccessError,
+        "description": "Resource is absent or inaccessible to this owner.",
+    },
+    409: {
+        "model": AuthoringError,
+        "description": "Stale card version or conflicting idempotency key. Reconcile the current card before a new logical edit.",
+    },
+    422: {
+        "model": AuthoringError,
+        "description": "Invalid authoring fields. field_errors contains bounded field paths and static reasons, never submitted values.",
+    },
 }

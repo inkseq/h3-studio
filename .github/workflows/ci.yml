@@ -143,6 +143,12 @@ jobs:
         timeout-minutes: 10
         run: python tools/ci_media_tools.py install "${{ runner.temp }}/sixnine-ci-apt"
       - run: python -m pip install --require-hashes -r requirements.dispatch.lock.txt
+      - name: Check pinned Python formatting and fatal lint
+        if: matrix.shard == 0
+        run: |
+          python -m pip install --require-hashes -r requirements.dev.lock.txt
+          python -m ruff format --check
+          python -m ruff check
       - name: Complete offline suite shard (temporary data, no model inference)
         run: python tools/ci_test_shards.py --suite python --shard-index ${{ matrix.shard }} --shard-count 6 --timing-output ci-timings/python-${{ matrix.shard }}.json
       - uses: actions/upload-artifact@v4

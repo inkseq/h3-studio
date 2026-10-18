@@ -3,6 +3,7 @@
 Importing this module does not import WanGP/torch, load weights, or start threads.
 The HTTP host owns durable receipts; this facade owns one live runtime handle.
 """
+
 from __future__ import annotations
 
 import copy
@@ -20,23 +21,46 @@ import threading
 import time
 
 from ..inference.protocol import BackendError, NotReady
-from ..inference.wangp_contract import (EngineManifest, RuntimeObservation,
-    RuntimeOutput, UPSTREAM_REVISION)
+from ..inference.wangp_contract import (
+    EngineManifest,
+    RuntimeObservation,
+    RuntimeOutput,
+    UPSTREAM_REVISION,
+)
 
 REQUIRED_CONFIG = {
-    "transformer_quantization": "bf16", "text_encoder_quantization": "bf16",
-    "transformer_dtype_policy": "bf16", "attention_mode": "sdpa",
-    "video_profile": 4, "profile": 4, "vae_config": 3, "vae_precision": "16",
-    "mixed_precision": "0", "compile": "", "boost": 1,
-    "int8_kernels": "disabled", "kernel_precision": "strict",
-    "fit_canvas": 2, "video_output_codec": "libx264_8", "video_container": "mp4",
-    "audio_output_codec": "aac_128", "enhancer_enabled": 0,
-    "save_queue_if_crash": 0, "notification_sound_enabled": 0,
+    "transformer_quantization": "bf16",
+    "text_encoder_quantization": "bf16",
+    "transformer_dtype_policy": "bf16",
+    "attention_mode": "sdpa",
+    "video_profile": 4,
+    "profile": 4,
+    "vae_config": 3,
+    "vae_precision": "16",
+    "mixed_precision": "0",
+    "compile": "",
+    "boost": 1,
+    "int8_kernels": "disabled",
+    "kernel_precision": "strict",
+    "fit_canvas": 2,
+    "video_output_codec": "libx264_8",
+    "video_container": "mp4",
+    "audio_output_codec": "aac_128",
+    "enhancer_enabled": 0,
+    "save_queue_if_crash": 0,
+    "notification_sound_enabled": 0,
     "embed_source_images": False,
 }
-CORE_VERSIONS = {"torch": "2.10.0+cu128", "torchvision": "0.25.0+cu128",
-    "torchaudio": "2.10.0+cu128", "diffusers": "0.36.0", "transformers": "4.54.0",
-    "numpy": "2.1.2", "optimum-quanto": "0.2.7", "comfy-kitchen": "0.2.35"}
+CORE_VERSIONS = {
+    "torch": "2.10.0+cu128",
+    "torchvision": "0.25.0+cu128",
+    "torchaudio": "2.10.0+cu128",
+    "diffusers": "0.36.0",
+    "transformers": "4.54.0",
+    "numpy": "2.1.2",
+    "optimum-quanto": "0.2.7",
+    "comfy-kitchen": "0.2.35",
+}
 
 
 def _contained_file(root: Path, path: Path) -> Path:
@@ -67,14 +91,25 @@ def _check_config(path, model_root=None, deployment_profile_id=None):
     required = REQUIRED_CONFIG
     if deployment_profile_id is not None:
         from ..runtime_catalog import get_profile
+
         required = get_profile(deployment_profile_id)['runtime']['config']
-    if (not isinstance(data, dict) or set(data) != set(required) | {"checkpoints_paths"}
-            or any(json.dumps(data.get(key), sort_keys=True) != json.dumps(value, sort_keys=True)
-                   for key, value in required.items())):
+    if (
+        not isinstance(data, dict)
+        or set(data) != set(required) | {"checkpoints_paths"}
+        or any(
+            json.dumps(data.get(key), sort_keys=True)
+            != json.dumps(value, sort_keys=True)
+            for key, value in required.items()
+        )
+    ):
         raise ValueError("wangp_runtime_config_mismatch")
     paths = data.get("checkpoints_paths")
-    if (not isinstance(paths, list) or len(paths) != 1 or not isinstance(paths[0], str)
-            or not Path(paths[0]).is_absolute()):
+    if (
+        not isinstance(paths, list)
+        or len(paths) != 1
+        or not isinstance(paths[0], str)
+        or not Path(paths[0]).is_absolute()
+    ):
         raise ValueError("wangp_runtime_model_root_mismatch")
     actual = Path(paths[0]).resolve(strict=True)
     if model_root is not None and actual != Path(model_root).resolve(strict=True):
@@ -83,46 +118,89 @@ def _check_config(path, model_root=None, deployment_profile_id=None):
 
 
 def verify_runtime(runtime_root, config_path, manifest_path, model_root):
+    # fmt: off
     """Explicit local attestation, not a model test and never an installer.
 
 Hashing weights occurs only when this function is explicitly called on the GPU
 host. No historical manifest/filename/size is treated as current verification.
 The returned evidence contains no runtime environment or configuration values.
 """
+    # fmt: on
     root = Path(runtime_root).resolve(strict=True)
     models = Path(model_root).resolve(strict=True)
-    manifest = EngineManifest.from_dict(json.loads(Path(manifest_path).read_text(encoding="utf-8")))
+    manifest = EngineManifest.from_dict(
+        json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    )
     profile = None
     if manifest.document.get('deployment_profile_id') is not None:
         from ..runtime_catalog import validate_manifest
+
         profile = validate_manifest(manifest)
     config = _check_config(config_path, models, profile['id'] if profile else None)
     environment_evidence = {}
-    if manifest.document.get("runtime_digest_kind") == "sixnine-environment-lock-sha256":
+    if (
+        manifest.document.get("runtime_digest_kind")
+        == "sixnine-environment-lock-sha256"
+    ):
         from .wangp_environment import verify_bound_environment
+
         environment_evidence = verify_bound_environment(root, manifest.document)
         revision = UPSTREAM_REVISION
     else:
         # Historical candidate manifests retain their exact verification path;
         # new cold bootstrap requires the fully bound package above.
-        revision = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
-                                  check=True, capture_output=True, text=True).stdout.strip()
+        revision = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
         if revision != UPSTREAM_REVISION:
             raise ValueError("wangp_runtime_source_mismatch")
         # Pilot image modified installation metadata only; executable source and
         # the exact requirements bytes remain pinned for the new native profiles.
         extra = [":(exclude)requirements.txt"] if profile else []
-        for args in (["diff", "--quiet", "HEAD", "--", *extra], ["diff", "--cached", "--quiet", "HEAD", "--", *extra]):
-            if subprocess.run(["git", "-C", str(root), *args], capture_output=True).returncode:
+        for args in (
+            ["diff", "--quiet", "HEAD", "--", *extra],
+            ["diff", "--cached", "--quiet", "HEAD", "--", *extra],
+        ):
+            if subprocess.run(
+                ["git", "-C", str(root), *args], capture_output=True
+            ).returncode:
                 raise ValueError("wangp_runtime_source_modified")
-        if profile and hashlib.sha256((root/'requirements.txt').read_bytes()).hexdigest() != profile['runtime']['requirements_sha256']:
+        if (
+            profile
+            and hashlib.sha256((root / 'requirements.txt').read_bytes()).hexdigest()
+            != profile['runtime']['requirements_sha256']
+        ):
             raise ValueError('wangp_runtime_requirements_mismatch')
-        untracked = subprocess.run(["git", "-C", str(root), "ls-files", "--others", "--exclude-standard", "-z"],
-                                  check=True, capture_output=True).stdout.decode().split("\0")
-        if any(Path(name).suffix.lower() in {".py", ".pyd", ".so"} for name in untracked if name):
+        untracked = (
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(root),
+                    "ls-files",
+                    "--others",
+                    "--exclude-standard",
+                    "-z",
+                ],
+                check=True,
+                capture_output=True,
+            )
+            .stdout.decode()
+            .split("\0")
+        )
+        if any(
+            Path(name).suffix.lower() in {".py", ".pyd", ".so"}
+            for name in untracked
+            if name
+        ):
             raise ValueError("wangp_runtime_untracked_code")
     versions = {}
-    for package, required in (profile['runtime']['core_versions'] if profile else CORE_VERSIONS).items():
+    for package, required in (
+        profile['runtime']['core_versions'] if profile else CORE_VERSIONS
+    ).items():
         version = importlib.metadata.version(package)
         if version != required:
             raise ValueError("wangp_runtime_dependency_mismatch")
@@ -134,27 +212,50 @@ The returned evidence contains no runtime environment or configuration values.
             if path.stat().st_size != record["size_bytes"]:
                 raise ValueError("wangp_component_size_mismatch")
             sha = hashlib.sha256()
-            git_blob = hashlib.sha1(("blob " + str(record["size_bytes"]) + "\0").encode())
+            git_blob = hashlib.sha1(
+                ("blob " + str(record["size_bytes"]) + "\0").encode()
+            )
             with path.open("rb") as stream:
                 for chunk in iter(lambda: stream.read(8 * 1024 * 1024), b""):
                     sha.update(chunk)
                     git_blob.update(chunk)
-            expected, observed = (record["sha256"], sha.hexdigest()) if "sha256" in record else (record["git_blob_sha1"], git_blob.hexdigest())
+            expected, observed = (
+                (record["sha256"], sha.hexdigest())
+                if "sha256" in record
+                else (record["git_blob_sha1"], git_blob.hexdigest())
+            )
             if expected != observed:
                 raise ValueError("wangp_component_hash_mismatch")
-            checked.append({"path": record["path"], "sha256": sha.hexdigest(), "size_bytes": record["size_bytes"]})
-    return {"manifest_digest": manifest.digest, "source_revision": revision,
-            "core_versions": versions, "verified_files": checked,
-            "config_sha256": hashlib.sha256(json.dumps(config, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
-            "inference_verified": False, **environment_evidence}
+            checked.append(
+                {
+                    "path": record["path"],
+                    "sha256": sha.hexdigest(),
+                    "size_bytes": record["size_bytes"],
+                }
+            )
+    return {
+        "manifest_digest": manifest.digest,
+        "source_revision": revision,
+        "core_versions": versions,
+        "verified_files": checked,
+        "config_sha256": hashlib.sha256(
+            json.dumps(config, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest(),
+        "inference_verified": False,
+        **environment_evidence,
+    }
 
 
 def config_for_model_root(model_root, deployment_profile_id=None):
     """Non-secret explicit startup configuration; caller writes wgp_config.json."""
     if deployment_profile_id is not None:
         from ..runtime_catalog import runtime_config
+
         return runtime_config(deployment_profile_id, model_root)
-    return {**REQUIRED_CONFIG, "checkpoints_paths": [str(Path(model_root).resolve(strict=True))]}
+    return {
+        **REQUIRED_CONFIG,
+        "checkpoints_paths": [str(Path(model_root).resolve(strict=True))],
+    }
 
 
 def _write_float_wav(path, samples, rate):
@@ -162,21 +263,31 @@ def _write_float_wav(path, samples, rate):
     # the muxed MP4's AAC stream is not decoded/re-encoded to fabricate a raw WAV.
     import numpy as np
     import soundfile
+
     value = np.asarray(samples, dtype=np.float32)
-    if value.ndim != 2 or value.shape[1] != 2 or not value.shape[0] or not np.isfinite(value).all() or rate != 32000:
+    if (
+        value.ndim != 2
+        or value.shape[1] != 2
+        or not value.shape[0]
+        or not np.isfinite(value).all()
+        or rate != 32000
+    ):
         raise BackendError("wangp_audio_payload_invalid")
     soundfile.write(str(path), value, rate, format="WAV", subtype="FLOAT")
 
 
 def _upstream_worker_alive():
-    return any(thread.name == "wangp-session-worker" and thread.is_alive()
-               for thread in threading.enumerate())
+    return any(
+        thread.name == "wangp-session-worker" and thread.is_alive()
+        for thread in threading.enumerate()
+    )
 
 
 def _lock_profile_device(torch, profile):
     """One explicit visible device and one owned process per physical GPU."""
     import fcntl
     import stat
+
     if not torch.cuda.is_available() or torch.cuda.device_count() != 1:
         raise ValueError('wangp_profile_one_visible_gpu_required')
     properties = torch.cuda.get_device_properties(0)
@@ -186,27 +297,49 @@ def _lock_profile_device(torch, profile):
     if hardware is not None:
         accepted = name.removeprefix('NVIDIA ') in hardware['gpu_models']
         capability = tuple(hardware['compute_capability'])
-        minimum, maximum = hardware['minimum_total_vram_bytes'], hardware['maximum_total_vram_bytes']
+        minimum, maximum = (
+            hardware['minimum_total_vram_bytes'],
+            hardware['maximum_total_vram_bytes'],
+        )
     else:
-        accepted = (re.fullmatch(r'(?:NVIDIA\s+)?(?:GeForce\s+)?RTX\s+5090', name)
-                    if pruned else re.fullmatch(r'(?:NVIDIA\s+)?RTX\s+PRO\s+6000\s+Blackwell\s+(?:Server|Workstation)\s+Edition', name))
+        accepted = (
+            re.fullmatch(r'(?:NVIDIA\s+)?(?:GeForce\s+)?RTX\s+5090', name)
+            if pruned
+            else re.fullmatch(
+                r'(?:NVIDIA\s+)?RTX\s+PRO\s+6000\s+Blackwell\s+(?:Server|Workstation)\s+Edition',
+                name,
+            )
+        )
         capability = (12, 0)
         low, high = (30, 34) if pruned else (90, 100)
-        minimum, maximum = low*1024**3, high*1024**3
-    if (not accepted or torch.cuda.get_device_capability(0) != capability
-            or not minimum <= properties.total_memory <= maximum):
+        minimum, maximum = low * 1024**3, high * 1024**3
+    if (
+        not accepted
+        or torch.cuda.get_device_capability(0) != capability
+        or not minimum <= properties.total_memory <= maximum
+    ):
         raise ValueError('wangp_profile_gpu_mismatch')
-    uuid = str(getattr(properties,'uuid',''))
-    if not re.fullmatch(r'(?:GPU-)?[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}',uuid):
+    uuid = str(getattr(properties, 'uuid', ''))
+    if not re.fullmatch(
+        r'(?:GPU-)?[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}', uuid
+    ):
         raise ValueError('wangp_profile_gpu_identity_required')
     uuid = uuid.removeprefix('GPU-').lower()
-    fd = os.open('/tmp/sixnine-wangp-gpu-'+uuid+'.lock', os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW, 0o600)
-    stream = os.fdopen(fd,'a+')
+    fd = os.open(
+        '/tmp/sixnine-wangp-gpu-' + uuid + '.lock',
+        os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW,
+        0o600,
+    )
+    stream = os.fdopen(fd, 'a+')
     try:
         info = os.fstat(stream.fileno())
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_nlink != 1:
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or info.st_nlink != 1
+        ):
             raise ValueError('wangp_profile_gpu_lock_invalid')
-        fcntl.flock(stream.fileno(),fcntl.LOCK_EX|fcntl.LOCK_NB)
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
     except Exception:
         stream.close()
         raise
@@ -215,7 +348,7 @@ def _lock_profile_device(torch, profile):
 
 def _profile_ram_groups(proc_root, group_root, *, resolve_membership=False):
     """Resolve the complete visible v2 ancestry, never follow an escaping link."""
-    if (group_root/'memory.max').is_file() and not resolve_membership:
+    if (group_root / 'memory.max').is_file() and not resolve_membership:
         # Existing container deployments expose their constrained group here.
         group = group_root
     else:
@@ -223,10 +356,19 @@ def _profile_ram_groups(proc_root, group_root, *, resolve_membership=False):
         # root is constrained: a visible child can impose a tighter limit.
         # Older available-headroom admission retains its container-root path.
         from pathlib import PurePosixPath
-        groups = [line[3:] for line in (proc_root/'self/cgroup').read_text().splitlines() if line.startswith('0::')]
-        if len(groups) != 1 or not groups[0].startswith('/') or '..' in PurePosixPath(groups[0]).parts:
+
+        groups = [
+            line[3:]
+            for line in (proc_root / 'self/cgroup').read_text().splitlines()
+            if line.startswith('0::')
+        ]
+        if (
+            len(groups) != 1
+            or not groups[0].startswith('/')
+            or '..' in PurePosixPath(groups[0]).parts
+        ):
             raise ValueError('wangp_profile_cgroup_invalid')
-        if not (group_root/'cgroup.controllers').is_file():
+        if not (group_root / 'cgroup.controllers').is_file():
             raise ValueError('wangp_profile_cgroup_invalid')
         group = group_root / groups[0].lstrip('/')
         if not group.is_dir():
@@ -242,7 +384,7 @@ def _profile_ram_groups(proc_root, group_root, *, resolve_membership=False):
 
 
 def _profile_ram_limit(group):
-    path = group/'memory.max'
+    path = group / 'memory.max'
     if path.is_symlink():
         raise ValueError('wangp_profile_cgroup_invalid')
     try:
@@ -265,41 +407,53 @@ def _profile_v1_ram(proc_root, group_root):
     This never substitutes host RAM for an unobserved controller constraint.
     """
     from pathlib import PurePosixPath
+
     def path(value):
         # mountinfo encodes spaces, tabs, newlines and backslashes in octal.
-        value = re.sub(r'\\([0-7]{3})', lambda match:chr(int(match[1], 8)), value)
-        if (not value.startswith('/') or '\\' in value or any(ord(c)<32 for c in value)
-                or any(part in {'.', '..'} for part in value.split('/'))):
+        value = re.sub(r'\\([0-7]{3})', lambda match: chr(int(match[1], 8)), value)
+        if (
+            not value.startswith('/')
+            or '\\' in value
+            or any(ord(c) < 32 for c in value)
+            or any(part in {'.', '..'} for part in value.split('/'))
+        ):
             raise ValueError('wangp_profile_cgroup_invalid')
         return PurePosixPath(value)
 
     def read(candidate):
         try:
             info = candidate.lstat()
-            if not stat.S_ISREG(info.st_mode) or candidate.is_symlink() or info.st_size>262144:
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or candidate.is_symlink()
+                or info.st_size > 262144
+            ):
                 raise ValueError('wangp_profile_cgroup_invalid')
             value = candidate.read_text()
-            if len(value)>262144:
+            if len(value) > 262144:
                 raise ValueError('wangp_profile_cgroup_invalid')
             return value
         except (OSError, UnicodeError):
             raise ValueError('wangp_profile_cgroup_invalid') from None
 
     def number(value, *, positive=False):
-        if not value.isdecimal() or positive and int(value)<=0:
+        if not value.isdecimal() or positive and int(value) <= 0:
             raise ValueError('wangp_profile_cgroup_invalid')
         return int(value)
 
     try:
-        memberships = [parts[2] for line in (proc_root/'self/cgroup').read_text().splitlines()
-                       if len(parts:=line.split(':', 2))==3 and 'memory' in parts[1].split(',')]
+        memberships = [
+            parts[2]
+            for line in (proc_root / 'self/cgroup').read_text().splitlines()
+            if len(parts := line.split(':', 2)) == 3 and 'memory' in parts[1].split(',')
+        ]
         if not memberships:
             return None  # The existing v2 observer decides whether that is valid.
-        if len(memberships)!=1:
+        if len(memberships) != 1:
             raise ValueError('wangp_profile_cgroup_invalid')
         # A hybrid hierarchy may mount cgroup2 for other controllers while
         # memory still belongs to v1. Never admit contradictory ownership.
-        controllers = group_root/'cgroup.controllers'
+        controllers = group_root / 'cgroup.controllers'
         try:
             controllers.lstat()
         except FileNotFoundError:
@@ -308,16 +462,22 @@ def _profile_v1_ram(proc_root, group_root):
             if 'memory' in read(controllers).split():
                 raise ValueError('wangp_profile_cgroup_invalid')
         membership = path(memberships[0])
-        mounted = group_root/'memory'
+        mounted = group_root / 'memory'
         matches = []
-        for line in (proc_root/'self/mountinfo').read_text().splitlines():
+        for line in (proc_root / 'self/mountinfo').read_text().splitlines():
             fields, separator, filesystem = line.partition(' - ')
             before, after = fields.split(), filesystem.split()
-            if separator and len(before)>=6 and len(after)>=3 and after[0]=='cgroup' and 'memory' in after[2].split(','):
+            if (
+                separator
+                and len(before) >= 6
+                and len(after) >= 3
+                and after[0] == 'cgroup'
+                and 'memory' in after[2].split(',')
+            ):
                 root, point = path(before[3]), path(before[4])
-                if point==PurePosixPath(mounted.as_posix()):
+                if point == PurePosixPath(mounted.as_posix()):
                     matches.append(root)
-        if len(matches)!=1 or not membership.is_relative_to(matches[0]):
+        if len(matches) != 1 or not membership.is_relative_to(matches[0]):
             raise ValueError('wangp_profile_cgroup_invalid')
         mount_root = matches[0]
         group = mounted.joinpath(*membership.relative_to(mount_root).parts)
@@ -329,43 +489,60 @@ def _profile_v1_ram(proc_root, group_root):
         while True:
             if group.is_symlink() or not group.is_dir():
                 raise ValueError('wangp_profile_cgroup_invalid')
-            if read(group/'memory.use_hierarchy').strip()!='1':
+            if read(group / 'memory.use_hierarchy').strip() != '1':
                 raise ValueError('wangp_profile_cgroup_invalid')
-            limit = number(read(group/'memory.limit_in_bytes').strip(), positive=True)
-            used = number(read(group/'memory.usage_in_bytes').strip())
+            limit = number(read(group / 'memory.limit_in_bytes').strip(), positive=True)
+            used = number(read(group / 'memory.usage_in_bytes').strip())
             fields = {}
-            for line in read(group/'memory.stat').splitlines():
+            for line in read(group / 'memory.stat').splitlines():
                 key, value = line.split()
                 if key in fields or not re.fullmatch(r'[a-z_]+', key):
                     raise ValueError('wangp_profile_cgroup_invalid')
                 fields[key] = number(value)
-            hierarchy = number(str(fields.get('hierarchical_memory_limit', '')), positive=True)
+            hierarchy = number(
+                str(fields.get('hierarchical_memory_limit', '')), positive=True
+            )
             limit = min(limit, hierarchy)
             capacity = limit if capacity is None else min(capacity, limit)
             # Never mix local and hierarchical counters. If an old kernel lacks
             # a shmem counter, no cache is credited as safely reclaimable.
-            keys = ('cache', 'shmem', 'active_file', 'inactive_file', 'dirty', 'writeback', 'unevictable')
+            keys = (
+                'cache',
+                'shmem',
+                'active_file',
+                'inactive_file',
+                'dirty',
+                'writeback',
+                'unevictable',
+            )
             reclaimable = 0
-            if all('total_'+key in fields for key in keys):
-                cache = max(0, fields['total_cache']-fields['total_shmem'])
-                lru = fields['total_active_file']+fields['total_inactive_file']
-                exclusions = sum(fields['total_'+key] for key in ('dirty', 'writeback', 'unevictable'))
-                reclaimable = max(0, min(cache, lru)-exclusions)
-            bound = min(limit, max(0, limit-used+reclaimable))
+            if all('total_' + key in fields for key in keys):
+                cache = max(0, fields['total_cache'] - fields['total_shmem'])
+                lru = fields['total_active_file'] + fields['total_inactive_file']
+                exclusions = sum(
+                    fields['total_' + key]
+                    for key in ('dirty', 'writeback', 'unevictable')
+                )
+                reclaimable = max(0, min(cache, lru) - exclusions)
+            bound = min(limit, max(0, limit - used + reclaimable))
             available = bound if available is None else min(available, bound)
-            if group==mounted:
+            if group == mounted:
                 # Limits include invisible ancestors, but their consumption is
                 # unobserved. Preserve older headroom profiles conservatively.
-                return capacity, available if mount_root==PurePosixPath('/') else 0
+                return capacity, available if mount_root == PurePosixPath('/') else 0
             group = group.parent
     except (OSError, UnicodeError, TypeError, ValueError):
         raise ValueError('wangp_profile_cgroup_invalid') from None
 
 
-def _effective_total_profile_ram(proc_root=Path('/proc'), group_root=Path('/sys/fs/cgroup')):
+def _effective_total_profile_ram(
+    proc_root=Path('/proc'), group_root=Path('/sys/fs/cgroup')
+):
     """Allocated capacity: host total constrained by every finite ancestor."""
-    info = {line.split(':',1)[0]: int(line.split()[1])*1024
-            for line in (proc_root/'meminfo').read_text().splitlines()}
+    info = {
+        line.split(':', 1)[0]: int(line.split()[1]) * 1024
+        for line in (proc_root / 'meminfo').read_text().splitlines()
+    }
     total = info.get('MemTotal')
     if type(total) is not int or total <= 0:
         raise ValueError('wangp_profile_total_ram_unconfirmed')
@@ -376,7 +553,7 @@ def _effective_total_profile_ram(proc_root=Path('/proc'), group_root=Path('/sys/
         # A whole VM root can lack memory.max. A resolved non-root memory
         # membership must expose its limit; missing observation is not max.
         try:
-            limit_stat = (group/'memory.max').lstat()
+            limit_stat = (group / 'memory.max').lstat()
         except FileNotFoundError:
             if group == group_root:
                 continue
@@ -391,18 +568,27 @@ def _effective_total_profile_ram(proc_root=Path('/proc'), group_root=Path('/sys/
     return total
 
 
-def _available_profile_ram(proc_root=Path('/proc'), group_root=Path('/sys/fs/cgroup'), *, resolve_membership=False):
+def _available_profile_ram(
+    proc_root=Path('/proc'),
+    group_root=Path('/sys/fs/cgroup'),
+    *,
+    resolve_membership=False,
+):
     """Headroom after imports; clean mapped file-cache pages are reclaimable."""
-    info = {line.split(':',1)[0]: int(line.split()[1])*1024
-            for line in (proc_root/'meminfo').read_text().splitlines()}
+    info = {
+        line.split(':', 1)[0]: int(line.split()[1]) * 1024
+        for line in (proc_root / 'meminfo').read_text().splitlines()
+    }
     available = info['MemAvailable']
     legacy = _profile_v1_ram(proc_root, group_root)
     if legacy is not None:
         return min(available, legacy[1])
-    for group in _profile_ram_groups(proc_root, group_root, resolve_membership=resolve_membership):
+    for group in _profile_ram_groups(
+        proc_root, group_root, resolve_membership=resolve_membership
+    ):
         if resolve_membership:
             try:
-                metadata = (group/'memory.max').lstat()
+                metadata = (group / 'memory.max').lstat()
             except FileNotFoundError:
                 if group == group_root:
                     continue
@@ -410,41 +596,59 @@ def _available_profile_ram(proc_root=Path('/proc'), group_root=Path('/sys/fs/cgr
             if not stat.S_ISREG(metadata.st_mode):
                 raise ValueError('wangp_profile_cgroup_invalid')
             for name in ('memory.current', 'memory.stat'):
-                path = group/name
+                path = group / name
                 metadata = path.lstat()
                 if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > 262144:
                     raise ValueError('wangp_profile_cgroup_invalid')
-        if (group/'memory.max').is_file():
+        if (group / 'memory.max').is_file():
             limit = _profile_ram_limit(group)
-            used = int((group/'memory.current').read_text())
-            fields = dict((key,int(value)) for key,value in
-                          (line.split() for line in (group/'memory.stat').read_text().splitlines()))
-            if resolve_membership and (used < 0 or any(value < 0 for value in fields.values())):
+            used = int((group / 'memory.current').read_text())
+            fields = dict(
+                (key, int(value))
+                for key, value in (
+                    line.split()
+                    for line in (group / 'memory.stat').read_text().splitlines()
+                )
+            )
+            if resolve_membership and (
+                used < 0 or any(value < 0 for value in fields.values())
+            ):
                 raise ValueError('wangp_profile_cgroup_invalid')
-            file_bytes = max(0,fields.get('file',0)-fields.get('shmem',0))
-            lru = max(0,fields.get('active_file',0)+fields.get('inactive_file',0))
-            exclusions = sum(max(0,fields.get(k,0)) for k in ('file_dirty','file_writeback','unevictable'))
-            reclaimable = max(0,min(file_bytes,lru)-exclusions)
+            file_bytes = max(0, fields.get('file', 0) - fields.get('shmem', 0))
+            lru = max(0, fields.get('active_file', 0) + fields.get('inactive_file', 0))
+            exclusions = sum(
+                max(0, fields.get(k, 0))
+                for k in ('file_dirty', 'file_writeback', 'unevictable')
+            )
+            reclaimable = max(0, min(file_bytes, lru) - exclusions)
             if limit is not None:
-                available = min(available,limit,max(0,limit-used+reclaimable))
+                available = min(available, limit, max(0, limit - used + reclaimable))
     return available
 
 
 def _profile_memory_admission(torch, profile):
     """Keep allocation evidence separate from an older headroom contract."""
-    free,_ = torch.cuda.mem_get_info(0)
+    free, _ = torch.cuda.mem_get_info(0)
     runtime = profile['runtime']
     metric = runtime.get('ram_admission_metric', 'available-headroom-v1')
-    available = (_available_profile_ram(resolve_membership=True)
-        if metric == 'effective-total-and-available-v1' else _available_profile_ram())
+    available = (
+        _available_profile_ram(resolve_membership=True)
+        if metric == 'effective-total-and-available-v1'
+        else _available_profile_ram()
+    )
     if metric in {'effective-total-v1', 'effective-total-and-available-v1'}:
         capacity = _effective_total_profile_ram()
         minimum = runtime['minimum_total_ram_bytes']
         if type(minimum) is not int or minimum <= 0:
             raise ValueError('wangp_profile_total_ram_unconfirmed')
-        observation = {'event': 'profile_memory_admission', 'ram_metric': metric,
-            'effective_total_ram_bytes': capacity, 'available_ram_bytes': available,
-            'minimum_total_ram_bytes': minimum, 'free_vram_bytes': free}
+        observation = {
+            'event': 'profile_memory_admission',
+            'ram_metric': metric,
+            'effective_total_ram_bytes': capacity,
+            'available_ram_bytes': available,
+            'minimum_total_ram_bytes': minimum,
+            'free_vram_bytes': free,
+        }
         ram_insufficient = capacity < minimum
         if metric == 'effective-total-and-available-v1':
             headroom = runtime['minimum_available_ram_bytes']
@@ -465,78 +669,121 @@ def _audit_profile_runtime(session, manifest, requested, *, loaded=False):
     """Attest actual selection and BF16 QKV layout; no config-string fallback."""
     from ..runtime_catalog import validate_manifest, model_for
     from ..inference.wangp_contract import canonical_json
+
     profile = validate_manifest(manifest)
     doc, runtime = manifest.document, profile['runtime']
     module = session._ensure_runtime().module
-    if any(canonical_json(module.server_config.get(k)) != canonical_json(v) for k,v in requested.items()):
+    if any(
+        canonical_json(module.server_config.get(k)) != canonical_json(v)
+        for k, v in requested.items()
+    ):
         raise ValueError('wangp_profile_effective_config_changed')
-    if (module.transformer_quantization != requested['transformer_quantization']
-            or module.text_encoder_quantization != requested['text_encoder_quantization']
-            or module.default_profile_video != runtime['memory_profile']
-            or getattr(getattr(module,'int8_backend',None),'_backend',None) != runtime['effective_int8_backend']):
+    if (
+        module.transformer_quantization != requested['transformer_quantization']
+        or module.text_encoder_quantization != requested['text_encoder_quantization']
+        or module.default_profile_video != runtime['memory_profile']
+        or getattr(getattr(module, 'int8_backend', None), '_backend', None)
+        != runtime['effective_int8_backend']
+    ):
         raise ValueError('wangp_profile_effective_backend_changed')
-    model = model_for(profile['id'],doc['mode'])['model_type']
+    model = model_for(profile['id'], doc['mode'])['model_type']
     definition = session.get_model_def(model)
-    if not isinstance(definition,dict) or definition.get('architecture') != model:
+    if not isinstance(definition, dict) or definition.get('architecture') != model:
         raise ValueError('wangp_profile_model_definition_changed')
     effective = definition.copy()
-    groups = module.get_model_config_groups(model,definition)
-    for _,_,settings in module.model_config_groups.selected_model_configs(groups,runtime['task_config']):
+    groups = module.get_model_config_groups(model, definition)
+    for _, _, settings in module.model_config_groups.selected_model_configs(
+        groups, runtime['task_config']
+    ):
         effective.update(settings)
     components = doc['components']
     transformer = components['transformer']['files'][0]['path']
     encoder = components['text_encoder']['files'][0]['path']
-    selected = module.get_model_filename(model,quantization=requested['transformer_quantization'],
-        dtype_policy='bf16',model_def=effective)
-    selected_encoder = module.get_model_filename(model,quantization=requested['text_encoder_quantization'],
-        dtype_policy='bf16',URLs=effective.get('text_encoder_URLs',[]))
-    if (not str(selected).endswith('/'+transformer) or not str(selected_encoder).endswith('/'+encoder)
-            or effective.get('video_vae_file') != components['video_vae']['files'][0]['path']
-            or effective.get('audio_vae_file',components['audio_vae']['files'][0]['path']) != components['audio_vae']['files'][0]['path']
-            or effective.get('qkv_splitting') is not runtime['qkv_splitting']
-            or any(effective.get(k) for k in ('pdd','vdn','auto_quantize'))):
+    selected = module.get_model_filename(
+        model,
+        quantization=requested['transformer_quantization'],
+        dtype_policy='bf16',
+        model_def=effective,
+    )
+    selected_encoder = module.get_model_filename(
+        model,
+        quantization=requested['text_encoder_quantization'],
+        dtype_policy='bf16',
+        URLs=effective.get('text_encoder_URLs', []),
+    )
+    if (
+        not str(selected).endswith('/' + transformer)
+        or not str(selected_encoder).endswith('/' + encoder)
+        or effective.get('video_vae_file')
+        != components['video_vae']['files'][0]['path']
+        or effective.get('audio_vae_file', components['audio_vae']['files'][0]['path'])
+        != components['audio_vae']['files'][0]['path']
+        or effective.get('qkv_splitting') is not runtime['qkv_splitting']
+        or any(effective.get(k) for k in ('pdd', 'vdn', 'auto_quantize'))
+    ):
         raise ValueError('wangp_profile_component_selection_changed')
     root = Path(requested['checkpoints_paths'][0]).resolve(strict=True)
-    resolved = {transformer:module.fl.get_local_model_filename(selected),
-                encoder:module.fl.get_local_model_filename(selected_encoder,extra_paths='Qwen3-VL-32B-Instruct')}
+    resolved = {
+        transformer: module.fl.get_local_model_filename(selected),
+        encoder: module.fl.get_local_model_filename(
+            selected_encoder, extra_paths='Qwen3-VL-32B-Instruct'
+        ),
+    }
     for component in components.values():
         for record in component['files']:
             name = record['path']
             if name not in resolved:
                 resolved[name] = module.fl.locate_file(name)
-    for name,path in resolved.items():
-        if path is None or Path(path).resolve(strict=True) != _contained_file(root,Path(name)):
+    for name, path in resolved.items():
+        if path is None or Path(path).resolve(strict=True) != _contained_file(
+            root, Path(name)
+        ):
             raise ValueError('wangp_profile_resolved_component_changed')
     if loaded:
-        if (module.loaded_profile != runtime['memory_profile'] or module.loaded_config != runtime['task_config']
-                or module.transformer_type != model):
+        if (
+            module.loaded_profile != runtime['memory_profile']
+            or module.loaded_config != runtime['task_config']
+            or module.transformer_type != model
+        ):
             raise ValueError('wangp_profile_loaded_config_changed')
         transformer_object = module.wan_model.transformer
         attention = transformer_object.blocks[0].attn
         split = runtime['qkv_splitting']
-        if (bool(transformer_object.split_linear_modules_map) != split
-                or all(hasattr(attention,k) for k in ('q_proj','k_proj','v_proj')) != split
-                or hasattr(attention,'qkv_proj') == split):
+        if (
+            bool(transformer_object.split_linear_modules_map) != split
+            or all(hasattr(attention, k) for k in ('q_proj', 'k_proj', 'v_proj'))
+            != split
+            or hasattr(attention, 'qkv_proj') == split
+        ):
             raise ValueError('wangp_profile_loaded_qkv_changed')
         if profile['model_id'] != 'MiniMax-H3-Pruned-Rank8-INT8':
             checkpoint = transformer_object.h3_checkpoint_info
-            if checkpoint.get('compressed_modulation') is not False or checkpoint.get('time_embed_dim') != 2688:
+            if (
+                checkpoint.get('compressed_modulation') is not False
+                or checkpoint.get('time_embed_dim') != 2688
+            ):
                 raise ValueError('wangp_profile_loaded_unpruned_mismatch')
 
 
 def _failure_code(errors):
+    # fmt: off
     """Reduce the first upstream error to a static stage/signature label.
 
 Pinned GenerationError exposes message/stage, not the original exception class.
 Messages are examined only in memory, with a bounded prefix, and never returned
 or persisted. Unknown shapes/text keep an explicit unclassified diagnostic.
 """
+    # fmt: on
     stage, message = "unknown", ""
     try:
         if type(errors) in (list, tuple) and errors:
             error = errors[0]
             candidate = getattr(error, "stage", None)
-            if type(candidate) is str and candidate in {"validation", "generation", "runtime"}:
+            if type(candidate) is str and candidate in {
+                "validation",
+                "generation",
+                "runtime",
+            }:
                 stage = candidate
             candidate = getattr(error, "message", None)
             if type(candidate) is str:
@@ -546,8 +793,14 @@ or persisted. Unknown shapes/text keep an explicit unclassified diagnostic.
     category = "unclassified"
     if "cuda out of memory" in message or "cuda error: out of memory" in message:
         category = "cuda_out_of_memory"
-    elif any(signature in message for signature in (
-            "sizes of tensors must match", "the size of tensor a", "mat1 and mat2 shapes cannot be multiplied")):
+    elif any(
+        signature in message
+        for signature in (
+            "sizes of tensors must match",
+            "the size of tensor a",
+            "mat1 and mat2 shapes cannot be multiplied",
+        )
+    ):
         category = "tensor_shape_mismatch"
     elif "invalid data found when processing input" in message:
         category = "media_decode_failed"
@@ -559,7 +812,9 @@ or persisted. Unknown shapes/text keep an explicit unclassified diagnostic.
 
 
 class _SessionHandle:
-    def __init__(self, job, output_root, audio_writer, worker_alive, quiesce, result_audit=None):
+    def __init__(
+        self, job, output_root, audio_writer, worker_alive, quiesce, result_audit=None
+    ):
         self.job, self.root, self.audio_writer = job, output_root, audio_writer
         self.worker_alive, self.quiesce = worker_alive, quiesce
         self.result_audit = result_audit
@@ -590,20 +845,37 @@ class _SessionHandle:
                 self._observation = RuntimeObservation("cancelled", stopped=True)
                 return self._observation
             if result.success is not True:
-                self._observation = RuntimeObservation("failed", stopped=True,
-                    error_code=_failure_code(getattr(result, "errors", None)))
+                self._observation = RuntimeObservation(
+                    "failed",
+                    stopped=True,
+                    error_code=_failure_code(getattr(result, "errors", None)),
+                )
                 return self._observation
-            if (result.total_tasks != 1 or result.successful_tasks != 1 or result.failed_tasks != 0
-                    or result.errors or len(result.generated_files) != 1):
+            if (
+                result.total_tasks != 1
+                or result.successful_tasks != 1
+                or result.failed_tasks != 0
+                or result.errors
+                or len(result.generated_files) != 1
+            ):
                 raise BackendError("wangp_result_shape_invalid")
             if self.result_audit is not None:
                 self.result_audit()
             video = _contained_file(self.root, Path(result.generated_files[0]))
             if video.suffix.lower() != ".mp4" or video.stat().st_size <= 0:
                 raise BackendError("wangp_video_output_missing")
-            artifacts = [item for item in result.artifacts if item.media_type == "video"
-                         and item.path and Path(item.path).resolve() == video]
-            if len(artifacts) != 1 or artifacts[0].audio_tensor is None or artifacts[0].audio_sampling_rate != 32000:
+            artifacts = [
+                item
+                for item in result.artifacts
+                if item.media_type == "video"
+                and item.path
+                and Path(item.path).resolve() == video
+            ]
+            if (
+                len(artifacts) != 1
+                or artifacts[0].audio_tensor is None
+                or artifacts[0].audio_sampling_rate != 32000
+            ):
                 raise BackendError("wangp_audio_output_missing")
             # Repeat observation retries packaging the SAME completed result only.
             # A collection failure never calls submit_task again.
@@ -611,14 +883,22 @@ class _SessionHandle:
             temp = wav.with_suffix(".pending.wav")
             if wav.is_symlink() or temp.is_symlink():
                 raise BackendError("wangp_output_path_invalid")
-            self.audio_writer(temp, artifacts[0].audio_tensor, artifacts[0].audio_sampling_rate)
+            self.audio_writer(
+                temp, artifacts[0].audio_tensor, artifacts[0].audio_sampling_rate
+            )
             if not temp.is_file() or temp.stat().st_size <= 0:
                 raise BackendError("wangp_audio_output_missing")
             with temp.open("r+b") as stream:
                 os.fsync(stream.fileno())
             os.replace(temp, wav)
-            self._observation = RuntimeObservation("succeeded", stopped=True, outputs={
-                "video": RuntimeOutput(video, "video/mp4"), "audio": RuntimeOutput(wav, "audio/wav")})
+            self._observation = RuntimeObservation(
+                "succeeded",
+                stopped=True,
+                outputs={
+                    "video": RuntimeOutput(video, "video/mp4"),
+                    "audio": RuntimeOutput(wav, "audio/wav"),
+                },
+            )
             return self._observation
 
 
@@ -628,8 +908,18 @@ class ModelLoadProgress:
     Payloads may contain private prompts/status. Inspect only their enum phase;
     retain no event object, text, paths, task IDs or user settings.
     """
-    LOADED_PHASES = frozenset({"encoding_text", "inference", "inference_stage_1",
-        "inference_stage_2", "inference_stage_3", "decoding", "downloading_output"})
+
+    LOADED_PHASES = frozenset(
+        {
+            "encoding_text",
+            "inference",
+            "inference_stage_1",
+            "inference_stage_2",
+            "inference_stage_3",
+            "decoding",
+            "downloading_output",
+        }
+    )
 
     def __init__(self, load_probe, *, clock=time.time):
         self.load_probe, self.clock = load_probe, clock
@@ -641,7 +931,11 @@ class ModelLoadProgress:
     def _probe(self):
         try:
             result = self.load_probe()
-            return result if type(result) is str and result in {"not_loaded", "loaded"} else "not_observed"
+            return (
+                result
+                if type(result) is str and result in {"not_loaded", "loaded"}
+                else "not_observed"
+            )
         except Exception:
             return "not_observed"
 
@@ -661,7 +955,11 @@ class ModelLoadProgress:
             with self._lock:
                 if phase == "loading_model":
                     self._set("loading")
-                elif type(phase) is str and phase in self.LOADED_PHASES and self._probe() == "loaded":
+                elif (
+                    type(phase) is str
+                    and phase in self.LOADED_PHASES
+                    and self._probe() == "loaded"
+                ):
                     self._set("loaded")
         except Exception:
             pass
@@ -699,29 +997,53 @@ class ModelLoadProgress:
 
 
 class PinnedWanGPSession:
-    def __init__(self, session, output_root, *, quiesce,
-                 audio_writer=_write_float_wav, worker_alive=_upstream_worker_alive,
-                 manifest=None, before_submit=None, result_audit=None, device_lock=None, model_progress=None):
+    def __init__(
+        self,
+        session,
+        output_root,
+        *,
+        quiesce,
+        audio_writer=_write_float_wav,
+        worker_alive=_upstream_worker_alive,
+        manifest=None,
+        before_submit=None,
+        result_audit=None,
+        device_lock=None,
+        model_progress=None,
+    ):
         if not callable(quiesce) or not callable(worker_alive):
             raise ValueError("wangp_runtime_stop_probe_required")
         self.session = session
         self.output_root = Path(output_root).resolve(strict=True)
         self.audio_writer = audio_writer
         self.worker_alive, self.quiesce = worker_alive, quiesce
-        self.manifest, self.before_submit, self.result_audit = manifest, before_submit, result_audit
+        self.manifest, self.before_submit, self.result_audit = (
+            manifest,
+            before_submit,
+            result_audit,
+        )
         self.device_lock = device_lock
         self._model_progress = model_progress
         if manifest is not None:
             from ..runtime_catalog import validate_manifest
+
             validate_manifest(manifest)
         self._lifecycle_lock = threading.RLock()
         self._closed = False
 
     def is_idle(self):
-        return not self._closed and self.session.active_job is None and self.worker_alive() is False
+        return (
+            not self._closed
+            and self.session.active_job is None
+            and self.worker_alive() is False
+        )
 
     def preparation(self):
-        return {"model": self._model_progress.snapshot()} if self._model_progress is not None else None
+        return (
+            {"model": self._model_progress.snapshot()}
+            if self._model_progress is not None
+            else None
+        )
 
     def submit_task(self, settings):
         with self._lifecycle_lock:
@@ -732,17 +1054,30 @@ class PinnedWanGPSession:
             allowed = {"minimax_h3_fl2va", "minimax_h3_ref2va"}
             if self.manifest is not None:
                 from ..runtime_catalog import model_for
+
                 doc = self.manifest.document
-                allowed = {model_for(doc['deployment_profile_id'], doc['mode'])['model_type']}
+                allowed = {
+                    model_for(doc['deployment_profile_id'], doc['mode'])['model_type']
+                }
             if model not in allowed:
                 raise ValueError("wangp_session_model_unsupported")
             if self.before_submit is not None:
                 self.before_submit()
             values = self.session.get_default_settings(model)
             values.update(copy.deepcopy(dict(settings)))
-            job = (self.session.submit_task(values, callbacks=self._model_progress)
-                if self._model_progress is not None else self.session.submit_task(values))
-            return _SessionHandle(job, self.output_root, self.audio_writer, self.worker_alive, self.quiesce, self.result_audit)
+            job = (
+                self.session.submit_task(values, callbacks=self._model_progress)
+                if self._model_progress is not None
+                else self.session.submit_task(values)
+            )
+            return _SessionHandle(
+                job,
+                self.output_root,
+                self.audio_writer,
+                self.worker_alive,
+                self.quiesce,
+                self.result_audit,
+            )
 
     def close_when_idle(self):
         """Unload only an idle runtime; never manufacture cancellation/stop proof."""
@@ -764,11 +1099,16 @@ def create_session(runtime_root, config_path, output_dir, *, manifest=None):
     profile = None
     if manifest is not None:
         from ..runtime_catalog import validate_manifest
+
         profile = validate_manifest(manifest)
-    config = _check_config(config_path, deployment_profile_id=profile['id'] if profile else None)
+    config = _check_config(
+        config_path, deployment_profile_id=profile['id'] if profile else None
+    )
     output = Path(output_dir).resolve(strict=True)
     existing = sys.modules.get("shared")
-    if existing is not None and not Path(existing.__file__).resolve().is_relative_to(root):
+    if existing is not None and not Path(existing.__file__).resolve().is_relative_to(
+        root
+    ):
         raise ValueError("wangp_runtime_import_collision")
     sys.path.insert(0, str(root))
     device_lock = None
@@ -782,33 +1122,58 @@ def create_session(runtime_root, config_path, output_dir, *, manifest=None):
     module = importlib.import_module("shared.api")
     if not Path(module.__file__).resolve().is_relative_to(root):
         raise ValueError("wangp_runtime_import_collision")
-    session = module.init(root=root, config_path=config_path, output_dir=output,
-        cli_args=profile['runtime']['cli_args'] if profile else ["--attention", "sdpa", "--profile", "4"], console_output=False,
-        console_isatty=False, webui_state=None)
+    session = module.init(
+        root=root,
+        config_path=config_path,
+        output_dir=output,
+        cli_args=profile['runtime']['cli_args']
+        if profile
+        else ["--attention", "sdpa", "--profile", "4"],
+        console_output=False,
+        console_isatty=False,
+        webui_state=None,
+    )
     torch = importlib.import_module("torch")
+
     def loaded_probe():
         native = session._ensure_runtime().module
         if getattr(native, "wan_model", None) is None:
             return "not_loaded"
-        if profile and (native.transformer_type != model_for(profile['id'], manifest.document['mode'])['model_type']
-                or native.loaded_profile != profile['runtime']['memory_profile']
-                or native.loaded_config != profile['runtime']['task_config']):
+        if profile and (
+            native.transformer_type
+            != model_for(profile['id'], manifest.document['mode'])['model_type']
+            or native.loaded_profile != profile['runtime']['memory_profile']
+            or native.loaded_config != profile['runtime']['task_config']
+        ):
             return "not_observed"
         return "loaded"
+
     if profile:
         from ..runtime_catalog import model_for
     model_progress = ModelLoadProgress(loaded_probe)
     if profile:
+
         def audit(loaded=False):
             _audit_profile_runtime(session, manifest, config, loaded=loaded)
-            if profile.get('compiler_epoch')=='full-controls-v2':
+            if profile.get('compiler_epoch') == 'full-controls-v2':
                 # Upstream initialization can select bundled tools and change
                 # its own environment. Check that exact selection before Ready
                 # and before work, never the CPU host's unrelated ffmpeg.
                 from .wangp_media_tools import verify_media_tools
-                verify_media_tools(root,dict(os.environ),cwd=Path.cwd())
+
+                verify_media_tools(root, dict(os.environ), cwd=Path.cwd())
+
         audit()
-        return PinnedWanGPSession(session, output, quiesce=torch.cuda.synchronize, manifest=manifest,
-            before_submit=audit, result_audit=lambda: audit(loaded=True), device_lock=device_lock,
-            model_progress=model_progress)
-    return PinnedWanGPSession(session, output, quiesce=torch.cuda.synchronize, model_progress=model_progress)
+        return PinnedWanGPSession(
+            session,
+            output,
+            quiesce=torch.cuda.synchronize,
+            manifest=manifest,
+            before_submit=audit,
+            result_audit=lambda: audit(loaded=True),
+            device_lock=device_lock,
+            model_progress=model_progress,
+        )
+    return PinnedWanGPSession(
+        session, output, quiesce=torch.cuda.synchronize, model_progress=model_progress
+    )

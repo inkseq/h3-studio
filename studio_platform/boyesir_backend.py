@@ -4,6 +4,7 @@ No import/constructor credential loads or network calls. A trusted shared-ledger
 gate and media authorizer must be supplied; this module never invents a second
 attempt database. Public model declarations are not successful inference evidence.
 """
+
 from __future__ import annotations
 
 from contextlib import closing, contextmanager
@@ -29,7 +30,13 @@ import uuid
 
 import httpx
 
-from .worker import BackendError, NotReady, Outcome, SubmissionRejected, SubmissionUncertain
+from .worker import (
+    BackendError,
+    NotReady,
+    Outcome,
+    SubmissionRejected,
+    SubmissionUncertain,
+)
 
 BASE_URL = "https://boyesir.com"
 SERVICE = "boyesir"
@@ -39,7 +46,14 @@ ID = re.compile(r"[A-Za-z0-9_-]{1,200}\Z")
 SHA = re.compile(r"[0-9a-f]{64}\Z")
 MIB = 1024**2
 _PRIVATE_TRACE = ContextVar("boyesir_private_transport_trace", default=False)
-_TRACE_LOGGERS = ("httpx", "httpcore.connection", "httpcore.http11", "httpcore.http2", "httpcore.proxy", "httpcore.socks")
+_TRACE_LOGGERS = (
+    "httpx",
+    "httpcore.connection",
+    "httpcore.http11",
+    "httpcore.http2",
+    "httpcore.proxy",
+    "httpcore.socks",
+)
 _TRACE_LOCK = threading.Lock()
 
 
@@ -49,7 +63,10 @@ class _PrivateTraceFilter(logging.Filter):
             # httpcore DEBUG includes raw response headers/exception repr, which
             # can contain Location signatures or Set-Cookie. Only our active
             # context is redacted; other projects/threads keep their logging.
-            record.msg, record.args = "Boyesir transport event (private details redacted)", ()
+            record.msg, record.args = (
+                "Boyesir transport event (private details redacted)",
+                (),
+            )
             record.exc_info = record.exc_text = record.stack_info = None
         return True
 
@@ -84,7 +101,9 @@ class ModelContract:
 
 
 MODELS = {
-    "bh-minimax-h3-pro-768p": ModelContract("bh-minimax-h3-pro-768p", "768p", 4, 15, 9, 0, 3),
+    "bh-minimax-h3-pro-768p": ModelContract(
+        "bh-minimax-h3-pro-768p", "768p", 4, 15, 9, 0, 3
+    ),
     "bh-hailuo-h3-2k": ModelContract("bh-hailuo-h3-2k", "2k", 6, 10, 9, 3, 3),
 }
 BLOCKED_MODELS = {
@@ -109,20 +128,37 @@ def _finite(value, low, high):
 
 
 def _digest(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
-                                    ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode()
+    ).hexdigest()
 
 
 def _safe_url(value, hosts):
     """Only trusted exact DNS hosts; no userinfo, ports, fragment or ambiguous URLs."""
     valid = isinstance(value, str) and 1 <= len(value) <= 8192
     if valid:
-        valid = not any(ord(c) <= 32 or ord(c) == 127 for c in value) and "\\" not in value
+        valid = (
+            not any(ord(c) <= 32 or ord(c) == 127 for c in value) and "\\" not in value
+        )
     try:
         parts = urlsplit(value) if valid else None
-        valid = bool(valid and parts.scheme == "https" and parts.hostname in hosts
-            and parts.netloc == parts.hostname and not parts.username and not parts.password
-            and not parts.fragment and parts.path.startswith("/") and not parts.path.startswith("//"))
+        valid = bool(
+            valid
+            and parts.scheme == "https"
+            and parts.hostname in hosts
+            and parts.netloc == parts.hostname
+            and not parts.username
+            and not parts.password
+            and not parts.fragment
+            and parts.path.startswith("/")
+            and not parts.path.startswith("//")
+        )
     except (ValueError, TypeError):
         valid = False
     _require(valid, "boyesir_media_url_rejected")
@@ -136,6 +172,7 @@ class ApprovedMedia:
     URL possession alone is not ownership proof. No URL or expiry is persisted in
     jobs; the resolver can renew it for the same asset SHA before submission.
     """
+
     tenant_id: str
     owner_id: str
     project_id: str
@@ -151,8 +188,16 @@ class ApprovedMedia:
 
 
 class MediaResolver(Protocol):
-    def resolve(self, *, tenant_id: str, owner_id: str, project_id: str,
-                asset_id: str, kind: str, model_id: str) -> ApprovedMedia: ...
+    def resolve(
+        self,
+        *,
+        tenant_id: str,
+        owner_id: str,
+        project_id: str,
+        asset_id: str,
+        kind: str,
+        model_id: str,
+    ) -> ApprovedMedia: ...
 
 
 @dataclass(frozen=True)
@@ -182,6 +227,7 @@ class SubmitGate(Protocol):
     A WorkerRunner integration must delegate its existing begin_submission here
     exactly once (not call both). No implementation is installed by this module.
     """
+
     def consume(self, binding: SubmissionBinding) -> bool: ...
     def record_accepted(self, binding: SubmissionBinding, task_id: str) -> None: ...
     def lookup(self, tag: str) -> SubmissionRecord | None: ...
@@ -200,36 +246,78 @@ class PreparedSubmission:
 
 def validate_request(request):
     """Deliberately separate schema: never strip normal H3 controls/defaults."""
-    _require(isinstance(request, dict) and set(request) == {"recipe_id", "provider_request"}
-             and request["recipe_id"] == "boyesir-video-v1", "boyesir_request_contract_required")
+    _require(
+        isinstance(request, dict)
+        and set(request) == {"recipe_id", "provider_request"}
+        and request["recipe_id"] == "boyesir-video-v1",
+        "boyesir_request_contract_required",
+    )
     body = request["provider_request"]
-    fields = {"model", "prompt", "duration", "resolution", "ratio", "output_audio", "media"}
-    _require(isinstance(body, dict) and set(body) == fields, "boyesir_unsupported_or_missing_control")
-    model = MODELS.get(body.get("model")) if isinstance(body.get("model"), str) else None
+    fields = {
+        "model",
+        "prompt",
+        "duration",
+        "resolution",
+        "ratio",
+        "output_audio",
+        "media",
+    }
+    _require(
+        isinstance(body, dict) and set(body) == fields,
+        "boyesir_unsupported_or_missing_control",
+    )
+    model = (
+        MODELS.get(body.get("model")) if isinstance(body.get("model"), str) else None
+    )
     _require(model is not None, "boyesir_model_contract_blocked")
-    _require(isinstance(body["prompt"], str) and bool(body["prompt"].strip())
-             and len(body["prompt"].encode("utf-8")) <= 32000
-             and "\x00" not in body["prompt"], "boyesir_prompt_invalid")
-    _require(type(body["duration"]) is int and model.minimum_seconds <= body["duration"] <= model.maximum_seconds,
-             "boyesir_duration_outside_declared_contract")
+    _require(
+        isinstance(body["prompt"], str)
+        and bool(body["prompt"].strip())
+        and len(body["prompt"].encode("utf-8")) <= 32000
+        and "\x00" not in body["prompt"],
+        "boyesir_prompt_invalid",
+    )
+    _require(
+        type(body["duration"]) is int
+        and model.minimum_seconds <= body["duration"] <= model.maximum_seconds,
+        "boyesir_duration_outside_declared_contract",
+    )
     _require(body["resolution"] == model.resolution, "boyesir_resolution_tier_mismatch")
-    _require(body["ratio"] == "provider_default" and body["output_audio"] == "provider_default",
-             "boyesir_ratio_or_output_audio_control_unconfirmed")
+    _require(
+        body["ratio"] == "provider_default"
+        and body["output_audio"] == "provider_default",
+        "boyesir_ratio_or_output_audio_control_unconfirmed",
+    )
     media = body["media"]
     _require(isinstance(media, list) and len(media) <= 15, "boyesir_reference_limit")
     counts = {"image": 0, "video": 0, "audio": 0}
     identities = set()
     for item in media:
-        _require(isinstance(item, dict) and set(item) == {"asset_id", "kind", "sha256"}, "boyesir_reference_contract_invalid")
+        _require(
+            isinstance(item, dict) and set(item) == {"asset_id", "kind", "sha256"},
+            "boyesir_reference_contract_invalid",
+        )
         _identity(item["asset_id"])
-        _require(isinstance(item["kind"], str) and item["kind"] in counts
-                 and isinstance(item["sha256"], str) and SHA.fullmatch(item["sha256"]), "boyesir_reference_contract_invalid")
+        _require(
+            isinstance(item["kind"], str)
+            and item["kind"] in counts
+            and isinstance(item["sha256"], str)
+            and SHA.fullmatch(item["sha256"]),
+            "boyesir_reference_contract_invalid",
+        )
         _require(item["asset_id"] not in identities, "boyesir_duplicate_reference")
         identities.add(item["asset_id"])
         counts[item["kind"]] += 1
-    _require(counts["image"] <= model.max_images and counts["video"] <= model.max_videos
-             and counts["audio"] <= model.max_audios, "boyesir_model_reference_limit")
-    _require(not counts["audio"] or counts["image"] or counts["video"], "boyesir_audio_requires_visual_reference")
+    _require(
+        counts["image"] <= model.max_images
+        and counts["video"] <= model.max_videos
+        and counts["audio"] <= model.max_audios,
+        "boyesir_model_reference_limit",
+    )
+    _require(
+        not counts["audio"] or counts["image"] or counts["video"],
+        "boyesir_audio_requires_visual_reference",
+    )
     # Freeze an independent JSON copy: callers cannot mutate accepted defaults.
     return json.loads(json.dumps(body, ensure_ascii=False, allow_nan=False))
 
@@ -240,18 +328,31 @@ def _binding(job, tag):
     for key in ("id", "tenant_id", "owner_id", "project_id"):
         _identity(job.get(key))
     body = validate_request(job.get("request"))
-    return SubmissionBinding(tag, job["id"], job["tenant_id"], job["owner_id"], job["project_id"],
-                             body["model"], _digest(body)), body
+    return SubmissionBinding(
+        tag,
+        job["id"],
+        job["tenant_id"],
+        job["owner_id"],
+        job["project_id"],
+        body["model"],
+        _digest(body),
+    ), body
 
 
 def _loader(registry_root):
-    _require(registry_root is not None and Path(registry_root).is_absolute(), "boyesir_central_path_required")
+    _require(
+        registry_root is not None and Path(registry_root).is_absolute(),
+        "boyesir_central_path_required",
+    )
     try:
         root = Path(registry_root).resolve(strict=True)
         expected = root / "api_registry.py"
         _require(expected.is_file(), "boyesir_central_loader_missing")
         old = sys.modules.get("api_registry")
-        _require(old is None or Path(getattr(old, "__file__", "")).resolve() == expected, "boyesir_central_loader_conflict")
+        _require(
+            old is None or Path(getattr(old, "__file__", "")).resolve() == expected,
+            "boyesir_central_loader_conflict",
+        )
         sys.path.insert(0, str(root))
         try:
             module = importlib.import_module("api_registry")
@@ -264,35 +365,85 @@ def _loader(registry_root):
 
 class BoyesirBackend:
     """Future API transport, deliberately unregistered in API/capabilities/worker."""
+
     kind = "boyesir-api"
     integration_ready = False
 
     @staticmethod
     def capabilities():
-        return {"backend": "boyesir-api", "integration_ready": False, "online_verified": False,
-            "models": {key: {"resolution_tier": value.resolution,
-                "duration_seconds": [value.minimum_seconds, value.maximum_seconds],
-                "max_images": value.max_images, "max_videos": value.max_videos, "max_audios": value.max_audios,
-                "evidence": value.evidence} for key, value in MODELS.items()},
-            "blocked_models": dict(BLOCKED_MODELS), "ratio": ["provider_default"],
-            "output_audio": ["provider_default"], "exact_pixel_dimensions": None,
-            "cancel_supported": False, "provider_idempotency_verified": False,
-            "max_concurrency": None, "billing_verified": False,
-            "blocked_controls": ["first_frame", "last_frame", "seed", "steps", "sampler", "guides", "vae", "exact_dimensions"]}
+        return {
+            "backend": "boyesir-api",
+            "integration_ready": False,
+            "online_verified": False,
+            "models": {
+                key: {
+                    "resolution_tier": value.resolution,
+                    "duration_seconds": [value.minimum_seconds, value.maximum_seconds],
+                    "max_images": value.max_images,
+                    "max_videos": value.max_videos,
+                    "max_audios": value.max_audios,
+                    "evidence": value.evidence,
+                }
+                for key, value in MODELS.items()
+            },
+            "blocked_models": dict(BLOCKED_MODELS),
+            "ratio": ["provider_default"],
+            "output_audio": ["provider_default"],
+            "exact_pixel_dimensions": None,
+            "cancel_supported": False,
+            "provider_idempotency_verified": False,
+            "max_concurrency": None,
+            "billing_verified": False,
+            "blocked_controls": [
+                "first_frame",
+                "last_frame",
+                "seed",
+                "steps",
+                "sampler",
+                "guides",
+                "vae",
+                "exact_dimensions",
+            ],
+        }
 
-    def __init__(self, *, enabled=False, submit_gate=None, media_resolver=None, input_hosts=(),
-                 registry_root=None, credential_loader=None, transport=None, download_transport=None,
-                 max_download_bytes=512*MIB, timeout_s=10, max_transfer_seconds=180,
-                 min_input_validity_s=900, clock=time.time, monotonic=time.monotonic,
-                 actual_cost_resolver=None):
+    def __init__(
+        self,
+        *,
+        enabled=False,
+        submit_gate=None,
+        media_resolver=None,
+        input_hosts=(),
+        registry_root=None,
+        credential_loader=None,
+        transport=None,
+        download_transport=None,
+        max_download_bytes=512 * MIB,
+        timeout_s=10,
+        max_transfer_seconds=180,
+        min_input_validity_s=900,
+        clock=time.time,
+        monotonic=time.monotonic,
+        actual_cost_resolver=None,
+    ):
         _require(type(enabled) is bool, "boyesir_enable_flag_invalid")
-        _require(type(max_download_bytes) is int and 1 <= max_download_bytes <= 512*MIB
-                 and _finite(timeout_s, 1, 30) and _finite(max_transfer_seconds, 1, 600)
-                 and _finite(min_input_validity_s, 60, 86400), "boyesir_transport_limits_invalid")
+        _require(
+            type(max_download_bytes) is int
+            and 1 <= max_download_bytes <= 512 * MIB
+            and _finite(timeout_s, 1, 30)
+            and _finite(max_transfer_seconds, 1, 600)
+            and _finite(min_input_validity_s, 60, 86400),
+            "boyesir_transport_limits_invalid",
+        )
         hosts = set(input_hosts)
         for host in hosts:
-            _require(isinstance(host, str) and re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", host)
-                     and "." in host and ".." not in host and not host.endswith(".localhost"), "boyesir_input_host_invalid")
+            _require(
+                isinstance(host, str)
+                and re.fullmatch(r"[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?", host)
+                and "." in host
+                and ".." not in host
+                and not host.endswith(".localhost"),
+                "boyesir_input_host_invalid",
+            )
             try:
                 ipaddress.ip_address(host)
             except ValueError:
@@ -300,11 +451,23 @@ class BoyesirBackend:
             else:
                 raise BackendError("boyesir_input_host_invalid")
         self.enabled = enabled
-        self.gate, self.resolver, self.input_hosts = submit_gate, media_resolver, frozenset(hosts)
+        self.gate, self.resolver, self.input_hosts = (
+            submit_gate,
+            media_resolver,
+            frozenset(hosts),
+        )
         self.registry_root, self.credential_loader = registry_root, credential_loader
         self._transport, self._downloads = transport, download_transport
-        self.max_bytes, self.timeout_s, self.transfer_s = max_download_bytes, timeout_s, max_transfer_seconds
-        self.min_validity, self.clock, self.monotonic = min_input_validity_s, clock, monotonic
+        self.max_bytes, self.timeout_s, self.transfer_s = (
+            max_download_bytes,
+            timeout_s,
+            max_transfer_seconds,
+        )
+        self.min_validity, self.clock, self.monotonic = (
+            min_input_validity_s,
+            clock,
+            monotonic,
+        )
         self.cost_resolver = actual_cost_resolver
         self.slot_key = "boyesir-api-" + PROFILE
         self._key = None
@@ -325,9 +488,13 @@ class BoyesirBackend:
     def _seal(self, binding, expiry, body):
         # Not a provider credential: process-only integrity for a trusted prepare.
         # A caller cannot replace body/binding/expiry with a matching plain hash.
-        material = json.dumps({"binding": vars(binding), "expires_at": expiry},
-                              sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
-        return hmac.digest(self._prepare_seal_key, material+b"\x00"+body, "sha256")
+        material = json.dumps(
+            {"binding": vars(binding), "expires_at": expiry},
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode()
+        return hmac.digest(self._prepare_seal_key, material + b"\x00" + body, "sha256")
 
     def _credential(self):
         self._ready()
@@ -335,11 +502,22 @@ class BoyesirBackend:
             try:
                 load = self.credential_loader or _loader(self.registry_root)
                 config = load(SERVICE, profile=PROFILE)
-                _require(config.service == SERVICE and config.profile == PROFILE and config.base_url == BASE_URL,
-                         "boyesir_central_profile_mismatch")
+                _require(
+                    config.service == SERVICE
+                    and config.profile == PROFILE
+                    and config.base_url == BASE_URL,
+                    "boyesir_central_profile_mismatch",
+                )
                 key = config.api_key
-                _require(isinstance(key, str) and key.isascii() and 1 <= len(key) <= 4096
-                         and not any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in key), "boyesir_credential_missing")
+                _require(
+                    isinstance(key, str)
+                    and key.isascii()
+                    and 1 <= len(key) <= 4096
+                    and not any(
+                        c.isspace() or ord(c) < 32 or ord(c) == 127 for c in key
+                    ),
+                    "boyesir_credential_missing",
+                )
                 self._key = key
             except Exception:
                 raise NotReady("boyesir_central_profile_unavailable") from None
@@ -363,12 +541,30 @@ class BoyesirBackend:
     def _request(self, method, url, *, body=None, download=False):
         headers = {"Accept-Encoding": "identity"}
         if not download:
-            _require(url == BASE_URL+"/v1/videos/generations" or url.startswith(BASE_URL+"/v1/tasks/"), "boyesir_api_endpoint_rejected")
-            headers.update({"Authorization": "Bearer "+self._credential(), "Accept": "application/json"})
+            _require(
+                url == BASE_URL + "/v1/videos/generations"
+                or url.startswith(BASE_URL + "/v1/tasks/"),
+                "boyesir_api_endpoint_rejected",
+            )
+            headers.update(
+                {
+                    "Authorization": "Bearer " + self._credential(),
+                    "Accept": "application/json",
+                }
+            )
         if body is not None:
             headers["Content-Type"] = "application/json"
-        request = httpx.Request(method, url, headers=headers, content=body,
-            extensions={"timeout": {k: self.timeout_s for k in ("connect", "read", "write", "pool")}})
+        request = httpx.Request(
+            method,
+            url,
+            headers=headers,
+            content=body,
+            extensions={
+                "timeout": {
+                    k: self.timeout_s for k in ("connect", "read", "write", "pool")
+                }
+            },
+        )
         # Direct transport has no automatic redirects, cookies, retries, default
         # auth or Client INFO logging of bearer/signed URLs. Do not print request.
         return self._transport_for(download=download).handle_request(request)
@@ -377,15 +573,26 @@ class BoyesirBackend:
         self._ready()
         try:
             started = self.monotonic()
-            with _private_transport_trace(), closing(self._request(method, BASE_URL+path, body=body)) as response:
+            with (
+                _private_transport_trace(),
+                closing(self._request(method, BASE_URL + path, body=body)) as response,
+            ):
                 status = response.status_code
                 if not 200 <= status < 300:
                     return status, None
-                _require(response.headers.get("content-encoding", "identity").lower() in {"", "identity"}, "boyesir_response_encoding_rejected")
+                _require(
+                    response.headers.get("content-encoding", "identity").lower()
+                    in {"", "identity"},
+                    "boyesir_response_encoding_rejected",
+                )
                 content = bytearray()
                 for chunk in response.iter_bytes():
                     content.extend(chunk)
-                    _require(len(content) <= MIB and self.monotonic()-started <= self.transfer_s, "boyesir_response_limit")
+                    _require(
+                        len(content) <= MIB
+                        and self.monotonic() - started <= self.transfer_s,
+                        "boyesir_response_limit",
+                    )
                 data = json.loads(content)
                 _require(isinstance(data, dict), "boyesir_response_invalid")
                 return status, data
@@ -397,38 +604,90 @@ class BoyesirBackend:
         binding, body = _binding(job, tag)
         self._credential()  # Fail before consuming the nonrepeatable submission intent.
         heartbeat()
-        payload = {key: body[key] for key in ("model", "prompt", "duration", "resolution")}
-        expiry = self.clock()+86400
+        payload = {
+            key: body[key] for key in ("model", "prompt", "duration", "resolution")
+        }
+        expiry = self.clock() + 86400
         for item in body["media"]:
             if self.resolver is None:
                 raise NotReady("boyesir_trusted_media_resolver_required")
             try:
-                media = self.resolver.resolve(tenant_id=binding.tenant_id, owner_id=binding.owner_id,
-                    project_id=binding.project_id, asset_id=item["asset_id"], kind=item["kind"], model_id=binding.model_id)
-                _require(isinstance(media, ApprovedMedia) and
-                    (media.tenant_id, media.owner_id, media.project_id, media.asset_id, media.kind, media.model_id, media.sha256) ==
-                    (binding.tenant_id, binding.owner_id, binding.project_id, item["asset_id"], item["kind"], binding.model_id, item["sha256"]),
-                    "boyesir_media_approval_mismatch")
-                _require(_finite(media.expires_at, self.clock()+self.min_validity, self.clock()+7*86400), "boyesir_media_approval_expired")
+                media = self.resolver.resolve(
+                    tenant_id=binding.tenant_id,
+                    owner_id=binding.owner_id,
+                    project_id=binding.project_id,
+                    asset_id=item["asset_id"],
+                    kind=item["kind"],
+                    model_id=binding.model_id,
+                )
+                _require(
+                    isinstance(media, ApprovedMedia)
+                    and (
+                        media.tenant_id,
+                        media.owner_id,
+                        media.project_id,
+                        media.asset_id,
+                        media.kind,
+                        media.model_id,
+                        media.sha256,
+                    )
+                    == (
+                        binding.tenant_id,
+                        binding.owner_id,
+                        binding.project_id,
+                        item["asset_id"],
+                        item["kind"],
+                        binding.model_id,
+                        item["sha256"],
+                    ),
+                    "boyesir_media_approval_mismatch",
+                )
+                _require(
+                    _finite(
+                        media.expires_at,
+                        self.clock() + self.min_validity,
+                        self.clock() + 7 * 86400,
+                    ),
+                    "boyesir_media_approval_expired",
+                )
                 url = _safe_url(media.url, self.input_hosts)
                 expiry = min(expiry, media.expires_at)
-                payload.setdefault({"image": "images", "video": "videos", "audio": "audios"}[item["kind"]], []).append(url)
+                payload.setdefault(
+                    {"image": "images", "video": "videos", "audio": "audios"}[
+                        item["kind"]
+                    ],
+                    [],
+                ).append(url)
             except Exception:
                 raise BackendError("boyesir_media_not_approved") from None
             heartbeat()
         encoded = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode()
-        return PreparedSubmission(binding, expiry, encoded, self._seal(binding, expiry, encoded))
+        return PreparedSubmission(
+            binding, expiry, encoded, self._seal(binding, expiry, encoded)
+        )
 
     def submit(self, prepared, tag):
         self._ready()
-        _require(isinstance(prepared, PreparedSubmission) and prepared.binding.tag == tag, "boyesir_prepared_identity_mismatch")
+        _require(
+            isinstance(prepared, PreparedSubmission) and prepared.binding.tag == tag,
+            "boyesir_prepared_identity_mismatch",
+        )
         try:
-            _require(isinstance(prepared.seal, bytes) and isinstance(prepared.body, bytes)
-                     and hmac.compare_digest(prepared.seal, self._seal(prepared.binding, prepared.expires_at, prepared.body)),
-                     "boyesir_prepared_integrity_invalid")
+            _require(
+                isinstance(prepared.seal, bytes)
+                and isinstance(prepared.body, bytes)
+                and hmac.compare_digest(
+                    prepared.seal,
+                    self._seal(prepared.binding, prepared.expires_at, prepared.body),
+                ),
+                "boyesir_prepared_integrity_invalid",
+            )
         except Exception:
             raise BackendError("boyesir_prepared_integrity_invalid") from None
-        _require(prepared.expires_at >= self.clock()+self.min_validity, "boyesir_prepared_media_expired")
+        _require(
+            prepared.expires_at >= self.clock() + self.min_validity,
+            "boyesir_prepared_media_expired",
+        )
         self._credential()
         try:
             consumed = self.gate.consume(prepared.binding)
@@ -437,12 +696,17 @@ class BoyesirBackend:
         if consumed is not True:
             raise SubmissionUncertain("boyesir_submission_already_intended")
         try:
-            status, data = self._json("POST", "/v1/videos/generations", body=prepared.body)
+            status, data = self._json(
+                "POST", "/v1/videos/generations", body=prepared.body
+            )
             if status == 402:
                 # Official contract: insufficient balance was not charged. No
                 # other status is treated as proof that submission did not occur.
                 raise SubmissionRejected("boyesir_insufficient_balance")
-            _require(200 <= status < 300 and isinstance(data, dict), "boyesir_create_response_invalid")
+            _require(
+                200 <= status < 300 and isinstance(data, dict),
+                "boyesir_create_response_invalid",
+            )
             task_id = _identity(data.get("task_id"))
             self.gate.record_accepted(prepared.binding, task_id)
             return task_id
@@ -458,14 +722,19 @@ class BoyesirBackend:
             _identity(task_id)
         try:
             record = self.gate.lookup(tag)
-            _require(record is None or isinstance(record, SubmissionRecord), "boyesir_ledger_record_invalid")
+            _require(
+                record is None or isinstance(record, SubmissionRecord),
+                "boyesir_ledger_record_invalid",
+            )
             if record is None:
                 _require(task_id is None, "boyesir_task_not_bound")
                 return None
             _require(record.binding.tag == tag, "boyesir_task_not_bound")
             if record.task_id is not None:
                 _identity(record.task_id)
-            _require(task_id is None or record.task_id == task_id, "boyesir_task_not_bound")
+            _require(
+                task_id is None or record.task_id == task_id, "boyesir_task_not_bound"
+            )
             return record
         except Exception:
             raise BackendError("boyesir_task_not_bound") from None
@@ -478,16 +747,28 @@ class BoyesirBackend:
 
     def _task(self, tag, task_id):
         self._record(tag, task_id)
-        status, data = self._json("GET", "/v1/tasks/"+task_id)
+        status, data = self._json("GET", "/v1/tasks/" + task_id)
         if not 200 <= status < 300:
             raise BackendError("boyesir_task_query_unavailable")
-        _require("task_id" not in data or data["task_id"] == task_id, "boyesir_task_echo_mismatch")
+        _require(
+            "task_id" not in data or data["task_id"] == task_id,
+            "boyesir_task_echo_mismatch",
+        )
         return data
 
     def poll(self, tag, task_id):
         data = self._task(tag, task_id)
         raw_state = data.get("status")
-        state = {"queued": "running", "processing": "running", "succeeded": "succeeded", "failed": "failed"}.get(raw_state, "unknown") if isinstance(raw_state, str) else "unknown"
+        state = (
+            {
+                "queued": "running",
+                "processing": "running",
+                "succeeded": "succeeded",
+                "failed": "failed",
+            }.get(raw_state, "unknown")
+            if isinstance(raw_state, str)
+            else "unknown"
+        )
         # Upstream error text/result URLs and refund claims never enter Outcome.
         return Outcome(state, task_id)
 
@@ -498,48 +779,90 @@ class BoyesirBackend:
     @staticmethod
     def _target(directory):
         target = Path(directory)
-        _require(target.is_absolute() and ".." not in target.parts, "boyesir_output_directory_invalid")
+        _require(
+            target.is_absolute() and ".." not in target.parts,
+            "boyesir_output_directory_invalid",
+        )
         for path in (target, *target.parents):
-            _require(path.exists() and not path.is_symlink() and not path.is_junction() and path.is_dir(), "boyesir_output_directory_invalid")
+            _require(
+                path.exists()
+                and not path.is_symlink()
+                and not path.is_junction()
+                and path.is_dir(),
+                "boyesir_output_directory_invalid",
+            )
         output = target / "boyesir-raw.mp4"
         if output.exists() or output.is_symlink():
             info = output.lstat()
-            _require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and not output.is_symlink(), "boyesir_output_file_invalid")
+            _require(
+                stat.S_ISREG(info.st_mode)
+                and info.st_nlink == 1
+                and not output.is_symlink(),
+                "boyesir_output_file_invalid",
+            )
         return output
 
     def fetch(self, job, tag, task_id, target_dir, heartbeat):
         binding, _ = _binding(job, tag)
         record = self._record(tag, task_id)
-        _require(record is not None and record.binding == binding, "boyesir_output_owner_or_request_mismatch")
+        _require(
+            record is not None and record.binding == binding,
+            "boyesir_output_owner_or_request_mismatch",
+        )
         data = self._task(tag, task_id)
         result = data.get("result")
         videos = result.get("videos") if isinstance(result, dict) else None
-        _require(data.get("status") == "succeeded" and isinstance(videos, list) and len(videos) == 1, "boyesir_single_output_contract_required")
+        _require(
+            data.get("status") == "succeeded"
+            and isinstance(videos, list)
+            and len(videos) == 1,
+            "boyesir_single_output_contract_required",
+        )
         url = _safe_url(videos[0], RESULT_HOSTS)
         output = self._target(target_dir)
-        partial = output.with_name(".boyesir-"+uuid.uuid4().hex+".part")
+        partial = output.with_name(".boyesir-" + uuid.uuid4().hex + ".part")
         count, started = 0, self.monotonic()
         heartbeat()
         try:
-            with _private_transport_trace(), closing(self._request("GET", url, download=True)) as response:
+            with (
+                _private_transport_trace(),
+                closing(self._request("GET", url, download=True)) as response,
+            ):
                 _require(response.status_code == 200, "boyesir_download_http_rejected")
-                _require(response.headers.get("content-encoding", "identity").lower() in {"", "identity"}, "boyesir_download_encoding_rejected")
+                _require(
+                    response.headers.get("content-encoding", "identity").lower()
+                    in {"", "identity"},
+                    "boyesir_download_encoding_rejected",
+                )
                 length = response.headers.get("content-length")
                 if length is not None:
-                    _require(re.fullmatch(r"[0-9]{1,12}", length) and 0 < int(length) <= self.max_bytes, "boyesir_download_size_rejected")
+                    _require(
+                        re.fullmatch(r"[0-9]{1,12}", length)
+                        and 0 < int(length) <= self.max_bytes,
+                        "boyesir_download_size_rejected",
+                    )
                 with partial.open("xb") as destination:
                     os.chmod(partial, 0o600)
                     for chunk in response.iter_bytes():
                         heartbeat()
                         count += len(chunk)
-                        _require(count <= self.max_bytes and self.monotonic()-started <= self.transfer_s, "boyesir_download_limit")
+                        _require(
+                            count <= self.max_bytes
+                            and self.monotonic() - started <= self.transfer_s,
+                            "boyesir_download_limit",
+                        )
                         destination.write(chunk)
-                    _require(count > 0 and (length is None or count == int(length)), "boyesir_download_incomplete")
+                    _require(
+                        count > 0 and (length is None or count == int(length)),
+                        "boyesir_download_incomplete",
+                    )
                     destination.flush()
                     os.fsync(destination.fileno())
             self._target(target_dir)
             partial.replace(output)
-            return {"video": output}  # Bytes only; collector MUST decode/probe before publication.
+            return {
+                "video": output
+            }  # Bytes only; collector MUST decode/probe before publication.
         except Exception:
             raise BackendError("boyesir_download_unavailable") from None
         finally:

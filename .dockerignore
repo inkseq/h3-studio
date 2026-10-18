@@ -46,6 +46,11 @@ deploy/wangp/profiles/*
 !yingxu/index.html
 !yingxu/vite.config.js
 !yingxu/source-manifest.json
+!yingxu/.prettierignore
+!yingxu/.prettierrc.json
+!yingxu/eslint.config.js
+!yingxu/tools/
+!yingxu/tools/check-changed.mjs
 !yingxu/src/
 !yingxu/src/*.js
 !yingxu/src/*.jsx

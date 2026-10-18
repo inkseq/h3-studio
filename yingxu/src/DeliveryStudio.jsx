@@ -1,26 +1,255 @@
-import {useI18n} from './i18n/I18nProvider.jsx';
-import {chapterTiming} from './media-timing.js';
+import { useI18n } from './i18n/I18nProvider.jsx';
+import { chapterTiming } from './media-timing.js';
 import React from 'react';
-import {store} from './store.js';
-import {download} from './media.js';
+import { store } from './store.js';
+import { download } from './media.js';
 import AssetPreview from './AssetPreview.jsx';
-import {deliveryIssues,chapterShots} from './delivery-model.js';
+import { deliveryIssues, chapterShots } from './delivery-model.js';
 import ChapterRoughCut from './ChapterRoughCut.jsx';
 import ChapterHandover from './ChapterHandover.jsx';
-export default function DeliveryStudio({project:p,chapterId,onFix,focusIssue}){
- const {t:lt,locale}=useI18n();
- const settings=p.journey?.delivery||{},issues=deliveryIssues(p,chapterId,locale),pending=issues.filter(i=>!i.accepted),shots=chapterShots(p,chapterId),cover=p.entities.find(e=>e.id===settings.coverAssetId);
- const set=(key,value)=>store.editProject(q=>{q.journey={...(q.journey||{}),delivery:{...(q.journey?.delivery||{}),[key]:value}}});
- const exportPlan=()=>{const q=store.exportProject();download(new Blob([JSON.stringify({type:'prototype-plan',version:2,executable:false,deliverable:'创作方案与交付检查，不是视频',projectId:q.id,title:q.title,logline:q.logline,chapterId,journey:{...(q.journey||{}),brief:{entry:'idea',aspect:'9:16',seconds:60,...q.journey?.brief},sound:{subtitles:'none',...q.journey?.sound},delivery:{platform:'暂未决定',version:'草案 v1',aspect:q.journey?.brief?.aspect||'9:16',...settings}},entities:q.entities,links:q.links,checklist:issues,remaining:pending.map(i=>({title:i.title,path:i.path})),acceptedPlaceholders:issues.filter(i=>i.accepted),note:'文件本体请用完整备份；示例分镜不是生成结果。'},null,2)],{type:'application/json'}),q.title+'-创作方案草案.json');store.notify(lt('delivery.downloaded'))};
- return <div className="delivery-studio"><div className="journey-delivery-intro"><div><span className="eyebrow">REVIEW & HANDOVER</span><h3>{p.title}</h3><p>{lt('legacy.panel62')}</p></div><span className="journey-delivery-badge">{lt('legacy.panel63')}</span></div>
- <div className="v6-requirements v6-delivery-settings"><label>{lt('legacy.panel64')}<select aria-label={lt('legacy.panel64')} value={settings.platform||''} onChange={e=>set('platform',e.target.value)}><option value="">{lt('legacy.panel65')}</option><option value="竖屏短剧平台">{lt('legacy.explain29')}</option><option value="YouTube / 横屏视频">{lt('legacy.explain26')}</option><option value="内部审片">{lt('legacy.explain27')}</option><option value="客户提案">{lt('legacy.explain28')}</option></select></label><label>{lt('legacy.panel66')}<input value={settings.version||'草案 v1'} maxLength={100} onChange={e=>set('version',e.target.value)}/></label><label>{lt('legacy.panel67')}<select aria-label={lt('legacy.panel67')} value={settings.aspect||p.journey?.brief?.aspect||'9:16'} onChange={e=>set('aspect',e.target.value)}><option>9:16</option><option>16:9</option><option>1:1</option></select></label><label>{lt('legacy.panel68')}<select aria-label={lt('legacy.panel68')} value={settings.coverAssetId||''} onChange={e=>set('coverAssetId',e.target.value)}><option value="">{lt('legacy.panel69')}</option>{p.entities.filter(e=>e.type==='image'&&e.data.fileId&&!e.data.missingFile).map(e=><option key={e.id} value={e.id}>{e.title}</option>)}</select></label></div>{cover&&<div className="v6-delivery-cover"><AssetPreview entity={cover}/></div>}
- <div className="journey-summary-grid"><div><span>{lt('legacy.panel70')}</span><strong>{lt('delivery.shots',{count:shots.length})}</strong><small>{lt('delivery.seconds',{count:Number((chapterTiming(shots).at(-1)?.end||0).toFixed(3))})}</small></div><div><span>{lt('legacy.panel71')}</span><strong>{p.journey?.sound?.mode==='silent'?lt('delivery.silent'):p.journey?.sound?.mode?lt('delivery.sound'):lt('delivery.undecided')}</strong><small>{lt('legacy.panel72')}</small></div><div><span>{lt('legacy.panel73')}</span><strong>{lt('delivery.items',{count:pending.length})}</strong><small>{lt('delivery.placeholders',{count:issues.filter(i=>i.accepted).length})}</small></div></div>
- <ChapterHandover project={p} chapterId={chapterId} onFix={onFix}/>
- <ChapterRoughCut key={p.id+':'+chapterId} project={p} chapterId={chapterId} onFix={onFix}/>
- {!pending.length&&<div className="v6-empty-good" role="status">{lt('legacy.panel74')}</div>}
- {focusIssue&&!issues.some(i=>i.id===focusIssue)&&<p className="journey-tip" role="status">{lt('legacy.panel75')}</p>}
- <div aria-label={lt('legacy.panel81')}>{issues.map(issue=><article data-testid={'delivery-issue-'+issue.id} key={issue.id} className={'v6-delivery-issue '+(issue.accepted?'accepted':'')+(focusIssue===issue.id?' v6-target':'')}><div><small>{issue.path}</small><strong>{issue.accepted?lt('delivery.prefix'):''}{issue.title}</strong><p>{issue.detail}</p>{issue.placeholderAllowed&&<label><input type="checkbox" checked={!!issue.accepted} onChange={e=>store.updateEntity(issue.entityId,{status:'draft',data:{acceptPlaceholder:e.target.checked,uxReview:{...(p.entities.find(s=>s.id===issue.entityId)?.data.uxReview||{}),status:e.target.checked?'placeholder':null,allRejected:false}}})}/> {lt('delivery.accept')}</label>}</div><button onClick={()=>onFix(issue)}>{lt('delivery.fix',{title:issue.title})}</button></article>)}</div>
- <details><summary>{lt('legacy.panel77')}</summary><div className="v6-actions">{[1,2,3,4,5,6].map(n=><button key={n} data-testid={'journey-check-'+n} onClick={()=>onFix({stage:n,id:'stage-'+n})}>{lt('delivery.step',{step:n})}</button>)}</div></details>
- <aside className="journey-tip">{lt('legacy.explain30')}</aside>
- <div className="journey-export-box"><div><h3>{lt('legacy.panel78')}</h3><p>{lt('legacy.panel79')}</p></div><button className="primary" data-testid="journey-export" onClick={exportPlan}>{lt('legacy.panel80')}</button></div></div>;
+export default function DeliveryStudio({ project: p, chapterId, onFix, focusIssue }) {
+  const { t: lt, locale } = useI18n();
+  const settings = p.journey?.delivery || {},
+    issues = deliveryIssues(p, chapterId, locale),
+    pending = issues.filter((i) => !i.accepted),
+    shots = chapterShots(p, chapterId),
+    cover = p.entities.find((e) => e.id === settings.coverAssetId);
+  const set = (key, value) =>
+    store.editProject((q) => {
+      q.journey = {
+        ...(q.journey || {}),
+        delivery: { ...(q.journey?.delivery || {}), [key]: value },
+      };
+    });
+  const exportPlan = () => {
+    const q = store.exportProject();
+    download(
+      new Blob(
+        [
+          JSON.stringify(
+            {
+              type: 'prototype-plan',
+              version: 2,
+              executable: false,
+              deliverable: '创作方案与交付检查，不是视频',
+              projectId: q.id,
+              title: q.title,
+              logline: q.logline,
+              chapterId,
+              journey: {
+                ...(q.journey || {}),
+                brief: { entry: 'idea', aspect: '9:16', seconds: 60, ...q.journey?.brief },
+                sound: { subtitles: 'none', ...q.journey?.sound },
+                delivery: {
+                  platform: '暂未决定',
+                  version: '草案 v1',
+                  aspect: q.journey?.brief?.aspect || '9:16',
+                  ...settings,
+                },
+              },
+              entities: q.entities,
+              links: q.links,
+              checklist: issues,
+              remaining: pending.map((i) => ({ title: i.title, path: i.path })),
+              acceptedPlaceholders: issues.filter((i) => i.accepted),
+              note: '文件本体请用完整备份；示例分镜不是生成结果。',
+            },
+            null,
+            2,
+          ),
+        ],
+        { type: 'application/json' },
+      ),
+      q.title + '-创作方案草案.json',
+    );
+    store.notify(lt('delivery.downloaded'));
+  };
+  return (
+    <div className="delivery-studio">
+      <div className="journey-delivery-intro">
+        <div>
+          <span className="eyebrow">REVIEW & HANDOVER</span>
+          <h3>{p.title}</h3>
+          <p>{lt('legacy.panel62')}</p>
+        </div>
+        <span className="journey-delivery-badge">{lt('legacy.panel63')}</span>
+      </div>
+      <div className="v6-requirements v6-delivery-settings">
+        <label>
+          {lt('legacy.panel64')}
+          <select
+            aria-label={lt('legacy.panel64')}
+            value={settings.platform || ''}
+            onChange={(e) => set('platform', e.target.value)}
+          >
+            <option value="">{lt('legacy.panel65')}</option>
+            <option value="竖屏短剧平台">{lt('legacy.explain29')}</option>
+            <option value="YouTube / 横屏视频">{lt('legacy.explain26')}</option>
+            <option value="内部审片">{lt('legacy.explain27')}</option>
+            <option value="客户提案">{lt('legacy.explain28')}</option>
+          </select>
+        </label>
+        <label>
+          {lt('legacy.panel66')}
+          <input
+            value={settings.version || '草案 v1'}
+            maxLength={100}
+            onChange={(e) => set('version', e.target.value)}
+          />
+        </label>
+        <label>
+          {lt('legacy.panel67')}
+          <select
+            aria-label={lt('legacy.panel67')}
+            value={settings.aspect || p.journey?.brief?.aspect || '9:16'}
+            onChange={(e) => set('aspect', e.target.value)}
+          >
+            <option>9:16</option>
+            <option>16:9</option>
+            <option>1:1</option>
+          </select>
+        </label>
+        <label>
+          {lt('legacy.panel68')}
+          <select
+            aria-label={lt('legacy.panel68')}
+            value={settings.coverAssetId || ''}
+            onChange={(e) => set('coverAssetId', e.target.value)}
+          >
+            <option value="">{lt('legacy.panel69')}</option>
+            {p.entities
+              .filter((e) => e.type === 'image' && e.data.fileId && !e.data.missingFile)
+              .map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.title}
+                </option>
+              ))}
+          </select>
+        </label>
+      </div>
+      {cover && (
+        <div className="v6-delivery-cover">
+          <AssetPreview entity={cover} />
+        </div>
+      )}
+      <div className="journey-summary-grid">
+        <div>
+          <span>{lt('legacy.panel70')}</span>
+          <strong>{lt('delivery.shots', { count: shots.length })}</strong>
+          <small>
+            {lt('delivery.seconds', {
+              count: Number((chapterTiming(shots).at(-1)?.end || 0).toFixed(3)),
+            })}
+          </small>
+        </div>
+        <div>
+          <span>{lt('legacy.panel71')}</span>
+          <strong>
+            {p.journey?.sound?.mode === 'silent'
+              ? lt('delivery.silent')
+              : p.journey?.sound?.mode
+                ? lt('delivery.sound')
+                : lt('delivery.undecided')}
+          </strong>
+          <small>{lt('legacy.panel72')}</small>
+        </div>
+        <div>
+          <span>{lt('legacy.panel73')}</span>
+          <strong>{lt('delivery.items', { count: pending.length })}</strong>
+          <small>
+            {lt('delivery.placeholders', { count: issues.filter((i) => i.accepted).length })}
+          </small>
+        </div>
+      </div>
+      <ChapterHandover project={p} chapterId={chapterId} onFix={onFix} />
+      <ChapterRoughCut
+        key={p.id + ':' + chapterId}
+        project={p}
+        chapterId={chapterId}
+        onFix={onFix}
+      />
+      {!pending.length && (
+        <div className="v6-empty-good" role="status">
+          {lt('legacy.panel74')}
+        </div>
+      )}
+      {focusIssue && !issues.some((i) => i.id === focusIssue) && (
+        <p className="journey-tip" role="status">
+          {lt('legacy.panel75')}
+        </p>
+      )}
+      <div aria-label={lt('legacy.panel81')}>
+        {issues.map((issue) => (
+          <article
+            data-testid={'delivery-issue-' + issue.id}
+            key={issue.id}
+            className={
+              'v6-delivery-issue ' +
+              (issue.accepted ? 'accepted' : '') +
+              (focusIssue === issue.id ? ' v6-target' : '')
+            }
+          >
+            <div>
+              <small>{issue.path}</small>
+              <strong>
+                {issue.accepted ? lt('delivery.prefix') : ''}
+                {issue.title}
+              </strong>
+              <p>{issue.detail}</p>
+              {issue.placeholderAllowed && (
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={!!issue.accepted}
+                    onChange={(e) =>
+                      store.updateEntity(issue.entityId, {
+                        status: 'draft',
+                        data: {
+                          acceptPlaceholder: e.target.checked,
+                          uxReview: {
+                            ...(p.entities.find((s) => s.id === issue.entityId)?.data.uxReview ||
+                              {}),
+                            status: e.target.checked ? 'placeholder' : null,
+                            allRejected: false,
+                          },
+                        },
+                      })
+                    }
+                  />{' '}
+                  {lt('delivery.accept')}
+                </label>
+              )}
+            </div>
+            <button onClick={() => onFix(issue)}>
+              {lt('delivery.fix', { title: issue.title })}
+            </button>
+          </article>
+        ))}
+      </div>
+      <details>
+        <summary>{lt('legacy.panel77')}</summary>
+        <div className="v6-actions">
+          {[1, 2, 3, 4, 5, 6].map((n) => (
+            <button
+              key={n}
+              data-testid={'journey-check-' + n}
+              onClick={() => onFix({ stage: n, id: 'stage-' + n })}
+            >
+              {lt('delivery.step', { step: n })}
+            </button>
+          ))}
+        </div>
+      </details>
+      <aside className="journey-tip">{lt('legacy.explain30')}</aside>
+      <div className="journey-export-box">
+        <div>
+          <h3>{lt('legacy.panel78')}</h3>
+          <p>{lt('legacy.panel79')}</p>
+        </div>
+        <button className="primary" data-testid="journey-export" onClick={exportPlan}>
+          {lt('legacy.panel80')}
+        </button>
+      </div>
+    </div>
+  );
 }

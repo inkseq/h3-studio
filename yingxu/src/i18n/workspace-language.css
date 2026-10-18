@@ -1,9 +1,196 @@
-.qc-header .language-switch,.freestyle-top .language-switch{flex-shrink:0;min-height:36px;padding:6px 10px}.qc-dialog button,.qc-agent button,.freestyle-shell button{white-space:normal;overflow-wrap:anywhere}.qc-dialog-head h2{min-width:0;overflow-wrap:anywhere}@media(max-width:760px){.qc-header{flex-wrap:wrap;gap:8px}.freestyle-top{flex-wrap:wrap;gap:10px}.freestyle-top nav{flex-wrap:wrap;width:100%;gap:8px}.qc-dialog{max-width:calc(100vw - 24px)}.qc-field{min-width:0}.qc-dialog input,.qc-dialog select{max-width:100%}.freestyle-start-actions{flex-wrap:wrap}}
-.account-settings-link{display:inline-flex;padding:8px 12px;min-height:36px;align-items:center}.api-key-form label,.agent-connect-step{min-width:0}.agent-connect button,.cloud-projects button,.story-library-home button{white-space:normal;overflow-wrap:anywhere}@media(max-width:760px){.api-key-options,.agent-connect-docs,.cloud-actions{flex-wrap:wrap}.api-key-form input,.api-key-form select{max-width:100%}.agent-connect-step{overflow-wrap:anywhere}}
+.qc-header .language-switch,
+.freestyle-top .language-switch {
+  flex-shrink: 0;
+  min-height: 36px;
+  padding: 6px 10px;
+}
+.qc-dialog button,
+.qc-agent button,
+.freestyle-shell button {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.qc-dialog-head h2 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .qc-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .freestyle-top {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .freestyle-top nav {
+    flex-wrap: wrap;
+    width: 100%;
+    gap: 8px;
+  }
+  .qc-dialog {
+    max-width: calc(100vw - 24px);
+  }
+  .qc-field {
+    min-width: 0;
+  }
+  .qc-dialog input,
+  .qc-dialog select {
+    max-width: 100%;
+  }
+  .freestyle-start-actions {
+    flex-wrap: wrap;
+  }
+}
+.account-settings-link {
+  display: inline-flex;
+  padding: 8px 12px;
+  min-height: 36px;
+  align-items: center;
+}
+.api-key-form label,
+.agent-connect-step {
+  min-width: 0;
+}
+.agent-connect button,
+.cloud-projects button,
+.story-library-home button {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .api-key-options,
+  .agent-connect-docs,
+  .cloud-actions {
+    flex-wrap: wrap;
+  }
+  .api-key-form input,
+  .api-key-form select {
+    max-width: 100%;
+  }
+  .agent-connect-step {
+    overflow-wrap: anywhere;
+  }
+}
 
-.qc-card-footer,.qc-result-heading,.qc-connection-list article{flex-wrap:wrap}.qc-card-version,.qc-agent-grant,.qc-created-code{overflow-wrap:anywhere}@media(max-width:760px){.qc-card button,.qc-dialog button,.qc-artifact-download{min-height:44px}.qc-card-footer{gap:8px}.qc-created-code textarea{max-width:100%;min-width:0}.qc-card-count{flex-wrap:wrap}}
-@media(max-width:760px){.qc-header{height:auto;min-height:60px}.qc-header .language-switch,.qc-header .account-settings-link,.qc-sidebar button,.qc-sidebar a,.qc-history-tools label{min-height:44px}.qc-dialog input,.qc-dialog select{font-size:16px}.qc-history-tools label{padding:4px 0}}
+.qc-card-footer,
+.qc-result-heading,
+.qc-connection-list article {
+  flex-wrap: wrap;
+}
+.qc-card-version,
+.qc-agent-grant,
+.qc-created-code {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .qc-card button,
+  .qc-dialog button,
+  .qc-artifact-download {
+    min-height: 44px;
+  }
+  .qc-card-footer {
+    gap: 8px;
+  }
+  .qc-created-code textarea {
+    max-width: 100%;
+    min-width: 0;
+  }
+  .qc-card-count {
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 760px) {
+  .qc-header {
+    height: auto;
+    min-height: 60px;
+  }
+  .qc-header .language-switch,
+  .qc-header .account-settings-link,
+  .qc-sidebar button,
+  .qc-sidebar a,
+  .qc-history-tools label {
+    min-height: 44px;
+  }
+  .qc-dialog input,
+  .qc-dialog select {
+    font-size: 16px;
+  }
+  .qc-history-tools label {
+    padding: 4px 0;
+  }
+}
 
-.qc-availability-mode,.qc-availability-actions{flex-wrap:wrap}.qc-availability-mode,.qc-deployment-field{min-width:0;overflow-wrap:anywhere}@media(max-width:760px){.qc-availability-actions button,.qc-availability-actions a{min-height:44px;display:inline-flex;align-items:center}.qc-deployment-field select{max-width:100%;min-height:44px}}
-@media(max-width:760px){.qc-main>.qc-header{height:auto;display:grid;grid-template-columns:auto auto 44px minmax(0,1fr);gap:8px;padding:8px 13px}.qc-main>.qc-header button{min-height:44px;min-width:44px}.qc-main>.qc-header>span{min-width:0}.qc-main>.qc-header>div{grid-column:1/-1;justify-content:space-between;min-width:0}.qc-main>.qc-header .qc-connection-state{display:flex;max-width:calc(100% - 52px);text-align:left;align-items:center}}
-.qc-shell .qc-history-backdrop,.qc-shell .qc-history-close{display:none}@media(max-width:760px){.qc-shell .qc-history-backdrop{display:block;position:fixed;inset:0 0 var(--mobile-nav-height,0) 0;z-index:9;border:0;border-radius:0;padding:0;background:#243a304d}.qc-shell .qc-history-close{display:inline-flex;position:absolute;top:8px;right:8px;min-width:44px;min-height:44px;padding:8px}}
+.qc-availability-mode,
+.qc-availability-actions {
+  flex-wrap: wrap;
+}
+.qc-availability-mode,
+.qc-deployment-field {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .qc-availability-actions button,
+  .qc-availability-actions a {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+  .qc-deployment-field select {
+    max-width: 100%;
+    min-height: 44px;
+  }
+}
+@media (max-width: 760px) {
+  .qc-main > .qc-header {
+    height: auto;
+    display: grid;
+    grid-template-columns: auto auto 44px minmax(0, 1fr);
+    gap: 8px;
+    padding: 8px 13px;
+  }
+  .qc-main > .qc-header button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .qc-main > .qc-header > span {
+    min-width: 0;
+  }
+  .qc-main > .qc-header > div {
+    grid-column: 1/-1;
+    justify-content: space-between;
+    min-width: 0;
+  }
+  .qc-main > .qc-header .qc-connection-state {
+    display: flex;
+    max-width: calc(100% - 52px);
+    text-align: left;
+    align-items: center;
+  }
+}
+.qc-shell .qc-history-backdrop,
+.qc-shell .qc-history-close {
+  display: none;
+}
+@media (max-width: 760px) {
+  .qc-shell .qc-history-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0 0 var(--mobile-nav-height, 0) 0;
+    z-index: 9;
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    background: #243a304d;
+  }
+  .qc-shell .qc-history-close {
+    display: inline-flex;
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    min-width: 44px;
+    min-height: 44px;
+    padding: 8px;
+  }
+}

@@ -4,6 +4,7 @@ Progress does not grant admission, settle bills or contact a GPU/provider. Missi
 old-host telemetry remains unknown. Only static diagnostics and bounded counters
 cross this public seam; remote exception text and download URLs never do.
 """
+
 from __future__ import annotations
 
 import copy
@@ -12,19 +13,48 @@ import math
 from .dstack_capacity import NATIVE_REASON_CODES
 from .lium_bootstrap import BOOT_FAILURE_CODES, BOOT_PHASES
 
-PHASES = BOOT_PHASES | {"provisioning", "image_pull", "model_load", "stopping", "stopped", "unknown"}
+PHASES = BOOT_PHASES | {
+    "provisioning",
+    "image_pull",
+    "model_load",
+    "stopping",
+    "stopped",
+    "unknown",
+}
 MODEL_STATES = {"not_loaded", "loading", "loaded", "not_observed"}
-DIAGNOSTICS = NATIVE_REASON_CODES | BOOT_FAILURE_CODES | {
-    "UnclassifiedBootstrapFailure", "dstack_native_observation_failed", "dstack_response_invalid",
-    "dstack_runtime_not_observed", "dstack_apply_requires_reconciliation", "dstack_exact_run_absent",
-    "dstack_stop_pending", "dstack_run_terminal_billing_pending", "dstack_no_capacity_billing_pending",
-    "dstack_business_obligations_pending",
-    "dstack_stop_requires_reconciliation", "dstack_runtime_busy", "dstack_runtime_ready",
-    "dstack_api_rejected", "dstack_api_unavailable", "dstack_response_limit",
-    "dstack_backend_binding_mismatch", "dstack_run_binding_mismatch", "dstack_run_ownership_mismatch",
-    "dstack_allocation_binding_mismatch", "dstack_native_binding_mismatch", "dstack_native_incarnation_changed",
-    "dstack_runtime_ready_model_load_unobserved", "matching_worker_unavailable",
-    "worker_heartbeat_expired", "worker_window_expired", "dstack_broker_unavailable"}
+DIAGNOSTICS = (
+    NATIVE_REASON_CODES
+    | BOOT_FAILURE_CODES
+    | {
+        "UnclassifiedBootstrapFailure",
+        "dstack_native_observation_failed",
+        "dstack_response_invalid",
+        "dstack_runtime_not_observed",
+        "dstack_apply_requires_reconciliation",
+        "dstack_exact_run_absent",
+        "dstack_stop_pending",
+        "dstack_run_terminal_billing_pending",
+        "dstack_no_capacity_billing_pending",
+        "dstack_business_obligations_pending",
+        "dstack_stop_requires_reconciliation",
+        "dstack_runtime_busy",
+        "dstack_runtime_ready",
+        "dstack_api_rejected",
+        "dstack_api_unavailable",
+        "dstack_response_limit",
+        "dstack_backend_binding_mismatch",
+        "dstack_run_binding_mismatch",
+        "dstack_run_ownership_mismatch",
+        "dstack_allocation_binding_mismatch",
+        "dstack_native_binding_mismatch",
+        "dstack_native_incarnation_changed",
+        "dstack_runtime_ready_model_load_unobserved",
+        "matching_worker_unavailable",
+        "worker_heartbeat_expired",
+        "worker_window_expired",
+        "dstack_broker_unavailable",
+    }
+)
 REASONS = {
     "dstack_no_capacity_billing_pending": "没有满足当前条件的可用机器；未分配实例，账单待核对",
     "model_download_timeout": "权重下载超时",
@@ -52,10 +82,18 @@ REASONS = {
     "dstack_runtime_bootstrap_failed": "GPU 启动失败，查看阶段诊断代码",
     "dstack_runtime_bootstrap_reconciliation_required": "启动结果尚未确认，请核对原启动记录",
 }
-NORMAL = {"dstack_runtime_preparing", "dstack_runtime_downloading_weights",
-    "dstack_runtime_starting_runtime", "dstack_runtime_loading_model", "dstack_runtime_busy",
-    "dstack_runtime_ready", "dstack_runtime_ready_model_load_unobserved",
-    "dstack_stop_pending", "dstack_run_terminal_billing_pending", "dstack_runtime_not_observed"}
+NORMAL = {
+    "dstack_runtime_preparing",
+    "dstack_runtime_downloading_weights",
+    "dstack_runtime_starting_runtime",
+    "dstack_runtime_loading_model",
+    "dstack_runtime_busy",
+    "dstack_runtime_ready",
+    "dstack_runtime_ready_model_load_unobserved",
+    "dstack_stop_pending",
+    "dstack_run_terminal_billing_pending",
+    "dstack_runtime_not_observed",
+}
 
 
 def _number(value):
@@ -78,7 +116,9 @@ def safe_preparation(value, now):
     """Strict additive JSON subset, including old/malformed receipt handling."""
     if not isinstance(value, dict):
         return None
-    result = {"phase": value.get("phase") if _known(value.get("phase"), PHASES) else "unknown"}
+    result = {
+        "phase": value.get("phase") if _known(value.get("phase"), PHASES) else "unknown"
+    }
     for key in ("started_at", "phase_started_at", "updated_at"):
         result[key] = _stamp(value.get(key), now)
     if _known(value.get("reason_code"), DIAGNOSTICS):
@@ -87,19 +127,34 @@ def safe_preparation(value, now):
         result["failure_phase"] = value["failure_phase"]
     download = value.get("download")
     if isinstance(download, dict):
-        result["download"] = {key: _count(download.get(key)) for key in (
-            "bytes_complete", "bytes_total", "files_complete", "files_total")}
+        result["download"] = {
+            key: _count(download.get(key))
+            for key in (
+                "bytes_complete",
+                "bytes_total",
+                "files_complete",
+                "files_total",
+            )
+        }
         result["download"]["basis"] = "completed_files"
     image = value.get("image")
     if isinstance(image, dict):
-        result["image"] = {key: _count(image.get(key)) for key in (
-            "downloaded_bytes", "extracted_bytes", "total_bytes")}
-        result["image"]["is_total_bytes_final"] = image.get("is_total_bytes_final") is True
+        result["image"] = {
+            key: _count(image.get(key))
+            for key in ("downloaded_bytes", "extracted_bytes", "total_bytes")
+        }
+        result["image"]["is_total_bytes_final"] = (
+            image.get("is_total_bytes_final") is True
+        )
     model = value.get("model")
     if isinstance(model, dict):
-        result["model"] = {"state": model.get("state") if _known(model.get("state"), MODEL_STATES) else "not_observed",
+        result["model"] = {
+            "state": model.get("state")
+            if _known(model.get("state"), MODEL_STATES)
+            else "not_observed",
             "phase_started_at": _stamp(model.get("phase_started_at"), now),
-            "updated_at": _stamp(model.get("updated_at"), now)}
+            "updated_at": _stamp(model.get("updated_at"), now),
+        }
     return result
 
 
@@ -118,8 +173,11 @@ def record_preparation(binding, value, observed_at, *, validation_at=None):
         return
     prior = safe_preparation(binding.get("preparation"), validation_at) or {}
     phase_same = incoming["phase"] == prior.get("phase")
-    incoming["phase_started_at"] = (incoming.get("phase_started_at") or
-        (prior.get("phase_started_at") if phase_same else None) or observed_at)
+    incoming["phase_started_at"] = (
+        incoming.get("phase_started_at")
+        or (prior.get("phase_started_at") if phase_same else None)
+        or observed_at
+    )
     for key in ("download", "image", "model"):
         if key not in incoming and key in prior:
             incoming[key] = copy.deepcopy(prior[key])
@@ -132,21 +190,37 @@ def _transfer(source, *, image=False):
         return None
     complete = source.get("bytes_complete")
     if image:
-        downloaded, extracted = source.get("downloaded_bytes"), source.get("extracted_bytes")
-        complete = downloaded+extracted if _number(downloaded) and _number(extracted) else None
+        downloaded, extracted = (
+            source.get("downloaded_bytes"),
+            source.get("extracted_bytes"),
+        )
+        complete = (
+            downloaded + extracted
+            if _number(downloaded) and _number(extracted)
+            else None
+        )
     total = source.get("total_bytes" if image else "bytes_total")
     # dstack totals are not final until the native client explicitly says so.
     if image and source.get("is_total_bytes_final") is not True:
         total = None
-    percent = 100 * complete / total if (_number(complete) and _number(total)
-        and total > 0 and complete <= total) else None
+    percent = (
+        100 * complete / total
+        if (_number(complete) and _number(total) and total > 0 and complete <= total)
+        else None
+    )
     result = {"bytes_complete": complete, "bytes_total": total, "percent": percent}
     if image:
-        result.update(downloaded_bytes=source.get("downloaded_bytes"),
-            extracted_bytes=source.get("extracted_bytes"), basis="download_and_extract")
+        result.update(
+            downloaded_bytes=source.get("downloaded_bytes"),
+            extracted_bytes=source.get("extracted_bytes"),
+            basis="download_and_extract",
+        )
     else:
-        result.update(files_complete=source.get("files_complete"), files_total=source.get("files_total"),
-            basis="completed_files")
+        result.update(
+            files_complete=source.get("files_complete"),
+            files_total=source.get("files_total"),
+            basis="completed_files",
+        )
     return result
 
 
@@ -160,12 +234,23 @@ def preparation_view(node, intent, public, now, *, fresh_seconds=30):
     phase = raw.get("phase") or binding.get("bootstrap_phase")
     if phase in {"failed", "setup_failed"} and raw.get("failure_phase"):
         phase = raw["failure_phase"]
-    model = raw.get("model") or {"state": "not_observed", "updated_at": None, "phase_started_at": None}
+    model = raw.get("model") or {
+        "state": "not_observed",
+        "updated_at": None,
+        "phase_started_at": None,
+    }
     lifecycle = public.get("lifecycle_phase")
-    mapped = {"provisioning": "renting", "image_pull": "pulling_image", "model_download": "downloading_weights",
-        "download_file": "downloading_weights", "model_download_waiting_for_shared_cache": "downloading_weights",
-        "runtime_start": "starting_runtime", "runtime_verification": "verifying_runtime",
-        "model_load": "loading_model", "runtime_ready": "ready"}.get(phase, "preparing")
+    mapped = {
+        "provisioning": "renting",
+        "image_pull": "pulling_image",
+        "model_download": "downloading_weights",
+        "download_file": "downloading_weights",
+        "model_download_waiting_for_shared_cache": "downloading_weights",
+        "runtime_start": "starting_runtime",
+        "runtime_verification": "verifying_runtime",
+        "model_load": "loading_model",
+        "runtime_ready": "ready",
+    }.get(phase, "preparing")
     phase_started = raw.get("phase_started_at")
     if lifecycle in {"stopping", "stopped"}:
         mapped = lifecycle
@@ -182,17 +267,27 @@ def preparation_view(node, intent, public, now, *, fresh_seconds=30):
     elif phase is None and lifecycle == "renting":
         mapped = "renting"
         phase_started = started
-    end = _stamp(binding.get("first_stopped_at"), now) if lifecycle == "stopped" else now
+    end = (
+        _stamp(binding.get("first_stopped_at"), now) if lifecycle == "stopped" else now
+    )
     observed = _stamp(binding.get("observed_at"), now)
-    age = now-observed if observed is not None else None
+    age = now - observed if observed is not None else None
     source_updated = raw.get("updated_at")
     stale = lifecycle != "stopped" and (age is None or age > fresh_seconds)
     # Only describes absence of a telemetry update. A large in-flight file or
     # long model load can produce no new completed-file count without failing.
-    stalled = mapped in {"downloading_weights", "starting_runtime", "verifying_runtime", "loading_model"} and (
-        source_updated is not None and now-source_updated > 120)
+    stalled = mapped in {
+        "downloading_weights",
+        "starting_runtime",
+        "verifying_runtime",
+        "loading_model",
+    } and (source_updated is not None and now - source_updated > 120)
     reason = raw.get("reason_code") or public.get("reason_code")
-    if public.get("native_ready") and not public.get("ready") and not public.get("current_job"):
+    if (
+        public.get("native_ready")
+        and not public.get("ready")
+        and not public.get("current_job")
+    ):
         reason = public.get("dispatch_reason_code") or reason
     reason = reason if _known(reason, DIAGNOSTICS) and reason not in NORMAL else None
     text = REASONS.get(reason)
@@ -202,9 +297,24 @@ def preparation_view(node, intent, public, now, *, fresh_seconds=30):
         text = "启动观测未及时更新，当前状态尚待确认"
     elif not text and stalled:
         text = "一段时间未收到新的进度；可能仍在处理当前文件或加载组件，尚不能判定失败"
-    return {"phase": mapped, "started_at": started, "phase_started_at": phase_started,
-        "updated_at": source_updated, "elapsed_seconds": end-started if end is not None and started is not None and end >= started else None,
-        "phase_elapsed_seconds": end-phase_started if end is not None and phase_started is not None and end >= phase_started else None,
-        "observation_age_seconds": age, "stale": stale, "stalled": stalled,
-        "reason_code": reason, "reason_text": text, "failure_phase": raw.get("failure_phase"),
-        "download": _transfer(raw.get("download")), "image": _transfer(raw.get("image"), image=True), "model": model}
+    return {
+        "phase": mapped,
+        "started_at": started,
+        "phase_started_at": phase_started,
+        "updated_at": source_updated,
+        "elapsed_seconds": end - started
+        if end is not None and started is not None and end >= started
+        else None,
+        "phase_elapsed_seconds": end - phase_started
+        if end is not None and phase_started is not None and end >= phase_started
+        else None,
+        "observation_age_seconds": age,
+        "stale": stale,
+        "stalled": stalled,
+        "reason_code": reason,
+        "reason_text": text,
+        "failure_phase": raw.get("failure_phase"),
+        "download": _transfer(raw.get("download")),
+        "image": _transfer(raw.get("image"), image=True),
+        "model": model,
+    }

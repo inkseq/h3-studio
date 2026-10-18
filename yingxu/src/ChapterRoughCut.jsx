@@ -1,48 +1,434 @@
-import {useI18n} from './i18n/I18nProvider.jsx';
-import React,{useSyncExternalStore} from 'react';
-import {store} from './store.js';
-import {cloudController as cloud} from './cloud-controller.js';
-import {useCloud} from './CloudStudio.jsx';
-import {roughCutSnapshot,roughCutSummary,roughCutJobs} from './roughcut-model.js';
-import {stableJSON,activeJobStatuses,jobStatusLabel,jobMessage,estimateLabel} from './cloud-model.js';
+import { useI18n } from './i18n/I18nProvider.jsx';
+import React, { useSyncExternalStore } from 'react';
+import { store } from './store.js';
+import { cloudController as cloud } from './cloud-controller.js';
+import { useCloud } from './CloudStudio.jsx';
+import { roughCutSnapshot, roughCutSummary, roughCutJobs } from './roughcut-model.js';
+import {
+  stableJSON,
+  activeJobStatuses,
+  jobStatusLabel,
+  jobMessage,
+  estimateLabel,
+} from './cloud-model.js';
 import ArtifactResult from './ArtifactResult.jsx';
-import {burnCaptionStatus} from './caption-model.js';
+import { burnCaptionStatus } from './caption-model.js';
 import './roughcut.css';
 
-const run=promise=>promise.catch(()=>{});
-const number=value=>Number.isFinite(value)?Number(value.toFixed(3)):'—';
-export default function ChapterRoughCut({project,chapterId,onFix}){
- const {t:lt,locale}=useI18n();
-  const c=useCloud(),s=useSyncExternalStore(store.subscribe,store.getState,store.getState),cap=c.capabilities?.chapter_render;
-  const options=c.renderOptions[chapterId]||c.renderPlans[chapterId]?.options||{resolution:'720P',aspect:project.journey?.delivery?.aspect||project.journey?.brief?.aspect||'9:16',burn_subtitles:false},setOptions=next=>cloud.setRenderOptions(chapterId,next);
-  const summary=roughCutSummary(project,chapterId),plan=c.renderPlans[chapterId],pending=c.renderPending[chapterId],jobs=roughCutJobs(c.jobs,project.id,chapterId);
-  const generatedUnsupported=summary.tracks.some(t=>t.generatedFrom)&&cap?.generated_audio!==true;
-  const trimUnsupported=summary.shots.some(item=>item.shot.data.selectedVideoRange)&&!(cap?.source_trim===true&&cap?.render_contract_version>=2);
-  const subtitleSupported=cap?.subtitles===true&&cap?.render_contract_version>=3,subtitles=burnCaptionStatus(project,chapterId),subtitleBlocked=!!options.burn_subtitles&&(!subtitleSupported||subtitles.issues.length>0);
-  const stale=!!plan&&plan.sourceSnapshot!==stableJSON(roughCutSnapshot(project,chapterId,options)),held=jobs.some(j=>j.status==='recovery_hold'),active=jobs.some(j=>activeJobStatuses.has(j.status)),submitted=!!plan&&jobs.some(j=>j.plan_id===plan.plan_id);
-  const expired=!!plan?.expires_at&&(typeof plan.expires_at==='number'?plan.expires_at*1000:Date.parse(plan.expires_at))<=Date.now();
-  return <section className="roughcut" aria-label={lt('rough.ui1')}><div className="cloud-section-head"><div><span className="eyebrow">CHAPTER ROUGH CUT</span><h3>{lt('rough.ui2')}</h3></div><span className="cloud-badge">{lt('rough.ui3')}</span></div><p>{lt('rough.ui4')}</p>
-  {s.workspace.mode!=='cloud'?<p className="cloud-warning">{lt('rough.ui5')}</p>:!cap?.implemented?<p className="cloud-warning">{lt('rough.ui6')}</p>:<>
-    {!cap.enabled&&<p className="cloud-warning">{lt('rough.ui7')}</p>}
-    {generatedUnsupported&&<p role="alert" className="cloud-warning">{lt('rough.ui8')}</p>}
-    {trimUnsupported&&<p role="alert" className="cloud-warning">{lt('rough.ui9')}</p>}
-    <div className="roughcut-options"><label>{lt('rough.ui10')}<select aria-label={lt('rough.ui10')} value={options.resolution} onChange={e=>setOptions({...options,resolution:e.target.value})}>{cap.resolutions.map(value=><option key={value}>{value}</option>)}</select></label><label>{lt('rough.ui11')}<select aria-label={lt('rough.ui11')} value={options.aspect} onChange={e=>setOptions({...options,aspect:e.target.value})}>{!cap.aspects.includes(options.aspect)&&<option value={options.aspect} disabled>{options.aspect} · {lt('rough.unsupported')}</option>}{cap.aspects.map(value=><option key={value}>{value}</option>)}</select></label><div><b>{cap.fps} fps</b><small>{lt('rough.ui12')}</small></div></div>
-    <p>{lt('rough.summary',{count:summary.shots.length,seconds:number(summary.total)})} · {summary.soundMode==='silent'?lt('rough.ui13'):lt('rough.tracks',{count:summary.tracks.length})} {lt('rough.audioInfo')}</p>
-    <div className="roughcut-subtitle-choice"><label><input type="checkbox" checked={!!options.burn_subtitles} disabled={!subtitleSupported&&!options.burn_subtitles} onChange={e=>setOptions({...options,burn_subtitles:e.target.checked})}/>{lt('rough.ui14')}</label><p>{options.burn_subtitles?lt('rough.ui15'):lt('rough.ui16')}</p>{!subtitleSupported&&<p className="cloud-warning">{lt('rough.ui17')}</p>}{options.burn_subtitles&&<><p>{lt('rough.ui18')}</p><div className="subtitle-style-example" aria-label={lt('rough.ui19')}><span>{lt('rough.ui20')}<br/>{lt('rough.ui21')}</span></div><p className="muted">{lt('rough.ui22')}</p>{subtitles.issues.length>0?<div role="alert" className="cloud-warning"><ul>{subtitles.issues.map((issue,index)=><li key={index}>{issue}</li>)}</ul><button onClick={()=>onFix({id:'roughcut-subtitles',stage:6})}>{lt('rough.ui23')}</button></div>:<p>{lt('rough.confirmed',{count:subtitles.aligned.length})}</p>}</>}</div>
-    <div className="cloud-actions"><button disabled={subtitleBlocked||generatedUnsupported||trimUnsupported||c.busy||!chapterId||!summary.shots.length||!!pending||active||held||!cap.aspects.includes(options.aspect)} onClick={()=>run(cloud.prepareRender(chapterId,options))}>{lt('rough.ui24')}</button><button onClick={()=>onFix({id:'roughcut-sound',stage:6})}>{lt('rough.ui25')}</button></div>
-    {plan&&<div className={'roughcut-plan '+(plan.status==='ready'&&!stale?'ready':'')} aria-label={lt('rough.ui26')}><h4>{stale?lt('rough.ui27'):plan.status==='ready'?lt('rough.ui28'):lt('rough.ui29')}</h4>{stale&&<p role="alert" className="cloud-warning">{lt('rough.ui30')}</p>}{expired&&<p role="alert">{lt('rough.ui31')}</p>}{plan.simulation&&<p className="cloud-warning">{lt('rough.ui32')}</p>}
-      <p><b>{plan.output_spec?.width} × {plan.output_spec?.height}</b> · {plan.output_spec?.fps} fps · {lt('rough.output',{seconds:number(plan.output_spec?.actual_duration),frames:plan.output_spec?.frame_count})}</p><p className="muted">{lt('rough.ui33')}</p>
-      <ol className="roughcut-timeline">{plan.timeline?.shots?.map(shot=><li key={shot.shot_id}><div><b>{shot.title}</b><small>{shot.source_title}{shot.simulation?lt('rough.ui34'):''}</small><span>{lt('rough.used',{duration:number(shot.duration),source:number(shot.source_duration)})}</span>{Number.isFinite(shot.source_start)&&<small>{lt('rough.source',{start:number(shot.source_start),end:number(shot.source_end)})}{Number.isFinite(shot.selected_start)?lt('rough.beforeAlignment',{start:number(shot.selected_start),end:number(shot.selected_end)}):""}</small>}</div><button onClick={()=>onFix({id:'roughcut-'+shot.shot_id,stage:4,entityId:shot.shot_id,field:'seconds'})}>{lt('rough.ui35')}</button></li>)}</ol>
-      {plan.timeline?.audio_tracks?.length>0?<div className="roughcut-audio"><h4>{lt('rough.ui36')}</h4>{plan.timeline.audio_tracks.map((track,index)=><p key={index}>{track.title}{track.generated_from?lt('rough.ui37'):''}{lt('rough.audioRange',{at:number(track.timeline_start),start:number(track.source_start),end:number(track.source_end),gain:number(track.gain*100)})}</p>)}</div>:<p>{lt('rough.ui38')}</p>}
-      {plan.timeline?.subtitles?.burned?<div className="roughcut-subtitle-plan"><h4>{lt('rough.ui39')}</h4><p>{lt('rough.burned',{count:plan.timeline.subtitles.cues?.length||0})}</p><details><summary>{lt('rough.ui40')}</summary><ol>{plan.timeline.subtitles.cues?.map(cue=><li key={cue.id}><b>{lt('rough.cue',{start:number(cue.start),end:number(cue.end),first:cue.start_frame,last:cue.end_frame})}</b><p className="subtitle-cue-text">{cue.text}</p></li>)}</ol></details></div>:<p>{plan.options?.burn_subtitles?lt('rough.ui41'):lt('rough.ui42')}</p>}
-      {plan.blockers?.length>0&&<div className="cloud-error" role="alert"><ul>{plan.blockers.map((text,index)=><li key={index}>{text}</li>)}</ul><details><summary>{lt('rough.ui43')}</summary><div className="cloud-actions">{summary.shots.map(shot=><button key={shot.id} onClick={()=>onFix({id:'roughcut-'+shot.id,stage:4,entityId:shot.id,field:'seconds'})}>{shot.title}</button>)}</div></details></div>}
-      {plan.warnings?.length>0&&<details open><summary>{lt('rough.ui44')}</summary><ul>{plan.warnings.map((text,index)=><li key={index}>{text}</li>)}</ul></details>}
-      <p>{estimateLabel(plan.estimate,locale)}</p><button className="primary" disabled={c.busy||plan.status!=='ready'||stale||expired||!cap.enabled||!!pending||submitted||active||held} onClick={()=>run(cloud.submitRender(chapterId))}>{submitted?lt('rough.ui45'):lt('rough.ui46')}</button>
-    </div>}
-    {held&&<p className="cloud-warning">{lt('rough.ui47')}</p>}{pending&&<div className="cloud-warning" role="alert"><p>{c.busy?lt('rough.ui48'):lt('rough.ui49')}</p><button disabled={c.busy||held} onClick={()=>run(cloud.submitRender(chapterId))}>{lt('rough.ui50')}</button></div>}
-    <div className="cloud-section-head"><h4>{lt('rough.ui51')}</h4><button disabled={c.busy} onClick={()=>run(cloud.refresh())}>{lt('rough.ui52')}</button></div><p>{lt('rough.ui53')}</p>
-    {!jobs.length&&<p className="muted">{lt('rough.ui54')}</p>}
-    <div className="roughcut-jobs">{jobs.map(job=><article key={job.id}><div className="cloud-section-head"><b>{job.simulation?lt('rough.ui55'):''}{jobStatusLabel(job.status,locale)}</b>{activeJobStatuses.has(job.status)&&<button disabled={c.busy} onClick={()=>run(cloud.cancel(job.id))}>{lt('rough.ui56')}</button>}</div><p role="status">{job.status==='running'?lt('rough.ui57'):jobMessage(job,locale)}</p><p>{job.effective_request?.render?.version>=3?(job.effective_request.render.subtitles?lt('rough.ui58'):lt('rough.ui59')):(lt('rough.ui60'))}</p><small>{job.created_at?new Date(typeof job.created_at==='number'?job.created_at*1000:job.created_at).toLocaleString():''}{job.effective_request?.duration?lt('rough.duration',{seconds:number(job.effective_request.duration)}): ''} · {lt('rough.job',{id:job.id})}</small>{job.status==='succeeded'&&(job.artifacts||[]).filter(a=>['video','audio'].includes(a.kind)).map(artifact=><ArtifactResult key={artifact.id} artifact={artifact} job={job} title={summary.chapterTitle}/>)}</article>)}</div>
-  </>}
-  </section>;
+const run = (promise) => promise.catch(() => {});
+const number = (value) => (Number.isFinite(value) ? Number(value.toFixed(3)) : '—');
+export default function ChapterRoughCut({ project, chapterId, onFix }) {
+  const { t: lt, locale } = useI18n();
+  const c = useCloud(),
+    s = useSyncExternalStore(store.subscribe, store.getState, store.getState),
+    cap = c.capabilities?.chapter_render;
+  const options = c.renderOptions[chapterId] ||
+      c.renderPlans[chapterId]?.options || {
+        resolution: '720P',
+        aspect: project.journey?.delivery?.aspect || project.journey?.brief?.aspect || '9:16',
+        burn_subtitles: false,
+      },
+    setOptions = (next) => cloud.setRenderOptions(chapterId, next);
+  const summary = roughCutSummary(project, chapterId),
+    plan = c.renderPlans[chapterId],
+    pending = c.renderPending[chapterId],
+    jobs = roughCutJobs(c.jobs, project.id, chapterId);
+  const generatedUnsupported =
+    summary.tracks.some((t) => t.generatedFrom) && cap?.generated_audio !== true;
+  const trimUnsupported =
+    summary.shots.some((item) => item.shot.data.selectedVideoRange) &&
+    !(cap?.source_trim === true && cap?.render_contract_version >= 2);
+  const subtitleSupported = cap?.subtitles === true && cap?.render_contract_version >= 3,
+    subtitles = burnCaptionStatus(project, chapterId),
+    subtitleBlocked =
+      !!options.burn_subtitles && (!subtitleSupported || subtitles.issues.length > 0);
+  const stale =
+      !!plan && plan.sourceSnapshot !== stableJSON(roughCutSnapshot(project, chapterId, options)),
+    held = jobs.some((j) => j.status === 'recovery_hold'),
+    active = jobs.some((j) => activeJobStatuses.has(j.status)),
+    submitted = !!plan && jobs.some((j) => j.plan_id === plan.plan_id);
+  const expired =
+    !!plan?.expires_at &&
+    (typeof plan.expires_at === 'number' ? plan.expires_at * 1000 : Date.parse(plan.expires_at)) <=
+      Date.now();
+  return (
+    <section className="roughcut" aria-label={lt('rough.ui1')}>
+      <div className="cloud-section-head">
+        <div>
+          <span className="eyebrow">CHAPTER ROUGH CUT</span>
+          <h3>{lt('rough.ui2')}</h3>
+        </div>
+        <span className="cloud-badge">{lt('rough.ui3')}</span>
+      </div>
+      <p>{lt('rough.ui4')}</p>
+      {s.workspace.mode !== 'cloud' ? (
+        <p className="cloud-warning">{lt('rough.ui5')}</p>
+      ) : !cap?.implemented ? (
+        <p className="cloud-warning">{lt('rough.ui6')}</p>
+      ) : (
+        <>
+          {!cap.enabled && <p className="cloud-warning">{lt('rough.ui7')}</p>}
+          {generatedUnsupported && (
+            <p role="alert" className="cloud-warning">
+              {lt('rough.ui8')}
+            </p>
+          )}
+          {trimUnsupported && (
+            <p role="alert" className="cloud-warning">
+              {lt('rough.ui9')}
+            </p>
+          )}
+          <div className="roughcut-options">
+            <label>
+              {lt('rough.ui10')}
+              <select
+                aria-label={lt('rough.ui10')}
+                value={options.resolution}
+                onChange={(e) => setOptions({ ...options, resolution: e.target.value })}
+              >
+                {cap.resolutions.map((value) => (
+                  <option key={value}>{value}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              {lt('rough.ui11')}
+              <select
+                aria-label={lt('rough.ui11')}
+                value={options.aspect}
+                onChange={(e) => setOptions({ ...options, aspect: e.target.value })}
+              >
+                {!cap.aspects.includes(options.aspect) && (
+                  <option value={options.aspect} disabled>
+                    {options.aspect} · {lt('rough.unsupported')}
+                  </option>
+                )}
+                {cap.aspects.map((value) => (
+                  <option key={value}>{value}</option>
+                ))}
+              </select>
+            </label>
+            <div>
+              <b>{cap.fps} fps</b>
+              <small>{lt('rough.ui12')}</small>
+            </div>
+          </div>
+          <p>
+            {lt('rough.summary', { count: summary.shots.length, seconds: number(summary.total) })} ·{' '}
+            {summary.soundMode === 'silent'
+              ? lt('rough.ui13')
+              : lt('rough.tracks', { count: summary.tracks.length })}{' '}
+            {lt('rough.audioInfo')}
+          </p>
+          <div className="roughcut-subtitle-choice">
+            <label>
+              <input
+                type="checkbox"
+                checked={!!options.burn_subtitles}
+                disabled={!subtitleSupported && !options.burn_subtitles}
+                onChange={(e) => setOptions({ ...options, burn_subtitles: e.target.checked })}
+              />
+              {lt('rough.ui14')}
+            </label>
+            <p>{options.burn_subtitles ? lt('rough.ui15') : lt('rough.ui16')}</p>
+            {!subtitleSupported && <p className="cloud-warning">{lt('rough.ui17')}</p>}
+            {options.burn_subtitles && (
+              <>
+                <p>{lt('rough.ui18')}</p>
+                <div className="subtitle-style-example" aria-label={lt('rough.ui19')}>
+                  <span>
+                    {lt('rough.ui20')}
+                    <br />
+                    {lt('rough.ui21')}
+                  </span>
+                </div>
+                <p className="muted">{lt('rough.ui22')}</p>
+                {subtitles.issues.length > 0 ? (
+                  <div role="alert" className="cloud-warning">
+                    <ul>
+                      {subtitles.issues.map((issue, index) => (
+                        <li key={index}>{issue}</li>
+                      ))}
+                    </ul>
+                    <button onClick={() => onFix({ id: 'roughcut-subtitles', stage: 6 })}>
+                      {lt('rough.ui23')}
+                    </button>
+                  </div>
+                ) : (
+                  <p>{lt('rough.confirmed', { count: subtitles.aligned.length })}</p>
+                )}
+              </>
+            )}
+          </div>
+          <div className="cloud-actions">
+            <button
+              disabled={
+                subtitleBlocked ||
+                generatedUnsupported ||
+                trimUnsupported ||
+                c.busy ||
+                !chapterId ||
+                !summary.shots.length ||
+                !!pending ||
+                active ||
+                held ||
+                !cap.aspects.includes(options.aspect)
+              }
+              onClick={() => run(cloud.prepareRender(chapterId, options))}
+            >
+              {lt('rough.ui24')}
+            </button>
+            <button onClick={() => onFix({ id: 'roughcut-sound', stage: 6 })}>
+              {lt('rough.ui25')}
+            </button>
+          </div>
+          {plan && (
+            <div
+              className={'roughcut-plan ' + (plan.status === 'ready' && !stale ? 'ready' : '')}
+              aria-label={lt('rough.ui26')}
+            >
+              <h4>
+                {stale
+                  ? lt('rough.ui27')
+                  : plan.status === 'ready'
+                    ? lt('rough.ui28')
+                    : lt('rough.ui29')}
+              </h4>
+              {stale && (
+                <p role="alert" className="cloud-warning">
+                  {lt('rough.ui30')}
+                </p>
+              )}
+              {expired && <p role="alert">{lt('rough.ui31')}</p>}
+              {plan.simulation && <p className="cloud-warning">{lt('rough.ui32')}</p>}
+              <p>
+                <b>
+                  {plan.output_spec?.width} × {plan.output_spec?.height}
+                </b>{' '}
+                · {plan.output_spec?.fps} fps ·{' '}
+                {lt('rough.output', {
+                  seconds: number(plan.output_spec?.actual_duration),
+                  frames: plan.output_spec?.frame_count,
+                })}
+              </p>
+              <p className="muted">{lt('rough.ui33')}</p>
+              <ol className="roughcut-timeline">
+                {plan.timeline?.shots?.map((shot) => (
+                  <li key={shot.shot_id}>
+                    <div>
+                      <b>{shot.title}</b>
+                      <small>
+                        {shot.source_title}
+                        {shot.simulation ? lt('rough.ui34') : ''}
+                      </small>
+                      <span>
+                        {lt('rough.used', {
+                          duration: number(shot.duration),
+                          source: number(shot.source_duration),
+                        })}
+                      </span>
+                      {Number.isFinite(shot.source_start) && (
+                        <small>
+                          {lt('rough.source', {
+                            start: number(shot.source_start),
+                            end: number(shot.source_end),
+                          })}
+                          {Number.isFinite(shot.selected_start)
+                            ? lt('rough.beforeAlignment', {
+                                start: number(shot.selected_start),
+                                end: number(shot.selected_end),
+                              })
+                            : ''}
+                        </small>
+                      )}
+                    </div>
+                    <button
+                      onClick={() =>
+                        onFix({
+                          id: 'roughcut-' + shot.shot_id,
+                          stage: 4,
+                          entityId: shot.shot_id,
+                          field: 'seconds',
+                        })
+                      }
+                    >
+                      {lt('rough.ui35')}
+                    </button>
+                  </li>
+                ))}
+              </ol>
+              {plan.timeline?.audio_tracks?.length > 0 ? (
+                <div className="roughcut-audio">
+                  <h4>{lt('rough.ui36')}</h4>
+                  {plan.timeline.audio_tracks.map((track, index) => (
+                    <p key={index}>
+                      {track.title}
+                      {track.generated_from ? lt('rough.ui37') : ''}
+                      {lt('rough.audioRange', {
+                        at: number(track.timeline_start),
+                        start: number(track.source_start),
+                        end: number(track.source_end),
+                        gain: number(track.gain * 100),
+                      })}
+                    </p>
+                  ))}
+                </div>
+              ) : (
+                <p>{lt('rough.ui38')}</p>
+              )}
+              {plan.timeline?.subtitles?.burned ? (
+                <div className="roughcut-subtitle-plan">
+                  <h4>{lt('rough.ui39')}</h4>
+                  <p>{lt('rough.burned', { count: plan.timeline.subtitles.cues?.length || 0 })}</p>
+                  <details>
+                    <summary>{lt('rough.ui40')}</summary>
+                    <ol>
+                      {plan.timeline.subtitles.cues?.map((cue) => (
+                        <li key={cue.id}>
+                          <b>
+                            {lt('rough.cue', {
+                              start: number(cue.start),
+                              end: number(cue.end),
+                              first: cue.start_frame,
+                              last: cue.end_frame,
+                            })}
+                          </b>
+                          <p className="subtitle-cue-text">{cue.text}</p>
+                        </li>
+                      ))}
+                    </ol>
+                  </details>
+                </div>
+              ) : (
+                <p>{plan.options?.burn_subtitles ? lt('rough.ui41') : lt('rough.ui42')}</p>
+              )}
+              {plan.blockers?.length > 0 && (
+                <div className="cloud-error" role="alert">
+                  <ul>
+                    {plan.blockers.map((text, index) => (
+                      <li key={index}>{text}</li>
+                    ))}
+                  </ul>
+                  <details>
+                    <summary>{lt('rough.ui43')}</summary>
+                    <div className="cloud-actions">
+                      {summary.shots.map((shot) => (
+                        <button
+                          key={shot.id}
+                          onClick={() =>
+                            onFix({
+                              id: 'roughcut-' + shot.id,
+                              stage: 4,
+                              entityId: shot.id,
+                              field: 'seconds',
+                            })
+                          }
+                        >
+                          {shot.title}
+                        </button>
+                      ))}
+                    </div>
+                  </details>
+                </div>
+              )}
+              {plan.warnings?.length > 0 && (
+                <details open>
+                  <summary>{lt('rough.ui44')}</summary>
+                  <ul>
+                    {plan.warnings.map((text, index) => (
+                      <li key={index}>{text}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+              <p>{estimateLabel(plan.estimate, locale)}</p>
+              <button
+                className="primary"
+                disabled={
+                  c.busy ||
+                  plan.status !== 'ready' ||
+                  stale ||
+                  expired ||
+                  !cap.enabled ||
+                  !!pending ||
+                  submitted ||
+                  active ||
+                  held
+                }
+                onClick={() => run(cloud.submitRender(chapterId))}
+              >
+                {submitted ? lt('rough.ui45') : lt('rough.ui46')}
+              </button>
+            </div>
+          )}
+          {held && <p className="cloud-warning">{lt('rough.ui47')}</p>}
+          {pending && (
+            <div className="cloud-warning" role="alert">
+              <p>{c.busy ? lt('rough.ui48') : lt('rough.ui49')}</p>
+              <button disabled={c.busy || held} onClick={() => run(cloud.submitRender(chapterId))}>
+                {lt('rough.ui50')}
+              </button>
+            </div>
+          )}
+          <div className="cloud-section-head">
+            <h4>{lt('rough.ui51')}</h4>
+            <button disabled={c.busy} onClick={() => run(cloud.refresh())}>
+              {lt('rough.ui52')}
+            </button>
+          </div>
+          <p>{lt('rough.ui53')}</p>
+          {!jobs.length && <p className="muted">{lt('rough.ui54')}</p>}
+          <div className="roughcut-jobs">
+            {jobs.map((job) => (
+              <article key={job.id}>
+                <div className="cloud-section-head">
+                  <b>
+                    {job.simulation ? lt('rough.ui55') : ''}
+                    {jobStatusLabel(job.status, locale)}
+                  </b>
+                  {activeJobStatuses.has(job.status) && (
+                    <button disabled={c.busy} onClick={() => run(cloud.cancel(job.id))}>
+                      {lt('rough.ui56')}
+                    </button>
+                  )}
+                </div>
+                <p role="status">
+                  {job.status === 'running' ? lt('rough.ui57') : jobMessage(job, locale)}
+                </p>
+                <p>
+                  {job.effective_request?.render?.version >= 3
+                    ? job.effective_request.render.subtitles
+                      ? lt('rough.ui58')
+                      : lt('rough.ui59')
+                    : lt('rough.ui60')}
+                </p>
+                <small>
+                  {job.created_at
+                    ? new Date(
+                        typeof job.created_at === 'number' ? job.created_at * 1000 : job.created_at,
+                      ).toLocaleString()
+                    : ''}
+                  {job.effective_request?.duration
+                    ? lt('rough.duration', { seconds: number(job.effective_request.duration) })
+                    : ''}{' '}
+                  · {lt('rough.job', { id: job.id })}
+                </small>
+                {job.status === 'succeeded' &&
+                  (job.artifacts || [])
+                    .filter((a) => ['video', 'audio'].includes(a.kind))
+                    .map((artifact) => (
+                      <ArtifactResult
+                        key={artifact.id}
+                        artifact={artifact}
+                        job={job}
+                        title={summary.chapterTitle}
+                      />
+                    ))}
+              </article>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
 }

@@ -1,1 +1,131 @@
-.api-key-panel{display:grid;gap:14px;border-top:1px solid #ddd8cd;padding-top:18px}.api-key-panel h3{display:flex;align-items:center;gap:8px}.api-key-panel p,.api-key-panel small{line-height:1.65}.api-key-form{background:#f5f6ef;border:1px solid #dce2d5;border-radius:10px;padding:14px}.api-key-options{display:grid;grid-template-columns:2fr 1fr;gap:12px}.api-key-panel input,.api-key-panel select{width:100%;min-width:0;padding:9px}.api-key-panel .api-key-project{display:flex;align-items:center;gap:8px}.api-key-project input{width:16px;flex:none}.api-key-form fieldset{display:grid;gap:8px;border:1px solid #d3daca;max-height:210px;overflow:auto;padding:12px}.api-key-created{padding:14px;display:grid;gap:12px;border:1px solid #aac183;background:#f0f7e8;border-radius:10px}.api-key-created>div{display:flex;align-items:center;justify-content:space-between;gap:10px}.api-key-created input{font-family:monospace}.api-key-list{display:grid;gap:10px}.api-key-list article{display:flex;align-items:start;justify-content:space-between;gap:12px;padding:13px;border:1px solid #ddd;border-radius:9px}.api-key-list article>div:first-child{display:grid;gap:5px;min-width:0}.api-key-list code,.api-key-list small{font-size:11px;overflow-wrap:anywhere}.api-key-list details{font-size:12px}.api-key-list summary{cursor:pointer}.api-key-revoke{max-width:170px;display:flex;flex-wrap:wrap;gap:6px}.api-key-revoke p{font-size:12px}.api-key-hint{display:flex;gap:8px;color:#66725e;font-size:12px}.cloud-remote-update{flex-basis:100%;padding:10px;background:#eef4e4;border:1px solid #c3d3a5;border-radius:8px}.cloud-remote-update button{margin-left:8px}@media(max-width:600px){.api-key-options{grid-template-columns:1fr}.api-key-list article{flex-wrap:wrap}.api-key-revoke{max-width:none}}
+.api-key-panel {
+  display: grid;
+  gap: 14px;
+  border-top: 1px solid #ddd8cd;
+  padding-top: 18px;
+}
+.api-key-panel h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.api-key-panel p,
+.api-key-panel small {
+  line-height: 1.65;
+}
+.api-key-form {
+  background: #f5f6ef;
+  border: 1px solid #dce2d5;
+  border-radius: 10px;
+  padding: 14px;
+}
+.api-key-options {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 12px;
+}
+.api-key-panel input,
+.api-key-panel select {
+  width: 100%;
+  min-width: 0;
+  padding: 9px;
+}
+.api-key-panel .api-key-project {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.api-key-project input {
+  width: 16px;
+  flex: none;
+}
+.api-key-form fieldset {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #d3daca;
+  max-height: 210px;
+  overflow: auto;
+  padding: 12px;
+}
+.api-key-created {
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+  border: 1px solid #aac183;
+  background: #f0f7e8;
+  border-radius: 10px;
+}
+.api-key-created > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.api-key-created input {
+  font-family: monospace;
+}
+.api-key-list {
+  display: grid;
+  gap: 10px;
+}
+.api-key-list article {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px;
+  border: 1px solid #ddd;
+  border-radius: 9px;
+}
+.api-key-list article > div:first-child {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+.api-key-list code,
+.api-key-list small {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.api-key-list details {
+  font-size: 12px;
+}
+.api-key-list summary {
+  cursor: pointer;
+}
+.api-key-revoke {
+  max-width: 170px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.api-key-revoke p {
+  font-size: 12px;
+}
+.api-key-hint {
+  display: flex;
+  gap: 8px;
+  color: #66725e;
+  font-size: 12px;
+}
+.cloud-remote-update {
+  flex-basis: 100%;
+  padding: 10px;
+  background: #eef4e4;
+  border: 1px solid #c3d3a5;
+  border-radius: 8px;
+}
+.cloud-remote-update button {
+  margin-left: 8px;
+}
+@media (max-width: 600px) {
+  .api-key-options {
+    grid-template-columns: 1fr;
+  }
+  .api-key-list article {
+    flex-wrap: wrap;
+  }
+  .api-key-revoke {
+    max-width: none;
+  }
+}

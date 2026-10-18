@@ -1,4 +1,5 @@
 """Streaming body limit; Content-Length is only an early rejection hint."""
+
 import asyncio
 import time
 from collections import Counter
@@ -13,13 +14,17 @@ AGENT_CONNECT_BODY_BYTES = 8192
 
 
 def body_limit(path, project_bytes, upload_bytes):
-    if path == "/v1/agent-connect/exchange" or path.startswith("/v1/account/agent-connections"):
+    if path == "/v1/agent-connect/exchange" or path.startswith(
+        "/v1/account/agent-connections"
+    ):
         return min(project_bytes, AGENT_CONNECT_BODY_BYTES)
     return upload_bytes + 1024 * 1024 if is_asset_upload(path) else project_bytes
 
 
 def is_asset_upload(path):
-    return path == "/v1/assets" or bool(re.fullmatch(r"/v1/quick-chat/sessions/[^/]+/assets", path))
+    return path == "/v1/assets" or bool(
+        re.fullmatch(r"/v1/quick-chat/sessions/[^/]+/assets", path)
+    )
 
 
 class RequestAdmission:
@@ -29,16 +34,41 @@ class RequestAdmission:
     consume the whole sync thread pool. Machine clients share their owner's
     allowance. A reverse proxy/shared limiter is still needed across processes.
     """
-    def __init__(self, *, total=32, authentication=8, login=2, per_owner=8,
-                 downloads=4, downloads_per_owner=2, thumbnails=8, thumbnails_per_owner=8):
-        values = (total, authentication, login, per_owner, downloads, downloads_per_owner,
-                  thumbnails, thumbnails_per_owner)
+
+    def __init__(
+        self,
+        *,
+        total=32,
+        authentication=8,
+        login=2,
+        per_owner=8,
+        downloads=4,
+        downloads_per_owner=2,
+        thumbnails=8,
+        thumbnails_per_owner=8,
+    ):
+        values = (
+            total,
+            authentication,
+            login,
+            per_owner,
+            downloads,
+            downloads_per_owner,
+            thumbnails,
+            thumbnails_per_owner,
+        )
         if any(type(x) is not int or x < 1 for x in values):
             raise ValueError("Invalid request admission limit")
-        self.limits = {"total": total, "authentication": authentication, "login": login,
-                       "owner": per_owner, "downloads": downloads,
-                       "owner_downloads": downloads_per_owner,
-                       "thumbnails": thumbnails, "owner_thumbnails": thumbnails_per_owner}
+        self.limits = {
+            "total": total,
+            "authentication": authentication,
+            "login": login,
+            "owner": per_owner,
+            "downloads": downloads,
+            "owner_downloads": downloads_per_owner,
+            "thumbnails": thumbnails,
+            "owner_thumbnails": thumbnails_per_owner,
+        }
         self.counts = Counter()
         self.lock = threading.Lock()
 
@@ -89,15 +119,27 @@ class RequestLease:
 
 
 def admission_rejected():
-    return JSONResponse({"detail": "同时处理的请求已达到上限，请稍后重试", "code": "request_capacity_busy"},
-        status_code=429, headers={"Retry-After": "3", "Cache-Control": "no-store",
-                                 "X-Content-Type-Options": "nosniff"})
+    return JSONResponse(
+        {
+            "detail": "同时处理的请求已达到上限，请稍后重试",
+            "code": "request_capacity_busy",
+        },
+        status_code=429,
+        headers={
+            "Retry-After": "3",
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 class RequestAdmissionMiddleware:
     def __init__(self, app, *, admission, send_idle_seconds=30, download_seconds=300):
         self.app, self.admission = app, admission
-        self.send_idle_seconds, self.download_seconds = send_idle_seconds, download_seconds
+        self.send_idle_seconds, self.download_seconds = (
+            send_idle_seconds,
+            download_seconds,
+        )
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http":
@@ -107,20 +149,37 @@ class RequestAdmissionMiddleware:
         started = False
         expected_bytes, emitted_bytes = None, 0
         path = scope.get("path", "")
-        download = (scope.get("method") in {"GET", "HEAD"} and path.endswith("/content")
-                    and path.startswith(("/v1/assets/", "/v1/artifacts/")))
+        download = (
+            scope.get("method") in {"GET", "HEAD"}
+            and path.endswith("/content")
+            and path.startswith(("/v1/assets/", "/v1/artifacts/"))
+        )
 
         async def bounded_send(message):
             nonlocal started, expected_bytes, emitted_bytes
             if message["type"] == "http.response.start":
-                if download and scope.get("method") == "GET" and message["status"] in {200, 206}:
-                    lengths = [value for key, value in message.get("headers", []) if key.lower() == b"content-length"]
-                    if len(lengths) == 1 and lengths[0].isdigit() and len(lengths[0]) <= 20:
+                if (
+                    download
+                    and scope.get("method") == "GET"
+                    and message["status"] in {200, 206}
+                ):
+                    lengths = [
+                        value
+                        for key, value in message.get("headers", [])
+                        if key.lower() == b"content-length"
+                    ]
+                    if (
+                        len(lengths) == 1
+                        and lengths[0].isdigit()
+                        and len(lengths[0]) <= 20
+                    ):
                         expected_bytes = int(lengths[0])
                 started = True
             elif message["type"] == "http.response.body" and expected_bytes is not None:
                 next_bytes = emitted_bytes + len(message.get("body", b""))
-                if next_bytes > expected_bytes or (not message.get("more_body", False) and next_bytes != expected_bytes):
+                if next_bytes > expected_bytes or (
+                    not message.get("more_body", False) and next_bytes != expected_bytes
+                ):
                     # BaseHTTPMiddleware can signal an empty end-of-stream
                     # before rethrowing a producer's read error. Never forward
                     # that false completion or depend on Uvicorn to catch it.
@@ -150,8 +209,11 @@ class RequestAdmissionMiddleware:
                 await self.app(scope, receive, bounded_send)
         except ResponseTimeout:
             if not started:
-                return await JSONResponse({"detail": "下载准备超时，请稍后重新读取原文件"}, status_code=504,
-                    headers={"Cache-Control": "no-store", "Retry-After": "3"})(scope, receive, bounded_send)
+                return await JSONResponse(
+                    {"detail": "下载准备超时，请稍后重新读取原文件"},
+                    status_code=504,
+                    headers={"Cache-Control": "no-store", "Retry-After": "3"},
+                )(scope, receive, bounded_send)
             # An incomplete response must close the connection, not append JSON
             # or pretend the remaining bytes arrived. Local media supports Range
             # for a later authenticated request; generation is never repeated.
@@ -173,6 +235,7 @@ class UploadAdmission:
     This is before multipart spooling, independent of durable asset/CPU quotas.
     Multi-process deployments must also enforce a shared ingress limit.
     """
+
     def __init__(self, *, per_owner=2, total=4):
         self.per_owner, self.total = per_owner, total
         self.owners = Counter()
@@ -180,7 +243,10 @@ class UploadAdmission:
 
     def acquire(self, owner):
         with self.lock:
-            if self.owners[owner] >= self.per_owner or sum(self.owners.values()) >= self.total:
+            if (
+                self.owners[owner] >= self.per_owner
+                or sum(self.owners.values()) >= self.total
+            ):
                 return False
             self.owners[owner] += 1
             return True
@@ -193,9 +259,21 @@ class UploadAdmission:
 
 
 class BodyLimitMiddleware:
-    def __init__(self, app, *, project_bytes, upload_bytes, idle_seconds=30, total_seconds=900,
-                 login_seconds=15):
-        self.app, self.project_bytes, self.upload_bytes = app, project_bytes, upload_bytes
+    def __init__(
+        self,
+        app,
+        *,
+        project_bytes,
+        upload_bytes,
+        idle_seconds=30,
+        total_seconds=900,
+        login_seconds=15,
+    ):
+        self.app, self.project_bytes, self.upload_bytes = (
+            app,
+            project_bytes,
+            upload_bytes,
+        )
         self.idle_seconds, self.total_seconds = idle_seconds, total_seconds
         self.login_seconds = login_seconds
 
@@ -206,7 +284,11 @@ class BodyLimitMiddleware:
         maximum = body_limit(path, self.project_bytes, self.upload_bytes)
         if path == "/api/auth/login":
             maximum = min(maximum, 16 * 1024)
-        total_seconds = min(self.total_seconds, self.login_seconds) if path == "/api/auth/login" else self.total_seconds
+        total_seconds = (
+            min(self.total_seconds, self.login_seconds)
+            if path == "/api/auth/login"
+            else self.total_seconds
+        )
         consumed = 0
         started = time.monotonic()
         complete = False
@@ -217,11 +299,13 @@ class BodyLimitMiddleware:
                 # A streaming response may keep listening for disconnect long
                 # after the request body has ended; that is not a slow upload.
                 return await receive()
-            remaining = total_seconds - (time.monotonic()-started)
+            remaining = total_seconds - (time.monotonic() - started)
             if remaining <= 0:
                 raise HTTPException(408, "上传接收超时，请检查网络后重试")
             try:
-                message = await asyncio.wait_for(receive(), timeout=min(self.idle_seconds, remaining))
+                message = await asyncio.wait_for(
+                    receive(), timeout=min(self.idle_seconds, remaining)
+                )
             except TimeoutError:
                 raise HTTPException(408, "上传接收超时，请检查网络后重试") from None
             if message["type"] == "http.request":

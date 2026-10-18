@@ -1,4 +1,5 @@
 """Receipt publication security with no provider, runtime, or database calls."""
+
 import json
 import os
 from pathlib import Path
@@ -11,7 +12,9 @@ from studio_platform import production_scaler
 
 
 class PrivateReceiptTests(unittest.TestCase):
-    def test_failed_serialization_keeps_original_receipt_and_removes_only_own_temp(self):
+    def test_failed_serialization_keeps_original_receipt_and_removes_only_own_temp(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             path = root / "service-state.json"
@@ -30,14 +33,18 @@ class PrivateReceiptTests(unittest.TestCase):
             root = Path(directory)
             path = root / "preparation-hold.json"
             path.write_text('{"reason":"original"}', encoding="utf-8")
-            with patch.object(Path, "replace", side_effect=OSError("injected publication failure")):
+            with patch.object(
+                Path, "replace", side_effect=OSError("injected publication failure")
+            ):
                 with self.assertRaises(OSError):
                     production_scaler.save(path, {"reason": "replacement"})
             self.assertEqual(json.loads(path.read_text()), {"reason": "original"})
             self.assertEqual(list(root.iterdir()), [path])
 
     @unittest.skipUnless(os.name == "posix", "POSIX file modes required")
-    def test_fresh_and_rewritten_receipts_are_private_before_payload_under_open_umask(self):
+    def test_fresh_and_rewritten_receipts_are_private_before_payload_under_open_umask(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             real_dump = json.dump
@@ -54,7 +61,9 @@ class PrivateReceiptTests(unittest.TestCase):
 
             previous_umask = os.umask(0)
             try:
-                with patch.object(production_scaler.json, "dump", side_effect=inspect_then_dump):
+                with patch.object(
+                    production_scaler.json, "dump", side_effect=inspect_then_dump
+                ):
                     for name in ("service-state.json", "preparation-hold.json"):
                         path = root / name
                         production_scaler.save(path, {"revision": 1})
@@ -66,8 +75,10 @@ class PrivateReceiptTests(unittest.TestCase):
                         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
                         self.assertEqual(json.loads(path.read_text()), {"revision": 2})
                 self.assertEqual(len(observations), 4)
-                self.assertEqual({p.name for p in root.iterdir()},
-                                 {"service-state.json", "preparation-hold.json"})
+                self.assertEqual(
+                    {p.name for p in root.iterdir()},
+                    {"service-state.json", "preparation-hold.json"},
+                )
             finally:
                 os.umask(previous_umask)
 

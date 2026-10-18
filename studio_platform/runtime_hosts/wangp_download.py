@@ -4,6 +4,7 @@ The already locked Hugging Face SDK owns transfer retries/partial-file formats.
 This helper cannot start a model, change a manifest, rent a GPU or replay a job.
 Downloaded bytes remain unqualified until the existing full runtime verifier.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -66,92 +67,202 @@ _LOCATOR_TRANSFORMERS = {
 }
 # path, original byte size, original hash kind and original content hash.
 _LOCATOR_FILES = (
-    (_LOCATOR_TRANSFORMERS["fl"], 21057674787, "sha256",
-     "30ff400f974b11a1ef13d216c5d9f6439a9c10322a3988b0374a39672ce286f0"),
-    (_LOCATOR_TRANSFORMERS["ref"], 21057674788, "sha256",
-     "e09db861c48d13560222948b4e38082bc21b1b7d4ddcaed9c865bf9c3233898c"),
-    ("Qwen3-VL-32B-Instruct/Qwen3-VL-32B-Instruct-layer50_quanto_bf16_int8.safetensors", 26723791903, "sha256",
-     "4df8fc5237746b3b058745d6ec8fe1e54a9721bdc663d35d2d1806952672f301"),
-    ("Qwen3-VL-32B-Instruct/config.json", 1474, "git_blob_sha1", "29e925092dee9f14278c53e7e7d876cea8a997bc"),
-    ("Qwen3-VL-32B-Instruct/preprocessor_config.json", 390, "git_blob_sha1", "2ea84a437d448ff71b08df68fdd949d5cc4ebb64"),
-    ("Qwen3-VL-32B-Instruct/tokenizer.json", 7032403, "git_blob_sha1", "c6cc1014128b19d1fc46b1d30a23e3b1d35db421"),
-    ("Qwen3-VL-32B-Instruct/tokenizer_config.json", 11004, "git_blob_sha1", "5e463a18949779b8a38a03f0a6d9089094970eed"),
-    ("Qwen3-VL-32B-Instruct/vocab.json", 2776833, "git_blob_sha1", "4783fe10ac3adce15ac8f358ef5462739852c569"),
-    ("minimax_h3/minimax_h3_video_vae_int8_convrot.safetensors", 2811065184, "sha256",
-     "52a2c8c73583c86e4f41cdcce3a6ad0ea562987bc0bf3d60a0cef5f5c8e60c0e"),
-    ("MiniMax-H3-audio_vae_fp32.safetensors", 605429308, "sha256",
-     "37dddc2f3e6d5d5139d823d5ea283bbf304dadcb885b1ccda818aa13dade5ea2"),
-    ("minimax_h3/minimax_h3_latent_upscaler_3d_bf16.safetensors", 690592992, "sha256",
-     "4f57821f5837f32f7142b67d815606dbd7550f194e5c769f7d6c3f83b146a5e6"),
+    (
+        _LOCATOR_TRANSFORMERS["fl"],
+        21057674787,
+        "sha256",
+        "30ff400f974b11a1ef13d216c5d9f6439a9c10322a3988b0374a39672ce286f0",
+    ),
+    (
+        _LOCATOR_TRANSFORMERS["ref"],
+        21057674788,
+        "sha256",
+        "e09db861c48d13560222948b4e38082bc21b1b7d4ddcaed9c865bf9c3233898c",
+    ),
+    (
+        "Qwen3-VL-32B-Instruct/Qwen3-VL-32B-Instruct-layer50_quanto_bf16_int8.safetensors",
+        26723791903,
+        "sha256",
+        "4df8fc5237746b3b058745d6ec8fe1e54a9721bdc663d35d2d1806952672f301",
+    ),
+    (
+        "Qwen3-VL-32B-Instruct/config.json",
+        1474,
+        "git_blob_sha1",
+        "29e925092dee9f14278c53e7e7d876cea8a997bc",
+    ),
+    (
+        "Qwen3-VL-32B-Instruct/preprocessor_config.json",
+        390,
+        "git_blob_sha1",
+        "2ea84a437d448ff71b08df68fdd949d5cc4ebb64",
+    ),
+    (
+        "Qwen3-VL-32B-Instruct/tokenizer.json",
+        7032403,
+        "git_blob_sha1",
+        "c6cc1014128b19d1fc46b1d30a23e3b1d35db421",
+    ),
+    (
+        "Qwen3-VL-32B-Instruct/tokenizer_config.json",
+        11004,
+        "git_blob_sha1",
+        "5e463a18949779b8a38a03f0a6d9089094970eed",
+    ),
+    (
+        "Qwen3-VL-32B-Instruct/vocab.json",
+        2776833,
+        "git_blob_sha1",
+        "4783fe10ac3adce15ac8f358ef5462739852c569",
+    ),
+    (
+        "minimax_h3/minimax_h3_video_vae_int8_convrot.safetensors",
+        2811065184,
+        "sha256",
+        "52a2c8c73583c86e4f41cdcce3a6ad0ea562987bc0bf3d60a0cef5f5c8e60c0e",
+    ),
+    (
+        "MiniMax-H3-audio_vae_fp32.safetensors",
+        605429308,
+        "sha256",
+        "37dddc2f3e6d5d5139d823d5ea283bbf304dadcb885b1ccda818aa13dade5ea2",
+    ),
+    (
+        "minimax_h3/minimax_h3_latent_upscaler_3d_bf16.safetensors",
+        690592992,
+        "sha256",
+        "4f57821f5837f32f7142b67d815606dbd7550f194e5c769f7d6c3f83b146a5e6",
+    ),
 )
 # New Base FL binding only; old Base manifests keep their original transport.
 # All ten files' size and hash match official immutable metadata at
 # _LOCATOR_REVISION. Metadata response SHA256 (not payload/inference proof):
 # a6c7e67b7e19a1ebcbd7a7bd84ae8c4eb92cd2cd14a5dacd872cc8eb56ee4316
 _BASE_FL_LOCATOR_FILES = (
-    ("MiniMax-H3-FL2VA_int8_convrot.safetensors", 34038903007, "sha256",
-     "83a36b67776962f44087f2f7c12d95791393f3cce1ef898efc90405216e7b0c0"),
-    ("Qwen3-VL-32B-Instruct/Qwen3-VL-32B-Instruct-layer50_bf16.safetensors", 51506305568, "sha256",
-     "a91ca0cc41bead2e62d8fc044a3ffdbd9487daa7c8997f697049990c7178e0a6"),
-    ("MiniMax-H3-video_vae_fp16.safetensors", 5207806512, "sha256",
-     "455010492bb59a9cc7b8f1ee23905b22a10079f89490adbf820a1728efcaea6b"),
-    *tuple(row for row in _LOCATOR_FILES if row[2] == "git_blob_sha1"
-           or row[0] in {"MiniMax-H3-audio_vae_fp32.safetensors",
-                         "minimax_h3/minimax_h3_latent_upscaler_3d_bf16.safetensors"}),
+    (
+        "MiniMax-H3-FL2VA_int8_convrot.safetensors",
+        34038903007,
+        "sha256",
+        "83a36b67776962f44087f2f7c12d95791393f3cce1ef898efc90405216e7b0c0",
+    ),
+    (
+        "Qwen3-VL-32B-Instruct/Qwen3-VL-32B-Instruct-layer50_bf16.safetensors",
+        51506305568,
+        "sha256",
+        "a91ca0cc41bead2e62d8fc044a3ffdbd9487daa7c8997f697049990c7178e0a6",
+    ),
+    (
+        "MiniMax-H3-video_vae_fp16.safetensors",
+        5207806512,
+        "sha256",
+        "455010492bb59a9cc7b8f1ee23905b22a10079f89490adbf820a1728efcaea6b",
+    ),
+    *tuple(
+        row
+        for row in _LOCATOR_FILES
+        if row[2] == "git_blob_sha1"
+        or row[0]
+        in {
+            "MiniMax-H3-audio_vae_fp32.safetensors",
+            "minimax_h3/minimax_h3_latent_upscaler_3d_bf16.safetensors",
+        }
+    ),
 )
 # All seventeen files used by the published full-controls catalog match the
 # official immutable _LOCATOR_REVISION metadata (sizes + LFS SHA256/Git blob ID).
 # Metadata-only response SHA256, not downloaded-weight or inference evidence:
 # 3ab00f8274e8f72538845415e28523556006f218eee430e35f9b54723ff9aebc
-_BASE_COMMON_LOCATOR_FILES = tuple(row for row in _BASE_FL_LOCATOR_FILES
-    if row[0] != "MiniMax-H3-FL2VA_int8_convrot.safetensors")
+_BASE_COMMON_LOCATOR_FILES = tuple(
+    row
+    for row in _BASE_FL_LOCATOR_FILES
+    if row[0] != "MiniMax-H3-FL2VA_int8_convrot.safetensors"
+)
 _BASE_REF_LOCATOR_FILES = (
-    ("MiniMax-H3-Ref2VA_int8_convrot.safetensors", 34038903008, "sha256",
-     "d9ba725b2920bb5ffb4ab8e2514f77264df59a5f05513613513f6fb5d9d6f749"),
+    (
+        "MiniMax-H3-Ref2VA_int8_convrot.safetensors",
+        34038903008,
+        "sha256",
+        "d9ba725b2920bb5ffb4ab8e2514f77264df59a5f05513613513f6fb5d9d6f749",
+    ),
     *_BASE_COMMON_LOCATOR_FILES,
 )
 _BF16_FL_LOCATOR_FILES = (
-    ("MiniMax-H3-FL2VA_bf16.safetensors", 66280486944, "sha256",
-     "f10704606e376815298cb6bd9d94ea721346b62cd840177cd3723971edd83367"),
+    (
+        "MiniMax-H3-FL2VA_bf16.safetensors",
+        66280486944,
+        "sha256",
+        "f10704606e376815298cb6bd9d94ea721346b62cd840177cd3723971edd83367",
+    ),
     *_BASE_COMMON_LOCATOR_FILES,
 )
 _BF16_REF_LOCATOR_FILES = (
-    ("MiniMax-H3-Ref2VA_bf16.safetensors", 66280486944, "sha256",
-     "ca877ed2b1bf72cfda76fe38117832544d6c0530abcfb9463e114cd767a39516"),
+    (
+        "MiniMax-H3-Ref2VA_bf16.safetensors",
+        66280486944,
+        "sha256",
+        "ca877ed2b1bf72cfda76fe38117832544d6c0530abcfb9463e114cd767a39516",
+    ),
     *_BASE_COMMON_LOCATOR_FILES,
 )
 _FULL_CONTROL_LOCATOR_FILES = {
-    "fl": (tuple(row for row in _LOCATOR_FILES if row[0] != _LOCATOR_TRANSFORMERS["ref"]),
-           _BASE_FL_LOCATOR_FILES, _BF16_FL_LOCATOR_FILES),
-    "ref": (tuple(row for row in _LOCATOR_FILES if row[0] != _LOCATOR_TRANSFORMERS["fl"]),
-            _BASE_REF_LOCATOR_FILES, _BF16_REF_LOCATOR_FILES),
+    "fl": (
+        tuple(row for row in _LOCATOR_FILES if row[0] != _LOCATOR_TRANSFORMERS["ref"]),
+        _BASE_FL_LOCATOR_FILES,
+        _BF16_FL_LOCATOR_FILES,
+    ),
+    "ref": (
+        tuple(row for row in _LOCATOR_FILES if row[0] != _LOCATOR_TRANSFORMERS["fl"]),
+        _BASE_REF_LOCATOR_FILES,
+        _BF16_REF_LOCATOR_FILES,
+    ),
 }
-SAFE_ERRORS = frozenset({"model_download_manifest_invalid", "model_download_manifest_changed",
-    "model_download_locator_invalid",
-    "model_download_path_invalid", "model_download_size_mismatch", "model_download_disk_headroom",
-    "model_download_failed", "model_download_timeout", "model_download_cache_limit",
-    "model_download_progress_invalid", "model_download_stop_unconfirmed", "model_download_state_exists",
-    "model_download_owner_unconfirmed"})
+SAFE_ERRORS = frozenset(
+    {
+        "model_download_manifest_invalid",
+        "model_download_manifest_changed",
+        "model_download_locator_invalid",
+        "model_download_path_invalid",
+        "model_download_size_mismatch",
+        "model_download_disk_headroom",
+        "model_download_failed",
+        "model_download_timeout",
+        "model_download_cache_limit",
+        "model_download_progress_invalid",
+        "model_download_stop_unconfirmed",
+        "model_download_state_exists",
+        "model_download_owner_unconfirmed",
+    }
+)
 STOP_STATUSES = frozenset({"confirmed", "unconfirmed", "not_observed"})
 
 
 def safe_download_failure(value):
     """Diagnostic facts only; these never substitute for controller idle proof."""
-    if (not isinstance(value, dict) or not isinstance(value.get("error_code"), str)
-            or value["error_code"] not in SAFE_ERRORS or not isinstance(value.get("stop_status"), str)
-            or value["stop_status"] not in STOP_STATUSES):
+    if (
+        not isinstance(value, dict)
+        or not isinstance(value.get("error_code"), str)
+        or value["error_code"] not in SAFE_ERRORS
+        or not isinstance(value.get("stop_status"), str)
+        or value["stop_status"] not in STOP_STATUSES
+    ):
         return None
     return {"error_code": value["error_code"], "stop_status": value["stop_status"]}
 
 
 class DownloadFailure(ValueError):
     def __init__(self, error_code, stop_status):
-        self.diagnosis = safe_download_failure({"error_code": error_code, "stop_status": stop_status})
+        self.diagnosis = safe_download_failure(
+            {"error_code": error_code, "stop_status": stop_status}
+        )
         if self.diagnosis is None:
             raise ValueError("model_download_progress_invalid")
         # Stop uncertainty remains the outward failure. Preserve its initiating
         # cause separately, never downgrade this to an ordinary stopped failure.
-        super().__init__("model_download_stop_unconfirmed" if stop_status == "unconfirmed" else error_code)
+        super().__init__(
+            "model_download_stop_unconfirmed"
+            if stop_status == "unconfirmed"
+            else error_code
+        )
 
 
 def path_checked(value):
@@ -165,7 +276,9 @@ def path_checked(value):
             info = current.lstat()
         except FileNotFoundError:
             continue
-        if stat.S_ISLNK(info.st_mode) or not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
+        if stat.S_ISLNK(info.st_mode) or not (
+            stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)
+        ):
             raise ValueError("model_download_path_invalid")
         if stat.S_ISREG(info.st_mode) and info.st_nlink != 1:
             raise ValueError("model_download_path_invalid")
@@ -183,9 +296,12 @@ def selected_files(document, expected_digest):
             if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", name):
                 raise ValueError()
             repo, revision = component.get("repository"), component["revision"]
-            if (not isinstance(repo, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo)
-                    or any(part in {".", ".."} for part in repo.split("/"))
-                    or not re.fullmatch(r"[0-9a-f]{40}", revision)):
+            if (
+                not isinstance(repo, str)
+                or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo)
+                or any(part in {".", ".."} for part in repo.split("/"))
+                or not re.fullmatch(r"[0-9a-f]{40}", revision)
+            ):
                 raise ValueError()
             files = component.get("files")
             if not isinstance(files, list) or not files:
@@ -193,22 +309,40 @@ def selected_files(document, expected_digest):
             for item in files:
                 filename = item["path"]
                 relative = PurePosixPath(filename)
-                if (not isinstance(filename, str) or not filename or relative.is_absolute()
-                        or str(relative) != filename or any(x in {".", "..", ".cache"} for x in relative.parts)
-                        or re.search(r"[\\:*?\[\]#%\x00-\x20]", filename) or filename in names
-                        or type(item["size_bytes"]) is not int or not 0 < item["size_bytes"] <= MAX_TOTAL):
+                if (
+                    not isinstance(filename, str)
+                    or not filename
+                    or relative.is_absolute()
+                    or str(relative) != filename
+                    or any(x in {".", "..", ".cache"} for x in relative.parts)
+                    or re.search(r"[\\:*?\[\]#%\x00-\x20]", filename)
+                    or filename in names
+                    or type(item["size_bytes"]) is not int
+                    or not 0 < item["size_bytes"] <= MAX_TOTAL
+                ):
                     raise ValueError()
-                key, width = ("sha256", 64) if "sha256" in item else ("git_blob_sha1", 40)
-                if not re.fullmatch(r"[0-9a-f]{" + str(width) + r"}", item.get(key, "")):
+                key, width = (
+                    ("sha256", 64) if "sha256" in item else ("git_blob_sha1", 40)
+                )
+                if not re.fullmatch(
+                    r"[0-9a-f]{" + str(width) + r"}", item.get(key, "")
+                ):
                     raise ValueError()
                 records.append((name, repo, revision, filename, item["size_bytes"]))
                 names.add(filename)
-        if not 0 < len(records) <= MAX_FILES or sum(row[4] for row in records) > MAX_TOTAL:
+        if (
+            not 0 < len(records) <= MAX_FILES
+            or sum(row[4] for row in records) > MAX_TOTAL
+        ):
             raise ValueError()
         return tuple(records)
     except Exception as error:
         code = str(error)
-        raise ValueError(code if code == "model_download_manifest_changed" else "model_download_manifest_invalid") from None
+        raise ValueError(
+            code
+            if code == "model_download_manifest_changed"
+            else "model_download_manifest_invalid"
+        ) from None
 
 
 def safe_error(error):
@@ -223,6 +357,7 @@ def _content_preserving_revision(document, expected_digest, records):
     full_controls = False
     if manifests is None:
         from ..runtime_catalog import engine_manifest, get_profile
+
         try:
             native = get_profile(document.get("deployment_profile_id"))
         except ValueError:
@@ -234,9 +369,10 @@ def _content_preserving_revision(document, expected_digest, records):
         except ValueError:
             raise ValueError("model_download_locator_invalid") from None
         full_controls = True
-    if (manifests.get(mode) != expected_digest
-            or any(repo != _LOCATOR_REPOSITORY or revision != _LOCATOR_ORIGINAL
-                   for _, repo, revision, _, _ in records)):
+    if manifests.get(mode) != expected_digest or any(
+        repo != _LOCATOR_REPOSITORY or revision != _LOCATOR_ORIGINAL
+        for _, repo, revision, _, _ in records
+    ):
         raise ValueError("model_download_locator_invalid")
     files = []
     for component in document["components"].values():
@@ -246,13 +382,16 @@ def _content_preserving_revision(document, expected_digest, records):
     if full_controls:
         expected_sets = _FULL_CONTROL_LOCATOR_FILES[mode]
     elif document.get("deployment_profile_id") in {
-            "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2",
-            "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-fl-r2-v3"}:
+        "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2",
+        "h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-fl-r2-v3",
+    }:
         expected_sets = (_BASE_FL_LOCATOR_FILES,)
     else:
         omitted = _LOCATOR_TRANSFORMERS["ref" if mode == "fl" else "fl"]
         expected_sets = (tuple(row for row in _LOCATOR_FILES if row[0] != omitted),)
-    if not any(sorted(files) == sorted(expected_files) for expected_files in expected_sets):
+    if not any(
+        sorted(files) == sorted(expected_files) for expected_files in expected_sets
+    ):
         raise ValueError("model_download_locator_invalid")
     return _LOCATOR_REVISION
 
@@ -274,8 +413,15 @@ def write_progress(path, value):
 
 def record_failure(state, expected_digest, error):
     """The owner has a separate file; a still-running child cannot overwrite it."""
-    write_progress(state / "failure.json", {"state": "failed", "manifest_digest": expected_digest,
-        "error_code": str(error), "download_failure": error.diagnosis})
+    write_progress(
+        state / "failure.json",
+        {
+            "state": "failed",
+            "manifest_digest": expected_digest,
+            "error_code": str(error),
+            "download_failure": error.diagnosis,
+        },
+    )
     if os.name == "posix":
         fd = os.open(state, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
@@ -287,17 +433,35 @@ def record_failure(state, expected_digest, error):
 def download_environment(environment, state_root):
     # No implicit API identity, custom endpoint or inherited SDK debug settings.
     state = path_checked(state_root)
-    result = {key: value for key, value in environment.items()
-              if not key.startswith(("HF_", "HUGGINGFACE_", "HUGGING_FACE_"))}
-    result.update(HF_ENDPOINT=ENDPOINT, HF_HOME=str(state / "cache"),
-        HF_HUB_CACHE=str(state / "cache" / "hub"), HF_XET_CACHE=str(state / "cache" / "xet"),
-        HF_TOKEN_PATH=str(state / "no-token"), HF_HUB_DISABLE_IMPLICIT_TOKEN="1",
-        HF_HUB_OFFLINE="0", HF_HUB_DISABLE_TELEMETRY="1", HF_HUB_DISABLE_PROGRESS_BARS="1",
-        HF_HUB_VERBOSITY="error", HF_DEBUG="0", HF_HUB_DOWNLOAD_TIMEOUT="60",
-        HF_HUB_ETAG_TIMEOUT="30", HF_XET_HIGH_PERFORMANCE="0",
-        HF_XET_CHUNK_CACHE_SIZE_BYTES="0", HF_XET_SHARD_CACHE_SIZE_LIMIT="0",
-        HF_XET_LOG_DEST=os.devnull, HF_XET_LOG_FILE=os.devnull, RUST_LOG="off",
-        RUST_BACKTRACE="0", DO_NOT_TRACK="1", TRANSFORMERS_OFFLINE="1")
+    result = {
+        key: value
+        for key, value in environment.items()
+        if not key.startswith(("HF_", "HUGGINGFACE_", "HUGGING_FACE_"))
+    }
+    result.update(
+        HF_ENDPOINT=ENDPOINT,
+        HF_HOME=str(state / "cache"),
+        HF_HUB_CACHE=str(state / "cache" / "hub"),
+        HF_XET_CACHE=str(state / "cache" / "xet"),
+        HF_TOKEN_PATH=str(state / "no-token"),
+        HF_HUB_DISABLE_IMPLICIT_TOKEN="1",
+        HF_HUB_OFFLINE="0",
+        HF_HUB_DISABLE_TELEMETRY="1",
+        HF_HUB_DISABLE_PROGRESS_BARS="1",
+        HF_HUB_VERBOSITY="error",
+        HF_DEBUG="0",
+        HF_HUB_DOWNLOAD_TIMEOUT="60",
+        HF_HUB_ETAG_TIMEOUT="30",
+        HF_XET_HIGH_PERFORMANCE="0",
+        HF_XET_CHUNK_CACHE_SIZE_BYTES="0",
+        HF_XET_SHARD_CACHE_SIZE_LIMIT="0",
+        HF_XET_LOG_DEST=os.devnull,
+        HF_XET_LOG_FILE=os.devnull,
+        RUST_LOG="off",
+        RUST_BACKTRACE="0",
+        DO_NOT_TRACK="1",
+        TRANSFORMERS_OFFLINE="1",
+    )
     return result
 
 
@@ -319,8 +483,16 @@ def cache_size(root):
     return size
 
 
-def fetch_files(document, expected_digest, model_root, progress_path, *, workers=2,
-                downloader=None, sleep=time.sleep):
+def fetch_files(
+    document,
+    expected_digest,
+    model_root,
+    progress_path,
+    *,
+    workers=2,
+    downloader=None,
+    sleep=time.sleep,
+):
     records = selected_files(document, expected_digest)
     locator_revision = _content_preserving_revision(document, expected_digest, records)
     if type(workers) is not int or not 1 <= workers <= 2:
@@ -341,20 +513,29 @@ def fetch_files(document, expected_digest, model_root, progress_path, *, workers
         raise ValueError("model_download_disk_headroom")
     if downloader is None:
         from huggingface_hub import hf_hub_download
+
         downloader = hf_hub_download
     lock = threading.Lock()
     completed = set()
     failure = None
     total = sum(row[4] for row in records)
+
     def progress(state, code=None):
-        value = {"state": state, "manifest_digest": expected_digest,
-                 "files_complete": len(completed), "files_total": len(records),
-                 "bytes_complete": sum(row[4] for row in records if row[3] in completed),
-                 "bytes_total": total, "inference_verified": False}
+        value = {
+            "state": state,
+            "manifest_digest": expected_digest,
+            "files_complete": len(completed),
+            "files_total": len(records),
+            "bytes_complete": sum(row[4] for row in records if row[3] in completed),
+            "bytes_total": total,
+            "inference_verified": False,
+        }
         if code:
             value["code"] = code
         write_progress(progress_path, value)
+
     progress("downloading")
+
     def fetch(record):
         nonlocal failure
         _, repo, revision, filename, size = record
@@ -364,9 +545,16 @@ def fetch_files(document, expected_digest, model_root, progress_path, *, workers
                 if failure is not None:
                     raise ValueError(failure)
             try:
-                returned = downloader(repo_id=repo, filename=filename, revision=locator_revision or revision,
-                    local_dir=str(root), token=False, endpoint=ENDPOINT, force_download=False,
-                    etag_timeout=30)
+                returned = downloader(
+                    repo_id=repo,
+                    filename=filename,
+                    revision=locator_revision or revision,
+                    local_dir=str(root),
+                    token=False,
+                    endpoint=ENDPOINT,
+                    force_download=False,
+                    etag_timeout=30,
+                )
                 path = path_checked(returned)
                 if path != expected or not path.is_file():
                     raise ValueError("model_download_path_invalid")
@@ -389,6 +577,7 @@ def fetch_files(document, expected_digest, model_root, progress_path, *, workers
             if failure is None:
                 completed.add(filename)
                 progress("downloading")
+
     try:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             list(pool.map(fetch, records))
@@ -416,9 +605,15 @@ def stop_child(child):
 
 def child_guard(owner_pid, timeout):
     """Linux kernel guards survive parent termination and native SDK stalls."""
-    if (sys.platform != "linux" or type(owner_pid) is not int or owner_pid <= 1
-            or type(timeout) not in (int, float) or not math.isfinite(timeout)
-            or not 0 < timeout <= DOWNLOAD_TIMEOUT or os.getppid() != owner_pid):
+    if (
+        sys.platform != "linux"
+        or type(owner_pid) is not int
+        or owner_pid <= 1
+        or type(timeout) not in (int, float)
+        or not math.isfinite(timeout)
+        or not 0 < timeout <= DOWNLOAD_TIMEOUT
+        or os.getppid() != owner_pid
+    ):
         raise ValueError("model_download_owner_unconfirmed")
     libc = ctypes.CDLL(None, use_errno=True)
     # The child is a separate process group so the owner can stop/reap it. Bind
@@ -429,14 +624,34 @@ def child_guard(owner_pid, timeout):
     signal.setitimer(signal.ITIMER_REAL, timeout)
 
 
-def run_download(python, source, manifest_path, expected_digest, model_root, state_root,
-                 environment, progress, *, timeout=DOWNLOAD_TIMEOUT, workers=2,
-                 popen=subprocess.Popen, clock=time.monotonic, sleep=time.sleep,
-                 stop=stop_child):
-    if (type(timeout) not in (int, float) or not math.isfinite(timeout) or not 1 <= timeout <= DOWNLOAD_TIMEOUT
-            or type(workers) is not int or not 1 <= workers <= 2):
+def run_download(
+    python,
+    source,
+    manifest_path,
+    expected_digest,
+    model_root,
+    state_root,
+    environment,
+    progress,
+    *,
+    timeout=DOWNLOAD_TIMEOUT,
+    workers=2,
+    popen=subprocess.Popen,
+    clock=time.monotonic,
+    sleep=time.sleep,
+    stop=stop_child,
+):
+    if (
+        type(timeout) not in (int, float)
+        or not math.isfinite(timeout)
+        or not 1 <= timeout <= DOWNLOAD_TIMEOUT
+        or type(workers) is not int
+        or not 1 <= workers <= 2
+    ):
         raise ValueError("model_download_manifest_invalid")
-    manifest_path, root, state = map(path_checked, (manifest_path, model_root, state_root))
+    manifest_path, root, state = map(
+        path_checked, (manifest_path, model_root, state_root)
+    )
     if manifest_path.stat().st_size > 1024**2:
         raise ValueError("model_download_manifest_invalid")
     records = selected_files(json.loads(manifest_path.read_text()), expected_digest)
@@ -446,10 +661,26 @@ def run_download(python, source, manifest_path, expected_digest, model_root, sta
     except FileExistsError:
         raise ValueError("model_download_state_exists") from None
     receipt = state / "progress.json"
-    command = [str(python), "-m", "studio_platform.runtime_hosts.wangp_download",
-               "--manifest", str(manifest_path), "--expected-digest", expected_digest,
-               "--model-root", str(root), "--progress", str(receipt), "--workers", str(workers),
-               "--owner-pid", str(os.getpid()), "--timeout", str(timeout)]
+    command = [
+        str(python),
+        "-m",
+        "studio_platform.runtime_hosts.wangp_download",
+        "--manifest",
+        str(manifest_path),
+        "--expected-digest",
+        expected_digest,
+        "--model-root",
+        str(root),
+        "--progress",
+        str(receipt),
+        "--workers",
+        str(workers),
+        "--owner-pid",
+        str(os.getpid()),
+        "--timeout",
+        str(timeout),
+    ]
+
     def read_receipt():
         value = None
         if receipt.exists():
@@ -457,14 +688,30 @@ def run_download(python, source, manifest_path, expected_digest, model_root, sta
             if receipt.stat().st_size > 8192:
                 raise ValueError("model_download_progress_invalid")
             value = json.loads(receipt.read_text())
-            if (set(value) - {"state", "manifest_digest", "files_complete", "files_total", "bytes_complete",
-                              "bytes_total", "inference_verified", "code"}
-                    or value.get("state") not in {"downloading", "downloaded_unverified", "failed"}
-                    or value.get("manifest_digest") != expected_digest or value.get("inference_verified") is not False
-                    or value.get("files_total") != len(records) or value.get("bytes_total") != sum(r[4] for r in records)
-                    or type(value.get("files_complete")) is not int or not 0 <= value["files_complete"] <= len(records)
-                    or type(value.get("bytes_complete")) is not int or not 0 <= value["bytes_complete"] <= value["bytes_total"]
-                    or value.get("code", "model_download_failed") not in SAFE_ERRORS):
+            if (
+                set(value)
+                - {
+                    "state",
+                    "manifest_digest",
+                    "files_complete",
+                    "files_total",
+                    "bytes_complete",
+                    "bytes_total",
+                    "inference_verified",
+                    "code",
+                }
+                or value.get("state")
+                not in {"downloading", "downloaded_unverified", "failed"}
+                or value.get("manifest_digest") != expected_digest
+                or value.get("inference_verified") is not False
+                or value.get("files_total") != len(records)
+                or value.get("bytes_total") != sum(r[4] for r in records)
+                or type(value.get("files_complete")) is not int
+                or not 0 <= value["files_complete"] <= len(records)
+                or type(value.get("bytes_complete")) is not int
+                or not 0 <= value["bytes_complete"] <= value["bytes_total"]
+                or value.get("code", "model_download_failed") not in SAFE_ERRORS
+            ):
                 raise ValueError("model_download_progress_invalid")
             if value["state"] == "failed":
                 raise ValueError(value.get("code", "model_download_failed"))
@@ -474,9 +721,15 @@ def run_download(python, source, manifest_path, expected_digest, model_root, sta
     child = None
     last = None
     try:
-        child = popen(command, cwd=str(path_checked(source)), env=download_environment(environment, state),
-                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                      start_new_session=True)
+        child = popen(
+            command,
+            cwd=str(path_checked(source)),
+            env=download_environment(environment, state),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
         while True:
             if clock() >= deadline:
                 raise ValueError("model_download_timeout")
@@ -485,8 +738,13 @@ def run_download(python, source, manifest_path, expected_digest, model_root, sta
                 raise ValueError("model_download_disk_headroom")
             value = read_receipt()
             if value is not None and value != last:
-                progress("model_download", files_complete=value["files_complete"], files_total=value["files_total"],
-                         bytes_complete=value["bytes_complete"], bytes_total=value["bytes_total"])
+                progress(
+                    "model_download",
+                    files_complete=value["files_complete"],
+                    files_total=value["files_total"],
+                    bytes_complete=value["bytes_complete"],
+                    bytes_total=value["bytes_total"],
+                )
                 last = value
             result = child.poll()
             if result is not None:
@@ -494,17 +752,28 @@ def run_download(python, source, manifest_path, expected_digest, model_root, sta
                 # A final atomic receipt may arrive between the prior read and
                 # poll. Validate it after the exact child has exited/reaped.
                 value = read_receipt()
-                if (result != 0 or value is None or value["state"] != "downloaded_unverified"
-                        or value["files_complete"] != len(records) or value["bytes_complete"] != value["bytes_total"]):
-                    raise ValueError(value.get("code", "model_download_failed") if value else "model_download_failed")
+                if (
+                    result != 0
+                    or value is None
+                    or value["state"] != "downloaded_unverified"
+                    or value["files_complete"] != len(records)
+                    or value["bytes_complete"] != value["bytes_total"]
+                ):
+                    raise ValueError(
+                        value.get("code", "model_download_failed")
+                        if value
+                        else "model_download_failed"
+                    )
                 # The existing verify-only and owned-launch checks still hash
                 # every model. A downloader receipt never certifies model bytes.
                 return value
-            sleep(.25)
+            sleep(0.25)
     except BaseException as original:
         error_code = safe_error(original)
         # No returned Popen handle is not proof that a process never existed.
-        failure = DownloadFailure(error_code, "unconfirmed" if child is not None else "not_observed")
+        failure = DownloadFailure(
+            error_code, "unconfirmed" if child is not None else "not_observed"
+        )
         try:
             record_failure(state, expected_digest, failure)
         except Exception:
@@ -543,17 +812,38 @@ def main(argv=None, *, guard=child_guard):
         if manifest.stat().st_size > 1024**2:
             raise ValueError("model_download_manifest_invalid")
         # Production also redirects file descriptors, covering native SDK logs.
-        with open(os.devnull, "w") as quiet, redirect_stdout(quiet), redirect_stderr(quiet):
-            fetch_files(json.loads(manifest.read_text()), args.expected_digest,
-                        args.model_root, args.progress, workers=args.workers)
+        with (
+            open(os.devnull, "w") as quiet,
+            redirect_stdout(quiet),
+            redirect_stderr(quiet),
+        ):
+            fetch_files(
+                json.loads(manifest.read_text()),
+                args.expected_digest,
+                args.model_root,
+                args.progress,
+                workers=args.workers,
+            )
         return 0
     except Exception as error:
         # Preserve only static codes. No raw exception, URLs or credentials.
         try:
-            records = selected_files(json.loads(args.manifest.read_text()), args.expected_digest)
-            write_progress(args.progress, {"state": "failed", "manifest_digest": args.expected_digest,
-                "files_complete": 0, "files_total": len(records), "bytes_complete": 0,
-                "bytes_total": sum(r[4] for r in records), "inference_verified": False, "code": safe_error(error)})
+            records = selected_files(
+                json.loads(args.manifest.read_text()), args.expected_digest
+            )
+            write_progress(
+                args.progress,
+                {
+                    "state": "failed",
+                    "manifest_digest": args.expected_digest,
+                    "files_complete": 0,
+                    "files_total": len(records),
+                    "bytes_complete": 0,
+                    "bytes_total": sum(r[4] for r in records),
+                    "inference_verified": False,
+                    "code": safe_error(error),
+                },
+            )
         except Exception:
             pass
         return 1

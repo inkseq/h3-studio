@@ -1,40 +1,56 @@
-import {quickViewCatalogs} from './quickViewCatalogs.js';
-import {sessionTakeCatalogs} from './sessionTakeCatalogs.js';
-import {storyOpenCatalogs} from './storyOpenCatalogs.js';
-import {v2Catalogs} from './v2Catalogs.js';
-import {libraryCatalogs} from './libraryCatalogs.js';
-import {trashCatalogs} from './trashCatalogs.js';
-import {workbenchCatalogs} from './workbenchCatalogs.js';
-import {assistantCatalogs} from './assistantCatalogs.js';
-import {takesCatalogs} from './takesCatalogs.js';
-import {adjunctCatalogs} from './adjunctCatalogs.js';
-import {accountDetailCatalogs} from './accountDetailCatalogs.js';
-import {operatorPanelCatalogs} from './operatorPanelCatalogs.js';
-import {h3MoreCatalogs} from './h3MoreCatalogs.js';
-import {operatorReasonCatalogs} from './operatorReasonCatalogs.js';
-import {operatorDetailCatalogs} from './operatorDetailCatalogs.js';
-import {legacyOperatorCatalogs} from './legacyOperatorCatalogs.js';
-import {operatorErrorCatalogs} from './operatorErrorCatalogs.js';
-import {storyCatalogs} from './storyCatalogs.js';
-import {operatorCatalogs} from './operatorCatalogs.js';
-import {accountCatalogs} from './accountCatalogs.js';
-import {workspaceCatalogs} from './workspaceCatalogs.js';
-import {settingsCatalogs} from './settingsCatalogs.js';
-import {clientCatalogs} from './clientCatalogs.js';
-import {storyboardCatalogs} from './storyboardCatalogs.js';
-import {legacyCatalogs} from './legacyCatalogs.js';
+import { quickViewCatalogs } from './quickViewCatalogs.js';
+import { sessionTakeCatalogs } from './sessionTakeCatalogs.js';
+import { storyOpenCatalogs } from './storyOpenCatalogs.js';
+import { v2Catalogs } from './v2Catalogs.js';
+import { libraryCatalogs } from './libraryCatalogs.js';
+import { trashCatalogs } from './trashCatalogs.js';
+import { workbenchCatalogs } from './workbenchCatalogs.js';
+import { assistantCatalogs } from './assistantCatalogs.js';
+import { takesCatalogs } from './takesCatalogs.js';
+import { adjunctCatalogs } from './adjunctCatalogs.js';
+import { accountDetailCatalogs } from './accountDetailCatalogs.js';
+import { operatorPanelCatalogs } from './operatorPanelCatalogs.js';
+import { h3MoreCatalogs } from './h3MoreCatalogs.js';
+import { operatorReasonCatalogs } from './operatorReasonCatalogs.js';
+import { operatorDetailCatalogs } from './operatorDetailCatalogs.js';
+import { legacyOperatorCatalogs } from './legacyOperatorCatalogs.js';
+import { operatorErrorCatalogs } from './operatorErrorCatalogs.js';
+import { storyCatalogs } from './storyCatalogs.js';
+import { operatorCatalogs } from './operatorCatalogs.js';
+import { accountCatalogs } from './accountCatalogs.js';
+import { workspaceCatalogs } from './workspaceCatalogs.js';
+import { settingsCatalogs } from './settingsCatalogs.js';
+import { clientCatalogs } from './clientCatalogs.js';
+import { storyboardCatalogs } from './storyboardCatalogs.js';
+import { legacyCatalogs } from './legacyCatalogs.js';
 export const catalogs = {
   en: {
     ...sessionTakeCatalogs.en,
     ...storyOpenCatalogs.en,
-    ...v2Catalogs.en, ...quickViewCatalogs.en,...libraryCatalogs.en,...trashCatalogs.en,...workbenchCatalogs.en,
-    ...takesCatalogs.en,...assistantCatalogs.en,
+    ...v2Catalogs.en,
+    ...quickViewCatalogs.en,
+    ...libraryCatalogs.en,
+    ...trashCatalogs.en,
+    ...workbenchCatalogs.en,
+    ...takesCatalogs.en,
+    ...assistantCatalogs.en,
     'workspace.closeHistory': 'Close creation history',
     ...adjunctCatalogs.en,
     ...h3MoreCatalogs.en,
     ...operatorPanelCatalogs.en,
     ...legacyOperatorCatalogs.en,
-    ...operatorErrorCatalogs.en, ...operatorDetailCatalogs.en, ...operatorReasonCatalogs.en, ...accountDetailCatalogs.en, ...storyCatalogs.en, ...operatorCatalogs.en, ...accountCatalogs.en, ...workspaceCatalogs.en, ...settingsCatalogs.en, ...clientCatalogs.en, ...storyboardCatalogs.en, ...legacyCatalogs.en,
+    ...operatorErrorCatalogs.en,
+    ...operatorDetailCatalogs.en,
+    ...operatorReasonCatalogs.en,
+    ...accountDetailCatalogs.en,
+    ...storyCatalogs.en,
+    ...operatorCatalogs.en,
+    ...accountCatalogs.en,
+    ...workspaceCatalogs.en,
+    ...settingsCatalogs.en,
+    ...clientCatalogs.en,
+    ...storyboardCatalogs.en,
+    ...legacyCatalogs.en,
     'app.name': 'Inkseq',
     'app.libraryTitle': 'Inkseq · Works',
     'app.storyTitle': 'Inkseq · Story workspace',
@@ -59,14 +75,30 @@ export const catalogs = {
   zh: {
     ...sessionTakeCatalogs.zh,
     ...storyOpenCatalogs.zh,
-    ...v2Catalogs.zh, ...quickViewCatalogs.zh,...libraryCatalogs.zh,...trashCatalogs.zh,...workbenchCatalogs.zh,
-    ...takesCatalogs.zh,...assistantCatalogs.zh,
+    ...v2Catalogs.zh,
+    ...quickViewCatalogs.zh,
+    ...libraryCatalogs.zh,
+    ...trashCatalogs.zh,
+    ...workbenchCatalogs.zh,
+    ...takesCatalogs.zh,
+    ...assistantCatalogs.zh,
     'workspace.closeHistory': '关闭创作记录',
     ...adjunctCatalogs.zh,
     ...h3MoreCatalogs.zh,
     ...operatorPanelCatalogs.zh,
     ...legacyOperatorCatalogs.zh,
-    ...operatorErrorCatalogs.zh, ...operatorDetailCatalogs.zh, ...operatorReasonCatalogs.zh, ...accountDetailCatalogs.zh, ...storyCatalogs.zh, ...operatorCatalogs.zh, ...accountCatalogs.zh, ...workspaceCatalogs.zh, ...settingsCatalogs.zh, ...clientCatalogs.zh, ...storyboardCatalogs.zh, ...legacyCatalogs.zh,
+    ...operatorErrorCatalogs.zh,
+    ...operatorDetailCatalogs.zh,
+    ...operatorReasonCatalogs.zh,
+    ...accountDetailCatalogs.zh,
+    ...storyCatalogs.zh,
+    ...operatorCatalogs.zh,
+    ...accountCatalogs.zh,
+    ...workspaceCatalogs.zh,
+    ...settingsCatalogs.zh,
+    ...clientCatalogs.zh,
+    ...storyboardCatalogs.zh,
+    ...legacyCatalogs.zh,
     'app.name': '映序',
     'app.libraryTitle': '映序 · 作品库',
     'app.storyTitle': '映序 · 故事工作台',

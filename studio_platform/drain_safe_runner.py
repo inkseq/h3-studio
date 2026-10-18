@@ -3,6 +3,7 @@
 No provider operations or import-time IO. All GPU slots of one CPU controller
 must use the SAME protected collection_lock_dir, including after restart.
 """
+
 from contextlib import contextmanager
 import math
 from pathlib import Path
@@ -22,8 +23,12 @@ def collection_slot(directory, heartbeat, *, poll_interval_s=1):
     lock when its owning process exits; an unknown GPU attempt stays in SQL.
     """
     directory = Path(directory)
-    if (not directory.is_absolute() or not callable(heartbeat)
-            or not math.isfinite(poll_interval_s) or not .01 <= poll_interval_s <= 30):
+    if (
+        not directory.is_absolute()
+        or not callable(heartbeat)
+        or not math.isfinite(poll_interval_s)
+        or not 0.01 <= poll_interval_s <= 30
+    ):
         raise ValueError('invalid_collection_lock_configuration')
     # This is operator-owned control state, never a user-provided media path.
     for parent in (directory, *directory.parents):
@@ -51,7 +56,16 @@ class DrainSafeRunner(WorkerRunner):
     attempt's collection. WorkerControl still checks its original model/pool,
     device ownership and provider deadline for every new claim/submission.
     """
-    def __init__(self, *args, stop_new, job_allowed, collection_lock_dir, job_filter=None, **kwargs):
+
+    def __init__(
+        self,
+        *args,
+        stop_new,
+        job_allowed,
+        collection_lock_dir,
+        job_filter=None,
+        **kwargs,
+    ):
         if not callable(stop_new) or not callable(job_allowed):
             raise ValueError('finite_worker_callbacks_required')
         directory = Path(collection_lock_dir)
@@ -77,7 +91,12 @@ class DrainSafeRunner(WorkerRunner):
             external = False if self.stop_requested is None else self.stop_requested()
             # An unavailable/non-boolean control response cannot authorize new
             # work. Existing bound attempts keep their recovery path below.
-            return type(stopped) is not bool or type(external) is not bool or stopped or external
+            return (
+                type(stopped) is not bool
+                or type(external) is not bool
+                or stopped
+                or external
+            )
         except Exception:
             return True
 
@@ -100,8 +119,14 @@ class DrainSafeRunner(WorkerRunner):
             # prior attempt; never strand it because a new deadline expired.
             return super()._claim(worker_id, pool, purpose=purpose)
         self._check_external_stop()
-        return self.control.claim(worker_id, pool, lease_seconds=900, purpose=purpose,
-            job_filter=self._job_filter, job_allowed=self._allowed_new_job)
+        return self.control.claim(
+            worker_id,
+            pool,
+            lease_seconds=900,
+            purpose=purpose,
+            job_filter=self._job_filter,
+            job_allowed=self._allowed_new_job,
+        )
 
     def run_once(self, worker_id, pool):
         self._worker_id = worker_id
@@ -112,7 +137,7 @@ class DrainSafeRunner(WorkerRunner):
             return super()._collect(job, lease, tag, task_id, heartbeat)
 
     def run_forever(self, worker_id, pool, *, poll_interval_s=1):
-        if not math.isfinite(poll_interval_s) or not .01 <= poll_interval_s <= 60:
+        if not math.isfinite(poll_interval_s) or not 0.01 <= poll_interval_s <= 60:
             raise ValueError('invalid_poll_interval')
         self._worker_id = worker_id
         prior = {}
@@ -123,7 +148,10 @@ class DrainSafeRunner(WorkerRunner):
         try:
             while True:
                 self._check_external_stop()
-                if self.stopped() and self.control.get(worker_id)['current_job_id'] is None:
+                if (
+                    self.stopped()
+                    and self.control.get(worker_id)['current_job_id'] is None
+                ):
                     break
                 self.run_once(worker_id, pool)
                 time.sleep(poll_interval_s)

@@ -4,6 +4,7 @@ The caller supplies the exact child environment and working directory. Call
 after any upstream FFmpeg setup, before model work/readiness; this check does
 not prevent a later caller from changing that environment or those files.
 """
+
 import hashlib
 import os
 from pathlib import Path
@@ -61,9 +62,18 @@ def _output(executable, arguments, environment, cwd):
     # stderr and exception text never enter readiness/status diagnostics.
     try:
         with tempfile.TemporaryFile() as capture:
-            result = subprocess.run([executable, *arguments], stdin=subprocess.DEVNULL,
-                stdout=capture, stderr=subprocess.DEVNULL, cwd=cwd, env=environment,
-                shell=False, close_fds=True, timeout=COMMAND_TIMEOUT, check=False)
+            result = subprocess.run(
+                [executable, *arguments],
+                stdin=subprocess.DEVNULL,
+                stdout=capture,
+                stderr=subprocess.DEVNULL,
+                cwd=cwd,
+                env=environment,
+                shell=False,
+                close_fds=True,
+                timeout=COMMAND_TIMEOUT,
+                check=False,
+            )
             if result.returncode:
                 raise ValueError("wangp_media_tools_probe_failed")
             capture.seek(0)
@@ -80,7 +90,12 @@ def _output(executable, arguments, environment, cwd):
 
 def _version(binary_name, output):
     first = output.splitlines()[0] if output else ""
-    match = re.match(r"^" + binary_name + r" version n?(\d{1,3})\.(\d{1,3})(?:\.(\d{1,3}))?(?=[\s.+-]|$)", first)
+    match = re.match(
+        r"^"
+        + binary_name
+        + r" version n?(\d{1,3})\.(\d{1,3})(?:\.(\d{1,3}))?(?=[\s.+-]|$)",
+        first,
+    )
     if not match:
         raise ValueError("wangp_media_tools_version_unconfirmed")
     parts = tuple(int(item) for item in match.groups() if item is not None)
@@ -93,7 +108,13 @@ def _signature(path):
     value = os.stat(path)
     if not stat.S_ISREG(value.st_mode) or not 0 < value.st_size <= MAX_BINARY_BYTES:
         raise ValueError("wangp_media_tools_binary_invalid")
-    return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns
+    return (
+        value.st_dev,
+        value.st_ino,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_ctime_ns,
+    )
 
 
 def verify_media_tools(runtime_root, environment, *, cwd):
@@ -103,9 +124,15 @@ def verify_media_tools(runtime_root, environment, *, cwd):
     environment are used by the tool commands. Version support is required for
     BOTH binaries; the decoder's required fps_mode option is checked separately.
     """
-    if (not isinstance(environment, dict) or any(not isinstance(key, str)
-            or not isinstance(value, str) or not key or "=" in key or "\0" in key
-            or "\0" in value for key, value in environment.items())):
+    if not isinstance(environment, dict) or any(
+        not isinstance(key, str)
+        or not isinstance(value, str)
+        or not key
+        or "=" in key
+        or "\0" in key
+        or "\0" in value
+        for key, value in environment.items()
+    ):
         raise ValueError("wangp_media_tools_invalid")
     environment = dict(environment)
     try:
@@ -114,13 +141,19 @@ def verify_media_tools(runtime_root, environment, *, cwd):
             raise ValueError("wangp_media_tools_invalid")
         evidence = {}
         for name in _ENV_KEYS:
-            selected = resolve_media_binary(name, runtime_root, environment, cwd=child_cwd)
+            selected = resolve_media_binary(
+                name, runtime_root, environment, cwd=child_cwd
+            )
             if selected is None:
                 raise ValueError("wangp_media_tools_missing")
             before = _signature(selected)
-            version = _version(name, _output(selected, ["-version"], environment, child_cwd))
+            version = _version(
+                name, _output(selected, ["-version"], environment, child_cwd)
+            )
             if name == "ffmpeg":
-                help_text = _output(selected, ["-hide_banner", "-h", "full"], environment, child_cwd)
+                help_text = _output(
+                    selected, ["-hide_banner", "-h", "full"], environment, child_cwd
+                )
                 if not re.search(r"(?m)^\s*-fps_mode(?:\s|$)", help_text):
                     raise ValueError("wangp_media_tools_fps_mode_unsupported")
             digest = hashlib.sha256()
@@ -129,7 +162,11 @@ def verify_media_tools(runtime_root, environment, *, cwd):
                     digest.update(chunk)
             if _signature(selected) != before:
                 raise ValueError("wangp_media_tools_binary_changed")
-            evidence[name] = {"binary": name, "version": version, "sha256": digest.hexdigest()}
+            evidence[name] = {
+                "binary": name,
+                "version": version,
+                "sha256": digest.hexdigest(),
+            }
         evidence["ffmpeg"]["fps_mode"] = "supported"
         return evidence
     except (OSError, TypeError):

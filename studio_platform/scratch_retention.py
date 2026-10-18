@@ -4,6 +4,7 @@ Callers hold their original operation/slot lock and persist the exact manifest
 before deletion. A crash can leave files missing but quota conservatively high;
 the same receipt reconciles that once, without deleting unrelated files.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -22,7 +23,9 @@ def fingerprint(path, max_bytes):
     before = _no_links(path)
     if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
         raise IntegrityError("r2_scratch_not_regular")
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0))
+    fd = os.open(
+        path, os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    )
     with os.fdopen(fd, "rb") as stream:
         opened = os.fstat(stream.fileno())
         if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
@@ -34,11 +37,22 @@ def fingerprint(path, max_bytes):
                 raise IntegrityError("r2_scratch_exceeds_limit")
             digest.update(chunk)
         after = os.fstat(stream.fileno())
-    identity = lambda value: (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_nlink)
+    identity = lambda value: (
+        value.st_dev,
+        value.st_ino,
+        value.st_size,
+        value.st_mtime_ns,
+        value.st_nlink,
+    )
     if identity(before) != identity(after) or count != after.st_size:
         raise IntegrityError("r2_scratch_changed")
-    return dict(size_bytes=count, sha256=digest.hexdigest(), device=after.st_dev,
-                inode=after.st_ino, mtime_ns=after.st_mtime_ns)
+    return dict(
+        size_bytes=count,
+        sha256=digest.hexdigest(),
+        device=after.st_dev,
+        inode=after.st_ino,
+        mtime_ns=after.st_mtime_ns,
+    )
 
 
 def manifest(directory, paths, max_bytes):

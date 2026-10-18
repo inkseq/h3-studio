@@ -6,6 +6,7 @@ against pinned Starlette 1.7.0 / python-multipart 0.0.32. Upstream's finalize()
 does not reject a truncated normal EOF, so completion and all temporary file
 handles are checked here. Upstream header/boundary limits remain unchanged.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -52,7 +53,8 @@ class StrictAssetParser(MultiPartParser):
             # must not close the spool while either disk thread still uses it.
             file = self._current_part.file
             self._current_part.file = _JoinedUploadFile(
-                file.file, size=file.size, filename=file.filename, headers=file.headers)
+                file.file, size=file.size, filename=file.filename, headers=file.headers
+            )
 
     def on_end(self):
         super().on_end()
@@ -120,7 +122,9 @@ async def _handle_upload(request: Request, original_handler, *, allowed_fields=_
             # This route has the larger file-upload body budget; never send
             # URL-encoded/JSON bodies into a different in-memory form parser.
             raise HTTPException(415, "素材上传须使用multipart/form-data")
-        parser = StrictAssetParser(request.headers, request.stream(), allowed_fields=allowed_fields)
+        parser = StrictAssetParser(
+            request.headers, request.stream(), allowed_fields=allowed_fields
+        )
         try:
             form = await parser.parse()
         except MultiPartException as error:
@@ -160,11 +164,15 @@ class AssetUploadRoute(APIRoute):
 
 class QuickChatAssetUploadRoute(APIRoute):
     """Session ID comes from the authenticated URL, not a multipart project ID."""
+
     def get_route_handler(self):
         original_handler = super().get_route_handler()
 
         async def strict_session_upload(request: Request):
-            return await _handle_upload(request, original_handler,
-                                        allowed_fields=frozenset({"file", "client_asset_id"}))
+            return await _handle_upload(
+                request,
+                original_handler,
+                allowed_fields=frozenset({"file", "client_asset_id"}),
+            )
 
         return strict_session_upload

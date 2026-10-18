@@ -3,6 +3,7 @@
 This is defense against live local writers, not proof that a prior host or an
 older version has stopped. Never delete lock files while writers may exist.
 """
+
 from contextlib import contextmanager
 import os
 from pathlib import Path
@@ -34,6 +35,7 @@ def asset_operation_lock(directory, asset_id):
         try:
             if os.name == "nt":
                 import msvcrt
+
                 if info.st_size == 0:
                     handle.write(b"0")
                 handle.seek(0)
@@ -44,6 +46,7 @@ def asset_operation_lock(directory, asset_id):
                     pass
             else:
                 import fcntl
+
                 try:
                     fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     acquired = True

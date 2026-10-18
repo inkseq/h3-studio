@@ -3,6 +3,7 @@
 JSON is stored canonically as strings in frozen values so a caller cannot mutate
 accepted settings through a retained dict. These are execution receipts, not jobs.
 """
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
@@ -24,8 +25,13 @@ STATES = TERMINAL | {"prepared", "dispatch_intent", "running", "sealing", "unkno
 
 
 def canonical_json(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-                      allow_nan=False)
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    )
 
 
 def digest(value: Any) -> str:
@@ -63,18 +69,30 @@ class EngineManifest:
 
     def __post_init__(self):
         data = _object(self.document_json)
-        if (data.get("engine") != "wangp" or data.get("source_revision") != UPSTREAM_REVISION
-                or data.get("protocol_version") != PROTOCOL_VERSION):
+        if (
+            data.get("engine") != "wangp"
+            or data.get("source_revision") != UPSTREAM_REVISION
+            or data.get("protocol_version") != PROTOCOL_VERSION
+        ):
             raise ValueError("wangp_manifest_revision_mismatch")
-        for key in ("compiler_id", "profile_id", "runtime_digest", "memory_profile", "kernel_profile"):
+        for key in (
+            "compiler_id",
+            "profile_id",
+            "runtime_digest",
+            "memory_profile",
+            "kernel_profile",
+        ):
             if not isinstance(data.get(key), str) or not data[key].strip():
                 raise ValueError("wangp_incomplete_manifest")
         if not isinstance(data.get("components"), dict) or not data["components"]:
             raise ValueError("wangp_components_required")
         for component in data["components"].values():
-            if not isinstance(component, dict) or any(not isinstance(component.get(k), str)
-                    or not component[k] or component[k] in {"main", "latest"}
-                    for k in ("revision", "precision")):
+            if not isinstance(component, dict) or any(
+                not isinstance(component.get(k), str)
+                or not component[k]
+                or component[k] in {"main", "latest"}
+                for k in ("revision", "precision")
+            ):
                 raise ValueError("wangp_unpinned_component")
         topology = data.get("topology")
         if not isinstance(topology, dict) or topology.get("slots") != 1:
@@ -107,7 +125,11 @@ class InputDescriptor:
         _identifier(self.asset_id)
         _identifier(self.handle)
         _sha(self.sha256)
-        if self.kind not in {"image", "video", "audio"} or type(self.size_bytes) is not int or self.size_bytes <= 0:
+        if (
+            self.kind not in {"image", "video", "audio"}
+            or type(self.size_bytes) is not int
+            or self.size_bytes <= 0
+        ):
             raise ValueError("wangp_invalid_input")
 
 
@@ -130,7 +152,9 @@ class PreparedRequest:
         _object(self.settings_json)
         if not _object(self.output_spec_json) or type(self.generate_audio) is not bool:
             raise ValueError("wangp_output_spec_required")
-        if not isinstance(self.inputs, tuple) or any(not isinstance(v, InputDescriptor) for v in self.inputs):
+        if not isinstance(self.inputs, tuple) or any(
+            not isinstance(v, InputDescriptor) for v in self.inputs
+        ):
             raise ValueError("wangp_immutable_inputs_required")
         if len({v.asset_id for v in self.inputs}) != len(self.inputs):
             raise ValueError("wangp_duplicate_input")
@@ -158,8 +182,12 @@ class ArtifactDescriptor:
     def __post_init__(self):
         _sha(self.sha256)
         allowed = {"video": {"video/mp4"}, "audio": {"audio/flac", "audio/wav"}}
-        if (self.kind not in allowed or self.media_type not in allowed[self.kind]
-                or type(self.size_bytes) is not int or self.size_bytes <= 0):
+        if (
+            self.kind not in allowed
+            or self.media_type not in allowed[self.kind]
+            or type(self.size_bytes) is not int
+            or self.size_bytes <= 0
+        ):
             raise ValueError("wangp_invalid_artifact")
 
 
@@ -182,20 +210,28 @@ class OperationReceipt:
     artifacts: tuple[ArtifactDescriptor, ...] = ()
 
     def __post_init__(self):
-        if self.operation_id != operation_id(self.attempt_tag) or self.state not in STATES:
+        if (
+            self.operation_id != operation_id(self.attempt_tag)
+            or self.state not in STATES
+        ):
             raise ValueError("wangp_invalid_receipt")
         for value in (self.job_id, self.slot_key, self.incarnation):
             _identifier(value)
         for value in (self.request_hash, self.manifest_digest, self.identity_digest):
             _sha(value)
-        if any(type(v) is not bool for v in (self.generate_audio, self.stop_proven, self.cancel_requested)):
+        if any(
+            type(v) is not bool
+            for v in (self.generate_audio, self.stop_proven, self.cancel_requested)
+        ):
             raise ValueError("wangp_invalid_receipt_flags")
         for value in (self.reason, self.hold_reason):
             if value:
                 _identifier(value)
         if self.state in TERMINAL and self.stop_proven is not True:
             raise ValueError("wangp_terminal_requires_stop_proof")
-        if not isinstance(self.artifacts, tuple) or any(not isinstance(v, ArtifactDescriptor) for v in self.artifacts):
+        if not isinstance(self.artifacts, tuple) or any(
+            not isinstance(v, ArtifactDescriptor) for v in self.artifacts
+        ):
             raise ValueError("wangp_invalid_receipt_artifacts")
         kinds = {v.kind for v in self.artifacts}
         if len(kinds) != len(self.artifacts):
@@ -210,7 +246,9 @@ class OperationReceipt:
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "OperationReceipt":
         data = dict(value)
-        data["artifacts"] = tuple(ArtifactDescriptor(**v) for v in data.get("artifacts", ()))
+        data["artifacts"] = tuple(
+            ArtifactDescriptor(**v) for v in data.get("artifacts", ())
+        )
         return cls(**data)
 
 
@@ -226,14 +264,26 @@ class HostReadiness:
 
 def safe_model_progress(value):
     """An optional native observation never changes execution eligibility."""
-    if (not isinstance(value, dict) or type(value.get("state")) is not str or value["state"] not in
-            {"not_loaded", "loading", "loaded", "not_observed"}):
+    if (
+        not isinstance(value, dict)
+        or type(value.get("state")) is not str
+        or value["state"] not in {"not_loaded", "loading", "loaded", "not_observed"}
+    ):
         return None
     result = {"state": value["state"]}
     for key in ("updated_at", "phase_started_at"):
         item = value.get(key)
-        result[key] = item if type(item) in (int, float) and math.isfinite(item) and 0 <= item <= 4_102_444_800 else None
-    if type(value.get("reason_code")) is str and value["reason_code"] in {"wangp_model_load_failed", "wangp_model_load_unobserved"}:
+        result[key] = (
+            item
+            if type(item) in (int, float)
+            and math.isfinite(item)
+            and 0 <= item <= 4_102_444_800
+            else None
+        )
+    if type(value.get("reason_code")) is str and value["reason_code"] in {
+        "wangp_model_load_failed",
+        "wangp_model_load_unobserved",
+    }:
         result["reason_code"] = value["reason_code"]
     return result
 
@@ -241,6 +291,7 @@ def safe_model_progress(value):
 @dataclass(frozen=True)
 class RuntimeOutput:
     """Trusted facade output, private to host; never sent over status transport."""
+
     path: Path
     media_type: str
 
@@ -260,6 +311,7 @@ class RuntimeHandle(Protocol):
 
 class RuntimeSession(Protocol):
     """D2 wraps the upstream SessionJob; this is not its native Python API."""
+
     def submit_task(self, settings: Mapping[str, Any]) -> RuntimeHandle: ...
     def is_idle(self) -> bool: ...
 

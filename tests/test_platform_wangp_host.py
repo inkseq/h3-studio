@@ -1,4 +1,5 @@
 """Injected Session lifecycle tests; files are bytes, not claimed H3 media."""
+
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import os
@@ -60,20 +61,33 @@ class HostFixture:
         self.output = self.root / "runtime-output"
         self.output.mkdir()
         self.journal_path = self.root / "journal" / "receipts.sqlite"
-        self.journal = ReceiptJournal(self.journal_path, slot_key="slot-1", manifest_digest=manifest().digest, create=True)
+        self.journal = ReceiptJournal(
+            self.journal_path,
+            slot_key="slot-1",
+            manifest_digest=manifest().digest,
+            create=True,
+        )
         self.session = FakeSession(self.journal)
         self.host = self.make_host()
 
     def make_host(self, *, session=None, journal=None, fault_hook=None, **kwargs):
-        host = WanGPHost(session=session or self.session, journal=journal or self.journal,
-            manifest=manifest(), output_root=self.output, sealed_root=self.root / "sealed",
-            fault_hook=fault_hook, **kwargs)
+        host = WanGPHost(
+            session=session or self.session,
+            journal=journal or self.journal,
+            manifest=manifest(),
+            output_root=self.output,
+            sealed_root=self.root / "sealed",
+            fault_hook=fault_hook,
+            **kwargs,
+        )
         self.addCleanup(host.close)
         return host
 
     def restart(self):
         self.host.close()
-        journal = ReceiptJournal(self.journal_path, slot_key="slot-1", manifest_digest=manifest().digest)
+        journal = ReceiptJournal(
+            self.journal_path, slot_key="slot-1", manifest_digest=manifest().digest
+        )
         session = FakeSession(journal)
         self.host = self.make_host(session=session, journal=journal)
         return session
@@ -109,6 +123,7 @@ class HostTests(HostFixture, unittest.TestCase):
     def test_exception_after_start_is_unknown_and_replay_does_not_start(self):
         def lost():
             raise RuntimeError("PRIVATE_RUNTIME_STREAM")
+
         self.session.on_submit = lost
         receipt = self.host.submit(prepared())
         self.assertEqual(receipt.state, "unknown")
@@ -118,17 +133,30 @@ class HostTests(HostFixture, unittest.TestCase):
         self.assertFalse(self.host.readiness().idle)
 
     def test_crash_around_dispatch_never_replays_on_restart(self):
-        for point, starts in (("after_prepared", 0), ("after_intent", 0), ("after_handle", 1)):
+        for point, starts in (
+            ("after_prepared", 0),
+            ("after_intent", 0),
+            ("after_handle", 1),
+        ):
             with self.subTest(point=point):
                 # Separate protected state for each simulated process death.
                 self.host.close()
                 path = self.root / (point + ".sqlite")
-                journal = ReceiptJournal(path, slot_key="slot-1", manifest_digest=manifest().digest, create=True)
+                journal = ReceiptJournal(
+                    path,
+                    slot_key="slot-1",
+                    manifest_digest=manifest().digest,
+                    create=True,
+                )
                 session = FakeSession(journal)
+
                 def fault(stage):
                     if stage == point:
                         raise Crash()
-                host = self.make_host(journal=journal, session=session, fault_hook=fault)
+
+                host = self.make_host(
+                    journal=journal, session=session, fault_hook=fault
+                )
                 with self.assertRaises(Crash):
                     host.submit(prepared())
                 self.assertEqual(session.calls, starts)
@@ -162,13 +190,19 @@ class HostTests(HostFixture, unittest.TestCase):
         self.assertTrue(self.host.readiness().idle)
 
     def test_pre_dispatch_cancel_starts_nothing(self):
-        self.host._fault_hook = lambda stage: self.host.cancel(prepared().operation_id) if stage == "after_prepared" else None
+        self.host._fault_hook = lambda stage: (
+            self.host.cancel(prepared().operation_id)
+            if stage == "after_prepared"
+            else None
+        )
         receipt = self.host.submit(prepared())
         self.assertEqual(receipt.state, "cancelled")
         self.assertTrue(receipt.stop_proven)
         self.assertEqual(self.session.calls, 0)
 
-    def test_missing_independent_audio_is_held_and_recoverable_without_regeneration(self):
+    def test_missing_independent_audio_is_held_and_recoverable_without_regeneration(
+        self,
+    ):
         op = self.host.submit(prepared()).operation_id
         self.complete(audio=False)
         self.assertEqual(self.host.inspect(op).state, "unknown")
@@ -186,16 +220,20 @@ class HostTests(HostFixture, unittest.TestCase):
             item.unlink()
         replacement = self.restart()
         self.assertEqual(self.host.inspect(op), receipt)
-        self.assertEqual(b"".join(self.host.read_artifact(op, "video")), b"synthetic-video-bytes")
+        self.assertEqual(
+            b"".join(self.host.read_artifact(op, "video")), b"synthetic-video-bytes"
+        )
         self.host.submit(prepared())
         self.assertEqual(replacement.calls, 0)
 
     def test_unsealed_crash_preserves_unknown_and_never_guesses_existing_files(self):
         op = self.host.submit(prepared()).operation_id
         self.complete()
+
         def fault(stage):
             if stage == "after_seal_before_commit":
                 raise Crash()
+
         self.host._fault_hook = fault
         with self.assertRaises(Crash):
             self.host.inspect(op)
@@ -211,7 +249,9 @@ class HostTests(HostFixture, unittest.TestCase):
         outside = self.root / "outside.mp4"
         outside.write_bytes(b"outside")
         outputs = dict(self.session.handle.observation.outputs)
-        outputs["video"] = RuntimeOutput(self.output / ".." / "outside.mp4", "video/mp4")
+        outputs["video"] = RuntimeOutput(
+            self.output / ".." / "outside.mp4", "video/mp4"
+        )
         self.session.handle.observation = RuntimeObservation("succeeded", True, outputs)
         self.assertEqual(self.host.inspect(op).state, "unknown")
         self.complete()

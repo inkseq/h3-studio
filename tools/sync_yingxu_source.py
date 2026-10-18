@@ -13,7 +13,8 @@ import json
 import os
 from pathlib import Path
 
-ROOT_FILES = ("index.html", "package.json", "package-lock.json", "vite.config.js")
+ROOT_FILES = ("index.html", "package.json", "package-lock.json", "vite.config.js",
+              ".prettierignore", ".prettierrc.json", "eslint.config.js", "tools/check-changed.mjs")
 SOURCE_SUFFIXES = {".js", ".jsx", ".css", ".json"}
 SOURCE_DOCUMENTS = {"src/NOVICE-STORIES-AC.md", "src/v2/fonts/README.md", "src/v2/fonts/OFL-Inter.txt"}
 # Only the reviewed, self-hosted prototype font is a binary source asset. Do
@@ -52,6 +53,7 @@ def source_files(source):
     source = Path(source)
     result = {}
     for name in ROOT_FILES:
+        _check_target_links(source, name)
         path = source / name
         if path.is_symlink() or not path.is_file():
             raise ValueError(f"Required regular source file is missing: {name}")

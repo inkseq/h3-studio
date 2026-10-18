@@ -1,4 +1,111 @@
-.story-open-notice{margin:12px 0 20px;padding:18px;border:1px solid var(--line-2,#cdd7d2);border-radius:12px;background:var(--surface-2,#f5f8f5);color:var(--ink,#243e35);min-width:0;max-width:100%;overflow-wrap:anywhere}.story-open-heading{display:flex;align-items:start;justify-content:space-between;gap:12px}.story-open-heading h2{margin:0;font-size:18px}.story-open-notice p{line-height:1.6;margin:10px 0}.story-open-notice pre{max-height:45vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}.story-open-notice summary{cursor:pointer;margin-top:14px}.story-open-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}.story-open-notice button,.story-open-notice a{min-height:36px}.story-open-destination{padding:22px;overflow:auto;flex:1;min-height:0}.story-open-destination>header{display:flex;justify-content:space-between;gap:12px;align-items:center}.story-open-destination main{max-width:1000px;margin:20px auto}@media(max-width:600px){.story-open-notice{padding:14px}.story-open-actions{display:grid}.story-open-actions button{width:100%;white-space:normal}.story-open-destination{padding:12px}}
-.cloud-projects .service-status{background:var(--surface-2,#243b32);color:var(--ink,#f3f7f4);border-color:var(--line-2,#52695d)}.cloud-project-list>div{display:flex;align-items:center;gap:8px;min-width:0}.cloud-project-list>div>button{flex:1;min-width:0;text-align:left;justify-content:space-between}.cloud-project-list>div>.item-menu{flex:0 0 auto;display:inline-flex}.cloud-project-list>div>.item-menu>button{width:36px;min-width:36px;height:36px;padding:4px}.cloud-project-list b{overflow-wrap:anywhere}
+.story-open-notice {
+  margin: 12px 0 20px;
+  padding: 18px;
+  border: 1px solid var(--line-2, #cdd7d2);
+  border-radius: 12px;
+  background: var(--surface-2, #f5f8f5);
+  color: var(--ink, #243e35);
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.story-open-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.story-open-heading h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.story-open-notice p {
+  line-height: 1.6;
+  margin: 10px 0;
+}
+.story-open-notice pre {
+  max-height: 45vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.story-open-notice summary {
+  cursor: pointer;
+  margin-top: 14px;
+}
+.story-open-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.story-open-notice button,
+.story-open-notice a {
+  min-height: 36px;
+}
+.story-open-destination {
+  padding: 22px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+.story-open-destination > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+.story-open-destination main {
+  max-width: 1000px;
+  margin: 20px auto;
+}
+@media (max-width: 600px) {
+  .story-open-notice {
+    padding: 14px;
+  }
+  .story-open-actions {
+    display: grid;
+  }
+  .story-open-actions button {
+    width: 100%;
+    white-space: normal;
+  }
+  .story-open-destination {
+    padding: 12px;
+  }
+}
+.cloud-projects .service-status {
+  background: var(--surface-2, #243b32);
+  color: var(--ink, #f3f7f4);
+  border-color: var(--line-2, #52695d);
+}
+.cloud-project-list > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.cloud-project-list > div > button {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  justify-content: space-between;
+}
+.cloud-project-list > div > .item-menu {
+  flex: 0 0 auto;
+  display: inline-flex;
+}
+.cloud-project-list > div > .item-menu > button {
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  padding: 4px;
+}
+.cloud-project-list b {
+  overflow-wrap: anywhere;
+}
 
-.cloud-projects .cloud-error{color:var(--bad,#a33a30)!important}
+.cloud-projects .cloud-error {
+  color: var(--bad, #a33a30) !important;
+}

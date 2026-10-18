@@ -4,7 +4,9 @@
 def create_storage_schema(engine, *schemas):
     with engine.begin() as connection:
         if engine.dialect.name == "postgresql":
-            connection.exec_driver_sql("SELECT pg_advisory_xact_lock(685939796868749721)")
+            connection.exec_driver_sql(
+                "SELECT pg_advisory_xact_lock(685939796868749721)"
+            )
         elif engine.dialect.name == "sqlite":
             connection.exec_driver_sql("BEGIN IMMEDIATE")
         else:

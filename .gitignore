@@ -21,6 +21,9 @@ inventory.json
 !docs/SCALING.zh-CN.md
 !docs/CONTROLS.zh-CN.md
 !requirements.lock.txt
+!requirements.dev.in
+!requirements.dev.lock.txt
+!pyproject.toml
 !server.py
 !password_auth.py
 !comfy_workflow.py
@@ -208,6 +211,11 @@ inventory.json
 !yingxu/index.html
 !yingxu/vite.config.js
 !yingxu/source-manifest.json
+!yingxu/.prettierignore
+!yingxu/.prettierrc.json
+!yingxu/eslint.config.js
+!yingxu/tools/
+!yingxu/tools/check-changed.mjs
 !yingxu/src/
 !yingxu/src/*.js
 !yingxu/src/*.jsx

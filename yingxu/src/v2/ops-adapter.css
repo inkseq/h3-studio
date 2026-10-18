@@ -1,249 +1,1242 @@
 /* Real business forms and dialogs inside the prototype's page view layer. */
-.ops-adapter [hidden],.ops-dialog [hidden]{display:none!important}
-.ops-tab-panel{display:flex;flex-direction:column;gap:14px}
-.ops-adapter .ops-page-tabs{margin:0 0 18px;max-width:100%;overflow-x:auto;justify-content:flex-start}
-.ops-adapter .ops-page-tabs>button{flex:none;white-space:nowrap;font-size:12px}
-.ops-adapter .ops-gpu-page,.ops-adapter .spanel,.ops-adapter .snav{min-width:0}
-.ops-adapter .mrow{grid-template-columns:22px minmax(0,1.2fr) minmax(180px,1fr) auto}
-.ops-adapter .mrow-main b,.ops-adapter .mrow-main small{flex-wrap:wrap;overflow-wrap:anywhere}
-.ops-adapter .mrow-main b{font-size:14px}
-.ops-adapter .mrow-main small,.ops-adapter .mrow .mode,.ops-adapter .mrow .q,.ops-adapter .mrow .pill{font-size:11px}
-.ops-adapter .mrow-state{min-width:0;overflow-wrap:anywhere}
-.ops-adapter .mrow-actions{max-width:250px}
-.ops-adapter .p4-keep{display:inline;white-space:normal}
-.ops-adapter .mgroup>header{flex-wrap:wrap}
-.ops-adapter .p4-inventorybar{display:flex;align-items:flex-end;flex-wrap:wrap;gap:12px}
-.ops-adapter .p4-inventorybar>label{display:flex;flex:1;flex-direction:column;gap:6px;min-width:180px;max-width:360px;font-size:12px}
-.ops-adapter .p4-offers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:16px 0}
-.ops-adapter .p4-offer{display:flex;flex-direction:column;gap:8px;margin:0}
-.ops-adapter .p4-offer>.p4-pill{align-self:flex-start}
-.ops-adapter .p4-offer h2{font-size:16px;margin:8px 0 0}
-.ops-adapter .p4-offer>small,.ops-adapter .p4-offer .p4-kv small{font-size:11px;color:var(--muted)}
-.ops-adapter .p4-offer-price{font-size:26px;font-weight:650;letter-spacing:-.02em;margin:8px 0}
-.ops-adapter .p4-offer-price small{margin-left:4px;font-size:11px;font-weight:400;letter-spacing:0;color:var(--muted)}
-.ops-adapter .p4-offer .p4-kv{font-size:12px}
-.ops-adapter .p4-offer>footer{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:auto;padding-top:12px;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
-.ops-adapter .p4-accountspend>section{display:flex;flex-direction:column;gap:6px}
-.ops-adapter .p4-accountspend strong{font-size:24px;font-weight:650}
-.ops-adapter .p4-accountspend small{font-size:11px;color:var(--muted)}
-.ops-adapter .settings-page .spanel>header{display:flex;align-items:center;gap:12px}
-.ops-adapter .limit-row{min-width:0;gap:14px}
-.ops-adapter .limit-row>div{min-width:0}
-.ops-adapter .limit-row b{font-size:13px}
-.ops-adapter .limit-input{flex-shrink:0}
-.ops-adapter .trash-row{grid-template-columns:22px 44px minmax(0,1fr) auto auto}
-.ops-adapter .trash-row .name small,.ops-adapter .trash-row .left{font-size:11px}
-.ops-adapter .trash-filter{max-width:100%;overflow-x:auto;justify-content:flex-start}
-.ops-adapter .trash-filter>button{white-space:nowrap;flex:none}
-.ops-tools{margin:12px 0;color:var(--muted);font-size:12px}
-.ops-tools>div{margin-top:10px}
-.ops-tools select{width:auto;max-width:100%}
-.ops-adapter .account-password form,.ops-adapter .assistant-connections form{display:flex;flex-direction:column;gap:12px}
-.ops-adapter .account-password label,.ops-adapter .assistant-connections label{display:flex;flex-direction:column;gap:6px}
-.ops-adapter .account-password h2{font-size:14px}
-.ops-item-row{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line)}
-.ops-item-row>div{flex:1;min-width:0}
-.ops-adapter .account-password h2,.ops-adapter .account-password p{margin-top:0}
-.ops-adapter .account-password form>button{align-self:flex-end}
-.assistant-connections{display:flex;flex-direction:column;gap:14px;min-width:0}
-.assistant-connections>h2,.assistant-connections>h3{margin:0}
-.assistant-connections>form,.assistant-connections>article,.assistant-connections>aside,.assistant-connections>details{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px}
-.assistant-connections form,.assistant-connections fieldset{display:flex;flex-direction:column;gap:12px;min-width:0}
-.assistant-connections fieldset{border:0;padding:0;margin:0}
-.assistant-connections legend{font-weight:600;margin-bottom:10px}
-.assistant-connections label{display:flex;flex-direction:column;gap:6px}
-.assistant-connections small,.assistant-connections p{color:var(--muted);line-height:1.6}
-.assistant-connections article h3{margin:0 0 10px;font-size:14px}
-.assistant-connections article[hidden]{display:none!important}
-.assistant-connections .assistant-inactive-toggle{height:32px;min-height:32px;align-self:flex-start;max-width:100%}
-.assistant-connection-created{font-size:12px;overflow-wrap:anywhere}
-.assistant-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
-.assistant-badge{display:inline-flex;color:var(--accent);font-size:11px}
-.ops-adapter :is(.p4-dialog,.op-dialog),.ops-dialog{background:var(--surface);color:var(--ink);border:1px solid var(--line-2);border-radius:var(--r-lg);box-shadow:var(--shadow-lg);padding:22px;width:min(720px,94vw);max-height:88dvh;overflow:auto}
-.ops-adapter :is(.p4-dialog,.op-dialog).wide{width:min(1080px,96vw)}
-.ops-adapter :is(.p4-dialog,.op-dialog)::backdrop,.ops-dialog::backdrop{background:var(--bg);opacity:.78}
-.ops-adapter :is(.p4-dialog,.op-dialog)>header,.ops-adapter :is(.p4-dialog,.op-dialog)>footer,.ops-dialog .qc-dialog-head{display:flex;align-items:center;justify-content:space-between;gap:16px}
-.ops-adapter :is(.p4-dialog,.op-dialog)>header,.ops-dialog .qc-dialog-head{margin-bottom:18px}
-.ops-adapter :is(.p4-dialog,.op-dialog) h2,.ops-dialog h2{margin:0;font-size:19px}
-.ops-adapter :is(.p4-dialog,.op-dialog)>header p{margin:5px 0 0;color:var(--muted)}
-.ops-adapter :is(.p4-dialog,.op-dialog)>footer{margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}
-.ops-adapter :is(.p4-dialog,.op-dialog)>footer>div{display:flex;flex-wrap:wrap;gap:8px}
-.ops-adapter :is(.p4-dialog,.op-dialog) label{display:flex;flex-direction:column;gap:6px;min-width:0}
-.ops-adapter :is(.p4-dialog,.op-dialog) fieldset{border:0;padding:0;margin:0;min-width:0}
-.ops-adapter .p4-primary{background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:600}
-.ops-adapter .p4-text{background:transparent;border-color:transparent;color:var(--ink-2)}
-.ops-adapter .p4-close{padding:3px;border:0;background:transparent;color:var(--muted)}
-.ops-adapter .p4-formgrid,.ops-adapter .p4-configfields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
-.ops-adapter .p4-configfields{grid-template-columns:minmax(0,2fr) minmax(100px,1fr) 70px minmax(110px,1fr)}
-.ops-adapter .p4-config,.ops-adapter .p4-panel,.ops-adapter .budget-account,.ops-adapter .budget-admin-row,.ops-adapter .p4-host-record{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px;margin:12px 0;min-width:0}
-.ops-adapter .p4-config>header,.ops-adapter .p4-between,.ops-adapter .operator-budget>header,.ops-adapter .p4-hosts>header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
-.ops-adapter .p4-config>header{margin-bottom:14px}
-.ops-adapter .p4-config>header>div,.ops-adapter .p4-policies,.ops-adapter .p4-policy-extra{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.ops-adapter .p4-policies [aria-pressed=true]{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
-.ops-adapter .p4-policy-extra{margin-top:10px}
-.ops-adapter .p4-policy-extra label{flex:1;min-width:150px}
-.ops-adapter .p4-fieldheading{margin:18px 0 10px}
-.ops-adapter .p4-total{display:flex;justify-content:space-between;gap:14px;padding:16px 0}
-.ops-adapter .p4-note,.ops-adapter .p4-meta,.ops-adapter .p4-footer,.ops-adapter :is(.p4-dialog,.op-dialog) small{color:var(--muted);font-size:12px;line-height:1.6}
-.ops-adapter .p4-preview,.ops-adapter .p4-start-results{background:var(--surface-2);border:1px solid var(--line-2);border-radius:var(--r);padding:14px;margin:12px 0}
-.ops-adapter .p4-checklist>div,.ops-adapter .p4-start-results>div{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}
-.ops-adapter .p4-kv,.ops-adapter .p4-metrics,.ops-adapter .p4-host-summary,.ops-adapter .budget-accounts,.ops-adapter .p4-accountspend{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
-.ops-adapter .p4-kv>div,.ops-adapter .p4-metrics>div{display:flex;flex-direction:column;gap:5px;padding:12px;background:var(--surface-2);border-radius:var(--r-sm);overflow-wrap:anywhere}
-.ops-adapter .p4-pill{display:inline-flex;align-items:center;border:1px solid var(--line-2);padding:3px 8px;border-radius:var(--r-sm);font-size:11px}
-.ops-adapter .p4-pill.good{color:var(--good);background:var(--good-soft)}
-.ops-adapter .p4-pill.warm,.ops-adapter .ops-warning,.ops-adapter .p4-warning{color:var(--warn);background:var(--warn-soft)}
-.ops-adapter .p4-error,.ops-adapter [role=alert]{color:var(--bad)}
-.ops-adapter .ops-warning,.ops-adapter .p4-warning{border:1px solid var(--line);border-radius:var(--r-sm);padding:12px}
-.ops-adapter .p4-progress-summary{display:flex;flex-direction:column;gap:3px;color:var(--muted);font-size:11px;margin-top:6px}
-.ops-adapter .p4-progress-diagnostic{display:flex;flex-direction:column;gap:3px;color:var(--muted);font-size:11px;overflow-wrap:anywhere}
-.ops-adapter .p4-progress-amount{display:flex;flex-direction:column;gap:6px;margin:10px 0}
-.ops-adapter progress{width:100%;accent-color:var(--accent)}
-.ops-adapter .p4-preparation-steps{display:flex;gap:8px;flex-wrap:wrap;padding:0;list-style:none}
-.ops-adapter .p4-preparation-steps li{padding:6px 8px;border-bottom:2px solid var(--line)}
-.ops-adapter .p4-preparation-steps li.current{border-color:var(--accent);color:var(--accent)}
-.ops-adapter .p4-preparation-steps small{display:block}
-.ops-adapter .p4-admin-jobs-table,.ops-adapter .p4-host-samples{overflow:auto;max-width:100%}
-.ops-adapter table{width:100%;border-collapse:collapse;font-size:12px}
-.ops-adapter th,.ops-adapter td{text-align:start;vertical-align:top;padding:10px;border-bottom:1px solid var(--line)}
-.ops-adapter td small{display:block;color:var(--muted);font-size:11px}
-.ops-adapter .p4-admin-machine{display:flex;gap:10px;align-items:center}
-.ops-adapter .p4-admin-machine>.mrow{flex:1}
-.ops-adapter .p4-jobs-actions,.ops-adapter .p4-host-policy,.ops-adapter .p4-host-lookup form,.ops-adapter .budget-admin-row form{display:flex;align-items:flex-end;flex-wrap:wrap;gap:10px;margin-top:12px}
-.ops-adapter .p4-jobs-actions label,.ops-adapter .p4-host-policy label,.ops-adapter .p4-host-lookup label,.ops-adapter .budget-admin-row label{display:flex;flex-direction:column;gap:6px;flex:1;min-width:140px}
-.ops-adapter .budget-account dl{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
-.ops-adapter .budget-account dd{margin:4px 0;font-weight:600}
-.ops-adapter .budget-account dt{font-size:11px;color:var(--muted)}
-.ops-adapter .p4-empty{padding:28px;color:var(--muted);border:1px solid var(--line);border-radius:var(--r-lg)}
-.ops-adapter .p4-empty form{display:flex;flex-direction:column;gap:12px;max-width:360px;margin:16px auto}
-.ops-adapter .p4-empty label{display:flex;flex-direction:column;gap:6px}
-.ops-account-menu{position:relative}
-.ops-account-menu>summary{cursor:pointer;list-style:none}
-.ops-account-menu>div{position:absolute;right:0;top:100%;z-index:100;min-width:180px;padding:8px;border:1px solid var(--line-2);border-radius:var(--r);background:var(--surface);box-shadow:var(--shadow);display:flex;flex-direction:column;gap:5px}
-.ops-account-menu a{color:var(--ink);padding:7px 10px;text-decoration:none;min-height:32px;display:flex;align-items:center}
-.trash-notice{position:fixed;bottom:76px;left:50%;transform:translateX(-50%);max-width:calc(100vw - 24px);padding:12px;background:var(--surface);color:var(--ink);z-index:130;border:1px solid var(--line-2);border-radius:var(--r);display:flex;flex-wrap:wrap;gap:10px;align-items:center;box-shadow:var(--shadow)}
-.item-menu{position:relative;display:inline-flex}
-.item-menu-popover{position:absolute;z-index:100;right:0;top:100%;display:flex;flex-direction:column;min-width:180px;max-width:min(280px,90vw);padding:6px;border:1px solid var(--line-2);border-radius:var(--r);background:var(--surface);box-shadow:var(--shadow)}
-.item-menu-popover button{text-align:start;white-space:normal}
-@media(min-width:761px) and (max-width:1220px){
-  .ops-adapter .mrow{grid-template-columns:22px minmax(0,1.2fr) minmax(180px,1fr)}
-  .ops-adapter .mrow-actions{grid-column:2 / -1;justify-self:start;max-width:none}
-  .ops-adapter .p4-offers{grid-template-columns:repeat(2,minmax(0,1fr))}
+.ops-adapter [hidden],
+.ops-dialog [hidden] {
+  display: none !important;
 }
-@media(max-width:760px){
-  .ops-adapter .p4-page-heading{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"title refresh" "observed launch";align-items:center;gap:8px 10px}
-  .ops-adapter .p4-page-title{grid-area:title;min-width:0;flex-wrap:wrap;gap:2px 8px;line-height:1.2}
-  .ops-adapter .p4-page-title>small{align-self:center;margin:0}
-  .ops-adapter .p4-observed-at{grid-area:observed;min-width:0;white-space:normal;overflow-wrap:anywhere;line-height:1.4;font-size:11px}
-  .ops-adapter .p4-page-refresh{grid-area:refresh;justify-self:end}
-  .ops-adapter .p4-page-launch{grid-area:launch;justify-self:end;max-width:100%}
-  .ops-adapter .p4-page-heading>.spacer{display:none}
-  .ops-adapter .mrow{grid-template-columns:22px minmax(0,1fr);gap:10px;padding:12px}
-  .ops-adapter .mrow-state,.ops-adapter .mrow-actions{grid-column:2;max-width:none;justify-content:flex-start}
-  .ops-adapter .p4-offers{grid-template-columns:1fr}
-  .ops-adapter .p4-inventorybar>label{min-width:0;max-width:none;flex-basis:100%}
-  .ops-adapter .snav{position:static}
-  .ops-adapter .trash-row{grid-template-columns:22px 36px minmax(0,1fr);gap:8px;padding:10px}
-  .ops-adapter .trash-row .thumb{width:36px}
-  .ops-adapter .trash-row .left,.ops-adapter .trash-row .acts{grid-column:3}
-  .ops-adapter .p4-configfields,.ops-adapter .p4-formgrid,.ops-adapter .p4-kv,.ops-adapter .p4-metrics,.ops-adapter .budget-accounts,.ops-adapter .p4-accountspend{grid-template-columns:1fr}
-  .ops-adapter :is(.p4-dialog,.op-dialog),.ops-dialog{padding:16px;width:94vw;max-height:86dvh}
-  .ops-adapter :is(.p4-dialog,.op-dialog)>footer{align-items:flex-start;flex-direction:column}
-  .ops-adapter :is(.p4-dialog,.op-dialog)>footer>div{width:100%;justify-content:flex-end}
-  .ops-adapter .p4-admin-machine{flex-wrap:wrap}
-  .ops-adapter .p4-admin-machine>.mrow{flex-basis:100%}
+.ops-tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.ops-adapter .ops-page-tabs {
+  margin: 0 0 18px;
+  max-width: 100%;
+  overflow-x: auto;
+  justify-content: flex-start;
+}
+.ops-adapter .ops-page-tabs > button {
+  flex: none;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.ops-adapter .ops-gpu-page,
+.ops-adapter .spanel,
+.ops-adapter .snav {
+  min-width: 0;
+}
+.ops-adapter .mrow {
+  grid-template-columns: 22px minmax(0, 1.2fr) minmax(180px, 1fr) auto;
+}
+.ops-adapter .mrow-main b,
+.ops-adapter .mrow-main small {
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+.ops-adapter .mrow-main b {
+  font-size: 14px;
+}
+.ops-adapter .mrow-main small,
+.ops-adapter .mrow .mode,
+.ops-adapter .mrow .q,
+.ops-adapter .mrow .pill {
+  font-size: 11px;
+}
+.ops-adapter .mrow-state {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ops-adapter .mrow-actions {
+  max-width: 250px;
+}
+.ops-adapter .p4-keep {
+  display: inline;
+  white-space: normal;
+}
+.ops-adapter .mgroup > header {
+  flex-wrap: wrap;
+}
+.ops-adapter .p4-inventorybar {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.ops-adapter .p4-inventorybar > label {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+  max-width: 360px;
+  font-size: 12px;
+}
+.ops-adapter .p4-offers {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+.ops-adapter .p4-offer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+.ops-adapter .p4-offer > .p4-pill {
+  align-self: flex-start;
+}
+.ops-adapter .p4-offer h2 {
+  font-size: 16px;
+  margin: 8px 0 0;
+}
+.ops-adapter .p4-offer > small,
+.ops-adapter .p4-offer .p4-kv small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.ops-adapter .p4-offer-price {
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin: 8px 0;
+}
+.ops-adapter .p4-offer-price small {
+  margin-left: 4px;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--muted);
+}
+.ops-adapter .p4-offer .p4-kv {
+  font-size: 12px;
+}
+.ops-adapter .p4-offer > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+}
+.ops-adapter .p4-accountspend > section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ops-adapter .p4-accountspend strong {
+  font-size: 24px;
+  font-weight: 650;
+}
+.ops-adapter .p4-accountspend small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.ops-adapter .settings-page .spanel > header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ops-adapter .limit-row {
+  min-width: 0;
+  gap: 14px;
+}
+.ops-adapter .limit-row > div {
+  min-width: 0;
+}
+.ops-adapter .limit-row b {
+  font-size: 13px;
+}
+.ops-adapter .limit-input {
+  flex-shrink: 0;
+}
+.ops-adapter .trash-row {
+  grid-template-columns: 22px 44px minmax(0, 1fr) auto auto;
+}
+.ops-adapter .trash-row .name small,
+.ops-adapter .trash-row .left {
+  font-size: 11px;
+}
+.ops-adapter .trash-filter {
+  max-width: 100%;
+  overflow-x: auto;
+  justify-content: flex-start;
+}
+.ops-adapter .trash-filter > button {
+  white-space: nowrap;
+  flex: none;
+}
+.ops-tools {
+  margin: 12px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.ops-tools > div {
+  margin-top: 10px;
+}
+.ops-tools select {
+  width: auto;
+  max-width: 100%;
+}
+.ops-adapter .account-password form,
+.ops-adapter .assistant-connections form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ops-adapter .account-password label,
+.ops-adapter .assistant-connections label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ops-adapter .account-password h2 {
+  font-size: 14px;
+}
+.ops-item-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.ops-item-row > div {
+  flex: 1;
+  min-width: 0;
+}
+.ops-adapter .account-password h2,
+.ops-adapter .account-password p {
+  margin-top: 0;
+}
+.ops-adapter .account-password form > button {
+  align-self: flex-end;
+}
+.assistant-connections {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.assistant-connections > h2,
+.assistant-connections > h3 {
+  margin: 0;
+}
+.assistant-connections > form,
+.assistant-connections > article,
+.assistant-connections > aside,
+.assistant-connections > details {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 16px;
+}
+.assistant-connections form,
+.assistant-connections fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.assistant-connections fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.assistant-connections legend {
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.assistant-connections label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.assistant-connections small,
+.assistant-connections p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+.assistant-connections article h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+.assistant-connections article[hidden] {
+  display: none !important;
+}
+.assistant-connections .assistant-inactive-toggle {
+  height: 32px;
+  min-height: 32px;
+  align-self: flex-start;
+  max-width: 100%;
+}
+.assistant-connection-created {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.assistant-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.assistant-badge {
+  display: inline-flex;
+  color: var(--accent);
+  font-size: 11px;
+}
+.ops-adapter :is(.p4-dialog, .op-dialog),
+.ops-dialog {
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 22px;
+  width: min(720px, 94vw);
+  max-height: 88dvh;
+  overflow: auto;
+}
+.ops-adapter :is(.p4-dialog, .op-dialog).wide {
+  width: min(1080px, 96vw);
+}
+.ops-adapter :is(.p4-dialog, .op-dialog)::backdrop,
+.ops-dialog::backdrop {
+  background: var(--bg);
+  opacity: 0.78;
+}
+.ops-adapter :is(.p4-dialog, .op-dialog) > header,
+.ops-adapter :is(.p4-dialog, .op-dialog) > footer,
+.ops-dialog .qc-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.ops-adapter :is(.p4-dialog, .op-dialog) > header,
+.ops-dialog .qc-dialog-head {
+  margin-bottom: 18px;
+}
+.ops-adapter :is(.p4-dialog, .op-dialog) h2,
+.ops-dialog h2 {
+  margin: 0;
+  font-size: 19px;
+}
+.ops-adapter :is(.p4-dialog, .op-dialog) > header p {
+  margin: 5px 0 0;
+  color: var(--muted);
+}
+.ops-adapter :is(.p4-dialog, .op-dialog) > footer {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.ops-adapter :is(.p4-dialog, .op-dialog) > footer > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ops-adapter :is(.p4-dialog, .op-dialog) label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.ops-adapter :is(.p4-dialog, .op-dialog) fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.ops-adapter .p4-primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+  font-weight: 600;
+}
+.ops-adapter .p4-text {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-2);
+}
+.ops-adapter .p4-close {
+  padding: 3px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+.ops-adapter .p4-formgrid,
+.ops-adapter .p4-configfields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.ops-adapter .p4-configfields {
+  grid-template-columns: minmax(0, 2fr) minmax(100px, 1fr) 70px minmax(110px, 1fr);
+}
+.ops-adapter .p4-config,
+.ops-adapter .p4-panel,
+.ops-adapter .budget-account,
+.ops-adapter .budget-admin-row,
+.ops-adapter .p4-host-record {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 16px;
+  margin: 12px 0;
+  min-width: 0;
+}
+.ops-adapter .p4-config > header,
+.ops-adapter .p4-between,
+.ops-adapter .operator-budget > header,
+.ops-adapter .p4-hosts > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.ops-adapter .p4-config > header {
+  margin-bottom: 14px;
+}
+.ops-adapter .p4-config > header > div,
+.ops-adapter .p4-policies,
+.ops-adapter .p4-policy-extra {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ops-adapter .p4-policies [aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.ops-adapter .p4-policy-extra {
+  margin-top: 10px;
+}
+.ops-adapter .p4-policy-extra label {
+  flex: 1;
+  min-width: 150px;
+}
+.ops-adapter .p4-fieldheading {
+  margin: 18px 0 10px;
+}
+.ops-adapter .p4-total {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 0;
+}
+.ops-adapter .p4-note,
+.ops-adapter .p4-meta,
+.ops-adapter .p4-footer,
+.ops-adapter :is(.p4-dialog, .op-dialog) small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.ops-adapter .p4-preview,
+.ops-adapter .p4-start-results {
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  padding: 14px;
+  margin: 12px 0;
+}
+.ops-adapter .p4-checklist > div,
+.ops-adapter .p4-start-results > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.ops-adapter .p4-kv,
+.ops-adapter .p4-metrics,
+.ops-adapter .p4-host-summary,
+.ops-adapter .budget-accounts,
+.ops-adapter .p4-accountspend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.ops-adapter .p4-kv > div,
+.ops-adapter .p4-metrics > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px;
+  background: var(--surface-2);
+  border-radius: var(--r-sm);
+  overflow-wrap: anywhere;
+}
+.ops-adapter .p4-pill {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line-2);
+  padding: 3px 8px;
+  border-radius: var(--r-sm);
+  font-size: 11px;
+}
+.ops-adapter .p4-pill.good {
+  color: var(--good);
+  background: var(--good-soft);
+}
+.ops-adapter .p4-pill.warm,
+.ops-adapter .ops-warning,
+.ops-adapter .p4-warning {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.ops-adapter .p4-error,
+.ops-adapter [role='alert'] {
+  color: var(--bad);
+}
+.ops-adapter .ops-warning,
+.ops-adapter .p4-warning {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 12px;
+}
+.ops-adapter .p4-progress-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 6px;
+}
+.ops-adapter .p4-progress-diagnostic {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.ops-adapter .p4-progress-amount {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0;
+}
+.ops-adapter progress {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.ops-adapter .p4-preparation-steps {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0;
+  list-style: none;
+}
+.ops-adapter .p4-preparation-steps li {
+  padding: 6px 8px;
+  border-bottom: 2px solid var(--line);
+}
+.ops-adapter .p4-preparation-steps li.current {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.ops-adapter .p4-preparation-steps small {
+  display: block;
+}
+.ops-adapter .p4-admin-jobs-table,
+.ops-adapter .p4-host-samples {
+  overflow: auto;
+  max-width: 100%;
+}
+.ops-adapter table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.ops-adapter th,
+.ops-adapter td {
+  text-align: start;
+  vertical-align: top;
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.ops-adapter td small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+.ops-adapter .p4-admin-machine {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.ops-adapter .p4-admin-machine > .mrow {
+  flex: 1;
+}
+.ops-adapter .p4-jobs-actions,
+.ops-adapter .p4-host-policy,
+.ops-adapter .p4-host-lookup form,
+.ops-adapter .budget-admin-row form {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+.ops-adapter .p4-jobs-actions label,
+.ops-adapter .p4-host-policy label,
+.ops-adapter .p4-host-lookup label,
+.ops-adapter .budget-admin-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 140px;
+}
+.ops-adapter .budget-account dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.ops-adapter .budget-account dd {
+  margin: 4px 0;
+  font-weight: 600;
+}
+.ops-adapter .budget-account dt {
+  font-size: 11px;
+  color: var(--muted);
+}
+.ops-adapter .p4-empty {
+  padding: 28px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+}
+.ops-adapter .p4-empty form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 360px;
+  margin: 16px auto;
+}
+.ops-adapter .p4-empty label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ops-account-menu {
+  position: relative;
+}
+.ops-account-menu > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.ops-account-menu > div {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  z-index: 100;
+  min-width: 180px;
+  padding: 8px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.ops-account-menu a {
+  color: var(--ink);
+  padding: 7px 10px;
+  text-decoration: none;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+}
+.trash-notice {
+  position: fixed;
+  bottom: 76px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 24px);
+  padding: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  z-index: 130;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  box-shadow: var(--shadow);
+}
+.item-menu {
+  position: relative;
+  display: inline-flex;
+}
+.item-menu-popover {
+  position: absolute;
+  z-index: 100;
+  right: 0;
+  top: 100%;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  max-width: min(280px, 90vw);
+  padding: 6px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.item-menu-popover button {
+  text-align: start;
+  white-space: normal;
+}
+@media (min-width: 761px) and (max-width: 1220px) {
+  .ops-adapter .mrow {
+    grid-template-columns: 22px minmax(0, 1.2fr) minmax(180px, 1fr);
+  }
+  .ops-adapter .mrow-actions {
+    grid-column: 2 / -1;
+    justify-self: start;
+    max-width: none;
+  }
+  .ops-adapter .p4-offers {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 760px) {
+  .ops-adapter .p4-page-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'title refresh' 'observed launch';
+    align-items: center;
+    gap: 8px 10px;
+  }
+  .ops-adapter .p4-page-title {
+    grid-area: title;
+    min-width: 0;
+    flex-wrap: wrap;
+    gap: 2px 8px;
+    line-height: 1.2;
+  }
+  .ops-adapter .p4-page-title > small {
+    align-self: center;
+    margin: 0;
+  }
+  .ops-adapter .p4-observed-at {
+    grid-area: observed;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.4;
+    font-size: 11px;
+  }
+  .ops-adapter .p4-page-refresh {
+    grid-area: refresh;
+    justify-self: end;
+  }
+  .ops-adapter .p4-page-launch {
+    grid-area: launch;
+    justify-self: end;
+    max-width: 100%;
+  }
+  .ops-adapter .p4-page-heading > .spacer {
+    display: none;
+  }
+  .ops-adapter .mrow {
+    grid-template-columns: 22px minmax(0, 1fr);
+    gap: 10px;
+    padding: 12px;
+  }
+  .ops-adapter .mrow-state,
+  .ops-adapter .mrow-actions {
+    grid-column: 2;
+    max-width: none;
+    justify-content: flex-start;
+  }
+  .ops-adapter .p4-offers {
+    grid-template-columns: 1fr;
+  }
+  .ops-adapter .p4-inventorybar > label {
+    min-width: 0;
+    max-width: none;
+    flex-basis: 100%;
+  }
+  .ops-adapter .snav {
+    position: static;
+  }
+  .ops-adapter .trash-row {
+    grid-template-columns: 22px 36px minmax(0, 1fr);
+    gap: 8px;
+    padding: 10px;
+  }
+  .ops-adapter .trash-row .thumb {
+    width: 36px;
+  }
+  .ops-adapter .trash-row .left,
+  .ops-adapter .trash-row .acts {
+    grid-column: 3;
+  }
+  .ops-adapter .p4-configfields,
+  .ops-adapter .p4-formgrid,
+  .ops-adapter .p4-kv,
+  .ops-adapter .p4-metrics,
+  .ops-adapter .budget-accounts,
+  .ops-adapter .p4-accountspend {
+    grid-template-columns: 1fr;
+  }
+  .ops-adapter :is(.p4-dialog, .op-dialog),
+  .ops-dialog {
+    padding: 16px;
+    width: 94vw;
+    max-height: 86dvh;
+  }
+  .ops-adapter :is(.p4-dialog, .op-dialog) > footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .ops-adapter :is(.p4-dialog, .op-dialog) > footer > div {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .ops-adapter .p4-admin-machine {
+    flex-wrap: wrap;
+  }
+  .ops-adapter .p4-admin-machine > .mrow {
+    flex-basis: 100%;
+  }
 }
 
 /* #277: active real-service page controls use the same three sizes as the demo.
    Machine rows are navigable content surfaces, not toolbar-sized buttons. */
-.ops-adapter button:not([data-ui-surface]),.ops-dialog button{height:32px;min-height:32px;box-sizing:border-box;padding-block:0;border-radius:var(--r-sm)}
-.ops-adapter button.small,.ops-adapter .mrow-actions button{height:28px;min-height:28px}
-.ops-adapter :is(.p4-page-launch,.assistant-connect,.snav button){height:36px;min-height:36px}
-.ops-adapter :is(input:not([type=checkbox]):not([type=radio]),select){height:36px;min-height:36px;box-sizing:border-box;padding-block:0}
-.ops-adapter .mrow-main[data-ui-surface]{height:auto;min-height:0;border-radius:0}
-.ops-adapter .settings-page{grid-template-columns:200px minmax(0,1fr)}
-.ops-adapter .settings-page .snav{top:0;align-self:start}
-.ops-adapter .settings-page .spanel{min-width:0}
-.ops-adapter .settings-page .limits{background:var(--surface);color:var(--ink);padding:16px}
-.ops-adapter .settings-page .limit-row b{color:var(--ink);font-weight:500}
-.ops-adapter .settings-story-defaults{display:flex;align-items:center;gap:10px;min-height:36px;padding:12px 16px;border:1px solid var(--line);border-radius:var(--r);color:var(--ink);background:var(--surface);text-decoration:none}
-.ops-adapter .settings-story-defaults>span{flex:1}
-.ops-adapter .assistant-badge{align-items:center;gap:4px}
-.ops-adapter .assistant-usage{color:var(--ink-2);font-size:12px}
-.ops-adapter .budget-cost-details>summary{cursor:pointer;color:var(--muted);font-size:12px;min-height:32px;align-content:center}
-.ops-adapter .ops-tools>summary{display:flex;align-items:center;gap:7px;min-height:32px;cursor:pointer;list-style:none}
-.ops-adapter .trash-tab-count{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
-.item-menu>button{width:28px;height:28px;min-width:28px;min-height:28px;padding:0;justify-content:center;border-radius:var(--r-sm)}
-.item-menu-popover button{height:32px;min-height:32px;padding:0 10px;align-items:center;gap:8px;display:flex}
-@media(max-width:760px){
- .ops-adapter .settings-page{grid-template-columns:1fr}
- .ops-adapter .settings-page .snav{position:static;flex-direction:row;overflow-x:auto}
- .ops-adapter .snav button{flex:none;white-space:nowrap}
- .ops-adapter :is(.trash-filter button,.ops-page-tabs button){height:36px;min-height:36px}
- .ops-adapter .trash-row{grid-template-columns:20px 32px minmax(0,1fr) auto;gap:8px}
- .ops-adapter .trash-row .left{grid-column:3;grid-row:2}
- .ops-adapter .trash-row .acts{grid-column:4;grid-row:1 / span 2}
- .ops-adapter .trash-row .thumb{width:32px;height:32px}
- .ops-adapter .settings-page .limit-row{align-items:flex-start;flex-wrap:wrap}
- .ops-adapter .limit-input{max-width:100%}
+.ops-adapter button:not([data-ui-surface]),
+.ops-dialog button {
+  height: 32px;
+  min-height: 32px;
+  box-sizing: border-box;
+  padding-block: 0;
+  border-radius: var(--r-sm);
+}
+.ops-adapter button.small,
+.ops-adapter .mrow-actions button {
+  height: 28px;
+  min-height: 28px;
+}
+.ops-adapter :is(.p4-page-launch, .assistant-connect, .snav button) {
+  height: 36px;
+  min-height: 36px;
+}
+.ops-adapter :is(input:not([type='checkbox']):not([type='radio']), select) {
+  height: 36px;
+  min-height: 36px;
+  box-sizing: border-box;
+  padding-block: 0;
+}
+.ops-adapter .mrow-main[data-ui-surface] {
+  height: auto;
+  min-height: 0;
+  border-radius: 0;
+}
+.ops-adapter .settings-page {
+  grid-template-columns: 200px minmax(0, 1fr);
+}
+.ops-adapter .settings-page .snav {
+  top: 0;
+  align-self: start;
+}
+.ops-adapter .settings-page .spanel {
+  min-width: 0;
+}
+.ops-adapter .settings-page .limits {
+  background: var(--surface);
+  color: var(--ink);
+  padding: 16px;
+}
+.ops-adapter .settings-page .limit-row b {
+  color: var(--ink);
+  font-weight: 500;
+}
+.ops-adapter .settings-story-defaults {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  color: var(--ink);
+  background: var(--surface);
+  text-decoration: none;
+}
+.ops-adapter .settings-story-defaults > span {
+  flex: 1;
+}
+.ops-adapter .assistant-badge {
+  align-items: center;
+  gap: 4px;
+}
+.ops-adapter .assistant-usage {
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.ops-adapter .budget-cost-details > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  min-height: 32px;
+  align-content: center;
+}
+.ops-adapter .ops-tools > summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  cursor: pointer;
+  list-style: none;
+}
+.ops-adapter .trash-tab-count {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.item-menu > button {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
+  justify-content: center;
+  border-radius: var(--r-sm);
+}
+.item-menu-popover button {
+  height: 32px;
+  min-height: 32px;
+  padding: 0 10px;
+  align-items: center;
+  gap: 8px;
+  display: flex;
+}
+@media (max-width: 760px) {
+  .ops-adapter .settings-page {
+    grid-template-columns: 1fr;
+  }
+  .ops-adapter .settings-page .snav {
+    position: static;
+    flex-direction: row;
+    overflow-x: auto;
+  }
+  .ops-adapter .snav button {
+    flex: none;
+    white-space: nowrap;
+  }
+  .ops-adapter :is(.trash-filter button, .ops-page-tabs button) {
+    height: 36px;
+    min-height: 36px;
+  }
+  .ops-adapter .trash-row {
+    grid-template-columns: 20px 32px minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+  .ops-adapter .trash-row .left {
+    grid-column: 3;
+    grid-row: 2;
+  }
+  .ops-adapter .trash-row .acts {
+    grid-column: 4;
+    grid-row: 1 / span 2;
+  }
+  .ops-adapter .trash-row .thumb {
+    width: 32px;
+    height: 32px;
+  }
+  .ops-adapter .settings-page .limit-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .ops-adapter .limit-input {
+    max-width: 100%;
+  }
 }
 
 /* The desktop timestamp also needs an explicit floor; browser small defaults are 10.833px. */
-.ops-adapter .p4-observed-at{font-size:11px;line-height:1.4}
-
-.ops-adapter .settings-generation-defaults dl{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px 16px;font-size:12px;line-height:1.5}
-.ops-adapter .settings-generation-defaults dt{color:var(--muted);min-width:0}
-.ops-adapter .settings-generation-defaults dd{margin:0;overflow-wrap:anywhere;min-width:0}
-.ops-adapter .settings-generation-defaults summary{font-size:12px;cursor:pointer;min-height:32px;align-content:center}
-.ops-adapter .settings-generation-defaults>.settings-story-defaults{height:36px;min-height:36px;padding:0 10px;margin-top:14px;font-size:12px}
-
-.ops-adapter .spend-breakdown{min-width:0;font-size:12px;line-height:1.5}
-.ops-adapter .spend-breakdown-heading{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 12px}
-.ops-adapter .spend-breakdown-heading small{font-size:11px;color:var(--muted)}
-.ops-adapter .spend-breakdown-buckets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:12px 0}
-.ops-adapter .spend-breakdown-buckets>div{min-width:0}
-.ops-adapter .spend-breakdown dt{color:var(--muted);font-size:12px;overflow-wrap:anywhere}
-.ops-adapter .spend-breakdown dd{margin:3px 0 0;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;color:var(--ink)}
-.ops-adapter .spend-breakdown-buckets dd{font-size:20px;font-weight:600}
-.ops-adapter .spend-breakdown-note,.ops-adapter .spend-breakdown-unavailable{font-size:12px;color:var(--muted);line-height:1.5;overflow-wrap:anywhere}
-.ops-adapter .spend-breakdown-warning{border-inline-start:2px solid var(--accent);padding-inline-start:8px;font-size:12px;overflow-wrap:anywhere}
-.ops-adapter .spend-breakdown-details>summary{min-height:32px;align-content:center;cursor:pointer;font-size:12px}
-.ops-adapter .spend-breakdown-details dl{margin:8px 0;display:grid;gap:8px}
-.ops-adapter .spend-breakdown-details dl>div{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 16px;align-items:start}
-.ops-adapter .spend-breakdown-details dd{margin:0;max-width:140px}
-.ops-adapter .spend-admission{margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}
-.ops-adapter .billing-admin{margin:20px 0;padding:16px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);font-size:12px;min-width:0}
-.ops-adapter .billing-admin h3,.ops-adapter .billing-admin h4{margin:0 0 8px}
-.ops-adapter .billing-admin p{line-height:1.5;overflow-wrap:anywhere}
-.ops-adapter .billing-owner,.ops-adapter .billing-selection{display:flex;align-items:end;flex-wrap:wrap;gap:8px}
-.ops-adapter .billing-selection{align-items:center;margin:12px 0}
-.ops-adapter .billing-owner label{flex:1;min-width:160px}
-.ops-adapter .billing-admin label{display:grid;gap:6px;font-size:12px;min-width:0}
-.ops-adapter .billing-admin :is(input:not([type=checkbox]),select,textarea){width:100%;min-width:0;box-sizing:border-box;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:var(--r-sm);font:inherit;padding:8px}
-.ops-adapter .billing-admin textarea{min-height:72px;resize:vertical}
-.ops-adapter .billing-row{padding:12px 0;border-top:1px solid var(--line);min-width:0}
-.ops-adapter .billing-rows{max-height:520px;overflow:auto;overscroll-behavior:contain}
-.ops-adapter .billing-row-title{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
-.ops-adapter .billing-row-title label,.ops-adapter .billing-confirm{display:flex;align-items:center;gap:8px;line-height:1.5}
-.ops-adapter .billing-row-title span{color:var(--muted);font-variant-numeric:tabular-nums}
-.ops-adapter .billing-admin input[type=checkbox]{width:16px;height:16px;flex:none}
-.ops-adapter .billing-admin dl{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 16px;margin:10px 0}
-.ops-adapter .billing-admin dt,.ops-adapter .billing-note{color:var(--muted);font-size:12px}
-.ops-adapter .billing-admin dd{margin:3px 0 0;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
-.ops-adapter .billing-admin summary{min-height:32px;align-content:center;cursor:pointer}
-.ops-adapter .billing-action-form,.ops-adapter .billing-item-inputs{display:grid;gap:12px;margin-top:12px}
-.ops-adapter .billing-item-inputs{grid-template-columns:repeat(2,minmax(0,1fr))}
-.ops-adapter .billing-preview{margin-top:16px;padding:12px;border:1px solid var(--accent);border-radius:var(--r-sm);background:var(--surface-3)}
-.ops-adapter .billing-preview>button{margin-top:12px}
-@media(max-width:760px){
- .ops-adapter .billing-admin{padding:12px}
- .ops-adapter .billing-admin dl,.ops-adapter .billing-item-inputs{grid-template-columns:1fr}
- .ops-adapter .billing-owner{align-items:stretch}
- .ops-adapter .billing-owner label{flex-basis:100%}
- .ops-adapter .billing-selection button{max-width:100%;white-space:normal;text-align:start;height:36px}
+.ops-adapter .p4-observed-at {
+  font-size: 11px;
+  line-height: 1.4;
 }
-@media(max-width:760px){
- .ops-adapter .spend-breakdown-buckets{gap:8px}
- .ops-adapter .spend-breakdown-buckets dd{font-size:16px}
- .ops-adapter .spend-breakdown-details dl>div{gap:6px 10px}
- .ops-adapter .spend-breakdown-details dd{max-width:110px}
+
+.ops-adapter .settings-generation-defaults dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px 16px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.ops-adapter .settings-generation-defaults dt {
+  color: var(--muted);
+  min-width: 0;
+}
+.ops-adapter .settings-generation-defaults dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.ops-adapter .settings-generation-defaults summary {
+  font-size: 12px;
+  cursor: pointer;
+  min-height: 32px;
+  align-content: center;
+}
+.ops-adapter .settings-generation-defaults > .settings-story-defaults {
+  height: 36px;
+  min-height: 36px;
+  padding: 0 10px;
+  margin-top: 14px;
+  font-size: 12px;
+}
+
+.ops-adapter .spend-breakdown {
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.ops-adapter .spend-breakdown-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+.ops-adapter .spend-breakdown-heading small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.ops-adapter .spend-breakdown-buckets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+.ops-adapter .spend-breakdown-buckets > div {
+  min-width: 0;
+}
+.ops-adapter .spend-breakdown dt {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.ops-adapter .spend-breakdown dd {
+  margin: 3px 0 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+.ops-adapter .spend-breakdown-buckets dd {
+  font-size: 20px;
+  font-weight: 600;
+}
+.ops-adapter .spend-breakdown-note,
+.ops-adapter .spend-breakdown-unavailable {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.ops-adapter .spend-breakdown-warning {
+  border-inline-start: 2px solid var(--accent);
+  padding-inline-start: 8px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.ops-adapter .spend-breakdown-details > summary {
+  min-height: 32px;
+  align-content: center;
+  cursor: pointer;
+  font-size: 12px;
+}
+.ops-adapter .spend-breakdown-details dl {
+  margin: 8px 0;
+  display: grid;
+  gap: 8px;
+}
+.ops-adapter .spend-breakdown-details dl > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 16px;
+  align-items: start;
+}
+.ops-adapter .spend-breakdown-details dd {
+  margin: 0;
+  max-width: 140px;
+}
+.ops-adapter .spend-admission {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.ops-adapter .billing-admin {
+  margin: 20px 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+  font-size: 12px;
+  min-width: 0;
+}
+.ops-adapter .billing-admin h3,
+.ops-adapter .billing-admin h4 {
+  margin: 0 0 8px;
+}
+.ops-adapter .billing-admin p {
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.ops-adapter .billing-owner,
+.ops-adapter .billing-selection {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ops-adapter .billing-selection {
+  align-items: center;
+  margin: 12px 0;
+}
+.ops-adapter .billing-owner label {
+  flex: 1;
+  min-width: 160px;
+}
+.ops-adapter .billing-admin label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  min-width: 0;
+}
+.ops-adapter .billing-admin :is(input:not([type='checkbox']), select, textarea) {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font: inherit;
+  padding: 8px;
+}
+.ops-adapter .billing-admin textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+.ops-adapter .billing-row {
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  min-width: 0;
+}
+.ops-adapter .billing-rows {
+  max-height: 520px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.ops-adapter .billing-row-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+.ops-adapter .billing-row-title label,
+.ops-adapter .billing-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.5;
+}
+.ops-adapter .billing-row-title span {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.ops-adapter .billing-admin input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+.ops-adapter .billing-admin dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin: 10px 0;
+}
+.ops-adapter .billing-admin dt,
+.ops-adapter .billing-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+.ops-adapter .billing-admin dd {
+  margin: 3px 0 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.ops-adapter .billing-admin summary {
+  min-height: 32px;
+  align-content: center;
+  cursor: pointer;
+}
+.ops-adapter .billing-action-form,
+.ops-adapter .billing-item-inputs {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+.ops-adapter .billing-item-inputs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.ops-adapter .billing-preview {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--surface-3);
+}
+.ops-adapter .billing-preview > button {
+  margin-top: 12px;
+}
+@media (max-width: 760px) {
+  .ops-adapter .billing-admin {
+    padding: 12px;
+  }
+  .ops-adapter .billing-admin dl,
+  .ops-adapter .billing-item-inputs {
+    grid-template-columns: 1fr;
+  }
+  .ops-adapter .billing-owner {
+    align-items: stretch;
+  }
+  .ops-adapter .billing-owner label {
+    flex-basis: 100%;
+  }
+  .ops-adapter .billing-selection button {
+    max-width: 100%;
+    white-space: normal;
+    text-align: start;
+    height: 36px;
+  }
+}
+@media (max-width: 760px) {
+  .ops-adapter .spend-breakdown-buckets {
+    gap: 8px;
+  }
+  .ops-adapter .spend-breakdown-buckets dd {
+    font-size: 16px;
+  }
+  .ops-adapter .spend-breakdown-details dl > div {
+    gap: 6px 10px;
+  }
+  .ops-adapter .spend-breakdown-details dd {
+    max-width: 110px;
+  }
 }

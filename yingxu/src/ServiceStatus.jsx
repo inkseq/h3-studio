@@ -1,9 +1,131 @@
-import {translate} from './i18n/locale.js';
-import {useI18n} from './i18n/I18nProvider.jsx';
+import { translate } from './i18n/locale.js';
+import { useI18n } from './i18n/I18nProvider.jsx';
 import React from 'react';
-import {executionStatus,inputUsage} from './service-model.js';
-const known=(value,locale)=>Number.isFinite(value)?value:translate(locale,'adjunct.unknown');
-export function ServiceStatus({capabilities,projectId}){
-  const {t:at,locale}=useI18n();const status=executionStatus(capabilities,locale),render=capabilities?.chapter_render;return <details className={'service-status '+status.kind}><summary>{status.title}{at('adjunct.serviceStatus.copy106')}</summary><p>{status.detail}</p><ul><li>{at('adjunct.serviceStatus.copy107')}</li><li>{at('adjunct.serviceStatus.copy108')}{render?.implemented&&render.enabled?at('adjunct.serviceStatus.copy109'):render?.implemented?at('adjunct.serviceStatus.copy110'):at('adjunct.serviceStatus.copy111')}</li><li>{at('adjunct.serviceStatus.copy112')}</li></ul><details className="api-integration"><summary>{at('adjunct.serviceStatus.copy113')}</summary><p>{at('adjunct.serviceStatus.copy114')}</p>{projectId&&<p>{at('adjunct.serviceStatus.copy115')}<code>{projectId}</code></p>}<ol><li>{at('adjunct.serviceStatus.copy116')}<code>GET /v1/capabilities</code>{at('adjunct.serviceStatus.copy117')}</li><li>{at('adjunct.serviceStatus.copy118')}<code>POST /v1/assets</code>{at('adjunct.serviceStatus.copy119')}</li><li>{at('adjunct.serviceStatus.copy120')}<code>POST /v1/generation-plans</code>{at('adjunct.serviceStatus.copy121')}</li><li>{at('adjunct.serviceStatus.copy122')}<code>POST /v1/jobs</code>{at('adjunct.serviceStatus.copy123')}<code>Idempotency-Key</code>{at('adjunct.serviceStatus.copy124')}</li><li>{at('adjunct.serviceStatus.copy125')}</li></ol><p>{at('adjunct.serviceStatus.copy126')}</p></details></details>;}
-export function InputUsage({project,shot,recipe,uploadMax}){
-  const {t:at,locale}=useI18n();const usage=inputUsage(project,shot.id,recipe,locale),limits=recipe?.limits;if(!limits)return <p className="cloud-warning">{at('adjunct.serviceStatus.copy127')}</p>;return <section className="input-usage" aria-label={at('adjunct.serviceStatus.copy128')}><b>{at('adjunct.serviceStatus.copy129')}</b><p>{at('adjunct.serviceStatus.copy130')}{usage.frames}{at('adjunct.serviceStatus.copy131')}{usage.groups.image.count}/{known(limits.max_images,locale)}{at('adjunct.serviceStatus.copy132')}{usage.groups.video.count}/{known(limits.max_videos,locale)}{at('adjunct.serviceStatus.copy133')}{usage.groups.audio.count}/{known(limits.max_audios,locale)}{at('adjunct.serviceStatus.copy134')}{usage.total}/{known(limits.max_total_files,locale)}{at('adjunct.serviceStatus.copy135')}{usage.guides}/{known(limits.max_guides,locale)}</p><p>{at('adjunct.serviceStatus.copy136')}{known(limits.min_clip_duration,locale)}–{known(limits.max_clip_duration,locale)}{at('adjunct.serviceStatus.copy137')}{known(limits.max_total_video_duration,locale)}{at('adjunct.serviceStatus.copy138')}{known(limits.max_total_audio_duration,locale)}{at('adjunct.serviceStatus.copy139')}</p><p>{at('adjunct.serviceStatus.copy140')}{Number(usage.groups.video.duration.toFixed(3))}{at('adjunct.serviceStatus.copy141')}{Number(usage.groups.audio.duration.toFixed(3))}{at('adjunct.serviceStatus.copy142')}{usage.unknownDurations?at('adjunct.serviceStatus.copy143',{v0:usage.unknownDurations}):''}{at('adjunct.serviceStatus.copy144')}</p>{Number.isFinite(uploadMax)&&<p>{at('adjunct.serviceStatus.copy145')}{(uploadMax/1024**2).toFixed(0)}{at('adjunct.serviceStatus.copy146')}</p>}{usage.issues.length>0&&<div role="status"><b>{at('adjunct.serviceStatus.copy147')}</b><ul>{usage.issues.map((issue,index)=><li key={index}>{issue}</li>)}</ul><p>{at('adjunct.serviceStatus.copy148')}</p></div>}</section>;}
+import { executionStatus, inputUsage } from './service-model.js';
+const known = (value, locale) =>
+  Number.isFinite(value) ? value : translate(locale, 'adjunct.unknown');
+export function ServiceStatus({ capabilities, projectId }) {
+  const { t: at, locale } = useI18n();
+  const status = executionStatus(capabilities, locale),
+    render = capabilities?.chapter_render;
+  return (
+    <details className={'service-status ' + status.kind}>
+      <summary>
+        {status.title}
+        {at('adjunct.serviceStatus.copy106')}
+      </summary>
+      <p>{status.detail}</p>
+      <ul>
+        <li>{at('adjunct.serviceStatus.copy107')}</li>
+        <li>
+          {at('adjunct.serviceStatus.copy108')}
+          {render?.implemented && render.enabled
+            ? at('adjunct.serviceStatus.copy109')
+            : render?.implemented
+              ? at('adjunct.serviceStatus.copy110')
+              : at('adjunct.serviceStatus.copy111')}
+        </li>
+        <li>{at('adjunct.serviceStatus.copy112')}</li>
+      </ul>
+      <details className="api-integration">
+        <summary>{at('adjunct.serviceStatus.copy113')}</summary>
+        <p>{at('adjunct.serviceStatus.copy114')}</p>
+        {projectId && (
+          <p>
+            {at('adjunct.serviceStatus.copy115')}
+            <code>{projectId}</code>
+          </p>
+        )}
+        <ol>
+          <li>
+            {at('adjunct.serviceStatus.copy116')}
+            <code>GET /v1/capabilities</code>
+            {at('adjunct.serviceStatus.copy117')}
+          </li>
+          <li>
+            {at('adjunct.serviceStatus.copy118')}
+            <code>POST /v1/assets</code>
+            {at('adjunct.serviceStatus.copy119')}
+          </li>
+          <li>
+            {at('adjunct.serviceStatus.copy120')}
+            <code>POST /v1/generation-plans</code>
+            {at('adjunct.serviceStatus.copy121')}
+          </li>
+          <li>
+            {at('adjunct.serviceStatus.copy122')}
+            <code>POST /v1/jobs</code>
+            {at('adjunct.serviceStatus.copy123')}
+            <code>Idempotency-Key</code>
+            {at('adjunct.serviceStatus.copy124')}
+          </li>
+          <li>{at('adjunct.serviceStatus.copy125')}</li>
+        </ol>
+        <p>{at('adjunct.serviceStatus.copy126')}</p>
+      </details>
+    </details>
+  );
+}
+export function InputUsage({ project, shot, recipe, uploadMax }) {
+  const { t: at, locale } = useI18n();
+  const usage = inputUsage(project, shot.id, recipe, locale),
+    limits = recipe?.limits;
+  if (!limits) return <p className="cloud-warning">{at('adjunct.serviceStatus.copy127')}</p>;
+  return (
+    <section className="input-usage" aria-label={at('adjunct.serviceStatus.copy128')}>
+      <b>{at('adjunct.serviceStatus.copy129')}</b>
+      <p>
+        {at('adjunct.serviceStatus.copy130')}
+        {usage.frames}
+        {at('adjunct.serviceStatus.copy131')}
+        {usage.groups.image.count}/{known(limits.max_images, locale)}
+        {at('adjunct.serviceStatus.copy132')}
+        {usage.groups.video.count}/{known(limits.max_videos, locale)}
+        {at('adjunct.serviceStatus.copy133')}
+        {usage.groups.audio.count}/{known(limits.max_audios, locale)}
+        {at('adjunct.serviceStatus.copy134')}
+        {usage.total}/{known(limits.max_total_files, locale)}
+        {at('adjunct.serviceStatus.copy135')}
+        {usage.guides}/{known(limits.max_guides, locale)}
+      </p>
+      <p>
+        {at('adjunct.serviceStatus.copy136')}
+        {known(limits.min_clip_duration, locale)}–{known(limits.max_clip_duration, locale)}
+        {at('adjunct.serviceStatus.copy137')}
+        {known(limits.max_total_video_duration, locale)}
+        {at('adjunct.serviceStatus.copy138')}
+        {known(limits.max_total_audio_duration, locale)}
+        {at('adjunct.serviceStatus.copy139')}
+      </p>
+      <p>
+        {at('adjunct.serviceStatus.copy140')}
+        {Number(usage.groups.video.duration.toFixed(3))}
+        {at('adjunct.serviceStatus.copy141')}
+        {Number(usage.groups.audio.duration.toFixed(3))}
+        {at('adjunct.serviceStatus.copy142')}
+        {usage.unknownDurations
+          ? at('adjunct.serviceStatus.copy143', { v0: usage.unknownDurations })
+          : ''}
+        {at('adjunct.serviceStatus.copy144')}
+      </p>
+      {Number.isFinite(uploadMax) && (
+        <p>
+          {at('adjunct.serviceStatus.copy145')}
+          {(uploadMax / 1024 ** 2).toFixed(0)}
+          {at('adjunct.serviceStatus.copy146')}
+        </p>
+      )}
+      {usage.issues.length > 0 && (
+        <div role="status">
+          <b>{at('adjunct.serviceStatus.copy147')}</b>
+          <ul>
+            {usage.issues.map((issue, index) => (
+              <li key={index}>{issue}</li>
+            ))}
+          </ul>
+          <p>{at('adjunct.serviceStatus.copy148')}</p>
+        </div>
+      )}
+    </section>
+  );
+}

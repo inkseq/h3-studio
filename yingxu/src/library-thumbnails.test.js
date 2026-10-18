@@ -1,7 +1,60 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createThumbnailQueue,thumbnailQueue} from './library-thumbnails.js';
-test('small renditions admit eight concurrent reads and release one next slot exactly once',async()=>{const q=createThumbnailQueue(),starts=[],done=[];for(let i=0;i<11;i++)q.enqueue(release=>{starts.push(i);done[i]=release;});await Promise.resolve();assert.deepEqual(starts,[0,1,2,3,4,5,6,7]);done[3]();done[3]();await Promise.resolve();assert.deepEqual(starts,[0,1,2,3,4,5,6,7,8]);done[0]();await Promise.resolve();assert.equal(starts.length,10);done[8]();await Promise.resolve();assert.equal(starts.length,11);});
-test('unmounted queued thumbnail never starts and cancellation releases active slot',async()=>{const q=createThumbnailQueue({maxActive:1}),starts=[];const cancelActive=q.enqueue(()=>starts.push('active'));const cancelQueued=q.enqueue(()=>starts.push('cancelled'));q.enqueue(()=>starts.push('next'));await Promise.resolve();cancelQueued();cancelActive();cancelActive();await Promise.resolve();assert.deepEqual(starts,['active','next']);});
-test('API/account instances have separate transient queues; old canceled owner cannot start',async()=>{const oldApi={},newApi={};assert.equal(thumbnailQueue(oldApi),thumbnailQueue(oldApi));assert.notEqual(thumbnailQueue(oldApi),thumbnailQueue(newApi));let oldDone,stale=false,fresh=false;thumbnailQueue(oldApi).enqueue(done=>oldDone=done);const cancel=thumbnailQueue(oldApi).enqueue(()=>stale=true);cancel();thumbnailQueue(newApi).enqueue(()=>fresh=true);await Promise.resolve();oldDone();await Promise.resolve();assert.equal(stale,false);assert.equal(fresh,true);});
-test('thumbnail concurrency is bounded even for invalid configuration',()=>{for(const maxActive of [0,-1,9,1.5,Infinity,'8'])assert.throws(()=>createThumbnailQueue({maxActive}),RangeError);});
+import { createThumbnailQueue, thumbnailQueue } from './library-thumbnails.js';
+test('small renditions admit eight concurrent reads and release one next slot exactly once', async () => {
+  const q = createThumbnailQueue(),
+    starts = [],
+    done = [];
+  for (let i = 0; i < 11; i++)
+    q.enqueue((release) => {
+      starts.push(i);
+      done[i] = release;
+    });
+  await Promise.resolve();
+  assert.deepEqual(starts, [0, 1, 2, 3, 4, 5, 6, 7]);
+  done[3]();
+  done[3]();
+  await Promise.resolve();
+  assert.deepEqual(starts, [0, 1, 2, 3, 4, 5, 6, 7, 8]);
+  done[0]();
+  await Promise.resolve();
+  assert.equal(starts.length, 10);
+  done[8]();
+  await Promise.resolve();
+  assert.equal(starts.length, 11);
+});
+test('unmounted queued thumbnail never starts and cancellation releases active slot', async () => {
+  const q = createThumbnailQueue({ maxActive: 1 }),
+    starts = [];
+  const cancelActive = q.enqueue(() => starts.push('active'));
+  const cancelQueued = q.enqueue(() => starts.push('cancelled'));
+  q.enqueue(() => starts.push('next'));
+  await Promise.resolve();
+  cancelQueued();
+  cancelActive();
+  cancelActive();
+  await Promise.resolve();
+  assert.deepEqual(starts, ['active', 'next']);
+});
+test('API/account instances have separate transient queues; old canceled owner cannot start', async () => {
+  const oldApi = {},
+    newApi = {};
+  assert.equal(thumbnailQueue(oldApi), thumbnailQueue(oldApi));
+  assert.notEqual(thumbnailQueue(oldApi), thumbnailQueue(newApi));
+  let oldDone,
+    stale = false,
+    fresh = false;
+  thumbnailQueue(oldApi).enqueue((done) => (oldDone = done));
+  const cancel = thumbnailQueue(oldApi).enqueue(() => (stale = true));
+  cancel();
+  thumbnailQueue(newApi).enqueue(() => (fresh = true));
+  await Promise.resolve();
+  oldDone();
+  await Promise.resolve();
+  assert.equal(stale, false);
+  assert.equal(fresh, true);
+});
+test('thumbnail concurrency is bounded even for invalid configuration', () => {
+  for (const maxActive of [0, -1, 9, 1.5, Infinity, '8'])
+    assert.throws(() => createThumbnailQueue({ maxActive }), RangeError);
+});
