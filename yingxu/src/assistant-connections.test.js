@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {capMicros,assistantScope,createAssistantOperations,creatorName,assistantDate} from './assistant-connections-model.js';
+import {build} from 'esbuild';
+import {Module} from 'node:module';
+import React from 'react';
+import {renderToStaticMarkup} from 'react-dom/server';
+import {capMicros,assistantScope,createAssistantOperations,creatorName,assistantDate,assistantConnectionsView} from './assistant-connections-model.js';
 import {createQuickChatClient} from './quick-chat-client.js';
 const memory=()=>{const values=new Map();return {values,getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,v),removeItem:k=>values.delete(k)};};
 const body=()=>({name:'Codex',authorization_profile_id:'profile',authorization_profile_version:1,scope:{kind:'session',id:'s'},permission:'organise',daily_limit_microusd:0});
@@ -22,3 +26,33 @@ test('display dates do not clamp valid policy timestamps or render Invalid Date'
 
 test('legacy original issue without cap reconciles server default zero',async()=>{const input=body();delete input.daily_limit_microusd;const ops=createAssistantOperations({account:'a',storage:memory(),client:{createConnection:async b=>({connection:{...receipt(b),daily_limit_microusd:0}})}});await ops.execute('createConnection',[],input);assert.equal(ops.read().pending,null);});
 test('authoritative write and closed conflict update older paginated rows',async()=>{const {mergeConnectionResult}=await import('./assistant-connections-model.js');const rows=Array.from({length:60},(_,i)=>({id:String(i),status:'connected',state_version:1,daily_limit_microusd:1}));const updated={id:'59',status:'connected',state_version:2,daily_limit_microusd:2};assert.deepEqual(mergeConnectionResult(rows,updated)[59],updated);assert.equal(rows[59].state_version,1);assert.equal(mergeConnectionResult(rows,{...updated,no_mutation_committed:true})[59].state_version,2);assert.equal(mergeConnectionResult(rows,{version:2,value:{}}),rows);});
+
+test('inactive visibility never changes authoritative records and preserves paused, pending, unknown and original-operation rows',()=>{
+ const rows=['connected','connected','pending','future-status','expired','revoked','unavailable'].map((status,index)=>({id:String(index),status,paused:index===1})),before=structuredClone(rows);
+ const closed=assistantConnectionsView(rows);assert.equal(closed.inactiveCount,3);assert.equal(closed.activeCount,4);
+ assert.deepEqual(closed.items.filter(item=>item.hidden).map(item=>item.row.id),['4','5','6']);
+ const open=assistantConnectionsView(rows,{showInactive:true});assert.ok(open.items.every(item=>!item.hidden));
+ const pending=assistantConnectionsView(rows,{pendingId:'6'});assert.equal(pending.inactiveCount,2);assert.equal(pending.items[6].hidden,false);
+ for(let index=0;index<rows.length;index++){assert.equal(closed.items[index].row,rows[index]);assert.equal(open.items[index].row,rows[index]);}
+ assert.deepEqual(rows,before);
+});
+
+test('real connection list keeps filtered rows mounted, exposes their toggle and distinguishes equal names in both languages',async()=>{
+ const source=`export {ConnectionList} from './src/AssistantConnections.jsx';export {I18nProvider} from './src/i18n/I18nProvider.jsx';`;
+ const compiled=await build({stdin:{contents:source,resolveDir:process.cwd(),loader:'jsx'},bundle:true,write:false,platform:'node',format:'cjs',external:['react','react-dom'],loader:{'.css':'empty'},logLevel:'silent'});
+ const module=new Module(import.meta.url);module.paths=Module._nodeModulePaths(process.cwd());module._compile(compiled.outputFiles[0].text,import.meta.url);
+ const rows=['connected','connected','pending','future-status','expired','revoked','unavailable'].map((status,index)=>({id:'connection-'+String(index+1).padStart(8,'0'),name:'My Codex',status,paused:index===1,created_at:1792190000+index,daily_limit_microusd:0}));
+ const old=Object.getOwnPropertyDescriptor(globalThis,'localStorage');
+ try{for(const language of ['en','zh']){
+  Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:()=>language}});
+  const render=props=>renderToStaticMarkup(React.createElement(module.exports.I18nProvider,null,React.createElement(module.exports.ConnectionList,{rows,scopeLabel:()=>'',permissionLabel:()=>'',...props})));
+  const hidden=render({}),shown=render({showInactive:true});
+  assert.equal((hidden.match(/<article/g)||[]).length,7,'filter retains the same row components and drafts');assert.equal((hidden.match(/<article hidden=""/g)||[]).length,3);assert.equal((shown.match(/<article hidden=""/g)||[]).length,0);
+  assert.match(hidden,/aria-expanded="false"/);assert.match(shown,/aria-expanded="true"/);
+  assert.match(hidden,language==='en'?/Show 3 inactive/:/显示 3 个失效连接/);assert.match(shown,language==='en'?/Hide inactive/:/收起失效连接/);
+  assert.match(hidden,language==='en'?/Created /:/创建于 /);assert.match(hidden,/00000001/);assert.match(hidden,/00000007/);assert.doesNotMatch(hidden,/assistants\.[A-Za-z]/);
+  const pending=render({pendingId:rows[6].id});assert.equal((pending.match(/<article hidden=""/g)||[]).length,2);
+  const partial=render({hasMore:true});assert.match(partial,language==='en'?/Show inactive \(3 loaded\)/:/显示已加载的 3 个失效连接/);
+  const noActive=render({rows:rows.slice(4)});assert.match(noActive,language==='en'?/No active connections/:/暂无有效连接/);
+ }}finally{if(old)Object.defineProperty(globalThis,'localStorage',old);else delete globalThis.localStorage;}
+});

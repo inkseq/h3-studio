@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from studio_platform.telemetry import (CloudTelemetryConfig, NullTelemetry, StageTelemetry,
-    configured_telemetry, create_cloud_telemetry, read_config)
+    configured_telemetry, controller_resource_config, create_cloud_telemetry, read_config)
 from studio_platform.runtime_catalog import PROFILE_IDS
 
 
@@ -162,6 +162,52 @@ class TelemetryTests(unittest.TestCase):
 
 
 class ConfigurationTests(unittest.TestCase):
+    def test_controller_labels_follow_exact_cpu_release_and_existing_origin(self):
+        original = config()
+        revision = 'a' * 40
+        with tempfile.TemporaryDirectory() as folder:
+            image = Path(folder) / 'controller-image'
+            image.write_text('sixnine-platform:' + revision + '\n', encoding='ascii')
+            with patch('studio_platform.telemetry._CONTROLLER_IMAGE_FILE', image):
+                for origin, environment in (('https://inkseq.com', 'production'),
+                        ('https://staging.inkseq.com', 'staging')):
+                    with self.subTest(environment=environment), patch.dict(os.environ,
+                            {'PUBLIC_ORIGIN': origin}, clear=True):
+                        observed = controller_resource_config(original)
+                        self.assertEqual(observed.service_name, 'sixnine-controller')
+                        self.assertEqual(observed.service_version, revision)
+                        self.assertEqual(observed.environment, environment)
+                        self.assertEqual(observed.endpoint, original.endpoint)
+                        self.assertEqual(observed.authorization, original.authorization)
+                        self.assertEqual(dict(os.environ), {'PUBLIC_ORIGIN': origin})
+                self.assertEqual(original, config())
+
+    def test_invalid_controller_identity_does_not_export_under_acceptance_labels(self):
+        with tempfile.TemporaryDirectory() as folder:
+            image = Path(folder) / 'controller-image'
+            for reference, env in (('sixnine-platform:latest', {'PUBLIC_ORIGIN': 'https://inkseq.com'}),
+                    ('sixnine-platform:' + 'b'*40, {'PUBLIC_ORIGIN': 'https://unexpected.example'}),
+                    ('sixnine-platform:' + 'b'*40, {'PUBLIC_ORIGIN': 'https://inkseq.com',
+                        'SIXNINE_PUBLIC_ORIGIN': 'https://staging.inkseq.com'})):
+                image.write_text(reference, encoding='ascii')
+                with self.subTest(reference=reference, env=env), patch.dict(os.environ, env, clear=True), \
+                        patch('studio_platform.telemetry._CONTROLLER_IMAGE_FILE', image):
+                    with self.assertRaisesRegex(ValueError, '^telemetry_controller_identity_invalid$'):
+                        controller_resource_config(config())
+
+    def test_local_config_and_disabled_export_remain_unchanged(self):
+        with tempfile.TemporaryDirectory() as folder:
+            missing = Path(folder) / 'absent'
+            with patch('studio_platform.telemetry._CONTROLLER_IMAGE_FILE', missing):
+                self.assertEqual(controller_resource_config(config()), config())
+            filename = Path(folder) / 'disabled.json'
+            filename.write_text(json.dumps({'schema_version': 1, 'enabled': False,
+                **vars(config())}), encoding='utf8')
+            filename.chmod(0o600)
+            with patch('studio_platform.telemetry.controller_resource_config') as identity:
+                self.assertFalse(configured_telemetry(filename).enabled)
+                identity.assert_not_called()
+
     def test_host_dashboard_formats_result_values_without_scaling_physical_ids_or_controls(self):
         dashboard = json.loads((Path(__file__).parent /
             "deploy/observability/sixnine-host-scorecard.json").read_text(encoding="utf-8"))
@@ -240,6 +286,41 @@ class SDKTests(unittest.TestCase):
             from opentelemetry.sdk._logs import LoggerProvider
         except ImportError:
             self.skipTest("Install the optional hashed telemetry lock for SDK tests")
+
+    def test_real_otlp_resource_contains_controller_release_and_environment(self):
+        from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import ExportLogsServiceRequest
+        bodies = []
+        class Response:
+            status = 204
+            def close(self): pass
+        class Pool:
+            def __init__(self, **_kwargs): pass
+            def request(self, _method, url, **kwargs):
+                if url.endswith('/logs'): bodies.append(kwargs['body'])
+                return Response()
+            def clear(self): pass
+        with tempfile.TemporaryDirectory() as folder:
+            image = Path(folder) / 'controller-image'
+            image.write_text('sixnine-platform:' + 'c'*40, encoding='ascii')
+            for environment in ('production', 'staging'):
+                origin = 'https://inkseq.com' if environment == 'production' else 'https://staging.inkseq.com'
+                bodies.clear()
+                with patch.dict(os.environ, {'PUBLIC_ORIGIN': origin}, clear=True), \
+                        patch('studio_platform.telemetry._CONTROLLER_IMAGE_FILE', image), \
+                        patch('urllib3.PoolManager', Pool):
+                    telemetry = create_cloud_telemetry(controller_resource_config(config()))
+                    try:
+                        telemetry.start('runtime_ready', {}).finish()
+                        self.assertTrue(telemetry.force_flush())
+                        self.assertTrue(bodies)
+                        resource = ExportLogsServiceRequest.FromString(bodies[0]).resource_logs[0].resource
+                        attributes = {a.key: a.value.string_value for a in resource.attributes}
+                        self.assertEqual(attributes['service.name'], 'sixnine-controller')
+                        self.assertEqual(attributes['service.version'], 'c'*40)
+                        self.assertEqual(attributes['deployment.environment.name'], environment)
+                        self.assertNotIn('PRIVATE', str(resource))
+                    finally:
+                        telemetry.close()
 
     def test_real_otlp_encodings_emit_start_before_span_ends_and_never_expose_http_failure(self):
         from opentelemetry.proto.collector.logs.v1.logs_service_pb2 import ExportLogsServiceRequest

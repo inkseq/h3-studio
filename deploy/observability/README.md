@@ -43,6 +43,19 @@ Names are `sixnine-api`, `sixnine-worker`, `sixnine-controller` or
 disables optional observation and reports a static status code. It never starts
 a GPU, changes environment credentials or blocks application startup.
 
+Deployed CPU controllers and their slot children use the existing protected
+`PUBLIC_ORIGIN` (`inkseq.com` or `staging.inkseq.com`) and the exact base-image
+reference embedded by `Dockerfile.dispatch` to set resource identity:
+`service.name=sixnine-controller`, the matching deployment environment, and the
+full release SHA as `service.version`. This replaces stale acceptance labels in
+memory only; exporter endpoint/authentication and the protected JSON stay
+unchanged. A malformed deployed identity disables optional export instead of
+mislabeling production as local. Local acceptance/other worker images retain
+their explicit configuration. Disabled exporters remain disabled, including the
+current isolated staging configuration; enabling it and verifying live staging
+streams is separate #290 observability work. No controller credentials reach a
+GPU, and dstack's own OTel switches remain absent.
+
 ## Instrumentation boundary
 
 ```python

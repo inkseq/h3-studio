@@ -1,7 +1,11 @@
 # Existing platform image and schema; PostgreSQL workers add CPU telemetry dependencies.
 ARG PLATFORM_IMAGE
 FROM ${PLATFORM_IMAGE}
+ARG PLATFORM_IMAGE
 USER root
+# CI already supplies sixnine-platform:<exact release SHA>. Preserve that
+# nonsecret identity in the immutable CPU image; no Docker socket is needed.
+RUN printf '%s\n' "$PLATFORM_IMAGE" > /app/inkseq-controller-image
 COPY requirements.dispatch.lock.txt /app/requirements.dispatch.lock.txt
 RUN python -m pip install --no-cache-dir --require-hashes -r /app/requirements.dispatch.lock.txt \
     && python -m pip check

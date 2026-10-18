@@ -127,12 +127,12 @@ Object.assign(settingsCatalogs.en,{
   'settings.chargeConfirmed':'Confirmed user charge today','settings.chargeAwaiting':'Charge awaiting reconciliation','settings.chargeReserved':'Reserved user charge',
   'settings.chargeRetainedCosts':'User charges reflect audited waivers. Original costs, provider records and budget safety exposure remain unchanged.',
   'settings.grossConfirmed':'Retained confirmed costs today','settings.grossAwaiting':'Retained costs awaiting reconciliation','settings.grossExposure':'Retained original cost exposure',
-  'settings.chargeWaived':'{count} references waived · original exposure {amount}',
+  'settings.chargeWaived':'{count} references waived',
 });
 Object.assign(settingsCatalogs.zh,{
   'settings.accountCharges':'我的应付费用','settings.connectionCharges':'此助手产生的应付费用',
   'settings.chargeConfirmed':'今日已确认应付','settings.chargeAwaiting':'待核对应付','settings.chargeReserved':'应付预留',
   'settings.chargeRetainedCosts':'应付费用已计入有审核记录的免单。原始成本、供应商记录和预算安全占用保持不变。',
   'settings.grossConfirmed':'保留的今日已确认成本','settings.grossAwaiting':'保留的待核对成本','settings.grossExposure':'保留的原始成本占用',
-  'settings.chargeWaived':'已免除 {count} 条记录的用户费用 · 原预估占用 {amount}',
+  'settings.chargeWaived':'已免除 {count} 条记录的用户费用',
 });

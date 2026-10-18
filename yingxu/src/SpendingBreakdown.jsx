@@ -19,7 +19,7 @@ export default function SpendingBreakdown({usage,scope}){
         [hasCharge?'settings.chargeReserved':'settings.costReserved',value.reserved_microusd],
       ].map(([label,amount])=><div key={label}><dt>{t(label)}</dt><dd>{money(amount)}</dd></div>)}
     </dl>
-    {hasCharge&&view.waivedCount>0&&<p className="spend-breakdown-note">{t('settings.chargeWaived',{count:view.waivedCount,amount:money(view.waivedExposure)})}</p>}
+    {hasCharge&&view.waivedCount>0&&<p className="spend-breakdown-note">{t('settings.chargeWaived',{count:view.waivedCount})}</p>}
     {value.awaiting_invoice_count>0&&<p className="spend-breakdown-note">{count('settings.costAwaitingCount',value.awaiting_invoice_count)}</p>}
     {value.prior_day_pending_estimate_microusd>0&&<p className="spend-breakdown-note">{t('settings.costPriorPending',{amount:money(value.prior_day_pending_estimate_microusd)})}</p>}
     {(value.unconfirmed_reference_count>0||value.unconfirmed_exposure_microusd>0)&&<p className="spend-breakdown-warning" role="status">{value.unconfirmed_reference_count>0?count('settings.costUnconfirmed',value.unconfirmed_reference_count):t('settings.costUnconfirmedUnknown')}{value.unconfirmed_exposure_microusd>0&&' '+t('settings.costUnconfirmedEstimate',{amount:money(value.unconfirmed_exposure_microusd)})}</p>}
