@@ -105,7 +105,7 @@ test('billing client uses existing expected-account cookie boundary and original
 });
 
 test('real admin component renders bulk action, evidence and authoritative confirmation in both languages without ordinary-owner controls',async()=>{
-  const source=`export {default as Panel} from './src/OperatorBillingPanel.jsx';export {default as Spending} from './src/SpendingBreakdown.jsx';export {I18nProvider} from './src/i18n/I18nProvider.jsx';`;
+  const source=`export {default as Panel,BillingPreviewTotals} from './src/OperatorBillingPanel.jsx';export {default as Spending} from './src/SpendingBreakdown.jsx';export {I18nProvider} from './src/i18n/I18nProvider.jsx';`;
   const result=await build({stdin:{contents:source,resolveDir:process.cwd(),loader:'jsx'},bundle:true,write:false,platform:'node',format:'cjs',external:['react','react-dom'],logLevel:'silent'});
   const module=new Module(import.meta.url);module.paths=Module._nodeModulePaths(process.cwd());module._compile(result.outputFiles[0].text,import.meta.url);
   const old=Object.getOwnPropertyDescriptor(globalThis,'localStorage');
@@ -113,6 +113,16 @@ test('real admin component renders bulk action, evidence and authoritative confi
     const html=renderToStaticMarkup(React.createElement(module.exports.I18nProvider,null,React.createElement(module.exports.Panel,{controller:{},state,busy:false})));
     assert.match(html,language==='en'?/Select up to 200 eligible loaded references/:/选择已加载的可处理记录/);assert.match(html,language==='en'?/Evidence SHA-256/:/依据文件 SHA-256/);assert.doesNotMatch(html,/billing\./);
     const ordinary=renderToStaticMarkup(React.createElement(module.exports.I18nProvider,null,React.createElement(module.exports.Panel,{controller:{},state:{...state,snapshot:{operator:{admin:false}}},busy:false})));assert.equal(ordinary,'');
+    const retained=[row('rental',{reference_type:'instance',provider_actual_cost_microusd:100000,user_charge_microusd:100000}),
+      row('first',{allocated_cost_microusd:30000,user_charge_microusd:30000}),row('second',{allocated_cost_microusd:70000,user_charge_microusd:70000})];
+    const waiver=preview(request(retained));waiver.items=retained;waiver.totals={...totals(3),instance_actual_microusd:0,job_allocated_microusd:0,waived_exposure_microusd:200000};
+    const waivedHtml=renderToStaticMarkup(React.createElement(module.exports.I18nProvider,null,React.createElement(module.exports.BillingPreviewTotals,{preview:waiver})));
+    assert.match(waivedHtml,/\$0\.20/);assert.doesNotMatch(waivedHtml,/\$0\.00|Recorded provider cost|Generation cost allocation|已记录供应商成本|生成成本分摊/);
+    const retainedHtml=renderToStaticMarkup(React.createElement(module.exports.I18nProvider,null,React.createElement(module.exports.Panel,{controller:{},state:{...state,billingReferences:{owner_id:owner,items:retained,next_cursor:null}},busy:false})));
+    assert.match(retainedHtml,/\$0\.10/);assert.match(retainedHtml,/\$0\.03/);assert.match(retainedHtml,/\$0\.07/);
+    const settlement={...waiver,request:{...waiver.request,action:'settle'},totals:{...waiver.totals,instance_actual_microusd:100000,job_allocated_microusd:100000,waived_exposure_microusd:0}};
+    const settledHtml=renderToStaticMarkup(React.createElement(module.exports.I18nProvider,null,React.createElement(module.exports.BillingPreviewTotals,{preview:settlement})));
+    assert.equal((settledHtml.match(/\$0\.10/g)||[]).length,2);assert.match(settledHtml,language==='en'?/Recorded provider cost/:/已记录供应商成本/);assert.match(settledHtml,language==='en'?/Generation cost allocation/:/生成成本分摊/);
     const zero={settled_today_microusd:0,reserved_microusd:0,awaiting_invoice_estimate_microusd:0,awaiting_invoice_count:0,prior_day_pending_estimate_microusd:0,legacy_settled_unknown_date_microusd:0,exposure_microusd:0,unconfirmed_exposure_microusd:0,unconfirmed_reference_count:0};
     const net={...zero,schema_version:1,attribution_scope:'connection',by_kind:{job:zero,instance:zero},waived_reference_count:97,waived_exposure_microusd:4000000};
     const usage={day:'2026-10-19',timezone:'Australia/Sydney',projected_microusd:195000000,charge_breakdown:net,breakdown:{...net,settled_today_microusd:4000000,exposure_microusd:4000000}};
