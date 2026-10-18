@@ -1,4 +1,5 @@
 """Pinned REST and journal semantics with fake capacity; never leases a GPU."""
+
 from dataclasses import replace
 import copy
 import json
@@ -11,8 +12,18 @@ from unittest.mock import Mock, patch
 
 import httpx
 
-from studio_platform.dstack_capacity import (CapacityRequest, DstackCapacity,
-    DstackClient, DstackError, DstackReadRateLimited, idle_action, live_capacity_usage, native_bootstrap_config, terminal_no_allocation, main)
+from studio_platform.dstack_capacity import (
+    CapacityRequest,
+    DstackCapacity,
+    DstackClient,
+    DstackError,
+    DstackReadRateLimited,
+    idle_action,
+    live_capacity_usage,
+    native_bootstrap_config,
+    terminal_no_allocation,
+    main,
+)
 from studio_platform.inference.wangp_contract import HostReadiness
 from studio_platform.worker_admission import managed_window_reason
 
@@ -22,20 +33,45 @@ PUB = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFakeKey"
 
 
 def request(**changes):
-    return replace(CapacityRequest(INTENT, "vastai", "h3-pruned-int8-v1", "fl", "h3-int8",
-        "config-1", "a" * 64, "example/runtime@sha256:" + "b" * 64, ("RTX5090",),
-        30, 160, 850000, 10., 3610., 3600), **changes)
+    return replace(
+        CapacityRequest(
+            INTENT,
+            "vastai",
+            "h3-pruned-int8-v1",
+            "fl",
+            "h3-int8",
+            "config-1",
+            "a" * 64,
+            "example/runtime@sha256:" + "b" * 64,
+            ("RTX5090",),
+            30,
+            160,
+            850000,
+            10.0,
+            3610.0,
+            3600,
+        ),
+        **changes,
+    )
 
 
 def no_capacity_run(run):
     """Pinned 0.22.3 terminal single-task response, no provider allocation."""
-    submission = {"id": "c3333333-3333-4333-8333-333333333333", "status": "failed",
+    submission = {
+        "id": "c3333333-3333-4333-8333-333333333333",
+        "status": "failed",
         "termination_reason": "failed_to_start_due_to_no_capacity",
         "termination_reason_message": "PRIVATE-PROVIDER-MESSAGE no offers",
-        "job_provisioning_data": None, "job_runtime_data": None}
-    return {**copy.deepcopy(run), "status": "failed", "termination_reason": "job_failed",
+        "job_provisioning_data": None,
+        "job_runtime_data": None,
+    }
+    return {
+        **copy.deepcopy(run),
+        "status": "failed",
+        "termination_reason": "job_failed",
         "latest_job_submission": copy.deepcopy(submission),
-        "jobs": [{"job_submissions": [submission], "job_connection_info": None}]}
+        "jobs": [{"job_submissions": [submission], "job_connection_info": None}],
+    }
 
 
 class Store:
@@ -44,7 +80,7 @@ class Store:
         self.lock = threading.Lock()
         self.obligations = False
         self.events = []
-        self.clock = lambda: 20.
+        self.clock = lambda: 20.0
 
     def load(self, intent_id):
         self.assert_identity(intent_id)
@@ -76,17 +112,24 @@ class Store:
             if self.obligations:
                 return False
             if retry:
-                if (not self.value.get("stop_started") or self.value.get("stop_attempt_count", 0) >= 5
-                        or now < self.value.get("stop_next_retry_at", float("inf"))
-                        or self.value.get("dstack_status") != "running"
-                        or not 0 <= now - self.value.get("observed_at", 0) <= 30
-                        or not self.value.get("provider_instance_id")):
+                if (
+                    not self.value.get("stop_started")
+                    or self.value.get("stop_attempt_count", 0) >= 5
+                    or now < self.value.get("stop_next_retry_at", float("inf"))
+                    or self.value.get("dstack_status") != "running"
+                    or not 0 <= now - self.value.get("observed_at", 0) <= 30
+                    or not self.value.get("provider_instance_id")
+                ):
                     return False
             elif self.value.get("stop_started"):
                 return False
             count = self.value.get("stop_attempt_count", 0) + 1
-            self.value.update(stop_started=True, stop_attempt_count=count,
-                stop_last_attempt_at=now, stop_next_retry_at=now + min(30 * 2**(count-1), 300))
+            self.value.update(
+                stop_started=True,
+                stop_attempt_count=count,
+                stop_last_attempt_at=now,
+                stop_next_retry_at=now + min(30 * 2 ** (count - 1), 300),
+            )
             self.events.append("stop_retry_committed" if retry else "stop_committed")
             return True
 
@@ -110,8 +153,13 @@ class FakeClient:
     def apply(self, spec):
         assert self.store.value["apply_started"]
         self.apply_count += 1
-        self.run = {"id": RUN, "project_name": self.project, "run_spec": copy.deepcopy(spec),
-            "status": "submitted", "cost": 0.1}
+        self.run = {
+            "id": RUN,
+            "project_name": self.project,
+            "run_spec": copy.deepcopy(spec),
+            "status": "submitted",
+            "cost": 0.1,
+        }
         if self.apply_lost:
             raise DstackError("dstack_api_unavailable")
         return copy.deepcopy(self.run)
@@ -127,8 +175,16 @@ class FakeClient:
             raise DstackError("dstack_api_unavailable")
 
     def running(self):
-        self.run.update(status="running", latest_job_submission={"job_provisioning_data": {
-            "backend": "vastai", "instance_id": "1234567", "instance_type": {"resources": {"gpus": [{"name": "RTX5090"}]}}}})
+        self.run.update(
+            status="running",
+            latest_job_submission={
+                "job_provisioning_data": {
+                    "backend": "vastai",
+                    "instance_id": "1234567",
+                    "instance_type": {"resources": {"gpus": [{"name": "RTX5090"}]}},
+                }
+            },
+        )
 
 
 class DstackCapacityTests(unittest.TestCase):
@@ -136,9 +192,11 @@ class DstackCapacityTests(unittest.TestCase):
         self.store = Store()
         self.client = FakeClient(self.store)
         self.native = Mock(return_value=HostReadiness("a" * 64, INTENT, "c" * 32, True))
-        self.now = 20.
+        self.now = 20.0
         self.store.clock = lambda: self.now
-        self.capacity = DstackCapacity(self.client, self.store, clock=self.store.clock, readiness=self.native)
+        self.capacity = DstackCapacity(
+            self.client, self.store, clock=self.store.clock, readiness=self.native
+        )
 
     def start(self):
         return self.capacity.start(request(), PUB)
@@ -149,14 +207,20 @@ class DstackCapacityTests(unittest.TestCase):
         self.assertEqual(self.client.apply_count, 1)
         self.assertEqual(self.store.events, ["apply_committed"])
 
-    def test_terminal_only_refresh_refuses_nonterminal_absent_failed_and_foreign_reads(self):
+    def test_terminal_only_refresh_refuses_nonterminal_absent_failed_and_foreign_reads(
+        self,
+    ):
         self.start()
         before = self.store.load(INTENT)
         original = copy.deepcopy(self.client.run)
-        cases = [None, original, {**original, 'status':'running'},
-            {**original, 'status':'failed', 'project_name':'foreign-project'},
-            {**original, 'status':'failed', 'run_spec':{}},
-            {**original, 'status':'failed', 'latest_job_submission':'malformed'}]
+        cases = [
+            None,
+            original,
+            {**original, 'status': 'running'},
+            {**original, 'status': 'failed', 'project_name': 'foreign-project'},
+            {**original, 'status': 'failed', 'run_spec': {}},
+            {**original, 'status': 'failed', 'latest_job_submission': 'malformed'},
+        ]
         for run in cases:
             with self.subTest(status=run.get('status') if run else None):
                 self.client.run = run
@@ -168,7 +232,9 @@ class DstackCapacityTests(unittest.TestCase):
         self.native.assert_not_called()
         self.assertEqual((self.client.apply_count, self.client.stop_count), (1, 0))
 
-    def test_terminal_only_refresh_reuses_owned_terminal_projection_without_native_call(self):
+    def test_terminal_only_refresh_reuses_owned_terminal_projection_without_native_call(
+        self,
+    ):
         self.start()
         self.client.run = no_capacity_run(self.client.run)
         result = self.capacity.observe_terminal(INTENT)
@@ -180,12 +246,16 @@ class DstackCapacityTests(unittest.TestCase):
         self.native.assert_not_called()
         self.assertEqual((self.client.apply_count, self.client.stop_count), (1, 0))
 
-    def test_no_capacity_observation_ends_without_native_start_or_settling_billing(self):
+    def test_no_capacity_observation_ends_without_native_start_or_settling_billing(
+        self,
+    ):
         self.start()
         self.client.run = no_capacity_run(self.client.run)
         value = self.capacity.observe(INTENT)
-        self.assertEqual((value["state"], value["ready"], value["billing_state"]),
-            ("stopped", False, "unsettled"))
+        self.assertEqual(
+            (value["state"], value["ready"], value["billing_state"]),
+            ("stopped", False, "unsettled"),
+        )
         self.assertEqual(value["reason_code"], "dstack_no_capacity_billing_pending")
         self.assertEqual(value["preparation"]["phase"], "stopped")
         self.assertNotIn("PRIVATE-PROVIDER-MESSAGE", json.dumps(value))
@@ -204,7 +274,9 @@ class DstackCapacityTests(unittest.TestCase):
         self.start()
         self.client.run = None
         for _ in range(3):
-            self.assertEqual(self.capacity.start(request(), PUB)["state"], "creation_unknown")
+            self.assertEqual(
+                self.capacity.start(request(), PUB)["state"], "creation_unknown"
+            )
         self.assertEqual(self.client.apply_count, 1)
 
     def test_binding_changes_cannot_replay_original_intent(self):
@@ -215,7 +287,9 @@ class DstackCapacityTests(unittest.TestCase):
 
     def test_foreign_named_run_is_not_adopted_or_stopped(self):
         self.client.run = {"id": RUN, "project_name": "other"}
-        with self.assertRaisesRegex(DstackError, "dstack_existing_run_requires_reconciliation"):
+        with self.assertRaisesRegex(
+            DstackError, "dstack_existing_run_requires_reconciliation"
+        ):
             self.start()
         self.assertEqual(self.client.apply_count, 0)
 
@@ -241,7 +315,10 @@ class DstackCapacityTests(unittest.TestCase):
         self.assertEqual(value["reason_code"], "dstack_native_incarnation_changed")
         self.assertFalse(value["ready"])
         self.native.return_value = HostReadiness("b" * 64, INTENT, "c" * 32, True)
-        self.assertEqual(self.capacity.observe(INTENT)["reason_code"], "dstack_native_binding_mismatch")
+        self.assertEqual(
+            self.capacity.observe(INTENT)["reason_code"],
+            "dstack_native_binding_mismatch",
+        )
 
     def test_busy_model_retains_identity_and_disables_admission(self):
         self.start()
@@ -251,19 +328,35 @@ class DstackCapacityTests(unittest.TestCase):
 
     def managed_reason(self):
         binding = self.store.load(INTENT)
-        intent = {"state": "ready", "hard_deadline": request().hard_deadline,
-            "provider_instance_id": binding.get("provider_instance_id")}
-        node = {"desired_state": "running", "runtime_state": binding.get("state"), "payload": {
-            "capacity_backend": "dstack-v1", "observation_fresh_seconds": 30,
-            "selection": {"runtime_profile_id": request().profile_id}, "dstack": binding,
-            "dstack_observation": {"run_id": binding.get("run_id"),
-                "instance_id": binding.get("provider_instance_id"),
-                "status": binding.get("dstack_status"), "observed_at": binding.get("observed_at")}}}
-        return managed_window_reason(intent, node, self.now, deployment_profile_id=request().profile_id)
+        intent = {
+            "state": "ready",
+            "hard_deadline": request().hard_deadline,
+            "provider_instance_id": binding.get("provider_instance_id"),
+        }
+        node = {
+            "desired_state": "running",
+            "runtime_state": binding.get("state"),
+            "payload": {
+                "capacity_backend": "dstack-v1",
+                "observation_fresh_seconds": 30,
+                "selection": {"runtime_profile_id": request().profile_id},
+                "dstack": binding,
+                "dstack_observation": {
+                    "run_id": binding.get("run_id"),
+                    "instance_id": binding.get("provider_instance_id"),
+                    "status": binding.get("dstack_status"),
+                    "observed_at": binding.get("observed_at"),
+                },
+            },
+        }
+        return managed_window_reason(
+            intent, node, self.now, deployment_profile_id=request().profile_id
+        )
 
     def test_cold_callback_still_journals_exact_instance_before_bootstrap(self):
         self.start()
         self.client.running()
+
         def native(binding, run):
             recorded = self.store.load(INTENT)
             self.assertEqual(recorded["provider_instance_id"], "1234567")
@@ -271,8 +364,11 @@ class DstackCapacityTests(unittest.TestCase):
             self.assertEqual(recorded["state"], "runtime_unconfirmed")
             self.assertFalse(recorded["ready"])
             self.assertNotIn("runtime_incarnation", recorded)
-            self.assertEqual(self.managed_reason(), "managed_dstack_readiness_unconfirmed")
+            self.assertEqual(
+                self.managed_reason(), "managed_dstack_readiness_unconfirmed"
+            )
             return HostReadiness("a" * 64, INTENT, "c" * 32, True)
+
         self.native.side_effect = native
         self.assertTrue(self.capacity.observe(INTENT)["ready"])
         self.assertIsNone(self.managed_reason())
@@ -282,37 +378,49 @@ class DstackCapacityTests(unittest.TestCase):
         self.client.running()
         self.capacity.observe(INTENT)
         prior = self.store.load(INTENT)
-        self.now = 25.
+        self.now = 25.0
         entered, release = threading.Event(), threading.Event()
         results = []
+
         def native(binding, run):
             entered.set()
             if not release.wait(timeout=5):
                 raise RuntimeError("test callback not released")
             return HostReadiness("a" * 64, INTENT, "c" * 32, True)
+
         self.native.side_effect = native
-        thread = threading.Thread(target=lambda: results.append(self.capacity.observe(INTENT)))
+        thread = threading.Thread(
+            target=lambda: results.append(self.capacity.observe(INTENT))
+        )
         thread.start()
         try:
             self.assertTrue(entered.wait(timeout=5))
             self.assertEqual(self.store.load(INTENT), prior)
             self.assertIsNone(self.managed_reason())
-            self.now = 51.
-            self.assertEqual(self.managed_reason(), "managed_dstack_readiness_unconfirmed")
-            self.assertEqual(self.store.load(INTENT)["observed_at"], 20.)
-            self.now = 60.
+            self.now = 51.0
+            self.assertEqual(
+                self.managed_reason(), "managed_dstack_readiness_unconfirmed"
+            )
+            self.assertEqual(self.store.load(INTENT)["observed_at"], 20.0)
+            self.now = 60.0
         finally:
             release.set()
             thread.join(timeout=5)
         self.assertFalse(thread.is_alive())
         self.assertTrue(results[0]["ready"])
-        self.assertEqual(results[0]["observed_at"], 25., "Native completion cannot renew an older provider read")
+        self.assertEqual(
+            results[0]["observed_at"],
+            25.0,
+            "Native completion cannot renew an older provider read",
+        )
         self.assertEqual(self.managed_reason(), "managed_dstack_readiness_unconfirmed")
         self.native.side_effect = None
-        self.now = 61.
+        self.now = 61.0
         self.capacity.observe(INTENT)
         self.assertIsNone(self.managed_reason())
-        self.assertEqual(self.store.load(INTENT)["runtime_incarnation"], prior["runtime_incarnation"])
+        self.assertEqual(
+            self.store.load(INTENT)["runtime_incarnation"], prior["runtime_incarnation"]
+        )
         self.assertEqual(self.client.apply_count, 1)
 
     def test_pending_warm_busy_check_preserves_busy_then_actual_failure_revokes(self):
@@ -321,26 +429,32 @@ class DstackCapacityTests(unittest.TestCase):
         self.native.return_value = HostReadiness("a" * 64, INTENT, "c" * 32, False)
         self.capacity.observe(INTENT)
         prior = self.store.load(INTENT)
-        self.now = 25.
+        self.now = 25.0
+
         def native(binding, run):
             self.assertEqual(self.store.load(INTENT), prior)
             self.assertEqual(binding["state"], "busy")
             self.assertIsNone(self.managed_reason())
             raise DstackError("dstack_runtime_preparing")
+
         self.native.side_effect = native
         value = self.capacity.observe(INTENT)
         self.assertFalse(value["ready"])
         self.assertEqual(value["state"], "runtime_unconfirmed")
         self.assertEqual(value["reason_code"], "dstack_runtime_preparing")
         self.assertEqual(self.managed_reason(), "managed_dstack_readiness_unconfirmed")
-        self.assertEqual(self.store.load(INTENT)["runtime_incarnation"], prior["runtime_incarnation"])
+        self.assertEqual(
+            self.store.load(INTENT)["runtime_incarnation"], prior["runtime_incarnation"]
+        )
 
     def test_changed_warm_provider_is_revoked_before_native_callback(self):
         self.start()
         self.client.running()
         self.capacity.observe(INTENT)
         self.native.reset_mock()
-        self.client.run["latest_job_submission"]["job_provisioning_data"]["instance_id"] = "changed-instance"
+        self.client.run["latest_job_submission"]["job_provisioning_data"][
+            "instance_id"
+        ] = "changed-instance"
         value = self.capacity.observe(INTENT)
         self.assertFalse(value["ready"])
         self.assertEqual(value["reason_code"], "dstack_instance_identity_changed")
@@ -371,13 +485,19 @@ class DstackCapacityTests(unittest.TestCase):
     def test_native_errors_never_expose_arbitrary_callback_text(self):
         self.start()
         self.client.running()
-        for error in (RuntimeError("secret prompt and token"),
-                      DstackError("secret prompt and token"),
-                      DstackError("dstack_runtime_preparing", "secret prompt and token")):
-            with self.subTest(error_type=type(error).__name__, argument_count=len(error.args)):
+        for error in (
+            RuntimeError("secret prompt and token"),
+            DstackError("secret prompt and token"),
+            DstackError("dstack_runtime_preparing", "secret prompt and token"),
+        ):
+            with self.subTest(
+                error_type=type(error).__name__, argument_count=len(error.args)
+            ):
                 self.native.side_effect = error
                 value = self.capacity.observe(INTENT)
-                self.assertEqual(value["reason_code"], "dstack_native_observation_failed")
+                self.assertEqual(
+                    value["reason_code"], "dstack_native_observation_failed"
+                )
                 self.assertEqual(value["state"], "runtime_unconfirmed")
                 self.assertFalse(value["ready"])
                 self.assertNotIn("secret", json.dumps(value))
@@ -385,10 +505,12 @@ class DstackCapacityTests(unittest.TestCase):
     def test_native_progress_is_allowlisted_and_never_admits_capacity(self):
         self.start()
         self.client.running()
-        for code, phase in (("downloading_weights", "model_download"),
-                            ("starting_runtime", "runtime_start"),
-                            ("loading_model", "model_load")):
-            self.native.side_effect = DstackError("dstack_runtime_"+code)
+        for code, phase in (
+            ("downloading_weights", "model_download"),
+            ("starting_runtime", "runtime_start"),
+            ("loading_model", "model_load"),
+        ):
+            self.native.side_effect = DstackError("dstack_runtime_" + code)
             value = self.capacity.observe(INTENT)
             self.assertEqual(value["bootstrap_phase"], phase)
             self.assertFalse(value["ready"])
@@ -398,7 +520,9 @@ class DstackCapacityTests(unittest.TestCase):
     def test_changed_resource_configuration_is_rejected(self):
         self.start()
         self.client.run["run_spec"]["configuration"]["resources"]["gpu"]["count"] = 2
-        self.assertEqual(self.capacity.observe(INTENT)["reason_code"], "dstack_run_binding_mismatch")
+        self.assertEqual(
+            self.capacity.observe(INTENT)["reason_code"], "dstack_run_binding_mismatch"
+        )
 
     def test_stop_preserves_business_obligations(self):
         self.start()
@@ -430,26 +554,34 @@ class DstackCapacityTests(unittest.TestCase):
 
     def test_stop_not_delivered_retries_original_run_after_durable_backoff(self):
         self.interrupted_stop()
-        self.now = 49.
-        self.assertEqual(self.capacity.stop(INTENT)["reason_code"], "dstack_stop_retry_waiting")
+        self.now = 49.0
+        self.assertEqual(
+            self.capacity.stop(INTENT)["reason_code"], "dstack_stop_retry_waiting"
+        )
         self.assertEqual(self.client.stop_count, 1)
-        self.now = 50.
+        self.now = 50.0
         # A new transport/controller must honor the same original retry journal.
-        restarted = DstackCapacity(self.client, self.store, clock=self.store.clock, readiness=self.native)
+        restarted = DstackCapacity(
+            self.client, self.store, clock=self.store.clock, readiness=self.native
+        )
         self.client.stop_not_delivered = False
         self.assertEqual(restarted.stop(INTENT)["state"], "stopping")
         self.assertEqual(self.client.stop_count, 2)
         self.assertEqual(self.client.apply_count, 1)
         self.assertEqual(self.store.value["run_id"], RUN)
         self.assertEqual(self.store.value["stop_attempt_count"], 2)
-        self.assertEqual(self.store.value["stop_next_retry_at"], 110.)
+        self.assertEqual(self.store.value["stop_next_retry_at"], 110.0)
         self.assertEqual(self.store.events.count("stop_committed"), 1)
         self.assertEqual(self.store.events.count("stop_retry_committed"), 1)
-        self.assertEqual(self.native.call_count, 1, "A stopped binding must not bootstrap native runtime")
+        self.assertEqual(
+            self.native.call_count,
+            1,
+            "A stopped binding must not bootstrap native runtime",
+        )
 
     def test_stop_retry_unknown_absent_changed_or_nonrunning_is_read_only(self):
         self.interrupted_stop()
-        self.now = 100.
+        self.now = 100.0
         original = copy.deepcopy(self.client.run)
         for status in ("submitted", "provisioning", "terminating", "terminated"):
             with self.subTest(status=status):
@@ -464,10 +596,16 @@ class DstackCapacityTests(unittest.TestCase):
                 elif mutation == "project":
                     self.client.run["project_name"] = "foreign"
                 elif mutation == "instance":
-                    self.client.run["latest_job_submission"]["job_provisioning_data"]["instance_id"] = "changed-instance"
+                    self.client.run["latest_job_submission"]["job_provisioning_data"][
+                        "instance_id"
+                    ] = "changed-instance"
                 else:
-                    self.client.run["latest_job_submission"]["job_provisioning_data"]["instance_type"]["resources"]["gpus"] *= 2
-                self.assertEqual(self.capacity.stop(INTENT)["state"], "observation_unknown")
+                    self.client.run["latest_job_submission"]["job_provisioning_data"][
+                        "instance_type"
+                    ]["resources"]["gpus"] *= 2
+                self.assertEqual(
+                    self.capacity.stop(INTENT)["state"], "observation_unknown"
+                )
                 self.assertEqual(self.client.stop_count, 1)
         self.client.run = None
         self.assertEqual(self.capacity.stop(INTENT)["state"], "removal_unknown")
@@ -479,12 +617,17 @@ class DstackCapacityTests(unittest.TestCase):
 
     def test_stop_retry_cap_preserves_explicit_manual_reconciliation(self):
         self.interrupted_stop()
-        for now, count, due in ((50., 2, 110.), (110., 3, 230.), (230., 4, 470.), (470., 5, 770.)):
+        for now, count, due in (
+            (50.0, 2, 110.0),
+            (110.0, 3, 230.0),
+            (230.0, 4, 470.0),
+            (470.0, 5, 770.0),
+        ):
             self.now = now
             self.assertEqual(self.capacity.stop(INTENT)["state"], "removal_unknown")
             self.assertEqual(self.store.value["stop_attempt_count"], count)
             self.assertEqual(self.store.value["stop_next_retry_at"], due)
-        self.now = 10000.
+        self.now = 10000.0
         value = self.capacity.stop(INTENT)
         self.assertEqual(value["reason_code"], "dstack_stop_retry_exhausted")
         self.assertFalse(value["ready"])
@@ -494,30 +637,42 @@ class DstackCapacityTests(unittest.TestCase):
 
     def test_stop_retry_missing_journal_and_new_obligations_fail_closed(self):
         self.interrupted_stop()
-        self.now = 50.
+        self.now = 50.0
         self.store.obligations = True
-        self.assertEqual(self.capacity.stop(INTENT)["reason_code"], "dstack_business_obligations_pending")
+        self.assertEqual(
+            self.capacity.stop(INTENT)["reason_code"],
+            "dstack_business_obligations_pending",
+        )
         self.store.obligations = False
         del self.store.value["stop_next_retry_at"]
-        self.assertEqual(self.capacity.stop(INTENT)["reason_code"], "dstack_stop_retry_journal_unconfirmed")
+        self.assertEqual(
+            self.capacity.stop(INTENT)["reason_code"],
+            "dstack_stop_retry_journal_unconfirmed",
+        )
         self.assertEqual(self.client.stop_count, 1)
 
     def test_concurrent_stop_recovery_consumes_one_original_retry_per_window(self):
         self.interrupted_stop()
-        self.now = 50.
+        self.now = 50.0
         barrier = threading.Barrier(2)
         original_get = self.client.get
+
         def get(**kw):
             value = original_get(**kw)
             barrier.wait(timeout=5)
             return value
+
         self.client.get = get
         failures = []
+
         def stop():
             try:
-                DstackCapacity(self.client, self.store, clock=self.store.clock).stop(INTENT)
+                DstackCapacity(self.client, self.store, clock=self.store.clock).stop(
+                    INTENT
+                )
             except Exception as error:
                 failures.append(type(error).__name__)
+
         threads = [threading.Thread(target=stop) for _ in range(2)]
         for thread in threads:
             thread.start()
@@ -543,8 +698,13 @@ class DstackCapacityTests(unittest.TestCase):
     def test_resource_floors_and_optional_regions_use_pinned_range_semantics(self):
         config = request().run_spec(PUB)["configuration"]
         self.assertEqual(config["resources"]["cpu"], {"arch": "x86", "count": "4.."})
-        self.assertIsNone(config["regions"], "An empty region whitelist excludes every offer")
-        self.assertEqual(request(regions=("us-ca",)).run_spec(PUB)["configuration"]["regions"], ["us-ca"])
+        self.assertIsNone(
+            config["regions"], "An empty region whitelist excludes every offer"
+        )
+        self.assertEqual(
+            request(regions=("us-ca",)).run_spec(PUB)["configuration"]["regions"],
+            ["us-ca"],
+        )
 
     def test_parsed_cpu_floor_preserves_ownership_and_rejects_changed_requirement(self):
         self.start()
@@ -554,12 +714,17 @@ class DstackCapacityTests(unittest.TestCase):
         for changed in ({"min": 3, "max": None}, {"min": 4, "max": 4}):
             with self.subTest(count=changed):
                 cpu["count"] = changed
-                self.assertEqual(self.capacity.observe(INTENT)["reason_code"], "dstack_run_binding_mismatch")
+                self.assertEqual(
+                    self.capacity.observe(INTENT)["reason_code"],
+                    "dstack_run_binding_mismatch",
+                )
 
     def test_server_added_region_restriction_cannot_be_adopted(self):
         self.start()
         self.client.run["run_spec"]["configuration"]["regions"] = []
-        self.assertEqual(self.capacity.observe(INTENT)["reason_code"], "dstack_run_binding_mismatch")
+        self.assertEqual(
+            self.capacity.observe(INTENT)["reason_code"], "dstack_run_binding_mismatch"
+        )
 
     def test_pinned_homogeneous_single_node_default_preserves_binding(self):
         self.start()
@@ -570,38 +735,51 @@ class DstackCapacityTests(unittest.TestCase):
         for value in (0, 2, True, False, "1", {"min": 1, "max": 1}):
             with self.subTest(nodes=value):
                 configuration["nodes"] = value
-                self.assertEqual(self.capacity.observe(INTENT)["reason_code"], "dstack_run_binding_mismatch")
+                self.assertEqual(
+                    self.capacity.observe(INTENT)["reason_code"],
+                    "dstack_run_binding_mismatch",
+                )
         configuration["nodes"] = 1
         configuration["groups"] = [{"nodes": 1}]
-        self.assertEqual(self.capacity.observe(INTENT)["reason_code"], "dstack_run_binding_mismatch")
+        self.assertEqual(
+            self.capacity.observe(INTENT)["reason_code"], "dstack_run_binding_mismatch"
+        )
 
     def test_concurrent_start_commits_only_one_paid_apply(self):
         barrier = threading.Barrier(2)
         original_get = self.client.get
         first_reads = []
+
         def get(**kw):
             if "run_name" in kw and not self.store.value.get("apply_started"):
                 first_reads.append(1)
                 barrier.wait(timeout=5)
                 return None
             return original_get(**kw)
+
         self.client.get = get
         failures = []
+
         def start():
             try:
                 self.start()
             except Exception as exc:
                 failures.append(type(exc).__name__)
+
         threads = [threading.Thread(target=start) for _ in range(2)]
-        for thread in threads: thread.start()
-        for thread in threads: thread.join(timeout=10)
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
         self.assertFalse(failures)
         self.assertEqual(self.client.apply_count, 1)
 
     def test_multi_gpu_allocation_cannot_be_marked_ready(self):
         self.start()
         self.client.running()
-        self.client.run["latest_job_submission"]["job_provisioning_data"]["instance_type"]["resources"]["gpus"] *= 2
+        self.client.run["latest_job_submission"]["job_provisioning_data"][
+            "instance_type"
+        ]["resources"]["gpus"] *= 2
         value = self.capacity.observe(INTENT)
         self.assertFalse(value["ready"])
         self.assertEqual(value["reason_code"], "dstack_allocated_gpu_count_unconfirmed")
@@ -615,25 +793,31 @@ class DstackCapacityTests(unittest.TestCase):
         finite = request().binding(PUB)
         self.assertEqual(finite["run_spec"]["configuration"]["max_duration"], 3600)
         self.assertNotIn("lifecycle_version", finite)
-        continuing = request(lifecycle_version=2, hard_deadline=None, max_duration_s=None)
+        continuing = request(
+            lifecycle_version=2, hard_deadline=None, max_duration_s=None
+        )
         binding = continuing.binding(PUB)
         self.assertEqual(binding["lifecycle_version"], 2)
         self.assertIsNone(binding["hard_deadline"])
         self.assertEqual(binding["run_spec"]["configuration"]["max_duration"], "off")
         self.capacity.start(continuing, PUB)
-        self.now = 100000.
+        self.now = 100000.0
         self.capacity.start(continuing, PUB)
         self.assertEqual(self.client.apply_count, 1)
-        self.now = 20.
+        self.now = 20.0
         with self.assertRaisesRegex(DstackError, "dstack_intent_binding_changed"):
             self.capacity.start(request(), PUB)
 
     def test_missing_deadline_requires_explicit_continuing_version(self):
-        for fields in ({"hard_deadline": None}, {"max_duration_s": None},
-                {"hard_deadline": None, "max_duration_s": None},
-                {"lifecycle_version": 2}, {"lifecycle_version": True},
-                {"lifecycle_version": 2, "hard_deadline": None},
-                {"lifecycle_version": 2, "max_duration_s": None}):
+        for fields in (
+            {"hard_deadline": None},
+            {"max_duration_s": None},
+            {"hard_deadline": None, "max_duration_s": None},
+            {"lifecycle_version": 2},
+            {"lifecycle_version": True},
+            {"lifecycle_version": 2, "hard_deadline": None},
+            {"lifecycle_version": 2, "max_duration_s": None},
+        ):
             with self.subTest(fields=fields), self.assertRaises(DstackError):
                 request(**fields)
 
@@ -645,7 +829,9 @@ class DstackCapacityTests(unittest.TestCase):
             self.skipTest("optional pinned dstack SDK absent")
         self.start()
         config = self.client.run["run_spec"]["configuration"]
-        self.client.run["run_spec"]["configuration"] = TaskConfiguration.model_validate(config).model_dump(mode="json")
+        self.client.run["run_spec"]["configuration"] = TaskConfiguration.model_validate(
+            config
+        ).model_dump(mode="json")
         self.assertEqual(self.capacity.observe(INTENT)["state"], "starting")
 
     def test_pinned_model_preserves_explicit_continuing_off(self):
@@ -653,45 +839,100 @@ class DstackCapacityTests(unittest.TestCase):
             from dstack._internal.core.models.configurations import TaskConfiguration
         except ImportError:
             self.skipTest("optional pinned dstack SDK absent")
-        continuing = request(lifecycle_version=2, hard_deadline=None, max_duration_s=None)
+        continuing = request(
+            lifecycle_version=2, hard_deadline=None, max_duration_s=None
+        )
         self.capacity.start(continuing, PUB)
         config = self.client.run["run_spec"]["configuration"]
-        self.client.run["run_spec"]["configuration"] = TaskConfiguration.model_validate(config).model_dump(mode="json")
-        self.assertEqual(self.client.run["run_spec"]["configuration"]["max_duration"], "off")
+        self.client.run["run_spec"]["configuration"] = TaskConfiguration.model_validate(
+            config
+        ).model_dump(mode="json")
+        self.assertEqual(
+            self.client.run["run_spec"]["configuration"]["max_duration"], "off"
+        )
         self.assertEqual(self.capacity.observe(INTENT)["state"], "starting")
 
     def test_idle_policy_distinguishes_holds_and_unknown_obligations(self):
-        policy = dict(now=1000, hard_deadline=2000, hold_until=0, last_business_activity=10,
-            idle_seconds=600, active_jobs=0, unsafe_attempts=0, collection_holds=0, observations_fresh=True)
+        policy = dict(
+            now=1000,
+            hard_deadline=2000,
+            hold_until=0,
+            last_business_activity=10,
+            idle_seconds=600,
+            active_jobs=0,
+            unsafe_attempts=0,
+            collection_holds=0,
+            observations_fresh=True,
+        )
         self.assertEqual(idle_action(**policy), "stop")
         self.assertEqual(idle_action(**{**policy, "hold_until": 1500}), "retain")
         self.assertEqual(idle_action(**{**policy, "collection_holds": 1}), "retain")
-        self.assertEqual(idle_action(**{**policy, "now": 2100, "unsafe_attempts": 1}), "drain")
-        self.assertEqual(idle_action(**{**policy, "observations_fresh": False}), "reconcile")
+        self.assertEqual(
+            idle_action(**{**policy, "now": 2100, "unsafe_attempts": 1}), "drain"
+        )
+        self.assertEqual(
+            idle_action(**{**policy, "observations_fresh": False}), "reconcile"
+        )
 
     def test_continuing_idle_and_keep_on_use_funding_not_a_fixed_deadline(self):
-        policy = dict(now=1000, hard_deadline=None, hold_until=0, last_business_activity=10,
-            idle_seconds=600, active_jobs=0, unsafe_attempts=0, collection_holds=0,
-            observations_fresh=True, lifecycle_version=2)
+        policy = dict(
+            now=1000,
+            hard_deadline=None,
+            hold_until=0,
+            last_business_activity=10,
+            idle_seconds=600,
+            active_jobs=0,
+            unsafe_attempts=0,
+            collection_holds=0,
+            observations_fresh=True,
+            lifecycle_version=2,
+        )
         self.assertEqual(idle_action(**policy), "stop")
         self.assertEqual(idle_action(**policy, keep_on="until_stopped"), "retain")
-        self.assertEqual(idle_action(**policy, keep_on="until_stopped", budget_available=False), "stop")
+        self.assertEqual(
+            idle_action(**policy, keep_on="until_stopped", budget_available=False),
+            "stop",
+        )
         for obligation in ("active_jobs", "unsafe_attempts", "collection_holds"):
             self.assertEqual(idle_action(**{**policy, obligation: 1}), "retain")
-            self.assertEqual(idle_action(**{**policy, obligation: 1}, budget_available=False), "drain")
-        self.assertEqual(idle_action(**{**policy, "observations_fresh": False},
-            keep_on="until_stopped"), "reconcile")
+            self.assertEqual(
+                idle_action(**{**policy, obligation: 1}, budget_available=False),
+                "drain",
+            )
+        self.assertEqual(
+            idle_action(
+                **{**policy, "observations_fresh": False}, keep_on="until_stopped"
+            ),
+            "reconcile",
+        )
 
     def test_continuing_hold_expiry_begins_a_full_idle_interval(self):
-        policy = dict(now=1000, hard_deadline=None, hold_until=1500, last_business_activity=10,
-            idle_seconds=600, active_jobs=0, unsafe_attempts=0, collection_holds=0,
-            observations_fresh=True, lifecycle_version=2, keep_on="until")
-        for now, expected in ((1000, "retain"), (1500, "retain"), (2099, "retain"), (2100, "stop")):
+        policy = dict(
+            now=1000,
+            hard_deadline=None,
+            hold_until=1500,
+            last_business_activity=10,
+            idle_seconds=600,
+            active_jobs=0,
+            unsafe_attempts=0,
+            collection_holds=0,
+            observations_fresh=True,
+            lifecycle_version=2,
+            keep_on="until",
+        )
+        for now, expected in (
+            (1000, "retain"),
+            (1500, "retain"),
+            (2099, "retain"),
+            (2100, "stop"),
+        ):
             self.assertEqual(idle_action(**{**policy, "now": now}), expected)
         with self.assertRaisesRegex(DstackError, "dstack_idle_policy_invalid"):
             idle_action(**{**policy, "lifecycle_version": 1})
 
-    @unittest.skipUnless(os.name == "posix", "GPU bootstrap validates Linux absolute paths")
+    @unittest.skipUnless(
+        os.name == "posix", "GPU bootstrap validates Linux absolute paths"
+    )
     def test_native_bootstrap_keeps_original_one_slot_interface(self):
         path = Path(__file__).resolve().parents[1] / "deploy" / "wangp" / "bootstrap.py"
         spec = importlib.util.spec_from_file_location("sixnine_inert_bootstrap", path)
@@ -709,38 +950,78 @@ class DstackCapacityTests(unittest.TestCase):
 
     def test_bootstrap_refuses_path_traversal(self):
         with self.assertRaisesRegex(DstackError, "dstack_runtime_path_invalid"):
-            native_bootstrap_config(request(), source_bundle_sha256="d" * 64, model_root="/root/../private")
+            native_bootstrap_config(
+                request(), source_bundle_sha256="d" * 64, model_root="/root/../private"
+            )
 
 
 class DstackLiveUsageTests(unittest.TestCase):
     def setUp(self):
-        self.now = 20.
-        self.binding = {**request().binding(PUB), "apply_started": True,
-            "run_id": RUN, "provider_instance_id": "1234567"}
-        self.node = {"intent_id": INTENT, "desired_state": "stopped", "runtime_state": "stopped",
-            "payload": {"capacity_backend": "dstack-v1", "hourly_cost_microusd": 850000,
-                "dstack": self.binding, "historical_bill": {"actual_cost_microusd": None}}}
-        self.run = {"id": RUN, "project_name": "sixnine", "run_spec": request().run_spec(PUB),
-            "status": "terminated", "latest_job_submission": {"job_provisioning_data": {
-                "backend": "vastai", "instance_id": "1234567", "instance_type": {
-                    "resources": {"gpus": [{"name": "RTX5090"}]}}}}}
-        self.client = Mock(project="sixnine", get=Mock(side_effect=lambda **_: copy.deepcopy(self.run)))
-        self.inventory = Mock(return_value={"backend": "vastai", "complete": True,
-            "observed_at": 20., "instance_ids": []})
+        self.now = 20.0
+        self.binding = {
+            **request().binding(PUB),
+            "apply_started": True,
+            "run_id": RUN,
+            "provider_instance_id": "1234567",
+        }
+        self.node = {
+            "intent_id": INTENT,
+            "desired_state": "stopped",
+            "runtime_state": "stopped",
+            "payload": {
+                "capacity_backend": "dstack-v1",
+                "hourly_cost_microusd": 850000,
+                "dstack": self.binding,
+                "historical_bill": {"actual_cost_microusd": None},
+            },
+        }
+        self.run = {
+            "id": RUN,
+            "project_name": "sixnine",
+            "run_spec": request().run_spec(PUB),
+            "status": "terminated",
+            "latest_job_submission": {
+                "job_provisioning_data": {
+                    "backend": "vastai",
+                    "instance_id": "1234567",
+                    "instance_type": {"resources": {"gpus": [{"name": "RTX5090"}]}},
+                }
+            },
+        }
+        self.client = Mock(
+            project="sixnine", get=Mock(side_effect=lambda **_: copy.deepcopy(self.run))
+        )
+        self.inventory = Mock(
+            return_value={
+                "backend": "vastai",
+                "complete": True,
+                "observed_at": 20.0,
+                "instance_ids": [],
+            }
+        )
 
     def usage(self, nodes=None):
-        return live_capacity_usage(self.client, [self.node] if nodes is None else nodes,
-            provider_inventory=self.inventory, clock=lambda: self.now)
+        return live_capacity_usage(
+            self.client,
+            [self.node] if nodes is None else nodes,
+            provider_inventory=self.inventory,
+            clock=lambda: self.now,
+        )
 
     def test_owned_terminal_and_fresh_provider_absence_free_capacity_not_billing(self):
         original = copy.deepcopy(self.node)
-        legacy = {"intent_id": "old-lium", "payload": {"capacity_backend": "legacy", "provider": "lium"}}
+        legacy = {
+            "intent_id": "old-lium",
+            "payload": {"capacity_backend": "legacy", "provider": "lium"},
+        }
         result = self.usage([self.node, legacy])
         self.assertEqual(result["instances"], 0)
         self.assertEqual(result["physical_gpus"], 0)
         self.assertEqual(result["hourly_cost_microusd"], 0)
         self.assertEqual(result["active_instance_ids"], ())
-        self.assertEqual(result["observations"][0]["reason_code"], "dstack_terminal_provider_absent")
+        self.assertEqual(
+            result["observations"][0]["reason_code"], "dstack_terminal_provider_absent"
+        )
         self.assertEqual(self.node, original)
         self.client.get.assert_called_once_with(run_id=RUN)
         self.inventory.assert_called_once_with("vastai")
@@ -752,40 +1033,77 @@ class DstackLiveUsageTests(unittest.TestCase):
     def unknown_no_allocation(self):
         self.no_allocation()
         self.binding["billing_state"] = "unsettled"
-        message = "sixnine_vast_attempts_v1:" + json.dumps({"version": 1, "outcome": "unknown",
-            "attempted_count": 1, "attempts": [{"ask_id": "46211052", "http_status": 400,
-                "code": "mutation_unknown", "outcome": "unknown", "contract_id": None}]})
+        message = "sixnine_vast_attempts_v1:" + json.dumps(
+            {
+                "version": 1,
+                "outcome": "unknown",
+                "attempted_count": 1,
+                "attempts": [
+                    {
+                        "ask_id": "46211052",
+                        "http_status": 400,
+                        "code": "mutation_unknown",
+                        "outcome": "unknown",
+                        "contract_id": None,
+                    }
+                ],
+            }
+        )
         self.run["latest_job_submission"]["termination_reason_message"] = message
-        self.run["jobs"][0]["job_submissions"][0]["termination_reason_message"] = message
+        self.run["jobs"][0]["job_submissions"][0]["termination_reason_message"] = (
+            message
+        )
 
-    def test_failed_unknown_put_and_complete_empty_account_free_only_current_capacity(self):
+    def test_failed_unknown_put_and_complete_empty_account_free_only_current_capacity(
+        self,
+    ):
         self.unknown_no_allocation()
         original = copy.deepcopy((self.node, self.run))
         self.assertFalse(terminal_no_allocation(self.run, self.binding))
         result = self.usage()
-        self.assertEqual((result["instances"], result["physical_gpus"], result["logical_slots"],
-            result["hourly_cost_microusd"], result["active_instance_ids"]), (0, 0, 0, 0, ()))
-        self.assertEqual(result["observations"][0]["reason_code"], "dstack_terminal_provider_accounted")
+        self.assertEqual(
+            (
+                result["instances"],
+                result["physical_gpus"],
+                result["logical_slots"],
+                result["hourly_cost_microusd"],
+                result["active_instance_ids"],
+            ),
+            (0, 0, 0, 0, ()),
+        )
+        self.assertEqual(
+            result["observations"][0]["reason_code"],
+            "dstack_terminal_provider_accounted",
+        )
         self.assertFalse(terminal_no_allocation(self.run, self.binding))
         self.assertEqual((self.node, self.run), original)
         self.assertEqual(self.binding["billing_state"], "unsettled")
-        self.assertIsNone(self.node["payload"]["historical_bill"]["actual_cost_microusd"])
+        self.assertIsNone(
+            self.node["payload"]["historical_bill"]["actual_cost_microusd"]
+        )
         self.inventory.assert_called_once_with("vastai")
 
     def test_failed_unknown_put_needs_current_complete_empty_same_account(self):
         self.unknown_no_allocation()
         original = copy.deepcopy((self.node, self.run))
         good = self.inventory.return_value
-        for bad in (None, {**good, "backend": "runpod"}, {**good, "complete": False},
-                {**good, "observed_at": -1}, {**good, "observed_at": True}, {**good, "observed_at": 20.1},
-                {**good, "instance_ids": "1234567"}, {**good, "instance_ids": ["1234567", "1234567"]},
-                {**good, "instance_ids": ["1234567"]}):
+        for bad in (
+            None,
+            {**good, "backend": "runpod"},
+            {**good, "complete": False},
+            {**good, "observed_at": -1},
+            {**good, "observed_at": True},
+            {**good, "observed_at": 20.1},
+            {**good, "instance_ids": "1234567"},
+            {**good, "instance_ids": ["1234567", "1234567"]},
+            {**good, "instance_ids": ["1234567"]},
+        ):
             with self.subTest(bad=bad):
                 self.inventory.return_value = bad
                 self.assertEqual(self.usage()["active_instance_ids"], (INTENT,))
                 self.assertEqual((self.node, self.run), original)
-        self.inventory.return_value = {**good, "observed_at": 1.}
-        self.now = 32.
+        self.inventory.return_value = {**good, "observed_at": 1.0}
+        self.now = 32.0
         self.assertEqual(self.usage()["instances"], 1)
         self.inventory.side_effect = ValueError("private supplier failure")
         result = self.usage()
@@ -795,7 +1113,10 @@ class DstackLiveUsageTests(unittest.TestCase):
     def test_empty_account_never_frees_unknown_active_or_ambiguous_native_run(self):
         self.unknown_no_allocation()
         original = copy.deepcopy(self.run)
-        cases = [{**original, "status": state} for state in ("running", "provisioning", "terminating")]
+        cases = [
+            {**original, "status": state}
+            for state in ("running", "provisioning", "terminating")
+        ]
         cases += [{**original, "project_name": "another"}, {**original, "jobs": []}]
         missing = copy.deepcopy(original)
         missing["latest_job_submission"].pop("job_runtime_data")
@@ -810,8 +1131,12 @@ class DstackLiveUsageTests(unittest.TestCase):
 
     def test_empty_account_does_not_erase_prior_runtime_or_host_evidence(self):
         self.unknown_no_allocation()
-        for key, value in (("runtime_incarnation", "a" * 32), ("bootstrap_started", True),
-                ("host_observation", {}), ("host_failure", {})):
+        for key, value in (
+            ("runtime_incarnation", "a" * 32),
+            ("bootstrap_started", True),
+            ("host_observation", {}),
+            ("host_failure", {}),
+        ):
             with self.subTest(key=key):
                 self.binding[key] = value
                 self.inventory.reset_mock()
@@ -819,42 +1144,73 @@ class DstackLiveUsageTests(unittest.TestCase):
                 self.inventory.assert_not_called()
                 self.binding.pop(key)
 
-    def test_later_read_expiry_restores_unknown_failed_capacity_without_another_account_read(self):
+    def test_later_read_expiry_restores_unknown_failed_capacity_without_another_account_read(
+        self,
+    ):
         self.unknown_no_allocation()
         other_id = "a3333333-3333-4333-8333-333333333333"
         other_run_id = "b3333333-3333-4333-8333-333333333333"
         other = copy.deepcopy(self.node)
         other["intent_id"] = other_id
-        other["payload"]["dstack"] = {**request(intent_id=other_id).binding(PUB),
-            "apply_started": True, "run_id": other_run_id}
-        other_run = {**copy.deepcopy(self.run), "id": other_run_id, "status": "running",
-            "run_spec": request(intent_id=other_id).run_spec(PUB)}
+        other["payload"]["dstack"] = {
+            **request(intent_id=other_id).binding(PUB),
+            "apply_started": True,
+            "run_id": other_run_id,
+        }
+        other_run = {
+            **copy.deepcopy(self.run),
+            "id": other_run_id,
+            "status": "running",
+            "run_spec": request(intent_id=other_id).run_spec(PUB),
+        }
+
         def read_run(**identity):
-            if identity["run_id"] == RUN:return copy.deepcopy(self.run)
-            self.now = 51.
+            if identity["run_id"] == RUN:
+                return copy.deepcopy(self.run)
+            self.now = 51.0
             return copy.deepcopy(other_run)
+
         self.client.get.side_effect = read_run
         original = copy.deepcopy([self.node, other])
         result = self.usage([self.node, other])
         self.assertEqual(set(result["active_instance_ids"]), {INTENT, other_id})
         self.assertEqual(result["instances"], 2)
-        self.assertEqual(result["observations"][0]["reason_code"], "dstack_terminal_provider_unconfirmed")
+        self.assertEqual(
+            result["observations"][0]["reason_code"],
+            "dstack_terminal_provider_unconfirmed",
+        )
         self.assertEqual([self.node, other], original)
         self.inventory.assert_called_once_with("vastai")
 
-    def test_unknown_failed_slot_stays_excluded_when_another_owned_allocation_appears(self):
+    def test_unknown_failed_slot_stays_excluded_when_another_owned_allocation_appears(
+        self,
+    ):
         self.unknown_no_allocation()
         other_id = "a3333333-3333-4333-8333-333333333333"
         other_run_id = "b3333333-3333-4333-8333-333333333333"
         other = copy.deepcopy(self.node)
         other["intent_id"] = other_id
-        other["payload"]["dstack"] = {**request(intent_id=other_id).binding(PUB),
-            "apply_started": True, "run_id": other_run_id, "provider_instance_id": "56042378"}
-        other_run = {"id": other_run_id, "project_name": "sixnine", "status": "running",
-            "run_spec": request(intent_id=other_id).run_spec(PUB), "latest_job_submission": {
-                "job_provisioning_data": {"backend": "vastai", "instance_id": "56042378"}}}
+        other["payload"]["dstack"] = {
+            **request(intent_id=other_id).binding(PUB),
+            "apply_started": True,
+            "run_id": other_run_id,
+            "provider_instance_id": "56042378",
+        }
+        other_run = {
+            "id": other_run_id,
+            "project_name": "sixnine",
+            "status": "running",
+            "run_spec": request(intent_id=other_id).run_spec(PUB),
+            "latest_job_submission": {
+                "job_provisioning_data": {
+                    "backend": "vastai",
+                    "instance_id": "56042378",
+                }
+            },
+        }
         self.client.get.side_effect = lambda **identity: copy.deepcopy(
-            self.run if identity["run_id"] == RUN else other_run)
+            self.run if identity["run_id"] == RUN else other_run
+        )
         self.inventory.return_value["instance_ids"] = ["56042378"]
         original = copy.deepcopy([self.node, other])
         for nodes in ([self.node, other], [other, self.node]):
@@ -864,8 +1220,12 @@ class DstackLiveUsageTests(unittest.TestCase):
                 self.assertEqual(result["instances"], 1)
                 self.assertEqual(result["hourly_cost_microusd"], 850000)
                 self.assertEqual(result["active_instance_ids"], (other_id,))
-                observed = next(row for row in result["observations"] if row["intent_id"] == INTENT)
-                self.assertEqual(observed["reason_code"], "dstack_terminal_provider_accounted")
+                observed = next(
+                    row for row in result["observations"] if row["intent_id"] == INTENT
+                )
+                self.assertEqual(
+                    observed["reason_code"], "dstack_terminal_provider_accounted"
+                )
                 self.assertEqual([self.node, other], original)
                 self.inventory.assert_called_once_with("vastai")
         # An additional unidentified provider allocation could be the old PUT.
@@ -880,17 +1240,26 @@ class DstackLiveUsageTests(unittest.TestCase):
         self.assertIn(INTENT, self.usage([self.node, other])["active_instance_ids"])
         other_run["project_name"] = "sixnine"
         original_spec = copy.deepcopy(other_run["run_spec"])
-        other_run["run_spec"]["configuration"]["max_price"] = .84
+        other_run["run_spec"]["configuration"]["max_price"] = 0.84
         self.assertIn(INTENT, self.usage([self.node, other])["active_instance_ids"])
         other_run["run_spec"] = original_spec
-        original_provisioning = copy.deepcopy(other_run["latest_job_submission"]["job_provisioning_data"])
-        other_run["latest_job_submission"]["job_provisioning_data"]["instance_type"] = None
+        original_provisioning = copy.deepcopy(
+            other_run["latest_job_submission"]["job_provisioning_data"]
+        )
+        other_run["latest_job_submission"]["job_provisioning_data"]["instance_type"] = (
+            None
+        )
         self.assertIn(INTENT, self.usage([self.node, other])["active_instance_ids"])
-        other_run["latest_job_submission"]["job_provisioning_data"] = original_provisioning
+        other_run["latest_job_submission"]["job_provisioning_data"] = (
+            original_provisioning
+        )
         original_read = self.client.get.side_effect
+
         def failed_witness(**identity):
-            if identity["run_id"] == RUN:return copy.deepcopy(self.run)
+            if identity["run_id"] == RUN:
+                return copy.deepcopy(self.run)
             raise DstackError("dstack_api_unavailable")
+
         self.client.get.side_effect = failed_witness
         self.assertIn(INTENT, self.usage([self.node, other])["active_instance_ids"])
         self.client.get.side_effect = original_read
@@ -898,22 +1267,47 @@ class DstackLiveUsageTests(unittest.TestCase):
         duplicate_run_id = "b4444444-4444-4444-8444-444444444444"
         duplicate = copy.deepcopy(other)
         duplicate["intent_id"] = duplicate_id
-        duplicate["payload"]["dstack"] = {**request(intent_id=duplicate_id).binding(PUB),
-            "apply_started": True, "run_id": duplicate_run_id, "provider_instance_id": "56042378"}
-        duplicate_run = {**copy.deepcopy(other_run), "id": duplicate_run_id,
-            "run_spec": request(intent_id=duplicate_id).run_spec(PUB)}
-        observed_runs = {RUN: self.run, other_run_id: other_run, duplicate_run_id: duplicate_run}
-        self.client.get.side_effect = lambda **identity: copy.deepcopy(observed_runs[identity["run_id"]])
-        self.assertIn(INTENT, self.usage([self.node, other, duplicate])["active_instance_ids"])
+        duplicate["payload"]["dstack"] = {
+            **request(intent_id=duplicate_id).binding(PUB),
+            "apply_started": True,
+            "run_id": duplicate_run_id,
+            "provider_instance_id": "56042378",
+        }
+        duplicate_run = {
+            **copy.deepcopy(other_run),
+            "id": duplicate_run_id,
+            "run_spec": request(intent_id=duplicate_id).run_spec(PUB),
+        }
+        observed_runs = {
+            RUN: self.run,
+            other_run_id: other_run,
+            duplicate_run_id: duplicate_run,
+        }
+        self.client.get.side_effect = lambda **identity: copy.deepcopy(
+            observed_runs[identity["run_id"]]
+        )
+        self.assertIn(
+            INTENT, self.usage([self.node, other, duplicate])["active_instance_ids"]
+        )
 
     def test_complete_no_capacity_submission_releases_capacity_only(self):
         self.no_allocation()
         self.node["desired_state"] = "running"
         original = copy.deepcopy((self.node, self.run))
         value = self.usage()
-        self.assertEqual((value["instances"], value["physical_gpus"], value["logical_slots"],
-            value["hourly_cost_microusd"], value["active_instance_ids"]), (0, 0, 0, 0, ()))
-        self.assertEqual(value["observations"][0]["reason_code"], "dstack_terminal_no_allocation")
+        self.assertEqual(
+            (
+                value["instances"],
+                value["physical_gpus"],
+                value["logical_slots"],
+                value["hourly_cost_microusd"],
+                value["active_instance_ids"],
+            ),
+            (0, 0, 0, 0, ()),
+        )
+        self.assertEqual(
+            value["observations"][0]["reason_code"], "dstack_terminal_no_allocation"
+        )
         self.assertEqual((self.node, self.run), original)
         self.assertNotIn("PRIVATE-PROVIDER-MESSAGE", json.dumps(value))
         self.inventory.assert_not_called()
@@ -923,9 +1317,16 @@ class DstackLiveUsageTests(unittest.TestCase):
         original = copy.deepcopy(self.run)
         cases = []
         for field in ("jobs", "latest_job_submission", "termination_reason"):
-            value = copy.deepcopy(original); value.pop(field); cases.append(value)
-        for jobs in (None, [], [{}], [{"job_submissions": []}],
-                [{"job_submissions": "PRIVATE-PROVIDER-MESSAGE"}]):
+            value = copy.deepcopy(original)
+            value.pop(field)
+            cases.append(value)
+        for jobs in (
+            None,
+            [],
+            [{}],
+            [{"job_submissions": []}],
+            [{"job_submissions": "PRIVATE-PROVIDER-MESSAGE"}],
+        ):
             cases.append({**original, "jobs": jobs})
         for field in ("job_provisioning_data", "job_runtime_data"):
             value = copy.deepcopy(original)
@@ -960,38 +1361,71 @@ class DstackLiveUsageTests(unittest.TestCase):
     def test_prior_allocation_or_native_receipts_prevent_no_allocation_exemption(self):
         self.no_allocation()
         original_binding = copy.deepcopy(self.binding)
-        for key, value in (("provider_instance_id", "previous-instance"),
-                ("runtime_incarnation", "c" * 32), ("first_runtime_ready_at", 10.),
-                ("bootstrap_started", True), ("bootstrap_launch_started", True),
-                ("runtime_launch_started", True)):
+        for key, value in (
+            ("provider_instance_id", "previous-instance"),
+            ("runtime_incarnation", "c" * 32),
+            ("first_runtime_ready_at", 10.0),
+            ("bootstrap_started", True),
+            ("bootstrap_launch_started", True),
+            ("runtime_launch_started", True),
+        ):
             with self.subTest(key=key):
                 self.binding[key] = value
                 self.assertEqual(self.usage()["instances"], 1)
-                self.binding.clear(); self.binding.update(original_binding)
-        previous = {"status": "failed", "job_provisioning_data": {"backend": "vastai",
-            "instance_id": "previous-instance"}, "job_runtime_data": None}
+                self.binding.clear()
+                self.binding.update(original_binding)
+        previous = {
+            "status": "failed",
+            "job_provisioning_data": {
+                "backend": "vastai",
+                "instance_id": "previous-instance",
+            },
+            "job_runtime_data": None,
+        }
         self.run["jobs"][0]["job_submissions"].insert(0, previous)
         self.assertEqual(self.usage()["instances"], 1)
         self.inventory.assert_not_called()
 
     def test_allocated_failure_still_needs_existing_fresh_provider_absence(self):
-        provisioning = copy.deepcopy(self.run["latest_job_submission"]["job_provisioning_data"])
+        provisioning = copy.deepcopy(
+            self.run["latest_job_submission"]["job_provisioning_data"]
+        )
         self.run = no_capacity_run(self.run)
         self.run["latest_job_submission"]["job_provisioning_data"] = provisioning
-        self.run["jobs"][0]["job_submissions"][0]["job_provisioning_data"] = provisioning
+        self.run["jobs"][0]["job_submissions"][0]["job_provisioning_data"] = (
+            provisioning
+        )
         self.inventory.return_value = None
         self.assertEqual(self.usage()["instances"], 1)
-        self.inventory.return_value = {"backend": "vastai", "complete": True,
-            "observed_at": self.now, "instance_ids": []}
-        self.assertEqual(self.usage()["observations"][0]["reason_code"], "dstack_terminal_provider_absent")
+        self.inventory.return_value = {
+            "backend": "vastai",
+            "complete": True,
+            "observed_at": self.now,
+            "instance_ids": [],
+        }
+        self.assertEqual(
+            self.usage()["observations"][0]["reason_code"],
+            "dstack_terminal_provider_absent",
+        )
 
     def test_pending_new_intent_counts_before_any_apply_and_legacy_never_counts(self):
         pending_id = "a3333333-3333-4333-8333-333333333333"
-        pending = {"intent_id": pending_id, "desired_state": "running", "payload": {
-            "capacity_backend": "dstack-v1", "hourly_cost_microusd": 850000,
-            "dstack": request(intent_id=pending_id).binding(PUB)}}
-        result = self.usage([self.node, pending,
-            {"payload": {"provider": "targon", "hourly_cost_microusd": 50000000}}])
+        pending = {
+            "intent_id": pending_id,
+            "desired_state": "running",
+            "payload": {
+                "capacity_backend": "dstack-v1",
+                "hourly_cost_microusd": 850000,
+                "dstack": request(intent_id=pending_id).binding(PUB),
+            },
+        }
+        result = self.usage(
+            [
+                self.node,
+                pending,
+                {"payload": {"provider": "targon", "hourly_cost_microusd": 50000000}},
+            ]
+        )
         self.assertEqual(result["active_instance_ids"], (pending_id,))
         self.assertEqual(result["instances"], 1)
         self.assertEqual(result["hourly_cost_microusd"], 850000)
@@ -1000,27 +1434,38 @@ class DstackLiveUsageTests(unittest.TestCase):
 
     def test_exact_terminal_requires_complete_same_backend_fresh_provider_absence(self):
         good = self.inventory.return_value
-        for bad in (None, {**good, "backend": "runpod"}, {**good, "complete": False},
-                {**good, "observed_at": -1}, {**good, "observed_at": 20.1},
-                {**good, "observed_at": True}, {**good, "instance_ids": "1234567"},
-                {**good, "instance_ids": ["1234567", "1234567"]},
-                {**good, "instance_ids": ["1234567"]}):
+        for bad in (
+            None,
+            {**good, "backend": "runpod"},
+            {**good, "complete": False},
+            {**good, "observed_at": -1},
+            {**good, "observed_at": 20.1},
+            {**good, "observed_at": True},
+            {**good, "instance_ids": "1234567"},
+            {**good, "instance_ids": ["1234567", "1234567"]},
+            {**good, "instance_ids": ["1234567"]},
+        ):
             with self.subTest(bad=bad):
                 self.inventory.return_value = bad
                 self.assertEqual(self.usage()["instances"], 1)
-        self.inventory.return_value = {**good, "observed_at": 1.}
-        self.now = 32.
+        self.inventory.return_value = {**good, "observed_at": 1.0}
+        self.now = 32.0
         self.assertEqual(self.usage()["instances"], 1)
         self.inventory.side_effect = ValueError("secret supplier token")
-        self.assertEqual(self.usage()["observations"][0]["reason_code"],
-            "dstack_terminal_provider_unconfirmed")
+        self.assertEqual(
+            self.usage()["observations"][0]["reason_code"],
+            "dstack_terminal_provider_unconfirmed",
+        )
 
     def test_unknown_or_unowned_run_never_frees_reserved_capacity(self):
         original = copy.deepcopy(self.run)
-        for bad in (None, {**original, "project_name": "another"},
-                {**original, "id": "b3333333-3333-4333-8333-333333333333"},
-                {**original, "status": "unexpected secret supplier token"},
-                {**original, "latest_job_submission": None}):
+        for bad in (
+            None,
+            {**original, "project_name": "another"},
+            {**original, "id": "b3333333-3333-4333-8333-333333333333"},
+            {**original, "status": "unexpected secret supplier token"},
+            {**original, "latest_job_submission": None},
+        ):
             with self.subTest(bad=bad):
                 self.run = bad
                 self.inventory.reset_mock()
@@ -1031,24 +1476,37 @@ class DstackLiveUsageTests(unittest.TestCase):
                 self.assertNotIn("secret supplier token", json.dumps(result))
                 self.inventory.assert_not_called()
         self.client.get.side_effect = DstackError("dstack_api_unavailable")
-        self.assertEqual(self.usage()["observations"][0]["reason_code"], "dstack_capacity_unconfirmed")
+        self.assertEqual(
+            self.usage()["observations"][0]["reason_code"],
+            "dstack_capacity_unconfirmed",
+        )
 
     def test_later_slow_run_read_restores_capacity_when_original_absence_expires(self):
         other_id = "a3333333-3333-4333-8333-333333333333"
         other_run_id = "b3333333-3333-4333-8333-333333333333"
         other = copy.deepcopy(self.node)
         other["intent_id"] = other_id
-        other["payload"]["dstack"] = {**request(intent_id=other_id).binding(PUB),
-            "apply_started": True, "run_id": other_run_id, "provider_instance_id": "7654321"}
-        other_run = {**copy.deepcopy(self.run), "id": other_run_id, "status": "running",
-            "run_spec": request(intent_id=other_id).run_spec(PUB)}
-        other_run["latest_job_submission"]["job_provisioning_data"]["instance_id"] = "7654321"
+        other["payload"]["dstack"] = {
+            **request(intent_id=other_id).binding(PUB),
+            "apply_started": True,
+            "run_id": other_run_id,
+            "provider_instance_id": "7654321",
+        }
+        other_run = {
+            **copy.deepcopy(self.run),
+            "id": other_run_id,
+            "status": "running",
+            "run_spec": request(intent_id=other_id).run_spec(PUB),
+        }
+        other_run["latest_job_submission"]["job_provisioning_data"]["instance_id"] = (
+            "7654321"
+        )
         original_nodes = copy.deepcopy([self.node, other])
 
         def read_run(**kw):
             if kw["run_id"] == RUN:
                 return copy.deepcopy(self.run)
-            self.now = 51.  # First account receipt was fresh before this read.
+            self.now = 51.0  # First account receipt was fresh before this read.
             return copy.deepcopy(other_run)
 
         self.client.get.side_effect = read_run
@@ -1057,8 +1515,10 @@ class DstackLiveUsageTests(unittest.TestCase):
         self.assertEqual(result["physical_gpus"], 2)
         self.assertEqual(result["hourly_cost_microusd"], 1700000)
         self.assertEqual(set(result["active_instance_ids"]), {INTENT, other_id})
-        self.assertEqual(result["observations"][0]["reason_code"],
-            "dstack_terminal_provider_unconfirmed")
+        self.assertEqual(
+            result["observations"][0]["reason_code"],
+            "dstack_terminal_provider_unconfirmed",
+        )
         self.assertEqual([self.node, other], original_nodes)
         self.inventory.assert_called_once_with("vastai")
         self.assertEqual(self.client.get.call_count, 2)
@@ -1074,14 +1534,24 @@ class DstackLiveUsageTests(unittest.TestCase):
         other_run_id = "b3333333-3333-4333-8333-333333333333"
         other = copy.deepcopy(self.node)
         other["intent_id"] = other_id
-        other["payload"]["dstack"] = {**request(intent_id=other_id).binding(PUB),
-            "apply_started": True, "run_id": other_run_id, "provider_instance_id": "1234567"}
+        other["payload"]["dstack"] = {
+            **request(intent_id=other_id).binding(PUB),
+            "apply_started": True,
+            "run_id": other_run_id,
+            "provider_instance_id": "1234567",
+        }
         self.run["status"] = "running"
-        self.run["latest_job_submission"]["job_provisioning_data"]["instance_type"]["resources"]["gpus"] *= 2
-        other_run = {**copy.deepcopy(self.run), "id": other_run_id,
-            "run_spec": request(intent_id=other_id).run_spec(PUB)}
+        self.run["latest_job_submission"]["job_provisioning_data"]["instance_type"][
+            "resources"
+        ]["gpus"] *= 2
+        other_run = {
+            **copy.deepcopy(self.run),
+            "id": other_run_id,
+            "run_spec": request(intent_id=other_id).run_spec(PUB),
+        }
         self.client.get.side_effect = lambda **kw: copy.deepcopy(
-            self.run if kw["run_id"] == RUN else other_run)
+            self.run if kw["run_id"] == RUN else other_run
+        )
         result = self.usage([self.node, other])
         self.assertEqual(result["instances"], 1)
         self.assertEqual(result["physical_gpus"], 2)
@@ -1090,8 +1560,12 @@ class DstackLiveUsageTests(unittest.TestCase):
 
     def test_only_confirmed_never_applied_cancel_frees_pending_capacity(self):
         binding = request().binding(PUB)
-        self.node["payload"]["dstack"] = {**binding, "state": "stopped",
-            "reason_code": "dstack_never_applied", "billing_state": "no_charge_confirmed"}
+        self.node["payload"]["dstack"] = {
+            **binding,
+            "state": "stopped",
+            "reason_code": "dstack_never_applied",
+            "billing_state": "no_charge_confirmed",
+        }
         self.assertEqual(self.usage()["instances"], 0)
         self.client.get.assert_not_called()
         self.node["payload"]["dstack"]["billing_state"] = "unsettled"
@@ -1108,86 +1582,162 @@ class DstackLiveUsageTests(unittest.TestCase):
 
 class DstackRESTTests(unittest.TestCase):
     def test_inventory_429_retries_closed_original_read_with_remaining_timeout(self):
-        seen, responses, sleeps, clock = [], [], [], [10.]
+        seen, responses, sleeps, clock = [], [], [], [10.0]
+
         def provider(req):
             seen.append(req)
-            clock[0] += .1
-            response = (httpx.Response(429, headers={"Retry-After": "2"}, text="PRIVATE") if len(seen) == 1
-                else httpx.Response(200, json={"success": True, "instances": [], "instances_found": 0,
-                    "total_instances": 0, "next_token": None}))
+            clock[0] += 0.1
+            response = (
+                httpx.Response(429, headers={"Retry-After": "2"}, text="PRIVATE")
+                if len(seen) == 1
+                else httpx.Response(
+                    200,
+                    json={
+                        "success": True,
+                        "instances": [],
+                        "instances_found": 0,
+                        "total_instances": 0,
+                        "next_token": None,
+                    },
+                )
+            )
             responses.append(response)
             return response
+
         def sleep(delay):
             self.assertTrue(all(response.is_closed for response in responses))
             sleeps.append(delay)
             clock[0] += delay
-        with patch("studio_platform.dstack_capacity.time.monotonic", side_effect=lambda: clock[0]), \
-                patch("studio_platform.dstack_capacity.time.sleep", side_effect=sleep), \
-                patch("studio_platform.dstack_capacity.random.uniform", return_value=.125):
-            result = self.provider_client("vastai", provider).provider_inventory("vastai", clock=lambda: 1000.)
+
+        with (
+            patch(
+                "studio_platform.dstack_capacity.time.monotonic",
+                side_effect=lambda: clock[0],
+            ),
+            patch("studio_platform.dstack_capacity.time.sleep", side_effect=sleep),
+            patch("studio_platform.dstack_capacity.random.uniform", return_value=0.125),
+        ):
+            result = self.provider_client("vastai", provider).provider_inventory(
+                "vastai", clock=lambda: 1000.0
+            )
         self.assertTrue(result["complete"])
         self.assertEqual(result["instance_ids"], [])
         self.assertEqual(sleeps, [2.125])
         self.assertEqual(len(seen), 2)
         self.assertEqual(seen[0].url, seen[1].url)
         self.assertEqual(seen[0].content, seen[1].content)
-        self.assertLess(seen[1].extensions["timeout"]["read"], seen[0].extensions["timeout"]["read"])
+        self.assertLess(
+            seen[1].extensions["timeout"]["read"], seen[0].extensions["timeout"]["read"]
+        )
 
     def test_search_429_http_date_preserves_exact_query_then_maps_original_offer(self):
         seen = []
+
         def provider(req):
             seen.append(req)
             if len(seen) == 1:
-                return httpx.Response(429, headers={"Retry-After": "Thu, 01 Jan 1970 00:00:02 GMT"})
-            return httpx.Response(200, json={"offers": [{"id": 12345, "machine_id": 19493, "verified": "verified"}]})
-        with patch("studio_platform.dstack_capacity.time.time", return_value=0), \
-                patch("studio_platform.dstack_capacity.time.sleep") as sleep, \
-                patch("studio_platform.dstack_capacity.random.uniform", return_value=.125):
-            result = self.provider_client("vastai", provider).vast_offer_mapping(request(), clock=lambda: 1000.)
-        self.assertEqual(result["offers"], [{"offer_id": "12345", "machine_id": "19493"}])
+                return httpx.Response(
+                    429, headers={"Retry-After": "Thu, 01 Jan 1970 00:00:02 GMT"}
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "offers": [
+                        {"id": 12345, "machine_id": 19493, "verified": "verified"}
+                    ]
+                },
+            )
+
+        with (
+            patch("studio_platform.dstack_capacity.time.time", return_value=0),
+            patch("studio_platform.dstack_capacity.time.sleep") as sleep,
+            patch("studio_platform.dstack_capacity.random.uniform", return_value=0.125),
+        ):
+            result = self.provider_client("vastai", provider).vast_offer_mapping(
+                request(), clock=lambda: 1000.0
+            )
+        self.assertEqual(
+            result["offers"], [{"offer_id": "12345", "machine_id": "19493"}]
+        )
         sleep.assert_called_once_with(2.125)
         self.assertEqual([req.method for req in seen], ["POST", "POST"])
         self.assertEqual(seen[0].content, seen[1].content)
         self.assertEqual(json.loads(seen[0].content)["verified"], {"eq": True})
 
     def test_429_exhaustion_or_long_retry_after_never_returns_empty_inventory(self):
-        for header, calls, delays, retry_after in ((None, 3, [1.125, 2.125], 1), ("120", 1, [], 120),
-                ("PRIVATE invalid header", 3, [1.125, 2.125], 1)):
+        for header, calls, delays, retry_after in (
+            (None, 3, [1.125, 2.125], 1),
+            ("120", 1, [], 120),
+            ("PRIVATE invalid header", 3, [1.125, 2.125], 1),
+        ):
             with self.subTest(header=header):
                 seen = []
+
                 def provider(req):
                     seen.append(req)
-                    return httpx.Response(429, headers={} if header is None else {"Retry-After": header},
-                        json={"instances": [], "PRIVATE": "never emitted"})
-                with patch("studio_platform.dstack_capacity.time.sleep") as sleep, \
-                        patch("studio_platform.dstack_capacity.random.uniform", return_value=.125), \
-                        self.assertRaises(DstackReadRateLimited) as error:
-                    self.provider_client("vastai", provider).provider_inventory("vastai")
+                    return httpx.Response(
+                        429,
+                        headers={} if header is None else {"Retry-After": header},
+                        json={"instances": [], "PRIVATE": "never emitted"},
+                    )
+
+                with (
+                    patch("studio_platform.dstack_capacity.time.sleep") as sleep,
+                    patch(
+                        "studio_platform.dstack_capacity.random.uniform",
+                        return_value=0.125,
+                    ),
+                    self.assertRaises(DstackReadRateLimited) as error,
+                ):
+                    self.provider_client("vastai", provider).provider_inventory(
+                        "vastai"
+                    )
                 self.assertEqual(str(error.exception), "dstack_provider_rate_limited")
                 self.assertEqual(error.exception.retry_after, retry_after)
                 self.assertEqual(len(seen), calls)
-                self.assertEqual([call.args[0] for call in sleep.call_args_list], delays)
+                self.assertEqual(
+                    [call.args[0] for call in sleep.call_args_list], delays
+                )
 
     def test_other_read_errors_and_uncertain_apply_are_not_retried(self):
-        for outcome in (httpx.Response(503, text="PRIVATE"), httpx.ReadTimeout("PRIVATE")):
+        for outcome in (
+            httpx.Response(503, text="PRIVATE"),
+            httpx.ReadTimeout("PRIVATE"),
+        ):
             with self.subTest(outcome=type(outcome).__name__):
                 seen = []
+
                 def provider(req):
                     seen.append(req)
                     if isinstance(outcome, Exception):
                         raise outcome
                     return outcome
-                with patch("studio_platform.dstack_capacity.time.sleep") as sleep, self.assertRaises(DstackError):
-                    self.provider_client("vastai", provider).provider_inventory("vastai")
+
+                with (
+                    patch("studio_platform.dstack_capacity.time.sleep") as sleep,
+                    self.assertRaises(DstackError),
+                ):
+                    self.provider_client("vastai", provider).provider_inventory(
+                        "vastai"
+                    )
                 self.assertEqual(len(seen), 1)
                 sleep.assert_not_called()
         seen = []
+
         def rejected(req):
             seen.append(req)
             return httpx.Response(429, text="PRIVATE")
-        client = DstackClient("http://127.0.0.1:3000", "dstack-secret-token-123456", "sixnine",
-            session=httpx.Client(transport=httpx.MockTransport(rejected)))
-        with patch("studio_platform.dstack_capacity.time.sleep") as sleep, self.assertRaises(DstackError):
+
+        client = DstackClient(
+            "http://127.0.0.1:3000",
+            "dstack-secret-token-123456",
+            "sixnine",
+            session=httpx.Client(transport=httpx.MockTransport(rejected)),
+        )
+        with (
+            patch("studio_platform.dstack_capacity.time.sleep") as sleep,
+            self.assertRaises(DstackError),
+        ):
             client.apply({"run_name": "original"})
         self.assertEqual(len(seen), 1)
         sleep.assert_not_called()
@@ -1196,27 +1746,45 @@ class DstackRESTTests(unittest.TestCase):
         key = "provider-secret-token-123456"
         config = {"type": backend, "creds": {"type": "api_key", "api_key": key}}
         config.update(config_changes or {})
+
         def dstack_read(req):
             self.assertEqual(req.method, "POST")
-            self.assertEqual(req.url.path, f"/api/project/sixnine/backends/{backend}/config_info")
-            self.assertEqual(req.headers["Authorization"], "Bearer dstack-secret-token-123456")
+            self.assertEqual(
+                req.url.path, f"/api/project/sixnine/backends/{backend}/config_info"
+            )
+            self.assertEqual(
+                req.headers["Authorization"], "Bearer dstack-secret-token-123456"
+            )
             self.assertEqual(json.loads(req.content), {})
             return httpx.Response(200, json=config)
+
         def provider_read(req):
             self.assertEqual(req.headers["Authorization"], "Bearer " + key)
             self.assertNotIn("dstack-secret", str(req.headers))
             self.assertIsNone(req.url.params.get("api_key"))
             return handler(req)
-        return DstackClient("http://127.0.0.1:3000", "dstack-secret-token-123456", "sixnine",
-            session=httpx.Client(transport=httpx.MockTransport(dstack_read)),
-            provider_session=httpx.Client(transport=httpx.MockTransport(provider_read), follow_redirects=True))
 
-    def test_provider_inventory_uses_same_backend_config_and_complete_vast_v1_pages(self):
+        return DstackClient(
+            "http://127.0.0.1:3000",
+            "dstack-secret-token-123456",
+            "sixnine",
+            session=httpx.Client(transport=httpx.MockTransport(dstack_read)),
+            provider_session=httpx.Client(
+                transport=httpx.MockTransport(provider_read), follow_redirects=True
+            ),
+        )
+
+    def test_provider_inventory_uses_same_backend_config_and_complete_vast_v1_pages(
+        self,
+    ):
         seen = []
+
         def provider(req):
             seen.append(req)
             self.assertEqual(req.method, "GET")
-            self.assertEqual(str(req.url).split("?")[0], "https://console.vast.ai/api/v1/instances/")
+            self.assertEqual(
+                str(req.url).split("?")[0], "https://console.vast.ai/api/v1/instances/"
+            )
             self.assertEqual(req.url.params["select_cols"], '["id"]')
             self.assertEqual(req.url.params["limit"], "25")
             if len(seen) == 1:
@@ -1225,84 +1793,194 @@ class DstackRESTTests(unittest.TestCase):
             else:
                 self.assertEqual(req.url.params["after_token"], "next-page-token")
                 rows, cursor = [{"id": 789}], None
-            return httpx.Response(200, json={"success": True, "instances": rows,
-                "instances_found": len(rows), "total_instances": 3, "next_token": cursor})
-        result = self.provider_client("vastai", provider).provider_inventory("vastai", clock=lambda: 20.)
-        self.assertEqual(result, {"backend": "vastai", "complete": True, "observed_at": 20.,
-            "instance_ids": ["123", "456", "789"]})
+            return httpx.Response(
+                200,
+                json={
+                    "success": True,
+                    "instances": rows,
+                    "instances_found": len(rows),
+                    "total_instances": 3,
+                    "next_token": cursor,
+                },
+            )
+
+        result = self.provider_client("vastai", provider).provider_inventory(
+            "vastai", clock=lambda: 20.0
+        )
+        self.assertEqual(
+            result,
+            {
+                "backend": "vastai",
+                "complete": True,
+                "observed_at": 20.0,
+                "instance_ids": ["123", "456", "789"],
+            },
+        )
         self.assertNotIn("secret", json.dumps(result))
         self.assertEqual(len(seen), 2)
 
     def test_vast_v1_empty_is_complete_only_with_a_matching_terminal_tally(self):
-        good = {"success": True, "instances": [], "instances_found": 0, "total_instances": 0,
-            "next_token": None}
-        result = self.provider_client("vastai", lambda _: httpx.Response(200, json=good)).provider_inventory("vastai")
+        good = {
+            "success": True,
+            "instances": [],
+            "instances_found": 0,
+            "total_instances": 0,
+            "next_token": None,
+        }
+        result = self.provider_client(
+            "vastai", lambda _: httpx.Response(200, json=good)
+        ).provider_inventory("vastai")
         self.assertEqual(result["instance_ids"], [])
-        for bad in ({"instances": []}, {**good, "total_instances": 1}, {**good, "success": False},
-                {**good, "instances_found": True}, {**good, "has_more": True},
-                {**good, "next_token": "cursor"}):
-            with self.subTest(bad=bad), self.assertRaisesRegex(DstackError, "dstack_provider_inventory_unconfirmed"):
-                self.provider_client("vastai", lambda _, bad=bad: httpx.Response(200, json=bad)).provider_inventory("vastai")
+        for bad in (
+            {"instances": []},
+            {**good, "total_instances": 1},
+            {**good, "success": False},
+            {**good, "instances_found": True},
+            {**good, "has_more": True},
+            {**good, "next_token": "cursor"},
+        ):
+            with (
+                self.subTest(bad=bad),
+                self.assertRaisesRegex(
+                    DstackError, "dstack_provider_inventory_unconfirmed"
+                ),
+            ):
+                self.provider_client(
+                    "vastai", lambda _, bad=bad: httpx.Response(200, json=bad)
+                ).provider_inventory("vastai")
 
     def test_vast_duplicate_rows_or_repeated_cursor_never_imply_complete_absence(self):
-        for second in ({"instances": [{"id": 123}], "next_token": None},
-                {"instances": [{"id": 456}], "next_token": "cursor"}):
+        for second in (
+            {"instances": [{"id": 123}], "next_token": None},
+            {"instances": [{"id": 456}], "next_token": "cursor"},
+        ):
             pages = iter([{"instances": [{"id": 123}], "next_token": "cursor"}, second])
+
             def read(_):
                 page = next(pages)
-                return httpx.Response(200, json={"success": True, "instances_found": 1,
-                    "total_instances": 2, **page})
-            with self.subTest(second=second), self.assertRaisesRegex(DstackError, "dstack_provider_inventory_unconfirmed"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "success": True,
+                        "instances_found": 1,
+                        "total_instances": 2,
+                        **page,
+                    },
+                )
+
+            with (
+                self.subTest(second=second),
+                self.assertRaisesRegex(
+                    DstackError, "dstack_provider_inventory_unconfirmed"
+                ),
+            ):
                 self.provider_client("vastai", read).provider_inventory("vastai")
 
     def test_runpod_unpaginated_account_query_projects_ids_only(self):
         def read(req):
             self.assertEqual(req.method, "POST")
             self.assertEqual(str(req.url), "https://api.runpod.io/graphql")
-            self.assertEqual(json.loads(req.content), {"query": "query { myself { pods { id } } }"})
-            return httpx.Response(200, json={"data": {"myself": {"pods": [{"id": "pod-123"}]}}})
+            self.assertEqual(
+                json.loads(req.content), {"query": "query { myself { pods { id } } }"}
+            )
+            return httpx.Response(
+                200, json={"data": {"myself": {"pods": [{"id": "pod-123"}]}}}
+            )
+
         result = self.provider_client("runpod", read).provider_inventory("runpod")
         self.assertEqual(result["instance_ids"], ["pod-123"])
-        for bad in ({"data": {"myself": {"pods": []}}, "errors": [{"message": "secret provider token"}]},
-                {"data": {"myself": {"pods": [], "pageInfo": {"hasNextPage": True}}}},
-                {"data": {"myself": {"pods": [{"id": "same"}, {"id": "same"}]}}}):
-            with self.subTest(bad=bad), self.assertRaisesRegex(DstackError, "^dstack_provider_inventory_unconfirmed$"):
-                self.provider_client("runpod", lambda _, bad=bad: httpx.Response(200, json=bad)).provider_inventory("runpod")
+        for bad in (
+            {
+                "data": {"myself": {"pods": []}},
+                "errors": [{"message": "secret provider token"}],
+            },
+            {"data": {"myself": {"pods": [], "pageInfo": {"hasNextPage": True}}}},
+            {"data": {"myself": {"pods": [{"id": "same"}, {"id": "same"}]}}},
+        ):
+            with (
+                self.subTest(bad=bad),
+                self.assertRaisesRegex(
+                    DstackError, "^dstack_provider_inventory_unconfirmed$"
+                ),
+            ):
+                self.provider_client(
+                    "runpod", lambda _, bad=bad: httpx.Response(200, json=bad)
+                ).provider_inventory("runpod")
 
-    def test_provider_redirect_auth_error_invalid_json_and_duplicate_keys_are_closed(self):
-        for response, code in ((httpx.Response(302, headers={"Location": "https://other.example/"}), "rejected"),
-                (httpx.Response(403, text="secret provider token"), "rejected"),
-                (httpx.Response(200, text="secret provider token"), "unavailable"),
-                (httpx.Response(200, content=b'{"success":true,"instances":[],"instances":[]}'), "unconfirmed"),
-                (httpx.Response(200, content=b"x" * (4 * 1024**2 + 1)), "response_limit")):
+    def test_provider_redirect_auth_error_invalid_json_and_duplicate_keys_are_closed(
+        self,
+    ):
+        for response, code in (
+            (
+                httpx.Response(302, headers={"Location": "https://other.example/"}),
+                "rejected",
+            ),
+            (httpx.Response(403, text="secret provider token"), "rejected"),
+            (httpx.Response(200, text="secret provider token"), "unavailable"),
+            (
+                httpx.Response(
+                    200, content=b'{"success":true,"instances":[],"instances":[]}'
+                ),
+                "unconfirmed",
+            ),
+            (httpx.Response(200, content=b"x" * (4 * 1024**2 + 1)), "response_limit"),
+        ):
             seen = []
+
             def read(req):
                 seen.append(req)
                 return response
-            with self.subTest(code=code), self.assertRaisesRegex(DstackError,
-                    "^dstack_provider_inventory_" + code + "$"):
+
+            with (
+                self.subTest(code=code),
+                self.assertRaisesRegex(
+                    DstackError, "^dstack_provider_inventory_" + code + "$"
+                ),
+            ):
                 self.provider_client("vastai", read).provider_inventory("vastai")
             self.assertEqual(len(seen), 1)
 
     def test_backend_mismatch_never_sends_credentials_to_a_provider(self):
         read = Mock()
         client = self.provider_client("vastai", read, config_changes={"type": "runpod"})
-        with self.assertRaisesRegex(DstackError, "dstack_provider_inventory_unconfirmed"):
+        with self.assertRaisesRegex(
+            DstackError, "dstack_provider_inventory_unconfirmed"
+        ):
             client.provider_inventory("vastai")
         read.assert_not_called()
 
     def test_exact_get_accepts_only_pinned_not_found_errors(self):
-        cases = [(404, {}, True),
-            (400, {"detail": [{"code": "resource_not_exists", "msg": "Run not found"}]}, True),
+        cases = [
+            (404, {}, True),
+            (
+                400,
+                {"detail": [{"code": "resource_not_exists", "msg": "Run not found"}]},
+                True,
+            ),
             (400, {"detail": [{"code": "other_error"}]}, False),
-            (400, {"detail": [{"code": "resource_not_exists"}, {"code": "other_error"}]}, False),
-            (400, {"detail": []}, False), (400, [], False)]
+            (
+                400,
+                {"detail": [{"code": "resource_not_exists"}, {"code": "other_error"}]},
+                False,
+            ),
+            (400, {"detail": []}, False),
+            (400, [], False),
+        ]
         for status, body, missing in cases:
             with self.subTest(status=status, body=body):
-                session = httpx.Client(transport=httpx.MockTransport(
-                    lambda _, status=status, body=body: httpx.Response(status, json=body)))
-                client = DstackClient("http://127.0.0.1:3000", "secret-token-123456", "sixnine",
-                    session=session)
+                session = httpx.Client(
+                    transport=httpx.MockTransport(
+                        lambda _, status=status, body=body: httpx.Response(
+                            status, json=body
+                        )
+                    )
+                )
+                client = DstackClient(
+                    "http://127.0.0.1:3000",
+                    "secret-token-123456",
+                    "sixnine",
+                    session=session,
+                )
                 if missing:
                     self.assertIsNone(client.get(run_id=RUN))
                 else:
@@ -1310,28 +1988,57 @@ class DstackRESTTests(unittest.TestCase):
                         client.get(run_id=RUN)
 
     def test_mutations_do_not_treat_not_found_as_success(self):
-        session = httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(400,
-            json={"detail": [{"code": "resource_not_exists", "msg": "Run not found"}]})))
-        client = DstackClient("http://127.0.0.1:3000", "secret-token-123456", "sixnine", session=session)
-        for method, argument in ((client.apply, request().run_spec(PUB)),
-                                 (client.stop, request().run_name)):
+        session = httpx.Client(
+            transport=httpx.MockTransport(
+                lambda _: httpx.Response(
+                    400,
+                    json={
+                        "detail": [
+                            {"code": "resource_not_exists", "msg": "Run not found"}
+                        ]
+                    },
+                )
+            )
+        )
+        client = DstackClient(
+            "http://127.0.0.1:3000", "secret-token-123456", "sixnine", session=session
+        )
+        for method, argument in (
+            (client.apply, request().run_spec(PUB)),
+            (client.stop, request().run_name),
+        ):
             with self.subTest(method=method.__name__):
                 with self.assertRaisesRegex(DstackError, "^dstack_api_rejected$"):
                     method(argument)
 
     def test_exact_paths_and_create_only_apply(self):
         seen = []
+
         def handler(req):
-            seen.append((req.url.path, json.loads(req.content), req.headers["Authorization"]))
+            seen.append(
+                (req.url.path, json.loads(req.content), req.headers["Authorization"])
+            )
             return httpx.Response(200, json={})
-        client = DstackClient("http://127.0.0.1:3000", "secret-token-123456", "sixnine",
-            session=httpx.Client(transport=httpx.MockTransport(handler)))
+
+        client = DstackClient(
+            "http://127.0.0.1:3000",
+            "secret-token-123456",
+            "sixnine",
+            session=httpx.Client(transport=httpx.MockTransport(handler)),
+        )
         client.plan(request().run_spec(PUB))
         client.apply(request().run_spec(PUB))
         client.get(run_id=RUN)
         client.stop(request().run_name)
-        self.assertEqual([row[0] for row in seen], ["/api/project/sixnine/runs/get_plan",
-            "/api/project/sixnine/runs/apply", "/api/project/sixnine/runs/get", "/api/project/sixnine/runs/stop"])
+        self.assertEqual(
+            [row[0] for row in seen],
+            [
+                "/api/project/sixnine/runs/get_plan",
+                "/api/project/sixnine/runs/apply",
+                "/api/project/sixnine/runs/get",
+                "/api/project/sixnine/runs/stop",
+            ],
+        )
         self.assertFalse(seen[1][1]["force"])
         self.assertTrue(seen[0][1]["for_offers_only"])
         self.assertNotIn("for_offers_only", seen[1][1])
@@ -1339,14 +2046,23 @@ class DstackRESTTests(unittest.TestCase):
         self.assertFalse(seen[3][1]["abort"])
 
     def test_server_errors_never_expose_response_secrets(self):
-        session = httpx.Client(transport=httpx.MockTransport(
-            lambda _: httpx.Response(500, text="secret prompt and token")))
-        client = DstackClient("http://localhost:3000", "secret-token-123456", "sixnine", session=session)
+        session = httpx.Client(
+            transport=httpx.MockTransport(
+                lambda _: httpx.Response(500, text="secret prompt and token")
+            )
+        )
+        client = DstackClient(
+            "http://localhost:3000", "secret-token-123456", "sixnine", session=session
+        )
         with self.assertRaisesRegex(DstackError, "^dstack_api_rejected$"):
             client.get(run_id=RUN)
 
     def test_remote_plain_http_and_url_credentials_are_refused(self):
-        for endpoint in ("http://remote.example", "https://user:password@example.com", "https://example.com/?key=a"):
+        for endpoint in (
+            "http://remote.example",
+            "https://user:password@example.com",
+            "https://example.com/?key=a",
+        ):
             with self.assertRaisesRegex(DstackError, "dstack_endpoint_invalid"):
                 DstackClient(endpoint, "secret-token-123456", "sixnine")
 

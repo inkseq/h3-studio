@@ -3,11 +3,20 @@
 These describe saved intent, not execution qualification. Validation never
 resolves assets, submits jobs, or returns request values in an error.
 """
+
 from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictFloat, StrictInt, StrictStr
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+)
 from pydantic import ValidationError, create_model, field_validator, model_validator
 from pydantic_core import PydanticCustomError
 
@@ -68,17 +77,25 @@ class GuideInput(AuthoringObject):
 
 
 class ExcerptInput(AuthoringObject):
-    time_seconds: Annotated[Number, Field(ge=0, le=362/24)]
+    time_seconds: Annotated[Number, Field(ge=0, le=362 / 24)]
     duration_seconds: Annotated[Number, Field(ge=2, le=15)]
 
 
 class CardInputs(AuthoringObject):
     first_frame: FrameInput | None = None
     last_frame: FrameInput | None = None
-    images: Annotated[list[ImageInput], Field(max_length=LIMITS["max_images"])] = Field(default_factory=list)
-    videos: Annotated[list[VideoInput], Field(max_length=LIMITS["max_videos"])] = Field(default_factory=list)
-    audios: Annotated[list[AudioInput], Field(max_length=LIMITS["max_audios"])] = Field(default_factory=list)
-    guides: Annotated[list[GuideInput], Field(max_length=8)] = Field(default_factory=list)
+    images: Annotated[list[ImageInput], Field(max_length=LIMITS["max_images"])] = Field(
+        default_factory=list
+    )
+    videos: Annotated[list[VideoInput], Field(max_length=LIMITS["max_videos"])] = Field(
+        default_factory=list
+    )
+    audios: Annotated[list[AudioInput], Field(max_length=LIMITS["max_audios"])] = Field(
+        default_factory=list
+    )
+    guides: Annotated[list[GuideInput], Field(max_length=8)] = Field(
+        default_factory=list
+    )
 
     @field_validator("images", "videos", "audios")
     @classmethod
@@ -88,22 +105,41 @@ class CardInputs(AuthoringObject):
         return values
 
 
-_CONTROL_SCHEMA = {name: value for name, value in control_schema().items()
-    if name not in {"guides", "video_audio"} and value.get("available") is not False}
+_CONTROL_SCHEMA = {
+    name: value
+    for name, value in control_schema().items()
+    if name not in {"guides", "video_audio"} and value.get("available") is not False
+}
 
 
 def _control_fields():
     fields = {}
     for name, schema in _CONTROL_SCHEMA.items():
         types = schema["type"] if isinstance(schema["type"], list) else [schema["type"]]
-        annotation = (Literal[tuple(schema["enum"])] if "enum" in schema else
-            StrictInt if "integer" in types else Number if "number" in types else
-            StrictBool if "boolean" in types else
-            list[ExcerptInput] if "array" in types and name in {'video_excerpts','audio_excerpts'} else StrictStr)
+        annotation = (
+            Literal[tuple(schema["enum"])]
+            if "enum" in schema
+            else StrictInt
+            if "integer" in types
+            else Number
+            if "number" in types
+            else StrictBool
+            if "boolean" in types
+            else list[ExcerptInput]
+            if "array" in types and name in {'video_excerpts', 'audio_excerpts'}
+            else StrictStr
+        )
         if "null" in types:
             annotation = annotation | None
-        constraints = {key: schema[source] for key, source in
-            (("ge", "minimum"), ("le", "maximum"), ("pattern", "pattern")) if source in schema}
+        constraints = {
+            key: schema[source]
+            for key, source in (
+                ("ge", "minimum"),
+                ("le", "maximum"),
+                ("pattern", "pattern"),
+            )
+            if source in schema
+        }
         if 'array' in types and 'maxItems' in schema:
             constraints['max_length'] = schema['maxItems']
         fields[name] = (annotation, Field(default=schema.get("default"), **constraints))
@@ -142,8 +178,10 @@ class CreateCardRequest(AuthoringObject):
     deployment_profile_id: StrictStr | None = None
     turn_id: StrictStr | None = None
     source_revision_id: StrictStr | None = None
-    expected_card_version: Any = Field(default=None,
-        description="Legacy create-only field; ignored when creating a new card. Revisions require an integer card version.")
+    expected_card_version: Any = Field(
+        default=None,
+        description="Legacy create-only field; ignored when creating a new card. Revisions require an integer card version.",
+    )
 
     @field_validator("prompt", "title")
     @classmethod
@@ -154,16 +192,25 @@ class CreateCardRequest(AuthoringObject):
 
 
 class ReviseCardRequest(CreateCardRequest):
-    expected_card_version: Annotated[StrictInt, Field(ge=1,
-        description="Current card.version read from this card; not session expected_version.")]
+    expected_card_version: Annotated[
+        StrictInt,
+        Field(
+            ge=1,
+            description="Current card.version read from this card; not session expected_version.",
+        ),
+    ]
 
 
 _TOP_FIELDS = frozenset(CreateCardRequest.model_fields)
 _SLOTS = frozenset(CardInputs.model_fields)
 _ENTRY_FIELDS = {
-    "first_frame": frozenset(FrameInput.model_fields), "last_frame": frozenset(FrameInput.model_fields),
-    "images": frozenset(ImageInput.model_fields), "videos": frozenset(VideoInput.model_fields),
-    "audios": frozenset(AudioInput.model_fields), "guides": frozenset(GuideInput.model_fields)}
+    "first_frame": frozenset(FrameInput.model_fields),
+    "last_frame": frozenset(FrameInput.model_fields),
+    "images": frozenset(ImageInput.model_fields),
+    "videos": frozenset(VideoInput.model_fields),
+    "audios": frozenset(AudioInput.model_fields),
+    "guides": frozenset(GuideInput.model_fields),
+}
 
 
 def _safe_path(location):
@@ -187,7 +234,11 @@ def _safe_path(location):
     slot = parts.pop(0)
     path.append(slot)
     if slot not in {"first_frame", "last_frame"}:
-        if not parts or type(parts[0]) is not int or not 0 <= parts[0] < max(9, LIMITS["max_images"]):
+        if (
+            not parts
+            or type(parts[0]) is not int
+            or not 0 <= parts[0] < max(9, LIMITS["max_images"])
+        ):
             return path
         path.append(parts.pop(0))
     if not parts or parts[0] not in _ENTRY_FIELDS[slot]:
@@ -206,10 +257,25 @@ def safe_field_errors(errors):
         if not isinstance(error, dict):
             continue
         kind = error.get("type")
-        reason = ("missing_field" if kind == "missing" else
-            "unknown_field" if kind == "extra_forbidden" else
-            "type_mismatch" if kind in {"int_type", "float_type", "string_type", "bool_type", "list_type",
-                "dict_type", "model_type", "model_attributes_type"} else "invalid_value")
+        reason = (
+            "missing_field"
+            if kind == "missing"
+            else "unknown_field"
+            if kind == "extra_forbidden"
+            else "type_mismatch"
+            if kind
+            in {
+                "int_type",
+                "float_type",
+                "string_type",
+                "bool_type",
+                "list_type",
+                "dict_type",
+                "model_type",
+                "model_attributes_type",
+            }
+            else "invalid_value"
+        )
         item = {"path": _safe_path(error.get("loc")), "reason": reason}
         if item not in result:
             result.append(item)
@@ -226,8 +292,17 @@ def validate_card_request(body, *, revising=False):
     except ValidationError as error:
         # Imported lazily to keep the schema usable by routes without a cycle.
         from .quick_chat import QuickChatError
-        raise QuickChatError("invalid_request", "请求字段不符合创作契约；请按字段提示修正。", 422,
-            field_errors=safe_field_errors(error.errors(include_url=False, include_context=False, include_input=False))) from None
+
+        raise QuickChatError(
+            "invalid_request",
+            "请求字段不符合创作契约；请按字段提示修正。",
+            422,
+            field_errors=safe_field_errors(
+                error.errors(
+                    include_url=False, include_context=False, include_input=False
+                )
+            ),
+        ) from None
     return body
 
 

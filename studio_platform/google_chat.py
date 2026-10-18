@@ -1,4 +1,5 @@
 """Google AI Studio text adapter. No GPU, tools, retries, or credential copies."""
+
 from __future__ import annotations
 
 import sys
@@ -26,10 +27,14 @@ class ChatError(Exception):
 
 def central_config():
     import os
-    root = Path(os.environ.get("AI_REGISTRY_ROOT", r"C:\Users\danmo\Desktop\AI-Registry"))
+
+    root = Path(
+        os.environ.get("AI_REGISTRY_ROOT", r"C:\Users\danmo\Desktop\AI-Registry")
+    )
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
     from api_registry import load_api
+
     return load_api("gemini", profile=PROFILE)
 
 
@@ -46,18 +51,33 @@ def payload(model, messages, instruction=DEFAULT_INSTRUCTION, max_tokens=2048):
     total = len(instruction)
     for index, message in enumerate(messages):
         expected = "user" if index % 2 == 0 else "model"
-        if (not isinstance(message, dict) or set(message) != {"role", "text"}
-                or message.get("role") != expected or not isinstance(message.get("text"), str)
-                or not message["text"].strip() or len(message["text"]) > 16000):
-            raise ChatError("invalid_history", "对话需从用户开始并按用户、助手交替，单条最多16000字。", 422)
+        if (
+            not isinstance(message, dict)
+            or set(message) != {"role", "text"}
+            or message.get("role") != expected
+            or not isinstance(message.get("text"), str)
+            or not message["text"].strip()
+            or len(message["text"]) > 16000
+        ):
+            raise ChatError(
+                "invalid_history",
+                "对话需从用户开始并按用户、助手交替，单条最多16000字。",
+                422,
+            )
         total += len(message["text"])
         contents.append({"role": expected, "parts": [{"text": message["text"]}]})
     if contents[-1]["role"] != "user" or total > 60000:
-        raise ChatError("history_limit", "请以用户消息结束；上下文总量最多60000字，超限请新建对话。", 422)
+        raise ChatError(
+            "history_limit",
+            "请以用户消息结束；上下文总量最多60000字，超限请新建对话。",
+            422,
+        )
     # Both models receive the same user-role preamble. Do not assume Gemma
     # accepts Gemini's systemInstruction parameter.
     if instruction.strip():
-        contents[0]["parts"].insert(0, {"text": "【创作助手工作约定】\n" + instruction + "\n【用户对话】"})
+        contents[0]["parts"].insert(
+            0, {"text": "【创作助手工作约定】\n" + instruction + "\n【用户对话】"}
+        )
     return {"contents": contents, "generationConfig": {"maxOutputTokens": max_tokens}}
 
 
@@ -70,54 +90,118 @@ class GoogleChatClient:
         try:
             config = self.loader()
             if config.base_url != ORIGIN or not config.api_key:
-                raise ChatError("profile_mismatch", "中央Google配置端点或凭据不匹配。", 503)
-            with httpx.Client(base_url=ORIGIN, headers={"x-goog-api-key": config.api_key},
-                              timeout=self.timeout, follow_redirects=False,
-                              transport=self.transport) as client:
+                raise ChatError(
+                    "profile_mismatch", "中央Google配置端点或凭据不匹配。", 503
+                )
+            with httpx.Client(
+                base_url=ORIGIN,
+                headers={"x-goog-api-key": config.api_key},
+                timeout=self.timeout,
+                follow_redirects=False,
+                transport=self.transport,
+            ) as client:
                 response = client.request(method, path, json=body)
         except ChatError:
             raise
         except httpx.TimeoutException:
-            raise ChatError("upstream_timeout", "Google响应超时，调用可能已执行并计费；没有自动重发。") from None
+            raise ChatError(
+                "upstream_timeout",
+                "Google响应超时，调用可能已执行并计费；没有自动重发。",
+            ) from None
         except Exception:
-            raise ChatError("connection_failed", "无法完成Google连接，请检查中央配置或网络；没有自动重发。", 503) from None
+            raise ChatError(
+                "connection_failed",
+                "无法完成Google连接，请检查中央配置或网络；没有自动重发。",
+                503,
+            ) from None
         if response.status_code != 200:
             code = response.status_code
-            messages = {400: "Google拒绝了当前参数。", 401: "Google凭据未获授权。",
-                        403: "Google拒绝访问，请检查该Key的权限及地区设置。",
-                        404: "Google未提供这个准确的模型ID。", 429: "Google额度或速率限制，请稍后再试。"}
-            raise ChatError("google_http_" + str(code), messages.get(code, "Google服务暂时未完成请求。"), 502)
+            messages = {
+                400: "Google拒绝了当前参数。",
+                401: "Google凭据未获授权。",
+                403: "Google拒绝访问，请检查该Key的权限及地区设置。",
+                404: "Google未提供这个准确的模型ID。",
+                429: "Google额度或速率限制，请稍后再试。",
+            }
+            raise ChatError(
+                "google_http_" + str(code),
+                messages.get(code, "Google服务暂时未完成请求。"),
+                502,
+            )
         try:
             return response.json()
         except Exception:
-            raise ChatError("invalid_response", "Google返回了无法解析的响应。") from None
+            raise ChatError(
+                "invalid_response", "Google返回了无法解析的响应。"
+            ) from None
 
     def models(self):
         result = []
         for model, label in MODELS.items():
             try:
                 data = self._request("GET", "/v1beta/models/" + model)
-                available = (data.get("name") == "models/" + model
-                             and "generateContent" in data.get("supportedGenerationMethods", []))
-                result.append({"id": model, "label": label, "catalog_available": available,
-                               "input_token_limit": data.get("inputTokenLimit"),
-                               "output_token_limit": data.get("outputTokenLimit")})
+                available = data.get(
+                    "name"
+                ) == "models/" + model and "generateContent" in data.get(
+                    "supportedGenerationMethods", []
+                )
+                result.append(
+                    {
+                        "id": model,
+                        "label": label,
+                        "catalog_available": available,
+                        "input_token_limit": data.get("inputTokenLimit"),
+                        "output_token_limit": data.get("outputTokenLimit"),
+                    }
+                )
             except ChatError as error:
-                result.append({"id": model, "label": label, "catalog_available": False,
-                               "error": error.code, "message": error.message})
+                result.append(
+                    {
+                        "id": model,
+                        "label": label,
+                        "catalog_available": False,
+                        "error": error.code,
+                        "message": error.message,
+                    }
+                )
         return result
 
-    def generate(self, model, messages, instruction=DEFAULT_INSTRUCTION, max_tokens=2048):
+    def generate(
+        self, model, messages, instruction=DEFAULT_INSTRUCTION, max_tokens=2048
+    ):
         body = payload(model, messages, instruction, max_tokens)
         started = time.monotonic()
-        data = self._request("POST", "/v1beta/models/" + model + ":generateContent", body)
+        data = self._request(
+            "POST", "/v1beta/models/" + model + ":generateContent", body
+        )
         candidates = data.get("candidates", [])
         candidate = candidates[0] if candidates else {}
         parts = candidate.get("content", {}).get("parts", [])
-        text = "\n".join(p["text"] for p in parts if isinstance(p.get("text"), str) and not p.get("thought"))
+        text = "\n".join(
+            p["text"]
+            for p in parts
+            if isinstance(p.get("text"), str) and not p.get("thought")
+        )
         if not text.strip():
-            raise ChatError("empty_or_blocked", "没有收到可展示的文本，可能被拦截或输出额度耗尽；没有自动重试。")
+            raise ChatError(
+                "empty_or_blocked",
+                "没有收到可展示的文本，可能被拦截或输出额度耗尽；没有自动重试。",
+            )
         usage = data.get("usageMetadata", {})
-        return {"model": model, "reported_model_version": data.get("modelVersion"), "text": text,
-                "finish_reason": candidate.get("finishReason"), "elapsed_seconds": round(time.monotonic()-started, 2),
-                "usage": {k: usage[k] for k in ("promptTokenCount", "candidatesTokenCount", "thoughtsTokenCount", "totalTokenCount") if k in usage}}
+        return {
+            "model": model,
+            "reported_model_version": data.get("modelVersion"),
+            "text": text,
+            "finish_reason": candidate.get("finishReason"),
+            "elapsed_seconds": round(time.monotonic() - started, 2),
+            "usage": {
+                k: usage[k]
+                for k in (
+                    "promptTokenCount",
+                    "candidatesTokenCount",
+                    "thoughtsTokenCount",
+                    "totalTokenCount",
+                )
+                if k in usage
+            },
+        }

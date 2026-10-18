@@ -4,6 +4,7 @@ Assistant/title recovery never resubmits a model call. History cleanup resumes
 only durable original purge intents, never elapsed-time expiry; it never owns
 generation, GPU capacity or billing reconciliation.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -16,7 +17,11 @@ class QuickChatRecovery:
         # not fence another API process's fresh request during a rolling start.
         if older_than_s < 180 or not 1 <= interval_s <= 300:
             raise ValueError("invalid_assistant_recovery_window")
-        self.service, self.older_than_s, self.interval_s = service, older_than_s, interval_s
+        self.service, self.older_than_s, self.interval_s = (
+            service,
+            older_than_s,
+            interval_s,
+        )
         self.stop = asyncio.Event()
         self.task = None
         self.last_count = 0
@@ -26,10 +31,12 @@ class QuickChatRecovery:
 
     async def reconcile(self, *, include_history=True):
         try:
-            self.last_count = await run_in_threadpool(self.service.recover_assistant_runs,
-                                                      older_than_s=self.older_than_s)
-            self.last_count += await run_in_threadpool(self.service.recover_title_runs,
-                                                       older_than_s=self.older_than_s)
+            self.last_count = await run_in_threadpool(
+                self.service.recover_assistant_runs, older_than_s=self.older_than_s
+            )
+            self.last_count += await run_in_threadpool(
+                self.service.recover_title_runs, older_than_s=self.older_than_s
+            )
             self.last_error_code = None
         except Exception:
             # Database/driver exception text may contain private values.
@@ -42,7 +49,9 @@ class QuickChatRecovery:
         cleanup = getattr(self.service, "process_history_cleanup", None)
         if cleanup is not None:
             try:
-                self.last_history_cleanup = await run_in_threadpool(cleanup, limit=10, max_objects=10)
+                self.last_history_cleanup = await run_in_threadpool(
+                    cleanup, limit=10, max_objects=10
+                )
                 self.last_history_error_code = None
             except Exception:
                 self.last_history_error_code = "quick_chat_history_cleanup_failed"

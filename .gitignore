@@ -21,6 +21,9 @@ inventory.json
 !docs/SCALING.zh-CN.md
 !docs/CONTROLS.zh-CN.md
 !requirements.lock.txt
+!requirements.dev.in
+!requirements.dev.lock.txt
+!pyproject.toml
 !server.py
 !password_auth.py
 !comfy_workflow.py

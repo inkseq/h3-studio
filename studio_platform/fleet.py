@@ -4,6 +4,7 @@ GPU hosts only run private ComfyUI. Database and object-store credentials stay
 on the CPU control host. PIDs are advisory output, never a source for signalling
 historical/unrelated processes. The default configuration is disabled.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -32,10 +33,20 @@ SAFE_WORKER = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
 def _origin(endpoint):
     try:
         parts = urlsplit(endpoint)
-        valid = (endpoint == endpoint.strip() and parts.scheme in ("http", "https")
-            and parts.hostname and not parts.username and not parts.password
-            and not parts.query and not parts.fragment and not parts.path
-            and (parts.scheme == "https" or parts.hostname in ("127.0.0.1", "localhost", "::1")))
+        valid = (
+            endpoint == endpoint.strip()
+            and parts.scheme in ("http", "https")
+            and parts.hostname
+            and not parts.username
+            and not parts.password
+            and not parts.query
+            and not parts.fragment
+            and not parts.path
+            and (
+                parts.scheme == "https"
+                or parts.hostname in ("127.0.0.1", "localhost", "::1")
+            )
+        )
         parts.port  # Reject invalid/out-of-range ports without echoing the URL.
     except (ValueError, AttributeError):
         valid = False
@@ -56,13 +67,20 @@ class SlotConfig:
     runtime_config_file: str = ""
 
     def __post_init__(self):
-        if (not SAFE_WORKER.fullmatch(self.spec.worker_id) or type(self.enabled) is not bool
-                or type(self.confirmed_idle) is not bool or type(self.recovery_only) is not bool):
+        if (
+            not SAFE_WORKER.fullmatch(self.spec.worker_id)
+            or type(self.enabled) is not bool
+            or type(self.confirmed_idle) is not bool
+            or type(self.recovery_only) is not bool
+        ):
             raise ValueError("invalid_fleet_slot")
         if self.recovery_only and self.spec.backend not in REAL_GPU_BACKENDS:
             raise ValueError("recovery_requires_real_engine")
         if self.spec.backend == "wangp-worker":
-            if not isinstance(self.runtime_config_file, str) or not Path(self.runtime_config_file).is_absolute():
+            if (
+                not isinstance(self.runtime_config_file, str)
+                or not Path(self.runtime_config_file).is_absolute()
+            ):
                 raise ValueError("absolute_wangp_runtime_config_required")
         elif self.runtime_config_file != "":
             raise ValueError("unexpected_engine_runtime_config")
@@ -70,12 +88,17 @@ class SlotConfig:
             if self.endpoint or self.allowed_origins or self.comfy_revision:
                 raise ValueError("cpu_slot_cannot_have_gpu_endpoint")
         elif self.spec.backend == "wangp-worker":
-            if (self.comfy_revision or not isinstance(self.allowed_origins, tuple)
-                    or self.allowed_origins != (_origin(self.endpoint),)):
-                raise ValueError("explicit_wangp_endpoint_and_manifest_required")
-        elif (not re.fullmatch(r"[0-9a-f]{40}", self.comfy_revision)
+            if (
+                self.comfy_revision
                 or not isinstance(self.allowed_origins, tuple)
-                or self.allowed_origins != (_origin(self.endpoint),)):
+                or self.allowed_origins != (_origin(self.endpoint),)
+            ):
+                raise ValueError("explicit_wangp_endpoint_and_manifest_required")
+        elif (
+            not re.fullmatch(r"[0-9a-f]{40}", self.comfy_revision)
+            or not isinstance(self.allowed_origins, tuple)
+            or self.allowed_origins != (_origin(self.endpoint),)
+        ):
             raise ValueError("explicit_fleet_endpoint_and_revision_required")
 
 
@@ -91,9 +114,15 @@ class FleetConfig:
         if not Path(self.work_dir).is_absolute():
             raise ValueError("fleet_work_dir_must_be_absolute")
         object.__setattr__(self, "work_dir", Path(self.work_dir).resolve())
-        if (type(self.enabled) is not bool or not isinstance(self.slots, tuple) or len(self.slots) > 32
-            or type(self.max_children) is not int or not 0 <= self.max_children <= 32
-            or not math.isfinite(self.shutdown_grace_s) or not 0 < self.shutdown_grace_s <= 3600):
+        if (
+            type(self.enabled) is not bool
+            or not isinstance(self.slots, tuple)
+            or len(self.slots) > 32
+            or type(self.max_children) is not int
+            or not 0 <= self.max_children <= 32
+            or not math.isfinite(self.shutdown_grace_s)
+            or not 0 < self.shutdown_grace_s <= 3600
+        ):
             raise ValueError("invalid_fleet_limits")
         ids, devices, endpoints, backends = set(), set(), set(), set()
         for slot in self.slots:
@@ -145,26 +174,72 @@ def read_config(path):
     try:
         with path.open("rb") as source:
             info = os.fstat(source.fileno())
-            if not stat.S_ISREG(info.st_mode) or os.name != "nt" and info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or os.name != "nt"
+                and info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+            ):
                 raise ValueError("fleet_config_must_be_operator_owned")
             raw = source.read(262145)
         if len(raw) > 262144:
             raise ValueError("fleet_config_too_large")
         value = json.loads(raw)
-        if (not isinstance(value, dict) or set(value) != {"version", "work_dir", "enabled", "max_children", "shutdown_grace_s", "slots"}
-            or type(value["version"]) is not int or value["version"] not in (1, 2) or not isinstance(value["slots"], list)):
+        if (
+            not isinstance(value, dict)
+            or set(value)
+            != {
+                "version",
+                "work_dir",
+                "enabled",
+                "max_children",
+                "shutdown_grace_s",
+                "slots",
+            }
+            or type(value["version"]) is not int
+            or value["version"] not in (1, 2)
+            or not isinstance(value["slots"], list)
+        ):
             raise ValueError("invalid_fleet_config")
         slots = []
-        spec_fields = {"worker_id", "pool", "provider", "instance_id", "physical_gpu_ids", "recipe_ids", "model_id", "configuration_id", "backend"}
+        spec_fields = {
+            "worker_id",
+            "pool",
+            "provider",
+            "instance_id",
+            "physical_gpu_ids",
+            "recipe_ids",
+            "model_id",
+            "configuration_id",
+            "backend",
+        }
         for item in value["slots"]:
-            required = spec_fields | {"enabled", "endpoint", "allowed_origins", "comfy_revision", "confirmed_idle"}
-            optional = {"engine_manifest_digest", "recovery_only", "runtime_config_file", "output_delivery", "dispatch_backend"}
-            if not isinstance(item, dict) or not required <= set(item) or set(item) - required - optional:
+            required = spec_fields | {
+                "enabled",
+                "endpoint",
+                "allowed_origins",
+                "comfy_revision",
+                "confirmed_idle",
+            }
+            optional = {
+                "engine_manifest_digest",
+                "recovery_only",
+                "runtime_config_file",
+                "output_delivery",
+                "dispatch_backend",
+            }
+            if (
+                not isinstance(item, dict)
+                or not required <= set(item)
+                or set(item) - required - optional
+            ):
                 raise ValueError("invalid_fleet_slot_fields")
-            if value["version"] == 1 and (item["backend"] == "wangp-worker"
-                    or item.get("engine_manifest_digest", "") != "" or item.get("recovery_only", False) is not False
-                    or item.get("dispatch_backend", "legacy") != "legacy"
-                    or item.get("runtime_config_file", "") != ""):
+            if value["version"] == 1 and (
+                item["backend"] == "wangp-worker"
+                or item.get("engine_manifest_digest", "") != ""
+                or item.get("recovery_only", False) is not False
+                or item.get("dispatch_backend", "legacy") != "legacy"
+                or item.get("runtime_config_file", "") != ""
+            ):
                 raise ValueError("new_engine_or_recovery_requires_fleet_v2")
             spec = {key: item[key] for key in spec_fields}
             spec["engine_manifest_digest"] = item.get("engine_manifest_digest", "")
@@ -173,17 +248,51 @@ def read_config(path):
             for key in ("physical_gpu_ids", "recipe_ids", "allowed_origins"):
                 if not isinstance(item[key], list):
                     raise ValueError("fleet_bindings_must_be_arrays")
-            spec["physical_gpu_ids"], spec["recipe_ids"] = tuple(spec["physical_gpu_ids"]), tuple(spec["recipe_ids"])
-            slots.append(SlotConfig(WorkerSpec(**spec), item["enabled"], item["endpoint"],
-                tuple(item["allowed_origins"]), item["comfy_revision"], item["confirmed_idle"],
-                item.get("recovery_only", False), item.get("runtime_config_file", "")))
-        return FleetConfig(Path(value["work_dir"]), tuple(slots), value["enabled"], value["max_children"], value["shutdown_grace_s"])
-    except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError, AttributeError):
+            spec["physical_gpu_ids"], spec["recipe_ids"] = (
+                tuple(spec["physical_gpu_ids"]),
+                tuple(spec["recipe_ids"]),
+            )
+            slots.append(
+                SlotConfig(
+                    WorkerSpec(**spec),
+                    item["enabled"],
+                    item["endpoint"],
+                    tuple(item["allowed_origins"]),
+                    item["comfy_revision"],
+                    item["confirmed_idle"],
+                    item.get("recovery_only", False),
+                    item.get("runtime_config_file", ""),
+                )
+            )
+        return FleetConfig(
+            Path(value["work_dir"]),
+            tuple(slots),
+            value["enabled"],
+            value["max_children"],
+            value["shutdown_grace_s"],
+        )
+    except (
+        OSError,
+        UnicodeError,
+        json.JSONDecodeError,
+        KeyError,
+        TypeError,
+        AttributeError,
+    ):
         raise ValueError("fleet_config_unavailable_or_invalid") from None
 
 
 class FleetSupervisor:
-    def __init__(self, config, repository, config_path, *, popen=None, clock=time.monotonic, sleeper=time.sleep):
+    def __init__(
+        self,
+        config,
+        repository,
+        config_path,
+        *,
+        popen=None,
+        clock=time.monotonic,
+        sleeper=time.sleep,
+    ):
         self.config, self.repo = config, repository
         self.config_path = Path(config_path)
         if not self.config_path.is_absolute():
@@ -200,15 +309,31 @@ class FleetSupervisor:
         children = []
         for worker_id, proc in self.children.items():
             code = proc.poll()
-            children.append({"worker_id": worker_id, "pid": proc.pid, "exit_code": code,
-                "state": "running" if code is None else "exited"})
-        return {"state": "disabled" if not self.config.enabled else "stopped" if self._finished else "draining" if self._stop.is_set() else "running",
-                "children": children}
+            children.append(
+                {
+                    "worker_id": worker_id,
+                    "pid": proc.pid,
+                    "exit_code": code,
+                    "state": "running" if code is None else "exited",
+                }
+            )
+        return {
+            "state": "disabled"
+            if not self.config.enabled
+            else "stopped"
+            if self._finished
+            else "draining"
+            if self._stop.is_set()
+            else "running",
+            "children": children,
+        }
 
     def _save(self):
         path = self.config.work_dir / "fleet-state.json"
         temporary = path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(self.snapshot(), sort_keys=True), encoding="utf-8")
+        temporary.write_text(
+            json.dumps(self.snapshot(), sort_keys=True), encoding="utf-8"
+        )
         temporary.replace(path)
 
     def start(self):
@@ -224,6 +349,7 @@ class FleetSupervisor:
         active = [slot for slot in self.config.slots if slot.enabled]
         if all(s.spec.backend == "mock" for s in active):
             from .repository import capacity_gate
+
             with self.repo.engine.connect() as conn:
                 has_gate = conn.execute(capacity_gate.select()).first() is not None
             if not has_gate:
@@ -250,8 +376,20 @@ class FleetSupervisor:
                     kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
                 else:
                     kwargs["start_new_session"] = True
-                proc = self.popen([sys.executable, "-m", "studio_platform.fleet", "--config", str(self.config_path),
-                    "--slot", slot.spec.worker_id, "--config-hash", self.config.fingerprint()], **kwargs)
+                proc = self.popen(
+                    [
+                        sys.executable,
+                        "-m",
+                        "studio_platform.fleet",
+                        "--config",
+                        str(self.config_path),
+                        "--slot",
+                        slot.spec.worker_id,
+                        "--config-hash",
+                        self.config.fingerprint(),
+                    ],
+                    **kwargs,
+                )
                 self.children[slot.spec.worker_id] = proc
             self._save()
             return self.snapshot()
@@ -296,8 +434,11 @@ class FleetSupervisor:
         self._shutdown_called = True
         self.drain()
         deadline = self.clock() + self.config.shutdown_grace_s
-        while any(proc.poll() is None for proc in self.children.values()) and self.clock() < deadline:
-            self.sleeper(min(.1, max(0, deadline-self.clock())))
+        while (
+            any(proc.poll() is None for proc in self.children.values())
+            and self.clock() < deadline
+        ):
+            self.sleeper(min(0.1, max(0, deadline - self.clock())))
         self._finished = all(proc.poll() is not None for proc in self.children.values())
         self._save() if self._started else None
         result = self.snapshot()
@@ -308,7 +449,7 @@ class FleetSupervisor:
     def run_forever(self, *, poll_interval_s=1):
         if not self.config.enabled:
             return self.snapshot()
-        if not math.isfinite(poll_interval_s) or not .01 <= poll_interval_s <= 60:
+        if not math.isfinite(poll_interval_s) or not 0.01 <= poll_interval_s <= 60:
             raise ValueError("invalid_fleet_poll_interval")
         self.config.work_dir.mkdir(parents=True, exist_ok=True)
         with _slot_lock(self.config.work_dir, "fleet-supervisor") as acquired:
@@ -323,7 +464,9 @@ class FleetSupervisor:
                 self.start()
                 while not self._stop.is_set():
                     self.tick()
-                    if self.children and all(proc.poll() is not None for proc in self.children.values()):
+                    if self.children and all(
+                        proc.poll() is not None for proc in self.children.values()
+                    ):
                         self._stop.set()
                         break
                     self._stop.wait(poll_interval_s)
@@ -340,15 +483,27 @@ class FleetSupervisor:
 def create_store(settings):
     """Same explicit CPU-side storage selection as the business API."""
     from .storage import LocalObjectStore, S3ObjectStore
+
     if settings.storage_provider == "local":
         return LocalObjectStore(settings.data_dir / "objects")
     if settings.storage_provider != "r2":
         raise ValueError("fleet_storage_requires_reviewed_runtime_adapter")
     from .storage_config import S3StorageConfig, load_configured_storage_credentials
-    config = S3StorageConfig("r2", settings.storage_endpoint, settings.storage_region,
-        settings.storage_bucket, "cloudflare-r2", settings.storage_profile, enabled=True)
-    credentials = load_configured_storage_credentials(config, credentials_file=settings.storage_credential_file,
-        registry_root=os.environ.get("AI_REGISTRY_ROOT"))
+
+    config = S3StorageConfig(
+        "r2",
+        settings.storage_endpoint,
+        settings.storage_region,
+        settings.storage_bucket,
+        "cloudflare-r2",
+        settings.storage_profile,
+        enabled=True,
+    )
+    credentials = load_configured_storage_credentials(
+        config,
+        credentials_file=settings.storage_credential_file,
+        registry_root=os.environ.get("AI_REGISTRY_ROOT"),
+    )
     return S3ObjectStore(config, credentials)
 
 
@@ -362,8 +517,17 @@ def request_drain(config):
     return {"state": "drain_requested"}
 
 
-def run_slot(config, worker_id, settings, *, repository=None, store_factory=create_store,
-             backend_factory=None, runner_factory=WorkerRunner, once=False):
+def run_slot(
+    config,
+    worker_id,
+    settings,
+    *,
+    repository=None,
+    store_factory=create_store,
+    backend_factory=None,
+    runner_factory=WorkerRunner,
+    once=False,
+):
     """Explicit CPU worker child; injectable factories permit fully offline tests."""
     slot = config.slot(worker_id)
     if not config.enabled or not slot.enabled:
@@ -371,8 +535,15 @@ def run_slot(config, worker_id, settings, *, repository=None, store_factory=crea
     if slot.recovery_only:
         if slot.spec.backend not in settings.recovery_backends:
             raise ValueError("fleet_recovery_backend_not_explicitly_allowed")
-    elif (slot.spec.backend == "cpu-render" and not settings.render_enabled
-        or slot.spec.backend != "cpu-render" and (settings.execution_backend != slot.spec.backend or not settings.generation_enabled)):
+    elif (
+        slot.spec.backend == "cpu-render"
+        and not settings.render_enabled
+        or slot.spec.backend != "cpu-render"
+        and (
+            settings.execution_backend != slot.spec.backend
+            or not settings.generation_enabled
+        )
+    ):
         raise ValueError("fleet_backend_does_not_match_explicit_service_settings")
     own_repo = repository is None
     repo = repository or Repository(settings.database_url)
@@ -382,11 +553,16 @@ def run_slot(config, worker_id, settings, *, repository=None, store_factory=crea
         control = WorkerControl(repo)
         if slot.spec.backend == "mock":
             from .repository import capacity_gate
+
             with repo.engine.connect() as conn:
                 has_gate = conn.execute(capacity_gate.select()).first() is not None
             if not has_gate:
                 repo.configure_capacity()
-        worker = (control.require_recovery_binding(slot.spec) if slot.recovery_only else control.register(slot.spec))
+        worker = (
+            control.require_recovery_binding(slot.spec)
+            if slot.recovery_only
+            else control.register(slot.spec)
+        )
         directory = config.work_dir / worker_id
         if backend_factory:
             backend = backend_factory(slot, directory)
@@ -394,21 +570,40 @@ def run_slot(config, worker_id, settings, *, repository=None, store_factory=crea
             backend = MockBackend(directory / "simulation", enabled=True)
         elif slot.spec.backend == "cpu-render":
             from .render_backend import CPURenderBackend
+
             backend = CPURenderBackend(directory / "render", enabled=True)
         elif slot.spec.backend == "comfy-worker":
-            backend = ComfyBackend(endpoint=slot.endpoint, enabled=True, allowed_origins=slot.allowed_origins,
-                comfy_revision=slot.comfy_revision)
+            backend = ComfyBackend(
+                endpoint=slot.endpoint,
+                enabled=True,
+                allowed_origins=slot.allowed_origins,
+                comfy_revision=slot.comfy_revision,
+            )
         else:
             # Fixed, protected configuration loader; never import a user-supplied
             # factory or route an unconfigured new engine through Comfy.
             from .inference.wangp_factory import create_backend
+
             backend = create_backend(slot, directory)
-        if getattr(backend, "kind", None) != slot.spec.backend or getattr(backend, "enabled", None) is not True:
+        if (
+            getattr(backend, "kind", None) != slot.spec.backend
+            or getattr(backend, "enabled", None) is not True
+        ):
             raise ValueError("fleet_adapter_identity_mismatch")
-        if slot.spec.backend == "wangp-worker" and getattr(getattr(backend, "manifest", None), "digest", None) != slot.spec.engine_manifest_digest:
+        if (
+            slot.spec.backend == "wangp-worker"
+            and getattr(getattr(backend, "manifest", None), "digest", None)
+            != slot.spec.engine_manifest_digest
+        ):
             raise ValueError("fleet_adapter_manifest_mismatch")
-        if (not slot.recovery_only and worker["current_job_id"] is None and worker["state"] != "retired"
-                and not (slot.spec.dispatch_backend == "hatchet-v1" and worker["drain_requested"])):
+        if (
+            not slot.recovery_only
+            and worker["current_job_id"] is None
+            and worker["state"] != "retired"
+            and not (
+                slot.spec.dispatch_backend == "hatchet-v1" and worker["drain_requested"]
+            )
+        ):
             if slot.spec.backend in {"mock", "cpu-render"}:
                 control.mark_ready(worker_id, upstream_idle_confirmed=True)
             elif slot.confirmed_idle:
@@ -421,27 +616,53 @@ def run_slot(config, worker_id, settings, *, repository=None, store_factory=crea
                 raise ValueError("fleet_readiness_requires_explicit_confirmation")
         store = store_factory(settings)
         from .execution_policy import ExecutionPolicies
+
         recovery_kwargs = {}
         if slot.recovery_only:
             from .drain_safe_runner import DrainSafeRunner
+
             if runner_factory is WorkerRunner:
                 runner_factory = DrainSafeRunner
-            elif not isinstance(runner_factory, type) or not issubclass(runner_factory, DrainSafeRunner):
+            elif not isinstance(runner_factory, type) or not issubclass(
+                runner_factory, DrainSafeRunner
+            ):
                 raise ValueError("recovery_requires_drain_safe_runner")
-            recovery_kwargs = {"stop_new": lambda: True, "job_allowed": lambda job: False,
-                "collection_lock_dir": config.work_dir / "recovery-collection"}
+            recovery_kwargs = {
+                "stop_new": lambda: True,
+                "job_allowed": lambda job: False,
+                "collection_lock_dir": config.work_dir / "recovery-collection",
+            }
         telemetry = None
-        if not slot.recovery_only and slot.spec.dispatch_backend == "hatchet-v1" and runner_factory is WorkerRunner:
+        if (
+            not slot.recovery_only
+            and slot.spec.dispatch_backend == "hatchet-v1"
+            and runner_factory is WorkerRunner
+        ):
             from .postgres_dispatch import PostgresSlotRunner
             from .telemetry import configured_telemetry
+
             runner_factory = PostgresSlotRunner
             telemetry = configured_telemetry()
-            recovery_kwargs.update(collection_lock_dir=config.work_dir / "collection-lock", telemetry=telemetry)
+            recovery_kwargs.update(
+                collection_lock_dir=config.work_dir / "collection-lock",
+                telemetry=telemetry,
+            )
         try:
-            runner = runner_factory(repo, store, directory, backend=backend, control=control,
+            runner = runner_factory(
+                repo,
+                store,
+                directory,
+                backend=backend,
+                control=control,
                 submission_guard=ExecutionPolicies(settings, repo).submission_allowed,
-                stop_requested=lambda: (directory / "drain.flag").exists(), **recovery_kwargs)
-            return runner.run_once(worker_id, slot.spec.pool) if once else runner.run_forever(worker_id, slot.spec.pool)
+                stop_requested=lambda: (directory / "drain.flag").exists(),
+                **recovery_kwargs,
+            )
+            return (
+                runner.run_once(worker_id, slot.spec.pool)
+                if once
+                else runner.run_forever(worker_id, slot.spec.pool)
+            )
         finally:
             if telemetry is not None:
                 telemetry.close()
@@ -453,7 +674,9 @@ def run_slot(config, worker_id, settings, *, repository=None, store_factory=crea
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Explicit CPU fleet; cloud creation remains disabled")
+    parser = argparse.ArgumentParser(
+        description="Explicit CPU fleet; cloud creation remains disabled"
+    )
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--slot")
     parser.add_argument("--config-hash")
@@ -474,6 +697,7 @@ def main(argv=None):
             print(json.dumps(request_drain(config)))
             return 0
         from .settings import Settings
+
         settings = Settings.from_environment()
         if args.slot:
             result = run_slot(config, args.slot, settings, once=args.once)

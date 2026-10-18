@@ -4,6 +4,7 @@ PostgreSQL LISTEN uses a dedicated autocommit connection. Notifications carry a
 fixed nonsecret payload; callers always re-read durable rows after waking.
 SQLite remains a local verification backend with a blocking timeout fallback.
 """
+
 from __future__ import annotations
 
 import select
@@ -22,8 +23,10 @@ def notify_demand(connection):
     """Deliver only on commit; rollback discards the hint with its business rows."""
     if connection.dialect.name != "postgresql" or connection.info.get(TRANSACTION_FLAG):
         return
-    connection.execute(text("SELECT pg_notify(:channel, :payload)"),
-                       {"channel": CHANNEL, "payload": PAYLOAD})
+    connection.execute(
+        text("SELECT pg_notify(:channel, :payload)"),
+        {"channel": CHANNEL, "payload": PAYLOAD},
+    )
     connection.info[TRANSACTION_FLAG] = True
 
 
@@ -40,7 +43,9 @@ class DemandWakeup:
         if self.repo.engine.dialect.name != "postgresql":
             return False
         try:
-            connection = self.repo.engine.connect().execution_options(isolation_level="AUTOCOMMIT")
+            connection = self.repo.engine.connect().execution_options(
+                isolation_level="AUTOCOMMIT"
+            )
             self.connection = connection
             connection.exec_driver_sql("LISTEN " + CHANNEL)
             self.driver = connection.connection.driver_connection
@@ -113,8 +118,17 @@ class DemandWakeup:
             self.writer.close()
 
 
-def run_demand_loop(stop, wakeup, has_demand, work, *, active_seconds, safety=None,
-                    clock=time.monotonic, report=lambda value: None):
+def run_demand_loop(
+    stop,
+    wakeup,
+    has_demand,
+    work,
+    *,
+    active_seconds,
+    safety=None,
+    clock=time.monotonic,
+    report=lambda value: None,
+):
     """One existing actor: fast while obligated, blocked while genuinely idle."""
     wakeup.subscribe()  # Commit before subscription is caught by the first scan.
     next_safety = clock()
@@ -129,5 +143,11 @@ def run_demand_loop(stop, wakeup, has_demand, work, *, active_seconds, safety=No
         # Re-read after work and before wait. A commit in this gap also leaves
         # a notification buffered on the already-subscribed connection.
         active = has_demand()
-        seconds = active_seconds if active else max(0, next_safety - clock()) if safety else IDLE_SAFETY_SECONDS
+        seconds = (
+            active_seconds
+            if active
+            else max(0, next_safety - clock())
+            if safety
+            else IDLE_SAFETY_SECONDS
+        )
         wakeup.wait(seconds)

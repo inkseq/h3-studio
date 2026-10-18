@@ -1,4 +1,5 @@
 """Protected runtime DSN loading with synthetic local values only."""
+
 import os
 from pathlib import Path
 import tempfile
@@ -31,7 +32,10 @@ class SettingsTests(unittest.TestCase):
 
     def test_file_loaded_without_changing_environment(self):
         self.write(b"postgresql+psycopg://fake:synthetic-only@localhost/fake\r\n")
-        self.assertEqual(database_url_from_environment(), "postgresql+psycopg://fake:synthetic-only@localhost/fake")
+        self.assertEqual(
+            database_url_from_environment(),
+            "postgresql+psycopg://fake:synthetic-only@localhost/fake",
+        )
         self.assertNotIn("SIXNINE_DATABASE_URL", os.environ)
         self.assertNotIn("synthetic-only", repr(Settings.from_environment()))
 
@@ -45,7 +49,9 @@ class SettingsTests(unittest.TestCase):
         os.environ["SIXNINE_OPERATOR_CAPACITY_OWNERS"] = "superdan,supervan"
         self.assertEqual(Settings.from_environment().operator_admin_owners, ())
         os.environ["SIXNINE_OPERATOR_ADMIN_OWNERS"] = "superdan"
-        self.assertEqual(Settings.from_environment().operator_admin_owners, ("superdan",))
+        self.assertEqual(
+            Settings.from_environment().operator_admin_owners, ("superdan",)
+        )
         for value in ("unknown", "superdan,superdan"):
             os.environ["SIXNINE_OPERATOR_ADMIN_OWNERS"] = value
             with self.assertRaisesRegex(ValueError, "explicit subset"):
@@ -73,7 +79,14 @@ class SettingsTests(unittest.TestCase):
                     Settings(self.path.parent, storyboard_owners=value)
 
     def test_invalid_files_reject_without_content_in_error(self):
-        for raw in (b"", b"x"*16385, b"postgresql://fake:synthetic-secret@host/db\nother", b"\xff", b" sqlite:///fake", b"sqlite:///fake\x00"):
+        for raw in (
+            b"",
+            b"x" * 16385,
+            b"postgresql://fake:synthetic-secret@host/db\nother",
+            b"\xff",
+            b" sqlite:///fake",
+            b"sqlite:///fake\x00",
+        ):
             with self.subTest(size=len(raw)):
                 self.write(raw)
                 with self.assertRaises(ValueError) as caught:

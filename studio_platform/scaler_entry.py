@@ -1,4 +1,5 @@
 """Select a reviewed controller from a bounded operator file; default is disabled."""
+
 import argparse
 import json
 from pathlib import Path
@@ -26,7 +27,14 @@ def main(argv=None):
             raise ValueError
         return run(argv)
     except Exception:
-        print(json.dumps({"phase": "controller_configuration_invalid", "provider_calls_enabled": False}))
+        print(
+            json.dumps(
+                {
+                    "phase": "controller_configuration_invalid",
+                    "provider_calls_enabled": False,
+                }
+            )
+        )
         return 1
 
 

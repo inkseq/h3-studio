@@ -1,4 +1,5 @@
 """Offline durable multipart state-machine tests; all objects and DBs are temporary."""
+
 from __future__ import annotations
 
 import hashlib
@@ -17,11 +18,21 @@ from unittest import mock
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
-from studio_platform.storage import (IntegrityError, ObjectNotFound, ObjectTooLarge,
-                                    S3ObjectStore, UnsupportedStorageOperation)
+from studio_platform.storage import (
+    IntegrityError,
+    ObjectNotFound,
+    ObjectTooLarge,
+    S3ObjectStore,
+    UnsupportedStorageOperation,
+)
 from studio_platform.storage_config import S3Credentials
-from studio_platform.storage_multipart import (MIB, MultipartConflict, MultipartJournal,
-                                              MultipartOutcomeUnknown, MultipartUploadManager)
+from studio_platform.storage_multipart import (
+    MIB,
+    MultipartConflict,
+    MultipartJournal,
+    MultipartOutcomeUnknown,
+    MultipartUploadManager,
+)
 from test_platform_storage import FakeClientError, FakeS3, OfflineTest, config
 
 
@@ -41,7 +52,9 @@ class FakeMultipartS3(FakeS3):
             self.failure = None
             if stage == "crash":
                 raise ProcessStopped()
-            raise RuntimeError("https://private.invalid?X-Amz-Signature=fake-secret-never-log")
+            raise RuntimeError(
+                "https://private.invalid?X-Amz-Signature=fake-secret-never-log"
+            )
 
     def _record(self, operation, args):
         self.calls.append((operation, {k: v for k, v in args.items() if k != "Body"}))
@@ -65,7 +78,10 @@ class FakeMultipartS3(FakeS3):
             raise FakeClientError(404, "NoSuchUpload")
         value = args["Body"].read()
         etag = '"' + hashlib.md5(value, usedforsecurity=False).hexdigest() + '"'
-        self.uploads[args["UploadId"]]["parts"][args["PartNumber"]] = {"body": value, "ETag": etag}
+        self.uploads[args["UploadId"]]["parts"][args["PartNumber"]] = {
+            "body": value,
+            "ETag": etag,
+        }
         self._finish("part")
         return {"ETag": etag}
 
@@ -73,13 +89,22 @@ class FakeMultipartS3(FakeS3):
         self._record("list_parts", args)
         if args["UploadId"] not in self.uploads:
             raise FakeClientError(404, "NoSuchUpload")
-        return {"Parts": [{"PartNumber": n, "Size": len(v["body"]), "ETag": v["ETag"]}
-                          for n, v in sorted(self.uploads[args["UploadId"]]["parts"].items())]}
+        return {
+            "Parts": [
+                {"PartNumber": n, "Size": len(v["body"]), "ETag": v["ETag"]}
+                for n, v in sorted(self.uploads[args["UploadId"]]["parts"].items())
+            ]
+        }
 
     def list_multipart_uploads(self, **args):
         self._record("list_uploads", args)
-        return {"Uploads": [{"Key": value["Key"], "UploadId": identifier}
-                            for identifier, value in self.uploads.items() if value["Key"].startswith(args["Prefix"])]}
+        return {
+            "Uploads": [
+                {"Key": value["Key"], "UploadId": identifier}
+                for identifier, value in self.uploads.items()
+                if value["Key"].startswith(args["Prefix"])
+            ]
+        }
 
     def complete_multipart_upload(self, **args):
         self._record("complete", args)
@@ -88,9 +113,17 @@ class FakeMultipartS3(FakeS3):
             raise FakeClientError(404, "NoSuchUpload")
         if args.get("IfNoneMatch") == "*" and args["Key"] in self.objects:
             raise FakeClientError(412, "PreconditionFailed")
-        payload = b"".join(upload["parts"][part["PartNumber"]]["body"] for part in args["MultipartUpload"]["Parts"])
-        self.objects[args["Key"]] = {"body": payload, "ContentLength": len(payload),
-            "ContentType": upload["ContentType"], "Metadata": upload["Metadata"], "ETag": '"multipart-not-sha256-2"'}
+        payload = b"".join(
+            upload["parts"][part["PartNumber"]]["body"]
+            for part in args["MultipartUpload"]["Parts"]
+        )
+        self.objects[args["Key"]] = {
+            "body": payload,
+            "ContentLength": len(payload),
+            "ContentType": upload["ContentType"],
+            "Metadata": upload["Metadata"],
+            "ETag": '"multipart-not-sha256-2"',
+        }
         del self.uploads[args["UploadId"]]
         self._finish("complete")
         return {"ETag": '"multipart-not-sha256-2"'}
@@ -111,18 +144,25 @@ class MultipartTests(OfflineTest):
         postgres = os.environ.get("PLATFORM_TEST_DATABASE_URL")
         if postgres:
             parsed = make_url(postgres)
-            if parsed.host not in {"127.0.0.1", "localhost"} or parsed.database != "sixnine_test":
-                raise RuntimeError("Multipart tests only allow the explicit local sixnine_test database")
+            if (
+                parsed.host not in {"127.0.0.1", "localhost"}
+                or parsed.database != "sixnine_test"
+            ):
+                raise RuntimeError(
+                    "Multipart tests only allow the explicit local sixnine_test database"
+                )
             schema = "multipart_test_" + uuid.uuid4().hex
             bootstrap = create_engine(parsed, echo=False, hide_parameters=True)
             with bootstrap.begin() as conn:
                 conn.execute(text('CREATE SCHEMA "' + schema + '"'))
+
             def drop_test_schema():
                 try:
                     with bootstrap.begin() as conn:
                         conn.execute(text('DROP SCHEMA "' + schema + '" CASCADE'))
                 finally:
                     bootstrap.dispose()
+
             self.addCleanup(drop_test_schema)
             self.url = parsed.update_query_dict({"options": "-csearch_path=" + schema})
         self.engine = create_engine(self.url)
@@ -131,18 +171,29 @@ class MultipartTests(OfflineTest):
         self.selected = config()
         self.fake = FakeMultipartS3(self.selected)
         self.store = S3ObjectStore(self.selected, client=self.fake)
-        self.manager = MultipartUploadManager(self.store, self.journal, part_size=5 * MIB)
+        self.manager = MultipartUploadManager(
+            self.store, self.journal, part_size=5 * MIB
+        )
 
     def begin(self, body=b"abc", **changes):
-        args = dict(size_bytes=len(body), sha256=hashlib.sha256(body).hexdigest(), filename="source.mp4", content_type="video/mp4")
+        args = dict(
+            size_bytes=len(body),
+            sha256=hashlib.sha256(body).hexdigest(),
+            filename="source.mp4",
+            content_type="video/mp4",
+        )
         args.update(changes)
         return self.manager.begin("owner", "asset", "request-1", **args)
 
     def uploaded(self, body=b"abc"):
         session = self.begin(body)
         for offset in range(0, len(body), self.manager.part_size):
-            self.manager.upload_part("owner", session["id"], offset // self.manager.part_size + 1,
-                                     io.BytesIO(body[offset:offset + self.manager.part_size]))
+            self.manager.upload_part(
+                "owner",
+                session["id"],
+                offset // self.manager.part_size + 1,
+                io.BytesIO(body[offset : offset + self.manager.part_size]),
+            )
         return session
 
     def count(self, name):
@@ -152,15 +203,17 @@ class MultipartTests(OfflineTest):
         # A fresh engine/journal simulates process restart without changing DB.
         engine = create_engine(self.url)
         self.addCleanup(engine.dispose)
-        return MultipartUploadManager(self.store, MultipartJournal(engine), part_size=32 * MIB)
+        return MultipartUploadManager(
+            self.store, MultipartJournal(engine), part_size=32 * MIB
+        )
 
     def test_multiple_parts_restart_and_full_readback(self):
         body = b"x" * (5 * MIB) + b"lastpart"
         session = self.begin(body)
-        self.manager.upload_part("owner", session["id"], 1, io.BytesIO(body[:5 * MIB]))
+        self.manager.upload_part("owner", session["id"], 1, io.BytesIO(body[: 5 * MIB]))
         manager = self.restarted()
         manager.reconcile("owner", session["id"])
-        manager.upload_part("owner", session["id"], 2, io.BytesIO(body[5 * MIB:]))
+        manager.upload_part("owner", session["id"], 2, io.BytesIO(body[5 * MIB :]))
         result = manager.complete("owner", session["id"])
         self.assertEqual(result.sha256, hashlib.sha256(body).hexdigest())
         self.assertEqual(self.fake.objects[result.key]["body"], body)
@@ -182,11 +235,15 @@ class MultipartTests(OfflineTest):
         before = len(self.fake.calls)
         with self.assertRaises(ObjectNotFound):
             self.manager.get("other", session["id"])
-        other = MultipartUploadManager(self.store, MultipartJournal(self.engine, tenant="other"))
+        other = MultipartUploadManager(
+            self.store, MultipartJournal(self.engine, tenant="other")
+        )
         with self.assertRaises(ObjectNotFound):
             other.get("owner", session["id"])
         selected = config(bucket="other-bucket")
-        changed = MultipartUploadManager(S3ObjectStore(selected, client=FakeMultipartS3(selected)), self.journal)
+        changed = MultipartUploadManager(
+            S3ObjectStore(selected, client=FakeMultipartS3(selected)), self.journal
+        )
         with self.assertRaises(MultipartConflict):
             changed.get("owner", session["id"])
         self.assertEqual(len(self.fake.calls), before)
@@ -199,7 +256,9 @@ class MultipartTests(OfflineTest):
             self.begin(sha256=None)
         selected = config("hippius")
         with self.assertRaises(UnsupportedStorageOperation):
-            MultipartUploadManager(S3ObjectStore(selected, client=FakeMultipartS3(selected)), self.journal)
+            MultipartUploadManager(
+                S3ObjectStore(selected, client=FakeMultipartS3(selected)), self.journal
+            )
         self.assertEqual(self.fake.calls, [])
         self.assertEqual(self.manager.capabilities["max_object_bytes"], 512 * MIB)
         self.assertFalse(self.manager.capabilities["browser_multipart"])
@@ -208,7 +267,9 @@ class MultipartTests(OfflineTest):
         session = self.begin()
         for number, body in ((0, b"abc"), (2, b"abc"), (1, b"ab"), (1, b"abcd")):
             with self.assertRaises(Exception):
-                self.manager.upload_part("owner", session["id"], number, io.BytesIO(body))
+                self.manager.upload_part(
+                    "owner", session["id"], number, io.BytesIO(body)
+                )
         self.assertEqual(self.count("part"), 0)
         self.manager.upload_part("owner", session["id"], 1, io.BytesIO(b"abc"))
         self.manager.upload_part("owner", session["id"], 1, io.BytesIO(b"abc"))
@@ -243,7 +304,10 @@ class MultipartTests(OfflineTest):
         manager = self.restarted()
         with self.assertRaises(MultipartConflict):
             manager.reconcile("owner", session["id"])
-        self.assertEqual(manager.reconcile("owner", session["id"], interrupted=True)["status"], "active")
+        self.assertEqual(
+            manager.reconcile("owner", session["id"], interrupted=True)["status"],
+            "active",
+        )
         self.assertEqual(self.count("create"), 1)
 
     def test_part_lost_response_and_part_missing_have_safe_recovery(self):
@@ -289,7 +353,9 @@ class MultipartTests(OfflineTest):
         self.fake.fail = RuntimeError("fake-secret-never-log")
         with self.assertRaises(Exception):
             self.manager.complete("owner", session["id"])
-        self.assertEqual(self.manager.get("owner", session["id"])["status"], "verification_pending")
+        self.assertEqual(
+            self.manager.get("owner", session["id"])["status"], "verification_pending"
+        )
         self.fake.fail = None
         self.manager.complete("owner", session["id"])
         self.assertEqual(self.count("complete"), 1)
@@ -301,13 +367,18 @@ class MultipartTests(OfflineTest):
         self.fake.uploads[record["upload_id"]]["parts"][1]["body"] = b"xyz"
         with self.assertRaises(IntegrityError):
             self.manager.complete("owner", session["id"])
-        self.assertNotEqual(self.manager.get("owner", session["id"])["status"], "completed")
+        self.assertNotEqual(
+            self.manager.get("owner", session["id"])["status"], "completed"
+        )
         self.assertEqual(self.count("get"), 1)
 
     def test_changed_or_unreserved_remote_parts_block_complete(self):
         session = self.uploaded()
         record = self.journal.get("owner", session["id"])
-        self.fake.uploads[record["upload_id"]]["parts"][2] = {"body": b"unexpected", "ETag": '"other"'}
+        self.fake.uploads[record["upload_id"]]["parts"][2] = {
+            "body": b"unexpected",
+            "ETag": '"other"',
+        }
         with self.assertRaises(MultipartConflict):
             self.manager.complete("owner", session["id"])
         with self.assertRaises(IntegrityError):
@@ -319,7 +390,9 @@ class MultipartTests(OfflineTest):
         self.fake.failure = ("abort", "after")
         with self.assertRaises(MultipartOutcomeUnknown):
             self.manager.abort("owner", session["id"])
-        self.assertEqual(self.restarted().reconcile("owner", session["id"])["status"], "aborted")
+        self.assertEqual(
+            self.restarted().reconcile("owner", session["id"])["status"], "aborted"
+        )
         self.manager.abort("owner", session["id"])
         self.assertEqual(self.count("abort"), 1)
         self.assertEqual(self.fake.objects, {})
@@ -328,7 +401,9 @@ class MultipartTests(OfflineTest):
         selected = config("aws-s3")
         self.fake = FakeMultipartS3(selected)
         self.store = S3ObjectStore(selected, client=self.fake)
-        self.manager = MultipartUploadManager(self.store, self.journal, part_size=5 * MIB)
+        self.manager = MultipartUploadManager(
+            self.store, self.journal, part_size=5 * MIB
+        )
         session = self.uploaded()
         self.manager.complete("owner", session["id"])
         call = next(args for op, args in self.fake.calls if op == "complete")
@@ -347,7 +422,11 @@ class MultipartTests(OfflineTest):
         else:
             self.fail("Expected a safe unknown outcome")
         with self.engine.connect() as conn:
-            records = conn.execute(text("SELECT record FROM storage_multipart_uploads")).scalars().all()
+            records = (
+                conn.execute(text("SELECT record FROM storage_multipart_uploads"))
+                .scalars()
+                .all()
+            )
         serialized = json.dumps(records)
         self.assertNotIn("X-Amz", serialized)
         self.assertNotIn("fake-secret", serialized)
@@ -355,11 +434,13 @@ class MultipartTests(OfflineTest):
 
     def test_concurrent_completion_submits_only_once(self):
         session = self.uploaded()
+
         def complete(_):
             try:
                 return self.manager.complete("owner", session["id"])
             except MultipartConflict:
                 return None
+
         with ThreadPoolExecutor(max_workers=6) as pool:
             results = list(pool.map(complete, range(6)))
         self.assertTrue(any(result is not None for result in results))
@@ -368,7 +449,10 @@ class MultipartTests(OfflineTest):
     def test_completion_with_stale_active_snapshot_returns_verified_result(self):
         session = self.uploaded()
         stale = self.restarted()
-        snapshot_read, completion_finished = Barrier(2, timeout=10), Barrier(2, timeout=10)
+        snapshot_read, completion_finished = (
+            Barrier(2, timeout=10),
+            Barrier(2, timeout=10),
+        )
         list_parts = stale._list_parts
 
         def delayed_list(record):
@@ -390,7 +474,9 @@ class MultipartTests(OfflineTest):
                 self.assertEqual(pending.result(timeout=10), winner)
         self.assertEqual(self.count("complete"), 1)
         self.assertEqual(self.count("get"), 1)
-        self.assertEqual(self.manager.get("owner", session["id"])["status"], "completed")
+        self.assertEqual(
+            self.manager.get("owner", session["id"])["status"], "completed"
+        )
 
     def test_missing_upload_without_new_journal_version_remains_missing(self):
         session = self.uploaded()
@@ -406,9 +492,11 @@ class MultipartTests(OfflineTest):
         session = self.uploaded()
         stale = self.restarted()
         list_parts = stale._list_parts
+
         def abort_before_list(record):
             self.manager.abort("owner", session["id"])
             return list_parts(record)
+
         with mock.patch.object(stale, "_list_parts", side_effect=abort_before_list):
             with self.assertRaises(MultipartConflict):
                 stale.complete("owner", session["id"])
@@ -417,25 +505,39 @@ class MultipartTests(OfflineTest):
         self.assertEqual(self.count("get"), 0)
 
     def test_stale_completion_preserves_inflight_and_unknown_outcomes(self):
-        for stage, error, status in (("crash", ProcessStopped, "completing"),
-                                     ("after", MultipartOutcomeUnknown, "completion_unknown")):
+        for stage, error, status in (
+            ("crash", ProcessStopped, "completing"),
+            ("after", MultipartOutcomeUnknown, "completion_unknown"),
+        ):
             with self.subTest(stage=stage):
-                session = self.manager.begin("owner", "asset", "uncertain-" + stage,
-                    size_bytes=3, sha256=hashlib.sha256(b"abc").hexdigest(),
-                    filename="source.mp4", content_type="video/mp4")
+                session = self.manager.begin(
+                    "owner",
+                    "asset",
+                    "uncertain-" + stage,
+                    size_bytes=3,
+                    sha256=hashlib.sha256(b"abc").hexdigest(),
+                    filename="source.mp4",
+                    content_type="video/mp4",
+                )
                 self.manager.upload_part("owner", session["id"], 1, io.BytesIO(b"abc"))
                 stale = self.restarted()
                 list_parts = stale._list_parts
                 before = self.count("complete")
+
                 def interrupted_before_list(record):
                     self.fake.failure = ("complete", stage)
                     with self.assertRaises(error):
                         self.manager.complete("owner", session["id"])
                     return list_parts(record)
-                with mock.patch.object(stale, "_list_parts", side_effect=interrupted_before_list):
+
+                with mock.patch.object(
+                    stale, "_list_parts", side_effect=interrupted_before_list
+                ):
                     with self.assertRaises(MultipartConflict):
                         stale.complete("owner", session["id"])
-                self.assertEqual(self.manager.get("owner", session["id"])["status"], status)
+                self.assertEqual(
+                    self.manager.get("owner", session["id"])["status"], status
+                )
                 self.assertEqual(self.count("complete"), before + 1)
                 self.assertEqual(self.count("get"), 0)
 
@@ -443,13 +545,17 @@ class MultipartTests(OfflineTest):
         session = self.uploaded()
         stale = self.restarted()
         list_parts = stale._list_parts
+
         def changed_binding_before_list(record):
             self.manager.complete("owner", session["id"])
             changed = self.journal.get("owner", session["id"])
             changed["binding"] = "different-storage-binding"
             self.journal.save("owner", changed)
             return list_parts(record)
-        with mock.patch.object(stale, "_list_parts", side_effect=changed_binding_before_list):
+
+        with mock.patch.object(
+            stale, "_list_parts", side_effect=changed_binding_before_list
+        ):
             with self.assertRaisesRegex(MultipartConflict, "different provider"):
                 stale.complete("owner", session["id"])
         self.assertEqual(self.count("complete"), 1)
@@ -467,27 +573,70 @@ class MultipartTests(OfflineTest):
     def test_real_sdk_request_shapes_are_valid_with_stubbed_transport(self):
         from botocore.response import StreamingBody
         from botocore.stub import ANY, Stubber
+
         selected = config("aws-s3")
         store = S3ObjectStore(selected, S3Credentials("fake-access", "fake-secret"))
         manager = MultipartUploadManager(store, self.journal)
         with Stubber(store._client) as stub:
-            stub.add_response("create_multipart_upload", {"UploadId": "sdk-upload"},
-                {"Bucket": selected.bucket, "Key": ANY, "ContentType": "video/mp4", "Metadata": ANY})
-            session = manager.begin("owner", "asset", "sdk-request", size_bytes=3,
-                sha256=hashlib.sha256(b"abc").hexdigest(), filename="source.mp4", content_type="video/mp4")
+            stub.add_response(
+                "create_multipart_upload",
+                {"UploadId": "sdk-upload"},
+                {
+                    "Bucket": selected.bucket,
+                    "Key": ANY,
+                    "ContentType": "video/mp4",
+                    "Metadata": ANY,
+                },
+            )
+            session = manager.begin(
+                "owner",
+                "asset",
+                "sdk-request",
+                size_bytes=3,
+                sha256=hashlib.sha256(b"abc").hexdigest(),
+                filename="source.mp4",
+                content_type="video/mp4",
+            )
             key = self.journal.get("owner", session["id"])["key"]
             common = {"Bucket": selected.bucket, "Key": key, "UploadId": "sdk-upload"}
-            stub.add_response("upload_part", {"ETag": '"etag-1"'}, {**common, "PartNumber": 1,
-                "Body": ANY, "ContentLength": 3, "ContentMD5": "kAFQmDzST7DWlj99KOF/cg=="})
+            stub.add_response(
+                "upload_part",
+                {"ETag": '"etag-1"'},
+                {
+                    **common,
+                    "PartNumber": 1,
+                    "Body": ANY,
+                    "ContentLength": 3,
+                    "ContentMD5": "kAFQmDzST7DWlj99KOF/cg==",
+                },
+            )
             manager.upload_part("owner", session["id"], 1, io.BytesIO(b"abc"))
-            stub.add_response("list_parts", {"Parts": [{"PartNumber": 1, "Size": 3, "ETag": '"etag-1"'}]},
-                              {**common, "PartNumberMarker": 0})
-            stub.add_response("complete_multipart_upload", {"ETag": '"final-etag"'}, {**common,
-                "IfNoneMatch": "*", "MultipartUpload": {"Parts": [{"PartNumber": 1, "ETag": '"etag-1"'}]}})
-            stub.add_response("head_object", {"ContentLength": 3, "ContentType": "video/mp4"},
-                              {"Bucket": selected.bucket, "Key": key})
-            stub.add_response("get_object", {"Body": StreamingBody(io.BytesIO(b"abc"), 3)},
-                              {"Bucket": selected.bucket, "Key": key})
+            stub.add_response(
+                "list_parts",
+                {"Parts": [{"PartNumber": 1, "Size": 3, "ETag": '"etag-1"'}]},
+                {**common, "PartNumberMarker": 0},
+            )
+            stub.add_response(
+                "complete_multipart_upload",
+                {"ETag": '"final-etag"'},
+                {
+                    **common,
+                    "IfNoneMatch": "*",
+                    "MultipartUpload": {
+                        "Parts": [{"PartNumber": 1, "ETag": '"etag-1"'}]
+                    },
+                },
+            )
+            stub.add_response(
+                "head_object",
+                {"ContentLength": 3, "ContentType": "video/mp4"},
+                {"Bucket": selected.bucket, "Key": key},
+            )
+            stub.add_response(
+                "get_object",
+                {"Body": StreamingBody(io.BytesIO(b"abc"), 3)},
+                {"Bucket": selected.bucket, "Key": key},
+            )
             self.assertEqual(manager.complete("owner", session["id"]).size_bytes, 3)
             stub.assert_no_pending_responses()
 

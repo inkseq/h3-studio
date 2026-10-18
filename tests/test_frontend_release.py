@@ -1,4 +1,5 @@
 """Frontend artifact safety and immutable publication, entirely offline."""
+
 import copy
 import gzip
 import hashlib
@@ -30,9 +31,21 @@ class FakeS3:
         self.puts.append(kwargs)
         status = self.error_status or (412 if kwargs["Key"] in self.objects else None)
         if status:
-            raise ClientError({"Error": {"Code": "PreconditionFailed" if status == 412 else "AccessDenied"},
-                               "ResponseMetadata": {"HTTPStatusCode": status}}, "PutObject")
-        self.objects[kwargs["Key"]] = {"Metadata": kwargs["Metadata"], "ContentLength": len(kwargs["Body"])}
+            raise ClientError(
+                {
+                    "Error": {
+                        "Code": "PreconditionFailed"
+                        if status == 412
+                        else "AccessDenied"
+                    },
+                    "ResponseMetadata": {"HTTPStatusCode": status},
+                },
+                "PutObject",
+            )
+        self.objects[kwargs["Key"]] = {
+            "Metadata": kwargs["Metadata"],
+            "ContentLength": len(kwargs["Body"]),
+        }
         return {}
 
     def head_object(self, **kwargs):
@@ -49,16 +62,23 @@ class FrontendReleaseTests(unittest.TestCase):
         (self.dist / "assets").mkdir(parents=True)
         self.html = b'<!doctype html><script type="module" src="/assets/index-AbCd_123.js"></script>'
         (self.dist / "index.html").write_bytes(self.html)
-        (self.dist / "assets" / "index-AbCd_123.js").write_bytes(b"console.log('safe fixture')")
+        (self.dist / "assets" / "index-AbCd_123.js").write_bytes(
+            b"console.log('safe fixture')"
+        )
         (self.dist / "assets" / "style-AbCd-123.css").write_bytes(b"body{color:black}")
         self.target = self.root / "bundle"
-        self.contract = patch("tools.release_contract.build_contracts", return_value={"api_compatibility": API_COMPATIBILITY})
+        self.contract = patch(
+            "tools.release_contract.build_contracts",
+            return_value={"api_compatibility": API_COMPATIBILITY},
+        )
         self.contract.start()
         self.addCleanup(self.contract.stop)
         self.manifest = build(COMMIT, self.dist, self.target)
 
     def write_manifest(self, value):
-        (self.target / bundle.MANIFEST_NAME).write_text(json.dumps(value), encoding="utf-8")
+        (self.target / bundle.MANIFEST_NAME).write_text(
+            json.dumps(value), encoding="utf-8"
+        )
 
     def replace_archive(self, raw, *, manifest=None):
         value = copy.deepcopy(manifest or self.manifest)
@@ -69,7 +89,9 @@ class FrontendReleaseTests(unittest.TestCase):
 
     def crafted_tar(self, entries, trailing=b""):
         raw = io.BytesIO()
-        with tarfile.open(fileobj=raw, mode="w", format=tarfile.USTAR_FORMAT) as archive:
+        with tarfile.open(
+            fileobj=raw, mode="w", format=tarfile.USTAR_FORMAT
+        ) as archive:
             for name, content, kind in entries:
                 member = tarfile.TarInfo(name)
                 member.type, member.mode, member.mtime = kind, 0o644, 0
@@ -84,7 +106,9 @@ class FrontendReleaseTests(unittest.TestCase):
         second = build(COMMIT, self.dist, other)
         self.assertEqual(second, self.manifest)
         for name in (bundle.ARCHIVE_NAME, bundle.MANIFEST_NAME):
-            self.assertEqual((self.target / name).read_bytes(), (other / name).read_bytes())
+            self.assertEqual(
+                (self.target / name).read_bytes(), (other / name).read_bytes()
+            )
         self.assertEqual(bundle.validate(self.target, COMMIT), self.manifest)
         files = bundle.archive_files(self.target, self.manifest)
         self.assertEqual(files["index.html"], self.html)
@@ -94,13 +118,27 @@ class FrontendReleaseTests(unittest.TestCase):
         self.assertEqual(compressed[3], 0)  # no original filename in gzip header
         self.assertEqual(compressed[4:8], bytes(4))
         with tarfile.open(fileobj=io.BytesIO(compressed), mode="r:gz") as archive:
-            self.assertTrue(all(m.isfile() and m.uid == m.gid == m.mtime == 0
-                                and m.mode == 0o644 and not m.uname and not m.gname for m in archive))
+            self.assertTrue(
+                all(
+                    m.isfile()
+                    and m.uid == m.gid == m.mtime == 0
+                    and m.mode == 0o644
+                    and not m.uname
+                    and not m.gname
+                    for m in archive
+                )
+            )
 
     def test_manifest_exact_identity_fields_and_types(self):
-        for change in ({"extra": True}, {"version": True}, {"commit": "c" * 40},
-                       {"api_contract": "unknown-v2"}, {"api_compatibility": "x" * 64},
-                       {"archive_bytes": True}, {"archive_bytes": bundle.MAX_ARCHIVE + 1}):
+        for change in (
+            {"extra": True},
+            {"version": True},
+            {"commit": "c" * 40},
+            {"api_contract": "unknown-v2"},
+            {"api_compatibility": "x" * 64},
+            {"archive_bytes": True},
+            {"archive_bytes": bundle.MAX_ARCHIVE + 1},
+        ):
             with self.subTest(change=change):
                 self.write_manifest({**self.manifest, **change})
                 with self.assertRaises(ValueError):
@@ -137,8 +175,13 @@ class FrontendReleaseTests(unittest.TestCase):
             bundle.validate(self.target, COMMIT)
 
     def test_dist_rejects_extra_files_dotfiles_sourcemaps_and_unhashed_assets(self):
-        for name in ("source-manifest.json", ".env", "assets/.secret", "assets/index-AbCd_123.js.map",
-                     "assets/unhashed.js"):
+        for name in (
+            "source-manifest.json",
+            ".env",
+            "assets/.secret",
+            "assets/index-AbCd_123.js.map",
+            "assets/unhashed.js",
+        ):
             with self.subTest(name=name):
                 path = self.dist / name
                 path.write_bytes(b"unwanted")
@@ -169,26 +212,43 @@ class FrontendReleaseTests(unittest.TestCase):
             bundle.validate(self.target, COMMIT)
 
     def test_archive_traversal_absolute_paths_and_unlisted_files(self):
-        for name in ("../index.html", "/index.html", "assets/../index.html", "assets\\index-AbCd1234.js",
-                     "assets/extra-AbCd1234.js"):
+        for name in (
+            "../index.html",
+            "/index.html",
+            "assets/../index.html",
+            "assets\\index-AbCd1234.js",
+            "assets/extra-AbCd1234.js",
+        ):
             with self.subTest(name=name):
                 self.replace_archive(self.crafted_tar([(name, b"x", tarfile.REGTYPE)]))
                 with self.assertRaises(ValueError):
                     bundle.validate(self.target, COMMIT)
 
     def test_archive_links_directories_devices_and_duplicate_members(self):
-        for kind in (tarfile.SYMTYPE, tarfile.LNKTYPE, tarfile.DIRTYPE, tarfile.CHRTYPE):
+        for kind in (
+            tarfile.SYMTYPE,
+            tarfile.LNKTYPE,
+            tarfile.DIRTYPE,
+            tarfile.CHRTYPE,
+        ):
             with self.subTest(kind=kind):
                 self.replace_archive(self.crafted_tar([("index.html", b"", kind)]))
                 with self.assertRaises(ValueError):
                     bundle.validate(self.target, COMMIT)
-        self.replace_archive(self.crafted_tar([("index.html", self.html, tarfile.REGTYPE)] * 2))
+        self.replace_archive(
+            self.crafted_tar([("index.html", self.html, tarfile.REGTYPE)] * 2)
+        )
         with self.assertRaisesRegex(ValueError, "duplicate"):
             bundle.validate(self.target, COMMIT)
 
     def test_manifest_path_collision_and_input_size_bounds(self):
-        for name, metadata in (("assets/INDEX-AbCd_123.js", self.manifest["files"]["assets/index-AbCd_123.js"]),
-                               ("../outside", {"sha256": "0" * 64, "size": 1})):
+        for name, metadata in (
+            (
+                "assets/INDEX-AbCd_123.js",
+                self.manifest["files"]["assets/index-AbCd_123.js"],
+            ),
+            ("../outside", {"sha256": "0" * 64, "size": 1}),
+        ):
             value = copy.deepcopy(self.manifest)
             value["files"][name] = metadata
             self.write_manifest(value)
@@ -210,7 +270,9 @@ class FrontendReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "trailer"):
             bundle.validate(self.target, COMMIT)
 
-    def test_existing_destination_and_changed_manifest_are_not_overwritten_or_trusted(self):
+    def test_existing_destination_and_changed_manifest_are_not_overwritten_or_trusted(
+        self,
+    ):
         original = (self.target / bundle.MANIFEST_NAME).read_bytes()
         with self.assertRaisesRegex(ValueError, "destination_must_be_empty"):
             build(COMMIT, self.dist, self.target)
@@ -220,7 +282,9 @@ class FrontendReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "manifest_changed"):
             bundle.archive_files(self.target, supplied)
 
-    def test_publication_uses_create_only_expected_prefix_and_reconciles_same_retry(self):
+    def test_publication_uses_create_only_expected_prefix_and_reconciles_same_retry(
+        self,
+    ):
         client = FakeS3()
         first = publish(COMMIT, self.target, client=client)
         second = publish(COMMIT, self.target, client=client)
@@ -232,7 +296,9 @@ class FrontendReleaseTests(unittest.TestCase):
             self.assertEqual(call["IfNoneMatch"], "*")
             self.assertEqual(call["ServerSideEncryption"], "AES256")
             self.assertTrue(call["Key"].startswith(f"releases/{COMMIT}/frontend/"))
-            self.assertEqual(call["Metadata"]["sha256"], hashlib.sha256(call["Body"]).hexdigest())
+            self.assertEqual(
+                call["Metadata"]["sha256"], hashlib.sha256(call["Body"]).hexdigest()
+            )
             self.assertEqual(call["ContentLength"], len(call["Body"]))
 
     def test_publication_refuses_existing_different_digest_or_size(self):
@@ -240,11 +306,15 @@ class FrontendReleaseTests(unittest.TestCase):
             with self.subTest(field=field):
                 client = FakeS3()
                 publish(COMMIT, self.target, client=client)
-                client.objects[f"releases/{COMMIT}/frontend/{bundle.ARCHIVE_NAME}"][field] = value
+                client.objects[f"releases/{COMMIT}/frontend/{bundle.ARCHIVE_NAME}"][
+                    field
+                ] = value
                 with self.assertRaisesRegex(ValueError, "differs"):
                     publish(COMMIT, self.target, client=client)
 
-    def test_publication_does_not_reconcile_other_aws_failures_or_send_invalid_bundle(self):
+    def test_publication_does_not_reconcile_other_aws_failures_or_send_invalid_bundle(
+        self,
+    ):
         client = FakeS3()
         client.error_status = 403
         with self.assertRaises(ClientError):

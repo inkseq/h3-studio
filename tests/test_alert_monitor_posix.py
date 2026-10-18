@@ -1,4 +1,5 @@
 """POSIX-only host state safety; stdlib only, no AWS or application imports."""
+
 import os
 from pathlib import Path
 import stat
@@ -19,20 +20,32 @@ class ProtectedStateTests(unittest.TestCase):
         # Only fixture parent/root identity differs from a deployed root-owned
         # state directory. Keep real modes, no-follow, link counts and flock.
         parents = patch.object(monitor, 'protected_directory')
-        parents.start(); self.addCleanup(parents.stop)
+        parents.start()
+        self.addCleanup(parents.stop)
         actual_fstat = os.fstat
+
         def root_fixture(fd):
             info = actual_fstat(fd)
-            return SimpleNamespace(st_mode=info.st_mode, st_uid=0, st_nlink=info.st_nlink, st_size=info.st_size)
+            return SimpleNamespace(
+                st_mode=info.st_mode,
+                st_uid=0,
+                st_nlink=info.st_nlink,
+                st_size=info.st_size,
+            )
+
         owner = patch.object(monitor.os, 'fstat', side_effect=root_fixture)
-        owner.start(); self.addCleanup(owner.stop)
+        owner.start()
+        self.addCleanup(owner.stop)
 
     def test_atomic_mode_and_failed_replace_preserve_previous_state(self):
         monitor.atomic(self.state, {'first': True})
         before = self.state.read_bytes()
         self.assertEqual(stat.S_IMODE(self.state.stat().st_mode), 0o600)
         self.assertEqual(monitor.read_protected(self.state), {'first': True})
-        with patch.object(monitor.os, 'replace', side_effect=OSError('interrupted')), self.assertRaises(OSError):
+        with (
+            patch.object(monitor.os, 'replace', side_effect=OSError('interrupted')),
+            self.assertRaises(OSError),
+        ):
             monitor.atomic(self.state, {'second': True})
         self.assertEqual(self.state.read_bytes(), before)
         self.assertEqual(list(self.root.iterdir()), [self.state])

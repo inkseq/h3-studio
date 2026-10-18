@@ -1,4 +1,5 @@
 """Storage contract tests: temporary local files and fake clients, no provider IO."""
+
 from __future__ import annotations
 
 import hashlib
@@ -16,41 +17,78 @@ from types import SimpleNamespace
 from unittest import mock
 
 from studio_platform.storage import (
-    IntegrityError, InvalidObjectKey, LocalObjectStore, ObjectAlreadyExists,
-    ObjectNotFound, ObjectStore, ObjectTooLarge, S3ObjectStore, SecretURL,
-    StorageError, StorageWriteUncertain, UnsupportedStorageOperation,
-    key_belongs_to, make_object_key, validate_key,
+    IntegrityError,
+    InvalidObjectKey,
+    LocalObjectStore,
+    ObjectAlreadyExists,
+    ObjectNotFound,
+    ObjectStore,
+    ObjectTooLarge,
+    S3ObjectStore,
+    SecretURL,
+    StorageError,
+    StorageWriteUncertain,
+    UnsupportedStorageOperation,
+    key_belongs_to,
+    make_object_key,
+    validate_key,
 )
 from studio_platform.storage_config import (
-    CredentialFields, R2_CREDENTIAL_FIELDS, S3Credentials, S3StorageConfig,
-    StorageConfigurationError, load_storage_credentials,
+    CredentialFields,
+    R2_CREDENTIAL_FIELDS,
+    S3Credentials,
+    S3StorageConfig,
+    StorageConfigurationError,
+    load_storage_credentials,
 )
 
 R2_ENDPOINT = "https://" + "a" * 32 + ".r2.cloudflarestorage.com"
 
 
 def config(provider="r2", **changes):
-    values = dict(provider=provider, endpoint_url=R2_ENDPOINT, region="auto", bucket="test-bucket",
-                  service="cloudflare-r2", profile="cloudflare-r2--test", enabled=True)
+    values = dict(
+        provider=provider,
+        endpoint_url=R2_ENDPOINT,
+        region="auto",
+        bucket="test-bucket",
+        service="cloudflare-r2",
+        profile="cloudflare-r2--test",
+        enabled=True,
+    )
     if provider == "hippius":
-        values.update(endpoint_url="https://s3.hippius.com", region="decentralized",
-                      service="hippius-s3", profile="hippius-s3--test")
+        values.update(
+            endpoint_url="https://s3.hippius.com",
+            region="decentralized",
+            service="hippius-s3",
+            profile="hippius-s3--test",
+        )
     if provider == "aws-s3":
-        values.update(endpoint_url="https://s3.ap-southeast-2.amazonaws.com", region="ap-southeast-2",
-                      service="aws-s3", profile="aws-s3--test")
+        values.update(
+            endpoint_url="https://s3.ap-southeast-2.amazonaws.com",
+            region="ap-southeast-2",
+            service="aws-s3",
+            profile="aws-s3--test",
+        )
     values.update(changes)
     return S3StorageConfig(**values)
 
 
 class FakeClientError(Exception):
     def __init__(self, status, code="TestFailure"):
-        self.response = {"Error": {"Code": code}, "ResponseMetadata": {"HTTPStatusCode": status}}
-        super().__init__("https://private.invalid?X-Amz-Signature=fake-secret-never-log")
+        self.response = {
+            "Error": {"Code": code},
+            "ResponseMetadata": {"HTTPStatusCode": status},
+        }
+        super().__init__(
+            "https://private.invalid?X-Amz-Signature=fake-secret-never-log"
+        )
 
 
 class FakeS3:
     def __init__(self, selected):
-        self.meta = SimpleNamespace(endpoint_url=selected.endpoint_url, region_name=selected.region)
+        self.meta = SimpleNamespace(
+            endpoint_url=selected.endpoint_url, region_name=selected.region
+        )
         self.objects, self.calls = {}, []
         self.fail = None
         self.body = None
@@ -63,9 +101,13 @@ class FakeS3:
         if kwargs.get("IfNoneMatch") == "*" and key in self.objects:
             raise FakeClientError(412, "PreconditionFailed")
         payload = kwargs["Body"].read()
-        self.objects[key] = dict(body=payload, ContentLength=len(payload),
-                                 ContentType=kwargs["ContentType"], Metadata=kwargs["Metadata"],
-                                 ETag='"fake-etag"')
+        self.objects[key] = dict(
+            body=payload,
+            ContentLength=len(payload),
+            ContentType=kwargs["ContentType"],
+            Metadata=kwargs["Metadata"],
+            ETag='"fake-etag"',
+        )
         return {"ETag": '"fake-etag"', "VersionId": "version-1"}
 
     def head_object(self, **kwargs):
@@ -95,14 +137,22 @@ class FakeS3:
         if self.fail:
             raise self.fail
         params = kwargs["Params"]
-        return (self.meta.endpoint_url + "/" + params["Bucket"] + "/" + params["Key"]
-                + "?X-Amz-Signature=fake-secret-never-log")
+        return (
+            self.meta.endpoint_url
+            + "/"
+            + params["Bucket"]
+            + "/"
+            + params["Key"]
+            + "?X-Amz-Signature=fake-secret-never-log"
+        )
 
 
 class OfflineTest(unittest.TestCase):
     def setUp(self):
         # Catches accidental default credential probes and all actual HTTP.
-        self.network = mock.patch.object(socket.socket, "connect", side_effect=AssertionError("No network allowed"))
+        self.network = mock.patch.object(
+            socket.socket, "connect", side_effect=AssertionError("No network allowed")
+        )
         self.network.start()
         self.addCleanup(self.network.stop)
 
@@ -117,8 +167,14 @@ class LocalStorageTests(OfflineTest):
 
     def test_new_object_roundtrip_and_restart(self):
         payload = b"private video bytes"
-        info = self.store.write_new("superdan", "asset-one", io.BytesIO(payload), filename="source.mp4",
-                                    content_type="video/mp4", max_bytes=len(payload))
+        info = self.store.write_new(
+            "superdan",
+            "asset-one",
+            io.BytesIO(payload),
+            filename="source.mp4",
+            content_type="video/mp4",
+            max_bytes=len(payload),
+        )
         self.assertIsInstance(self.store, ObjectStore)
         self.assertTrue(key_belongs_to(info.key, "superdan"))
         self.assertFalse(key_belongs_to(info.key, "supervan"))
@@ -151,24 +207,48 @@ class LocalStorageTests(OfflineTest):
                 return "won"
             except ObjectAlreadyExists:
                 return "lost"
+
         with ThreadPoolExecutor(max_workers=8) as pool:
             results = list(pool.map(publish, range(8)))
         self.assertEqual(results.count("won"), 1)
         self.assertEqual(results.count("lost"), 7)
 
     def test_failed_upload_is_not_published_and_staging_is_removed(self):
-        for bad_limit, bad_hash, expected in ((2, None, ObjectTooLarge), (10, "0" * 64, IntegrityError)):
+        for bad_limit, bad_hash, expected in (
+            (2, None, ObjectTooLarge),
+            (10, "0" * 64, IntegrityError),
+        ):
             with self.assertRaises(expected):
-                self.store.put("failed/object", io.BytesIO(b"123"), max_bytes=bad_limit,
-                               expected_sha256=bad_hash)
+                self.store.put(
+                    "failed/object",
+                    io.BytesIO(b"123"),
+                    max_bytes=bad_limit,
+                    expected_sha256=bad_hash,
+                )
             with self.assertRaises(ObjectNotFound):
                 self.store.stat("failed/object")
             self.assertEqual(list(self.store._staging.iterdir()), [])
 
     def test_invalid_keys_cannot_escape_or_hit_windows_special_files(self):
-        keys = ["../secret", "/absolute", "C:/secret", "safe\\secret", "a//b", "a/./b",
-                "a/../b", "a/%2e%2e/b", "a/file?token=value", "a/file#part", "a/file:stream",
-                "a/NUL.txt", "a/CON", "a/trailing.", "a/space name", "a/\x00", "a/图片"]
+        keys = [
+            "../secret",
+            "/absolute",
+            "C:/secret",
+            "safe\\secret",
+            "a//b",
+            "a/./b",
+            "a/../b",
+            "a/%2e%2e/b",
+            "a/file?token=value",
+            "a/file#part",
+            "a/file:stream",
+            "a/NUL.txt",
+            "a/CON",
+            "a/trailing.",
+            "a/space name",
+            "a/\x00",
+            "a/图片",
+        ]
         for key in keys:
             with self.subTest(key=key), self.assertRaises(InvalidObjectKey):
                 self.store.put(key, io.BytesIO(b"never written"))
@@ -176,15 +256,22 @@ class LocalStorageTests(OfflineTest):
 
     def test_post_publish_sync_failure_retains_reconciliation_key(self):
         from studio_platform import storage
-        with mock.patch.object(storage, "_sync_directory", side_effect=[None, OSError("sync failed")]):
+
+        with mock.patch.object(
+            storage, "_sync_directory", side_effect=[None, OSError("sync failed")]
+        ):
             with self.assertRaises(StorageWriteUncertain) as result:
                 self.store.write_new("owner", "asset", io.BytesIO(b"bytes"))
         with self.store.open(result.exception.key) as source:
             self.assertEqual(source.read(), b"bytes")
 
     def test_limits_and_header_injection_rejected(self):
-        for kwargs in ({"max_bytes": -1}, {"max_bytes": True}, {"expected_sha256": "bad"},
-                       {"content_type": "video/mp4\r\nLocation: other"}):
+        for kwargs in (
+            {"max_bytes": -1},
+            {"max_bytes": True},
+            {"expected_sha256": "bad"},
+            {"content_type": "video/mp4\r\nLocation: other"},
+        ):
             with self.subTest(kwargs=kwargs), self.assertRaises(StorageError):
                 self.store.write_new("user", "asset", io.BytesIO(b"123"), **kwargs)
 
@@ -217,8 +304,12 @@ class LocalStorageTests(OfflineTest):
         with self.assertRaises(StorageError):
             self.store.open(info.key)
         from studio_platform.storage import _no_links
+
         fake = SimpleNamespace(st_mode=0o040700, st_file_attributes=0x400)
-        with mock.patch.object(Path, "lstat", return_value=fake), self.assertRaises(StorageError):
+        with (
+            mock.patch.object(Path, "lstat", return_value=fake),
+            self.assertRaises(StorageError),
+        ):
             _no_links(self.root)
 
     def test_delete_idempotent_and_keeps_other_assets(self):
@@ -250,13 +341,26 @@ class CloudStorageTests(OfflineTest):
             S3ObjectStore(config())
 
     def test_explicit_provider_endpoint_region_and_profile(self):
-        invalid = [{"endpoint_url": ""}, {"endpoint_url": "https://other.invalid"},
-                   {"endpoint_url": R2_ENDPOINT + "?token=secret"},
-                   {"endpoint_url": "https://name:secret@" + "a" * 32 + ".r2.cloudflarestorage.com"},
-                   {"region": "us-east-1"}, {"profile": ""}, {"provider": "minio"},
-                   {"bucket": "../escape"}, {"endpoint_url": "http://localhost:9000"}]
+        invalid = [
+            {"endpoint_url": ""},
+            {"endpoint_url": "https://other.invalid"},
+            {"endpoint_url": R2_ENDPOINT + "?token=secret"},
+            {
+                "endpoint_url": "https://name:secret@"
+                + "a" * 32
+                + ".r2.cloudflarestorage.com"
+            },
+            {"region": "us-east-1"},
+            {"profile": ""},
+            {"provider": "minio"},
+            {"bucket": "../escape"},
+            {"endpoint_url": "http://localhost:9000"},
+        ]
         for changes in invalid:
-            with self.subTest(changes=changes), self.assertRaises(StorageConfigurationError):
+            with (
+                self.subTest(changes=changes),
+                self.assertRaises(StorageConfigurationError),
+            ):
                 config(**changes)
         selected = config()
         wrong = FakeS3(config("hippius"))
@@ -267,7 +371,9 @@ class CloudStorageTests(OfflineTest):
         for provider in ("r2", "aws-s3"):
             with self.subTest(provider=provider):
                 store, fake = self.store(provider)
-                info = store.write_new("owner", "asset", io.BytesIO(b"bytes"), content_type="video/mp4")
+                info = store.write_new(
+                    "owner", "asset", io.BytesIO(b"bytes"), content_type="video/mp4"
+                )
                 self.assertEqual(fake.calls[0][1]["IfNoneMatch"], "*")
                 self.assertEqual(store.stat(info.key).sha256, info.sha256)
                 with store.open(info.key) as stream:
@@ -294,19 +400,25 @@ class CloudStorageTests(OfflineTest):
         self.assertNotEqual(first.key, second.key)
         self.assertNotIn("IfNoneMatch", fake.calls[0][1])
         signed = store.presign_download(first.key)
-        self.assertTrue(signed.reveal().startswith("https://s3.hippius.com/test-bucket/"))
+        self.assertTrue(
+            signed.reveal().startswith("https://s3.hippius.com/test-bucket/")
+        )
 
     def test_bounded_uploads_fail_before_any_cloud_call(self):
         store, fake = self.store(max_single_put_bytes=3)
         with self.assertRaises(ObjectTooLarge):
             store.write_new("owner", "asset", io.BytesIO(b"four"), max_bytes=10)
         with self.assertRaises(IntegrityError):
-            store.write_new("owner", "asset", io.BytesIO(b"ok"), expected_sha256="0" * 64)
+            store.write_new(
+                "owner", "asset", io.BytesIO(b"ok"), expected_sha256="0" * 64
+            )
         self.assertEqual(fake.calls, [])
 
     def test_unknown_write_returns_reconciliation_key_without_fallback_or_retry(self):
         store, fake = self.store("hippius")
-        fake.fail = TimeoutError("https://private.invalid?X-Amz-Signature=fake-secret-never-log")
+        fake.fail = TimeoutError(
+            "https://private.invalid?X-Amz-Signature=fake-secret-never-log"
+        )
         try:
             store.write_new("owner", "asset", io.BytesIO(b"abc"))
         except StorageWriteUncertain as error:
@@ -318,11 +430,15 @@ class CloudStorageTests(OfflineTest):
 
     def test_sdk_failures_and_signed_urls_do_not_leak_via_repr_or_errors(self):
         store, fake = self.store()
-        signed = store.presign_upload("safe/key", content_type="video/mp4", expires_seconds=300)
+        signed = store.presign_upload(
+            "safe/key", content_type="video/mp4", expires_seconds=300
+        )
         self.assertIsInstance(signed, SecretURL)
         self.assertNotIn("fake-secret", repr(signed))
         self.assertNotIn("fake-secret", str(signed))
-        self.assertEqual(signed.required_headers, {"Content-Type": "video/mp4", "If-None-Match": "*"})
+        self.assertEqual(
+            signed.required_headers, {"Content-Type": "video/mp4", "If-None-Match": "*"}
+        )
         with self.assertRaises(TypeError):
             json.dumps(signed)
         credentials = S3Credentials("fake-access", "fake-secret")
@@ -331,11 +447,16 @@ class CloudStorageTests(OfflineTest):
             with self.assertRaises(TypeError):
                 pickle.dumps(secret_object)
         fake.fail = FakeClientError(403)
-        for action in (lambda: store.stat("safe/key"), lambda: store.presign_download("safe/key")):
+        for action in (
+            lambda: store.stat("safe/key"),
+            lambda: store.presign_download("safe/key"),
+        ):
             try:
                 action()
             except StorageError as error:
-                self.assertNotIn("fake-secret", "".join(traceback.format_exception(error)))
+                self.assertNotIn(
+                    "fake-secret", "".join(traceback.format_exception(error))
+                )
 
     def test_presign_refuses_custom_domains_expiry_and_invalid_keys(self):
         store, fake = self.store()
@@ -351,10 +472,15 @@ class CloudStorageTests(OfflineTest):
     def test_download_disposition_is_signed_and_injection_rejected(self):
         store, fake = self.store()
         from unittest.mock import patch
-        with patch.object(fake, "generate_presigned_url", wraps=fake.generate_presigned_url) as generate:
+
+        with patch.object(
+            fake, "generate_presigned_url", wraps=fake.generate_presigned_url
+        ) as generate:
             store.presign_download("safe/key", download_filename="章节.mp4")
-            self.assertEqual(generate.call_args.kwargs["Params"]["ResponseContentDisposition"],
-                             "attachment; filename*=UTF-8''%E7%AB%A0%E8%8A%82.mp4")
+            self.assertEqual(
+                generate.call_args.kwargs["Params"]["ResponseContentDisposition"],
+                "attachment; filename*=UTF-8''%E7%AB%A0%E8%8A%82.mp4",
+            )
             for filename in ("../other", "bad\r\nheader", "a\\b", ""):
                 with self.assertRaises(StorageError):
                     store.presign_download("safe/key", download_filename=filename)
@@ -367,53 +493,100 @@ class CloudStorageTests(OfflineTest):
             import boto3  # noqa: F401
         except ImportError:
             self.skipTest("Optional boto3 dependency is not installed")
-        with mock.patch.dict(os.environ, {"AWS_ENDPOINT_URL": "https://wrong.invalid",
-                                           "AWS_ENDPOINT_URL_S3": "https://wrong.invalid"}):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AWS_ENDPOINT_URL": "https://wrong.invalid",
+                "AWS_ENDPOINT_URL_S3": "https://wrong.invalid",
+            },
+        ):
             store = S3ObjectStore(config(), S3Credentials("fake-access", "fake-secret"))
             self.assertEqual(store._client.meta.endpoint_url, R2_ENDPOINT)
             self.assertEqual(store._client.meta.config.retries["total_max_attempts"], 1)
             signed = store.presign_download("safe/key")
-            self.assertTrue(signed.reveal().startswith(R2_ENDPOINT + "/test-bucket/safe/key?"))
+            self.assertTrue(
+                signed.reveal().startswith(R2_ENDPOINT + "/test-bucket/safe/key?")
+            )
             upload = store.presign_upload("safe/new", content_type="video/mp4")
             self.assertIn("If-None-Match", upload.required_headers)
             with self.assertRaises(StorageError):
-                store._client.meta.events.emit("before-send.s3.PutObject",
-                                                request=SimpleNamespace(url="https://wrong.invalid/redirect"))
+                store._client.meta.events.emit(
+                    "before-send.s3.PutObject",
+                    request=SimpleNamespace(url="https://wrong.invalid/redirect"),
+                )
 
-    def test_immutable_video_r2_signatures_are_bucket_stable_and_do_not_change_default_signers(self):
+    def test_immutable_video_r2_signatures_are_bucket_stable_and_do_not_change_default_signers(
+        self,
+    ):
         from datetime import datetime, timezone
         from urllib.parse import parse_qs, urlsplit
-        from studio_platform.storage import VIDEO_SIGNING_BUCKET_SECONDS, VIDEO_SIGNING_VALIDITY_SECONDS
+        from studio_platform.storage import (
+            VIDEO_SIGNING_BUCKET_SECONDS,
+            VIDEO_SIGNING_VALIDITY_SECONDS,
+        )
         import botocore.auth
 
         store = S3ObjectStore(config(), S3Credentials("fake-access", "fake-secret"))
-        start = 1760572800 // VIDEO_SIGNING_BUCKET_SECONDS * VIDEO_SIGNING_BUCKET_SECONDS
+        start = (
+            1760572800 // VIDEO_SIGNING_BUCKET_SECONDS * VIDEO_SIGNING_BUCKET_SECONDS
+        )
         clock = botocore.auth.get_current_datetime
+
         def sign(now, **options):
-            with mock.patch("studio_platform.storage.time", SimpleNamespace(time=lambda: now)):
-                return store.presign_immutable_video("safe/video.mp4", content_type="video/mp4", **options)
-        early, late, next_bucket = sign(start), sign(start + VIDEO_SIGNING_BUCKET_SECONDS - 1), sign(start + VIDEO_SIGNING_BUCKET_SECONDS)
+            with mock.patch(
+                "studio_platform.storage.time", SimpleNamespace(time=lambda: now)
+            ):
+                return store.presign_immutable_video(
+                    "safe/video.mp4", content_type="video/mp4", **options
+                )
+
+        early, late, next_bucket = (
+            sign(start),
+            sign(start + VIDEO_SIGNING_BUCKET_SECONDS - 1),
+            sign(start + VIDEO_SIGNING_BUCKET_SECONDS),
+        )
         self.assertEqual(early.reveal(), late.reveal())
         self.assertNotEqual(late.reveal(), next_bucket.reveal())
         self.assertEqual(early.expires_at, start + VIDEO_SIGNING_VALIDITY_SECONDS)
-        self.assertEqual(next_bucket.expires_at, start + VIDEO_SIGNING_BUCKET_SECONDS + VIDEO_SIGNING_VALIDITY_SECONDS)
+        self.assertEqual(
+            next_bucket.expires_at,
+            start + VIDEO_SIGNING_BUCKET_SECONDS + VIDEO_SIGNING_VALIDITY_SECONDS,
+        )
         query = parse_qs(urlsplit(early.reveal()).query)
-        self.assertEqual(query["X-Amz-Date"], [datetime.fromtimestamp(start, timezone.utc).strftime("%Y%m%dT%H%M%SZ")])
+        self.assertEqual(
+            query["X-Amz-Date"],
+            [datetime.fromtimestamp(start, timezone.utc).strftime("%Y%m%dT%H%M%SZ")],
+        )
         self.assertEqual(query["X-Amz-Expires"], ["86400"])
-        self.assertEqual(query["response-cache-control"], ["private, max-age=86400, immutable"])
+        self.assertEqual(
+            query["response-cache-control"], ["private, max-age=86400, immutable"]
+        )
         self.assertEqual(query["response-content-type"], ["video/mp4"])
         self.assertEqual(query["response-content-disposition"], ["inline"])
         attachment = sign(start + 1, download_filename="章节.mp4")
-        self.assertEqual(parse_qs(urlsplit(attachment.reveal()).query)["response-content-disposition"],
-            ["attachment; filename*=UTF-8''%E7%AB%A0%E8%8A%82.mp4"])
+        self.assertEqual(
+            parse_qs(urlsplit(attachment.reveal()).query)[
+                "response-content-disposition"
+            ],
+            ["attachment; filename*=UTF-8''%E7%AB%A0%E8%8A%82.mp4"],
+        )
         self.assertNotEqual(attachment.reveal(), early.reveal())
         self.assertEqual(early.required_headers, {})
         self.assertNotIn("fake-secret", repr(early))
         # Existing SDK GET/PUT dates stay current, short-lived and unmodified,
         # even when immutable video signing occurs in the same process.
         with ThreadPoolExecutor(max_workers=3) as pool:
-            urls = list(pool.map(lambda _: store.presign_upload("safe/new", content_type="video/mp4").reveal(), range(3)))
-        default = parse_qs(urlsplit(store.presign_download("safe/video.mp4").reveal()).query)
+            urls = list(
+                pool.map(
+                    lambda _: store.presign_upload(
+                        "safe/new", content_type="video/mp4"
+                    ).reveal(),
+                    range(3),
+                )
+            )
+        default = parse_qs(
+            urlsplit(store.presign_download("safe/video.mp4").reveal()).query
+        )
         self.assertEqual(default["X-Amz-Expires"], ["300"])
         self.assertNotEqual(default["X-Amz-Date"], query["X-Amz-Date"])
         self.assertNotIn("response-cache-control", default)
@@ -423,12 +596,19 @@ class CloudStorageTests(OfflineTest):
 
     def test_immutable_video_policy_is_not_a_general_long_lived_or_public_presign(self):
         store = S3ObjectStore(config(), S3Credentials("fake-access", "fake-secret"))
-        for mime in ("image/png", "audio/flac", "application/octet-stream", "video/mp4\r\npublic"):
+        for mime in (
+            "image/png",
+            "audio/flac",
+            "application/octet-stream",
+            "video/mp4\r\npublic",
+        ):
             with self.assertRaises(StorageError):
                 store.presign_immutable_video("safe/video", content_type=mime)
         for filename in ("../file.mp4", "bad\r\nheader", ""):
             with self.assertRaises(StorageError):
-                store.presign_immutable_video("safe/video", content_type="video/mp4", download_filename=filename)
+                store.presign_immutable_video(
+                    "safe/video", content_type="video/mp4", download_filename=filename
+                )
         with self.assertRaises(InvalidObjectKey):
             store.presign_immutable_video("../video", content_type="video/mp4")
         with self.assertRaises(StorageError):
@@ -444,13 +624,17 @@ class CloudStorageTests(OfflineTest):
     def test_stream_transport_errors_are_safe_and_body_is_closed(self):
         store, fake = self.store()
         body = mock.Mock()
-        body.read.side_effect = RuntimeError("https://x.invalid?X-Amz-Signature=fake-secret-never-log")
+        body.read.side_effect = RuntimeError(
+            "https://x.invalid?X-Amz-Signature=fake-secret-never-log"
+        )
         with mock.patch.object(fake, "get_object", return_value={"Body": body}):
             try:
                 with store.open("safe/key") as source:
                     source.read()
             except StorageError as error:
-                self.assertNotIn("fake-secret", "".join(traceback.format_exception(error)))
+                self.assertNotIn(
+                    "fake-secret", "".join(traceback.format_exception(error))
+                )
             else:
                 self.fail("The broken download must remain a failure")
         body.close.assert_called_once()
@@ -458,49 +642,80 @@ class CloudStorageTests(OfflineTest):
 
 class RegistryCredentialTests(OfflineTest):
     def loaded(self, **changes):
-        result = dict(service="cloudflare-r2", profile="cloudflare-r2--test", base_url=None,
-                      env={"R2_ENDPOINT": R2_ENDPOINT, "R2_ACCESS_KEY_ID": "fake-access",
-                           "R2_SECRET_ACCESS_KEY": "fake-secret"})
+        result = dict(
+            service="cloudflare-r2",
+            profile="cloudflare-r2--test",
+            base_url=None,
+            env={
+                "R2_ENDPOINT": R2_ENDPOINT,
+                "R2_ACCESS_KEY_ID": "fake-access",
+                "R2_SECRET_ACCESS_KEY": "fake-secret",
+            },
+        )
         result.update(changes)
         return SimpleNamespace(**result)
 
     def test_loader_is_explicit_and_leaves_environment_unchanged(self):
         loader = mock.Mock(return_value=self.loaded())
         before = dict(os.environ)
-        result = load_storage_credentials(config(), fields=R2_CREDENTIAL_FIELDS, loader=loader)
+        result = load_storage_credentials(
+            config(), fields=R2_CREDENTIAL_FIELDS, loader=loader
+        )
         self.assertIsInstance(result, S3Credentials)
         loader.assert_called_once_with("cloudflare-r2", profile="cloudflare-r2--test")
         self.assertEqual(dict(os.environ), before)
 
     def test_profile_endpoint_and_missing_fields_fail_closed(self):
-        cases = [self.loaded(profile="other"), self.loaded(service="other"),
-                 self.loaded(base_url="https://other.invalid"), self.loaded(env={}),
-                 self.loaded(env={"R2_ENDPOINT": "https://other.invalid", "R2_ACCESS_KEY_ID": "fake-access",
-                                  "R2_SECRET_ACCESS_KEY": "fake-secret"})]
+        cases = [
+            self.loaded(profile="other"),
+            self.loaded(service="other"),
+            self.loaded(base_url="https://other.invalid"),
+            self.loaded(env={}),
+            self.loaded(
+                env={
+                    "R2_ENDPOINT": "https://other.invalid",
+                    "R2_ACCESS_KEY_ID": "fake-access",
+                    "R2_SECRET_ACCESS_KEY": "fake-secret",
+                }
+            ),
+        ]
         for loaded in cases:
             with self.assertRaises(StorageConfigurationError):
-                load_storage_credentials(config(), fields=R2_CREDENTIAL_FIELDS, loader=lambda *a, **k: loaded)
+                load_storage_credentials(
+                    config(), fields=R2_CREDENTIAL_FIELDS, loader=lambda *a, **k: loaded
+                )
 
     def test_loader_error_never_exposes_values(self):
         loader = mock.Mock(side_effect=RuntimeError("fake-secret-never-log"))
         try:
-            load_storage_credentials(config(), fields=R2_CREDENTIAL_FIELDS, loader=loader)
+            load_storage_credentials(
+                config(), fields=R2_CREDENTIAL_FIELDS, loader=loader
+            )
         except StorageConfigurationError as error:
             self.assertNotIn("fake-secret", "".join(traceback.format_exception(error)))
         else:
             self.fail("Expected configuration failure")
 
     def test_required_session_field_never_falls_back_to_environment(self):
-        fields = CredentialFields("R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_ENDPOINT", "R2_SESSION_TOKEN")
+        fields = CredentialFields(
+            "R2_ACCESS_KEY_ID",
+            "R2_SECRET_ACCESS_KEY",
+            "R2_ENDPOINT",
+            "R2_SESSION_TOKEN",
+        )
         with mock.patch.dict(os.environ, {"R2_SESSION_TOKEN": "unrelated-fake-token"}):
             with self.assertRaises(StorageConfigurationError):
-                load_storage_credentials(config(), fields=fields, loader=lambda *a, **k: self.loaded())
+                load_storage_credentials(
+                    config(), fields=fields, loader=lambda *a, **k: self.loaded()
+                )
 
     def test_hippius_credentials_cannot_be_wallet_seed(self):
         with self.assertRaises(StorageConfigurationError):
             S3Credentials("twelve words are not api access", "some secret")
         with self.assertRaises(StorageConfigurationError):
-            S3ObjectStore(config("hippius"), S3Credentials("not-an-s3-access-key", "fake-secret"))
+            S3ObjectStore(
+                config("hippius"), S3Credentials("not-an-s3-access-key", "fake-secret")
+            )
         with self.assertRaises(StorageConfigurationError):
             CredentialFields("secret-value", "FIELD", "ENDPOINT")
 

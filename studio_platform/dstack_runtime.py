@@ -7,6 +7,7 @@ An original journal known not to have dispatched setup can resume its immutable
 source upload, then make the single initial launch.
 Provider endpoint extraction and worker lifecycle stay with the controller.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
@@ -30,14 +31,31 @@ from .inference.wangp_factory import create_backend, read_document
 from .inference.wangp_http import HTTPWanGPTransport
 from .runtime_catalog import engine_manifest, get_profile, profile_output_delivery
 from .runtime_hosts.wangp_http import private_token_file
-from .wangp_bootstrap import (SOURCE_NAMES, BootError, WanGPSSHHost, _write_immutable,
-                             read_sources, validate_report, safe_preparation_report)
+from .wangp_bootstrap import (
+    SOURCE_NAMES,
+    BootError,
+    WanGPSSHHost,
+    _write_immutable,
+    read_sources,
+    validate_report,
+    safe_preparation_report,
+)
 from .worker import _slot_lock
 
 GPU_UUID = re.compile(r"GPU-[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}\Z")
 PROVIDERS = {"vastai": "vast", "runpod": "runpod"}
-IDENTITY_FIELDS = ("intent_id", "run_id", "provider_instance_id", "backend", "profile_id",
-                   "mode", "model_id", "configuration_id", "manifest_digest", "spec_digest")
+IDENTITY_FIELDS = (
+    "intent_id",
+    "run_id",
+    "provider_instance_id",
+    "backend",
+    "profile_id",
+    "mode",
+    "model_id",
+    "configuration_id",
+    "manifest_digest",
+    "spec_digest",
+)
 
 
 def _require(condition, code):
@@ -47,7 +65,10 @@ def _require(condition, code):
 
 def _uuid(value):
     try:
-        _require(isinstance(value, str) and str(UUID(value)) == value, "dstack_runtime_identity_invalid")
+        _require(
+            isinstance(value, str) and str(UUID(value)) == value,
+            "dstack_runtime_identity_invalid",
+        )
     except (ValueError, TypeError, AttributeError):
         raise DstackError("dstack_runtime_identity_invalid") from None
     return value
@@ -55,16 +76,22 @@ def _uuid(value):
 
 def _absolute(value):
     path = Path(value)
-    _require(path.is_absolute() and ".." not in path.parts, "dstack_runtime_path_invalid")
+    _require(
+        path.is_absolute() and ".." not in path.parts, "dstack_runtime_path_invalid"
+    )
     for part in (path, *path.parents):
-        _require(not part.is_symlink() and not (hasattr(part, "is_junction") and part.is_junction()),
-                 "dstack_runtime_link_forbidden")
+        _require(
+            not part.is_symlink()
+            and not (hasattr(part, "is_junction") and part.is_junction()),
+            "dstack_runtime_link_forbidden",
+        )
     return path
 
 
 @dataclass(frozen=True)
 class DstackRuntimeConfig:
     """Trusted deployment selection, not user-controlled job parameters."""
+
     work_dir: Path
     source_dir: Path
     ssh_key_file: Path
@@ -90,38 +117,70 @@ class DstackRuntimeConfig:
     def __post_init__(self):
         for name in ("work_dir", "source_dir", "ssh_key_file", "known_hosts_file"):
             object.__setattr__(self, name, _absolute(getattr(self, name)))
-        _require(type(self.local_port) is int and 1024 <= self.local_port <= 65535,
-                 "dstack_runtime_port_invalid")
-        _require(self.provider in PROVIDERS.values() and self.mode in {"fl", "ref"}
-            and type(self.trust_first_host_key) is bool and self.runtime_python == "/venv/main/bin/python",
-            "dstack_runtime_configuration_invalid")
-        _require(all(isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", value)
-            for value in (self.pool, self.configuration_id)), "dstack_runtime_configuration_invalid")
+        _require(
+            type(self.local_port) is int and 1024 <= self.local_port <= 65535,
+            "dstack_runtime_port_invalid",
+        )
+        _require(
+            self.provider in PROVIDERS.values()
+            and self.mode in {"fl", "ref"}
+            and type(self.trust_first_host_key) is bool
+            and self.runtime_python == "/venv/main/bin/python",
+            "dstack_runtime_configuration_invalid",
+        )
+        _require(
+            all(
+                isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", value)
+                for value in (self.pool, self.configuration_id)
+            ),
+            "dstack_runtime_configuration_invalid",
+        )
         try:
             manifest = engine_manifest(self.deployment_profile_id, self.mode)
             profile = get_profile(self.deployment_profile_id)
         except ValueError:
             raise DstackError("dstack_runtime_profile_invalid") from None
-        floor = profile.get("hardware_admission", {}).get("minimum_total_vram_bytes",
-            (30 if "Pruned" in profile["model_id"] else 90) * 1024**3)
-        _require(self.model_id == profile["model_id"] and self.engine_manifest_digest == manifest.digest
-            and type(self.min_gpu_bytes) is int and self.min_gpu_bytes >= floor,
-            "dstack_runtime_manifest_binding_invalid")
-        object.__setattr__(self, "recipe_ids", (manifest.document["generation_recipe_id"],))
-        object.__setattr__(self, "output_delivery", profile_output_delivery(self.deployment_profile_id))
-        _require(type(self.source_sha256) is dict and set(self.source_sha256) == SOURCE_NAMES
-            and all(isinstance(v, str) and re.fullmatch(r"[0-9a-f]{64}", v) for v in self.source_sha256.values()),
-            "dstack_runtime_source_hashes_invalid")
-        object.__setattr__(self, "source_sha256", MappingProxyType(dict(self.source_sha256)))
+        floor = profile.get("hardware_admission", {}).get(
+            "minimum_total_vram_bytes",
+            (30 if "Pruned" in profile["model_id"] else 90) * 1024**3,
+        )
+        _require(
+            self.model_id == profile["model_id"]
+            and self.engine_manifest_digest == manifest.digest
+            and type(self.min_gpu_bytes) is int
+            and self.min_gpu_bytes >= floor,
+            "dstack_runtime_manifest_binding_invalid",
+        )
+        object.__setattr__(
+            self, "recipe_ids", (manifest.document["generation_recipe_id"],)
+        )
+        object.__setattr__(
+            self, "output_delivery", profile_output_delivery(self.deployment_profile_id)
+        )
+        _require(
+            type(self.source_sha256) is dict
+            and set(self.source_sha256) == SOURCE_NAMES
+            and all(
+                isinstance(v, str) and re.fullmatch(r"[0-9a-f]{64}", v)
+                for v in self.source_sha256.values()
+            ),
+            "dstack_runtime_source_hashes_invalid",
+        )
+        object.__setattr__(
+            self, "source_sha256", MappingProxyType(dict(self.source_sha256))
+        )
 
 
 class RuntimeStore(Protocol):
     def load(self, intent_id: str) -> dict: ...
-    def begin_bootstrap(self, intent_id: str, run_id: str, instance_id: str) -> bool: ...
+    def begin_bootstrap(
+        self, intent_id: str, run_id: str, instance_id: str
+    ) -> bool: ...
 
 
 class RuntimeHost(Protocol):
     """Existing verified SSH transport; no provider credential methods."""
+
     def ensure_connected(self) -> None: ...
     def upload(self, files: dict) -> None: ...
     def start(self, identity: dict) -> dict: ...
@@ -147,62 +206,130 @@ class DstackNativeRuntime:
     supported; proxy/dockerized topology must be rejected by the extractor.
     This bridge does not discover, rent, stop, register or execute business jobs.
     """
-    def __init__(self, store: RuntimeStore, config_for_binding, coordinates_for_run, *,
-                 ssh_factory=DstackSSHHost, transport_factory=HTTPWanGPTransport,
-                 backend_factory=create_backend, max_hosts=128):
-        _require(type(max_hosts) is int and 1 <= max_hosts <= 128, "dstack_runtime_host_limit_invalid")
-        self.store, self.config_for_binding, self.coordinates_for_run = store, config_for_binding, coordinates_for_run
-        self.ssh_factory, self.transport_factory, self.backend_factory = ssh_factory, transport_factory, backend_factory
+
+    def __init__(
+        self,
+        store: RuntimeStore,
+        config_for_binding,
+        coordinates_for_run,
+        *,
+        ssh_factory=DstackSSHHost,
+        transport_factory=HTTPWanGPTransport,
+        backend_factory=create_backend,
+        max_hosts=128,
+    ):
+        _require(
+            type(max_hosts) is int and 1 <= max_hosts <= 128,
+            "dstack_runtime_host_limit_invalid",
+        )
+        self.store, self.config_for_binding, self.coordinates_for_run = (
+            store,
+            config_for_binding,
+            coordinates_for_run,
+        )
+        self.ssh_factory, self.transport_factory, self.backend_factory = (
+            ssh_factory,
+            transport_factory,
+            backend_factory,
+        )
         self.max_hosts, self._hosts, self._slots = max_hosts, {}, {}
 
     def _binding(self, binding, run, config):
-        _require(type(binding) is dict and isinstance(config, DstackRuntimeConfig), "dstack_runtime_binding_invalid")
-        _uuid(binding.get("intent_id")); _uuid(binding.get("run_id"))
+        _require(
+            type(binding) is dict and isinstance(config, DstackRuntimeConfig),
+            "dstack_runtime_binding_invalid",
+        )
+        _uuid(binding.get("intent_id"))
+        _uuid(binding.get("run_id"))
         current = self.store.load(binding["intent_id"])
-        _require(type(current) is dict and all(current.get(k) == binding.get(k) for k in IDENTITY_FIELDS)
+        _require(
+            type(current) is dict
+            and all(current.get(k) == binding.get(k) for k in IDENTITY_FIELDS)
             and current.get("run_spec") == binding.get("run_spec")
-            and current.get("apply_started") is True and current.get("provider_instance_id"),
-            "dstack_runtime_binding_changed")
-        _require(type(run) is dict and run.get("id") == binding["run_id"] and run.get("status") == "running",
-            "dstack_runtime_run_not_running")
-        provisioning = (run.get("latest_job_submission") or {}).get("job_provisioning_data") or {}
+            and current.get("apply_started") is True
+            and current.get("provider_instance_id"),
+            "dstack_runtime_binding_changed",
+        )
+        _require(
+            type(run) is dict
+            and run.get("id") == binding["run_id"]
+            and run.get("status") == "running",
+            "dstack_runtime_run_not_running",
+        )
+        provisioning = (run.get("latest_job_submission") or {}).get(
+            "job_provisioning_data"
+        ) or {}
         gpus = provisioning.get("instance_type", {}).get("resources", {}).get("gpus")
-        _require(provisioning.get("instance_id") == binding["provider_instance_id"]
-            and provisioning.get("backend") == binding["backend"] and isinstance(gpus, list) and len(gpus) == 1,
-            "dstack_runtime_allocation_mismatch")
-        _require(PROVIDERS.get(binding["backend"]) == config.provider and
-            (binding["profile_id"], binding["mode"], binding["model_id"], binding["configuration_id"], binding["manifest_digest"])
-            == (config.deployment_profile_id, config.mode, config.model_id, config.configuration_id, config.engine_manifest_digest),
-            "dstack_runtime_configuration_mismatch")
+        _require(
+            provisioning.get("instance_id") == binding["provider_instance_id"]
+            and provisioning.get("backend") == binding["backend"]
+            and isinstance(gpus, list)
+            and len(gpus) == 1,
+            "dstack_runtime_allocation_mismatch",
+        )
+        _require(
+            PROVIDERS.get(binding["backend"]) == config.provider
+            and (
+                binding["profile_id"],
+                binding["mode"],
+                binding["model_id"],
+                binding["configuration_id"],
+                binding["manifest_digest"],
+            )
+            == (
+                config.deployment_profile_id,
+                config.mode,
+                config.model_id,
+                config.configuration_id,
+                config.engine_manifest_digest,
+            ),
+            "dstack_runtime_configuration_mismatch",
+        )
         image = binding["run_spec"]["configuration"]["image"]
-        _require(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}", image),
-            "dstack_runtime_image_unpinned")
+        _require(
+            re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}", image),
+            "dstack_runtime_image_unpinned",
+        )
         return current, image
 
     def _sources(self, config):
         files, manifest = read_sources(config)
-        hashes = {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}
+        hashes = {
+            name: hashlib.sha256(data).hexdigest() for name, data in files.items()
+        }
         _require(hashes == dict(config.source_sha256), "dstack_runtime_source_changed")
         runtime = json.loads(files["wangp-runtime.json"])
-        _require(runtime.get("source_bundle_sha256") == hashes["wangp-package.tar.gz"]
-            and runtime.get("status_path") == "/workspace/h3-studio/profile-slot-0/setup-status.json"
+        _require(
+            runtime.get("source_bundle_sha256") == hashes["wangp-package.tar.gz"]
+            and runtime.get("status_path")
+            == "/workspace/h3-studio/profile-slot-0/setup-status.json"
             and runtime.get("prepared_root") == "/opt/workspace-internal/Wan2GP"
-            and not runtime.get("dependency_artifact_url") and not runtime.get("dependency_artifact_path"),
-            "dstack_runtime_prepared_source_required")
+            and not runtime.get("dependency_artifact_url")
+            and not runtime.get("dependency_artifact_path"),
+            "dstack_runtime_prepared_source_required",
+        )
         return files, manifest, hashes
 
     def _coordinates(self, binding, run):
         coordinates = self.coordinates_for_run(dict(binding), run)
-        _require(type(coordinates) is dict and set(coordinates) ==
-            {"host", "port", "username", "instance_id"}, "dstack_runtime_ssh_coordinates_invalid")
-        _require(coordinates.get("host") is not None and coordinates.get("port") is not None,
-            "dstack_runtime_ssh_coordinates_unavailable")
-        _require(isinstance(coordinates["host"], str)
+        _require(
+            type(coordinates) is dict
+            and set(coordinates) == {"host", "port", "username", "instance_id"},
+            "dstack_runtime_ssh_coordinates_invalid",
+        )
+        _require(
+            coordinates.get("host") is not None and coordinates.get("port") is not None,
+            "dstack_runtime_ssh_coordinates_unavailable",
+        )
+        _require(
+            isinstance(coordinates["host"], str)
             and re.fullmatch(r"[A-Za-z0-9.:_-]{1,253}", coordinates["host"])
-            and type(coordinates["port"]) is int and 1 <= coordinates["port"] <= 65535
+            and type(coordinates["port"]) is int
+            and 1 <= coordinates["port"] <= 65535
             and coordinates["username"] == "root"
             and coordinates["instance_id"] == binding["provider_instance_id"],
-            "dstack_runtime_ssh_coordinates_invalid")
+            "dstack_runtime_ssh_coordinates_invalid",
+        )
         return dict(coordinates)
 
     @staticmethod
@@ -210,8 +337,14 @@ class DstackNativeRuntime:
         _absolute(path)
         temporary = path.with_name(path.name + "." + uuid4().hex + ".tmp")
         try:
-            with os.fdopen(os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as out:
-                json.dump(state, out, sort_keys=True); out.flush(); os.fsync(out.fileno())
+            with os.fdopen(
+                os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600),
+                "w",
+                encoding="utf-8",
+            ) as out:
+                json.dump(state, out, sort_keys=True)
+                out.flush()
+                os.fsync(out.fileno())
             temporary.replace(path)
             DstackNativeRuntime._sync_directory(path.parent)
         finally:
@@ -221,7 +354,7 @@ class DstackNativeRuntime:
     @staticmethod
     def _sync_directory(directory):
         if os.name == "posix":
-            descriptor=os.open(directory,os.O_RDONLY|os.O_DIRECTORY)
+            descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
             try:
                 os.fsync(descriptor)
             finally:
@@ -232,23 +365,30 @@ class DstackNativeRuntime:
         # A hard interruption between link and unlink can retain our staging
         # alias. Remove only one exact owned inode in this locked intent dir;
         # unknown hard links still fail checked_reader, never mint a new token.
-        info=token_path.lstat()
+        info = token_path.lstat()
         if info.st_nlink != 2 or not stat.S_ISREG(info.st_mode):
             return
-        aliases=[]
-        for index,candidate in enumerate(token_path.parent.glob("wangp-token.*.tmp")):
-            if index>=32:
+        aliases = []
+        for index, candidate in enumerate(token_path.parent.glob("wangp-token.*.tmp")):
+            if index >= 32:
                 return
-            if not re.fullmatch(r"wangp-token\.[0-9a-f]{32}\.tmp",candidate.name):
+            if not re.fullmatch(r"wangp-token\.[0-9a-f]{32}\.tmp", candidate.name):
                 continue
-            current=candidate.lstat()
-            if ((current.st_dev,current.st_ino)==(info.st_dev,info.st_ino)
-                    and stat.S_ISREG(current.st_mode) and current.st_uid==info.st_uid
-                    and (os.name!="posix" or current.st_uid==os.getuid() and not current.st_mode & 0o077)):
+            current = candidate.lstat()
+            if (
+                (current.st_dev, current.st_ino) == (info.st_dev, info.st_ino)
+                and stat.S_ISREG(current.st_mode)
+                and current.st_uid == info.st_uid
+                and (
+                    os.name != "posix"
+                    or current.st_uid == os.getuid()
+                    and not current.st_mode & 0o077
+                )
+            ):
                 aliases.append(candidate)
-            if len(aliases)>1:
+            if len(aliases) > 1:
                 return
-        if len(aliases)==1:
+        if len(aliases) == 1:
             aliases[0].unlink()
             DstackNativeRuntime._sync_directory(token_path.parent)
 
@@ -269,46 +409,79 @@ class DstackNativeRuntime:
                 if created:
                     self._sync_directory(config.work_dir)
                 receipt = directory / "bootstrap-state.json"
-                identity = {"intent_id": intent_id, "instance_id": binding["provider_instance_id"],
-                    "configuration_id": config.configuration_id, "provider": config.provider, "backend": "wangp-worker",
-                    "engine_manifest_digest": config.engine_manifest_digest, "output_delivery": config.output_delivery,
-                    "deployment_profile_id": config.deployment_profile_id, "runtime_python": config.runtime_python,
-                    "profile_slot_index": 0, "expected_host_gpus": 1, "sources": hashes,
-                    "dstack_run_id": binding["run_id"], "dstack_image": image}
-                state = read_document(receipt, maximum=16384) if receipt.exists() else None
+                identity = {
+                    "intent_id": intent_id,
+                    "instance_id": binding["provider_instance_id"],
+                    "configuration_id": config.configuration_id,
+                    "provider": config.provider,
+                    "backend": "wangp-worker",
+                    "engine_manifest_digest": config.engine_manifest_digest,
+                    "output_delivery": config.output_delivery,
+                    "deployment_profile_id": config.deployment_profile_id,
+                    "runtime_python": config.runtime_python,
+                    "profile_slot_index": 0,
+                    "expected_host_gpus": 1,
+                    "sources": hashes,
+                    "dstack_run_id": binding["run_id"],
+                    "dstack_image": image,
+                }
+                state = (
+                    read_document(receipt, maximum=16384) if receipt.exists() else None
+                )
                 if state is not None:
-                    _require(state.get("identity") == identity and state.get("local_port") == config.local_port,
-                        "dstack_runtime_receipt_changed")
-                    _require(state.get("phase") in {"journaled", "start_unknown", "booting", "runtime_ready"},
-                        "dstack_runtime_receipt_phase_invalid")
-                    if state["phase"] == "start_unknown" and current.get("bootstrap_launch_started") is False:
+                    _require(
+                        state.get("identity") == identity
+                        and state.get("local_port") == config.local_port,
+                        "dstack_runtime_receipt_changed",
+                    )
+                    _require(
+                        state.get("phase")
+                        in {"journaled", "start_unknown", "booting", "runtime_ready"},
+                        "dstack_runtime_receipt_phase_invalid",
+                    )
+                    if (
+                        state["phase"] == "start_unknown"
+                        and current.get("bootstrap_launch_started") is False
+                    ):
                         # The durable launch journal proves no remote call was
                         # permitted yet (e.g. DB failed before launch CAS).
                         # Absent/historical or true journals remain unknown.
                         state["phase"] = "journaled"
                         self._save(receipt, state)
-                _require(current.get("bootstrap_started") is True
-                    or state is None or state.get("phase") == "journaled",
-                    "dstack_runtime_existing_receipt_requires_reconciliation")
+                _require(
+                    current.get("bootstrap_started") is True
+                    or state is None
+                    or state.get("phase") == "journaled",
+                    "dstack_runtime_existing_receipt_requires_reconciliation",
+                )
                 # dstack RUNNING can precede SSH metadata/availability. Only
                 # read-only connection work belongs before the nonreplayable
                 # journal; do not consume the initial bootstrap while waiting
                 # for an endpoint or its verified host key.
                 coordinates = self._coordinates(binding, run)
                 if intent_id not in self._hosts:
-                    _require(len(self._hosts) < self.max_hosts, "dstack_runtime_host_limit_reached")
+                    _require(
+                        len(self._hosts) < self.max_hosts,
+                        "dstack_runtime_host_limit_reached",
+                    )
                     try:
                         host = self.ssh_factory(config, coordinates)
                     except Exception:
-                        raise DstackError("dstack_runtime_ssh_unavailable_or_host_key_untrusted") from None
+                        raise DstackError(
+                            "dstack_runtime_ssh_unavailable_or_host_key_untrusted"
+                        ) from None
                     self._hosts[intent_id] = (identity, coordinates, host)
                 cached_identity, cached_coordinates, host = self._hosts[intent_id]
-                _require(cached_identity == identity and cached_coordinates == coordinates,
-                    "dstack_runtime_host_identity_changed")
+                _require(
+                    cached_identity == identity and cached_coordinates == coordinates,
+                    "dstack_runtime_host_identity_changed",
+                )
                 try:
                     host.ensure_connected()
                 except Exception:
-                    raise DstackError("dstack_runtime_ssh_unavailable_or_host_key_untrusted") from None
+                    raise DstackError(
+                        "dstack_runtime_ssh_unavailable_or_host_key_untrusted"
+                    ) from None
                 if state is None and not current.get("bootstrap_started"):
                     # Stage the original private runtime credential once on
                     # CPU. WanGPSSHHost.start uploads these same bytes; it must
@@ -316,31 +489,56 @@ class DstackNativeRuntime:
                     token_path = directory / "wangp-token"
                     if token_path.exists():
                         self._recover_token_alias(token_path)
-                        private_token_file(token_path)  # Crash during local staging; no remote launch yet.
+                        private_token_file(
+                            token_path
+                        )  # Crash during local staging; no remote launch yet.
                     else:
-                        temporary=directory/("wangp-token."+uuid4().hex+".tmp")
+                        temporary = directory / ("wangp-token." + uuid4().hex + ".tmp")
                         try:
-                            with os.fdopen(os.open(temporary, os.O_WRONLY|os.O_CREAT|os.O_EXCL, 0o600), "w") as out:
-                                out.write(secrets.token_urlsafe(48)); out.flush(); os.fsync(out.fileno())
-                            os.link(temporary,token_path)  # Atomic no-overwrite install of complete bytes.
+                            with os.fdopen(
+                                os.open(
+                                    temporary,
+                                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                                    0o600,
+                                ),
+                                "w",
+                            ) as out:
+                                out.write(secrets.token_urlsafe(48))
+                                out.flush()
+                                os.fsync(out.fileno())
+                            os.link(
+                                temporary, token_path
+                            )  # Atomic no-overwrite install of complete bytes.
                         finally:
                             if temporary.exists():
                                 temporary.unlink()
                         self._sync_directory(directory)
-                    state = {"identity": identity, "phase": "journaled", "local_port": config.local_port}
+                    state = {
+                        "identity": identity,
+                        "phase": "journaled",
+                        "local_port": config.local_port,
+                    }
                     self._save(receipt, state)
                 # Material is staged before the database journal. A CPU disk
                 # failure cannot consume a one-shot remote launch. Resuming
                 # staged material always retains its original token/identity.
-                self.store.begin_bootstrap(intent_id, binding["run_id"], binding["provider_instance_id"])
+                self.store.begin_bootstrap(
+                    intent_id, binding["run_id"], binding["provider_instance_id"]
+                )
                 if state is not None:
-                    _require(state is not None and (directory / "wangp-token").is_file(),
-                        "dstack_runtime_recovery_material_missing")
-                    private_token_file(directory / "wangp-token")  # Verify, never recreate.
+                    _require(
+                        state is not None and (directory / "wangp-token").is_file(),
+                        "dstack_runtime_recovery_material_missing",
+                    )
+                    private_token_file(
+                        directory / "wangp-token"
+                    )  # Verify, never recreate.
                 else:
                     raise DstackError("dstack_runtime_recovery_material_missing")
                 if state["phase"] == "journaled":
-                    self.store.authorize_bootstrap_launch(intent_id, binding["run_id"], binding["provider_instance_id"])
+                    self.store.authorize_bootstrap_launch(
+                        intent_id, binding["run_id"], binding["provider_instance_id"]
+                    )
                     # Source upload is immutable and has no setup launch. A
                     # failed upload can retry the same bytes/token; an existing
                     # partial file instead requires reconciliation below. No
@@ -352,90 +550,170 @@ class DstackNativeRuntime:
                             # A partial file is not silently overwritten by
                             # the original transport. Preserve the journal,
                             # explain the reconciliation hold, never launch.
-                            raise DstackError("dstack_runtime_upload_reconciliation_required") from None
+                            raise DstackError(
+                                "dstack_runtime_upload_reconciliation_required"
+                            ) from None
                         raise DstackError("dstack_runtime_upload_unconfirmed") from None
                     except Exception:
                         raise DstackError("dstack_runtime_upload_unconfirmed") from None
                     state["phase"] = "start_unknown"
                     self._save(receipt, state)  # Before the non-replayable launch.
-                    _require(self.store.begin_runtime_launch(intent_id, binding["run_id"], binding["provider_instance_id"]),
-                        "dstack_runtime_launch_requires_reconciliation")
+                    _require(
+                        self.store.begin_runtime_launch(
+                            intent_id,
+                            binding["run_id"],
+                            binding["provider_instance_id"],
+                        ),
+                        "dstack_runtime_launch_requires_reconciliation",
+                    )
                     try:
                         host.start(identity)
                     except Exception:
-                        raise DstackError("dstack_runtime_bootstrap_response_unknown") from None
+                        raise DstackError(
+                            "dstack_runtime_bootstrap_response_unknown"
+                        ) from None
                     state["phase"] = "booting"
                     self._save(receipt, state)
                 report = host.report()
-                _require(type(report) is dict and report.get("identity") == identity,
-                    "dstack_runtime_remote_identity_unconfirmed")
+                _require(
+                    type(report) is dict and report.get("identity") == identity,
+                    "dstack_runtime_remote_identity_unconfirmed",
+                )
                 preparation = safe_preparation_report(report)
                 # The SSH report has already discarded its raw receipt fields.
                 # Accept only the same numeric allowlist from that protected seam.
                 if type(report.get("preparation")) is dict:
                     supplied = report["preparation"]
-                    preparation = safe_preparation_report({"phase": supplied.get("phase"),
-                        "started_unix": supplied.get("started_at"),
-                        "phase_started_unix": supplied.get("phase_started_at"),
-                        "updated_unix": supplied.get("updated_at"),
-                        **(supplied.get("download") if type(supplied.get("download")) is dict else {}),
-                        "state": report.get("state"), "error_code": report.get("error_code"),
-                        "failure_phase": report.get("failure_phase")})
+                    preparation = safe_preparation_report(
+                        {
+                            "phase": supplied.get("phase"),
+                            "started_unix": supplied.get("started_at"),
+                            "phase_started_unix": supplied.get("phase_started_at"),
+                            "updated_unix": supplied.get("updated_at"),
+                            **(
+                                supplied.get("download")
+                                if type(supplied.get("download")) is dict
+                                else {}
+                            ),
+                            "state": report.get("state"),
+                            "error_code": report.get("error_code"),
+                            "failure_phase": report.get("failure_phase"),
+                        }
+                    )
+
                 def progress_error(code):
                     error = DstackError(code)
                     error.preparation = preparation
                     return error
+
                 if report.get("state") == "failed":
                     raise progress_error("dstack_runtime_bootstrap_failed")
-                if (report.get("state") in {"unknown", "reconcile_required"}
-                        or report.get("phase") == "runtime_start_unknown"):
-                    raise progress_error("dstack_runtime_bootstrap_reconciliation_required")
+                if (
+                    report.get("state") in {"unknown", "reconcile_required"}
+                    or report.get("phase") == "runtime_start_unknown"
+                ):
+                    raise progress_error(
+                        "dstack_runtime_bootstrap_reconciliation_required"
+                    )
                 if report.get("state") != "ready":
                     # Only these fixed progress codes leave the private host;
                     # preserve real download/start progress without exposing
                     # report text or pretending process startup loaded weights.
-                    phases = {"model_download": "dstack_runtime_downloading_weights",
-                              "runtime_start": "dstack_runtime_starting_runtime",
-                              "model_load": "dstack_runtime_loading_model"}
-                    raise progress_error(phases.get(report.get("phase"), "dstack_runtime_preparing"))
+                    phases = {
+                        "model_download": "dstack_runtime_downloading_weights",
+                        "runtime_start": "dstack_runtime_starting_runtime",
+                        "model_load": "dstack_runtime_loading_model",
+                    }
+                    raise progress_error(
+                        phases.get(report.get("phase"), "dstack_runtime_preparing")
+                    )
                 validate_report(config, report, manifest)
                 gpu = report["gpus"][0]["uuid"]
                 _require(GPU_UUID.fullmatch(gpu), "dstack_runtime_physical_gpu_invalid")
-                _require(not state.get("physical_gpu_uuid") or state["physical_gpu_uuid"] == gpu,
-                    "dstack_runtime_physical_gpu_changed")
+                _require(
+                    not state.get("physical_gpu_uuid")
+                    or state["physical_gpu_uuid"] == gpu,
+                    "dstack_runtime_physical_gpu_changed",
+                )
                 host.open_tunnel(config.local_port)
-                transport = self.transport_factory(f"http://127.0.0.1:{config.local_port}",
-                    private_token_file(directory / "wangp-token"))
+                transport = self.transport_factory(
+                    f"http://127.0.0.1:{config.local_port}",
+                    private_token_file(directory / "wangp-token"),
+                )
                 try:
                     native = transport.readiness()
                 finally:
                     transport.close()
-                _require(isinstance(native, HostReadiness) and native.manifest_digest == config.engine_manifest_digest
-                    and native.slot_key == intent_id and type(native.idle) is bool
-                    and isinstance(native.incarnation, str) and re.fullmatch(r"[0-9a-f]{32}", native.incarnation),
-                    "dstack_runtime_private_endpoint_mismatch")
-                for prior in (current.get("runtime_incarnation"), state.get("runtime_incarnation")):
-                    _require(not prior or native.incarnation == prior, "dstack_runtime_incarnation_changed")
+                _require(
+                    isinstance(native, HostReadiness)
+                    and native.manifest_digest == config.engine_manifest_digest
+                    and native.slot_key == intent_id
+                    and type(native.idle) is bool
+                    and isinstance(native.incarnation, str)
+                    and re.fullmatch(r"[0-9a-f]{32}", native.incarnation),
+                    "dstack_runtime_private_endpoint_mismatch",
+                )
+                for prior in (
+                    current.get("runtime_incarnation"),
+                    state.get("runtime_incarnation"),
+                ):
+                    _require(
+                        not prior or native.incarnation == prior,
+                        "dstack_runtime_incarnation_changed",
+                    )
                 _write_immutable(directory / "wangp-manifest.json", manifest)
-                _write_immutable(directory / "wangp-client.json", {"version": 1, "enabled": True,
-                    "slot_key": intent_id, "configuration_id": config.configuration_id,
-                    "manifest_file": str(directory / "wangp-manifest.json"),
-                    "token_file": str(directory / "wangp-token"), "runtime_incarnation": native.incarnation})
-                spec = WorkerSpec("dstack-" + intent_id.replace("-", ""), config.pool, config.provider,
-                    binding["provider_instance_id"], (gpu,), config.recipe_ids, config.model_id,
-                    config.configuration_id, "wangp-worker", config.engine_manifest_digest,
-                    output_delivery=config.output_delivery, dispatch_backend="hatchet-v1")
+                _write_immutable(
+                    directory / "wangp-client.json",
+                    {
+                        "version": 1,
+                        "enabled": True,
+                        "slot_key": intent_id,
+                        "configuration_id": config.configuration_id,
+                        "manifest_file": str(directory / "wangp-manifest.json"),
+                        "token_file": str(directory / "wangp-token"),
+                        "runtime_incarnation": native.incarnation,
+                    },
+                )
+                spec = WorkerSpec(
+                    "dstack-" + intent_id.replace("-", ""),
+                    config.pool,
+                    config.provider,
+                    binding["provider_instance_id"],
+                    (gpu,),
+                    config.recipe_ids,
+                    config.model_id,
+                    config.configuration_id,
+                    "wangp-worker",
+                    config.engine_manifest_digest,
+                    output_delivery=config.output_delivery,
+                    dispatch_backend="hatchet-v1",
+                )
                 endpoint = f"http://127.0.0.1:{config.local_port}"
-                slot = SlotConfig(spec, True, endpoint, (endpoint,), "", native.idle,
-                    runtime_config_file=str(directory / "wangp-client.json"))
+                slot = SlotConfig(
+                    spec,
+                    True,
+                    endpoint,
+                    (endpoint,),
+                    "",
+                    native.idle,
+                    runtime_config_file=str(directory / "wangp-client.json"),
+                )
                 # Exercise the original manifest/compiler/factory contract;
                 # the parent owns the real WorkerRunner and its transport.
                 backend = self.backend_factory(slot, directory)
                 backend.close()
-                state.update(phase="runtime_ready", physical_gpu_uuid=gpu, runtime_incarnation=native.incarnation)
+                state.update(
+                    phase="runtime_ready",
+                    physical_gpu_uuid=gpu,
+                    runtime_incarnation=native.incarnation,
+                )
                 self._save(receipt, state)
                 self._slots[intent_id] = slot
-                model = safe_model_progress(native.preparation.get("model")) if type(native.preparation) is dict else None
+                model = (
+                    safe_model_progress(native.preparation.get("model"))
+                    if type(native.preparation) is dict
+                    else None
+                )
                 return replace(native, preparation={**preparation, "model": model})
         except DstackError:
             raise

@@ -4,6 +4,7 @@ Run ``python -m studio_platform.capacity_scan --providers lium targon`` using
 the existing process configuration. This does not start/stop GPU instances,
 initialize budgets, refresh authorization or mark execution capacity ready.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -12,8 +13,13 @@ from threading import Event, Thread
 
 from sqlalchemy import select
 
-from .capacity_market import (PROVIDERS, REFRESH_TIMEOUT_SECONDS, market_inventory,
-                              publish_observation, refresh_projection)
+from .capacity_market import (
+    PROVIDERS,
+    REFRESH_TIMEOUT_SECONDS,
+    market_inventory,
+    publish_observation,
+    refresh_projection,
+)
 
 
 class ProviderMarketRefresh:
@@ -23,16 +29,19 @@ class ProviderMarketRefresh:
     commands, readiness state, or credentials are changed. Missing Lium identity
     becomes a safe supplier error rather than an implicit credential fallback.
     """
+
     def __init__(self, repo, loader=None, *, readers=None, interval=30):
         if type(interval) is not int or not 30 <= interval <= 90:
             raise ValueError("inventory_interval_invalid")
         self.repo, self.loader, self.interval = repo, loader, interval
         if readers is None:
             from .capacity_inventory import scan_lium, scan_targon
+
             def lium():
                 if loader is None:
                     raise ValueError("inventory_profile_unavailable")
                 return scan_lium(loader, clock=repo.clock)
+
             readers = {"lium": lium, "targon": lambda: scan_targon(clock=repo.clock)}
         if set(readers) != set(PROVIDERS):
             raise ValueError("inventory_provider_invalid")
@@ -49,7 +58,12 @@ class ProviderMarketRefresh:
                 raise ValueError("inventory_provider_mismatch")
             return value
         except Exception:
-            return {"provider": provider, "status": "error", "observed_at": started, "offers": []}
+            return {
+                "provider": provider,
+                "status": "error",
+                "observed_at": started,
+                "offers": [],
+            }
 
     def __call__(self, *, stopping=False):
         if stopping:
@@ -69,23 +83,40 @@ class ProviderMarketRefresh:
             except Exception:
                 # Use request-start time; failure must not satisfy a newer
                 # refresh marker or disguise an old observation as fresh.
-                publish_observation(self.repo, {"provider": provider, "status": "error",
-                    "observed_at": self.last[provider], "offers": []})
+                publish_observation(
+                    self.repo,
+                    {
+                        "provider": provider,
+                        "status": "error",
+                        "observed_at": self.last[provider],
+                        "offers": [],
+                    },
+                )
         now = self.repo.clock()
         with self.repo.engine.connect() as connection:
-            requested = {row["provider"]: refresh_projection(row, now)
-                         for row in connection.execute(select(market_inventory)).mappings()}
+            requested = {
+                row["provider"]: refresh_projection(row, now)
+                for row in connection.execute(select(market_inventory)).mappings()
+            }
         for provider in PROVIDERS:
             request = requested.get(provider, {})
             marker = request.get("refresh_requested_at")
-            forced = (type(marker) in (int, float) and
-                      0 <= now - marker < REFRESH_TIMEOUT_SECONDS
-                      and request.get("refresh_request_id") != self.started_request[provider]
-                      and request.get("refresh_status") == "pending")
-            if provider in self.pending or not forced and now - self.last[provider] < self.interval:
+            forced = (
+                type(marker) in (int, float)
+                and 0 <= now - marker < REFRESH_TIMEOUT_SECONDS
+                and request.get("refresh_request_id") != self.started_request[provider]
+                and request.get("refresh_status") == "pending"
+            )
+            if (
+                provider in self.pending
+                or not forced
+                and now - self.last[provider] < self.interval
+            ):
                 continue
             if self.executor is None:
-                self.executor = ThreadPoolExecutor(max_workers=len(PROVIDERS), thread_name_prefix="provider-market")
+                self.executor = ThreadPoolExecutor(
+                    max_workers=len(PROVIDERS), thread_name_prefix="provider-market"
+                )
             self.last[provider] = now
             self.started_request[provider] = request.get("refresh_request_id")
             self.pending[provider] = self.executor.submit(self._read, provider, now)
@@ -93,14 +124,22 @@ class ProviderMarketRefresh:
 
 class MarketScanner:
     def __init__(self, repo, *, providers=PROVIDERS, readers=None, interval=30):
-        if not providers or len(set(providers)) != len(providers) or any(x not in PROVIDERS for x in providers):
+        if (
+            not providers
+            or len(set(providers)) != len(providers)
+            or any(x not in PROVIDERS for x in providers)
+        ):
             raise ValueError("inventory_provider_invalid")
         if type(interval) is not int or not 30 <= interval <= 90:
             raise ValueError("inventory_interval_invalid")
         self.repo, self.providers, self.interval = repo, tuple(providers), interval
         if readers is None:
             from .capacity_inventory import scan_lium, scan_targon
-            readers = {"lium": lambda: scan_lium(clock=repo.clock), "targon": lambda: scan_targon(clock=repo.clock)}
+
+            readers = {
+                "lium": lambda: scan_lium(clock=repo.clock),
+                "targon": lambda: scan_targon(clock=repo.clock),
+            }
         self.readers = readers
         self.stop_event, self.thread = Event(), None
 
@@ -111,21 +150,38 @@ class MarketScanner:
                 raise ValueError("inventory_provider_mismatch")
             return observation
         except Exception:
-            return {"provider": provider, "status": "error", "observed_at": self.repo.clock(),
-                    "reason_code": "inventory_scan_failed", "offers": []}
+            return {
+                "provider": provider,
+                "status": "error",
+                "observed_at": self.repo.clock(),
+                "reason_code": "inventory_scan_failed",
+                "offers": [],
+            }
 
     def once(self):
         # Parallel suppliers: one timeout must not keep another result hidden.
-        with ThreadPoolExecutor(max_workers=len(self.providers), thread_name_prefix="stock-read") as executor:
-            futures = {executor.submit(self._read, provider): provider for provider in self.providers}
+        with ThreadPoolExecutor(
+            max_workers=len(self.providers), thread_name_prefix="stock-read"
+        ) as executor:
+            futures = {
+                executor.submit(self._read, provider): provider
+                for provider in self.providers
+            }
             for future in as_completed(futures):
                 provider = futures[future]
                 observation = future.result()
                 try:
                     publish_observation(self.repo, observation)
                 except ValueError:
-                    publish_observation(self.repo, {"provider": provider, "status": "error",
-                        "observed_at": self.repo.clock(), "offers": []})
+                    publish_observation(
+                        self.repo,
+                        {
+                            "provider": provider,
+                            "status": "error",
+                            "observed_at": self.repo.clock(),
+                            "offers": [],
+                        },
+                    )
 
     def _run(self):
         while not self.stop_event.is_set():
@@ -156,6 +212,7 @@ def main():
     args = parser.parse_args()
     from .repository import Repository
     from .settings import Settings
+
     # Schema is created by the normal application migration path, not a reader.
     repo = Repository(Settings.from_environment().database_url)
     scanner = MarketScanner(repo, providers=args.providers)

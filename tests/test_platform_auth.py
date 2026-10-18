@@ -1,4 +1,5 @@
 """Real bcrypt/session tests on disposable state; no secret values are emitted."""
+
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import secrets
@@ -6,7 +7,14 @@ import tempfile
 import unittest
 
 from sqlalchemy import create_engine, select, update
-from studio_platform.auth import Auth, AuthenticationError, LoginLimited, accounts, clients, sessions
+from studio_platform.auth import (
+    Auth,
+    AuthenticationError,
+    LoginLimited,
+    accounts,
+    clients,
+    sessions,
+)
 from studio_platform.repository import Repository
 
 
@@ -14,7 +22,9 @@ class PlatformAuthTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.repo = Repository("sqlite:///"+(Path(self.temp.name)/"auth.sqlite3").as_posix())
+        self.repo = Repository(
+            "sqlite:///" + (Path(self.temp.name) / "auth.sqlite3").as_posix()
+        )
         self.addCleanup(self.repo.close)
         self.now = 1000.0
         self.auth = Auth(self.repo.engine, clock=lambda: self.now)
@@ -53,7 +63,13 @@ class PlatformAuthTests(unittest.TestCase):
         self.auth.register_client("machine", machine, "supervan", ["p"], ["jobs:read"])
         self.assertIsNotNone(self.auth.bearer(machine))
         with self.repo.engine.begin() as conn:
-            conn.execute(update(accounts).where(accounts.c.tenant == "sixnine", accounts.c.username == "supervan").values(disabled=1))
+            conn.execute(
+                update(accounts)
+                .where(
+                    accounts.c.tenant == "sixnine", accounts.c.username == "supervan"
+                )
+                .values(disabled=1)
+            )
         self.assertIsNotNone(self.auth.session(dan))
         self.assertIsNone(self.auth.session(van))
         self.assertIsNone(self.auth.bearer(machine))
@@ -65,6 +81,7 @@ class PlatformAuthTests(unittest.TestCase):
                 return True
             except LoginLimited:
                 return False
+
         with ThreadPoolExecutor(max_workers=12) as pool:
             outcomes = list(pool.map(take, range(20)))
         self.assertEqual(sum(outcomes), 5)
@@ -74,7 +91,11 @@ class PlatformAuthTests(unittest.TestCase):
     def test_malformed_password_hash_fails_closed(self):
         self.provision()
         with self.repo.engine.begin() as conn:
-            conn.execute(update(accounts).where(accounts.c.username == "superdan").values(password_hash="not-a-bcrypt-hash"))
+            conn.execute(
+                update(accounts)
+                .where(accounts.c.username == "superdan")
+                .values(password_hash="not-a-bcrypt-hash")
+            )
         self.assertFalse(self.auth.ready())
         with self.assertRaises(AuthenticationError):
             self.auth.login("superdan", self.password)
@@ -89,17 +110,32 @@ class PlatformAuthTests(unittest.TestCase):
         self.provision()
         token = self.auth.login("superdan", self.password)
         machine = secrets.token_urlsafe(32)
-        self.auth.register_client("small-pool", machine, "superdan", ["p"], ["jobs:read"])
-        engine = create_engine(self.repo.engine.url, pool_size=1, max_overflow=0, pool_timeout=.1,
-                               connect_args={"check_same_thread": False})
+        self.auth.register_client(
+            "small-pool", machine, "superdan", ["p"], ["jobs:read"]
+        )
+        engine = create_engine(
+            self.repo.engine.url,
+            pool_size=1,
+            max_overflow=0,
+            pool_timeout=0.1,
+            connect_args={"check_same_thread": False},
+        )
         self.addCleanup(engine.dispose)
         limited = Auth(engine, clock=lambda: self.now)
+
         def validate(index):
-            return (limited.session(token) if index % 2 else limited.bearer(machine)).owner
+            return (
+                limited.session(token) if index % 2 else limited.bearer(machine)
+            ).owner
+
         with ThreadPoolExecutor(max_workers=4) as pool:
-            self.assertEqual(list(pool.map(validate, range(20))), ["superdan"]*20)
+            self.assertEqual(list(pool.map(validate, range(20))), ["superdan"] * 20)
         with engine.begin() as conn:
-            conn.execute(update(accounts).where(accounts.c.username == "superdan").values(disabled=1))
+            conn.execute(
+                update(accounts)
+                .where(accounts.c.username == "superdan")
+                .values(disabled=1)
+            )
         self.assertIsNone(limited.session(token))
         self.assertIsNone(limited.bearer(machine))
 

@@ -28,3 +28,33 @@ collector does not support the five existing `load_tests` hooks. Do not replace
 the shard runner until collection parity, including hook-selected cases and
 duplicate occurrences, has been demonstrated. No tests have been removed or
 rewritten as pytest fixtures in this layout change.
+
+## Python style
+
+Install the separately pinned developer tooling without changing runtime locks:
+
+```sh
+python -m pip install --require-hashes -r requirements.dev.lock.txt
+python -m ruff format --check
+python -m ruff check
+```
+
+Ruff 0.17.0 formats `platform_app.py`, `studio_platform/` and this test directory.
+The installed host evaluator `studio_platform/alert_conditions.py`, deployment
+helpers, public Agent helper scripts and release tools are deliberately outside
+this slice. The explicit source scope also includes tracked modules matched by
+the repository's legacy private-folder ignore rules. Runtime requirements and
+Docker inputs do not include the developer lock.
+
+Use `python -m ruff format` for formatting only. Import sorting, automatic lint
+fixes, unsafe fixes and docstring code rewriting are disabled. The initial lint
+gate covers fatal correctness diagnostics (`E9`, `F63`, `F7`, `F82`); broader
+lint is a later baseline, not a reason to mix business fixes into formatting.
+Nine existing docstrings have narrow formatting guards to preserve their exact
+string values. This batch verifies every selected file's complete AST, including
+type comments, with source locations excluded.
+
+AST equivalence does not imply unchanged release fingerprints. The normal
+release contract hashes runtime Python bytes, so formatting application source
+changes API/worker compatibility fingerprints and still needs the normal tested
+staging and identical-artifact production acceptance.

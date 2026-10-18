@@ -1,4 +1,5 @@
 """Private durable rent markers; no credentials, request bodies or media."""
+
 from __future__ import annotations
 
 import json
@@ -25,61 +26,135 @@ class RentJournal:
         info = self.directory.stat()
         if os.name != "nt" and (info.st_uid != os.getuid() or info.st_mode & 0o077):
             raise ValueError("rent_journal_directory_not_private")
-        return self.directory/(tag+".json")
+        return self.directory / (tag + ".json")
 
     @staticmethod
     def _validate(value, tag):
         fields = {"version", "tag", "phase"}
-        if not isinstance(value, dict) or type(value.get("version")) is not int or value.get("version") != 1 or value.get("tag") != tag:
+        if (
+            not isinstance(value, dict)
+            or type(value.get("version")) is not int
+            or value.get("version") != 1
+            or value.get("tag") != tag
+        ):
             raise ValueError("rent_journal_invalid")
         phase = value.get("phase")
-        if phase in {"post_started", "confirmed", "quarantined", "rejected"} and "executor_id" in value:
+        if (
+            phase in {"post_started", "confirmed", "quarantined", "rejected"}
+            and "executor_id" in value
+        ):
             fields.add("executor_id")
         if phase in {"confirmed", "quarantined"}:
             fields.add("instance_id")
-        if "absolute_ttl" in value and phase in {"post_started", "confirmed", "quarantined", "rejected"}:
+        if "absolute_ttl" in value and phase in {
+            "post_started",
+            "confirmed",
+            "quarantined",
+            "rejected",
+        }:
             fields.add("absolute_ttl")
             RentJournal._validate_ttl(value["absolute_ttl"])
-        if phase not in {"checking", "not_submitted", "post_started", "confirmed", "quarantined", "rejected"} or set(value) != fields:
+        if (
+            phase
+            not in {
+                "checking",
+                "not_submitted",
+                "post_started",
+                "confirmed",
+                "quarantined",
+                "rejected",
+            }
+            or set(value) != fields
+        ):
             raise ValueError("rent_journal_invalid")
         for key in ("executor_id", "instance_id"):
-            if key in value and (not isinstance(value[key], str) or str(uuid.UUID(value[key])) != value[key]):
+            if key in value and (
+                not isinstance(value[key], str)
+                or str(uuid.UUID(value[key])) != value[key]
+            ):
                 raise ValueError("rent_journal_invalid_id")
-        if ("instance_id" in value and value.get("absolute_ttl", {}).get("instance_id") is not None
-                and value["absolute_ttl"]["instance_id"] != value["instance_id"]):
+        if (
+            "instance_id" in value
+            and value.get("absolute_ttl", {}).get("instance_id") is not None
+            and value["absolute_ttl"]["instance_id"] != value["instance_id"]
+        ):
             raise ValueError("rent_journal_invalid_ttl_identity")
         return value
 
     @staticmethod
     def _validate_ttl(value):
-        fields = {"version", "created_at", "hard_deadline", "requested_hours", "deadline",
-                  "effective_deadline", "instance_id", "provider_created_at", "attempts"}
-        numeric = lambda v: type(v) in (int, float) and math.isfinite(v) and 0 <= v < 253402300799
-        if (not isinstance(value, dict) or set(value) != fields or type(value["version"]) is not int
-                or value["version"] != 1 or type(value["requested_hours"]) is not int
-                or not 1 <= value["requested_hours"] <= 720
-                or not all(numeric(value[k]) for k in ("created_at", "hard_deadline", "deadline", "effective_deadline"))
-                or value["deadline"] != min(value["created_at"]+value["requested_hours"]*3600, value["hard_deadline"])
-                or not value["created_at"] < value["effective_deadline"] <= value["deadline"]
-                or not isinstance(value["attempts"], list) or len(value["attempts"]) > 2):
+        fields = {
+            "version",
+            "created_at",
+            "hard_deadline",
+            "requested_hours",
+            "deadline",
+            "effective_deadline",
+            "instance_id",
+            "provider_created_at",
+            "attempts",
+        }
+        numeric = lambda v: (
+            type(v) in (int, float) and math.isfinite(v) and 0 <= v < 253402300799
+        )
+        if (
+            not isinstance(value, dict)
+            or set(value) != fields
+            or type(value["version"]) is not int
+            or value["version"] != 1
+            or type(value["requested_hours"]) is not int
+            or not 1 <= value["requested_hours"] <= 720
+            or not all(
+                numeric(value[k])
+                for k in (
+                    "created_at",
+                    "hard_deadline",
+                    "deadline",
+                    "effective_deadline",
+                )
+            )
+            or value["deadline"]
+            != min(
+                value["created_at"] + value["requested_hours"] * 3600,
+                value["hard_deadline"],
+            )
+            or not value["created_at"]
+            < value["effective_deadline"]
+            <= value["deadline"]
+            or not isinstance(value["attempts"], list)
+            or len(value["attempts"]) > 2
+        ):
             raise ValueError("rent_journal_invalid_ttl")
         if value["instance_id"] is not None:
             if str(uuid.UUID(value["instance_id"])) != value["instance_id"]:
                 raise ValueError("rent_journal_invalid_ttl_identity")
-            if not numeric(value["provider_created_at"]) or abs(value["provider_created_at"]-value["created_at"]) > 300:
+            if (
+                not numeric(value["provider_created_at"])
+                or abs(value["provider_created_at"] - value["created_at"]) > 300
+            ):
                 raise ValueError("rent_journal_invalid_ttl_identity")
         elif value["provider_created_at"] is not None or value["attempts"]:
             raise ValueError("rent_journal_invalid_ttl_identity")
         for index, attempt in enumerate(value["attempts"]):
-            if (not isinstance(attempt, dict) or set(attempt) != {"target", "started_at", "status", "acknowledged", "confirmed"}
-                    or not numeric(attempt["target"]) or not numeric(attempt["started_at"])
-                    or not value["created_at"] < attempt["target"] <= value["deadline"]
-                    or attempt["status"] not in ("PENDING", "RUNNING")
-                    or type(attempt["acknowledged"]) is not bool or type(attempt["confirmed"]) is not bool):
+            if (
+                not isinstance(attempt, dict)
+                or set(attempt)
+                != {"target", "started_at", "status", "acknowledged", "confirmed"}
+                or not numeric(attempt["target"])
+                or not numeric(attempt["started_at"])
+                or not value["created_at"] < attempt["target"] <= value["deadline"]
+                or attempt["status"] not in ("PENDING", "RUNNING")
+                or type(attempt["acknowledged"]) is not bool
+                or type(attempt["confirmed"]) is not bool
+            ):
                 raise ValueError("rent_journal_invalid_ttl_attempt")
-            if index and (not value["attempts"][0]["acknowledged"] or not value["attempts"][0]["confirmed"]
-                    or value["attempts"][0]["status"] != "PENDING" or attempt["status"] != "RUNNING"
-                    or attempt["target"] > value["attempts"][0]["target"]):
+            if index and (
+                not value["attempts"][0]["acknowledged"]
+                or not value["attempts"][0]["confirmed"]
+                or value["attempts"][0]["status"] != "PENDING"
+                or attempt["status"] != "RUNNING"
+                or attempt["target"] > value["attempts"][0]["target"]
+            ):
                 raise ValueError("rent_journal_invalid_ttl_correction")
         return value
 
@@ -91,27 +166,51 @@ class RentJournal:
             return None
         with os.fdopen(descriptor, "rb") as source:
             info = os.fstat(source.fileno())
-            if (path.is_symlink() or not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
-                    or os.name != "nt" and (info.st_uid != os.getuid() or info.st_mode & 0o077)):
+            if (
+                path.is_symlink()
+                or not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
+                or os.name != "nt"
+                and (info.st_uid != os.getuid() or info.st_mode & 0o077)
+            ):
                 raise ValueError("rent_journal_file_not_private")
             raw = source.read(4097)
         if len(raw) > 4096:
             raise ValueError("rent_journal_too_large")
         return self._validate(json.loads(raw), tag)
 
-    def save(self, tag, phase, *, executor_id=None, instance_id=None, absolute_ttl=None):
+    def save(
+        self, tag, phase, *, executor_id=None, instance_id=None, absolute_ttl=None
+    ):
         # Creation acknowledgements must not overwrite a concurrent TTL intent
         # recovered from an earlier lost rent response.
         with self.ttl_lock(tag):
-            self._save(tag, phase, executor_id=executor_id, instance_id=instance_id, absolute_ttl=absolute_ttl)
+            self._save(
+                tag,
+                phase,
+                executor_id=executor_id,
+                instance_id=instance_id,
+                absolute_ttl=absolute_ttl,
+            )
 
-    def _save(self, tag, phase, *, executor_id=None, instance_id=None, absolute_ttl=None):
+    def _save(
+        self, tag, phase, *, executor_id=None, instance_id=None, absolute_ttl=None
+    ):
         path = self._path(tag)
         prior = self.read(tag)
-        if (prior is None and phase != "checking" or prior is not None and
-                (prior["phase"], phase) not in {("checking", "not_submitted"),
-                                             ("checking", "post_started"), ("post_started", "confirmed"),
-                                             ("post_started", "rejected"), ("post_started", "quarantined")}):
+        if (
+            prior is None
+            and phase != "checking"
+            or prior is not None
+            and (prior["phase"], phase)
+            not in {
+                ("checking", "not_submitted"),
+                ("checking", "post_started"),
+                ("post_started", "confirmed"),
+                ("post_started", "rejected"),
+                ("post_started", "quarantined"),
+            }
+        ):
             raise ValueError("rent_journal_transition_refused")
         value = {"version": 1, "tag": tag, "phase": phase}
         if prior and "absolute_ttl" in prior:
@@ -122,11 +221,18 @@ class RentJournal:
             if phase != "post_started":
                 raise ValueError("rent_journal_ttl_binding_requires_new_rent")
             value["absolute_ttl"] = absolute_ttl
-        for key, candidate in (("executor_id", executor_id), ("instance_id", instance_id)):
+        for key, candidate in (
+            ("executor_id", executor_id),
+            ("instance_id", instance_id),
+        ):
             if candidate is not None:
                 value[key] = str(uuid.UUID(candidate))
         self._validate(value, tag)
-        if prior and "executor_id" in prior and value.get("executor_id") != prior["executor_id"]:
+        if (
+            prior
+            and "executor_id" in prior
+            and value.get("executor_id") != prior["executor_id"]
+        ):
             raise ValueError("rent_journal_executor_conflict")
         self._write(path, value, prior is not None)
 
@@ -135,7 +241,11 @@ class RentJournal:
         if len(raw) > 4096:
             raise ValueError("rent_journal_too_large")
         tag = value["tag"]
-        target = self.directory/(tag+"-"+str(uuid.uuid4())+".next") if replace else path
+        target = (
+            self.directory / (tag + "-" + str(uuid.uuid4()) + ".next")
+            if replace
+            else path
+        )
         descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "wb") as output:
             output.write(raw)
@@ -157,17 +267,25 @@ class RentJournal:
         fd = os.open(path, os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
         with os.fdopen(fd, "r+b") as handle:
             info = os.fstat(handle.fileno())
-            if (path.is_symlink() or not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
-                    or os.name != "nt" and (info.st_uid != os.getuid() or info.st_mode & 0o077)):
+            if (
+                path.is_symlink()
+                or not stat.S_ISREG(info.st_mode)
+                or info.st_nlink != 1
+                or os.name != "nt"
+                and (info.st_uid != os.getuid() or info.st_mode & 0o077)
+            ):
                 raise ValueError("rent_journal_lock_not_private")
             if os.name == "nt":
                 import msvcrt
+
                 if info.st_size == 0:
-                    handle.write(b"0"); handle.flush()
+                    handle.write(b"0")
+                    handle.flush()
                 handle.seek(0)
                 msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
             else:
                 import fcntl
+
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             try:
                 yield
@@ -185,14 +303,30 @@ class RentJournal:
             raise ValueError("rent_journal_ttl_binding_missing")
         old = prior["absolute_ttl"]
         self._validate_ttl(value)
-        if (any(value[k] != old[k] for k in ("version", "created_at", "hard_deadline", "requested_hours", "deadline"))
-                or value["effective_deadline"] > old["effective_deadline"]
-                or old["instance_id"] is not None and any(value[k] != old[k] for k in ("instance_id", "provider_created_at"))
-                or len(value["attempts"]) < len(old["attempts"])):
+        if (
+            any(
+                value[k] != old[k]
+                for k in (
+                    "version",
+                    "created_at",
+                    "hard_deadline",
+                    "requested_hours",
+                    "deadline",
+                )
+            )
+            or value["effective_deadline"] > old["effective_deadline"]
+            or old["instance_id"] is not None
+            and any(value[k] != old[k] for k in ("instance_id", "provider_created_at"))
+            or len(value["attempts"]) < len(old["attempts"])
+        ):
             raise ValueError("rent_journal_ttl_extension_refused")
         for before, after in zip(old["attempts"], value["attempts"]):
-            if (any(before[k] != after[k] for k in ("target", "started_at", "status"))
-                    or before["acknowledged"] and not after["acknowledged"]
-                    or before["confirmed"] and not after["confirmed"]):
+            if (
+                any(before[k] != after[k] for k in ("target", "started_at", "status"))
+                or before["acknowledged"]
+                and not after["acknowledged"]
+                or before["confirmed"]
+                and not after["confirmed"]
+            ):
                 raise ValueError("rent_journal_ttl_replay_refused")
         self._write(path, {**prior, "absolute_ttl": value}, True)

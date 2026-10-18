@@ -1,4 +1,5 @@
 """Offline archive transfer checks: real temp files, no SSH/provider/GPU calls."""
+
 from contextlib import redirect_stdout
 import hashlib
 import io
@@ -14,7 +15,10 @@ from unittest.mock import Mock, patch
 from studio_platform.lium_bootstrap import BootError
 from studio_platform import wangp_bootstrap
 from studio_platform.wangp_bootstrap import (
-    DEPENDENCY_NAME, MAX_DEPENDENCY_BYTES, WanGPSSHHost, dependency_source,
+    DEPENDENCY_NAME,
+    MAX_DEPENDENCY_BYTES,
+    WanGPSSHHost,
+    dependency_source,
 )
 
 
@@ -32,6 +36,7 @@ def checksum(path):
 
 class GuardedSource:
     """Fail on an unbounded/full-archive read while recording actual read sizes."""
+
     def __init__(self, path):
         self.path = path
         self.read_sizes = []
@@ -65,6 +70,7 @@ class GuardedSource:
 
 class LocalRemote:
     """Run the actual remote verification snippets against an isolated local root."""
+
     def __init__(self, root):
         self.root = root
         self.root.mkdir()
@@ -116,13 +122,21 @@ class LocalRemote:
     def run(self, script, **kwargs):
         anchor = "Path('/root/sixnine-cache')"
         if script.count(anchor) != 1:
-            raise AssertionError("Only the bounded archive verification scripts may run")
+            raise AssertionError(
+                "Only the bounded archive verification scripts may run"
+            )
         self.scripts.append(script)
         output = io.StringIO()
         with redirect_stdout(output):
             # All paths in these source-owned snippets derive from this one root.
-            exec(compile(script.replace(anchor, "Path(" + repr(str(self.root)) + ")"),
-                         "<offline-transfer-verification>", "exec"), {})
+            exec(
+                compile(
+                    script.replace(anchor, "Path(" + repr(str(self.root)) + ")"),
+                    "<offline-transfer-verification>",
+                    "exec",
+                ),
+                {},
+            )
         return json.loads(output.getvalue())
 
     def open_sftp(self):
@@ -144,7 +158,8 @@ class LocalRemote:
                     raise AssertionError("Unexpected SFTP target or write mode")
                 remote.opens.append((name, mode))
                 target = (remote.root / (DEPENDENCY_NAME + ".partial")).open(
-                    "xb" if mode == "wx" else "ab")
+                    "xb" if mode == "wx" else "ab"
+                )
 
                 class Writer:
                     def __enter__(self):
@@ -158,7 +173,9 @@ class LocalRemote:
 
                     def write(self, data):
                         if not 0 < len(data) <= CHUNK:
-                            raise AssertionError("Archive write is not bounded to 8 MiB")
+                            raise AssertionError(
+                                "Archive write is not bounded to 8 MiB"
+                            )
                         remote.writes.append(len(data))
                         if remote.corrupt_write:
                             data = bytes([data[0] ^ 1]) + data[1:]
@@ -167,7 +184,9 @@ class LocalRemote:
                         remote.after_write()
                         if remote.interrupt_after_write:
                             remote.interrupt_after_write = False
-                            raise ConnectionResetError("Synthetic transfer interruption")
+                            raise ConnectionResetError(
+                                "Synthetic transfer interruption"
+                            )
                         return count
 
                 return Writer()
@@ -194,7 +213,9 @@ class WanGPTransferTests(unittest.TestCase):
         self.host.ensure_connected = Mock()
         self.host.run = self.remote.run
         self.host.client = self.remote
-        self.host.start = Mock(side_effect=AssertionError("Transfer must not launch a runtime"))
+        self.host.start = Mock(
+            side_effect=AssertionError("Transfer must not launch a runtime")
+        )
         sftp = patch("paramiko.SFTPClient", side_effect=self.remote.sftp_client)
         sftp.start()
         self.addCleanup(sftp.stop)
@@ -211,7 +232,9 @@ class WanGPTransferTests(unittest.TestCase):
                 remaining -= len(data)
 
     def transfer(self, expected=None):
-        self.host._upload_dependency(self.source, self.expected if expected is None else expected, self.size)
+        self.host._upload_dependency(
+            self.source, self.expected if expected is None else expected, self.size
+        )
 
     def assert_published(self, prefix_size, mode):
         self.assertEqual(checksum(self.final), self.expected)
@@ -224,10 +247,20 @@ class WanGPTransferTests(unittest.TestCase):
         self.assertEqual(self.source.read_bytes, self.size)
         self.assertEqual(self.remote.pipelined, [True])
         self.assertEqual(len(self.remote.scripts), 2)
-        self.assertTrue(all(0 < value <= wangp_bootstrap.SFTP_OPEN_SECONDS
-                            for value in self.remote.open_timeouts))
-        self.assertTrue(all(channel.closed and 0 < channel.timeout <= wangp_bootstrap.SFTP_IO_SECONDS
-                            and channel.subsystems == ["sftp"] for channel in self.remote.channels))
+        self.assertTrue(
+            all(
+                0 < value <= wangp_bootstrap.SFTP_OPEN_SECONDS
+                for value in self.remote.open_timeouts
+            )
+        )
+        self.assertTrue(
+            all(
+                channel.closed
+                and 0 < channel.timeout <= wangp_bootstrap.SFTP_IO_SECONDS
+                and channel.subsystems == ["sftp"]
+                for channel in self.remote.channels
+            )
+        )
         self.host.start.assert_not_called()
 
     def test_new_archive_streams_bounded_chunks_then_publishes(self):
@@ -309,8 +342,12 @@ class WanGPTransferTests(unittest.TestCase):
 
     def test_overall_deadline_interrupts_transfer_and_retains_resume_prefix(self):
         clock = [10.0]
-        self.remote.after_write = lambda: clock.__setitem__(0, 10.0 + wangp_bootstrap.DEPENDENCY_TRANSFER_SECONDS + 1)
-        with patch.object(wangp_bootstrap.time, "monotonic", side_effect=lambda: clock[0]):
+        self.remote.after_write = lambda: clock.__setitem__(
+            0, 10.0 + wangp_bootstrap.DEPENDENCY_TRANSFER_SECONDS + 1
+        )
+        with patch.object(
+            wangp_bootstrap.time, "monotonic", side_effect=lambda: clock[0]
+        ):
             with self.assertRaisesRegex(BootError, "wangp_dependency_transfer_timeout"):
                 self.transfer()
         self.assertEqual(self.partial.stat().st_size, CHUNK)
@@ -328,7 +365,9 @@ class WanGPTransferTests(unittest.TestCase):
         with self.assertRaises(TimeoutError):
             self.transfer()
         self.assertEqual(len(self.remote.open_timeouts), 1)
-        self.assertLessEqual(self.remote.open_timeouts[0], wangp_bootstrap.SFTP_OPEN_SECONDS)
+        self.assertLessEqual(
+            self.remote.open_timeouts[0], wangp_bootstrap.SFTP_OPEN_SECONDS
+        )
         self.assertEqual(self.remote.opens, [])
         self.assertFalse(self.partial.exists())
         self.host.start.assert_not_called()
@@ -365,19 +404,34 @@ class WanGPDependencySourceTests(unittest.TestCase):
         self.path = self.root / DEPENDENCY_NAME
         self.path.write_bytes(b"offline package")
         self.config = SimpleNamespace(source_dir=self.root)
-        self.runtime = {"dependency_artifact_path": REMOTE_CACHE + "/" + DEPENDENCY_NAME,
-                        "dependency_artifact_sha256": checksum(self.path)}
+        self.runtime = {
+            "dependency_artifact_path": REMOTE_CACHE + "/" + DEPENDENCY_NAME,
+            "dependency_artifact_sha256": checksum(self.path),
+        }
 
     def test_source_is_bound_to_exact_target_and_recorded_size(self):
-        self.assertEqual(dependency_source(self.config, self.runtime),
-                         (self.path, self.runtime["dependency_artifact_sha256"], self.path.stat().st_size))
-        self.assertIsNone(dependency_source(self.config, {"dependency_artifact_path": ""}))
+        self.assertEqual(
+            dependency_source(self.config, self.runtime),
+            (
+                self.path,
+                self.runtime["dependency_artifact_sha256"],
+                self.path.stat().st_size,
+            ),
+        )
+        self.assertIsNone(
+            dependency_source(self.config, {"dependency_artifact_path": ""})
+        )
 
     def test_wrong_target_or_missing_digest_fails_before_transfer(self):
-        for change in ({"dependency_artifact_path": "/workspace/" + DEPENDENCY_NAME},
-                       {"dependency_artifact_sha256": ""},
-                       {"dependency_artifact_sha256": "A" * 64}):
-            with self.subTest(change=change), self.assertRaisesRegex(BootError, "wangp_dependency_binding_invalid"):
+        for change in (
+            {"dependency_artifact_path": "/workspace/" + DEPENDENCY_NAME},
+            {"dependency_artifact_sha256": ""},
+            {"dependency_artifact_sha256": "A" * 64},
+        ):
+            with (
+                self.subTest(change=change),
+                self.assertRaisesRegex(BootError, "wangp_dependency_binding_invalid"),
+            ):
                 dependency_source(self.config, {**self.runtime, **change})
 
     def test_linked_source_is_rejected(self):
@@ -386,7 +440,9 @@ class WanGPDependencySourceTests(unittest.TestCase):
         try:
             self.path.symlink_to(target)
         except OSError as error:
-            self.skipTest("This host cannot create test symlinks: " + type(error).__name__)
+            self.skipTest(
+                "This host cannot create test symlinks: " + type(error).__name__
+            )
         with self.assertRaisesRegex(BootError, "wangp_dependency_source_untrusted"):
             dependency_source(self.config, self.runtime)
 
@@ -396,11 +452,19 @@ class WanGPDependencySourceTests(unittest.TestCase):
             dependency_source(self.config, self.runtime)
 
     def test_directory_empty_or_oversized_source_is_rejected(self):
-        for mode, size in ((stat.S_IFDIR | 0o700, 64), (stat.S_IFREG | 0o600, 0),
-                           (stat.S_IFREG | 0o600, MAX_DEPENDENCY_BYTES + 1)):
+        for mode, size in (
+            (stat.S_IFDIR | 0o700, 64),
+            (stat.S_IFREG | 0o600, 0),
+            (stat.S_IFREG | 0o600, MAX_DEPENDENCY_BYTES + 1),
+        ):
             info = SimpleNamespace(st_mode=mode, st_size=size, st_nlink=1)
-            with self.subTest(mode=mode, size=size), patch.object(Path, "lstat", return_value=info):
-                with self.assertRaisesRegex(BootError, "wangp_dependency_source_untrusted"):
+            with (
+                self.subTest(mode=mode, size=size),
+                patch.object(Path, "lstat", return_value=info),
+            ):
+                with self.assertRaisesRegex(
+                    BootError, "wangp_dependency_source_untrusted"
+                ):
                     dependency_source(self.config, self.runtime)
 
 

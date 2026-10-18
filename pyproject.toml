@@ -1,0 +1,22 @@
+[tool.ruff]
+required-version = "==0.17.0"
+target-version = "py312"
+line-length = 88
+include = ["platform_app.py", "studio_platform/**/*.py", "tests/**/*.py"]
+# The repository's private-folder allowlist also matches nine tracked modules.
+# The finite source scope above, rather than that legacy ignore list, is used.
+respect-gitignore = false
+# This evaluator is also a protected installed host helper. Keep its bytes.
+extend-exclude = ["studio_platform/alert_conditions.py"]
+force-exclude = true
+unsafe-fixes = false
+
+[tool.ruff.lint]
+# Start with fatal correctness diagnostics; broader lint is a separate baseline.
+select = ["E9", "F63", "F7", "F82"]
+fixable = []
+
+[tool.ruff.format]
+quote-style = "preserve"
+line-ending = "lf"
+docstring-code-format = false

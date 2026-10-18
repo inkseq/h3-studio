@@ -1,4 +1,5 @@
 """Dedicated Comfy transport; no worker, runtime or cloud initialization."""
+
 from __future__ import annotations
 
 import hashlib
@@ -13,8 +14,15 @@ import httpx
 
 from ..storage import key_belongs_to, validate_key
 from .outputs import _request, _shape
-from .protocol import (BackendError, NotReady, Outcome, SubmissionRejected,
-                       SubmissionUncertain, TAG, TASK)
+from .protocol import (
+    BackendError,
+    NotReady,
+    Outcome,
+    SubmissionRejected,
+    SubmissionUncertain,
+    TAG,
+    TASK,
+)
 
 
 class ComfyBackend:
@@ -24,9 +32,20 @@ class ComfyBackend:
     pending billing. Never use a quote as an invoice. HTTP endpoint must be local
     or an explicitly approved HTTPS gateway, without credentials/query/fragment.
     """
-    def __init__(self, *, endpoint="", enabled=False, allowed_origins=(), transport=None,
-                 actual_cost_resolver=None, max_download_bytes=512*1024*1024,
-                 timeout_s=30, max_transfer_seconds=180, comfy_revision=None):
+
+    def __init__(
+        self,
+        *,
+        endpoint="",
+        enabled=False,
+        allowed_origins=(),
+        transport=None,
+        actual_cost_resolver=None,
+        max_download_bytes=512 * 1024 * 1024,
+        timeout_s=30,
+        max_transfer_seconds=180,
+        comfy_revision=None,
+    ):
         self.enabled = bool(enabled)
         self.endpoint = endpoint.rstrip("/")
         self.cost_resolver = actual_cost_resolver
@@ -42,12 +61,27 @@ class ComfyBackend:
         if self.enabled:
             parsed = urlsplit(self.endpoint)
             allowed = set(allowed_origins)
-            if (self.endpoint not in allowed or parsed.scheme not in {"http", "https"}
-                or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment
-                or parsed.path or parsed.scheme == "http" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}):
+            if (
+                self.endpoint not in allowed
+                or parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username
+                or parsed.password
+                or parsed.query
+                or parsed.fragment
+                or parsed.path
+                or parsed.scheme == "http"
+                and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}
+            ):
                 raise ValueError("comfy_endpoint_not_explicitly_allowed")
-            if (type(self.max_bytes) is not int or self.max_bytes <= 0 or not math.isfinite(timeout_s)
-                    or timeout_s <= 0 or not math.isfinite(max_transfer_seconds) or max_transfer_seconds <= 0):
+            if (
+                type(self.max_bytes) is not int
+                or self.max_bytes <= 0
+                or not math.isfinite(timeout_s)
+                or timeout_s <= 0
+                or not math.isfinite(max_transfer_seconds)
+                or max_transfer_seconds <= 0
+            ):
                 raise ValueError("invalid_comfy_limits")
 
     def close(self):
@@ -59,8 +93,13 @@ class ComfyBackend:
         if not self.enabled:
             raise NotReady("backend_disabled")
         if self._client is None:
-            self._client = httpx.Client(base_url=self.endpoint, timeout=self.timeout_s,
-                follow_redirects=False, trust_env=False, transport=self.transport)
+            self._client = httpx.Client(
+                base_url=self.endpoint,
+                timeout=self.timeout_s,
+                follow_redirects=False,
+                trust_env=False,
+                transport=self.transport,
+            )
         return self._client
 
     def _json(self, method, path, **kwargs):
@@ -73,7 +112,10 @@ class ComfyBackend:
                 started = time.monotonic()
                 for chunk in response.iter_bytes():
                     content.extend(chunk)
-                    if len(content) > 16*1024*1024 or time.monotonic()-started > self.max_transfer_seconds:
+                    if (
+                        len(content) > 16 * 1024 * 1024
+                        or time.monotonic() - started > self.max_transfer_seconds
+                    ):
                         raise BackendError("comfy_response_limit")
                 return json.loads(content)
         except (httpx.HTTPError, json.JSONDecodeError):
@@ -82,12 +124,15 @@ class ComfyBackend:
     def is_idle(self):
         """Current dedicated queue evidence, not model qualification or recovery."""
         queue = self._json("GET", "/queue")
-        return (isinstance(queue, dict)
-                and queue.get("queue_running") == []
-                and queue.get("queue_pending") == [])
+        return (
+            isinstance(queue, dict)
+            and queue.get("queue_running") == []
+            and queue.get("queue_pending") == []
+        )
 
     def prepare(self, job, tag, store, heartbeat):
         from comfy_workflow import build_workflow
+
         if not TAG.fullmatch(tag):
             raise BackendError("invalid_attempt_tag")
         if self.is_idle() is not True:
@@ -101,13 +146,27 @@ class ComfyBackend:
             key = validate_key(model["key"])
             if not key_belongs_to(key, job["owner_id"]):
                 raise BackendError("asset_owner_mismatch")
-            extension = {"image": ".png", "video": ".mp4", "audio": ".wav"}[snapshot["metadata"]["kind"]]
+            extension = {"image": ".png", "video": ".mp4", "audio": ".wav"}[
+                snapshot["metadata"]["kind"]
+            ]
             filename = "sixnine-" + hashlib.sha256(key.encode()).hexdigest() + extension
             with store.open(key) as source:
-                response = self._json("POST", "/upload/image", files={"image": (filename, source, "application/octet-stream")},
-                    data={"type": "input", "overwrite": "true", "subfolder": "sixnine-inputs"})
+                response = self._json(
+                    "POST",
+                    "/upload/image",
+                    files={"image": (filename, source, "application/octet-stream")},
+                    data={
+                        "type": "input",
+                        "overwrite": "true",
+                        "subfolder": "sixnine-inputs",
+                    },
+                )
             name, folder = response.get("name"), response.get("subfolder", "")
-            if (name != filename or folder != "sixnine-inputs" or response.get("type", "input") != "input"):
+            if (
+                name != filename
+                or folder != "sixnine-inputs"
+                or response.get("type", "input") != "input"
+            ):
                 raise BackendError("comfy_upload_path_invalid")
             filenames[asset_id] = folder + "/" + name
             metadata[asset_id] = snapshot["metadata"]
@@ -115,8 +174,15 @@ class ComfyBackend:
 
     def submit(self, prepared, tag):
         try:
-            with self._http().stream("POST", "/prompt", json={"prompt": prepared, "client_id": tag,
-                    "extra_data": {"sixnine_attempt_id": tag}}) as response:
+            with self._http().stream(
+                "POST",
+                "/prompt",
+                json={
+                    "prompt": prepared,
+                    "client_id": tag,
+                    "extra_data": {"sixnine_attempt_id": tag},
+                },
+            ) as response:
                 if response.status_code in (400, 401, 403, 404, 422):
                     raise SubmissionRejected("comfy_submission_rejected")
                 if response.status_code != 200:
@@ -124,7 +190,7 @@ class ComfyBackend:
                 content = bytearray()
                 for chunk in response.iter_bytes():
                     content.extend(chunk)
-                    if len(content) > 1024*1024:
+                    if len(content) > 1024 * 1024:
                         raise SubmissionUncertain("comfy_submission_unknown")
                 body = json.loads(content)
             task_id = body.get("prompt_id") if isinstance(body, dict) else None
@@ -139,13 +205,25 @@ class ComfyBackend:
         if not isinstance(prompt, list) or len(prompt) < 4:
             return False
         extra, graph = prompt[3], prompt[2]
-        if not isinstance(extra, dict) or extra.get("sixnine_attempt_id") != tag or not isinstance(graph, dict):
+        if (
+            not isinstance(extra, dict)
+            or extra.get("sixnine_attempt_id") != tag
+            or not isinstance(graph, dict)
+        ):
             return False
-        return any(isinstance(node, dict) and node.get("class_type") == "SaveVideo"
-            and node.get("inputs", {}).get("filename_prefix") == "h3-studio/" + tag for node in graph.values())
+        return any(
+            isinstance(node, dict)
+            and node.get("class_type") == "SaveVideo"
+            and node.get("inputs", {}).get("filename_prefix") == "h3-studio/" + tag
+            for node in graph.values()
+        )
 
     def reconcile(self, tag, task_id=None):
-        if not TAG.fullmatch(tag) or task_id is not None and not TASK.fullmatch(task_id):
+        if (
+            not TAG.fullmatch(tag)
+            or task_id is not None
+            and not TASK.fullmatch(task_id)
+        ):
             raise BackendError("invalid_attempt_identity")
         if task_id:
             return self.poll(tag, task_id)
@@ -187,16 +265,25 @@ class ComfyBackend:
         record = self._record(tag, task_id)
         if record is None:
             queue = self._json("GET", "/queue")
-            if isinstance(queue, dict) and any(self._tagged(p, tag) and p[1] == task_id
-                for k in ("queue_running", "queue_pending") for p in queue.get(k, [])):
+            if isinstance(queue, dict) and any(
+                self._tagged(p, tag) and p[1] == task_id
+                for k in ("queue_running", "queue_pending")
+                for p in queue.get(k, [])
+            ):
                 return Outcome("running", task_id)
             if task_id in self._confirmed_dequeued:
                 return Outcome("cancelled", task_id)
             return Outcome("unknown", task_id)
         status = record.get("status", {})
-        if status.get("completed") is True and status.get("status_str") not in ("error", "failed"):
+        if status.get("completed") is True and status.get("status_str") not in (
+            "error",
+            "failed",
+        ):
             return Outcome("succeeded", task_id)
-        if status.get("completed") is False and status.get("status_str") in ("error", "failed"):
+        if status.get("completed") is False and status.get("status_str") in (
+            "error",
+            "failed",
+        ):
             return Outcome("failed", task_id)
         return Outcome("unknown", task_id)
 
@@ -204,14 +291,22 @@ class ComfyBackend:
         if not TASK.fullmatch(task_id):
             raise BackendError("invalid_upstream_task_id")
         from comfy_workflow import COMFY_COMMIT
+
         if self.comfy_revision != COMFY_COMMIT:
             queue = self._json("GET", "/queue")
-            if not isinstance(queue, dict) or any(not isinstance(queue.get(k), list) for k in ("queue_running", "queue_pending")):
+            if not isinstance(queue, dict) or any(
+                not isinstance(queue.get(k), list)
+                for k in ("queue_running", "queue_pending")
+            ):
                 raise BackendError("comfy_cancel_unknown")
-            if any(self._tagged(p, tag) and p[1] == task_id for p in queue["queue_running"]):
+            if any(
+                self._tagged(p, tag) and p[1] == task_id for p in queue["queue_running"]
+            ):
                 # Unverified versions never get a global interrupt or guessed route.
                 return False
-            if not any(self._tagged(p, tag) and p[1] == task_id for p in queue["queue_pending"]):
+            if not any(
+                self._tagged(p, tag) and p[1] == task_id for p in queue["queue_pending"]
+            ):
                 return False
             try:
                 response = self._http().post("/queue", json={"delete": [task_id]})
@@ -220,10 +315,16 @@ class ComfyBackend:
             except httpx.HTTPError:
                 raise BackendError("comfy_cancel_unknown") from None
             checked = self._json("GET", "/queue")
-            if not isinstance(checked, dict) or any(not isinstance(checked.get(k), list) for k in ("queue_running", "queue_pending")):
+            if not isinstance(checked, dict) or any(
+                not isinstance(checked.get(k), list)
+                for k in ("queue_running", "queue_pending")
+            ):
                 raise BackendError("comfy_cancel_unknown")
-            stopped = not any(isinstance(p, list) and len(p) > 1 and p[1] == task_id
-                              for k in ("queue_running", "queue_pending") for p in checked[k])
+            stopped = not any(
+                isinstance(p, list) and len(p) > 1 and p[1] == task_id
+                for k in ("queue_running", "queue_pending")
+                for p in checked[k]
+            )
             if stopped:
                 self._confirmed_dequeued.add(task_id)
             return stopped
@@ -238,18 +339,29 @@ class ComfyBackend:
         found = {}
         for node_id, result in record.get("outputs", {}).items():
             node = graph.get(str(node_id), {})
-            kind = {"SaveVideo": "video", "SaveAudioAdvanced": "audio"}.get(node.get("class_type"))
+            kind = {"SaveVideo": "video", "SaveAudioAdvanced": "audio"}.get(
+                node.get("class_type")
+            )
             if kind is None:
                 continue
             prefix = tag + ("_audio" if kind == "audio" else "")
             if node.get("inputs", {}).get("filename_prefix") != "h3-studio/" + prefix:
                 continue
-            for label in ("videos", "images", "gifs") if kind == "video" else ("audio", "audios"):
+            for label in (
+                ("videos", "images", "gifs") if kind == "video" else ("audio", "audios")
+            ):
                 for entry in result.get(label, []):
                     filename = entry.get("filename", "")
                     extension = ".mp4" if kind == "video" else ".flac"
-                    if (entry.get("type") == "output" and entry.get("subfolder") == "h3-studio"
-                        and isinstance(filename, str) and re.fullmatch(re.escape(prefix) + r"_\d+_?" + re.escape(extension), filename)):
+                    if (
+                        entry.get("type") == "output"
+                        and entry.get("subfolder") == "h3-studio"
+                        and isinstance(filename, str)
+                        and re.fullmatch(
+                            re.escape(prefix) + r"_\d+_?" + re.escape(extension),
+                            filename,
+                        )
+                    ):
                         found.setdefault(kind, entry)
         return found
 
@@ -269,12 +381,18 @@ class ComfyBackend:
             query = {key: entry[key] for key in ("filename", "subfolder", "type")}
             count, started = 0, time.monotonic()
             try:
-                with self._http().stream("GET", "/view", params=query) as response, target.open("wb") as destination:
+                with (
+                    self._http().stream("GET", "/view", params=query) as response,
+                    target.open("wb") as destination,
+                ):
                     if response.status_code != 200:
                         raise BackendError("comfy_download_failed")
                     for chunk in response.iter_bytes():
                         count += len(chunk)
-                        if count > self.max_bytes or time.monotonic()-started > self.max_transfer_seconds:
+                        if (
+                            count > self.max_bytes
+                            or time.monotonic() - started > self.max_transfer_seconds
+                        ):
                             raise BackendError("comfy_download_limit")
                         destination.write(chunk)
             except httpx.HTTPError:

@@ -1,4 +1,5 @@
 """Server-owned recipe source identity, independent from UI/manual version numbers."""
+
 from .repository import request_hash
 
 
@@ -23,8 +24,10 @@ def source_components(project, shot_id):
         for link in incoming.get(identity, []):
             used_links[link["id"]] = link
             pending.append(link["source"])
-        inherited_cast = storyboard and identity == scene_id and "cast" in shot.get("data", {})
-        for actor in ([] if inherited_cast else node.get("data", {}).get("cast", [])):
+        inherited_cast = (
+            storyboard and identity == scene_id and "cast" in shot.get("data", {})
+        )
+        for actor in [] if inherited_cast else node.get("data", {}).get("cast", []):
             actor_id = actor.get("characterId") if isinstance(actor, dict) else actor
             if isinstance(actor_id, str) and actor_id in lookup:
                 pending.append(actor_id)
@@ -55,9 +58,12 @@ def source_components(project, shot_id):
                 pending.append(draft["place"]["locationId"])
             pending.extend(draft.get("propIds", []))
             pending.extend(ref["entityId"] for ref in draft.get("extraRefs", []))
-            pending.extend(filter(None, (draft.get("firstFrameId"), draft.get("lastFrameId"))))
+            pending.extend(
+                filter(None, (draft.get("firstFrameId"), draft.get("lastFrameId")))
+            )
             if draft.get("continuePrevious"):
                 from .storyboard import previous_shot
+
                 previous = previous_shot(project, node)
                 if previous:
                     pending.append(previous["id"])
@@ -69,12 +75,25 @@ def source_components(project, shot_id):
         for guide in node.get("data", {}).get("h3", {}).get("guides", []):
             if isinstance(guide, dict) and isinstance(guide.get("media_id"), str):
                 pending.append(guide["media_id"])
-    return {"shot_id": shot_id, "entities": [lookup[k] for k in sorted(chosen)],
-                         "links": [used_links[k] for k in sorted(used_links)],
-                         **({"storyboard_style": project.get("journey", {}).get("storyboard", {}).get("style", "")}
-                            if storyboard else {}),
-                         **({"storyboard_defaults": project["journey"]["storyboard"]["defaults"]}
-                            if "defaults" in project.get("journey", {}).get("storyboard", {}) else {})}
+    return {
+        "shot_id": shot_id,
+        "entities": [lookup[k] for k in sorted(chosen)],
+        "links": [used_links[k] for k in sorted(used_links)],
+        **(
+            {
+                "storyboard_style": project.get("journey", {})
+                .get("storyboard", {})
+                .get("style", "")
+            }
+            if storyboard
+            else {}
+        ),
+        **(
+            {"storyboard_defaults": project["journey"]["storyboard"]["defaults"]}
+            if "defaults" in project.get("journey", {}).get("storyboard", {})
+            else {}
+        ),
+    }
 
 
 def source_snapshot(project, shot_id):
@@ -84,11 +103,18 @@ def source_snapshot(project, shot_id):
 def validate_source_ref(project, ref):
     lookup = {e["id"]: e for e in project["entities"]}
     shot = lookup.get(ref["shot_id"])
-    if not shot or shot["type"] not in {"shot", "generation"} or shot["version"] != ref["shot_version"]:
+    if (
+        not shot
+        or shot["type"] not in {"shot", "generation"}
+        or shot["version"] != ref["shot_version"]
+    ):
         return False
     ancestors = {}
     node = lookup.get(shot.get("parentId"))
     while node:
         ancestors[node["type"]] = node["id"]
         node = lookup.get(node.get("parentId"))
-    return all(ref.get(key) in (None, ancestors.get(kind)) for key, kind in (("chapter_id", "chapter"), ("scene_id", "scene")))
+    return all(
+        ref.get(key) in (None, ancestors.get(kind))
+        for key, kind in (("chapter_id", "chapter"), ("scene_id", "scene"))
+    )

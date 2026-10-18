@@ -1,4 +1,5 @@
 """CPU image metadata/package boundary checks; no image build or network."""
+
 import hashlib
 import json
 from pathlib import Path
@@ -38,13 +39,26 @@ class RuntimeImagePackagingTests(unittest.TestCase):
     def test_prepared_runtime_document_preserves_existing_wire_bytes(self):
         # Frozen before extracting the constructor: one card and the second
         # slot of a two-card host, with a fixed source-bundle digest fixture.
-        cases = ((PROFILE_IDS[0], 0, 1,
-                  '403626196bf3e3356b6afac229dbcd9f08555eeda8286f48a186b3667caa8563'),
-                 (PROFILE_IDS[2], 1, 2,
-                  'e6dcb69197519bee73855bdfaa72bbb0bc411069c3c2c5d9cac7e09c35260ef8'))
+        cases = (
+            (
+                PROFILE_IDS[0],
+                0,
+                1,
+                '403626196bf3e3356b6afac229dbcd9f08555eeda8286f48a186b3667caa8563',
+            ),
+            (
+                PROFILE_IDS[2],
+                1,
+                2,
+                'e6dcb69197519bee73855bdfaa72bbb0bc411069c3c2c5d9cac7e09c35260ef8',
+            ),
+        )
         for profile, index, count, expected in cases:
-            document = prepared_runtime_document(profile, index, count, 'a'*64)
-            wire = (json.dumps(document, ensure_ascii=False, sort_keys=True, indent=2)+'\n').encode('utf-8')
+            document = prepared_runtime_document(profile, index, count, 'a' * 64)
+            wire = (
+                json.dumps(document, ensure_ascii=False, sort_keys=True, indent=2)
+                + '\n'
+            ).encode('utf-8')
             self.assertEqual(hashlib.sha256(wire).hexdigest(), expected)
 
     def test_runtime_factory_constructs_without_build_tools_in_image(self):
@@ -53,28 +67,44 @@ class RuntimeImagePackagingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             root.chmod(0o700)
-            image = root/'image'
+            image = root / 'image'
             image.mkdir()
-            shutil.copytree(ROOT/'studio_platform', image/'studio_platform',
-                            ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
-            shutil.copytree(ROOT/'deploy/wangp/profiles', image/'deploy/wangp/profiles')
-            shutil.copyfile(ROOT/'comfy_workflow.py', image/'comfy_workflow.py')
+            shutil.copytree(
+                ROOT / 'studio_platform',
+                image / 'studio_platform',
+                ignore=shutil.ignore_patterns('__pycache__', '*.pyc'),
+            )
+            shutil.copytree(
+                ROOT / 'deploy/wangp/profiles', image / 'deploy/wangp/profiles'
+            )
+            shutil.copyfile(ROOT / 'comfy_workflow.py', image / 'comfy_workflow.py')
             # Source construction is an offline build operation outside the
             # staged image; the image receives only its protected four inputs.
             profile_id = EXPECTED_PROFILE_IDS[6]
             base_fl = EXPECTED_PROFILE_IDS[7]
-            build(root/'sources', [(profile_id, 'fl'), (profile_id, 'ref'), (base_fl, 'fl')])
-            for name, content in (('ssh-key', 'private test fixture'),
-                                  ('broker.json', '{"token":"test fixture"}')):
-                path = root/name
+            build(
+                root / 'sources',
+                [(profile_id, 'fl'), (profile_id, 'ref'), (base_fl, 'fl')],
+            )
+            for name, content in (
+                ('ssh-key', 'private test fixture'),
+                ('broker.json', '{"token":"test fixture"}'),
+            ):
+                path = root / name
                 path.write_text(content)
                 path.chmod(0o600)
-            config = {'version': 1, 'work_dir': str(root/'runtime'),
-                'source_index_file': str(root/'sources/index.json'),
-                'ssh_key_file': str(root/'ssh-key'), 'known_hosts_file': str(root/'known-hosts'),
-                'broker_config_file': str(root/'broker.json'), 'first_local_port': 19100,
-                'last_local_port': 19102, 'trust_first_host_key': False}
-            config_path = root/'runtime-config.json'
+            config = {
+                'version': 1,
+                'work_dir': str(root / 'runtime'),
+                'source_index_file': str(root / 'sources/index.json'),
+                'ssh_key_file': str(root / 'ssh-key'),
+                'known_hosts_file': str(root / 'known-hosts'),
+                'broker_config_file': str(root / 'broker.json'),
+                'first_local_port': 19100,
+                'last_local_port': 19102,
+                'trust_first_host_key': False,
+            }
+            config_path = root / 'runtime-config.json'
             config_path.write_text(json.dumps(config))
             config_path.chmod(0o600)
             script = """import json,sys
@@ -94,40 +124,86 @@ assert set(factory.sources)=={(sys.argv[3],'fl'),(sys.argv[3],'ref'),(sys.argv[4
 assert not factory.work_dir.exists()
 print(json.dumps({'sources':len(factory.sources),'modes':sorted(mode for _,mode in factory.sources)}))
 """
-            result = subprocess.run([sys.executable, '-I', '-c', script, str(image), str(config_path), profile_id, base_fl],
-                                    capture_output=True, text=True, check=True, timeout=30, cwd=image)
-            self.assertEqual(json.loads(result.stdout), {'sources': 3, 'modes': ['fl', 'fl', 'ref']})
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    '-I',
+                    '-c',
+                    script,
+                    str(image),
+                    str(config_path),
+                    profile_id,
+                    base_fl,
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=30,
+                cwd=image,
+            )
+            self.assertEqual(
+                json.loads(result.stdout), {'sources': 3, 'modes': ['fl', 'fl', 'ref']}
+            )
 
     def test_profile_metadata_is_explicit_image_input_and_runtime_fingerprint(self):
-        dockerfile = (ROOT/'Dockerfile.platform').read_text()
-        patterns = (ROOT/'.dockerignore').read_text().splitlines()
+        dockerfile = (ROOT / 'Dockerfile.platform').read_text()
+        patterns = (ROOT / '.dockerignore').read_text().splitlines()
         self.assertEqual(PROFILE_IDS, EXPECTED_PROFILE_IDS)
-        self.assertIn('COPY deploy/wangp/profiles/ ./deploy/wangp/profiles/', dockerfile)
-        names = {'deploy/wangp/profiles/'+profile+'.json' for profile in PROFILE_IDS}
+        self.assertIn(
+            'COPY deploy/wangp/profiles/ ./deploy/wangp/profiles/', dockerfile
+        )
+        names = {
+            'deploy/wangp/profiles/' + profile + '.json' for profile in PROFILE_IDS
+        }
         for folder in ('deploy/', 'deploy/wangp/', 'deploy/wangp/profiles/'):
-            self.assertIn('!'+folder, patterns)
-        self.assertEqual({line[1:] for line in patterns if line.startswith('!deploy/wangp/profiles/') and line.endswith('.json')}, names)
+            self.assertIn('!' + folder, patterns)
+        self.assertEqual(
+            {
+                line[1:]
+                for line in patterns
+                if line.startswith('!deploy/wangp/profiles/') and line.endswith('.json')
+            },
+            names,
+        )
         self.assertTrue(names <= set(FIXED))
         # No private execution/operator/provider configuration is baked in.
-        self.assertFalse(any(line.startswith('!deploy/') and ('*' in line or 'execution-policy' in line or 'operator' in line)
-                             for line in patterns))
+        self.assertFalse(
+            any(
+                line.startswith('!deploy/')
+                and ('*' in line or 'execution-policy' in line or 'operator' in line)
+                for line in patterns
+            )
+        )
 
     def test_catalog_and_manifests_load_from_isolated_image_shaped_sources(self):
         with tempfile.TemporaryDirectory() as temporary:
             image = Path(temporary)
-            modules = ('studio_platform/__init__.py', 'studio_platform/runtime_catalog.py',
-                       'studio_platform/inference/__init__.py', 'studio_platform/inference/wangp_contract.py',
-                       'studio_platform/inference/protocol.py', 'studio_platform/inference/native_outputs.py',
-                       'studio_platform/inference/wangp_profile_dispatch.py',
-                       'studio_platform/inference/wangp_profile_compiler.py',
-                       'studio_platform/inference/wangp_full_compiler.py',
-                       'studio_platform/inference/wangp_compiler.py',
-                       'studio_platform/h3_profile_support.py', 'studio_platform/storage.py',
-                       'studio_platform/storage_config.py', 'comfy_workflow.py')
-            for name in (*modules, *('deploy/wangp/profiles/'+profile+'.json' for profile in PROFILE_IDS)):
-                target = image/name
+            modules = (
+                'studio_platform/__init__.py',
+                'studio_platform/runtime_catalog.py',
+                'studio_platform/inference/__init__.py',
+                'studio_platform/inference/wangp_contract.py',
+                'studio_platform/inference/protocol.py',
+                'studio_platform/inference/native_outputs.py',
+                'studio_platform/inference/wangp_profile_dispatch.py',
+                'studio_platform/inference/wangp_profile_compiler.py',
+                'studio_platform/inference/wangp_full_compiler.py',
+                'studio_platform/inference/wangp_compiler.py',
+                'studio_platform/h3_profile_support.py',
+                'studio_platform/storage.py',
+                'studio_platform/storage_config.py',
+                'comfy_workflow.py',
+            )
+            for name in (
+                *modules,
+                *(
+                    'deploy/wangp/profiles/' + profile + '.json'
+                    for profile in PROFILE_IDS
+                ),
+            ):
+                target = image / name
                 target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(ROOT/name, target)
+                shutil.copyfile(ROOT / name, target)
             script = """import json,sys
 sys.path.insert(0,sys.argv[1])
 class NoRuntimeImports:
@@ -165,9 +241,25 @@ for profile in catalog['profiles']:
         assert engine_manifest(profile['id'],mode).document['production_adapter_verified'] is False
 print(json.dumps({'profiles':len(catalog['profiles']),'manifests':sum(len(profile['models']) for profile in catalog['profiles'])}))
 """
-            result = subprocess.run([sys.executable,'-I','-S','-c',script,str(image),json.dumps(EXPECTED_PROFILE_IDS)],
-                                    capture_output=True,text=True,check=True,timeout=20,cwd=image)
-            self.assertEqual(json.loads(result.stdout), {'profiles':16, 'manifests':29})
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    '-I',
+                    '-S',
+                    '-c',
+                    script,
+                    str(image),
+                    json.dumps(EXPECTED_PROFILE_IDS),
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=20,
+                cwd=image,
+            )
+            self.assertEqual(
+                json.loads(result.stdout), {'profiles': 16, 'manifests': 29}
+            )
 
 
 if __name__ == '__main__':

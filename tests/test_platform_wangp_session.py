@@ -6,29 +6,39 @@ import unittest
 
 from studio_platform.inference.protocol import BackendError, NotReady
 from studio_platform.runtime_hosts.wangp_session import (
-    PinnedWanGPSession, _check_config, config_for_model_root)
+    PinnedWanGPSession,
+    _check_config,
+    config_for_model_root,
+)
 
 
 class FakeJob:
     done = False
+
     def __init__(self, result):
         self.value, self.cancel_calls = result, 0
+
     def result(self, timeout=None):
         return self.value
+
     def cancel(self):
         self.cancel_calls += 1
 
 
 class FakeSession:
     active_job = None
+
     def __init__(self, job):
         self.job, self.calls = job, []
+
     def get_default_settings(self, model):
         return {"model_type": model, "num_inference_steps": 20}
+
     def submit_task(self, settings):
         self.calls.append(settings)
         self.active_job = self.job
         return self.job
+
     def close(self):
         self.closed = True
 
@@ -40,18 +50,38 @@ class SessionTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         self.video = self.root / "result.mp4"
         self.video.write_bytes(b"cpu-test-video")
-        self.result = NS(success=True, cancelled=False, total_tasks=1, successful_tasks=1,
-            failed_tasks=0, errors=[], generated_files=[str(self.video)], artifacts=[NS(
-            path=str(self.video), media_type="video", audio_tensor=[[.1, .2]], audio_sampling_rate=32000)])
+        self.result = NS(
+            success=True,
+            cancelled=False,
+            total_tasks=1,
+            successful_tasks=1,
+            failed_tasks=0,
+            errors=[],
+            generated_files=[str(self.video)],
+            artifacts=[
+                NS(
+                    path=str(self.video),
+                    media_type="video",
+                    audio_tensor=[[0.1, 0.2]],
+                    audio_sampling_rate=32000,
+                )
+            ],
+        )
         self.job = FakeJob(self.result)
         self.upstream = FakeSession(self.job)
         self.writes = []
+
         def writer(path, samples, rate):
             self.writes.append((samples, rate))
             path.write_bytes(b"cpu-test-wav")
+
         self.quiesced = []
-        self.facade = PinnedWanGPSession(self.upstream, self.root, audio_writer=writer,
-                                         quiesce=lambda: self.quiesced.append(1))
+        self.facade = PinnedWanGPSession(
+            self.upstream,
+            self.root,
+            audio_writer=writer,
+            quiesce=lambda: self.quiesced.append(1),
+        )
 
     def test_cancellation_is_intent_until_upstream_stops(self):
         handle = self.facade.submit_task({"num_inference_steps": 50})
@@ -73,18 +103,20 @@ class SessionTests(unittest.TestCase):
         self.assertTrue(self.facade.is_idle())
         self.assertEqual(set(result.outputs), {"video", "audio"})
         self.assertEqual(self.video.read_bytes(), b"cpu-test-video")
-        self.assertEqual(self.writes, [([[.1, .2]], 32000)])
+        self.assertEqual(self.writes, [([[0.1, 0.2]], 32000)])
         self.assertEqual(self.upstream.calls[0]["num_inference_steps"], 50)
         self.assertIs(handle.observe(), result)
         self.assertEqual(len(self.writes), 1)
 
     def test_packaging_retry_uses_same_result_without_regeneration(self):
         attempts = []
+
         def writer(path, samples, rate):
             attempts.append(1)
             if len(attempts) == 1:
                 raise OSError("transient")
             path.write_bytes(b"recovered")
+
         self.facade.audio_writer = writer
         handle = self.facade.submit_task({})
         self.job.done = True
@@ -152,6 +184,7 @@ class SessionTests(unittest.TestCase):
     def test_cuda_quiescence_failure_is_not_terminal_stop_proof(self):
         def fail():
             raise RuntimeError("device context not proven idle")
+
         self.facade.quiesce = fail
         handle = self.facade.submit_task({})
         self.job.done = True

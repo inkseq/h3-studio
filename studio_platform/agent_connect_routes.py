@@ -1,4 +1,5 @@
 """Explicit browser authorization and a single anonymous JSON exchange route."""
+
 from __future__ import annotations
 
 import json
@@ -16,7 +17,13 @@ EXCHANGE_PATH = "/v1/agent-connect/exchange"
 HELPER_PATH = "/for-agents/connect.py"
 MANIFEST_PATH = "/for-agents/connect-manifest.json"
 PUBLIC_GET_PATHS = frozenset({HELPER_PATH, MANIFEST_PATH})
-HELPER_SOURCE = Path(__file__).resolve().parent.parent / "skills" / "inkseq" / "scripts" / "connect.py"
+HELPER_SOURCE = (
+    Path(__file__).resolve().parent.parent
+    / "skills"
+    / "inkseq"
+    / "scripts"
+    / "connect.py"
+)
 MAX_BODY_BYTES = AGENT_CONNECT_BODY_BYTES
 CONNECTION_STORAGE_REQUIREMENTS = {
     "windows-user-dpapi": "Current Windows user DPAPI and access to that user's encrypted connection store.",
@@ -35,14 +42,23 @@ CONNECTION_VERIFICATION_LIMITS = "These are implementation requirements and veri
 
 def helper_manifest(raw=None):
     import hashlib
+
     raw = HELPER_SOURCE.read_bytes() if raw is None else raw
-    return {"version": 1, "helper": HELPER_PATH, "sha256": hashlib.sha256(raw).hexdigest(),
-        "protocol": "client-held-pat-v1", "credential_storage": list(CONNECTION_STORAGE_REQUIREMENTS),
-        "missing_storage_behavior": "stop_before_exchange", "manual_pat": "advanced_fallback",
-        "exchange": EXCHANGE_PATH, "raw_api_key_response": False, "discovery_is_authorization": False,
+    return {
+        "version": 1,
+        "helper": HELPER_PATH,
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "protocol": "client-held-pat-v1",
+        "credential_storage": list(CONNECTION_STORAGE_REQUIREMENTS),
+        "missing_storage_behavior": "stop_before_exchange",
+        "manual_pat": "advanced_fallback",
+        "exchange": EXCHANGE_PATH,
+        "raw_api_key_response": False,
+        "discovery_is_authorization": False,
         "credential_storage_requirements": dict(CONNECTION_STORAGE_REQUIREMENTS),
         "verification_checklist": list(CONNECTION_VERIFICATION_CHECKLIST),
-        "verification_limits": CONNECTION_VERIFICATION_LIMITS}
+        "verification_limits": CONNECTION_VERIFICATION_LIMITS,
+    }
 
 
 def register_routes(app, *, service=None):
@@ -51,8 +67,11 @@ def register_routes(app, *, service=None):
     settings = app.state.settings
 
     def origin(request):
-        return service.origin(settings.public_origin_for_host(request.headers.get("host", ""))
-                              or settings.public_origin or str(request.base_url).rstrip("/"))
+        return service.origin(
+            settings.public_origin_for_host(request.headers.get("host", ""))
+            or settings.public_origin
+            or str(request.base_url).rstrip("/")
+        )
 
     def source_guard(request, *, browser=False):
         expected = origin(request)
@@ -77,7 +96,9 @@ def register_routes(app, *, service=None):
         return principal
 
     async def body(request, *, allowed, required=()):
-        media_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        media_type = (
+            request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+        )
         if media_type != "application/json":
             raise ConnectError("connection_json_required", 415)
         data = await request.body()
@@ -87,7 +108,11 @@ def register_routes(app, *, service=None):
             value = json.loads(data)
         except (ValueError, UnicodeError):
             raise ConnectError("connection_body_invalid", 422) from None
-        if not isinstance(value, dict) or set(value) - set(allowed) or set(required) - set(value):
+        if (
+            not isinstance(value, dict)
+            or set(value) - set(allowed)
+            or set(required) - set(value)
+        ):
             raise ConnectError("connection_fields_invalid", 422)
         return value
 
@@ -96,56 +121,133 @@ def register_routes(app, *, service=None):
         headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
         if error.retry_after:
             headers["Retry-After"] = str(error.retry_after)
-        guidance={
-            'connection_version_conflict':('Connection settings changed. Reload before a new explicit update.','连接设置已改变，请重新读取后再明确修改。'),
-            'connection_scope_invalid':('Choose this conversation, this story, or all your work.','请选择此对话、此故事或你的全部作品。'),
-            'connection_scope_not_found':('The selected work is unavailable or not owned by this account.','所选作品不可用或不属于当前账号。'),
-            'connection_permission_invalid':('Choose organise without paid work, or create and generate.','请选择不执行付费工作的整理权限，或创作并生成权限。'),
-            'connection_not_connected':('Connect first; revoked connections cannot resume. Existing work is retained.','请先连接；已撤销的连接不能恢复，原作品保留。'),
-            'connection_settings_invalid':('Use positive integer connection settings and the current version.','请使用正整数连接设置和当前版本。'),
-            'connection_daily_limit_invalid':('Use a nonnegative USD micro-unit cap; zero means unlimited.','请使用非负美元微单位额度；零表示不限额。'),
-            'connection_update_invalid':('Use the current integer version and a boolean pause or nonnegative cap.','请使用当前整数版本、布尔暂停值或非负额度。')}
-        en,zh=guidance.get(error.code,('Connection request was refused. Reconcile the original request before retrying.','连接请求被拒绝，请先核对原请求，不要重复创建。'))
-        return JSONResponse({"code": error.code, "message": en, "messages":{"en":en,"zh":zh},
-            "retryable": error.status_code in {429, 503}}, status_code=error.status_code, headers=headers)
+        guidance = {
+            'connection_version_conflict': (
+                'Connection settings changed. Reload before a new explicit update.',
+                '连接设置已改变，请重新读取后再明确修改。',
+            ),
+            'connection_scope_invalid': (
+                'Choose this conversation, this story, or all your work.',
+                '请选择此对话、此故事或你的全部作品。',
+            ),
+            'connection_scope_not_found': (
+                'The selected work is unavailable or not owned by this account.',
+                '所选作品不可用或不属于当前账号。',
+            ),
+            'connection_permission_invalid': (
+                'Choose organise without paid work, or create and generate.',
+                '请选择不执行付费工作的整理权限，或创作并生成权限。',
+            ),
+            'connection_not_connected': (
+                'Connect first; revoked connections cannot resume. Existing work is retained.',
+                '请先连接；已撤销的连接不能恢复，原作品保留。',
+            ),
+            'connection_settings_invalid': (
+                'Use positive integer connection settings and the current version.',
+                '请使用正整数连接设置和当前版本。',
+            ),
+            'connection_daily_limit_invalid': (
+                'Use a nonnegative USD micro-unit cap; zero means unlimited.',
+                '请使用非负美元微单位额度；零表示不限额。',
+            ),
+            'connection_update_invalid': (
+                'Use the current integer version and a boolean pause or nonnegative cap.',
+                '请使用当前整数版本、布尔暂停值或非负额度。',
+            ),
+        }
+        en, zh = guidance.get(
+            error.code,
+            (
+                'Connection request was refused. Reconcile the original request before retrying.',
+                '连接请求被拒绝，请先核对原请求，不要重复创建。',
+            ),
+        )
+        return JSONResponse(
+            {
+                "code": error.code,
+                "message": en,
+                "messages": {"en": en, "zh": zh},
+                "retryable": error.status_code in {429, 503},
+            },
+            status_code=error.status_code,
+            headers=headers,
+        )
 
     @app.post("/v1/account/agent-connections", status_code=201)
     async def issue(request: Request):
         source_guard(request, browser=True)
         principal = browser(request)
-        value = await body(request, allowed={"name", "authorization_profile_id", "authorization_profile_version", "daily_limit_microusd", "scope", "permission"},
-            required={"authorization_profile_id", "authorization_profile_version"})
+        value = await body(
+            request,
+            allowed={
+                "name",
+                "authorization_profile_id",
+                "authorization_profile_version",
+                "daily_limit_microusd",
+                "scope",
+                "permission",
+            },
+            required={"authorization_profile_id", "authorization_profile_version"},
+        )
         try:
-            return await run_in_threadpool(service.issue, principal, name=value.get("name", "Codex"),
+            return await run_in_threadpool(
+                service.issue,
+                principal,
+                name=value.get("name", "Codex"),
                 authorization_profile_id=value["authorization_profile_id"],
                 authorization_profile_version=value["authorization_profile_version"],
-                idempotency_key=request.headers.get("idempotency-key"), origin=origin(request),
-                daily_limit_microusd=value.get("daily_limit_microusd", 0), scope=value.get("scope"),permission=value.get("permission"))
+                idempotency_key=request.headers.get("idempotency-key"),
+                origin=origin(request),
+                daily_limit_microusd=value.get("daily_limit_microusd", 0),
+                scope=value.get("scope"),
+                permission=value.get("permission"),
+            )
         except AuthenticationError:
             raise ConnectError("connection_login_required", 401) from None
 
     @app.get("/v1/account/agent-connection-settings")
-    def connection_settings(request:Request):
+    def connection_settings(request: Request):
         return service.settings(browser(request))
 
     @app.patch("/v1/account/agent-connection-settings")
-    async def update_connection_settings(request:Request):
-        source_guard(request,browser=True)
-        value=await body(request,allowed={"expected_version","value"},required={"expected_version","value"})
-        return service.change_settings(browser(request),value,request.headers.get('idempotency-key'))
+    async def update_connection_settings(request: Request):
+        source_guard(request, browser=True)
+        value = await body(
+            request,
+            allowed={"expected_version", "value"},
+            required={"expected_version", "value"},
+        )
+        return service.change_settings(
+            browser(request), value, request.headers.get('idempotency-key')
+        )
 
     @app.patch("/v1/account/agent-connections/{connection_id}")
-    async def update_connection(connection_id:str,request:Request):
-        source_guard(request,browser=True)
-        value=await body(request,allowed={"expected_version","paused","daily_limit_microusd"},required={"expected_version"})
-        return service.change_connection(browser(request),connection_id,value,request.headers.get('idempotency-key'))
+    async def update_connection(connection_id: str, request: Request):
+        source_guard(request, browser=True)
+        value = await body(
+            request,
+            allowed={"expected_version", "paused", "daily_limit_microusd"},
+            required={"expected_version"},
+        )
+        return service.change_connection(
+            browser(request),
+            connection_id,
+            value,
+            request.headers.get('idempotency-key'),
+        )
 
     @app.get("/v1/account/agent-connections/{connection_id}/activity")
-    def connection_activity(connection_id:str,request:Request,limit:int=20,offset:int=0):
-        return service.activity(browser(request),connection_id,limit,offset)
+    def connection_activity(
+        connection_id: str, request: Request, limit: int = 20, offset: int = 0
+    ):
+        return service.activity(browser(request), connection_id, limit, offset)
 
     @app.get("/v1/account/agent-connections")
-    def list_connections(request: Request, limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0, le=10000)):
+    def list_connections(
+        request: Request,
+        limit: int = Query(50, ge=1, le=100),
+        offset: int = Query(0, ge=0, le=10000),
+    ):
         try:
             return service.list(browser(request), limit=limit, offset=offset)
         except AuthenticationError:
@@ -169,10 +271,29 @@ def register_routes(app, *, service=None):
     @app.post(EXCHANGE_PATH)
     async def exchange(request: Request):
         expected_origin = source_guard(request)
-        value = await body(request, allowed={"code", "client_challenge", "token_hash", "key_prefix",
-            "expected_authorization_fingerprint", "recovery_verifier"},
-            required={"code", "client_challenge", "token_hash", "key_prefix", "expected_authorization_fingerprint"})
+        value = await body(
+            request,
+            allowed={
+                "code",
+                "client_challenge",
+                "token_hash",
+                "key_prefix",
+                "expected_authorization_fingerprint",
+                "recovery_verifier",
+            },
+            required={
+                "code",
+                "client_challenge",
+                "token_hash",
+                "key_prefix",
+                "expected_authorization_fingerprint",
+            },
+        )
         # ASGI client address is supplied by the configured trusted proxy layer.
         # Never directly trust a request's X-Forwarded-For string here.
-        return await run_in_threadpool(service.exchange, **value, origin=expected_origin,
-            source=request.client.host if request.client else "unknown")
+        return await run_in_threadpool(
+            service.exchange,
+            **value,
+            origin=expected_origin,
+            source=request.client.host if request.client else "unknown",
+        )

@@ -5,6 +5,7 @@ OS-held lock outlives individual controller ticks, so another controller cannot
 upload concurrently. A lost process may resume verified partial bytes, but this
 helper never calls remote setup/start or infers an inference outcome.
 """
+
 from __future__ import annotations
 
 import threading
@@ -27,7 +28,9 @@ class PollableUpload:
         self._key = None
 
     def pending(self):
-        return self._thread is not None and (self._thread.is_alive() or not self._done.is_set())
+        return self._thread is not None and (
+            self._thread.is_alive() or not self._done.is_set()
+        )
 
     def stopped_for(self, key):
         """Positive proof from this owned operation, never reconstructed from files."""
@@ -40,11 +43,18 @@ class PollableUpload:
 
     def snapshot(self):
         with self._mutex:
-            return {"state": self._state, "phase": "staging_dependencies", **self._progress}
+            return {
+                "state": self._state,
+                "phase": "staging_dependencies",
+                **self._progress,
+            }
 
     def _observe(self, transferred, total):
-        if (type(transferred) is not int or type(total) is not int
-                or not 0 <= transferred <= total):
+        if (
+            type(transferred) is not int
+            or type(total) is not int
+            or not 0 <= transferred <= total
+        ):
             return
         with self._mutex:
             self._progress = {"transferred_bytes": transferred, "total_bytes": total}
@@ -88,7 +98,9 @@ class PollableUpload:
                         self._state = state
                     self._done.set()
 
-        self._thread = threading.Thread(target=run, name="bootstrap-upload", daemon=True)
+        self._thread = threading.Thread(
+            target=run, name="bootstrap-upload", daemon=True
+        )
         try:
             self._thread.start()
         except Exception:
