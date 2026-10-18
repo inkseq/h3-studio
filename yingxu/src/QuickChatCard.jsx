@@ -19,6 +19,7 @@ import QuickChatMaterials,{PrivateMedia} from './QuickChatMaterials.jsx';
 import OperatorBudgetPanel from './OperatorBudgetPanel.jsx';
 import GenerationFailure from './GenerationFailure.jsx';
 import {nativeArtifactAttachment,assertArtifactAttachmentTarget} from './artifact-media.js';
+import {useThreadKeepAlive,useThreadViewState} from './QuickChatThread.jsx';
 const statusText=(status,t)=>({waiting_capacity:t('workspace.detail44'),queued:t('workspace.detail45'),claimed:t('workspace.detail46'),submitting:t('workspace.detail47'),running:t('workspace.detail48'),collecting:t('workspace.detail49'),checking:t('workspace.detail50'),succeeded:t('workspace.detail51'),failed:t('workspace.detail52'),cancel_requested:t('workspace.detail53'),cancelled:t('workspace.detail54'),submission_unknown:t('workspace.detail55'),recovery_hold:t('workspace.detail56'),admission_failed:t('workspace.detail1'),admission_blocked:t('workspace.detail2'),pending_admission:t('workspace.detail3'),active:t('workspace.detail4'),finished_with_issues:t('workspace.detail5'),planned:t('workspace.detail6'),partial:t('workspace.detail7'),completed:t('workspace.detail8'),ready:t('workspace.detail9'),blocked:t('workspace.detail10'),unknown:t('workspace.detail11')})[status]||status;
 const text=value=>typeof value==='string'?value:value?.message||value?.code||'';
 function amount(preflight,t){const estimate=preflight?.estimate,items=preflight?.items;const priced=value=>typeof value==='number'&&Number.isFinite(value)&&value>=0;if(preflight?.estimate_available!==true||!items?.length||!priced(estimate?.cost_microusd)||items.some(item=>item.error_code||!priced(item.plan?.estimate?.cost_microusd)))return null;return t('workspace.estimate.'+(estimate.source==='mock'||estimate.kind==='simulation'?'mock':estimate.kind==='included'?'included':estimate.kind==='budget_reservation'?'reserve':'estimate'),{amount:formatMoneyMicros(estimate.cost_microusd),currency:estimate.currency||'USD'});}
@@ -32,14 +33,15 @@ function ArtifactDownloadLink({artifact,controller,account,sessionId,busy,onErro
 }
 export default function QuickChatCard({card,state,controller,onContinue,onUseResult,onUseMaterial,takePreferences}){
   const {t,locale}=useI18n(),pageActive=usePageActive(),pageActiveRef=useRef(pageActive);pageActiveRef.current=pageActive;
-  const query=new URLSearchParams(window.location.search),wanted=safeSessionId(query.get('revision'))||state.submissions[safeSessionId(query.get('submission'))]?.revision_id;
-  const [selectedTake,setSelectedTake]=useState(null),[selected,setSelected]=useState(''),[editing,setEditing]=useState(null),[inputEdit,setInputEdit]=useState(null),[retry,setRetry]=useState(null),[confirmStart,setConfirmStart]=useState(false),[error,setError]=useState('');
+  const query=new URLSearchParams(window.location.search),wanted=safeSessionId(query.get('revision'))||state.submissions[safeSessionId(query.get('submission'))]?.revision_id,wantedTake=safeSessionId(query.get('take'));
+  const [selectedTake,setSelectedTake]=useThreadViewState('selectedTake',null),[selected,setSelected]=useThreadViewState('selectedRevision',''),[editing,setEditing]=useState(null),[inputEdit,setInputEdit]=useState(null),[retry,setRetry]=useState(null),[confirmStart,setConfirmStart]=useState(false),[error,setError]=useState('');
+  useThreadKeepAlive(!!(editing||inputEdit||retry||confirmStart));
   const revision=state.revisions[selected||card.current_revision_id],selectedRecipe=selectedTake&&revision&&selectedTake.revision_id===revision.id?selectedTake.recipe:revision,recipe=recipeFor(state.capabilities,revision),submission=Object.values(state.submissions).find(item=>item.revision_id===revision?.id),preflights=Object.values(state.preflights).filter(pref=>pref.revision_id===revision?.id),preflight=preflights.filter(pref=>!pref.item_ids?.length&&(pref.items?.length??0)===(revision?.copies??1)).sort((a,b)=>(b.created_at||0)-(a.created_at||0))[0],expired=preflight?.status==='ready'&&(preflight.stale===true||preflight.expires_at&&preflight.expires_at*1000<=Date.now());
   const countContext=JSON.stringify([state.account,state.session?.id,card.id,revision?.id]),liveCountContext=useRef(countContext);
   liveCountContext.current=countContext;
   const capacity=modeAvailability(state.availability,state.capabilities,revision,undefined,Date.now(),locale);
   const versions=(card.revisions||[]).map(item=>state.revisions[item.id]||item),bindings=revision?bindingsForInputs(revision.inputs,state.materials):[];
-  useEffect(()=>{if(wanted&&state.revisions[wanted]?.card_id===card.id)setSelected(wanted);},[wanted,state.revisions[wanted]?.card_id,card.id]);
+  useEffect(()=>{if(wanted&&state.revisions[wanted]?.card_id===card.id){setSelected(wanted);if(wantedTake)setSelectedTake(current=>current?.id===wantedTake?current:null);}},[wanted,wantedTake,state.revisions[wanted]?.card_id,card.id]);
   useEffect(()=>{setConfirmStart(false);setRetry(null);setEditing(null);setInputEdit(null);},[state.account,state.session?.id]);
   function chooseRevision(id){if(!pageActiveRef.current)return;setSelectedTake(null);setSelected(id);window.history.replaceState(null,'',`${sessionHref(state.session.id)}&revision=${encodeURIComponent(id)}`);}
   async function act(fn){setError('');try{return await fn();}catch(err){setError(err.message||t('workspace.status73'));}}

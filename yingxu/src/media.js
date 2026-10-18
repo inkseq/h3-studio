@@ -12,13 +12,13 @@ export const isCloudFileId=id=>typeof id==='string'&&/^cloud_(?:asset|artifact)_
 // View-only access. Byte processing/export continues to use getFile below.
 // Capture the originating resolver and its context once; never refresh an old
 // link against a later account's global handler when a user clicks it.
-export function nativeMediaSource(id,{download=false}={}){
+export function nativeMediaSource(id,{download=false,rendition=null}={}){
  if(!isCloudFileId(id)){
   if(typeof id==='string'&&id.startsWith('cloud_'))throw Error('client.mediaPath');
   return null;
  }
  if(!cloudMediaNative)throw Error('client.mediaAccount');
- const source=cloudMediaNative(id,{download});source.assertCurrent();return source;
+ const source=cloudMediaNative(id,{download,rendition});source.assertCurrent();return source;
 }
 function database(){return dbPromise??=new Promise((resolve,reject)=>{const req=indexedDB.open('yingxu-media-v1',1);req.onupgradeneeded=()=>req.result.createObjectStore('files');req.onsuccess=()=>resolve(req.result);req.onerror=()=>{dbPromise=null;reject(req.error)}})}
 export async function putFile(id,file){const db=await database();return new Promise((resolve,reject)=>{const tx=db.transaction('files','readwrite');tx.objectStore('files').put(file,id);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error)})}

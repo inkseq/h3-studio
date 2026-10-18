@@ -94,7 +94,7 @@ export function createQuickChatController({client=createQuickChatClient(),storag
   async function readHistoryCard(summary,ctx,bundle){
     const response=await client.card(ctx.sessionId,summary.id);guard(ctx);const card=record(response,'card');
     if(card?.id!==summary.id||card.session_id&&card.session_id!==ctx.sessionId)throw Error('quickHistory.invalid');
-    bundle.cards[card.id]={...card,created_at:summary.created_at};
+    bundle.cards[card.id]={...card,created_at:summary.created_at??card.created_at};
     if(!card.current_revision_id&&!card.current_revision?.id)throw Error('quickHistory.invalid');
     const ids=new Set([card.current_revision_id,card.current_revision?.id,...(response.revisions||card.revisions||[]).map(item=>item.id)].filter(Boolean));
     for(const id of ids){const revision=state.revisions[id]||record(await client.revision(ctx.sessionId,id),'revision');guard(ctx);if(revision?.id!==id||revision.card_id!==card.id)throw Error('quickHistory.invalid');bundle.revisions[id]=revision;}
@@ -190,6 +190,23 @@ export function createQuickChatController({client=createQuickChatClient(),storag
     for(const id of ids){const revision=record(await client.revision(ctx.sessionId,id),'revision');guard(ctx);emit({revisions:{...state.revisions,[revision.id]:revision}});}
     return card;
   }
+  async function focusCard({cardId,revisionId,submissionId}={}){
+    const ctx={...context(),readGeneration},valid=value=>typeof value==='string'&&value.length>0&&value.length<=160;
+    if(!ctx.account||!ctx.sessionId||![cardId,revisionId,submissionId].some(valid)
+        ||[cardId,revisionId,submissionId].some(value=>value!=null&&!valid(value)))throw Error('quickHistory.scope');
+    const bundle={cards:{},revisions:{},submissions:{},turns:{}};
+    if(submissionId){const value=state.submissions[submissionId]||record(await client.submission(ctx.sessionId,submissionId),'submission');guard(ctx);
+      if(value?.id!==submissionId||!valid(value.revision_id)||revisionId&&revisionId!==value.revision_id)throw Error('quickHistory.invalid');
+      revisionId=value.revision_id;bundle.submissions[value.id]=value;}
+    if(revisionId){const value=state.revisions[revisionId]||record(await client.revision(ctx.sessionId,revisionId),'revision');guard(ctx);
+      if(value?.id!==revisionId||!valid(value.card_id)||cardId&&cardId!==value.card_id)throw Error('quickHistory.invalid');
+      cardId=value.card_id;bundle.revisions[value.id]=value;}
+    if(!valid(cardId))throw Error('quickHistory.invalid');
+    await readHistoryCard({id:cardId,created_at:state.cards[cardId]?.created_at},ctx,bundle);guard(ctx);
+    const cards={...state.cards};for(const [id,value]of Object.entries(bundle.cards))if(!cards[id]||!Number.isInteger(cards[id].version)||value.version>=cards[id].version)cards[id]=value;
+    emit({cards,revisions:{...bundle.revisions,...state.revisions},submissions:{...bundle.submissions,...state.submissions},cardTurns:{...bundle.turns,...state.cardTurns}});
+    return {card_id:cardId,revision_id:revisionId||cards[cardId].current_revision_id,submission_id:submissionId||null};
+  }
   async function refresh(){if(!state.account||!state.session||refreshing)return;refreshing=true;const ctx={...context(),readGeneration};try{await loadResources(state.session.id);}catch(error){try{guard(ctx);emit({error:'云端状态暂未更新，保留原任务；稍后自动核对。'});}catch{}throw error;}finally{refreshing=false;}}
   async function act(fn,{success}={}){if(state.busy)throw Error('原操作仍在处理中，请等待。');const ctx=context();emit({busy:true,error:'',notice:''});try{const value=await fn();guard(ctx,{session:false});if(success)emit({notice:success});return value;}catch(error){if(ctx.epoch===epoch)emit({error:error.message||'操作没有完成。请核对原记录。'});throw error;}finally{if(ctx.epoch===epoch)emit({busy:false});}}
   function transferIdentity(value,operation){return value&&typeof value.id==='string'&&(!operation.transferId||operation.transferId===value.id)&&value.source_session_id===operation.args[0]&&value.item_id===operation.args[1]&&value.project_id===operation.body.target_project_id&&value.expected_project_version===operation.body.expected_project_version&&value.parent_id===operation.body.parent_id&&value.seed_locked===true;}
@@ -256,7 +273,7 @@ export function createQuickChatController({client=createQuickChatClient(),storag
     resumeMaterial:assetId=>act(async()=>{const result=await command('resumeMaterial',[state.session.id,assetId],{});await loadResources(state.session.id);return result;},{success:'已核对原素材处理收据，没有重新上传原文件。'}),
     refreshAvailability,
     refresh:()=>act(async()=>{const ctx=context(),[schema,capabilities]=await Promise.all([client.schema(),client.capabilities()]);guard(ctx,{session:false});emit({schema,capabilities});await refreshAvailability().catch(()=>null);await list();return refresh();}),poll:()=>state.busy?Promise.resolve():refresh(),
-    history:options=>loadCardHistory(options),
+    history:options=>loadCardHistory(options),focusCard,
     textHistory:options=>loadTextHistory(options),
     turn:(text,model_id,assistant_mode='assist',{createCard=false,draft}={})=>act(async()=>{if(createCard&&assistant_mode!=='none')throw Error('直接出卡只用于原输入模式，不替代助手回复。');const result=await command('turn',[state.session.id],{expected_version:state.session.version,text,model_id,assistant_mode,...(createCard?{create_card:true}:{})},{draft});await loadResources(state.session.id);return result;},{success:'这一轮已保存；只有确认任务卡才会生成视频。'}),
     createCard:body=>act(async()=>{const result=await command('createCard',[state.session.id],body);await loadResources(state.session.id);const card=record(result,'card');if(card.id)await loadCard(card.id);return result;},{success:'任务卡已保存，尚未提交视频生成。'}),

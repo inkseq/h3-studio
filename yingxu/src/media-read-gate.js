@@ -4,6 +4,10 @@ export function nativeContentRequest(value, origin, init = {}) {
   try {
     const url = new URL(typeof value === 'string' ? value : value.url, origin);
     const method = init.method || value.method || 'GET';
+    const renditions=url.searchParams.getAll('rendition');
+    // Small rendition responses use their own visible-image lane. They must
+    // never enter the heavy-video gate or be mistaken for original videos.
+    if(renditions.length===1&&renditions[0]==='thumb')return false;
     return ['GET', 'HEAD'].includes(method) && url.origin === origin &&
       /^\/v1\/(?:assets|artifacts)\/[A-Za-z0-9_-]{1,200}\/content$/.test(url.pathname);
   } catch { return false; }

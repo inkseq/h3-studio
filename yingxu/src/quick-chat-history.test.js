@@ -204,3 +204,27 @@ test('opening saved history shows loading through auth and first-page hydration,
   assert.equal(initialThreadLoading({...signed,state:{cardHistoryError:{status:503}}}),false);
   assert.equal(initialThreadLoading({...base,requestedSession:null}),false);
 });
+
+test('take-grid focus hydrates one original card/version without reopening or discarding loaded history, draft or pending receipt',async()=>{
+  const h=await fixture().start();await h.controller.history();const before=h.controller.getState();let resets=0;
+  h.api.reset=()=>resets++;h.api.patchSession=async()=>{throw Object.assign(Error('lost original metadata ack'),{status:503});};
+  await assert.rejects(h.controller.patch({title:'Original pending title'}));const pending=h.controller.getState().pending;
+  h.stored.set('original-composer-draft','Unsubmitted prompt');const stored=new Map(h.stored);
+  const result=await h.controller.focusCard({cardId:'card-005',revisionId:'revision-005',submissionId:'submission-005'}),state=h.controller.getState();
+  assert.equal(result.card_id,'card-005');assert.equal(result.revision_id,'revision-005');assert.equal(resets,0);
+  assert.equal(state.session,before.session);assert.equal(state.materials,before.materials);assert.equal(state.timeline,before.timeline);
+  assert.equal(state.cardHistoryCursor,before.cardHistoryCursor);assert.equal(Object.keys(state.cards).length,21);
+  assert.equal(state.cards['card-005'].created_at,1004);assert.equal(state.pending,pending);assert.deepEqual(h.stored,stored);
+  assert.equal(quickThreadEntries(state.timeline,state.cards).find(entry=>entry.kind==='card').record.id,'card-005');h.controller.destroy();
+});
+
+test('take focus rejects foreign card/revision pairing atomically and late owner/session/write responses never enter the next view',async()=>{
+  const wrong=await fixture().start(),before=wrong.controller.getState();
+  await assert.rejects(wrong.controller.focusCard({cardId:'card-005',revisionId:'revision-006'}));assert.equal(wrong.controller.getState(),before);wrong.controller.destroy();
+  for(const change of ['account','session','write']){
+    const h=await fixture().start();h.holdCard('card-005');const request=h.controller.focusCard({cardId:'card-005',revisionId:'revision-005'});
+    while(!h.calls.some(([kind,,id])=>kind==='card'&&id==='card-005'))await Promise.resolve();
+    if(change==='account')await h.controller.setAccount('other-owner');else if(change==='session')await h.controller.open('other-session');else await h.controller.patch({title:'Newly authored title'});
+    h.releaseCard();await assert.rejects(request);assert.equal(h.controller.getState().cards['card-005'],undefined);h.controller.destroy();
+  }
+});

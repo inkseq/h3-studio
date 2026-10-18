@@ -9,6 +9,7 @@ export function createQuickChatClient(options={}){
     preferences:()=>api.request('/v1/quick-chat/preferences'),
     savePreferences:(body,key)=>write('/v1/quick-chat/preferences',body,key,'PATCH'),
     takes:(id,card,{before_cursor,limit=20}={})=>api.request(base(id)+`/cards/${enc(card)}/takes?`+new URLSearchParams({limit,...(before_cursor?{before_cursor}:{})})),
+    sessionTakes:(id,{before_cursor,limit=40,signal}={})=>api.request(base(id)+'/takes?'+new URLSearchParams({limit,...(before_cursor?{before_cursor}:{})}),{signal}),
     starTake:(id,take,body,key)=>write(base(id)+`/takes/${enc(take)}`,body,key,'PATCH'),
     again:(id,card,body,key)=>write(base(id)+`/cards/${enc(card)}/again`,body,key),
     takeToStory:(id,take,body,key)=>write(base(id)+`/takes/${enc(take)}/story`,body,key),

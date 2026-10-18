@@ -1,4 +1,5 @@
 import {quickViewCatalogs} from './quickViewCatalogs.js';
+import {sessionTakeCatalogs} from './sessionTakeCatalogs.js';
 import {storyOpenCatalogs} from './storyOpenCatalogs.js';
 import {v2Catalogs} from './v2Catalogs.js';
 import {libraryCatalogs} from './libraryCatalogs.js';
@@ -24,6 +25,7 @@ import {storyboardCatalogs} from './storyboardCatalogs.js';
 import {legacyCatalogs} from './legacyCatalogs.js';
 export const catalogs = {
   en: {
+    ...sessionTakeCatalogs.en,
     ...storyOpenCatalogs.en,
     ...v2Catalogs.en, ...quickViewCatalogs.en,...libraryCatalogs.en,...trashCatalogs.en,...workbenchCatalogs.en,
     ...takesCatalogs.en,...assistantCatalogs.en,
@@ -55,6 +57,7 @@ export const catalogs = {
     'locale.switchToEnglish': 'Switch to English',
   },
   zh: {
+    ...sessionTakeCatalogs.zh,
     ...storyOpenCatalogs.zh,
     ...v2Catalogs.zh, ...quickViewCatalogs.zh,...libraryCatalogs.zh,...trashCatalogs.zh,...workbenchCatalogs.zh,
     ...takesCatalogs.zh,...assistantCatalogs.zh,
