@@ -1,6 +1,23 @@
-import React,{createContext,forwardRef,useCallback,useContext,useImperativeHandle,useLayoutEffect,useMemo,useRef,useState} from 'react';
+import React,{Component,createContext,forwardRef,useCallback,useContext,useImperativeHandle,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {captureThreadAnchor,restoreThreadAnchor} from './quick-chat-history.js';
 import {threadLayout,threadWindow,threadEntryKey,threadCardId} from './quick-thread-window.js';
+
+// Read the visible row before React changes rows/spacers. A ResizeObserver
+// callback runs after layout and is too late to capture an unpin/prepend shift.
+export class ThreadScrollSnapshot extends Component{
+  getSnapshotBeforeUpdate(previous){
+    if(this.props.active===false||previous?.active===false)return null;
+    const root=this.props.scrollRef.current;
+    return root?{anchor:captureThreadAnchor(root),bottom:root.scrollHeight-root.scrollTop-root.clientHeight<48}:null;
+  }
+  componentDidUpdate(_props,_state,snapshot){
+    const root=this.props.scrollRef.current;
+    if(!root||!snapshot)return;
+    if(snapshot.bottom)root.scrollTop=root.scrollHeight;
+    else restoreThreadAnchor(root,snapshot.anchor);
+  }
+  render(){return this.props.children;}
+}
 
 const RowContext=createContext(null);
 export function useThreadKeepAlive(value){const row=useContext(RowContext);useLayoutEffect(()=>{row?.pin('editor',!!value);return()=>row?.pin('editor',false);},[row,value]);}
@@ -50,7 +67,7 @@ export default forwardRef(function QuickChatThread({entries,scrollRef,renderEntr
   // Once the target has entered the normal viewport window it need not remain
   // pinned forever; open editors/media/focus keep their own independent pins.
   useLayoutEffect(()=>{if(!jumpKey||pendingJump.current)return;const target=layout.rows.find(row=>row.key===jumpKey);if(target&&target.offset+target.height>=viewport.top&&target.offset<=viewport.top+viewport.height)setJumpKey(null);},[jumpKey,layout,viewport]);
-  return <div ref={node} className="quick-virtual-thread" data-virtual-count={entries.length} data-mounted-count={rows.filter(row=>row.kind==='row').length}>
+  return <ThreadScrollSnapshot scrollRef={scrollRef} active={active}><div ref={node} className="quick-virtual-thread" data-virtual-count={entries.length} data-mounted-count={rows.filter(row=>row.kind==='row').length}>
     {rows.map(row=>{if(row.kind==='spacer')return <div key={row.key} className="quick-thread-spacer" style={{height:row.height}} aria-hidden="true"/>;let saved=memory.current.get(row.key);if(!saved){saved=new Map();memory.current.set(row.key,saved);}return <ThreadRow key={row.key} row={row} render={renderEntry} attach={attach} pin={pin} memory={saved}/>;})}
-  </div>;
+  </div></ThreadScrollSnapshot>;
 });
