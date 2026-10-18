@@ -169,6 +169,33 @@ class MonitorTests(unittest.TestCase):
                 _, host, _ = monitor.observe({'total': 2000, 'idle': 800}, proc=proc)
                 self.assertIsNone(host['cpu_percent'])
 
+    def test_disk_80_90_use_actual_filesystem_sample_metric_and_sns_dedup(self):
+        statvfs = Mock(return_value=SimpleNamespace(f_blocks=1000, f_bfree=240, f_bavail=190, f_frsize=4096))
+        value = monitor.disk_sample(statvfs=statvfs)
+        statvfs.assert_called_once_with('/srv/sixnine')
+        self.assertEqual(value, 80)  # 760 used / (760 used +190 available), not total-block estimate.
+        self.tick(1000, disk_used_percent=value)
+        first = json.loads(self.sns.publish.call_args.kwargs['Message'])
+        self.assertEqual((first['code'], first['transition']), ('host_disk_80', 'firing'))
+        self.tick(1060, disk_used_percent=90)
+        self.assertEqual(json.loads(self.sns.publish.call_args.kwargs['Message'])['code'], 'host_disk_90')
+        self.assertEqual(self.sns.publish.call_count, 2)
+        self.tick(1120, disk_used_percent=None)
+        self.assertEqual(self.sns.publish.call_count, 2)
+        self.tick(1180, disk_used_percent=90)
+        self.assertEqual(self.sns.publish.call_count, 2)
+        self.tick(1240, disk_used_percent=79)
+        self.assertEqual(self.sns.publish.call_count, 4)
+        metrics = {item['MetricName']: item for item in self.cloud.put_metric_data.call_args.kwargs['MetricData']}
+        self.assertEqual((metrics['DiskUsedPercent']['Value'], metrics['DiskUsedPercent']['Unit']), (79, 'Percent'))
+        self.assertTrue(all('PRIVATE' not in call.kwargs['Message'] for call in self.sns.publish.call_args_list))
+
+    def test_disk_sample_invalid_or_missing_never_invents_a_healthy_disk(self):
+        for values in ((0, 0, 0, 4096), (100, 10, 20, 4096), (100, 110, 20, 4096), (100, 10, 1, 0)):
+            with self.subTest(values=values), self.assertRaisesRegex(ValueError, 'disk_sample_invalid'):
+                monitor.disk_sample(statvfs=lambda path: SimpleNamespace(**dict(zip(
+                    ('f_blocks', 'f_bfree', 'f_bavail', 'f_frsize'), values))))
+
 
 
 

@@ -187,6 +187,17 @@ def proc_sample(*, proc=Path('/proc')):
             'memory_percent': 100 * (1 - memory['MemAvailable'] / memory['MemTotal'])}
 
 
+def disk_sample(*, path='/srv/sixnine', statvfs=None):
+    """The real host data filesystem, using df's non-root available capacity."""
+    value = (statvfs or os.statvfs)(path)
+    require(all(type(item) is int for item in (value.f_blocks, value.f_bfree, value.f_bavail, value.f_frsize))
+        and value.f_frsize > 0 and 0 <= value.f_bavail <= value.f_bfree <= value.f_blocks,
+        'alert_disk_sample_invalid')
+    used = value.f_blocks - value.f_bfree
+    require(used + value.f_bavail > 0, 'alert_disk_sample_invalid')
+    return 100 * used / (used + value.f_bavail)
+
+
 def observe(previous_cpu, *, runner=subprocess.run, proc=Path('/proc')):
     sample = proc_sample(proc=proc)
     cpu = None
@@ -195,7 +206,11 @@ def observe(previous_cpu, *, runner=subprocess.run, proc=Path('/proc')):
         if total > 0 and 0 <= idle <= total:
             cpu = 100 * (1 - idle / total)
     host = {'cpu_percent': cpu, 'memory_percent': sample['memory_percent'], 'health_ok': None,
-            'http_requests': None, 'http_5xx': None, 'processes_ok': None}
+            'http_requests': None, 'http_5xx': None, 'processes_ok': None, 'disk_used_percent': None}
+    try:
+        host['disk_used_percent'] = disk_sample()
+    except (OSError, ValueError, AttributeError):
+        pass  # An unknown disk observation never resolves an active alarm.
     snapshot = None
     try:
         found = containers(runner=runner)
@@ -223,7 +238,7 @@ def notification(value, environment):
             'alert_notification_invalid')
     # The core evaluator owns this finite code list. Keep a second boundary at SNS.
     require(value['code'] in {'gpu_runtime_exceeded', 'gpu_idle_stop_overdue', 'test_spend_80', 'test_spend_100',
-            'job_stuck', 'job_repeated_wake', 'host_cpu_sustained', 'host_memory_sustained',
+            'job_stuck', 'job_repeated_wake', 'host_cpu_sustained', 'host_memory_sustained', 'host_disk_80', 'host_disk_90',
             'host_process_unhealthy', 'health_down', 'http_5xx_rate', 'generation_failure', 'terminal_reservation_stale'}
             and value['environment'] == environment and value['transition'] in {'firing', 'resolved'}
             and (value['resource_id'] is None or type(value['resource_id']) is str
@@ -305,6 +320,12 @@ def tick(settings, state, snapshot, host, cpu, *, evaluator, sns, cloudwatch, sa
         {'MetricName': 'SnapshotHealthy', 'Dimensions': [{'Name': 'Environment', 'Value': settings['environment']},
             {'Name': 'InstanceId', 'Value': settings['instance_id']}], 'Timestamp': datetime.fromtimestamp(now, timezone.utc),
          'Value': int(fresh), 'Unit': 'Count'}]}
+    disk = host.get('disk_used_percent')
+    if type(disk) in (int, float) and math.isfinite(disk) and 0 <= disk <= 100:
+        metric['MetricData'].append({'MetricName': 'DiskUsedPercent',
+            'Dimensions': [{'Name': 'Environment', 'Value': settings['environment']},
+                {'Name': 'InstanceId', 'Value': settings['instance_id']}],
+            'Timestamp': datetime.fromtimestamp(now, timezone.utc), 'Value': disk, 'Unit': 'Percent'})
     cloudwatch.put_metric_data(**metric)
     return state
 
