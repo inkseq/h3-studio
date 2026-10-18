@@ -72,6 +72,20 @@ class DeploymentPolicyTests(unittest.TestCase):
     def test_rendered_compose_has_strict_production_policy(self):
         self.assertTrue(policy.validate(self.rendered, compose_version=self.compose_version))
 
+    def test_browser_session_duration_is_bounded_and_retained_config_still_validates(self):
+        for duration in (None, "604800", "900"):
+            changed = copy.deepcopy(self.rendered)
+            environment = changed["services"]["app"]["environment"]
+            environment.pop("INKSEQ_BROWSER_SESSION_SECONDS", None)
+            if duration is not None:
+                environment["INKSEQ_BROWSER_SESSION_SECONDS"] = duration
+            self.assertTrue(policy.validate(changed, compose_version=self.compose_version))
+        for duration in ("0", "31536001", " 900", "true", 604800):
+            changed = copy.deepcopy(self.rendered)
+            changed["services"]["app"]["environment"]["INKSEQ_BROWSER_SESSION_SECONDS"] = duration
+            with self.assertRaises(policy.ConfigurationError):
+                policy.validate(changed, compose_version=self.compose_version)
+
     def test_staging_has_its_own_exact_origin_and_proxy_profile(self):
         candidate = copy.deepcopy(self.rendered)
         candidate['services']['app']['environment'].update(PUBLIC_ORIGIN='https://staging.inkseq.com', PUBLIC_ORIGIN_ALIASES='')

@@ -9,6 +9,27 @@ from .content_lifecycle import reference_ids
 PROFILES={'character','location','prop'}
 FILES={'image','video','audio'}
 
+def profile_file_ids(data):
+    """Existing Story inbox membership, projected without changing authoring."""
+    result=set()
+    def ids(value):
+        if isinstance(value,list):result.update(item for item in value if isinstance(item,str))
+    for field in ('libraryFileIds','imageIds','referenceAssetIds'):
+        ids(data.get(field))
+    for field in ('looks','versions'):
+        values=data.get(field,[])
+        for variant in values if isinstance(values,list) else []:
+            if not isinstance(variant,dict):continue
+            images=variant.get('imageIds')
+            gallery=variant.get('gallery')
+            ids(images if isinstance(images,list) else list(gallery.values()) if isinstance(gallery,dict) else [])
+    voices=data.get('voices',[])
+    for voice in voices if isinstance(voices,list) else []:
+        if isinstance(voice,dict) and isinstance(voice.get('assetId'),str):result.add(voice['assetId'])
+    ambient=data.get('ambient')
+    if isinstance(ambient,dict) and isinstance(ambient.get('assetId'),str):result.add(ambient['assetId'])
+    return result
+
 class _LibraryRead:
     """One owner-scoped read snapshot, never a cache between requests.
 
@@ -88,6 +109,8 @@ def contract():
     return {'storage':'project_scoped','aggregate':'authorized read projection only',
         'list':'GET /v1/library','usage':'GET /v1/library/usage',
         'filters':['project_id','type','work','unused','tag','q','limit','offset'],
+        'counts_scope':'authorized_filtered_except_type',
+        'inbox':'current file items not dismissed or filed into a profile; read-only authoring projection',
         'actions':['library.tag','library.file','library.rename'],'import':'POST /v1/library/imports',
         'import_status':'GET /v1/library/imports/{operation_id}',
         'deletion':'Use /v1/trash preview/actions; no automatic deletion',
@@ -241,6 +264,7 @@ class Library:
                 for kind,field in (('asset','cloudAssetId'),('artifact','cloudArtifactId')):
                     if entity['data'].get(field):global_usage.setdefault((kind,entity['data'][field]),set()).update((pid,sid) for sid in usage.get(entity['id'],[]))
             attached=set()
+            filed={e['id']:profile_file_ids(e['data']) for e in project['entities'] if e['type'] in PROFILES}
             def append(kind,ident,typ,title,data,extra=None):
                 tags=data.get('tags',[]) if kind=='entity' else project.get('journey',{}).get('libraryTags',{}).get(kind+':'+ident,[])
                 tags=[t for t in tags if isinstance(t,str)] if isinstance(tags,list) else []
@@ -250,7 +274,8 @@ class Library:
                 results.append({'target':{'project_id':pid,'kind':kind,'id':ident},'type':typ,'title':project.get('journey',{}).get('libraryTitles',{}).get(kind+':'+ident,title),'tags':tags,
                     'asset_id':data.get('cloudAssetId') or (ident if kind=='asset' else None),'artifact_id':data.get('cloudArtifactId') or (ident if kind=='artifact' else None),'project_version':row['version'],'source_project_id':pid,'source_project_title':project.get('title',''),
                     'provenance':data.get('importSource'),
-                    'filed_in':[e['id'] for e in project['entities'] if e['type'] in PROFILES and ident in e['data'].get('libraryFileIds',[])],
+                    'filed_in':[pid for pid,ids in filed.items() if ident in ids],
+                    'inbox':typ in FILES and data.get('storyboardInbox') is not False and not any(ident in ids for ids in filed.values()),
                     'usage':[{'project_id':pid,'shot_id':sid,'web_url':'/?'+urlencode({'project':pid,'entity':sid})} for sid in sorted(used)],
                     'work_ids':[pid] if used else [],'unused':not used,'source':data.get('source','upload' if kind=='asset' else 'generation' if kind=='artifact' else 'authoring'),**(extra or {})})
             for entity in project['entities']:
@@ -276,11 +301,17 @@ class Library:
     def listing(self,principal,*,project_id=None,type=None,work=None,unused=None,tag=None,q=None,limit=100,offset=0):
         if not 1<=limit<=100 or offset<0:raise ValueError('Invalid pagination / 分页无效')
         values=[e for e in self.entries(principal) if (project_id is None or e['target']['project_id']==project_id)
-            and (type is None or e['type']==type or type=='profile' and e['type'] in PROFILES or type=='file' and e['type'] in FILES)
             and (work is None or work in e['work_ids']) and (unused is None or e['unused']==unused)
             and (tag is None or tag in e['tags']) and (not q or q.casefold() in e['title'].casefold() or any(q.casefold() in t.casefold() for t in e['tags']))]
+        counts={kind:sum(e['type']==kind for e in values) for kind in sorted(PROFILES|FILES)}
+        counts['file']=sum(e['type'] in FILES for e in values)
+        counts['inbox']=sum(e['inbox'] for e in values)
+        values=[e for e in values if (type is None or e['type']==type
+            or type=='profile' and e['type'] in PROFILES or type=='file' and e['type'] in FILES
+            or type=='inbox' and e['inbox'])]
         values.sort(key=lambda e:(e['target']['project_id'],e['target']['kind'],e['target']['id']))
         return {'items':values[offset:offset+limit],'next_offset':offset+limit if len(values)>offset+limit else None,
+            'counts':counts,'counts_scope':'authorized_filtered_except_type',
             'usage_scope':'authorized_projects','usage_kind':'current_authoring','historical_retention':'unmeasured_not_deletion_permission','storage_scope':'project','aggregate_read_only':True}
 
 def register_routes(app):
