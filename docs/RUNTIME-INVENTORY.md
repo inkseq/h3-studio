@@ -10,7 +10,7 @@ Observed read-only on staging and production on 2026-10-18, 17:33–17:49 UTC fo
 | Generation workers | Controller's `postgres_dispatch` slot children and `wangp-worker` execution backend | Keep current queue until staging-only #295 passes; no dual consumer. |
 | Storage | R2 selected in both app and controller | Keep local provider for isolated tests, previews and backup/recovery. No `objects/` or unique user media deletion. |
 | Standalone workbench | No deployed `server:app` process/container; unified Dockerfile never copies it | Remove the old server, separate SQLite password auth, web UI and standalone Docker/release/admin/check path. |
-| Historical operator containers/units | Old operator containers are exited; nine production units are failed | Not live capacity. Unit retirement is a separate reversible operation after fresh inactivity checks; never stop the current dstack controller. |
+| Historical operator containers/units | Old operator containers are exited; nine failed production units were reversibly retired | Exact original definitions and intent remain in a private archive. No live service was stopped; the current dstack controller is unchanged. |
 
 Both hosts had 59 public business tables / 444 columns; the sampled job states were terminal and workers retired/stopped. These aggregate observations do not settle invoices, release reservations, remove records, or prove provider absence. The retained history includes a staging `creation_unknown` row. Nothing in this source cleanup changes any row or starts/stops a provider instance.
 
@@ -31,3 +31,9 @@ The removed standalone website had its own `server.py`, `password_auth.py`, `web
 Only the corresponding obsolete CI image/browser/deploy checks are removed. Unknown/security/budget/provider changes still require every current platform gate, including the unified image, dispatch/dstack derivatives, PostgreSQL suite and native helper checks. No protected host release helper is replaced, and original rollback images/artifacts remain available independently of this source removal. Historical standalone documentation is explicitly dated and remains in Git; it does not authorize redeploying the retired path.
 
 Host-path renaming, local media migration/deletion, wholesale provider/scaler removal and DBOS production activation are outside this slice. DBOS remains staging only under CR-20261019-37.
+
+## Reader-before-writer schema compatibility
+
+This preparatory release also introduces a read-only `schema_version` helper without importing Alembic. A private business-backup source may contain only the exact known baseline marker shape and revision; it is validated and excluded from portable business exports, just like authentication is excluded. Unknown or malformed markers still refuse export. No baseline marker is created, changed or removed by this reader.
+
+Only after this reader is the previous rollback image may a later Alembic release adopt the baseline. Otherwise reverting to the old strict backup inventory would make the next daily backup reject `alembic_version`. This is a Medium-risk compatibility prerequisite, separate from the Low-risk standalone source retirement and the separately reviewed host-unit operation. Actual current/previous reader capability must be checked before any live adoption; source merge alone does not satisfy that gate.
