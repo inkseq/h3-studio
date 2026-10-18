@@ -1,19 +1,10 @@
 # Send only the application source and pinned dependencies to Docker.
 **
-!Dockerfile
 !.dockerignore
 !requirements.lock.txt
-!server.py
-!password_auth.py
 !comfy_workflow.py
 !comfy-object-info.json
 !tools/
-!tools/manage_users.py
-!web/
-!web/index.html
-!web/app.js
-!web/styles.css
-!web/h3-ref-bf16-workflow.json
 
 # Separate v1 image inputs. No runtime directories or central vault are included.
 !Dockerfile.platform

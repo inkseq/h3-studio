@@ -202,6 +202,7 @@ class ShardTests(unittest.TestCase):
         self.assertEqual(
             set(ci.POSTGRES_MODULES) - expected,
             {
+                "test_schema_version",
                 "test_operator_manual_review",
                 "test_capacity_market_refresh",
                 "test_capacity_candidates",

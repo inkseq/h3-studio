@@ -30,7 +30,7 @@ Canonical frontend and approved mock live in the public `inkseq/inkseq-design` r
 
 ## Historical standalone workbench
 
-The earlier MiniMax H3 workbench exposed separate image/video/audio references, timeline guides, native controls, owned assets, jobs and downloads. `server.py`, `web/` and the old standalone deployment files remain for known compatibility/laboratory uses; this is not a second business-backend development path.
+The earlier standalone MiniMax H3 website, separate password database and deployment path were retired after the #257 deployed-runtime inventory. Their source remains recoverable in Git history; current platform authentication, jobs and recovery use `studio_platform/`. The expert visual workflow is retained as a test fixture. This retirement does not remove any host database, media, original-job recovery code or rollback image.
 
 Its older documentation described a CPU-only website deployment with generation disabled and a fixed test account set. That description is historical, not the current public generation or authentication state. Consult the dated baseline and exact release evidence before operating any deployment.
 
@@ -47,7 +47,6 @@ Python 3.12, Node.js and FFmpeg/ffprobe are required:
 ```sh
 python -m pip install -r requirements.lock.txt
 python -m unittest discover -s tests -p 'test_*.py' -v
-node --check web/app.js
 ```
 
 Tests use disposable data and fake requests. Do not run live generation scripts

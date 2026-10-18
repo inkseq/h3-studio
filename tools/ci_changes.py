@@ -55,11 +55,11 @@ FRONTEND_ROOT = frozenset({"yingxu/index.html", "yingxu/package.json", "yingxu/p
                            "yingxu/src/NOVICE-STORIES-AC.md"})
 # Ordinary backend changes still run the complete Python and PostgreSQL suites
 # plus the platform image/runtime check. Security, money, queue and provider
-# code is deliberately absent: it falls back to all checks, including legacy/UI.
+# code is deliberately absent: it falls back to all current platform/UI checks.
 BACKEND_MODULES = frozenset({"agent_discovery", "caption_server", "diagnostics", "generation_draft",
                              "guided", "guided_schema", "media", "media_process", "project_activity",
                              "project_validation", "render_backend", "render_cli", "render_plans"})
-GATES = ("python", "postgres", "frontend", "containers", "legacy", "frontend_tools", "macos_helper")
+GATES = ("python", "postgres", "frontend", "containers", "frontend_tools", "macos_helper")
 SHA = re.compile(r"[0-9a-f]{40}")
 
 
@@ -88,7 +88,7 @@ def selection(kinds, *, reason: str) -> dict:
         "category": "full" if full else "+".join(sorted(kinds)) or "unchanged",
         "reason": reason,
         "python": backend, "postgres": backend, "frontend": frontend,
-        "containers": backend, "legacy": full,
+        "containers": backend,
         # The full Python suite already includes the frontend release tool tests.
         "frontend_tools": frontend and not backend,
         # Credential helpers and unknown/critical changes take the complete

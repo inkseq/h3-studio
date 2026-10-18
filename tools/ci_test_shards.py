@@ -25,7 +25,7 @@ DEFAULT_SHARD_COUNT = 6
 # New PostgreSQL coverage is added explicitly; existing modules never disappear
 # as a side effect of CI path selection or balancing.
 POSTGRES_MODULES = tuple("""
-test_platform_repository test_platform_queue test_platform_autoscale test_platform_control
+test_platform_repository test_schema_version test_platform_queue test_platform_autoscale test_platform_control
 test_platform_worker test_platform_drain_safe_runner test_platform_production_scaler
 test_platform_on_demand_scaler test_platform_backlog_handoff test_platform_preparation_recovery
 test_platform_preparation_idle test_platform_production_boot_memory test_platform_fleet
