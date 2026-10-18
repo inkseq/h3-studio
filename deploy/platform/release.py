@@ -991,7 +991,18 @@ def post_release_retention(root):
         return None
     try:
         value = _protected_json(policy, maximum=1024)
-        require(value == {'version': 1, 'enabled': True}, 'retention_policy_requires_review')
+        require(value == {'version': 1, 'enabled': True} and type(value.get('version')) is int
+            and value.get('enabled') is True, 'retention_policy_requires_review')
+        intent = root / 'environment-release-intent.json'
+        if intent.exists() or intent.is_symlink():
+            pin = _protected_json(intent, maximum=1024)
+            require(set(pin) == {'version', 'commit', 'candidate_sha256', 'state'}
+                and type(pin['version']) is int and pin['version'] == 1
+                and isinstance(pin['commit'], str) and SHA.fullmatch(pin['commit'])
+                and isinstance(pin['candidate_sha256'], str) and DIGEST.fullmatch(pin['candidate_sha256'])
+                and pin['state'] in {'in_progress', 'completed'}, 'retention_promotion_intent_unknown')
+            if pin['state'] == 'in_progress':
+                return {'state': 'retention_deferred_until_full_tuple_installed'}
         import importlib.util
         helper = Path(__file__).with_name('release_retention.py')
         regular(helper, root_owned=True, maximum=1024**2)

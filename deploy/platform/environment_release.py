@@ -56,6 +56,25 @@ def approvals(root, value, api):
         frontend_release.immutable_file(directory/(commit+'.sha256'), (digest+'\n').encode())
 
 
+def retention_intent(root, value, *, completed=False):
+    """Only a retention pin for the existing deployers, never deployment approval."""
+    path = root / 'environment-release-intent.json'
+    expected = {'version': 1, 'commit': value['commit'],
+        'candidate_sha256': release_candidate.digest(release_candidate.encode(value)), 'state': 'in_progress'}
+    if path.exists() or path.is_symlink():
+        prior = release._protected_json(path)
+        release.require(set(prior) == set(expected) and type(prior['version']) is int and prior['version'] == 1
+            and type(prior['commit']) is str and release.SHA.fullmatch(prior['commit'])
+            and type(prior['candidate_sha256']) is str and release.DIGEST.fullmatch(prior['candidate_sha256'])
+            and prior['state'] in {'in_progress', 'completed'}, 'retention_promotion_intent_unknown')
+        release.require(prior['state'] == 'completed' and not completed or prior == expected,
+            'another_environment_release_requires_reconciliation')
+    else:
+        release.require(not completed, 'retention_promotion_intent_missing')
+    frontend_release.atomic_file(path, (json.dumps({**expected,
+        'state': 'completed' if completed else 'in_progress'}, sort_keys=True) + '\n').encode())
+
+
 def run(target, commit, *, root=release.ROOT, api=None):
     sealed = deployment_target.host(root)
     release.require(target in {'staging', 'production'} and sealed['name'] == target, 'environment_release_wrong_host')
@@ -79,9 +98,14 @@ def run(target, commit, *, root=release.ROOT, api=None):
     with (root/'release.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         approvals(root, value, api)
+        retention_intent(root, value)
     if value['kind'] == 'platform':
         deploy_approved.deploy(commit, root=root)
     deploy_frontend.deploy(commit, root=root, api=api)
+    with (root/'release.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        retention_intent(root, value, completed=True)
+        release.post_release_retention(root)
     return {'state': 'staging_release_healthy' if target == 'staging' else 'accepted_artifacts_promoted',
         'commit': commit, 'candidate_sha256': release_candidate.digest(release_candidate.encode(value))}
 
