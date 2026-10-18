@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Inkseq verified release bundle retention (UTC)
+
+[Timer]
+OnCalendar=*-*-* 17:30:00 UTC
+RandomizedDelaySec=900
+Persistent=true
+Unit=inkseq-release-retention.service
+
+[Install]
+WantedBy=timers.target
