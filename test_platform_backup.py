@@ -17,6 +17,7 @@ from sqlalchemy import insert, select
 
 from studio_platform.backup import backup_local, verify_local, restore_local, dump_postgres, BackupError
 from studio_platform.assets import AssetService, AssetNotFound
+from studio_platform.asset_objects import ASSET_OBJECT_ROLES
 from studio_platform.auth import Auth, accounts, sessions, clients
 from studio_platform.agent_connect import AgentConnect, audit as connection_audit
 from studio_platform.repository import Repository, Scope
@@ -75,7 +76,7 @@ class BackupTests(unittest.TestCase):
         with closing(sqlite3.connect(self.database)) as db, db:
             for ident, raw in db.execute("SELECT id,record FROM platform_assets").fetchall():
                 record = json.loads(raw)
-                for role in ("original", "model"):
+                for role in ASSET_OBJECT_ROLES:
                     record[role]["provider"] = "r2"
                 db.execute("UPDATE platform_assets SET record=? WHERE id=?", (json.dumps(record), ident))
         local = self.store
@@ -228,7 +229,7 @@ class BackupTests(unittest.TestCase):
             self.assertEqual(runtime_main(["verify", "--backup", str(source)]), 0)
         self.assertEqual(json.loads(output.getvalue())["state"], "verified")
         self.assertNotIn(str(source), output.getvalue())
-        self.assertEqual(len(manifest["objects"]), 2)
+        self.assertEqual(len(manifest["objects"]), 4)
         destination = self.root/"recovered"
         result = restore_local(source, destination)
         self.assertEqual(result["held_jobs"], 1)
@@ -635,7 +636,7 @@ class BackupTests(unittest.TestCase):
             expected = {item["key"]: item for item in manifest["objects"]}
             for raw in records:
                 asset = json.loads(raw)
-                for role in ("original", "model"):
+                for role in ASSET_OBJECT_ROLES:
                     obj = asset[role]
                     item = expected[obj["key"]]
                     self.assertEqual(obj["sha256"], item["sha256"])

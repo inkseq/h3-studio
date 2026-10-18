@@ -6,6 +6,8 @@ never exported. Recovery is an isolated, disabled copy, not automatic failover.
 """
 from __future__ import annotations
 
+from .asset_objects import ASSET_OBJECT_ROLES
+
 import csv
 from contextlib import closing
 import hashlib
@@ -244,9 +246,9 @@ def _media_references(db, provider_bindings=None, *, offline=False):
         entry["references"].append(reference)
     for ident, owner, project, status, raw in db.execute("SELECT id,owner,project_id,status,record FROM platform_assets"):
         record = json.loads(raw)
-        if status != "ready":
+        if status != "ready" or record.get("rendition_status") == "pending":
             pending += 1
-        for role in ("original", "model"):
+        for role in ASSET_OBJECT_ROLES:
             if record.get(role):
                 add(owner, record[role], {"table": "assets", "id": ident, "project_id": project, "role": role})
     receipt_table = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='platform_artifact_write_receipts'").fetchone()
@@ -739,7 +741,7 @@ def _restore_local_provider_metadata(path, manifest):
     with closing(sqlite3.connect(path)) as db, db:
         for ident, raw in db.execute("SELECT id,record FROM platform_assets").fetchall():
             value = json.loads(raw)
-            for role in ("original", "model"):
+            for role in ASSET_OBJECT_ROLES:
                 if value.get(role):
                     convert(value[role])
             db.execute("UPDATE platform_assets SET record=? WHERE id=?", (json.dumps(value), ident))

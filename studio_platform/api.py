@@ -17,6 +17,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
 from .assets import AssetService, AssetNotFound
+from .media_renditions import public_renditions, RENDITIONS
 from .upload_route import AssetUploadRoute
 from .auth import Auth, AuthenticationError, LoginLimited
 from .capabilities import VERSION, capabilities
@@ -240,9 +241,16 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
         downloading = (principal is not None and request.method in {"GET", "HEAD"}
             and request.url.path.endswith("/content")
             and request.url.path.startswith(("/v1/artifacts/", "/v1/assets/")))
-        if downloading and (not lease.acquire("downloads")
-                or not lease.acquire("owner_downloads", principal.owner)):
-            return admission_rejected()
+        if downloading:
+            # Only the strict small-copy selector enters this gate. The route
+            # still authorizes its original owner/project and verifies the
+            # <=64KiB role; invalid/missing selectors never serve originals.
+            thumbnail = (request.url.path.startswith("/v1/assets/")
+                and request.query_params.getlist("rendition") == ["thumb"])
+            global_gate, owner_gate = (("thumbnails", "owner_thumbnails") if thumbnail
+                                      else ("downloads", "owner_downloads"))
+            if not lease.acquire(global_gate) or not lease.acquire(owner_gate, principal.owner):
+                return admission_rejected()
         uploading = request.method == "POST" and is_asset_upload(request.url.path) and principal is not None
         if uploading and not upload_admission.acquire(principal.owner):
             return JSONResponse({"detail": "同时上传的文件已达到上限，请等当前上传完成再重试"}, status_code=429,
@@ -436,7 +444,7 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
         # resume the same durable receipt, never create a fresh storage key.
         return asset_service.resume(principal.owner, asset_id)
 
-    def object_content(key, mime, filename, request, *, download=False, immutable_video=False):
+    def object_content(key, mime, filename, request, *, download=False, immutable_video=False, immutable_rendition=False):
         headers = {"Accept-Ranges": "bytes", "Content-Disposition": ("attachment" if download else "inline")+"; filename*=UTF-8''"+quote(filename, safe="")}
         if not isinstance(storage, LocalObjectStore):
             if request.method == "HEAD":
@@ -445,13 +453,15 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
                 headers["Content-Length"] = str(info.size_bytes)
                 return StreamingResponse(iter(()), media_type=mime, headers=headers)
             options = {"download_filename": filename} if download else {}
-            if immutable_video and isinstance(storage, S3ObjectStore) and storage.config.provider == "r2":
-                url = storage.presign_immutable_video(key, content_type=mime, **options)
+            if (immutable_video or immutable_rendition) and isinstance(storage, S3ObjectStore) and storage.config.provider == "r2":
+                signer = storage.presign_immutable_rendition if immutable_rendition else storage.presign_immutable_video
+                url = signer(key, content_type=mime, **options)
                 now = time.time()
                 # Use the issued URL's bucket, including a rollover during signing.
                 bucket_end = url.expires_at - VIDEO_SIGNING_VALIDITY_SECONDS + VIDEO_SIGNING_BUCKET_SECONDS
-                request.scope[ARTIFACT_VIDEO_CACHE_SCOPE_KEY] = max(0,
-                    min(int(url.expires_at - now) - 600, int(bucket_end - now)))
+                if immutable_video:
+                    request.scope[ARTIFACT_VIDEO_CACHE_SCOPE_KEY] = max(0,
+                        min(int(url.expires_at - now) - 600, int(bucket_end - now)))
             else:
                 url = storage.presign_download(key, expires_seconds=300, **options)
             return RedirectResponse(url.reveal(), status_code=307,
@@ -493,12 +503,22 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
 
     @app.api_route("/v1/assets/{asset_id}/content", methods=["GET", "HEAD"])
     def asset_content(asset_id: str, request: Request, download: bool = False,
+                      rendition: str | None = Query(None),
                       expected_account: str | None = Query(None, description="Optional browser account fence for native media/navigation; does not grant access")):
         principal = request.state.principal
         value = asset_service.get(principal.owner, asset_id)
         authorized_project(principal, value["project_id"], "assets:read")
         if value["status"] != "ready":
             raise HTTPException(409, "素材尚未就绪")
+        if "rendition" in request.query_params:
+            if request.query_params.getlist("rendition") != [rendition] or rendition not in RENDITIONS:
+                raise HTTPException(400, "invalid_rendition")
+            advertised = public_renditions(value).get("renditions", {}).get(rendition)
+            if advertised is None:
+                raise HTTPException(404, "rendition_not_ready")
+            item = value[rendition]
+            return object_content(item["key"], advertised["content_type"], f'{asset_id}-{rendition}.webp',
+                request, download=download, immutable_rendition=True)
         return object_content(value["original"]["key"], value["mime"], value["file_name"], request, download=download)
 
     @app.post("/v1/assets/{asset_id}/derivatives", status_code=201)

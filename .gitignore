@@ -63,6 +63,9 @@ inventory.json
 !studio_platform/source_snapshot.py
 !studio_platform/http_limits.py
 !studio_platform/media.py
+!studio_platform/asset_objects.py
+!studio_platform/media_renditions.py
+!studio_platform/rendition_backfill.py
 !studio_platform/media_process.py
 !studio_platform/upload_route.py
 !studio_platform/asset_operation.py

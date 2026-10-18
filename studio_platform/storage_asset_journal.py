@@ -1,6 +1,8 @@
 """Private upload receipts and atomic capacity counters; no storage/network IO."""
 from __future__ import annotations
 
+from .asset_objects import ASSET_OBJECT_ROLES
+
 import json
 import hashlib
 import re
@@ -81,7 +83,7 @@ class AssetUploadJournal:
         if acquire_gate:
             owner_reference_gate(conn, self.tenant, owner)
         selection = asset.get("selection") or {}
-        keys = [asset[role]["key"] for role in ("original", "model")
+        keys = [asset[role]["key"] for role in ASSET_OBJECT_ROLES
                 if isinstance(asset.get(role), dict) and asset[role].get("key")]
         if receipt is not None:
             keys.extend(spec["key"] for spec in receipt.get("objects", {}).values() if spec.get("key"))
@@ -109,7 +111,7 @@ class AssetUploadJournal:
                     known_bytes = 0
                     for raw in legacy:
                         record = json.loads(raw)
-                        for role in ("original", "model"):
+                        for role in ASSET_OBJECT_ROLES:
                             size = record.get(role, {}).get("size_bytes", 0)
                             if type(size) is not int or size < 0:
                                 raise AssetConflict("旧素材大小元信息需要核对，未重置配额")

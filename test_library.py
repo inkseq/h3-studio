@@ -30,6 +30,23 @@ class LibraryTests(unittest.TestCase):
     def import_body(self):return {'source':{'project_id':'story-one','kind':'entity','id':'hero'},'target_project_id':'target','expected_project_version':self.current('target')['version']}
     def importing(self,body,key='import'):
         return self.client.post('/v1/library/imports',json=body,headers={'Idempotency-Key':key})
+    def test_display_renditions_follow_original_authorized_asset_and_import_receipt(self):
+        self.prepare()
+        before=self.app.state.assets.usage('superdan')
+        values=self.client.get('/v1/library?type=image').json()['items']
+        self.assertEqual(len(values),1)
+        entry=values[0];asset=self.app.state.assets.get('superdan',self.asset)
+        self.assertTrue(entry['rendition_ready'])
+        self.assertEqual(entry['thumbnail_url'],f'/v1/assets/{self.asset}/content?rendition=thumb')
+        self.assertEqual(entry['renditions']['thumb']['sha256'],asset['thumb']['sha256'])
+        self.assertEqual(self.app.state.assets.usage('superdan'),before)  # GET never generates/writes.
+        imported=self.importing(self.import_body()).json()
+        self.assertEqual(imported['state'],'completed')
+        target=self.current('target')['project'];file=next(e for e in target['entities'] if e['type']=='image')
+        copied=self.app.state.assets.public(self.app.state.assets.get('superdan',file['data']['cloudAssetId']))
+        self.assertTrue(copied['rendition_ready'])
+        self.assertNotEqual(copied['thumbnail_url'],entry['thumbnail_url'])
+        self.login('supervan');self.assertEqual(self.client.get('/v1/library?type=image').json()['items'],[])
     def test_tags_usage_scope_filters_and_atomic_file_into_profile(self):
         self.prepare()
         self.action([{'op':'library.tag','targets':[{'kind':'entity','id':'hero'},{'kind':'entity','id':'file-one'}],'tags':['blue','hero']},

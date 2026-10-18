@@ -5,6 +5,8 @@ Unknown historical storage identities are retained rather than guessed.
 """
 from __future__ import annotations
 
+from .asset_objects import ASSET_OBJECT_ROLES
+
 import hashlib
 import json
 import re
@@ -221,8 +223,18 @@ def cleanup_plan(connection, service, principal, sessions, *, media_targets=None
     for ident, asset in candidate_assets.items():
         receipt = uploads.get(ident)
         bound = receipt and receipt.get("storage_binding") == service.assets.storage_binding
+        # A ready original can have an explicitly running display backfill.
+        # Preserve the entire asset while any original-receipt write outcome
+        # is unknown; do not delete only the visible subset of its keys.
+        if receipt and (receipt.get('busy') or receipt.get('rendition_backfill',{}).get('phase') not in (None,'complete')
+                or set(receipt.get('objects',{})) != {role for role in ASSET_OBJECT_ROLES if asset.get(role)}
+                or any(spec.get('phase')!='verified' or any(spec.get(k)!=asset.get(role,{}).get(k)
+                    for k in ('key','size_bytes','sha256','content_type'))
+                    for role,spec in receipt.get('objects',{}).items())):
+            retain({'asset_id':ident},'original_upload_unconfirmed')
+            bound=False
         valid = bool(bound) and all(add("asset", ident, asset[role], service.assets.storage_binding)
-            for role in ("original", "model") if asset.get(role))
+            for role in ASSET_OBJECT_ROLES if asset.get(role))
         if not valid or not asset.get("original"):
             retain({"asset_id": ident}, "unknown_storage_binding")
     for ident, row in candidate_artifacts.items():
@@ -238,7 +250,7 @@ def cleanup_plan(connection, service, principal, sessions, *, media_targets=None
         if row["id"] in candidate_assets:
             continue
         asset = json.loads(row["record"])
-        for role in ("original", "model"):
+        for role in ASSET_OBJECT_ROLES:
             spec = _object(asset.get(role, {}))
             if spec and spec["object_key"] in blob_owners:
                 for kind, ident in blob_owners[spec["object_key"]]:
@@ -259,7 +271,7 @@ def cleanup_plan(connection, service, principal, sessions, *, media_targets=None
         for ident in list(assets_kept):
             record = candidate_assets[ident]
             retain(record, "derived_asset_reference")
-            for role in ("original", "model"):
+            for role in ASSET_OBJECT_ROLES:
                 spec = _object(record.get(role, {}))
                 if spec:
                     for kind, alias in blob_owners.get(spec["object_key"], ()):

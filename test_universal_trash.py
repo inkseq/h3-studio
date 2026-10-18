@@ -209,6 +209,34 @@ class UniversalPurgeTests(ledger.LedgerCase):
         self.service.process_history_cleanup();self.assertEqual(self.service.assets.usage(self.scope.owner_id)['accounted_bytes'],after)
         with self.assertRaises(Conflict):self.repo.put_document(Scope(self.scope.tenant_id,self.scope.owner_id,'__projects'),
             'project','resurrection',{'asset_id':aid})
+    def test_all_display_roles_follow_explicit_purge_but_pending_backfill_is_retained(self):
+        from studio_platform.storage import StorageWriteUncertain
+        self.activate();asset=self.upload();aid=asset['id']
+        held=self.service.assets.get(self.scope.owner_id,aid)
+        keys=[held[role]['key'] for role in ('original','model','thumb','preview')]
+        moved=self.trash.apply(self.principal,self.body('asset',aid),'all-display-trash')
+        pending,_=self.purge(moved,'all-display-purge');self.service.process_history_cleanup()
+        self.assertTrue(self.trash.get_action(self.principal,pending['operation_id'])['media_deleted'])
+        for key in keys:
+            with self.assertRaises(ObjectNotFound):self.service.storage.stat(key)
+        with patch.object(self.service.assets,'_prepare_renditions',return_value={}):other=self.upload()
+        original=self.service.storage.put
+        def lost(key,*args,**kwargs):
+            original(key,*args,**kwargs);raise StorageWriteUncertain(key)
+        with patch.object(self.service.storage,'put',side_effect=lost):
+            with self.assertRaises(StorageWriteUncertain):
+                self.service.assets.ensure_image_renditions(self.scope.owner_id,other['id'])
+        before=self.service.assets.usage(self.scope.owner_id)
+        held=self.service.assets.get(self.scope.owner_id,other['id'])
+        with self.assertRaisesRegex(Conflict,'upload_unresolved'):
+            self.trash.apply(self.principal,self.body('asset',other['id']),'pending-display-trash')
+        from studio_platform.content_references import cleanup_plan
+        with self.repo.engine.connect() as connection:
+            result=cleanup_plan(connection,self.service,self.principal,[],
+                media_targets={'asset_ids':{other['id']},'artifact_ids':set()})
+        self.assertEqual(result['objects'],[]);self.assertEqual(result['kept']['assets'],1)
+        self.assertEqual(self.service.assets.usage(self.scope.owner_id),before)
+        self.service.storage.stat(held['original']['key'])
     def test_accepted_input_retained_and_jobs_accounting_unchanged(self):
         self.activate();asset=self.upload();aid=asset['id']
         plan=self.repo.create_plan(self.scope,{'asset_id':aid},{'pool':'test-pool'},expires_at=self.now+1000)

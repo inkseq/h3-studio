@@ -1,4 +1,6 @@
 """Authorized library projection and original project-CAS metadata actions."""
+from .asset_objects import ASSET_OBJECT_ROLES
+from .media_renditions import public_renditions
 import copy
 import json
 from urllib.parse import urlencode
@@ -57,7 +59,7 @@ class _LibraryRead:
                 for row in conn.execute(select(asset_table).where(asset_table.c.tenant==library.tenant,
                         asset_table.c.owner==principal.owner,asset_table.c.project_id.in_(asset_projects))).mappings():
                     asset=json.loads(row['record']);selection=asset.get('selection') or {}
-                    keys=[asset[role]['key'] for role in ('original','model')
+                    keys=[asset[role]['key'] for role in ASSET_OBJECT_ROLES
                         if isinstance(asset.get(role),dict) and asset[role].get('key')]
                     if available(tuple(value for value in (asset.get('id'),asset.get('parent_id')) if value),
                             (selection['artifact_id'],) if selection.get('artifact_id') else (),keys):
@@ -253,6 +255,11 @@ class Library:
                     'filed_in':[e['id'] for e in project['entities'] if e['type'] in PROFILES and ident in e['data'].get('libraryFileIds',[])],
                     'usage':[{'project_id':pid,'shot_id':sid,'web_url':'/?'+urlencode({'project':pid,'entity':sid})} for sid in sorted(used)],
                     'work_ids':[pid] if used else [],'unused':not used,'source':data.get('source','upload' if kind=='asset' else 'generation' if kind=='artifact' else 'authoring'),**(extra or {})})
+                asset_id=results[-1]['asset_id']
+                if asset_id and (pid,asset_id) in snapshot.assets:
+                    results[-1].update(public_renditions(snapshot.assets[(pid,asset_id)][0]))
+                elif typ=='image':
+                    results[-1].update(rendition_ready=False,rendition_status='missing',renditions={})
             for entity in project['entities']:
                 if entity['type'] not in PROFILES|FILES:continue
                 if not snapshot.entity_available(pid,entity):continue
