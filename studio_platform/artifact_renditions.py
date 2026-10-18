@@ -185,6 +185,13 @@ def ensure(writer, job, attempt_id, tag, *, expected_version=None, interrupted=F
     display = record.setdefault("display", dict(version=1, phase="planned", source_sha256=source["sha256"], objects={}, reserved_bytes=0))
     if display.get("source_sha256") != source["sha256"] or display.get("version") != 1:
         raise IntegrityError("artifact_poster_source_changed")
+    if display['phase'] == 'missing':
+        # cleanup above completed the previous failed extraction's exact
+        # manifest. Persist a fresh active claim before any reservation/IO;
+        # another retry must not treat this writer as a quiescent failure.
+        display['phase'] = 'planned'
+        display.pop('scratch_cleanup', None)
+        display.pop('error_code', None)
     writer._save(record)  # Original CAS claims this display writer before IO.
     if not display["objects"]:
         _resize_reservation(writer, record, max(display["reserved_bytes"], POSTER_PREFIX_BYTES + POSTER_FRAME_BYTES

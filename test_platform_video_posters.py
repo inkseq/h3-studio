@@ -261,6 +261,48 @@ class PosterWriterTests(ledger_fixture.LedgerCase):
         self.assertEqual(sorted(outcomes),['blocked','complete'])
         self.assertEqual(len(self.repo.list_artifacts(self.scope,job['id'])),1)
 
+    def test_missing_retry_claim_blocks_second_retry_before_files_and_retains_exact_quota(self):
+        job,attempt,tag=self.settled()
+        from studio_platform import artifact_renditions as module
+        with mock.patch.object(module,'create_video_renditions',side_effect=media.MediaError('bounded first-frame failure')):
+            missing=ensure(self.writer,job,attempt,tag)
+        self.assertEqual(missing['display']['phase'],'missing')
+        self.assertEqual(missing['display']['scratch_cleanup']['phase'],'complete')
+        baseline=self.writer.quota.usage(self.scope.owner_id)['accounted_bytes']
+        original_save=self.writer._save
+        import threading
+        claimed,release=threading.Event(),threading.Event()
+        def held_claim(record,**kwargs):
+            original_save(record,**kwargs)
+            if record['display']['phase']=='planned' and not claimed.is_set():
+                claimed.set()
+                if not release.wait(5):raise AssertionError('test retry was not released')
+        from concurrent.futures import ThreadPoolExecutor
+        with mock.patch.object(self.writer,'_save',side_effect=held_claim),ThreadPoolExecutor(max_workers=1) as pool:
+            first=pool.submit(ensure,self.writer,job,attempt,tag)
+            try:
+                self.assertTrue(claimed.wait(5))
+                held=self.writer.get(job,attempt,tag)
+                self.assertEqual(held['display']['phase'],'planned')
+                self.assertNotIn('scratch_cleanup',held['display'])
+                self.assertNotIn('error_code',held['display'])
+                self.assertFalse((self.work/tag/'display-v1').exists())
+                with (mock.patch.object(module,'cleanup',side_effect=AssertionError('second retry must not clean')),
+                        mock.patch.object(self.store,'open',side_effect=AssertionError('second retry must not read')),
+                        mock.patch.object(self.store,'put',side_effect=AssertionError('second retry must not write'))):
+                    with self.assertRaisesRegex(ArtifactWritePending,'artifact_poster_writer_unconfirmed'):
+                        ensure(self.writer,job,attempt,tag)
+                self.assertEqual(self.writer.quota.usage(self.scope.owner_id)['accounted_bytes'],baseline)
+                self.assertEqual(self.writer.get(job,attempt,tag)['version'],held['version'])
+            finally:
+                release.set()
+            completed=first.result(timeout=10)
+        self.assertEqual(completed['display']['phase'],'complete')
+        self.assertFalse((self.work/tag/'display-v1').exists())
+        self.assertEqual(self.writer.quota.usage(self.scope.owner_id)['accounted_bytes'],baseline+
+            sum(role['size_bytes'] for role in completed['display']['objects'].values()))
+        self.assertEqual(self.repo.get_job(self.scope,job['id'])['status'],'succeeded')
+
 
 @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg required")
 class PosterApiTests(unittest.TestCase):
