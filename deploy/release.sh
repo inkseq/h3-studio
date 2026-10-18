@@ -30,13 +30,13 @@ docker run --rm --network none --user 10001:10001 \
   --mount "type=bind,src=$base/data,dst=/data,readonly" "$image" python -c '
 import pathlib,sqlite3,sys
 p=pathlib.Path("/data/studio.sqlite3")
-if not p.exists(): sys.exit("Provision both password accounts first; see LIGHTSAIL.md")
+if not p.exists(): sys.exit("Provision both password accounts first; see docs/LIGHTSAIL.md")
 c=sqlite3.connect("file:/data/studio.sqlite3?mode=ro",uri=True)
 tables={r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type=\"table\"")}
 if "jobs" in tables and c.execute("SELECT COUNT(*) FROM jobs WHERE status IN (\"queued\",\"running\",\"cancel_requested\")").fetchone()[0]:
  sys.exit("Active jobs exist: drain and reconcile before deployment")
 from password_auth import passwords_ready
-if not passwords_ready(c): sys.exit("Provision both password accounts first; see LIGHTSAIL.md")
+if not passwords_ready(c): sys.exit("Provision both password accounts first; see docs/LIGHTSAIL.md")
 '
 previous=''
 if [[ -L "$base/current" ]]; then previous="$(readlink -f "$base/current")"; fi

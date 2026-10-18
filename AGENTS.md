@@ -39,11 +39,11 @@ Classify the affected behavior, not the filename. When uncertain choose the lowe
 
 | Area | Sources / contracts |
 |---|---|
-| API, ownership, tasks, budgets | `platform_app.py`, `studio_platform/{api,repository,queue,auth}.py`; [GENERATION-CONTRACT.md](GENERATION-CONTRACT.md) |
-| GPU/queue orchestration | `studio_platform/dstack_*.py`, `postgres_dispatch.py`, `host_policy.py`; [DSTACK-MIGRATION.md](DSTACK-MIGRATION.md), [OPERATOR-CAPACITY-CONTRACT.md](OPERATOR-CAPACITY-CONTRACT.md) |
+| API, ownership, tasks, budgets | `platform_app.py`, `studio_platform/{api,repository,queue,auth}.py`; [GENERATION-CONTRACT.md](docs/GENERATION-CONTRACT.md) |
+| GPU/queue orchestration | `studio_platform/dstack_*.py`, `postgres_dispatch.py`, `host_policy.py`; [DSTACK-MIGRATION.md](docs/DSTACK-MIGRATION.md), [OPERATOR-CAPACITY-CONTRACT.md](docs/OPERATOR-CAPACITY-CONTRACT.md) |
 | Native runtime | `studio_platform/inference/`, `runtime_hosts/`, `native_runtime/`; pinned manifests and existing execution policies |
 | Quick Chat / storyboard / assets | `studio_platform/quick_chat*.py`, `story*.py`, `assets.py`; linked issue UX/contract and canonical frontend |
 | Release | [DEVELOPMENT-RELEASE.zh-CN.md](DEVELOPMENT-RELEASE.zh-CN.md), `deploy/platform/`, `deploy/dstack/RELEASE.md` |
-| Architecture / dated observations | [PROJECT-PLAN.md](PROJECT-PLAN.md), [DECISIONS.md](DECISIONS.md), [CURRENT-BASELINE.md](CURRENT-BASELINE.md); these are not live status endpoints |
+| Architecture / dated observations | [PROJECT-PLAN.md](docs/PROJECT-PLAN.md), [DECISIONS.md](docs/DECISIONS.md), [CURRENT-BASELINE.md](docs/CURRENT-BASELINE.md); these are not live status endpoints |
 
 Local previews: `tools/run_quick_chat_preview.py` (8870), `tools/run_operator_preview.py` (8897), isolated loopback data and fake/disabled generation. Do not import old rental/bootstrap scripts for tests; they may have top-level side effects. Previous process/history is in `docs/archive/workflow-20261008/`, for reference only.

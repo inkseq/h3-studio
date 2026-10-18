@@ -1,7 +1,7 @@
 # Independent business backup storage
 
 `business-backup.json` is a source-only CloudFormation template for work package
-F. It complements [the portable backup transport](../../BACKUP-OFFDEVICE.md).
+F. It complements [the portable backup transport](../../docs/BACKUP-OFFDEVICE.md).
 It does not deploy itself, move live Local storage, back up authentication, or
 change a job, GPU, budget or release bucket. Source checks are not AWS acceptance.
 

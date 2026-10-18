@@ -17,16 +17,20 @@ inventory.json
 !Dockerfile
 !README.md
 !AGENTS.md
-!LIGHTSAIL.md
-!SCALING.zh-CN.md
-!CONTROLS.zh-CN.md
+!docs/LIGHTSAIL.md
+!docs/SCALING.zh-CN.md
+!docs/CONTROLS.zh-CN.md
 !requirements.lock.txt
 !server.py
 !password_auth.py
 !comfy_workflow.py
 !comfy-object-info.json
 !model_manifest.json
-!test_*.py
+!tests/
+!tests/test_*.py
+!tests/README.md
+!tests/fixtures/
+!tests/fixtures/targon_execution_policies.json
 !web/
 !web/index.html
 !web/app.js
@@ -58,7 +62,7 @@ inventory.json
 !studio_platform/auth.py
 !studio_platform/capabilities.py
 !studio_platform/generation_draft.py
-!FREESTYLE-AGENT.zh-CN.md
+!docs/FREESTYLE-AGENT.zh-CN.md
 !studio_platform/project_validation.py
 !studio_platform/source_snapshot.py
 !studio_platform/http_limits.py
@@ -97,9 +101,9 @@ inventory.json
 !deploy/wangp/profiles/h3-pruned-rank8-int8-sdpa-p4-29gib-fl-r2-v5.json
 !deploy/wangp/profiles/h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-fl-r2-v3.json
 !studio_platform/inference/comfy.py
-!CURRENT-BASELINE.md
-!GENERATION-CONTRACT.md
-!GENERATION-FOUNDATION-RESULT.md
+!docs/CURRENT-BASELINE.md
+!docs/GENERATION-CONTRACT.md
+!docs/GENERATION-FOUNDATION-RESULT.md
 !studio_platform/control.py
 !studio_platform/worker_admission.py
 !studio_platform/operator_extensions.py
@@ -115,8 +119,8 @@ inventory.json
 !studio_platform/runtime_hosts/wangp_startup.py
 !tools/build_operator_sources.py
 !tools/run_operator_preview.py
-!OPERATOR-CAPACITY-CONTRACT.md
-!OPERATOR-CAPACITY-OPERATIONS.md
+!docs/OPERATOR-CAPACITY-CONTRACT.md
+!docs/OPERATOR-CAPACITY-OPERATIONS.md
 !studio_platform/fleet.py
 !studio_platform/scaler.py
 !studio_platform/render_plans.py
@@ -133,33 +137,33 @@ inventory.json
 !studio_platform/capacity.py
 !studio_platform/capacity_cli.py
 !studio_platform/boyesir_backend.py
-!WORKER-CLI.zh-CN.md
-!QUEUE-CONTRACT.md
-!WORKER-CONTRACT.md
-!FLEET-CONTRACT.md
-!SCALER-CONTRACT.md
-!CHAPTER-RENDER-CONTRACT.md
-!CAPTION-BURN-IN-CONTRACT.zh-CN.md
-!ARCHITECTURE.zh-CN.md
-!SYSTEM-DESIGN-DUAL-GPU.zh-CN.md
-!LONG-DURATION.zh-CN.md
-!ITERATIONS.zh-CN.md
-!DELIVERY-REPORT.zh-CN.md
-!EVIDENCE-INDEX.zh-CN.md
-!START-HERE.zh-CN.md
-!OPERATIONS.zh-CN.md
-!API-USAGE.zh-CN.md
-!BACKUP-RECOVERY.zh-CN.md
-!ASSET-RECOVERY.zh-CN.md
-!LIUM-PROVIDER-CONTRACT.md
-!COLD-START-CONTRACT.zh-CN.md
-!API-PROVIDER-COMPATIBILITY.zh-CN.md
-!BOYESIR-ADAPTER-CONTRACT.zh-CN.md
-!HIPPIUS-STORAGE-REVIEW.zh-CN.md
-!LAUNCH-SCALE-NOVEL-PLAN.zh-CN.md
-!VIDEO-API-V1-DRAFT.zh-CN.md
-!SIXNINE-READINESS.zh-CN.md
-!OVERNIGHT-HANDOFF.md
+!docs/WORKER-CLI.zh-CN.md
+!docs/QUEUE-CONTRACT.md
+!docs/WORKER-CONTRACT.md
+!docs/FLEET-CONTRACT.md
+!docs/SCALER-CONTRACT.md
+!docs/CHAPTER-RENDER-CONTRACT.md
+!docs/CAPTION-BURN-IN-CONTRACT.zh-CN.md
+!docs/ARCHITECTURE.zh-CN.md
+!docs/SYSTEM-DESIGN-DUAL-GPU.zh-CN.md
+!docs/LONG-DURATION.zh-CN.md
+!docs/ITERATIONS.zh-CN.md
+!docs/DELIVERY-REPORT.zh-CN.md
+!docs/EVIDENCE-INDEX.zh-CN.md
+!docs/START-HERE.zh-CN.md
+!docs/OPERATIONS.zh-CN.md
+!docs/API-USAGE.zh-CN.md
+!docs/BACKUP-RECOVERY.zh-CN.md
+!docs/ASSET-RECOVERY.zh-CN.md
+!docs/LIUM-PROVIDER-CONTRACT.md
+!docs/COLD-START-CONTRACT.zh-CN.md
+!docs/API-PROVIDER-COMPATIBILITY.zh-CN.md
+!docs/BOYESIR-ADAPTER-CONTRACT.zh-CN.md
+!docs/HIPPIUS-STORAGE-REVIEW.zh-CN.md
+!docs/LAUNCH-SCALE-NOVEL-PLAN.zh-CN.md
+!docs/VIDEO-API-V1-DRAFT.zh-CN.md
+!docs/SIXNINE-READINESS.zh-CN.md
+!docs/archive/OVERNIGHT-HANDOFF.md
 !Dockerfile.platform
 !tools/sync_yingxu_source.py
 !tools/check_platform_container.py
@@ -221,14 +225,14 @@ inventory.json
 !studio_platform/lium_bootstrap.py
 !studio_platform/lium_reference_smoke.py
 !bootstrap_cloud.py
-!LIUM-BOOTSTRAP.zh-CN.md
+!docs/LIUM-BOOTSTRAP.zh-CN.md
 !deploy/platform/deploy_approved.py
 !deploy/platform/ec2/ssm-deploy-document.json
 !deploy/platform/ec2/CD.zh-CN.md
 !tools/deploy_aws_release.py
 !studio_platform/lium_runtime_aws.py
 !studio_platform/lium_identity.py
-!LIUM-PRODUCTION-INTEGRATION.zh-CN.md
+!docs/LIUM-PRODUCTION-INTEGRATION.zh-CN.md
 !skills/
 !skills/inkseq/
 !skills/inkseq/SKILL.md
@@ -251,37 +255,37 @@ inventory.json
 !deploy/platform/gpu_scaler.py
 !deploy/platform/verify_public_scaling.py
 !deploy/platform/GPU-SCALER.zh-CN.md
-!test_platform_gpu_scaler.py
+!tests/test_platform_gpu_scaler.py
 !deploy/platform/gpu_handoff.py
 !deploy/platform/gpu_preparation_recovery.py
 !studio_platform/backlog_handoff.py
 !studio_platform/preparation_recovery.py
 !studio_platform/preparation_hold_recovery.py
 !deploy/platform/preparation_hold_recovery.py
-!test_platform_preparation_recovery.py
-!test_platform_backlog_handoff.py
-!test_platform_gpu_acceptance.py
+!tests/test_platform_preparation_recovery.py
+!tests/test_platform_backlog_handoff.py
+!tests/test_platform_gpu_acceptance.py
 !studio_platform/production_worker.py
 !studio_platform/drain_safe_runner.py
 !studio_platform/production_scaler.py
 !studio_platform/runtime_adoption.py
 !studio_platform/live_runtime_handoff.py
 !studio_platform/production_scaler_boot.py
-!test_platform_production_scaler.py
-!PRODUCTION-SCALER.zh-CN.md
-!PRODUCTION-WORKER.zh-CN.md
+!tests/test_platform_production_scaler.py
+!docs/PRODUCTION-SCALER.zh-CN.md
+!docs/PRODUCTION-WORKER.zh-CN.md
 !deploy/platform/production-worker.example.json
-!AGENT-API-RELEASE-20261004.zh-CN.md
-!BACKEND-HANDOFF-20261004.zh-CN.md
-!AGENT-ONBOARDING.zh-CN.md
+!docs/archive/AGENT-API-RELEASE-20261004.zh-CN.md
+!docs/archive/BACKEND-HANDOFF-20261004.zh-CN.md
+!docs/AGENT-ONBOARDING.zh-CN.md
 !studio_platform/on_demand_scaler.py
 !studio_platform/scaler_entry.py
-!ON-DEMAND-GPU.zh-CN.md
+!docs/ON-DEMAND-GPU.zh-CN.md
 !studio_platform/qualification_profiles.py
 !studio_platform/queued_task_runner.py
-!QUEUED-TASK-START.zh-CN.md
+!docs/QUEUED-TASK-START.zh-CN.md
 !studio_platform/lium_multimodal_smoke.py
-!FREESTYLE-ADMISSION.zh-CN.md
+!docs/FREESTYLE-ADMISSION.zh-CN.md
 
 # Independently released UI, API and pinned GPU lifecycle.
 !studio_platform/frontend.py
@@ -290,8 +294,8 @@ inventory.json
 !tools/ci_change_scope.py
 !tools/prepare_release.py
 !tools/run_local_preview.py
-!test_platform_rent_journal.py
-!test_prepare_release.py
+!tests/test_platform_rent_journal.py
+!tests/test_prepare_release.py
 !tools/build_frontend_release.py
 !tools/check_frontend_bundle.py
 !tools/publish_frontend_release.py
@@ -303,7 +307,7 @@ inventory.json
 
 # Reviewed cross-session workflow; keep setup scripts and runtime evidence ignored.
 !WORKFLOW.md
-!PROJECT-PLAN.md
+!docs/PROJECT-PLAN.md
 !workflow/
 !workflow/project.json
 !.github/ISSUE_TEMPLATE/
@@ -312,12 +316,12 @@ inventory.json
 !.github/PULL_REQUEST_TEMPLATE.md
 
 # Reviewed audit-remediation guidance; runtime data remains excluded.
-!WORKFLOW.zh-CN.md
-!PLANNING-INDEX.zh-CN.md
-!UNIFIED-BACKEND-API-PLAN.zh-CN.md
-!REUSE-AND-MIGRATION-DECISION.zh-CN.md
+!docs/WORKFLOW.zh-CN.md
+!docs/PLANNING-INDEX.zh-CN.md
+!docs/UNIFIED-BACKEND-API-PLAN.zh-CN.md
+!docs/REUSE-AND-MIGRATION-DECISION.zh-CN.md
 !UNIFIED-API-CONTRACT-EXAMPLES.draft.json
-!GENERATION-RELIABILITY-ARCHITECTURE.zh-CN.md
+!docs/GENERATION-RELIABILITY-ARCHITECTURE.zh-CN.md
 
 # Reviewed WanGP integration source; no weights, credentials or execution state.
 !studio_platform/generation_admission.py
@@ -340,10 +344,10 @@ inventory.json
 !deploy/wangp/manifest.json
 !deploy/wangp/manifest-ref2va-candidate.json
 !deploy/wangp/runtime-recipe.json
-!WANGP-INTEGRATION-RESULT.md
+!docs/WANGP-INTEGRATION-RESULT.md
 
 # Durable decision rationale only; no operational state or credentials.
-!DECISIONS.md
+!docs/DECISIONS.md
 
 # Engine-bound cold boot and explicit continuing-service policy.
 !studio_platform/service_policy.py
@@ -352,7 +356,7 @@ inventory.json
 !studio_platform/member_readiness.py
 !studio_platform/wangp_bootstrap.py
 !studio_platform/bootstrap_staging.py
-!test_platform_wangp_bootstrap.py
+!tests/test_platform_wangp_bootstrap.py
 !studio_platform/runtime_hosts/wangp_environment.py
 !studio_platform/runtime_hosts/wangp_system_restore.py
 !studio_platform/runtime_hosts/wangp_download.py
@@ -386,13 +390,13 @@ inventory.json
 !tools/agent_connect.py
 !tools/run_quick_chat_preview.py
 !skills/inkseq/scripts/connect.py
-!AGENT-CONNECT-CONTRACT.md
+!docs/AGENT-CONNECT-CONTRACT.md
 
 # Explicit encrypted business-backup copies; no backup data or receipts.
 !studio_platform/backup_remote.py
 !studio_platform/backup_remote_cli.py
 !studio_platform/backup_reconcile.py
-!BACKUP-OFFDEVICE.md
+!docs/BACKUP-OFFDEVICE.md
 
 # Dedicated business backup infrastructure; no deployed targets or credentials.
 !deploy/platform/business-backup.json
@@ -405,7 +409,7 @@ inventory.json
 !tools/targon_cleanup_guard.py
 !deploy/platform/operator_handoff.py
 !deploy/platform/operator_handoff_continuation.py
-!test_operator_handoff.py
+!tests/test_operator_handoff.py
 !deploy/wangp/targon_prepare.py
 !deploy/wangp/profiles/
 !deploy/wangp/profiles/h3-pruned-rank8-int8-pro6000-quanto-int8-vae-int8-sdpa-p4-lowram-v1.json
@@ -415,8 +419,8 @@ inventory.json
 !deploy/wangp/profiles/h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-single-fl-v2.json
 
 # Reviewed capacity/dispatch migration; no runtime config or credentials.
-!DSTACK-MIGRATION.md
-!DSTACK-MIGRATION.zh-CN.md
+!docs/DSTACK-MIGRATION.md
+!docs/DSTACK-MIGRATION.zh-CN.md
 !requirements.hatchet.txt
 !requirements.dispatch.lock.txt
 !studio_platform/hatchet_dispatch.py
@@ -465,34 +469,34 @@ inventory.json
 !studio_platform/storage_migration_cli.py
 !studio_platform/scratch_retention.py
 !studio_platform/dstack_preparation.py
-!test_dstack_preparation.py
-!STORAGE-MIGRATION.md
+!tests/test_dstack_preparation.py
+!docs/STORAGE-MIGRATION.md
 
-!test_platform_wangp_memory.py
+!tests/test_platform_wangp_memory.py
 !studio_platform/operator_budgets.py
 !studio_platform/operator_budget_routes.py
 !studio_platform/operator_prices.py
-!test_operator_budgets.py
-!test_operator_budget_routes.py
-!test_dstack_prices.py
+!tests/test_operator_budgets.py
+!tests/test_operator_budget_routes.py
+!tests/test_dstack_prices.py
 
 # Closed per-host observations and original-journal policy; no runtime data.
 !studio_platform/operator_host_routes.py
 !studio_platform/host_scorecard.py
 !studio_platform/host_policy.py
-!test_host_scorecard.py
-!test_host_policy.py
-!test_dstack_host_selection.py
-!test_operator_host_routes.py
+!tests/test_host_scorecard.py
+!tests/test_host_policy.py
+!tests/test_dstack_host_selection.py
+!tests/test_operator_host_routes.py
 !deploy/observability/sixnine-host-scorecard.json
 
 # Owner-scoped creation history and original-object retention.
 !studio_platform/content_lifecycle.py
 !studio_platform/content_references.py
 !studio_platform/quick_chat_history.py
-!test_quick_chat_history.py
-!test_creation_history_storage.py
-!test_creation_history_routes.py
+!tests/test_quick_chat_history.py
+!tests/test_creation_history_storage.py
+!tests/test_creation_history_routes.py
 !yingxu/src/CreationHistory.jsx
 !yingxu/src/creation-history-model.js
 !yingxu/src/creation-history.test.js
@@ -500,9 +504,9 @@ inventory.json
 # Event wakeup and reviewed native Vast safety source; no runtime receipts.
 !studio_platform/demand_wakeup.py
 !studio_platform/dstack_allocation_proof.py
-!test_demand_wakeup.py
-!test_dstack_allocation_proof.py
-!test_dstack_native_vast.py
+!tests/test_demand_wakeup.py
+!tests/test_dstack_allocation_proof.py
+!tests/test_dstack_native_vast.py
 !deploy/dstack/Dockerfile.server-vast
 !deploy/dstack/native_vast_safety.py
 !deploy/dstack/patch_native_vast.py
@@ -519,9 +523,9 @@ inventory.json
 !studio_platform/inference/wangp_profile_dispatch.py
 !studio_platform/inference/wangp_full_compiler.py
 !studio_platform/runtime_hosts/wangp_media_tools.py
-!test_platform_wangp_full_compiler.py
-!test_platform_wangp_media_tools.py
-!test_platform_full_controls.py
+!tests/test_platform_wangp_full_compiler.py
+!tests/test_platform_wangp_media_tools.py
+!tests/test_platform_full_controls.py
 !deploy/wangp/profiles/h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6.json
 !deploy/wangp/profiles/h3-pruned-rank8-int8-pro6000-sdpa-p4-controls-v2.json
 !deploy/wangp/profiles/h3-unpruned33b-int8-sdpa-p3-controls-v2.json
@@ -532,44 +536,44 @@ inventory.json
 # PostgreSQL wake transport; original lease authority retained.
 !studio_platform/postgres_dispatch.py
 !studio_platform/dispatch_telemetry.py
-!test_postgres_dispatch.py
-!test_dispatch_telemetry.py
+!tests/test_postgres_dispatch.py
+!tests/test_dispatch_telemetry.py
 
 # Lightweight host alert monitor.
 !deploy/platform/alert_monitor.py
 !deploy/platform/inkseq-alert-monitor.service
 !deploy/platform/inkseq-alert-monitor.timer
 !deploy/platform/ALERTS.md
-!test_alert_monitor.py
+!tests/test_alert_monitor.py
 
 # Lightweight original-ledger alert projection and closed counters (#218).
 !studio_platform/alert_snapshot.py
 !studio_platform/alert_conditions.py
 !studio_platform/alert_http.py
-!test_alert_snapshot.py
-!test_alert_conditions.py
-!test_alert_http.py
-!test_alert_monitor_posix.py
+!tests/test_alert_snapshot.py
+!tests/test_alert_conditions.py
+!tests/test_alert_http.py
+!tests/test_alert_monitor_posix.py
 
 # CR20 private business backup scheduling.
 !deploy/platform/business_backup.py
 !deploy/platform/inkseq-business-backup.service
 !deploy/platform/inkseq-business-backup.timer
-!test_business_backup_schedule.py
+!tests/test_business_backup_schedule.py
 !deploy/platform/DAILY-BACKUP.md
 # Explicit durable native-source retention (#227).
 !deploy/dstack/native-retention.json
 !tools/restore_native_sources.py
-!test_restore_native_sources.py
+!tests/test_restore_native_sources.py
 
-!test_backup_incomplete_coverage.py
+!tests/test_backup_incomplete_coverage.py
 
 # Editable v2 admission settings; same ledger, no credential material.
 !studio_platform/spending_limits.py
 !studio_platform/spending_routes.py
-!test_spending_limits.py
+!tests/test_spending_limits.py
 !studio_platform/backup_deletion.py
-!test_backup_expected_deletion.py
+!tests/test_backup_expected_deletion.py
 
 # Canonical bilingual source modules and styles; no runtime data.
 !yingxu/src/i18n/
@@ -578,33 +582,33 @@ inventory.json
 !yingxu/src/i18n/*.css
 
 !studio_platform/quick_chat_takes.py
-!test_quick_chat_takes.py
+!tests/test_quick_chat_takes.py
 
 !studio_platform/agent_management.py
-!test_agent_management.py
+!tests/test_agent_management.py
 
 # Exact public Agent task references.
 !skills/inkseq/reference/
 !skills/inkseq/reference/api.md
 !skills/inkseq/reference/recovery.md
 !studio_platform/storyboard_versions.py
-!test_storyboard_versions.py
+!tests/test_storyboard_versions.py
 
 !studio_platform/universal_trash.py
-!test_universal_trash.py
-!LIBRARY-STORAGE.md
+!tests/test_universal_trash.py
+!docs/LIBRARY-STORAGE.md
 !studio_platform/library.py
 !studio_platform/library_imports.py
 !studio_platform/artifact_renditions.py
-!test_platform_video_posters.py
-!test_library.py
+!tests/test_platform_video_posters.py
+!tests/test_library.py
 
 # Incident 254 scoped policy regression
 !studio_platform/budget_policy.py
-!test_budget_policy254.py
+!tests/test_budget_policy254.py
 # Native audited terminal settlement recovery (#254)
 !studio_platform/settlement_recovery.py
-!test_settlement_recovery.py
+!tests/test_settlement_recovery.py
 !docs/SETTLEMENT-RECOVERY.md
 !studio_platform/invoice_checks.py
 

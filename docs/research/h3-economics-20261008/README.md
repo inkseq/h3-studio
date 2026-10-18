@@ -2,7 +2,7 @@
 
 Research date: **2026-10-08**. Owner: [#66](https://github.com/apedintensor/h3-studio/issues/66), under runtime work package [#4](https://github.com/apedintensor/h3-studio/issues/4). Sources were read, not executed. No GPU was rented, model downloaded, generation submitted or deployment changed for this research.
 
-This is a decision input, not a new architecture or an accepted runtime switch. [DEC-002/003](../../../DECISIONS.md) remain in force. Our existing WanGP adapter, upstream advertised support, a measured recipe and a currently enabled product feature are four separate things.
+This is a decision input, not a new architecture or an accepted runtime switch. [DEC-002/003](../../DECISIONS.md) remain in force. Our existing WanGP adapter, upstream advertised support, a measured recipe and a currently enabled product feature are four separate things.
 
 ## 1. What the evidence supports
 
@@ -178,7 +178,7 @@ Evidence locations under `C:/Users/danmo/Desktop/inference/`:
 
 Historical5090 rent was$0.65/h; PRO6000 runs used$1.46/h or$1.29/h; B200 final receipt implies$5.60/h. Do not relabel these as today's prices. REF pod final cost$3.422932842 covers2200.456827 billed seconds, including one successful image-reference attempt and one failed video-reference attempt. Preparation is78.594% of the successful attempt's accepted→persist elapsed time. Internal quota reservations are not extra supplier invoices.
 
-Current acceptance state remains in [CURRENT-BASELINE.md](../../../CURRENT-BASELINE.md), not this historical performance table. The local preserved checkout may contain an older baseline; research was based on remote main `9da1541` plus the explicitly dated receipts. No new visual/audio quality benchmark was run.
+Current acceptance state remains in [CURRENT-BASELINE.md](../../CURRENT-BASELINE.md), not this historical performance table. The local preserved checkout may contain an older baseline; research was based on remote main `9da1541` plus the explicitly dated receipts. No new visual/audio quality benchmark was run.
 
 ## 6. Cost calculation
 
@@ -222,7 +222,7 @@ At730 continuously billed hours, compute-only one-card cost is5090$430.70–620.
 
 ## 7. Proposed comparison order and acceptance gates
 
-The broad cohorts below are historical research alternatives, not the current execution queue. The user's later 2026-10-08 direction selects inexpensive RTX 5090 / INT8 FL2VA and Ref2VA for future tests: see [DEC-011](../../../DECISIONS.md#dec-011--use-rtx-5090-and-int8-for-future-low-cost-h3-tests) and the [bounded pilot proposal](5090-test-plan.md). Other hardware/acceleration cohorts are deferred unless explicitly selected later. Neither document authorizes an experiment to start.
+The broad cohorts below are historical research alternatives, not the current execution queue. The user's later 2026-10-08 direction selects inexpensive RTX 5090 / INT8 FL2VA and Ref2VA for future tests: see [DEC-011](../../DECISIONS.md#dec-011--use-rtx-5090-and-int8-for-future-low-cost-h3-tests) and the [bounded pilot proposal](5090-test-plan.md). Other hardware/acceleration cohorts are deferred unless explicitly selected later. Neither document authorizes an experiment to start.
 
 1. **Remove avoidable preparation.** Existing[#61](https://github.com/apedintensor/h3-studio/issues/61) covers prepared dependency image identity. Model cache/volume locality needs separate measured design under[#22](https://github.com/apedintensor/h3-studio/issues/22); a prebuilt Python image alone does not eliminate model downloads. Do not assume a mounted network volume has local-NVMe bandwidth or exists in every region.
 2. **Full-control cohort:** matched Base FL and REF on5090 versus PRO6000; fix component files, precision, steps, scheduler and output framing. If an identical recipe does not fit, record that boundary, then introduce a separately named lower-memory recipe. H100 is a price-dependent alternate. Evaluate H200/B200 only for a demonstrated envelope/latency need.

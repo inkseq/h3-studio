@@ -19,19 +19,19 @@ import subprocess
 # Keep CI-only governance paths separate: lightweight checks do not authorize
 # preparing a release while its governing instructions are uncommitted.
 DOCUMENTS = frozenset("""
-AGENT-API-RELEASE-20261004.zh-CN.md AGENT-ONBOARDING.zh-CN.md
-API-PROVIDER-COMPATIBILITY.zh-CN.md API-USAGE.zh-CN.md ARCHITECTURE.zh-CN.md
-ASSET-RECOVERY.zh-CN.md BACKEND-HANDOFF-20261004.zh-CN.md BACKUP-RECOVERY.zh-CN.md
-BOYESIR-ADAPTER-CONTRACT.zh-CN.md CAPTION-BURN-IN-CONTRACT.zh-CN.md
-CHAPTER-RENDER-CONTRACT.md COLD-START-CONTRACT.zh-CN.md CONTROLS.zh-CN.md
-DELIVERY-REPORT.zh-CN.md DEVELOPMENT-RELEASE.zh-CN.md EVIDENCE-INDEX.zh-CN.md FLEET-CONTRACT.md
-FREESTYLE-ADMISSION.zh-CN.md FREESTYLE-AGENT.zh-CN.md HIPPIUS-STORAGE-REVIEW.zh-CN.md
-ITERATIONS.zh-CN.md LAUNCH-SCALE-NOVEL-PLAN.zh-CN.md LIGHTSAIL.md
-LIUM-BOOTSTRAP.zh-CN.md LIUM-PRODUCTION-INTEGRATION.zh-CN.md LIUM-PROVIDER-CONTRACT.md
-ON-DEMAND-GPU.zh-CN.md OPERATIONS.zh-CN.md OVERNIGHT-HANDOFF.md
-PRODUCTION-SCALER.zh-CN.md PRODUCTION-WORKER.zh-CN.md QUEUE-CONTRACT.md README.md
-SCALER-CONTRACT.md SCALING.zh-CN.md SIXNINE-READINESS.zh-CN.md START-HERE.zh-CN.md
-VIDEO-API-V1-DRAFT.zh-CN.md WORKER-CLI.zh-CN.md WORKER-CONTRACT.md
+docs/archive/AGENT-API-RELEASE-20261004.zh-CN.md docs/AGENT-ONBOARDING.zh-CN.md
+docs/API-PROVIDER-COMPATIBILITY.zh-CN.md docs/API-USAGE.zh-CN.md docs/ARCHITECTURE.zh-CN.md
+docs/ASSET-RECOVERY.zh-CN.md docs/archive/BACKEND-HANDOFF-20261004.zh-CN.md docs/BACKUP-RECOVERY.zh-CN.md
+docs/BOYESIR-ADAPTER-CONTRACT.zh-CN.md docs/CAPTION-BURN-IN-CONTRACT.zh-CN.md
+docs/CHAPTER-RENDER-CONTRACT.md docs/COLD-START-CONTRACT.zh-CN.md docs/CONTROLS.zh-CN.md
+docs/DELIVERY-REPORT.zh-CN.md DEVELOPMENT-RELEASE.zh-CN.md docs/EVIDENCE-INDEX.zh-CN.md docs/FLEET-CONTRACT.md
+docs/FREESTYLE-ADMISSION.zh-CN.md docs/FREESTYLE-AGENT.zh-CN.md docs/HIPPIUS-STORAGE-REVIEW.zh-CN.md
+docs/ITERATIONS.zh-CN.md docs/LAUNCH-SCALE-NOVEL-PLAN.zh-CN.md docs/LIGHTSAIL.md
+docs/LIUM-BOOTSTRAP.zh-CN.md docs/LIUM-PRODUCTION-INTEGRATION.zh-CN.md docs/LIUM-PROVIDER-CONTRACT.md
+docs/ON-DEMAND-GPU.zh-CN.md docs/OPERATIONS.zh-CN.md docs/archive/OVERNIGHT-HANDOFF.md
+docs/PRODUCTION-SCALER.zh-CN.md docs/PRODUCTION-WORKER.zh-CN.md docs/QUEUE-CONTRACT.md README.md
+docs/SCALER-CONTRACT.md docs/SCALING.zh-CN.md docs/SIXNINE-READINESS.zh-CN.md docs/START-HERE.zh-CN.md
+docs/VIDEO-API-V1-DRAFT.zh-CN.md docs/WORKER-CLI.zh-CN.md docs/WORKER-CONTRACT.md
 deploy/platform/DNS-CUTOVER.zh-CN.md deploy/platform/FONTS.zh-CN.md
 deploy/platform/GPU-SCALER.zh-CN.md deploy/platform/HOST-PREFLIGHT.zh-CN.md
 deploy/platform/INFRASTRUCTURE.zh-CN.md deploy/platform/READINESS-REVIEW.zh-CN.md
@@ -44,9 +44,9 @@ deploy/platform/ec2/CD.zh-CN.md deploy/platform/ec2/README.zh-CN.md
 # Additions/deletions/type changes, unknown Markdown, published Skills, and
 # executable workflow/configuration files still require complete checks.
 GOVERNANCE_DOCUMENTS = frozenset("""
-AGENTS.md WORKFLOW.md WORKFLOW.zh-CN.md PROJECT-PLAN.md
-CURRENT-BASELINE.md GENERATION-CONTRACT.md GENERATION-FOUNDATION-RESULT.md
-PLANNING-INDEX.zh-CN.md UNIFIED-BACKEND-API-PLAN.zh-CN.md REUSE-AND-MIGRATION-DECISION.zh-CN.md
+AGENTS.md WORKFLOW.md docs/WORKFLOW.zh-CN.md docs/PROJECT-PLAN.md
+docs/CURRENT-BASELINE.md docs/GENERATION-CONTRACT.md docs/GENERATION-FOUNDATION-RESULT.md
+docs/PLANNING-INDEX.zh-CN.md docs/UNIFIED-BACKEND-API-PLAN.zh-CN.md docs/REUSE-AND-MIGRATION-DECISION.zh-CN.md
 workflow/owner-changes.md
 """.split())
 
@@ -74,7 +74,7 @@ def path_kind(path: str) -> str:
         return "frontend"
     if path in {f"studio_platform/{name}.py" for name in BACKEND_MODULES}:
         return "backend"
-    if path in {f"test_platform_{name}.py" for name in BACKEND_MODULES}:
+    if path in {f"tests/test_platform_{name}.py" for name in BACKEND_MODULES}:
         return "backend"
     return "full"
 
