@@ -620,3 +620,12 @@ inventory.json
 # Managed prototype view snapshot (source-manifest constrained)
 !yingxu/src/v2/
 !yingxu/src/v2/**
+
+# Held staging-only, no-GPU resource spike (#295).
+!tools/workflow_spike295.py
+!tests/test_workflow_spike295.py
+!docs/WORKFLOW-RESOURCE-SPIKE.md
+!requirements.workflow-dbos.in
+!requirements.workflow-dbos.lock.txt
+!requirements.workflow-procrastinate.in
+!requirements.workflow-procrastinate.lock.txt
