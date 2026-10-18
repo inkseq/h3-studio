@@ -27,6 +27,7 @@ Let B = `/v1/quick-chat/sessions/SESSION`.
 | Preflight | POST B`/revisions/REVISION/preflights` | `{revision_hash:input_hash,capabilities_version:CURRENT_VERSION}`. |
 | Submit | POST B`/revisions/REVISION/submissions` | `{revision_hash:input_hash,preflight_id:READY_ID,confirmed:true}`; only after readiness/user authority and required human spending approval. |
 | Group takes | GET B`/cards/CARD/takes?limit=20&before_cursor=CURSOR` | Follow returned cursor; original item/submission/job/execution IDs, `group_number`, `recipe`, annotation. |
+| All session takes | GET B`/takes?limit=40&before_cursor=CURSOR` | Read-only original summaries across all cards; follow `before_cursor`, retain `card_id/revision_id/submission_id`, filter explicit `trash_state`. No story export or generation. |
 | Star | PATCH B`/takes/ITEM` | `{expected_version:ANNOTATION_VERSION,starred:true}`. |
 | Again | POST B`/cards/CARD/again` | `{expected_card_version:CARD_VERSION,source_revision_id:REVISION,item_id:ITEM,copies:1}`; fresh revision only. |
 | Transfer | POST B`/takes/ITEM/story` | `{target_project_id:PROJECT,expected_project_version:VERSION,parent_id:SCENE}`. No enqueue. |
@@ -125,6 +126,19 @@ Output duration is separate from the edit timeline and reference selections. Nat
 
 
 ## Media, history and money
+
+### Small previews and session-wide review (#287)
+
+Asset, Library and video-artifact responses advertise `thumbnail_url`, `preview_url`, `rendition_status` and verified `renditions` when display copies exist. Use the advertised thumb for grids and preview for detail; download the original through its original content/download URL. These display copies are not new generation input IDs. Missing/pending copies never mean the original is absent, and a content GET does not create a copy. Keep private signed redirects out of prompts and saved configuration; use the original authenticated API URL for later reads.
+
+```powershell
+# $base is /v1/quick-chat/sessions/$session; no paid work or story copy.
+python scripts/inkseq.py --base-url $origin --connection $connection request GET "$base/takes?limit=40" --output session-takes-page-1.json
+# Continue with the returned before_cursor, using a new output file per page.
+python scripts/inkseq.py --base-url $origin --connection $connection request GET "$base/takes?limit=40&before_cursor=$cursor" --output session-takes-page-2.json
+```
+
+Session summaries include the original card/revision/submission IDs, status and annotation, plus safe artifact display metadata. `total_count` includes explicit trashed rows; creator grids hide them. For full immutable parameters or compare/star/adopt actions, read that original card's existing group-takes API. Open the same browser card with `/quick-chat?session=SESSION&card=CARD&revision=REVISION&submission=SUBMISSION`; omit submission only for an unsubmitted draft. Reading pages or opening the card must not submit a job, replace the current composer draft, or restart an unknown original operation.
 
 POST `/v1/assets` multipart uses client_project_id/client_asset_id/file; Quick Chat uses B`/assets` with client_asset_id/file. GET assets with original scope and stable client ID, then POST the original receipt resume endpoint if appropriate. For authorized aggregate discovery, tags and usage, see [the current library contract](#project-scoped-library-and-explicit-imports-238); original project ownership and write authority remain required.
 
