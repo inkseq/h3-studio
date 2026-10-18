@@ -40,15 +40,15 @@ export function WorkbenchBulk({ids,onClear,onSelectAll}){
  return <div className="workbench-bulk"><b>{t('workbench.selected',{count:ids.length})}</b><button onClick={onSelectAll}>{t('workbench.all')}</button><button onClick={onClear}>{t('workbench.clear')}</button><WorkbenchCopies value={copies} onChange={setCopies} max={state.copiesMax}/>{!state.copiesMax&&<button onClick={()=>dispatch({type:'workbenchRefresh'})}>{t('workbench.refresh')}</button>}<button disabled={!ids.length||!valid||state.busy||!!state.workbenchPending} onClick={()=>dispatch({type:'workbenchGenerate',ids:[...ids],copies:Number(copies)})}>{t('workbench.preflight')}</button><select value={profile} onChange={e=>setProfile(e.target.value)} aria-label={t('workbench.profile')}><option value="">{t('workbench.keepProfile')}</option>{state.capabilities?.deployment_profiles?.map(p=><option key={p.id} value={p.id}>{p.label||p.model_id}</option>)}</select>{['draft','final'].map(operation=><button key={operation} disabled={!ids.length||state.busy||!!state.workbenchPending} onClick={()=>dispatch({type:'workbenchAction',profileId:profile||undefined,action:{op:'storyboard.bulk',shot_ids:[...ids],operation}})}>{t('workbench.'+operation)}</button>)}<select aria-label={t('workbench.scene')} value={scene} onChange={e=>setScene(e.target.value)}><option value="">{t('workbench.scene')}</option>{state.scenes?.map(row=><option key={row.id} value={row.id}>{row.title}</option>)}</select><button disabled={!scene||!ids.length||state.busy||!!state.workbenchPending} onClick={()=>dispatch({type:'workbenchAction',action:{op:'storyboard.bulk',shot_ids:[...ids],operation:'move',parent_id:scene}})}>{t('workbench.move')}</button><small>{t('workbench.qualityHint')}</small></div>;
 }
 
-export function WorkbenchDefaults({shotId}) {
+export function WorkbenchDefaults({shotId,initialTarget='shot'}) {
  const {t}=useI18n(),{state,adapter,dispatch}=useStoryboardUI();
  const [data,setData]=useState(null),[target,setTarget]=useState('shot'),[draft,setDraft]=useState(null),[max,setMax]=useState(''),[error,setError]=useState('');
- const generation=useRef(0),scope=state.contextId+':'+shotId;
+ const generation=useRef(0),panel=useRef(null),scope=state.contextId+':'+shotId;
  async function load(){const n=++generation.current;setError('');try{
    const [versions,prefs,copies]=await Promise.all([adapter.readVersions(shotId),adapter.readPreferences(),adapter.readCopies()]);
    if(n!==generation.current)return;setData({versions,prefs,copies});setMax(String(copies.copies_max));setDraft(null);
  }catch(error){if(n===generation.current)setError(t(error.status===404?'workbench.shotUnavailable':'workbench.versionsReadFailed'));}}
- useEffect(()=>{setDraft(null);setData(null);setTarget('shot');load();return()=>{generation.current++;};},[scope]);
+ useEffect(()=>{setDraft(null);setData(null);setTarget(initialTarget);if(initialTarget==='account'&&panel.current)panel.current.open=true;load();return()=>{generation.current++;};},[scope,initialTarget]);
  const shot=state.shots.find(row=>row.id===shotId);
  const authored=target==='account'?data?.prefs?.defaults:target==='story'?data?.versions?.defaults?.story:data?.versions?.defaults?.shot;
  const value=draft||authored||{},effective=(target==='account'?{}:target==='story'?data?.versions?.defaults?.global:data?.versions?.defaults?.effective)||{},display={...effective,...value,controls:{...effective.controls,...value.controls}};
@@ -61,7 +61,7 @@ export function WorkbenchDefaults({shotId}) {
    if(n===generation.current&&result?.ok!==false)await load();
  }
  async function saveCopies(){const n=generation.current;const result=await dispatch({type:'workbenchCopies',body:{expected_version:data.copies.version,copies_max:Number(max),takes_fold_count:data.copies.takes_fold_count}});if(n===generation.current&&result?.ok!==false)setData(old=>({...old,copies:result.receipt}));}
- return <details className="workbench-defaults"><summary>{t('workbench.defaults')}</summary><p>{t('workbench.durationSeed')}</p>{error&&<p role="alert">{error}</p>}<button disabled={state.busy||!!state.workbenchPending} onClick={load}>{t('workbench.reloadDefaults')}</button>
+ return <details ref={panel} className="workbench-defaults"><summary>{t('workbench.defaults')}</summary><p>{t('workbench.durationSeed')}</p>{error&&<p role="alert">{error}</p>}<button disabled={state.busy||!!state.workbenchPending} onClick={load}>{t('workbench.reloadDefaults')}</button>
  <fieldset disabled={!data||state.busy||!!state.workbenchPending}><select aria-label={t('workbench.defaults')} value={target} onChange={e=>{setTarget(e.target.value);setDraft(null);}}>{['shot','story','account'].map(key=><option value={key} key={key}>{t('workbench.'+key)}</option>)}</select>
  <label>{t('workbench.profile')}<select value={value.deployment_profile_id||''} onChange={e=>field('deployment_profile_id',e.target.value)}><option value="">{t('workbench.followDefaults')}</option>{profiles.map(p=><option key={p.id} value={p.id}>{p.label||p.model_id}</option>)}</select></label>
  <label>{t('workbench.mode')}<select value={value.recipe_id||''} onChange={e=>field('recipe_id',e.target.value)}><option value="">{t('workbench.followDefaults')}</option>{state.capabilities?.recipes?.filter(r=>['h3-base-fl2va-v1','h3-base-ref2va-v1'].includes(r.id)).map(r=><option key={r.id} value={r.id}>{t(r.mode==='ref'?'workspace.status14':'workspace.status13')}</option>)}</select></label>

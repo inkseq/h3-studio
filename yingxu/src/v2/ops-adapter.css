@@ -186,3 +186,9 @@
 
 /* The desktop timestamp also needs an explicit floor; browser small defaults are 10.833px. */
 .ops-adapter .p4-observed-at{font-size:11px;line-height:1.4}
+
+.ops-adapter .settings-generation-defaults dl{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:8px 16px;font-size:12px;line-height:1.5}
+.ops-adapter .settings-generation-defaults dt{color:var(--muted);min-width:0}
+.ops-adapter .settings-generation-defaults dd{margin:0;overflow-wrap:anywhere;min-width:0}
+.ops-adapter .settings-generation-defaults summary{font-size:12px;cursor:pointer;min-height:32px;align-content:center}
+.ops-adapter .settings-generation-defaults>.settings-story-defaults{height:36px;min-height:36px;padding:0 10px;margin-top:14px;font-size:12px}

@@ -47,6 +47,14 @@ The unit excludes static credential/config sources and IMDSv1; the SDK must
 resolve the existing EC2 instance role. No keys are copied or logged.
 
 Threshold overrides are a small closed dictionary accepted by `alert_conditions`:
+The host data filesystem `/srv/sixnine` fires separate disk alerts at **80%** and
+**90%** used immediately. The observer reads host `statvfs`, using the same
+used/(used+non-root-available) capacity convention as `df`, including reserved
+blocks correctly, and publishes `DiskUsedPercent` to the existing scoped metric
+namespace. Missing/invalid disk samples never clear an active incident. The
+existing durable SNS transition/deduplication and environment fencing apply;
+no new credential or notification destination is introduced.
+
 CPU above 70% or memory above 85% for 900 seconds; unhealthy required processes
 for 900 seconds; app health down for 120 seconds; at least 3 server errors and
 5% error ratio in the rolling 300-second request window. GPU maximum runtime

@@ -1,8 +1,12 @@
 import React from 'react';
 import {useI18n} from './i18n/I18nProvider.jsx';
 
-export default function QuickChatHistory({state,disabled,onCards,onText}){
+export default function QuickChatHistory({state,account,readyAccount,sessionReady,onCards,onText}){
   const {t}=useI18n(),error=state.cardHistoryError;
+  // Card paging is a scoped, single-flight GET. The rest of open()/refresh()
+  // can still hydrate jobs after the initial page is already usable.
+  const disabled=!sessionReady||!account||readyAccount!==account||state.account!==account
+    ||!state.session?.id||!!state.pending||!state.cardHistoryLoaded&&!error;
   return <header className="quick-history" data-card-history aria-live="polite">
     {state.cardHistoryLoading?<p role="status">{t('quickHistory.loading')}</p>:error?<><p className="qc-error" role="alert">{t(error.key,{status:error.status})}</p><button type="button" data-history-retry disabled={disabled} onClick={onCards}>{t(error.reset?'quickHistory.refresh':'quickHistory.retry')}</button></>:state.cardHistoryHasMore?<button type="button" data-history-load disabled={disabled} onClick={onCards}>{t('quickHistory.more')}</button>:state.cardHistoryLoaded?<p className="muted" data-history-start role="status">{t('quickHistory.start')}</p>:null}
     {state.cardHistoryLoaded&&!state.cardHistoryHasMore&&!error&&(state.historyCursor||state.textHistoryLoading)&&<div className="quick-history-text"><button type="button" disabled={disabled||state.textHistoryLoading} onClick={onText}>{t(state.textHistoryLoading?'quickHistory.textLoading':'quickHistory.textMore')}</button>{state.textHistoryError&&<p className="qc-error" role="alert">{t(state.textHistoryError.key,{status:state.textHistoryError.status})}</p>}</div>}

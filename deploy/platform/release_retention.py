@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import stat
 import sys
+import time
 
 import release
 
@@ -23,6 +24,7 @@ ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8",
        "DOCKER_CONFIG": "/opt/sixnine-release/docker-config"}
 MAX_ENTRIES = 8192
 MAX_OBJECTS = 4096
+EXTRA_RELEASES = 3
 
 
 def safe_directory(path, *, incoming=False):
@@ -82,6 +84,24 @@ def closure(root, containers):
     kept.add(commit_value(state.get('current')))
     if state.get('previous') is not None:
         kept.add(commit_value(state['previous']))
+    if state.get('failed_release') is not None:
+        kept.add(commit_value(state['failed_release']))
+    pins = read_json(root, 'release-retention-pins.json', observed, optional=True)
+    if pins is not None:
+        release.require(set(pins) == {'version', 'commits'} and type(pins['version']) is int
+            and pins['version'] == 1 and type(pins['commits']) is list and len(pins['commits']) <= 128,
+            'retention_explicit_pins_unknown')
+        kept.update(commit_value(value) for value in pins['commits'])
+    intent = read_json(root, 'environment-release-intent.json', observed, optional=True)
+    if intent is not None:
+        release.require(set(intent) == {'version', 'commit', 'candidate_sha256', 'state'}
+            and type(intent['version']) is int and intent['version'] == 1
+            and intent['state'] in {'in_progress', 'completed'}
+            and type(intent['candidate_sha256']) is str and release.DIGEST.fullmatch(intent['candidate_sha256']),
+            'retention_promotion_intent_unknown')
+        commit = commit_value(intent['commit'])
+        if intent['state'] == 'in_progress':
+            kept.add(commit)
     for relative in ('frontend/current.json', 'frontend/previous.json', 'frontend/previous-platform-pointer.json'):
         if not (root / relative).parent.exists():
             continue
@@ -116,6 +136,48 @@ def closure(root, containers):
                 if ref and Path(ref).is_relative_to(prefix) and len(pieces) > len(prefix.parts):
                     kept.add(commit_value(pieces[len(prefix.parts)]))
     return kept, observed
+
+
+def keep_policy(root, containers):
+    """Pins plus three newest distinct installed versions; incoming is not a version."""
+    kept, observed = closure(root, containers)
+    installed, newest = {}, {}
+    for relative in ('releases', 'migration/releases', 'frontend/releases'):
+        parent = root / relative
+        if not parent.exists() and not parent.is_symlink():
+            continue
+        safe_ancestors(root, parent)
+        safe_directory(parent)
+        for directory in sorted(parent.iterdir()):
+            release.require(len(installed) < 1536, 'retention_release_count_limit')
+            if not release.SHA.fullmatch(directory.name):
+                continue  # Unknown entries are never selected for deletion.
+            info = safe_directory(directory)
+            installed[directory.relative_to(root).as_posix()] = identity(info)
+            kind = {'releases': 'platform', 'migration/releases': 'migration', 'frontend/releases': 'frontend'}[relative]
+            try:
+                artifact = directory / 'artifact' if kind == 'migration' else directory
+                manifest_name = {'platform': 'release-manifest.json', 'migration': 'migration-manifest.json',
+                    'frontend': 'frontend-manifest.json'}[kind]
+                manifest_path = artifact / manifest_name
+                safe_ancestors(root, manifest_path)
+                release.regular(manifest_path, maximum=262144)
+                metadata = json.loads(manifest_path.read_text())
+                release.require(metadata.get('commit') == directory.name, 'retention_directory_identity_invalid')
+                approval(root, kind, directory.name, manifest_path)
+                if kind == 'platform':
+                    metadata = release.manifest(artifact, directory.name)
+                expected = set(metadata['files']) | {manifest_name} if kind == 'platform' else {
+                    'migration': {'artifact', 'sources', 'overlay.yaml'},
+                    'frontend': {'index.html', manifest_name}}[kind]
+                release.require({entry.name for entry in directory.iterdir()} == expected, 'retention_bundle_shape_unknown')
+            except Exception:
+                continue  # Unknown/partial objects remain, but never consume a newest-version slot.
+            newest[directory.name] = max(newest.get(directory.name, 0), info.st_mtime_ns)
+    extras = sorted((commit for commit in newest if commit not in kept),
+        key=lambda commit: (newest[commit], commit), reverse=True)[:EXTRA_RELEASES]
+    observed['installed_versions'] = installed
+    return kept | set(extras), observed, extras
 
 
 def docker_snapshot(command=release.command):
@@ -194,7 +256,7 @@ def bundle(root, directory, kind, api, *, installed=False, image_cache=None):
     if kind == 'platform':
         value = release.manifest(artifact, commit)
         files = value['files']
-        release.require({p.name for p in artifact.iterdir()} == release.FILES | {manifest_name},
+        release.require({p.name for p in artifact.iterdir()} == set(value['files']) | {manifest_name},
                         'retention_platform_extra_files')
     elif kind == 'migration':
         helper = release.migration_helper()
@@ -245,7 +307,7 @@ def plan_locked(root=release.ROOT, *, api, command=release.command):
     """No mutation. Caller keeps release.lock until apply completes."""
     root = Path(root)
     containers, images = docker_snapshot(command)
-    kept, observed = closure(root, containers)
+    kept, observed, extras = keep_policy(root, containers)
     candidates, retained, image_cache = [], [], {}
     locations = (('releases', 'platform', True), ('incoming', 'platform', False),
         ('migration/releases', 'migration', True), ('incoming-migrations', 'migration', False),
@@ -300,29 +362,31 @@ def plan_locked(root=release.ROOT, *, api, command=release.command):
             safe_ancestors(root, directory); safe_directory(directory)
             value = release.manifest(directory, commit)
             release.approved_manifest(root, directory, commit)
-            protected_images.update(release.validate_image_archive(directory / 'image.tar.gz', value))
+            key = ('platform', commit, release.checksum(directory / 'release-manifest.json'))
+            if key not in image_cache:
+                image_cache[key] = release.validate_image_archive(directory / 'image.tar.gz', value)
+            protected_images.update(image_cache[key])
             protected_images.add(value['image_id'])
         directory = root / 'migration/releases' / commit / 'artifact'
         if directory.exists():
             helper = release.migration_helper()
             value = helper.manifest(directory, commit); helper.approved(root, directory, commit)
-            protected_images.update(release.validate_image_archive(directory / 'dispatch-image.tar.gz',
-                {'commit': commit, **value['dispatch']}))
+            key = ('migration', commit, release.checksum(directory / 'migration-manifest.json'))
+            if key not in image_cache:
+                image_cache[key] = release.validate_image_archive(directory / 'dispatch-image.tar.gz',
+                    {'commit': commit, **value['dispatch']})
+            protected_images.update(image_cache[key])
             protected_images.add(value['dispatch']['image_id'])
-    image_candidates = eligible_image_ids(images, candidates, protected_images)
+    image_candidates = eligible_image_tags(images, candidates, protected_images)
     return {'version': 1, 'state': 'retention_plan', 'kept_commits': sorted(kept), 'pointers': observed,
-        'candidates': candidates, 'retained': retained, 'image_candidates': sorted(image_candidates),
+        'newest_extra_commits': extras,
+        'candidates': candidates, 'retained': retained, 'image_candidates': image_candidates,
         'protected_images': sorted(value for value in protected_images if value),
         'reclaimable_file_bytes': sum(item['bytes'] for item in candidates)}
 
 
-def eligible_image_ids(images, candidates, protected_images):
-    """Pure selection from verified bundle closure and actual Docker aliases.
-
-    Containerd imports can attach local Sixnine RepoDigests without a registry
-    pull. Accept only that bundle's exact repository/kind and inspected Id;
-    foreign repositories, unrelated digests and mismatched commit tags stay.
-    """
+def eligible_image_tags(images, candidates, protected_images):
+    """Only exact managed tags bound to a proven old archive, never image IDs."""
     aliases = {}
     for candidate in candidates:
         repository = {'platform': 'sixnine-platform', 'migration': 'sixnine-dispatch'}.get(candidate['kind'])
@@ -340,13 +404,14 @@ def eligible_image_ids(images, candidates, protected_images):
     for image in images:
         image_id = image.get('Id')
         release.require(type(image_id) is str and IMAGE.fullmatch(image_id), 'retention_image_identity_invalid')
-        tags, digests = image.get('RepoTags') or [], image.get('RepoDigests') or []
+        tags = image.get('RepoTags') or []
+        digests = image.get('RepoDigests') or []
+        release.require(type(tags) is list and all(type(tag) is str for tag in tags), 'retention_image_tags_invalid')
         allowed = aliases.get(image_id)
-        owned = allowed is not None and set(tags).issubset(allowed['tags']) and set(digests).issubset(allowed['digests'])
-        dangling = not tags and not digests
-        if image_id not in protected_images and (owned or dangling):
-            result.append(image_id)
-    return sorted(result)
+        owned = allowed and set(tags).issubset(allowed['tags']) and set(digests).issubset(allowed['digests'])
+        if image_id not in protected_images and owned:
+            result.extend({'tag': tag, 'image_id': image_id} for tag in sorted(set(tags)))
+    return sorted(result, key=lambda value: value['tag'])
 
 
 def delete_tree(root, snapshot):
@@ -410,7 +475,7 @@ def delete_tree(root, snapshot):
 
 def apply_locked(root, plan, *, command=release.command, prune_cache=True):
     containers, _ = docker_snapshot(command)
-    kept, observed = closure(root, containers)
+    kept, observed, _ = keep_policy(root, containers)
     release.require(sorted(kept) == plan['kept_commits'] and observed == plan['pointers'], 'retention_plan_stale')
     # Validate ALL trees before the first delete; an altered later artifact may
     # not leave a partially applied earlier plan that appeared fully accepted.
@@ -422,19 +487,35 @@ def apply_locked(root, plan, *, command=release.command, prune_cache=True):
     for item in plan['candidates']:
         delete_tree(root, item)
         removed.append(item['relative'])
-    for image_id in plan['image_candidates']:
+    removed_tags = []
+    for candidate in plan['image_candidates']:
         # Docker itself refuses images referenced by a new container; never
         # force removal. Re-read all containers before each precise deletion.
-        current, _ = docker_snapshot(command)
+        image_id, tag = candidate['image_id'], candidate['tag']
+        current, images = docker_snapshot(command)
         release.require(image_id not in {item.get('Image') for item in current}
             and image_id not in plan['protected_images'], 'retention_image_became_in_use')
-        command(['image', 'rm', image_id], environment=ENV, timeout=120)
+        release.require(any(image.get('Id') == image_id and tag in (image.get('RepoTags') or [])
+            for image in images), 'retention_image_tag_changed')
+        command(['image', 'rm', tag], environment=ENV, timeout=120)
+        removed_tags.append(candidate)
+    dangling_pruned = False
     if prune_cache:
-        command(['builder', 'prune', '--force', '--filter', 'until=72h'], environment=ENV, timeout=120)
+        # A previous rollback image may be dangling but not container-referenced.
+        # Preserve it rather than allow a global dangling prune to remove it.
+        _, images = docker_snapshot(command)
+        protected_dangling = any(image.get('Id') in plan['protected_images']
+            and not image.get('RepoTags') for image in images)
+        if not protected_dangling:
+            command(['image', 'prune', '--force'], environment=ENV, timeout=120)
+            dangling_pruned = True
     return {'version': 1, 'state': 'retention_applied', 'removed': removed,
-        'removed_file_bytes': plan['reclaimable_file_bytes'], 'removed_images': plan['image_candidates'],
+        'removed_artifacts': [{'relative': item['relative'], 'commit': item['commit'], 'bytes': item['bytes']}
+            for item in plan['candidates']],
+        'removed_file_bytes': plan['reclaimable_file_bytes'], 'removed_image_tags': removed_tags,
         'retained': plan['retained'], 'kept_commits': plan['kept_commits'],
-        'persistent_data_touched': False, 'cache_unused_older_than_hours': 72 if prune_cache else None}
+        'persistent_data_touched': False, 'dangling_images_pruned': dangling_pruned,
+        'build_cache_touched': False}
 
 
 def s3_client():
@@ -447,23 +528,55 @@ def s3_client():
 def maintain_locked(root=release.ROOT, *, apply=False, api=None, command=release.command):
     root = Path(root)
     result = plan_locked(root, api=api or s3_client(), command=command)
-    return apply_locked(root, result, command=command) if apply else result
+    if not apply:
+        return result
+    import frontend_release
+    folder = root / 'retention-receipts'
+    safe_directory(root)
+    frontend_release.protected_directory(folder, create=True)
+    receipt = folder / (str(time.time_ns()) + '.json')
+    # Persist the exact approved plan before any mutation, including partial-failure evidence.
+    payload = {'version': 1, 'state': 'retention_started', 'plan': compact_plan(result)}
+    frontend_release.immutable_file(receipt, (json.dumps(payload, sort_keys=True) + '\n').encode())
+    try:
+        outcome = apply_locked(root, result, command=command)
+    except Exception:
+        # The pre-delete receipt remains. Never claim all planned bytes were freed.
+        raise
+    payload = {'version': 1, **outcome}
+    frontend_release.atomic_file(receipt, (json.dumps(payload, sort_keys=True) + '\n').encode())
+    return {**outcome, 'receipt': receipt.relative_to(root).as_posix()}
+
+
+def compact_plan(value):
+    """Receipts describe exact versions/bytes, not thousands of file inode entries."""
+    return {**{key: item for key, item in value.items() if key not in {'candidates', 'pointers'}},
+        'candidates': [{key: item[key] for key in ('relative', 'commit', 'kind', 'bytes')}
+            for item in value['candidates']],
+        'pointer_sha256': hashlib.sha256(json.dumps(value['pointers'], sort_keys=True).encode()).hexdigest()}
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--apply', action='store_true', help='apply verified plan under existing release.lock')
+    parser.add_argument('--scheduled', action='store_true', help='require the exact independently enabled retention policy')
     args = parser.parse_args(argv)
     try:
         release.require(os.name == 'posix' and os.geteuid() == 0, 'retention_root_host_required')
         safe_directory(release.ROOT)
+        if args.scheduled:
+            policy = read_json(release.ROOT, 'retention-policy.json', {})
+            release.require(args.apply and policy == {'version': 1, 'enabled': True}
+                and type(policy.get('version')) is int and policy.get('enabled') is True,
+                'retention_policy_requires_review')
         import fcntl
         if (release.ROOT / 'release.lock').exists() or (release.ROOT / 'release.lock').is_symlink():
             release.regular(release.ROOT / 'release.lock', root_owned=True, maximum=16384)
         descriptor = os.open(release.ROOT / 'release.lock', os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         with os.fdopen(descriptor, 'a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            print(json.dumps(maintain_locked(apply=args.apply), sort_keys=True))
+            result = maintain_locked(apply=args.apply)
+            print(json.dumps(result if args.apply else compact_plan(result), sort_keys=True))
         return 0
     except Exception as error:
         print(str(error) if isinstance(error, release.ReleaseError) else 'retention_failed_details_suppressed', file=sys.stderr)

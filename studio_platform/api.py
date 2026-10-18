@@ -42,6 +42,10 @@ from . import capacity_market  # Read-only market cache; never authorizes capaci
 from . import dstack_workspace  # Account-owned presentation metadata before schema creation.
 
 COOKIE = "sixnine_session"
+# The opaque handle can outlive its authority: every request checks the SQL
+# seven-day inactivity expiry. Only login writes the cookie, so a late response
+# from an older account cannot overwrite a newer login or restore a logout.
+BROWSER_HANDLE_SECONDS = 365 * 86400
 TERMINAL = {"succeeded", "failed", "cancelled"}
 ARTIFACT_VIDEO_CACHE_SCOPE_KEY = "inkseq.immutable-artifact-video-cache"
 
@@ -304,7 +308,7 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
         except AuthenticationError as error:
             raise HTTPException(401, str(error)) from None
         response = JSONResponse({"username": body["username"], "authentication": settings.auth_mode})
-        response.set_cookie(COOKIE, token, max_age=settings.session_seconds, httponly=True,
+        response.set_cookie(COOKIE, token, max_age=BROWSER_HANDLE_SECONDS, httponly=True,
             secure=bool(settings.public_origin), samesite="lax", path="/")
         return response
 

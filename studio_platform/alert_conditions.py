@@ -16,7 +16,7 @@ DEFAULTS = {
 }
 CODES = frozenset({"gpu_runtime_exceeded", "gpu_idle_stop_overdue", "test_spend_80",
     "test_spend_100", "job_stuck", "job_repeated_wake", "host_cpu_sustained",
-    "host_memory_sustained", "host_process_unhealthy", "health_down", "http_5xx_rate", "generation_failure", "terminal_reservation_stale"})
+    "host_memory_sustained", "host_disk_80", "host_disk_90", "host_process_unhealthy", "health_down", "http_5xx_rate", "generation_failure", "terminal_reservation_stale"})
 STATES = frozenset({"waiting_capacity", "queued", "claimed", "submitting", "running",
     "submission_unknown", "cancel_requested", "collecting", "recovery_hold", "starting", "upstream_status_unknown"})
 
@@ -142,7 +142,21 @@ def evaluate(snapshot, previous_state, *, environment, now, host=None, threshold
                 count > config["wake_count"] if type(count) is int and count >= 0 else None, since=first)
         state["observed_jobs"] = observed
         spend = snapshot.get("test_spend")
-        if isinstance(spend, dict):
+        if isinstance(spend, dict) and spend.get("scope") == "acceptance_task" and isinstance(spend.get("tasks"), list):
+            # A scoped snapshot supersedes only the retired global warning;
+            # each acceptance task keeps its own stable notification identity.
+            for percent in (80, 100):
+                condition("test_spend_"+str(percent), None, False)
+            for task in spend["tasks"]:
+                resource = identity(task.get("resource_id")) if isinstance(task, dict) else None
+                if resource is None:
+                    continue
+                amount, limit = task.get("projected_microusd"), task.get("limit_microusd")
+                for percent in (80, 100):
+                    condition("test_spend_"+str(percent), resource,
+                        amount*100 >= limit*percent if type(amount) is int and amount >= 0
+                            and type(limit) is int and limit > 0 else None)
+        elif isinstance(spend, dict):
             amount, limit = spend.get("projected_microusd"), spend.get("limit_microusd")
             for percent in (80, 100):
                 condition("test_spend_"+str(percent), None,
@@ -172,6 +186,10 @@ def evaluate(snapshot, previous_state, *, environment, now, host=None, threshold
     else:
         state["database_gap"] = True
     host = host if isinstance(host, dict) else {}
+    disk = host.get("disk_used_percent")
+    for percent in (80, 90):
+        condition("host_disk_" + str(percent), None,
+            disk >= percent if finite(disk) and 0 <= disk <= 100 else None)
     for field, code, threshold in (("cpu_percent", "host_cpu_sustained", "cpu_percent"),
                                   ("memory_percent", "host_memory_sustained", "memory_percent")):
         value = host.get(field)

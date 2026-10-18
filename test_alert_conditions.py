@@ -150,3 +150,21 @@ class TerminalReservation254Tests(unittest.TestCase):
             messages+=result["notifications"];state=result["state"]
         self.assertEqual(len(messages),1)
         self.assertEqual(messages[0]["duration_seconds"],3600)
+
+
+class TaskSpend285Tests(unittest.TestCase):
+    def test_scoped_task_alerts_do_not_sum_unrelated_tasks_or_reuse_global_alarm(self):
+        legacy=evaluate(snapshot(10000,test_spend={"projected_microusd":21_000_000,"limit_microusd":20_000_000}),
+            None,environment='staging',now=10000)
+        task_a='21c96b98-a74c-4034-a496-e5d6ec75405a'
+        task_b='8a462df4-5cf3-4675-8072-3a422695ace7'
+        spend={"scope":"acceptance_task","tasks":[
+            {"task_id":"issue-267","resource_id":task_a,"projected_microusd":17_000_000,"limit_microusd":20_000_000},
+            {"task_id":"issue-285","resource_id":task_b,"projected_microusd":5_000_000,"limit_microusd":20_000_000}]}
+        result=evaluate(snapshot(10060,test_spend=spend),legacy['state'],environment='staging',now=10060)
+        firing=[(n['code'],n['resource_id']) for n in result['notifications'] if n['transition']=='firing']
+        self.assertEqual(firing,[('test_spend_80',task_a)])
+        self.assertFalse(result['state']['conditions']['test_spend_100:host']['active'])
+        self.assertEqual(evaluate(snapshot(10120,test_spend=spend),result['state'],environment='staging',now=10120)['notifications'],[])
+        unknown=evaluate(snapshot(10180,complete=False),result['state'],environment='staging',now=10180)
+        self.assertTrue(unknown['state']['conditions']['test_spend_80:'+task_a]['active'])

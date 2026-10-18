@@ -494,7 +494,7 @@ export function ShotEditor({shotId, onClose, inline,wide,onWide}) {const {t:tr,l
         : <div className="row tight"><StoryboardDownloads version={viewing} title={shot.title}/><button className="small" onClick={() => { setSaving(true); setMsg(''); }}><Pin size={14}/>{tr('storyboard.copy81')}</button>{msg && <small className="okmsg">{msg}</small>}</div>)}
 
       <WorkbenchTakes shot={shot} wide={wide} onWide={onWide} previewId={viewing?.id} onPreview={row=>setPreview(row.entity_id||row.id)}/>
-      </div><div className="ed-form"><WorkbenchDefaults shotId={shot.id}/>
+      </div><div className="ed-form"><WorkbenchDefaults shotId={shot.id} initialTarget={new URLSearchParams(globalThis.location?.search||'').get('defaults')==='account'?'account':'shot'}/>
       <label className="field"><span>{tr('storyboard.copy84')}</span><textarea rows={2} value={shot.script} onChange={e => upd({script: e.target.value})} /></label>
       <label className="field"><span>{tr(restoredExact?'workbench.restoredPrompt':'storyboard.copy85')}</span>
         <textarea rows={2} value={shot.prompt} onChange={e => upd({prompt: e.target.value})} placeholder={tr('storyboard.finish11')} /></label>
@@ -602,12 +602,15 @@ export function usePlayer(shots) {
 
 export function Screen({player,big,style}){const {t:tr,locale}=useI18n();const {TYPE_LABEL,VARIANT_LABEL,KIND_LABEL,MODE_LABEL,QUALITY_LABEL}=displayLabels(tr);
   const {seg,t,playing}=player,ref=useRef(),playback=useRef(null),local=seg?t-seg.start:0;
+  const [shape,setShape]=useState(null),mediaKey=seg?seg.shot.id+':'+seg.version?.id:'';
+  const aspect=shape?.key===mediaKey?shape.aspect:16/9;
   if(!playback.current)playback.current=createStoryboardPlayback();
   const sync=()=>playback.current.sync({video:ref.current,time:local,playing,onFailure:()=>player.setPlaying(false)});
   useEffect(sync,[seg?.version?.id,seg?.shot.id,playing,local]);
   useEffect(()=>()=>playback.current.reset(),[]);
   if(!seg)return <div className="screen" style={style}><div className="screen-empty">{tr('storyboard.copy93')}</div></div>;
-  return <div className={'screen'+(big?' big':'')} style={style}>{seg.version?<StoryboardVideo key={seg.shot.id+':'+seg.version.id} asset={seg.version.asset||seg.version} videoRef={ref} onLoadedMetadata={sync} onCanPlay={sync}/>:<div className="screen-empty"><b>{seg.shot.title}</b><span>{tr('storyboard.copy94')}</span></div>}<div className="screen-cap">{seg.shot.title}<small>{seg.shot.script}</small></div></div>;
+  const caption=<div className="screen-cap">{seg.shot.title}<small>{seg.shot.script}</small></div>;
+  return <div className={'screen'+(big?' big':'')} style={{...style,'--media-aspect':aspect}}>{seg.version?<div className="screen-picture"><StoryboardVideo key={mediaKey} asset={seg.version.asset||seg.version} videoRef={ref} onLoadedMetadata={event=>{const video=event.currentTarget;if(video.videoWidth>0&&video.videoHeight>0)setShape({key:mediaKey,aspect:video.videoWidth/video.videoHeight});sync();}} onCanPlay={sync}/>{caption}</div>:<><div className="screen-empty"><b>{seg.shot.title}</b><span>{tr('storyboard.copy94')}</span></div>{caption}</>}</div>;
 }
 
 export function Transport({player}) {const {t:tr,locale}=useI18n();const {TYPE_LABEL,VARIANT_LABEL,KIND_LABEL,MODE_LABEL,QUALITY_LABEL}=displayLabels(tr);

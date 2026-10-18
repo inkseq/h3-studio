@@ -177,6 +177,8 @@ inventory.json
 !deploy/platform/check_config.py
 !deploy/platform/release.py
 !deploy/platform/release_retention.py
+!deploy/platform/inkseq-release-retention.service
+!deploy/platform/inkseq-release-retention.timer
 !deploy/platform/RETENTION.md
 !deploy/platform/ec2/journald-sixnine.conf
 !deploy/platform/targon_market.py
