@@ -52,6 +52,10 @@ on:
 permissions:
   contents: read
 
+env:
+  # Preserve bare unittest module names for focused checks and shared fixtures.
+  PYTHONPATH: ${{ github.workspace }}/tests
+
 # Never filter the workflow itself by changed paths: the stable `test` check
 # must report a result for every push/PR, including an explicitly allowed doc edit.
 # Main publishes/deploys staging after test. Production promotion is explicit.

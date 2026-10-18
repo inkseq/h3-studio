@@ -7,8 +7,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        Read AGENTS.md → PROJECT-PLAN.md → WORKFLOW.md → the issue before implementation.
-        PROJECT-PLAN.md is the English architecture and A–H work-package entry point.
+        Read AGENTS.md → docs/PROJECT-PLAN.md → WORKFLOW.md → the issue before implementation.
+        docs/PROJECT-PLAN.md is the English architecture and A–H work-package entry point.
         Use English on GitHub. Find the existing project and work-package issues in workflow/project.json; avoid duplicate work.
         Link existing specifications instead of copying the architecture. Never include credentials, connection codes, private prompts, user media, or signed URLs.
         Record blockers immediately and triage other material discoveries before merge/handoff. Reuse an issue where possible; fixed small in-scope bugs need no separate task.

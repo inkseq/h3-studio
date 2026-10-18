@@ -3,7 +3,7 @@
     "title": "Sixnine unified generation contract examples",
     "status": "design_examples_not_deployed",
     "date": "2026-10-06",
-    "companion": "UNIFIED-BACKEND-API-PLAN.zh-CN.md",
+    "companion": "docs/UNIFIED-BACKEND-API-PLAN.zh-CN.md",
     "base_url": "https://api.example.invalid",
     "notes": [
       "This file is not OpenAPI, an SDK, a fixture for production, or proof that an endpoint accepts these fields.",

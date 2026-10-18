@@ -10,20 +10,20 @@ The generation runtime uses WanGP; historical Comfy routes remain for original-j
 
 | Need | Entry and authority |
 |---|---|
-| Product direction and work packages | [PROJECT-PLAN.md](PROJECT-PLAN.md) |
-| Durable choices, rationale and revisit conditions | [DECISIONS.md](DECISIONS.md); acceptance of a decision is not release evidence |
-| Required generation behavior | [GENERATION-CONTRACT.md](GENERATION-CONTRACT.md) and the specific contract/specification linked by the issue |
-| Latest recorded implementation/deployment observations | [CURRENT-BASELINE.md](CURRENT-BASELINE.md); dated evidence, not live health |
+| Product direction and work packages | [PROJECT-PLAN.md](docs/PROJECT-PLAN.md) |
+| Durable choices, rationale and revisit conditions | [DECISIONS.md](docs/DECISIONS.md); acceptance of a decision is not release evidence |
+| Required generation behavior | [GENERATION-CONTRACT.md](docs/GENERATION-CONTRACT.md) and the specific contract/specification linked by the issue |
+| Latest recorded implementation/deployment observations | [CURRENT-BASELINE.md](docs/CURRENT-BASELINE.md); dated evidence, not live health |
 | Ownership, current task status and acceptance | [Delivery board](https://github.com/orgs/inkseq/projects/1), linked issues/PRs and [WORKFLOW.md](WORKFLOW.md) |
-| Historical design, implementation reports and local research | [PLANNING-INDEX.zh-CN.md](PLANNING-INDEX.zh-CN.md); follow its scope and date labels |
+| Historical design, implementation reports and local research | [PLANNING-INDEX.zh-CN.md](docs/PLANNING-INDEX.zh-CN.md); follow its scope and date labels |
 
 Material durable decision changes update the record and affected plan/contract together. Historical reports explain a past revision; they do not override current contracts or authorize operating a service.
 
 ## Working references
 
 - [Development checks and scoped releases](DEVELOPMENT-RELEASE.zh-CN.md), [platform deployment](deploy/platform/README.zh-CN.md), [release and rollback](deploy/platform/RELEASE.zh-CN.md).
-- [API usage](API-USAGE.zh-CN.md), [backup/recovery](BACKUP-RECOVERY.zh-CN.md) and [operations](OPERATIONS.zh-CN.md): use the applicable implementation/version and current authorization; these procedures are not health reports.
-- [Earlier architecture](ARCHITECTURE.zh-CN.md), [five-minute walkthrough](START-HERE.zh-CN.md), [delivery report](DELIVERY-REPORT.zh-CN.md), [readiness review](deploy/platform/READINESS-REVIEW.zh-CN.md) and [iteration evidence](ITERATIONS.zh-CN.md): dated background, not the active task list or proof of today's deployment.
+- [API usage](docs/API-USAGE.zh-CN.md), [backup/recovery](docs/BACKUP-RECOVERY.zh-CN.md) and [operations](docs/OPERATIONS.zh-CN.md): use the applicable implementation/version and current authorization; these procedures are not health reports.
+- [Earlier architecture](docs/ARCHITECTURE.zh-CN.md), [five-minute walkthrough](docs/START-HERE.zh-CN.md), [delivery report](docs/DELIVERY-REPORT.zh-CN.md), [readiness review](deploy/platform/READINESS-REVIEW.zh-CN.md) and [iteration evidence](docs/ITERATIONS.zh-CN.md): dated background, not the active task list or proof of today's deployment.
 - [Infrastructure/cost observations](deploy/platform/INFRASTRUCTURE.zh-CN.md) and [DNS cutover](deploy/platform/DNS-CUTOVER.zh-CN.md): verify the recorded scope, destination and date before use; old prices, endpoints and rollout windows are not current authority.
 
 Canonical frontend and approved mock live in the public `inkseq/inkseq-design` repository at `../video-studio-design/studio-app` and `../video-studio-design/quick-chat-mock`. The backend is `inkseq/h3-studio`. The active Delivery Project is the private `inkseq` organization project; its verified item, field and view identifiers are recorded in `workflow/project.json`. Historical evidence retains its original links. This repository's `yingxu/` is a generated release snapshot maintained by `tools/sync_yingxu_source.py`. Edit canonical source; do not directly edit the snapshot, publish unapproved UX, or put local drafts/media into images.
@@ -34,19 +34,19 @@ The earlier MiniMax H3 workbench exposed separate image/video/audio references, 
 
 Its older documentation described a CPU-only website deployment with generation disabled and a fixed test account set. That description is historical, not the current public generation or authentication state. Consult the dated baseline and exact release evidence before operating any deployment.
 
-- [Lightsail and GitHub Actions deployment](LIGHTSAIL.md)
-- [Multi-GPU / API routing design and remaining work](SCALING.zh-CN.md)
-- [Generation controls and measured limits](CONTROLS.zh-CN.md)
+- [Lightsail and GitHub Actions deployment](docs/LIGHTSAIL.md)
+- [Multi-GPU / API routing design and remaining work](docs/SCALING.zh-CN.md)
+- [Generation controls and measured limits](docs/CONTROLS.zh-CN.md)
 
 ## Local checks
 
-Use [the scoped development/release workflow](DEVELOPMENT-RELEASE.zh-CN.md) to select checks for the final change. The broad compatibility command below is a reference, not a requirement to run the full suite for every small edit.
+Use [the scoped development/release workflow](DEVELOPMENT-RELEASE.zh-CN.md) to select checks for the final change. [Test layout and focused commands](tests/README.md) explain discovery and shared fixtures. The broad compatibility command below is a reference, not a requirement to run the full suite for every small edit.
 
 Python 3.12, Node.js and FFmpeg/ffprobe are required:
 
 ```sh
 python -m pip install -r requirements.lock.txt
-python -m unittest discover -s . -p 'test_*.py' -v
+python -m unittest discover -s tests -p 'test_*.py' -v
 node --check web/app.js
 ```
 

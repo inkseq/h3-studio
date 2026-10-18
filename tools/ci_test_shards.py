@@ -86,11 +86,14 @@ def flatten(suite):
 def load_suite(kind: str, root: Path = ROOT, *, loader=None):
     loader = loader or unittest.TestLoader()
     root = root.resolve()
-    # Running a tools/ script does not otherwise put the project root on sys.path.
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
+    tests = root / "tests"
+    # Keep the existing bare test module names and their fixture imports. Tests
+    # are not application packages, and tools/ execution also needs the app root.
+    for directory in (root, tests):
+        if str(directory) not in sys.path:
+            sys.path.insert(0, str(directory))
     if kind == "python":
-        suite = loader.discover(str(root), pattern="test_*.py", top_level_dir=str(root))
+        suite = loader.discover(str(tests), pattern="test_*.py", top_level_dir=str(tests))
     elif kind == "postgres":
         if len(POSTGRES_MODULES) != len(set(POSTGRES_MODULES)):
             raise ValueError("duplicate_postgres_module")

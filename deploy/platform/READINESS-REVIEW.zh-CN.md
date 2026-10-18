@@ -28,7 +28,7 @@
 | Hippius | 实验适配器；尚无已登记匹配 profile。固定 key 条件 PUT 明确拒绝，随机 `write_new` 不宣称服务器强制防覆盖；AssetService 所需保证不满足，因此不作为可用生产选择 | 正式身份/桶、运行版本与官方文档差异、条件创建替代协议、multipart/CORS/持久性专项验收。失败不会悄悄切 R2 |
 | AWS S3 | 独立显式区域 endpoint/provider 的适配器，非当前启用后端 | 目标身份/桶/区域、网络与权限、线上恢复与成本验收；不能沿用当前机器默认 AWS profile 猜账户 |
 
-R2 的 S3 签名 URL 必须保留已签名 API host，不能换为 `media.sixnine.art`。如以后需要自定义媒体域名，必须另做鉴权/Range 路径。浏览器当前先上传 CPU API 并在服务端归一化，不能把“已经有 presign 方法”写成“大文件已绕过 AWS 中转”；只换存储后端仍可能产生 CPU 主机出站流量。相关依据和当时官方链接见 [HIPPIUS-STORAGE-REVIEW.zh-CN.md](../../HIPPIUS-STORAGE-REVIEW.zh-CN.md)。
+R2 的 S3 签名 URL 必须保留已签名 API host，不能换为 `media.sixnine.art`。如以后需要自定义媒体域名，必须另做鉴权/Range 路径。浏览器当前先上传 CPU API 并在服务端归一化，不能把“已经有 presign 方法”写成“大文件已绕过 AWS 中转”；只换存储后端仍可能产生 CPU 主机出站流量。相关依据和当时官方链接见 [HIPPIUS-STORAGE-REVIEW.zh-CN.md](../../docs/HIPPIUS-STORAGE-REVIEW.zh-CN.md)。
 
 ## 当前需要完成的部署条件
 
@@ -55,7 +55,7 @@ R2 的 S3 签名 URL 必须保留已签名 API host，不能换为 `media.sixnin
 
 本轮复跑 `test_platform_backup`、`test_platform_backup_postgres`、`test_platform_deployment`、`test_platform_preflight`、`test_platform_bundle`、`test_platform_bootstrap`、`test_platform_release`：59 项，57 通过、2 项可选集成跳过。其中 4 项 portable 备份测试实际连接已有专用本机 PostgreSQL 测试库，以唯一 schema 隔离；两项跳过是本轮未再次开启的原生 pg_dump 演练/额外临时 DB 容器集成，不是失败。
 
-此前真实 pg_dump/pg_restore 到独立测试库的演练已有记录，见 [BACKUP-RECOVERY.zh-CN.md](../../BACKUP-RECOVERY.zh-CN.md)；本轮没有把其历史成功冒充新生产验证。主机假元信息/Compose 配置/归档检查和代码审阅不需要任何真实云身份。
+此前真实 pg_dump/pg_restore 到独立测试库的演练已有记录，见 [BACKUP-RECOVERY.zh-CN.md](../../docs/BACKUP-RECOVERY.zh-CN.md)；本轮没有把其历史成功冒充新生产验证。主机假元信息/Compose 配置/归档检查和代码审阅不需要任何真实云身份。
 
 存储/重启故障及恢复隔离组合复跑 `test_platform_storage`、`test_platform_storage_multipart`、`test_platform_artifact_writer`、`test_platform_reliability`：78 项，77 通过、1 项跳过（仅适用 SQLite 的实际 quarantine 测试，在本轮 PG 模式明确跳过；基础备份回归已覆盖 SQLite 恢复）。S3 供应商为 fake/Stubber，只有任务账本连接本机隔离 PG。
 
@@ -65,6 +65,6 @@ R2 的 S3 签名 URL 必须保留已签名 API host，不能换为 `media.sixnin
 
 - [生产包说明](README.zh-CN.md)、[受限发布与回滚](RELEASE.zh-CN.md)、[只读主机预检](HOST-PREFLIGHT.zh-CN.md)
 - [主机模板与费用观察](INFRASTRUCTURE.zh-CN.md)、[Linux 中央秘密候选设计，未启用](RUNTIME-SECRETS.zh-CN.md)
-- [备份和恢复的准确范围](../../BACKUP-RECOVERY.zh-CN.md)、[存储兼容性与未验收项](../../HIPPIUS-STORAGE-REVIEW.zh-CN.md)
+- [备份和恢复的准确范围](../../docs/BACKUP-RECOVERY.zh-CN.md)、[存储兼容性与未验收项](../../docs/HIPPIUS-STORAGE-REVIEW.zh-CN.md)
 
 本报告不构成修改 DNS、租用主机、导入新凭据、付费测试、迁移对象或清理旧文件的授权。

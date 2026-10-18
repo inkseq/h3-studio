@@ -8,7 +8,7 @@
     "visibility": "PRIVATE"
   },
   "language": "en",
-  "plan": "PROJECT-PLAN.md",
+  "plan": "docs/PROJECT-PLAN.md",
   "workflow": "WORKFLOW.md",
   "authority": "Routing and issue identifiers only. Read GitHub for live task status; versioned evidence for releases.",
   "work_packages": {
@@ -289,7 +289,7 @@
       "number": 132,
       "url": "https://github.com/inkseq/h3-studio/issues/132",
       "title": "[E/C] Migrate capacity and dispatch to dstack and Hatchet with Grafana Cloud",
-      "specification": "DSTACK-MIGRATION.md"
+      "specification": "docs/DSTACK-MIGRATION.md"
     }
   },
   "views": {

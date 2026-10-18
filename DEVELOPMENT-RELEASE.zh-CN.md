@@ -77,7 +77,7 @@ Independent artifact/host approval must also compare the retained four hashes an
 
 关键模块：`tools/ci_changes.py`、`tools/release_contract.py`、`studio_platform/frontend.py`、`deploy/platform/frontend_bundle.py`、`frontend_release.py`、`deploy_frontend.py`、`release.py` 与 `gpu_scaler.py`。主机 helper 必须由独立操作身份安装，发布 bundle 不能替换 root 执行器。
 
-无网络边界检查：`python -m unittest test_ci_changes test_release_contract test_frontend_release test_frontend_deploy test_platform_frontend test_platform_release test_platform_gpu_release test_platform_gpu_scaler test_platform_aws_deploy`。GPU 测试使用模拟依赖，不代表真实推理验证。
+无网络边界检查：`PYTHONPATH=tests python -m unittest test_ci_changes test_release_contract test_frontend_release test_frontend_deploy test_platform_frontend test_platform_release test_platform_gpu_release test_platform_gpu_scaler test_platform_aws_deploy`。PowerShell 的导入路径写法和完整收集命令见 [tests/README.md](tests/README.md)。GPU 测试使用模拟依赖，不代表真实推理验证。
 
 采用的官方依据：[GitHub workflow 路径过滤与触发规则](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax)、[Docker GitHub Actions 构建缓存](https://docs.docker.com/build/cache/backends/gha/)、[Starlette 静态文件路径行为](https://www.starlette.io/staticfiles/)。
 # Staging 2GiB + 2GiB swap：待实测的资源配置

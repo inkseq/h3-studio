@@ -414,7 +414,7 @@ the opt-in `native-frames-v1` delivery contract to preserve all native frames an
 the complete generated waveform for new separately qualified WanGP plans.
 It requires matching operator-policy, cold-approval, boot and worker capability
 identities; an existing configuration or accepted task is not silently upgraded.
-See [the output contract](../../GENERATION-CONTRACT.md#6-output-contract) for
+See [the output contract](../../docs/GENERATION-CONTRACT.md#6-output-contract) for
 duration/audio validation and compatibility. Current first-proof configuration
 remains on its original export behavior. CPU numbered-frame evidence establishes
 export behavior only: B3 should first prove text-to-video, and a real first/last
