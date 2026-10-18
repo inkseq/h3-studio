@@ -254,7 +254,7 @@ def bundle(root, directory, kind, api, *, installed=False, image_cache=None):
     if kind == 'platform':
         value = release.manifest(artifact, commit)
         files = value['files']
-        release.require({p.name for p in artifact.iterdir()} == release.FILES | {manifest_name},
+        release.require({p.name for p in artifact.iterdir()} == set(value['files']) | {manifest_name},
                         'retention_platform_extra_files')
     elif kind == 'migration':
         helper = release.migration_helper()

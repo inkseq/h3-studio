@@ -66,7 +66,7 @@ class RetentionTests(unittest.TestCase):
                     'Metadata': {'sha256': hashlib.sha256(path.read_bytes()).hexdigest()},
                     'ServerSideEncryption': 'AES256'}
 
-    def platform(self, commit):
+    def platform(self, commit, *, targeted=False):
         folder = self.root / 'releases' / commit; folder.mkdir()
         config = json.dumps({'os': 'linux', 'architecture': 'amd64', 'rootfs': {'type': 'layers', 'diff_ids': []},
             'config': {'Labels': {'org.opencontainers.image.revision': commit}}}).encode()
@@ -76,10 +76,11 @@ class RetentionTests(unittest.TestCase):
             for name, data in ((image_id[7:] + '.json', config), ('manifest.json', json.dumps([{
                     'Config': image_id[7:] + '.json', 'RepoTags': ['sixnine-platform:' + commit], 'Layers': []}]).encode())):
                 member = tarfile.TarInfo(name); member.size = len(data); tar.addfile(member, io.BytesIO(data))
-        for name in release.FILES:
+        files = release.TARGET_FILES if targeted else release.FILES
+        for name in files:
             (folder / name).write_bytes(gzip.compress(archive.getvalue()) if name == 'image.tar.gz' else b'INERT')
         manifest = {'commit': commit, 'image': 'sixnine-platform:' + commit, 'image_id': image_id,
-            'files': {name: release.checksum(folder / name) for name in release.FILES}}
+            'files': {name: release.checksum(folder / name) for name in files}}
         (folder / 'release-manifest.json').write_text(json.dumps(manifest))
         (self.root / 'approved-releases' / (commit + '.sha256')).write_text(release.checksum(folder / 'release-manifest.json'))
         self.register(commit, '', folder)
@@ -127,6 +128,30 @@ class RetentionTests(unittest.TestCase):
         self.assertEqual(value['candidates'], [])
         self.assertEqual(value['image_candidates'], [])
         self.assertIn({'relative': 'releases/' + self.old, 'reason': 'unproven_or_partial_artifact'}, value['retained'])
+
+    def test_real_platform_bundle_accepts_legacy_and_target_aware_manifest_file_sets(self):
+        for targeted, commit in ((False, '2' * 40), (True, '3' * 40)):
+            source, image_id = self.platform(commit, targeted=targeted)
+            incoming = self.root / 'incoming' / commit
+            shutil.copytree(source, incoming)
+            expected = (release.TARGET_FILES if targeted else release.FILES) | {'release-manifest.json'}
+            for directory, installed in ((source, True), (incoming, False)):
+                with self.subTest(targeted=targeted, installed=installed):
+                    self.api.head_object.reset_mock()
+                    bundle = retention.bundle(self.root, directory, 'platform', self.api, installed=installed)
+                    self.assertEqual(set(bundle['entries']), expected | {''})
+                    self.assertEqual((bundle['commit'], bundle['kind'], bundle['image_ids']),
+                        (commit, 'platform', [image_id]))
+                    self.assertEqual({call.kwargs['Key'] for call in self.api.head_object.call_args_list},
+                        {f'releases/{commit}/{name}' for name in expected})
+
+    def test_target_aware_platform_bundle_still_rejects_an_unlisted_extra_file(self):
+        source, _ = self.platform('2' * 40, targeted=True)
+        (source / 'FOREIGN_ASSET').write_bytes(b'UNIQUE')
+        self.api.head_object.reset_mock()
+        with self.assertRaisesRegex(release.ReleaseError, 'retention_platform_extra_files'):
+            retention.bundle(self.root, source, 'platform', self.api, installed=True)
+        self.api.head_object.assert_not_called()
 
     def test_explicit_rollback_and_inflight_tuple_are_pinned_beyond_newest_three(self):
         for relative, document in (
