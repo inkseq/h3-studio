@@ -604,6 +604,7 @@ inventory.json
 !studio_platform/settlement_recovery.py
 !test_settlement_recovery.py
 !docs/SETTLEMENT-RECOVERY.md
+!studio_platform/invoice_checks.py
 
 # Managed prototype view snapshot (source-manifest constrained)
 !yingxu/src/v2/

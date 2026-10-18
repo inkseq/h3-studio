@@ -1,4 +1,5 @@
-import {microsToDollars,formatMoneyMicros} from './money.js';
+import {microsToDollars} from './money.js';
+import SpendingBreakdown from './SpendingBreakdown.jsx';
 import {Bot} from 'lucide-react';
 import {assistantCatalogs} from './i18n/assistantCatalogs.js';
 import React,{useEffect,useMemo,useRef,useState} from 'react';
@@ -46,7 +47,7 @@ function ConnectionRow({row,busy,t,scopeLabel,permissionLabel,onPatch,onRevoke,o
   if(result)setDraft(null);
  }catch{setError(t('assistants.invalid'));}}
  return <article><h3>{row.name} · {t('assistants.'+(row.paused?'paused':['pending','connected','expired','revoked','unavailable'].includes(row.status)?row.status:'unavailable'))}</h3><p>{scopeLabel(row.scope)} · {permissionLabel(row.permission)}</p>
- <p className="assistant-usage">{Number.isSafeInteger(row.usage?.projected_microusd)?t(row.daily_limit_microusd===0?'assistants.usageUnlimited':'assistants.usage',{amount:formatMoneyMicros(row.usage.projected_microusd),cap:formatMoneyMicros(row.daily_limit_microusd)}):t('assistants.usageUnknown')}</p>
+ <SpendingBreakdown usage={row.usage} scope="connection"/>
  <form onSubmit={save}><label>{t('assistants.cap')}<input inputMode="decimal" value={cap} onChange={e=>setDraft(old=>({value:e.target.value,version:old?.version??row.state_version}))} disabled={busy||!editable}/></label><small>{t('assistants.zero')}</small><button disabled={busy||!editable}>{t('assistants.saveCap')}</button>{draft&&<button type="button" disabled={busy} onClick={()=>setDraft(null)}>{t('assistants.reloadCap')}</button>}{error&&<p role="alert">{error}</p>}</form>
  <div className="assistant-actions"><button disabled={busy||!editable} onClick={()=>onPatch({expected_version:row.state_version,paused:!row.paused})}>{t(row.paused?'assistants.resume':'assistants.pause')}</button><button disabled={busy||closed} onClick={onRevoke}>{t('assistants.revoke')}</button><button disabled={busy} onClick={onActivity}>{t('assistants.activity')}</button></div></article>;
 }

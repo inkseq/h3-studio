@@ -73,6 +73,7 @@ class DstackController:
         # Scheduling stamps only. They never authorize admission, retirement,
         # settlement or a claim that the original PUT allocated nothing.
         self._passive_unknown = {}
+        self._invoice_checked_at = None
 
     def _business_demand(self, connection):
         if connection.execute(select(jobs.c.id).where(
@@ -189,8 +190,20 @@ class DstackController:
         # them. Direct tick refuses an expired stamp; no second polling actor.
         return any(not self._passive_matches(node, allow_due=True) for node in nodes)
 
+    def _invoice_check(self):
+        now = self.repo.clock()
+        if self._invoice_checked_at is not None and 0 <= now-self._invoice_checked_at < IDLE_SAFETY_SECONDS:
+            return {"state": "not_due", "ledger_writes": 0, "provider_mutations": 0}
+        self._invoice_checked_at = now
+        from .invoice_checks import inspect_pending_invoices
+        try:
+            return inspect_pending_invoices(self.repo, self.service.settings.tenant_id, self.capacity.client)
+        except Exception:
+            return {"state": "check_unavailable", "ledger_writes": 0, "provider_mutations": 0}
+
     def safety_sweep(self):
         """Rare complete-account observation; never stops or settles a resource."""
+        invoice_check = self._invoice_check()
         try:
             client = self.capacity.client
             rows = client._post("/api/runs/list", {"project_name": client.project,
@@ -233,7 +246,7 @@ class DstackController:
                         self._passive_unknown.pop(node["intent_id"], None)
                         continue
                     witness["observed_at"] = self.repo.clock()
-            return {"state": "idle_safety_observed", "active_runs": len(rows),
+            return {"state": "idle_safety_observed", "active_runs": len(rows), "invoice_check": invoice_check,
                 "provider_allocations": {name: len(value["instance_ids"]) for name, value in providers.items()},
                 "untracked_active_runs": sum(row["id"] not in known_runs for row in rows),
                 "untracked_provider_allocations": {name: len(set(value["instance_ids"]) - known[name])
@@ -242,7 +255,8 @@ class DstackController:
                 "business_writes": 0, "provider_mutations": 0}
         except Exception:
             self._passive_unknown.clear()
-            return {"state": "idle_safety_unconfirmed", "business_writes": 0, "provider_mutations": 0}
+            return {"state": "idle_safety_unconfirmed", "invoice_check": invoice_check,
+                "business_writes": 0, "provider_mutations": 0}
 
     def _nodes(self):
         with self.repo.engine.connect() as connection:
@@ -474,7 +488,7 @@ class DstackController:
                 code = ("global_capacity_exceeded" if isinstance(error, BudgetExceeded)
                     and error.args == ("global_capacity_exceeded",) else "dstack_controller_observation_failed")
                 results.append({"node_id": node["intent_id"], "state": "reconciliation_required", "code": code})
-        return {"state": "running", "nodes": results}
+        return {"state": "running", "nodes": results, "invoice_check": self._invoice_check()}
 
 
 class SlotProcesses:

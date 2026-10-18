@@ -19,5 +19,5 @@ test('Both catalogs contain the same keys and named values; user input is interp
   assert.deepEqual(Object.keys(catalogs.en).sort(),Object.keys(catalogs.zh).sort());
   const variables=text=>[...text.matchAll(/\{([A-Za-z]\w*)\}/g)].map(match=>match[1]).sort();
   for(const key of Object.keys(catalogs.en))assert.deepEqual(variables(catalogs.en[key]),variables(catalogs.zh[key]),key);
-  assert.equal(translate('en','settings.usage',{amount:'{privatePrompt}'}),'Recorded and reserved today: {privatePrompt}');
+  assert.equal(translate('en','settings.usage',{amount:'{privatePrompt}'}),'Admission exposure: {privatePrompt}');
 });

@@ -7,6 +7,7 @@ All checks and the original reservation commit in the same SQL transaction.
 from datetime import datetime, timezone
 from dataclasses import dataclass
 import hashlib
+import math
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, insert, or_, select, update
@@ -192,10 +193,123 @@ def admit_spending(repo, connection, scope, reference_type, reference_id, amount
             actor_id=actor_id, created_at=now))
 
 
+_USAGE_FIELDS = ("settled_today_microusd", "reserved_microusd",
+    "awaiting_invoice_estimate_microusd", "awaiting_invoice_count",
+    "prior_day_pending_estimate_microusd", "legacy_settled_unknown_date_microusd",
+    "unconfirmed_exposure_microusd", "unconfirmed_reference_count", "exposure_microusd")
+
+
+def empty_usage_breakdown(*, actor_id=None, connected=True):
+    """Display-only ledger amounts; zero is not a supplier-cost assertion."""
+    value = {"schema_version": 1, "attribution_scope": "connection" if actor_id else "account",
+        "attribution_status": "recorded" if connected else "not_connected",
+        **dict.fromkeys(_USAGE_FIELDS, 0),
+        "by_kind": {kind: dict.fromkeys(_USAGE_FIELDS, 0) for kind in ("job", "instance")}}
+    if not actor_id:
+        # The first amount is disjoint from account exposure. The second is a
+        # subset of known-owner exposure, never another additive cost layer.
+        value.update(unattributed_exposure_microusd=0, unattributed_actor_exposure_microusd=0)
+    return value
+
+
+def _display_reference(rows, start, now):
+    """One original obligation, regardless of its owner/global account layers."""
+    value = dict.fromkeys(_USAGE_FIELDS, 0)
+    states = {row["state"] for row in rows}
+    amounts = [money(row["amount_microusd"]) for row in rows]
+    actuals = [money(row["actual_cost_microusd"]) for row in rows
+               if row["actual_cost_microusd"] is not None]
+    amount = max(amounts + actuals)
+    state = next(iter(states)) if len(states) == 1 else None
+    times = [row["created_at"] for row in rows]
+    valid_times = all(type(at) in (int, float) and math.isfinite(at) and 0 <= at <= now for at in times)
+    if state in {"reserved", "invoice_pending"} and not actuals and valid_times:
+        field = "reserved_microusd" if state == "reserved" else "awaiting_invoice_estimate_microusd"
+        value[field] = amount
+        if state == "invoice_pending":
+            value["awaiting_invoice_count"] = 1
+            if min(times) < start:
+                value["prior_day_pending_estimate_microusd"] = amount
+    elif state in {"settled", "released"} and len(actuals) == len(rows) and len(set(actuals)) == 1 and valid_times:
+        settled = {row["settled_at"] for row in rows}
+        if settled == {None}:
+            value["legacy_settled_unknown_date_microusd"] = actuals[0]
+        elif len(settled) == 1 and all(type(at) in (int, float) and math.isfinite(at) and 0 <= at <= now for at in settled):
+            if next(iter(settled)) >= start:
+                value["settled_today_microusd"] = actuals[0]
+        else:
+            state = None
+    else:
+        state = None
+    if state is None:
+        # Partial/inconsistent historical account layers stay visibly unknown;
+        # do not add both their estimate and actual or silently pick a state.
+        value["unconfirmed_exposure_microusd"] = amount
+        value["unconfirmed_reference_count"] = 1
+    value["exposure_microusd"] = sum(value[field] for field in (
+        "settled_today_microusd", "reserved_microusd", "awaiting_invoice_estimate_microusd",
+        "legacy_settled_unknown_date_microusd", "unconfirmed_exposure_microusd"))
+    return value
+
+
+def usage_breakdown(connection, tenant, owner, now, *, actor_id=None):
+    """Strict display attribution, independent of conservative admission caps.
+
+    Account exposure includes known-owner obligations with unknown old actors.
+    A connection receives only its original exact actor, never another actor's
+    or a shared/unknown dollar amount. All reads preserve the original ledger.
+    """
+    start, _ = day_window(now)
+    query = select(budget_reservations, budget_accounts.c.owner_id.label("account_owner"),
+        jobs.c.tenant_id.label("job_tenant"), jobs.c.owner_id.label("job_owner"), jobs.c.actor_id.label("job_actor"),
+        spending_origins.c.tenant_id.label("origin_tenant"), spending_origins.c.owner_id.label("origin_owner"),
+        spending_origins.c.actor_id.label("origin_actor")).join(
+        budget_accounts, budget_accounts.c.id == budget_reservations.c.account_id).outerjoin(
+        jobs, and_(budget_reservations.c.reference_type == "job", jobs.c.id == budget_reservations.c.reference_id)).outerjoin(
+        spending_origins, and_(spending_origins.c.reference_type == budget_reservations.c.reference_type,
+            spending_origins.c.reference_id == budget_reservations.c.reference_id)).where(budget_accounts.c.tenant_id == tenant)
+    references = {}
+    for row in connection.execute(query).mappings():
+        references.setdefault((row["reference_type"], row["reference_id"]), []).append(row)
+    value = empty_usage_breakdown(actor_id=actor_id)
+    for (kind, _), rows in references.items():
+        owners = {row["account_owner"] for row in rows if row["account_owner"] is not None}
+        tenant_conflict = False
+        for row in rows:
+            for source in ("job", "origin"):
+                if row[source + "_owner"] is not None:
+                    tenant_conflict |= row[source + "_tenant"] != tenant
+                    owners.add(row[source + "_owner"])
+        if owners and owner not in owners:
+            continue
+        if tenant_conflict or kind not in value["by_kind"] or len(owners) > 1:
+            raise BudgetExceeded("spending_usage_unconfirmed")
+        row = rows[0]
+        actor = row["origin_actor"] or row["job_actor"]
+        actor = actor if actor not in (None, "quick-chat-execution") else None
+        if actor_id and (owners != {owner} or actor != actor_id):
+            continue
+        current = _display_reference(rows, start, now)
+        if not owners:
+            value["unattributed_exposure_microusd"] += current["exposure_microusd"]
+            continue
+        if not actor_id and actor is None:
+            value["unattributed_actor_exposure_microusd"] += current["exposure_microusd"]
+        for field in _USAGE_FIELDS:
+            value[field] += current[field]
+            value["by_kind"][kind][field] += current[field]
+    return value
+
+
 def public_usage(connection, tenant, owner, now, *, actor_id=None):
-    return {"projected_microusd": daily_projection(connection, tenant, owner, now, actor_id=actor_id),
+    value = {"projected_microusd": daily_projection(connection, tenant, owner, now, actor_id=actor_id),
         "day": datetime.fromtimestamp(now, timezone.utc).astimezone(ZoneInfo("Australia/Sydney")).date().isoformat(),
-        "timezone": "Australia/Sydney", "includes_unresolved_prior_days": True}
+        "timezone": "Australia/Sydney", "includes_unresolved_prior_days": True,
+        "breakdown": usage_breakdown(connection, tenant, owner, now, actor_id=actor_id)}
+    if actor_id is None:
+        from .invoice_checks import public_reconciliation
+        value["reconciliation"] = public_reconciliation(connection, tenant, owner, now)
+    return value
 
 
 def check_submission_confirmation(repo, tenant, principal, plan_ids):
