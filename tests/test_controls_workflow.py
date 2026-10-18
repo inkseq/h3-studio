@@ -410,7 +410,9 @@ class ControlTests(unittest.TestCase):
     def test_expert_visual_workflow_has_deployed_weights_and_coherent_links(self):
         root = Path(__file__).resolve().parents[1]
         workflow = json.loads(
-            (root / "web/h3-ref-bf16-workflow.json").read_text(encoding="utf-8")
+            (root / "tests/fixtures/h3-ref-bf16-workflow.json").read_text(
+                encoding="utf-8"
+            )
         )
         schema = json.loads(
             (root / "comfy-object-info.json").read_text(encoding="utf-8")

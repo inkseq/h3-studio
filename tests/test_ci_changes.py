@@ -17,7 +17,7 @@ MAIN = "refs/heads/main"
 class ChangeClassificationTests(unittest.TestCase):
     def assert_full(self, result):
         self.assertEqual(result["category"], "full")
-        for gate in ("python", "postgres", "frontend", "containers", "legacy"):
+        for gate in ("python", "postgres", "frontend", "containers"):
             self.assertTrue(result[gate], gate)
         self.assertTrue(result["macos_helper"])
 
@@ -110,7 +110,7 @@ class ChangeClassificationTests(unittest.TestCase):
         )
         self.assertTrue(result["frontend"])
         self.assertTrue(result["frontend_tools"])
-        for gate in ("python", "postgres", "containers", "legacy"):
+        for gate in ("python", "postgres", "containers"):
             self.assertFalse(result[gate], gate)
         for path in (
             "web/app.js",
@@ -125,7 +125,6 @@ class ChangeClassificationTests(unittest.TestCase):
         self.assertTrue(result["python"])
         self.assertTrue(result["postgres"])
         self.assertTrue(result["containers"])
-        self.assertFalse(result["legacy"])
         self.assertFalse(result["frontend"])
         self.assertFalse(result["macos_helper"])
         combined = ci.classify(
@@ -291,7 +290,7 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(result["action"], "prepare-frontend")
         self.assertTrue(result["frontend"])
         self.assertTrue(result["frontend_tools"])
-        for gate in ("python", "postgres", "containers", "legacy"):
+        for gate in ("python", "postgres", "containers"):
             self.assertFalse(result[gate], gate)
 
     def test_accepted_promotion_preserves_exact_commit_without_rebuilding(self):
