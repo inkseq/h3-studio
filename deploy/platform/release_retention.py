@@ -565,7 +565,8 @@ def main(argv=None):
         if args.scheduled:
             policy = read_json(release.ROOT, 'retention-policy.json', {})
             release.require(args.apply and policy == {'version': 1, 'enabled': True}
-                and type(policy.get('version')) is int, 'retention_policy_requires_review')
+                and type(policy.get('version')) is int and policy.get('enabled') is True,
+                'retention_policy_requires_review')
         import fcntl
         if (release.ROOT / 'release.lock').exists() or (release.ROOT / 'release.lock').is_symlink():
             release.regular(release.ROOT / 'release.lock', root_owned=True, maximum=16384)

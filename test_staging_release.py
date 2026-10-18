@@ -156,6 +156,8 @@ class CandidateTests(unittest.TestCase):
                 first = host.run('staging', COMMIT, root=root, api=api)
                 platform.assert_called_once_with(COMMIT, root=root)
                 frontend.assert_called_once_with(COMMIT, root=root, api=api)
+                intent = json.loads((root/'environment-release-intent.json').read_text())
+                self.assertEqual((intent['commit'], intent['state']), (COMMIT, 'completed'))
                 accepted = proof(value)
                 (root/'promotion-candidates').mkdir(); (root/'approved-promotions').mkdir()
                 receipt = root/'promotion-candidates'/(COMMIT+'.json'); receipt.write_bytes(candidate.encode(accepted))
@@ -171,6 +173,23 @@ class CandidateTests(unittest.TestCase):
                 with patch.object(host.deployment_target, 'host', return_value=target.profile()), self.assertRaises(host.release.ReleaseError):
                     host.run('production', COMMIT, root=root, api=api)
                 self.assertEqual(platform.call_count, 2)
+
+    def test_full_tuple_retention_pin_resumes_only_original_unknown_operation(self):
+        value = publication()
+        with tempfile.TemporaryDirectory() as name, patch.object(host.release, 'regular'):
+            root = Path(name)
+            host.retention_intent(root, value)
+            before = (root/'environment-release-intent.json').read_bytes()
+            host.retention_intent(root, value)  # Same immutable tuple may resume.
+            changed = copy.deepcopy(value)
+            changed['commit'] = 'e' * 40
+            with self.assertRaisesRegex(host.release.ReleaseError, 'requires_reconciliation'):
+                host.retention_intent(root, changed)
+            self.assertEqual((root/'environment-release-intent.json').read_bytes(), before)
+            host.retention_intent(root, value, completed=True)
+            self.assertEqual(json.loads((root/'environment-release-intent.json').read_text())['state'], 'completed')
+            host.retention_intent(root, changed)  # Original completed operation does not become a second authority.
+            self.assertEqual(json.loads((root/'environment-release-intent.json').read_text())['commit'], 'e' * 40)
 
     def test_wrong_host_refuses_before_any_object_read_or_deployment(self):
         api = Mock()

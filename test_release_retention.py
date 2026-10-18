@@ -388,7 +388,8 @@ class RetentionTests(unittest.TestCase):
                 patch.object(retention, 'maintain_locked', return_value={'state': 'synthetic'}) as maintain, \
                 patch('sys.stdout', io.StringIO()), patch('sys.stderr', io.StringIO()):
             for contents in (None, 'not-json', '{"version":1,"enabled":false}',
-                    '{"version":true,"enabled":true}', '{"version":1,"enabled":true,"unknown":1}'):
+                    '{"version":true,"enabled":true}', '{"version":1,"enabled":1}',
+                    '{"version":1,"enabled":true,"unknown":1}'):
                 policy.unlink(missing_ok=True)
                 if contents is not None:
                     policy.write_text(contents)
@@ -401,6 +402,17 @@ class RetentionTests(unittest.TestCase):
             policy.unlink()
             self.assertEqual(retention.main(['--apply']), 0)
             maintain.assert_called_once_with(apply=True)
+
+    def test_post_hook_requires_exact_boolean_enabled_and_integer_version(self):
+        policy = self.root / 'retention-policy.json'
+        before = (self.root / 'release-state.json').read_bytes()
+        with patch('importlib.util.spec_from_file_location') as load, patch('sys.stderr', io.StringIO()):
+            for contents in ('{"version":true,"enabled":true}', '{"version":1,"enabled":1}'):
+                policy.write_text(contents)
+                value = release.post_release_retention(self.root)
+                self.assertEqual(value['state'], 'retention_skipped_preserving_healthy_release')
+                load.assert_not_called()
+                self.assertEqual((self.root / 'release-state.json').read_bytes(), before)
 
     def test_full_tuple_post_hook_defers_without_changing_healthy_state(self):
         (self.root / 'retention-policy.json').write_text('{"version":1,"enabled":true}')
