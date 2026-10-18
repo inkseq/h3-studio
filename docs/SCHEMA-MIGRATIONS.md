@@ -121,7 +121,12 @@ auth tables; unknown/malformed revisions still refuse backup. A portable SQLite
 recovery intentionally contains business tables only, so it must not claim the
 full 59-table authentication-inclusive baseline. Initialize the normal full
 schema and recheck/re-adopt the recovered PostgreSQL database explicitly. The
-normal full PostgreSQL dump/rehearsal continues to retain the version table.
+current `backup.py:dump_postgres` path also passes an explicit public-business
+table allowlist to `pg_dump`; its dump/rehearsal does not retain authentication
+tables, the version table or separate workflow schemas. Neither current backup
+path is a full-database backup. After restoring either business-only format,
+check the normal schema and explicitly re-adopt the known revision. Workflow
+state backup/restore needs a separate reviewed contract before integration.
 The no-Alembic `schema_version.py` reader ships in the preceding compatibility
 release, before the writer. Before live adoption, verify both current and
 previous rollback images include that reader; the writer must not be the first

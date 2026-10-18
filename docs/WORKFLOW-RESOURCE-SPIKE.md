@@ -50,13 +50,15 @@ schema initialization is a separate explicit command. The pinned Procrastinate
 schema checks the already-installed `plpgsql` extension in `pg_catalog`; this
 experiment must not add an extension or change public application objects.
 
-Before schema writes, inspect the installed backup helper. The current portable
-business exporter enumerates the original `public` schema and excludes auth and
-the known Alembic marker. It **does not back up experiment workflow state**.
-Do not claim durable workflow-state backup from that business export. Normal
-full PostgreSQL dumps include separate schemas; root must verify the actual
-installed backup policy, not assume that path was used. Keep experiment receipts
-and original IDs for the resource gate.
+Before schema writes, inspect the installed backup helper. Both current backup
+paths are business-only: the portable exporter enumerates the original `public`
+business tables, and `backup.py:dump_postgres` passes the same explicit business
+table allowlist to `pg_dump`. Neither includes authentication tables, the known
+Alembic marker or separate SDK schemas. They **do not back up experiment workflow
+state**. Do not claim a full-database or durable workflow-state backup from either
+path. Keep experiment receipts, original IDs and the exact stub schema catalog
+for this disposable resource gate. A business-only restore needs a normal schema
+check and explicit re-adoption; it does not restore the baseline marker.
 
 The adopted baseline's strict checker intentionally rejects these extra schemas
 and triggers while the spike is present. Do not widen its or the production
