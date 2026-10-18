@@ -26,3 +26,11 @@ export function creatorName(value){return value?.kind==='agent'&&typeof value.co
 export function assistantDate(value,locale,unknown){if(typeof value!=='number'||!Number.isFinite(value))return unknown;const date=new Date(value*1000);if(!Number.isFinite(date.getTime()))return unknown;try{return date.toLocaleString(locale==='zh'?'zh-CN':'en');}catch{return unknown;}}
 
 export function mergeConnectionResult(rows,result){const row=result?.connection||result;if(!row||typeof row.id!=='string'||typeof row.status!=='string')return rows;return rows.some(old=>old.id===row.id)?rows.map(old=>old.id===row.id?row:old):[row,...rows];}
+
+// A view filter only: server status stays authoritative, including pending
+// grants and future statuses. Keep the original operation's row available.
+export function assistantConnectionsView(rows,{showInactive=false,pendingId=null}={}){
+ const items=rows.map(row=>({row,inactive:['expired','revoked','unavailable'].includes(row.status)&&row.id!==pendingId}));
+ const inactiveCount=items.filter(item=>item.inactive).length;
+ return {items:items.map(item=>({...item,hidden:item.inactive&&!showInactive})),inactiveCount,activeCount:rows.length-inactiveCount};
+}

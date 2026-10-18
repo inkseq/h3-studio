@@ -7,7 +7,7 @@ metadata, never metric labels or Loki index labels. No provider keys reach GPUs.
 from __future__ import annotations
 
 import base64
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import json
 import math
 import os
@@ -498,6 +498,32 @@ def create_cloud_telemetry(config):
         providers=(logs, traces, metrics), transport_stats=stats)
 
 
+_CONTROLLER_IMAGE_FILE = Path('/app/inkseq-controller-image')
+
+
+def controller_resource_config(config):
+    """Use the deployed CPU image identity, retaining destination/credentials.
+
+    Local acceptance and worker images have no controller marker. Disabled
+    exports never reach this function; this does not enable staging telemetry.
+    """
+    if not _CONTROLLER_IMAGE_FILE.exists():
+        return config
+    origin = os.environ.get('PUBLIC_ORIGIN')
+    legacy = os.environ.get('SIXNINE_PUBLIC_ORIGIN')
+    if origin and legacy and origin != legacy:
+        raise ValueError('telemetry_controller_identity_invalid')
+    environment = {'https://inkseq.com': 'production',
+                   'https://staging.inkseq.com': 'staging'}.get(origin or legacy)
+    with _CONTROLLER_IMAGE_FILE.open('r', encoding='ascii') as stream:
+        reference = stream.read(129)
+    version = re.fullmatch(r'sixnine-platform:([0-9a-f]{40})\n?', reference)
+    if environment is None or version is None:
+        raise ValueError('telemetry_controller_identity_invalid')
+    return replace(config, service_name='sixnine-controller',
+                   service_version=version.group(1), environment=environment)
+
+
 def configured_telemetry(filename=None):
     """Disabled unless explicitly configured; a broken exporter never boots GPUs."""
     filename = filename or os.environ.get("SIXNINE_TELEMETRY_CONFIG_FILE")
@@ -505,6 +531,6 @@ def configured_telemetry(filename=None):
         return NullTelemetry()
     try:
         config = read_config(filename)
-        return create_cloud_telemetry(config) if config else NullTelemetry()
+        return create_cloud_telemetry(controller_resource_config(config)) if config else NullTelemetry()
     except Exception:
         return NullTelemetry("telemetry_config_unavailable")

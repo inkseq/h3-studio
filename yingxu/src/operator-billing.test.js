@@ -124,9 +124,9 @@ test('real admin component renders bulk action, evidence and authoritative confi
     const settledHtml=renderToStaticMarkup(React.createElement(module.exports.I18nProvider,null,React.createElement(module.exports.BillingPreviewTotals,{preview:settlement})));
     assert.equal((settledHtml.match(/\$0\.10/g)||[]).length,2);assert.match(settledHtml,language==='en'?/Recorded provider cost/:/已记录供应商成本/);assert.match(settledHtml,language==='en'?/Generation cost allocation/:/生成成本分摊/);
     const zero={settled_today_microusd:0,reserved_microusd:0,awaiting_invoice_estimate_microusd:0,awaiting_invoice_count:0,prior_day_pending_estimate_microusd:0,legacy_settled_unknown_date_microusd:0,exposure_microusd:0,unconfirmed_exposure_microusd:0,unconfirmed_reference_count:0};
-    const net={...zero,schema_version:1,attribution_scope:'connection',by_kind:{job:zero,instance:zero},waived_reference_count:97,waived_exposure_microusd:4000000};
+    const net={...zero,schema_version:1,attribution_scope:'connection',by_kind:{job:zero,instance:zero},waived_reference_count:97,waived_exposure_microusd:6070000};
     const usage={day:'2026-10-19',timezone:'Australia/Sydney',projected_microusd:195000000,charge_breakdown:net,breakdown:{...net,settled_today_microusd:4000000,exposure_microusd:4000000}};
     const spending=renderToStaticMarkup(React.createElement(module.exports.I18nProvider,null,React.createElement(module.exports.Spending,{usage,scope:'connection'})));
-    assert.match(spending,/spend-breakdown-buckets[\s\S]*?\$0\.00/);assert.match(spending,language==='en'?/Charges from this assistant/:/此助手产生的应付费用/);assert.match(spending,language==='en'?/97 references waived/:/已免除 97 条记录/);assert.match(spending,/\$4\.00/);assert.doesNotMatch(spending,/\$195\.00/);
+    assert.match(spending,/spend-breakdown-buckets[\s\S]*?\$0\.00/);assert.match(spending,language==='en'?/Charges from this assistant/:/此助手产生的应付费用/);assert.match(spending,language==='en'?/97 references waived/:/已免除 97 条记录/);assert.match(spending,/\$4\.00/);assert.doesNotMatch(spending,/\$195\.00|\$6\.07|原预估占用|original exposure/);
   }}finally{if(old)Object.defineProperty(globalThis,'localStorage',old);else delete globalThis.localStorage;}
 });

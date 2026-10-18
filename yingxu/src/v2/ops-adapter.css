@@ -54,6 +54,9 @@
 .assistant-connections label{display:flex;flex-direction:column;gap:6px}
 .assistant-connections small,.assistant-connections p{color:var(--muted);line-height:1.6}
 .assistant-connections article h3{margin:0 0 10px;font-size:14px}
+.assistant-connections article[hidden]{display:none!important}
+.assistant-connections .assistant-inactive-toggle{height:32px;min-height:32px;align-self:flex-start;max-width:100%}
+.assistant-connection-created{font-size:12px;overflow-wrap:anywhere}
 .assistant-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 .assistant-badge{display:inline-flex;color:var(--accent);font-size:11px}
 .ops-adapter :is(.p4-dialog,.op-dialog),.ops-dialog{background:var(--surface);color:var(--ink);border:1px solid var(--line-2);border-radius:var(--r-lg);box-shadow:var(--shadow-lg);padding:22px;width:min(720px,94vw);max-height:88dvh;overflow:auto}
