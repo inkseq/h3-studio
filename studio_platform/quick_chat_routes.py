@@ -51,6 +51,8 @@ def agent_contract():
             "preferences_url": "/v1/quick-chat/preferences",
             "preferences": "Owner CAS preferences default copies_max=4 and takes_fold_count=8. Both are editable positive integers; existing document byte and model limits still apply. Lowering the preference affects new revisions only, never historical reads or original submission replay.",
             "list": PREFIX+"/{session_id}/cards/{card_id}/takes?limit=20&before_cursor={cursor}",
+            "session_list": PREFIX+"/{session_id}/takes?limit=40&before_cursor={cursor}",
+            "session_list_contract": "Owner/session-scoped keyset pages of original take summaries, including card_id/revision_id/status/annotation and advertised thumbnail renditions. Includes trashed rows with explicit trash_state; creator grids hide them. total_count covers all original takes. No generation or story export is performed.",
             "labels": "group_number is a stable display ordinal across revisions; item.index and immutable hashes remain unchanged. Rows preserve original submission/job/execution actions and include full recipe and mutable annotation.",
             "again": {"method":"POST", "path":PREFIX+"/{session_id}/cards/{card_id}/again",
                 "body":{"expected_card_version":"{card.version}","source_revision_id":"{revision.id}","item_id":"{take.id}","copies":1}},
@@ -180,6 +182,10 @@ def register_routes(app, *, hooks=None, assistant=None, assistant_enabled=False,
     @app.get(PREFIX+"/{session_id}/cards/{card_id}/takes")
     def takes(session_id: str, card_id: str, request: Request, limit: int = 20, before_cursor: str | None = None):
         return service.group_takes(request.state.principal, session_id, card_id, limit=limit, before_cursor=before_cursor)
+
+    @app.get(PREFIX+"/{session_id}/takes")
+    def session_takes(session_id: str, request: Request, limit: int = 40, before_cursor: str | None = None):
+        return service.session_takes(request.state.principal, session_id, limit=limit, before_cursor=before_cursor)
 
     def star(session_id: str, item_id: str, request: Request, body: TakeStarRequest, key: str = Header(..., alias="Idempotency-Key")):
         payload=body.model_dump(exclude_unset=True)

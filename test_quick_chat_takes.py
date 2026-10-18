@@ -193,6 +193,76 @@ class TakeTests(ledger.LedgerCase):
             self.assertEqual(update.status_code,200,update.text)
             group=client.get('/v1/quick-chat/sessions/'+self.sid+'/cards/'+value['card']['id']+'/takes')
             self.assertEqual(group.status_code,200,group.text);self.assertEqual(group.json()['total_count'],1)
+            session=client.get('/v1/quick-chat/sessions/'+self.sid+'/takes')
+            self.assertEqual(session.status_code,200,session.text)
+            self.assertEqual(session.json()['takes'][0]['card_id'],value['card']['id'])
+            self.assertNotIn('recipe',session.json()['takes'][0])
+
+    def test_session_grid_pages_all_66_card_takes_without_writes_or_renumbering(self):
+        cards=[self.card(copies=2,key='grid-card-'+str(i)) for i in range(66)]
+        starred=cards[0]['revision']['items'][0]['id']
+        self.service.star_take(self.principal,self.sid,starred,{'expected_version':0,'starred':True},'grid-star')
+        with self.repo.engine.connect() as conn:
+            before={name:conn.scalar(select(func.count()).select_from(table)) for name,table in
+                [('objects',objects),('jobs',jobs),('plans',plans),('documents',documents)]}
+        page=self.service.session_takes(self.principal,self.sid,limit=11)
+        self.assertEqual(page['total_count'],132)
+        seen=[]; cursors=set()
+        while True:
+            seen.extend(page['takes'])
+            if not page['before_cursor']:break
+            self.assertNotIn(page['before_cursor'],cursors);cursors.add(page['before_cursor'])
+            page=self.service.session_takes(self.principal,self.sid,limit=11,before_cursor=page['before_cursor'])
+        self.assertEqual(len(seen),132);self.assertEqual(len({row['id'] for row in seen}),132)
+        self.assertEqual({row['card_id'] for row in seen},{card['card']['id'] for card in cards})
+        for card in cards:
+            group=[row for row in seen if row['card_id']==card['card']['id']]
+            self.assertEqual({row['group_number'] for row in group},{1,2})
+            self.assertEqual(self.service.get_revision(self.principal,self.sid,card['revision']['id']),card['revision'])
+        self.assertTrue(next(row for row in seen if row['id']==starred)['annotation']['starred'])
+        self.assertTrue(all('recipe' not in row and 'job' not in row and row['status']=='draft' for row in seen))
+        with self.repo.engine.connect() as conn:
+            after={name:conn.scalar(select(func.count()).select_from(table)) for name,table in
+                [('objects',objects),('jobs',jobs),('plans',plans),('documents',documents)]}
+        self.assertEqual(before,after)
+
+    def test_session_grid_cursor_and_authorization_do_not_cross_group_owner_or_session(self):
+        card=self.card(copies=3)
+        group=self.service.group_takes(self.principal,self.sid,card['card']['id'],limit=1)
+        page=self.service.session_takes(self.principal,self.sid,limit=1)
+        with self.assertRaises(QuickChatError):
+            self.service.session_takes(self.principal,self.sid,before_cursor=group['before_cursor'])
+        with self.assertRaises(QuickChatError):
+            self.service.group_takes(self.principal,self.sid,card['card']['id'],before_cursor=page['before_cursor'])
+        other=self.service.create_session(self.principal,{},'other-grid-session')['session']['id']
+        with self.assertRaises(QuickChatError):
+            self.service.session_takes(self.principal,other,before_cursor=page['before_cursor'])
+        with self.assertRaises(NotFound):
+            self.service.session_takes(Principal('other','browser'),self.sid)
+        scoped=Principal(self.principal.owner,'scoped',machine=True,all_projects=False,
+            project_ids=('some-other-story',),scopes=('projects:read','jobs:read'))
+        with self.assertRaises(NotFound):self.service.session_takes(scoped,self.sid)
+        for bad in (0,101,True,1.5):
+            with self.assertRaises(QuickChatError):self.service.session_takes(self.principal,self.sid,limit=bad)
+
+    def test_session_grid_reuses_original_job_status_but_only_returns_thumbnail_summary(self):
+        card=self.card(copies=2);submitted=self.submit(card['revision'])
+        original=self.service.get_submission
+        def projected(*args):
+            value=original(*args)
+            for item in value['items']:
+                item['job']['artifacts']=[{'id':'poster-video','kind':'video',
+                    'thumbnail_url':'/v1/artifacts/poster-video/content?rendition=thumb',
+                    'object_key':'private/internal/key','metadata':{'private':'not a grid field'}}]
+            return value
+        with patch.object(self.service,'get_submission',side_effect=projected):
+            group=self.service.group_takes(self.principal,self.sid,card['card']['id'])
+            page=self.service.session_takes(self.principal,self.sid)
+        self.assertEqual({row['id']:row['status'] for row in page['takes']},
+            {row['id']:row['status'] for row in group['takes']})
+        self.assertEqual({row['submission_id'] for row in page['takes']},{submitted['id']})
+        self.assertEqual(page['takes'][0]['artifacts'],[{'id':'poster-video','kind':'video',
+            'thumbnail_url':'/v1/artifacts/poster-video/content?rendition=thumb'}])
 
     def test_target_cas_after_upload_preserves_asset_and_original_unknown(self):
         self.story();png=io.BytesIO();Image.new('RGB',(512,512),'red').save(png,'PNG');png.seek(0)

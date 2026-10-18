@@ -90,6 +90,26 @@ class QuickChatTakesMixin:
             "controls": {**copy.deepcopy(revision["controls"]), "seed": item["seed"]}, "copies": 1}
 
     def group_takes(self, principal, session_id, card_id, *, limit=20, before_cursor=None):
+        return self._takes_page(principal, session_id, card_id, limit=limit, before_cursor=before_cursor)
+
+    def session_takes(self, principal, session_id, *, limit=40, before_cursor=None):
+        """Bounded read projection of original takes, never a new take catalog."""
+        page = self._takes_page(principal, session_id, None, limit=limit, before_cursor=before_cursor)
+        values = []
+        for take in page['takes']:
+            value = {key: copy.deepcopy(take[key]) for key in (
+                'id', 'card_id', 'revision_id', 'submission_id', 'job_id', 'status',
+                'index', 'group_number', 'created_at', 'annotation', 'trash_state')}
+            value['title'] = take['annotation'].get('title') or take['recipe'].get('title', '')
+            value['artifacts'] = [{key: copy.deepcopy(artifact[key]) for key in (
+                'id', 'kind', 'thumbnail_url', 'preview_url', 'rendition_status') if key in artifact}
+                for artifact in (take.get('job') or {}).get('artifacts', [])]
+            values.append(value)
+        return {'session_id': session_id, 'takes': values, 'total_count': page['total_count'],
+            'before_cursor': page['before_cursor'], 'projection': 'original_takes_v1',
+            'includes_trashed': True}
+
+    def _takes_page(self, principal, session_id, card_id, *, limit, before_cursor):
         from .quick_chat import objects, QuickChatError
         self._access(principal, session_id, "projects:read", "jobs:read")
         if type(limit) is not int or not 1 <= limit <= 100:
@@ -99,22 +119,26 @@ class QuickChatTakesMixin:
             try:
                 if not isinstance(before_cursor,str) or len(before_cursor)>512: raise ValueError()
                 cursor = json.loads(base64.urlsafe_b64decode(before_cursor.encode()))
-                if len(before_cursor)>512 or not isinstance(cursor,list) or len(cursor)!=4 or cursor[0]!=card_id or type(cursor[1]) not in (int,float) or not math.isfinite(cursor[1]) or not isinstance(cursor[2],str) or type(cursor[3]) is not int:
+                if len(before_cursor)>512 or not isinstance(cursor,list) or len(cursor)!=4 or cursor[0]!=(card_id or 'session:'+session_id) or type(cursor[1]) not in (int,float) or not math.isfinite(cursor[1]) or not isinstance(cursor[2],str) or type(cursor[3]) is not int:
                     raise ValueError()
             except Exception:
                 raise QuickChatError("invalid_cursor", "Invalid group cursor. / 候选组游标无效。", 422) from None
         with self.repo.engine.connect() as conn:
-            self._get(conn, principal, card_id, session_id, "card")
+            if card_id is not None:
+                self._get(conn, principal, card_id, session_id, "card")
             query = select(objects).where(objects.c.tenant==self.tenant, objects.c.owner==principal.owner,
-                objects.c.session_id==session_id, objects.c.kind=="revision", objects.c.parent_id==card_id)
+                objects.c.session_id==session_id, objects.c.kind=="revision")
+            if card_id is not None:
+                query = query.where(objects.c.parent_id==card_id)
             # Original immutable revision versions define creation order, independent of
             # clocks and pagination; appending a revision cannot renumber old takes.
-            metadata=conn.execute(query.with_only_columns(objects.c.id,
+            metadata=conn.execute(query.with_only_columns(objects.c.id, objects.c.parent_id,
                 objects.c.payload["version"].as_integer().label("revision_version"),
                 func.json_array_length(objects.c.payload["items"]).label("item_count"))).mappings()
-            group_offsets={}; total_count=0
-            for original in sorted(metadata,key=lambda r:r["revision_version"]):
-                group_offsets[original["id"]]=total_count
+            group_offsets={}; group_counts={}; total_count=0
+            for original in sorted(metadata,key=lambda r:(r['parent_id'],r["revision_version"])):
+                group_offsets[original["id"]]=group_counts.get(original['parent_id'],0)
+                group_counts[original['parent_id']]=group_offsets[original['id']]+original['item_count']
                 total_count+=original["item_count"]
             if cursor:
                 query=query.where(or_(objects.c.created_at<cursor[1], and_(objects.c.created_at==cursor[1],objects.c.id<=cursor[2])))
@@ -140,14 +164,14 @@ class QuickChatTakesMixin:
                 annotation=conn.execute(select(objects).where(objects.c.tenant==self.tenant,objects.c.owner==principal.owner,
                     objects.c.session_id==session_id,objects.c.kind=="take_annotation",objects.c.business_key==item["id"])).mappings().first()
                 values.append({"status":"draft","job":None,"job_id":None,"retryable":False,"resume_admission_available":False,
-                    **copy.deepcopy(live),"id":item["id"],"index":item["index"],"seed":item["seed"],"revision_id":r["id"],
+                    **copy.deepcopy(live),"id":item["id"],"card_id":r['parent_id'],"index":item["index"],"seed":item["seed"],"revision_id":r["id"],
                     "created_by":creator(conn,self.tenant,principal.owner,"take",item["id"]),"group_number":group_offsets[r["id"]]+item["index"]+1,"submission_id":submission,"created_at":r["created_at"],"recipe":self._take_recipe(r["payload"],item),
                     "trash_state":trash["payload"]["state"] if trash else "active","trash_version":trash["version"] if trash else project["version"],
                     "project_id":session["payload"]["project_id"],
                     "annotation":{"version":annotation["version"] if annotation else 0,"starred":annotation["payload"].get("starred",False) if annotation else False,"title":annotation["payload"].get("title","") if annotation else ""}})
             after=None
             if len(entries)>limit:
-                r,item=page[-1];after=base64.urlsafe_b64encode(json.dumps([card_id,r["created_at"],r["id"],item["index"]]).encode()).decode()
+                r,item=page[-1];after=base64.urlsafe_b64encode(json.dumps([card_id or 'session:'+session_id,r["created_at"],r["id"],item["index"]]).encode()).decode()
             return {"card_id":card_id,"takes":values,"total_count":total_count,"before_cursor":after}
 
     def star_take(self, principal, session_id, item_id, body, key):
