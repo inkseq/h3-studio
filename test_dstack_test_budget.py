@@ -11,7 +11,7 @@ from sqlalchemy import insert, select, update
 
 from studio_platform.dstack_operator import DstackOperator, OperatorError, _request
 from studio_platform.dstack_capacity import DstackError
-from studio_platform.dstack_test_budget import ACCOUNT, budget_reason, day_window, projected_cost
+from studio_platform.dstack_test_budget import ACCOUNT, budget_reason, day_window, projected_cost, task_guard
 from studio_platform.operator_capacity import operator_nodes
 from studio_platform.repository import BudgetExceeded, budget_accounts, budget_reservations, instance_intents
 from studio_platform.worker_admission import dstack_budget_reason, managed_window_reason
@@ -38,7 +38,8 @@ class LayeredClient(original.Client):
 
 
 class DailyTestBudgetTests(LedgerCase):
-    preview = original.DstackLifetimeTests.preview
+    def preview(self, **options):
+        return original.DstackLifetimeTests.preview(self, test_task_id="issue-267", **options)
     start = original.DstackOperatorTests.start
     running = original.DstackOperatorTests.running
     counts = original.DstackOperatorTests.counts
@@ -91,7 +92,8 @@ class DailyTestBudgetTests(LedgerCase):
         self.assertEqual(binding["run_spec"]["configuration"]["max_duration"], 7200)
         intent, row = self.rows()
         self.assertIsNone(intent["hard_deadline"])
-        self.assertEqual(row["payload"]["lifecycle"]["test_gpu_guard"], GUARD)
+        self.assertEqual(row["payload"]["lifecycle"]["test_gpu_guard"],
+            task_guard(GUARD, "issue-267", limit=20_000_000, max_runtime=7200))
         for options in ({"keep_on": "until_stopped"}, {"idle_shutdown_seconds": 601}):
             with self.assertRaisesRegex(OperatorError, "test_idle_policy"):
                 self.preview(**options)
@@ -99,7 +101,7 @@ class DailyTestBudgetTests(LedgerCase):
         with self.assertRaisesRegex(OperatorError, "test_guard_binding"):
             DstackOperator(self.repo, self.settings, self.capacity, self.config)
         from studio_platform.dstack_operator import _request
-        old = replace(_request(row["payload"]["request"]), test_max_duration_s=None)
+        old = replace(_request(row["payload"]["request"]), test_max_duration_s=None, test_task_id=None)
         self.assertEqual(old.run_spec(original.PUB)["configuration"]["max_duration"], "off")
 
     def test_changed_admin_runtime_reaches_native_spec_and_original_guard(self):
@@ -162,7 +164,7 @@ class DailyTestBudgetTests(LedgerCase):
             self.assertEqual(projected_cost(connection, GUARD, self.now), 19_000_000)
             before = [dict(r) for r in connection.execute(select(budget_accounts)).mappings()]
         preview = self.preview()
-        with self.assertRaisesRegex(OperatorError, "test_daily_limit"):
+        with self.assertRaisesRegex(OperatorError, "test_task_limit"):
             self.start(key="different", preview=preview)
         self.assertEqual(len(self.client.applied), 1)
         self.now = day_window(self.now)[1] + 1
@@ -197,8 +199,8 @@ class DailyTestBudgetTests(LedgerCase):
                 "dstack_test_runtime_limit_reached")
             connection.execute(update(budget_reservations).where(budget_reservations.c.account_id == ACCOUNT)
                 .values(amount_microusd=20_000_000))
-            self.assertEqual(budget_reason(connection, intent, node, self.now), "dstack_test_daily_limit_reached")
-            with self.assertRaisesRegex(BudgetExceeded, "test_daily_limit"):
+            self.assertEqual(budget_reason(connection, intent, node, self.now), "dstack_test_task_limit_reached")
+            with self.assertRaisesRegex(BudgetExceeded, "test_task_limit"):
                 self.service.fund_window(connection, intent, node, self.now)
 
     def test_malformed_or_foreign_shared_reservation_fails_closed(self):
@@ -226,12 +228,115 @@ class DailyTestBudgetTests(LedgerCase):
             pending = connection.execute(select(operator_nodes.c.payload).where(
                 operator_nodes.c.intent_id == second)).scalar_one()
             before = [dict(r) for r in connection.execute(select(budget_reservations)).mappings()]
-        with self.assertRaisesRegex(OperatorError, "test_daily_limit"):
+        with self.assertRaisesRegex(OperatorError, "test_task_limit"):
             self.capacity.start(_request(pending["request"]), original.PUB)
         self.assertEqual(self.client.applied, [first])
         self.assertFalse(self.store.load(second).get("apply_started", False))
         with self.repo.engine.connect() as connection:
             self.assertEqual([dict(r) for r in connection.execute(select(budget_reservations)).mappings()], before)
+
+    def test_task_identity_is_required_frozen_and_native_tagged(self):
+        self.assertTrue(self.service.catalog(self.owner)["test_task_id_required"])
+        for task in (None, "", "x"*101, "a/b", True):
+            with self.subTest(task=task), patch.object(self.capacity, "plan", side_effect=AssertionError("no provider reads")):
+                body={"profile_id":"5090-fl"}
+                if task is not None:body["test_task_id"]=task
+                with self.assertRaisesRegex(OperatorError,"dstack_test_task_required"):
+                    self.service.preview(self.owner,body)
+        preview=self.preview()
+        with self.assertRaisesRegex(OperatorError,"dstack_start_invalid"):
+            self.service.start(self.owner,{"preview_id":preview["preview_id"],"test_task_id":"other"},"changed-task")
+        node_id=self.start(preview=preview)["node_id"]
+        intent,node=self.rows()
+        self.assertEqual(node["payload"]["request"]["test_task_id"],"issue-267")
+        self.assertEqual(self.store.load(node_id)["run_spec"]["configuration"]["tags"]["inkseq_test_task"],"issue-267")
+        held=self.service.set_hold(self.owner,node_id,{"idle_shutdown_seconds":300},"idle-policy")
+        self.assertEqual(held["lifecycle"]["test_gpu_guard"]["task_id"],"issue-267")
+        with self.assertRaisesRegex(OperatorError,"dstack_hold_invalid"):
+            self.service.set_hold(self.owner,node_id,{"test_task_id":"other"},"retag")
+
+    def test_predeploy_v1_preview_cannot_create_a_new_unattributed_rental(self):
+        from studio_platform.operator_capacity import operator_previews
+        preview=self.preview()
+        with self.repo.transaction() as connection:
+            row=connection.execute(select(operator_previews)).mappings().one()
+            payload=copy.deepcopy(row['payload'])
+            payload['lifecycle']['test_gpu_guard']=copy.deepcopy(GUARD)
+            payload['request'].pop('test_task_id')
+            connection.execute(update(operator_previews).values(payload=payload))
+        with self.assertRaisesRegex(OperatorError,'dstack_test_task_required'):
+            self.start(preview=preview)
+        self.assertEqual(self.counts(),(0,0,0,0))
+        self.assertEqual(self.client.applied,[])
+
+    def test_task_total_survives_calendar_change_and_unrelated_history_is_excluded(self):
+        node_id=self.history(amount=1_812_500,actual=19_000_000)
+        guard=task_guard(GUARD,"issue-267",limit=20_000_000,max_runtime=7200)
+        other=task_guard(GUARD,"issue-285",limit=20_000_000,max_runtime=7200)
+        self.now=day_window(self.now)[1]+1
+        with self.repo.engine.connect() as connection:
+            before=[dict(r) for r in connection.execute(select(budget_reservations)).mappings()]
+            self.assertEqual(projected_cost(connection,guard,self.now),19_000_000)
+            self.assertEqual(projected_cost(connection,other,self.now),0)
+            self.assertEqual([dict(r) for r in connection.execute(select(budget_reservations)).mappings()],before)
+        # Ordinary original ledger rows retain their actual bill and identity.
+        self.assertEqual({r['reference_id'] for r in before},{node_id})
+
+    def test_stopped_same_task_unknown_invoice_uses_commitment_and_other_task_is_not_blocked(self):
+        node_id=self.start()["node_id"]
+        guard=task_guard(GUARD,"issue-267",limit=20_000_000,max_runtime=7200)
+        with self.repo.transaction() as connection:
+            connection.execute(update(instance_intents).where(instance_intents.c.id==node_id).values(state="destroyed"))
+        self.now+=86400
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(projected_cost(connection,guard,self.now),1_812_500)
+            self.assertEqual(projected_cost(connection,task_guard(GUARD,"issue-285",limit=20_000_000,max_runtime=7200),self.now),0)
+        # Native stopped but supplier invoice still unknown: keep the actual
+        # frozen reservation; do not invent another day's running cost.
+        with self.repo.transaction() as connection:
+            connection.execute(update(instance_intents).where(instance_intents.c.id==node_id).values(state="destroying"))
+            connection.execute(update(operator_nodes).values(runtime_state="stopped"))
+            self.assertEqual(projected_cost(connection,guard,self.now),1_812_500)
+
+    def test_same_task_corrupt_binding_fails_closed_but_old_unattributed_hold_does_not_leak(self):
+        self.start()
+        guard=task_guard(GUARD,"issue-267",limit=20_000_000,max_runtime=7200)
+        intent,node=self.rows()
+        payload=copy.deepcopy(node["payload"])
+        payload['request']['test_task_id']='changed'
+        with self.repo.transaction() as connection:
+            connection.execute(update(operator_nodes).values(payload=payload))
+            with self.assertRaisesRegex(BudgetExceeded,"test_budget_unconfirmed"):
+                projected_cost(connection,guard,self.now)
+            payload['request']['test_task_id']='issue-267'
+            payload['lifecycle']['test_gpu_guard'].pop('task_id')
+            connection.execute(update(operator_nodes).values(payload=payload))
+            with self.assertRaisesRegex(BudgetExceeded,"test_budget_unconfirmed"):
+                projected_cost(connection,guard,self.now)
+            payload['lifecycle']['test_gpu_guard']=copy.deepcopy(GUARD)
+            payload['request'].pop('test_task_id')
+            payload['dstack']['run_spec']['configuration']['tags'].pop('inkseq_test_task')
+            connection.execute(update(operator_nodes).values(payload=payload))
+            self.assertEqual(projected_cost(connection,guard,self.now),0)
+
+    def test_parallel_same_task_starts_cannot_overcommit_task_cap(self):
+        from studio_platform.repository import spending_settings
+        from studio_platform.spending_limits import ADMIN_OWNER,admin_defaults
+        limits=admin_defaults(self.service);limits['test_task_limit_microusd']=3_000_000
+        with self.repo.transaction() as connection:
+            connection.execute(insert(spending_settings).values(tenant_id=self.settings.tenant_id,owner_id=ADMIN_OWNER,
+                version=1,value=limits,updated_at=self.now,actor_id=self.owner.actor_id))
+        previews=[self.preview(),self.preview()]
+        empty={"instances":0,"physical_gpus":0,"hourly_cost_microusd":0,"active_instance_ids":()}
+        def attempt(index):
+            try:return self.start(key='parallel-'+str(index),preview=previews[index])['node_id']
+            except OperatorError as error:return str(error)
+        with patch.object(self.service,"_limits",return_value=empty),patch.object(self.capacity,"start",side_effect=DstackError("dstack_api_unavailable")):
+            results=self.parallel(attempt,count=2)
+        self.assertEqual(results.count("dstack_test_task_limit_reached"),1)
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(len(list(connection.execute(select(instance_intents)))),1)
+            self.assertEqual(len(list(connection.execute(select(budget_reservations)))),2)
 
 
 if __name__ == "__main__":

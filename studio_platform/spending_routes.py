@@ -92,8 +92,9 @@ def register_routes(app):
     def read_admin(request: Request):
         human(request, admin=True)
         with repo.engine.connect() as connection:
-            return response(read_settings(connection, settings.tenant_id, ADMIN_OWNER,
-                admin_defaults=admin_defaults(getattr(app.state, "dstack_operator", None))))
+            return response({**read_settings(connection, settings.tenant_id, ADMIN_OWNER,
+                admin_defaults=admin_defaults(getattr(app.state, "dstack_operator", None))),
+                "test_budget_scope": "acceptance_task"})
 
     @app.put("/v1/operator/admin/spending-settings")
     def update_admin(request: Request, body: dict):
