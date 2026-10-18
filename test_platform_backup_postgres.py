@@ -16,6 +16,7 @@ from unittest.mock import patch
 from sqlalchemy import event, insert, select, update, null, JSON, text
 
 from studio_platform.assets import AssetService, AssetNotFound
+from studio_platform.asset_objects import ASSET_OBJECT_ROLES
 from studio_platform.auth import Auth, accounts, sessions, clients
 from studio_platform.backup import backup_postgres_engine, backup_postgres_local, verify_local, restore_local, BackupError
 from studio_platform.queue import TaskQueue
@@ -235,7 +236,8 @@ class PostgresPortableBackupTests(LedgerCase):
         with self.repo.engine.begin() as conn:
             raw = conn.execute(select(asset_table.c.record)).scalar_one()
             record = json.loads(raw)
-            for role in ("original", "model"):
+            original_roles = {role: dict(record[role]) for role in ASSET_OBJECT_ROLES}
+            for role in ASSET_OBJECT_ROLES:
                 record[role]["provider"] = "r2"
             conn.execute(update(asset_table).values(record=json.dumps(record)))
         class ReadOnlyR2:
@@ -248,14 +250,30 @@ class PostgresPortableBackupTests(LedgerCase):
         backup_postgres_engine(self.repo.engine, None, target, schema=self.schema, stores={"r2": ReadOnlyR2()})
         manifest = verify_local(target)
         self.assertEqual({x.get("provider") for x in manifest["objects"]}, {"r2"})
+        self.assertEqual({item["key"] for item in manifest["objects"]},
+                         {spec["key"] for spec in original_roles.values()})
+        for role, spec in original_roles.items():
+            with self.subTest(role=role):
+                item = next(item for item in manifest["objects"] if item["key"] == spec["key"])
+                self.assertEqual((item["size_bytes"], item["sha256"]), (spec["size_bytes"], spec["sha256"]))
+                self.assertEqual(hashlib.sha256((target/"media"/item["file"]).read_bytes()).hexdigest(), spec["sha256"])
+                self.assertEqual({ref["role"] for ref in item["references"]}, {role})
         restored = self.root/"r2-restored"
         restore_local(target, restored)
         with closing(sqlite3.connect(restored/"platform.sqlite3")) as db:
             self.assertEqual(db.execute("SELECT reserved_microusd FROM platform_budget_accounts WHERE id='owner-budget'").fetchone()[0], 123)
             value = json.loads(db.execute("SELECT record FROM platform_assets").fetchone()[0])
-            self.assertEqual(value["original"]["provider"], "local")
+            self.assertEqual(value["rendition_metadata"], record["rendition_metadata"])
+            for role, spec in original_roles.items():
+                with self.subTest(restored_role=role):
+                    self.assertEqual(value[role]["provider"], "local")
+                    self.assertEqual({name: value[role][name] for name in ("key", "size_bytes", "sha256")},
+                                     {name: spec[name] for name in ("key", "size_bytes", "sha256")})
             self.assertEqual(db.execute("SELECT status FROM platform_jobs WHERE id=?", (self.job_row["id"],)).fetchone()[0], "recovery_hold")
-        self.assertEqual(self.assets.get("superdan", self.asset["id"])["original"]["provider"], "r2")
+        source = self.assets.get("superdan", self.asset["id"])
+        self.assertEqual(source["rendition_metadata"], record["rendition_metadata"])
+        for role in ASSET_OBJECT_ROLES:
+            self.assertEqual(source[role], record[role])  # Isolated restore never rewrites source locators.
 
 
 if __name__ == "__main__":
