@@ -4,6 +4,14 @@ import {formatMoneyMicros as money} from './money.js';
 import {usdInput,usdMicrousd} from './operator-budget-model.js';
 import {billingAllocationInputs,billingReferenceKey,billingTimeBounds,validBillingRequest,validBillingPreview} from './operator-billing-model.js';
 
+export function BillingPreviewTotals({preview}){
+  const {t}=useI18n();
+  return <dl>
+    {preview.request.action==='settle'&&<><div><dt>{t('billing.providerCost')}</dt><dd>{money(preview.totals.instance_actual_microusd)}</dd></div><div><dt>{t('billing.allocated')}</dt><dd>{money(preview.totals.job_allocated_microusd)}</dd></div></>}
+    <div><dt>{t('billing.waiverExposure')}</dt><dd>{money(preview.totals.waived_exposure_microusd)}</dd></div>
+  </dl>;
+}
+
 export default function OperatorBillingPanel({controller,state,busy}){
   const {t}=useI18n(),[owner,setOwner]=useState(state.account||''),[selected,setSelected]=useState({}),
     [action,setAction]=useState('waive'),[reason,setReason]=useState(''),[evidence,setEvidence]=useState(''),
@@ -55,7 +63,7 @@ export default function OperatorBillingPanel({controller,state,busy}){
     </>}
     {preview&&<section className="billing-preview" aria-label={t('billing.previewTitle')}>
       <h4>{t('billing.previewTitle')}</h4><p>{t('billing.previewAction',{action:t('billing.'+preview.request.action),owner:preview.request.owner_id,count:preview.totals.reference_count})}</p><p>{preview.request.reason}</p>
-      <dl><div><dt>{t('billing.providerCost')}</dt><dd>{money(preview.totals.instance_actual_microusd)}</dd></div><div><dt>{t('billing.allocated')}</dt><dd>{money(preview.totals.job_allocated_microusd)}</dd></div><div><dt>{t('billing.waiverExposure')}</dt><dd>{money(preview.totals.waived_exposure_microusd)}</dd></div></dl><p className="billing-note">{t('billing.layers')}</p>
+      <BillingPreviewTotals preview={preview}/><p className="billing-note">{t('billing.layers')}</p>
       <label className="billing-confirm"><input type="checkbox" checked={confirmed} disabled={locked||!valid} onChange={event=>setConfirmed(event.target.checked)}/>{t('billing.confirm')}</label><button type="button" disabled={locked||!valid||!confirmed||!validBillingPreview(preview,request)} onClick={()=>void apply()}>{t('billing.submit')}</button>
     </section>}
     {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}
