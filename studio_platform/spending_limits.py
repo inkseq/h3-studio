@@ -302,10 +302,14 @@ def usage_breakdown(connection, tenant, owner, now, *, actor_id=None):
 
 
 def public_usage(connection, tenant, owner, now, *, actor_id=None):
-    return {"projected_microusd": daily_projection(connection, tenant, owner, now, actor_id=actor_id),
+    value = {"projected_microusd": daily_projection(connection, tenant, owner, now, actor_id=actor_id),
         "day": datetime.fromtimestamp(now, timezone.utc).astimezone(ZoneInfo("Australia/Sydney")).date().isoformat(),
         "timezone": "Australia/Sydney", "includes_unresolved_prior_days": True,
         "breakdown": usage_breakdown(connection, tenant, owner, now, actor_id=actor_id)}
+    if actor_id is None:
+        from .invoice_checks import public_reconciliation
+        value["reconciliation"] = public_reconciliation(connection, tenant, owner, now)
+    return value
 
 
 def check_submission_confirmation(repo, tenant, principal, plan_ids):

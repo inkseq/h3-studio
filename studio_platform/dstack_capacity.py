@@ -300,10 +300,22 @@ class DstackClient:
         if self._owns_provider_session and self._provider_session is not None:
             self._provider_session.close()
 
-    def _post(self, path, body, *, absent=False):
+    def _post(self, path, body, *, absent=False, timeout=None):
         try:
-            response = self._session.post(self.endpoint + path, json=body,
-                headers=self._headers, timeout=self.timeout)
+            if timeout is None:
+                response = self._session.post(self.endpoint + path, json=body,
+                    headers=self._headers, timeout=self.timeout)
+            else:
+                deadline = time.monotonic()+min(timeout, self.timeout)
+                with self._session.stream("POST", self.endpoint + path, json=body,
+                        headers=self._headers, timeout=min(timeout, self.timeout), follow_redirects=False) as incoming:
+                    content = bytearray()
+                    for chunk in incoming.iter_bytes(chunk_size=65536):
+                        _require(time.monotonic() < deadline and len(content)+len(chunk) <= 8*1024**2,
+                            "dstack_response_limit")
+                        content.extend(chunk)
+                    _require(time.monotonic() < deadline, "dstack_api_unavailable")
+                    response = httpx.Response(incoming.status_code, content=bytes(content))
             if absent and response.status_code == 404:
                 return None
             _require(len(response.content) <= 8 * 1024**2, "dstack_response_limit")
@@ -338,7 +350,8 @@ class DstackClient:
 
     def _provider_document(self, method, url, key, *, timeout, body=None, params=None):
         _require((method, url) in {("GET", VAST_INSTANCES_URL), ("POST", RUNPOD_GRAPHQL_URL),
-                ("POST", "https://console.vast.ai/api/v0/bundles/")}
+                ("POST", "https://console.vast.ai/api/v0/bundles/"),
+                ("GET", "https://console.vast.ai/api/v0/charges/")}
             or method == "GET" and re.fullmatch(r"https://console\.vast\.ai/api/v0/instances/[1-9][0-9]{0,17}/", url),
             "dstack_provider_inventory_unconfirmed")
         if self._provider_session is None:
@@ -366,9 +379,10 @@ class DstackClient:
                         _require(response.status_code == 200, "dstack_provider_inventory_rejected")
                         content = bytearray()
                         for chunk in response.iter_bytes(chunk_size=65536):
-                            _require(len(content) + len(chunk) <= 4 * 1024**2,
+                            _require(time.monotonic() < deadline and len(content) + len(chunk) <= 4 * 1024**2,
                                 "dstack_provider_inventory_response_limit")
                             content.extend(chunk)
+                        _require(time.monotonic() < deadline, "dstack_provider_inventory_unavailable")
                         return json.loads(content, object_pairs_hook=unique_object, parse_constant=invalid_constant)
                 # Close the refused response before sleeping. A long server
                 # delay is surfaced rather than retried earlier than requested.
@@ -384,10 +398,11 @@ class DstackClient:
         except Exception:
             raise DstackError("dstack_provider_inventory_unavailable") from None
 
-    def _vast_key(self):
+    def _vast_key(self, *, timeout=None):
         # The exact existing dstack backend remains credential authority.
         # No registry/profile switch, key persistence or process env mutation.
-        config = self._post(f"/api/project/{self.project}/backends/vastai/config_info", {})
+        config = self._post(f"/api/project/{self.project}/backends/vastai/config_info", {},
+            **({"timeout": timeout} if timeout is not None else {}))
         creds = config.get("creds") if isinstance(config, dict) else None
         _require(isinstance(config, dict) and config.get("type") == "vastai"
             and isinstance(creds, dict) and creds.get("type") == "api_key",
@@ -448,6 +463,16 @@ class DstackClient:
             and type(ended) in (int, float) and math.isfinite(ended) and 0 <= ended-observed < 120,
             "dstack_host_clock_invalid")
         return {"observed_at": observed, "offers": list(found.values())}
+
+    def vast_charges(self, start, end):
+        from .invoice_checks import CHARGES_URL, read_vast_charges
+        # This inspection also runs during active work. Keep its total I/O
+        # on2s/6s request budgets, inside the30s freshness window; no thread
+        # or second poller. An incomplete read stays unknown until next check.
+        key = self._vast_key(timeout=2)
+        return read_vast_charges(lambda params, timeout: self._provider_document(
+            "GET", CHARGES_URL, key, params=params, timeout=min(timeout, self.timeout, 3)),
+            start, end, timeout_budget=6)
 
     def vast_instance_identity(self, identity):
         _require(isinstance(identity, str) and re.fullmatch(r"[1-9][0-9]{0,17}", identity),
