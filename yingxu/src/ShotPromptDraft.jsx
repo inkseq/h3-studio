@@ -1,14 +1,131 @@
-import {useI18n} from './i18n/I18nProvider.jsx';
-import React,{useState} from 'react';
-import {store} from './store.js';
-import {storyboardPrompt,promptDraftPatch,restorePromptPatch} from './shot-prompt.js';
+import { useI18n } from './i18n/I18nProvider.jsx';
+import React, { useState } from 'react';
+import { store } from './store.js';
+import { storyboardPrompt, promptDraftPatch, restorePromptPatch } from './shot-prompt.js';
 
-export default function ShotPromptDraft({project,shot}){
-  const {t:at}=useI18n();
-  const [options,setOptions]=useState({includeScene:false,includeCharacters:true,includeLocations:true}),[preview,setPreview]=useState(null),[error,setError]=useState('');
-  const source=storyboardPrompt(project,shot.id,options),current=String(shot.data.prompt??shot.description??''),previous=shot.data.promptDraftPrevious;
-  const stale=preview&&(preview.source!==source||preview.expected!==current);
-  const toggle=(key,value)=>{setOptions(o=>({...o,[key]:value}));setError('');};
-  const apply=()=>{try{const live=store.getState();if(live.project.id!==project.id)throw Error(at('adjunct.shotPromptDraft.copy149'));const latest=live.project.entities.find(e=>e.id===shot.id);if(stale)throw Error(at('adjunct.shotPromptDraft.copy150'));if(store.updateEntity(shot.id,{data:promptDraftPatch(latest,preview.text,preview.expected)})){setPreview(null);setError('');}}catch(e){setError(e.message);}};
-  return <details className="shot-prompt-draft"><summary>{at('adjunct.shotPromptDraft.copy151')}</summary><p>{at('adjunct.shotPromptDraft.copy152')}</p><div className="shot-prompt-options">{[['includeCharacters',at('adjunct.shotPromptDraft.copy153')],['includeLocations',at('adjunct.shotPromptDraft.copy154')],['includeScene',at('adjunct.shotPromptDraft.copy155')]].map(([key,label])=><label key={key}><input type="checkbox" checked={options[key]} onChange={e=>toggle(key,e.target.checked)}/>{label}</label>)}</div><button type="button" disabled={!source.trim()} onClick={()=>{setPreview({source,expected:current,text:source});setError('');}}>{at('adjunct.shotPromptDraft.copy156')}</button>{!source.trim()&&<p>{at('adjunct.shotPromptDraft.copy157')}</p>}{preview&&<div className="shot-prompt-preview"><label className="cloud-control"><span>{at('adjunct.shotPromptDraft.copy158')}</span><textarea rows={7} value={preview.text} maxLength={24000} onChange={e=>setPreview(p=>({...p,text:e.target.value}))}/></label><p>{at('adjunct.shotPromptDraft.copy159')}{preview.text.length}{at('adjunct.shotPromptDraft.copy160')}</p>{stale&&<p className="cloud-warning">{at('adjunct.shotPromptDraft.copy161')}</p>}<div className="cloud-actions"><button type="button" disabled={stale||!preview.text.trim()||preview.text.length>12000} onClick={apply}>{at('adjunct.shotPromptDraft.copy162')}</button><button type="button" onClick={()=>setPreview(null)}>{at('adjunct.shotPromptDraft.copy163')}</button></div></div>}{previous&&<details><summary>{at('adjunct.shotPromptDraft.copy164')}</summary><pre>{previous.text||at('adjunct.shotPromptDraft.copy165')}</pre><button type="button" disabled={current!==previous.applied} onClick={()=>{try{store.updateEntity(shot.id,{data:restorePromptPatch(shot)});setError('');}catch(e){setError(e.message);}}}>{at('adjunct.shotPromptDraft.copy166')}</button>{current!==previous.applied&&<p>{at('adjunct.shotPromptDraft.copy167')}</p>}</details>}{error&&<p className="cloud-error" role="alert">{error}</p>}</details>;
+export default function ShotPromptDraft({ project, shot }) {
+  const { t: at } = useI18n();
+  const [options, setOptions] = useState({
+      includeScene: false,
+      includeCharacters: true,
+      includeLocations: true,
+    }),
+    [preview, setPreview] = useState(null),
+    [error, setError] = useState('');
+  const source = storyboardPrompt(project, shot.id, options),
+    current = String(shot.data.prompt ?? shot.description ?? ''),
+    previous = shot.data.promptDraftPrevious;
+  const stale = preview && (preview.source !== source || preview.expected !== current);
+  const toggle = (key, value) => {
+    setOptions((o) => ({ ...o, [key]: value }));
+    setError('');
+  };
+  const apply = () => {
+    try {
+      const live = store.getState();
+      if (live.project.id !== project.id) throw Error(at('adjunct.shotPromptDraft.copy149'));
+      const latest = live.project.entities.find((e) => e.id === shot.id);
+      if (stale) throw Error(at('adjunct.shotPromptDraft.copy150'));
+      if (
+        store.updateEntity(shot.id, {
+          data: promptDraftPatch(latest, preview.text, preview.expected),
+        })
+      ) {
+        setPreview(null);
+        setError('');
+      }
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+  return (
+    <details className="shot-prompt-draft">
+      <summary>{at('adjunct.shotPromptDraft.copy151')}</summary>
+      <p>{at('adjunct.shotPromptDraft.copy152')}</p>
+      <div className="shot-prompt-options">
+        {[
+          ['includeCharacters', at('adjunct.shotPromptDraft.copy153')],
+          ['includeLocations', at('adjunct.shotPromptDraft.copy154')],
+          ['includeScene', at('adjunct.shotPromptDraft.copy155')],
+        ].map(([key, label]) => (
+          <label key={key}>
+            <input
+              type="checkbox"
+              checked={options[key]}
+              onChange={(e) => toggle(key, e.target.checked)}
+            />
+            {label}
+          </label>
+        ))}
+      </div>
+      <button
+        type="button"
+        disabled={!source.trim()}
+        onClick={() => {
+          setPreview({ source, expected: current, text: source });
+          setError('');
+        }}
+      >
+        {at('adjunct.shotPromptDraft.copy156')}
+      </button>
+      {!source.trim() && <p>{at('adjunct.shotPromptDraft.copy157')}</p>}
+      {preview && (
+        <div className="shot-prompt-preview">
+          <label className="cloud-control">
+            <span>{at('adjunct.shotPromptDraft.copy158')}</span>
+            <textarea
+              rows={7}
+              value={preview.text}
+              maxLength={24000}
+              onChange={(e) => setPreview((p) => ({ ...p, text: e.target.value }))}
+            />
+          </label>
+          <p>
+            {at('adjunct.shotPromptDraft.copy159')}
+            {preview.text.length}
+            {at('adjunct.shotPromptDraft.copy160')}
+          </p>
+          {stale && <p className="cloud-warning">{at('adjunct.shotPromptDraft.copy161')}</p>}
+          <div className="cloud-actions">
+            <button
+              type="button"
+              disabled={stale || !preview.text.trim() || preview.text.length > 12000}
+              onClick={apply}
+            >
+              {at('adjunct.shotPromptDraft.copy162')}
+            </button>
+            <button type="button" onClick={() => setPreview(null)}>
+              {at('adjunct.shotPromptDraft.copy163')}
+            </button>
+          </div>
+        </div>
+      )}
+      {previous && (
+        <details>
+          <summary>{at('adjunct.shotPromptDraft.copy164')}</summary>
+          <pre>{previous.text || at('adjunct.shotPromptDraft.copy165')}</pre>
+          <button
+            type="button"
+            disabled={current !== previous.applied}
+            onClick={() => {
+              try {
+                store.updateEntity(shot.id, { data: restorePromptPatch(shot) });
+                setError('');
+              } catch (e) {
+                setError(e.message);
+              }
+            }}
+          >
+            {at('adjunct.shotPromptDraft.copy166')}
+          </button>
+          {current !== previous.applied && <p>{at('adjunct.shotPromptDraft.copy167')}</p>}
+        </details>
+      )}
+      {error && (
+        <p className="cloud-error" role="alert">
+          {error}
+        </p>
+      )}
+    </details>
+  );
 }

@@ -1,4 +1,201 @@
-.roughcut{margin:24px 0;padding:20px;border:1px solid #d1d9ce;border-radius:14px;background:#fcfff9;min-width:0}.roughcut h3{margin:5px 0}.roughcut p,.roughcut li{font-size:12px;line-height:1.7;overflow-wrap:anywhere}.roughcut-options{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin:16px 0}.roughcut-options label,.roughcut-options>div{display:grid;gap:6px;font-size:12px}.roughcut-options small{color:#746f64}.roughcut-options select{width:100%;min-width:0;padding:8px}.roughcut .cloud-actions{flex-wrap:wrap}.roughcut-plan{padding:16px;background:#f6f2e8;border-radius:10px;margin:16px 0}.roughcut-plan.ready{background:#edf4e7}.roughcut-timeline{padding-left:24px}.roughcut-timeline li{padding:10px 0;border-bottom:1px solid #dce4d6}.roughcut-timeline li>div{display:grid;gap:4px}.roughcut-timeline button{margin-top:8px;font-size:11px}.roughcut details{margin:14px 0}.roughcut summary{cursor:pointer;font-size:12px}.roughcut-jobs{display:grid;gap:12px}.roughcut-jobs article{padding:14px;border:1px solid #dce2d6;border-radius:10px}.roughcut-jobs article>small{display:block;overflow-wrap:anywhere;color:#746f64;font-size:10px}.roughcut-result{margin-top:14px}.roughcut-result video{display:block;max-width:100%;max-height:440px;margin-top:14px;background:#191b19}.roughcut button{white-space:normal}.roughcut-audio{margin-top:14px}@media(max-width:700px){.roughcut{padding:14px}.roughcut-options{grid-template-columns:1fr 1fr}.roughcut-options>div{grid-column:1/-1}.roughcut .cloud-section-head{flex-wrap:wrap}.roughcut .cloud-actions>button{flex:1 1 150px}.roughcut-plan{padding:12px}}
+.roughcut {
+  margin: 24px 0;
+  padding: 20px;
+  border: 1px solid #d1d9ce;
+  border-radius: 14px;
+  background: #fcfff9;
+  min-width: 0;
+}
+.roughcut h3 {
+  margin: 5px 0;
+}
+.roughcut p,
+.roughcut li {
+  font-size: 12px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.roughcut-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+  margin: 16px 0;
+}
+.roughcut-options label,
+.roughcut-options > div {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+.roughcut-options small {
+  color: #746f64;
+}
+.roughcut-options select {
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+}
+.roughcut .cloud-actions {
+  flex-wrap: wrap;
+}
+.roughcut-plan {
+  padding: 16px;
+  background: #f6f2e8;
+  border-radius: 10px;
+  margin: 16px 0;
+}
+.roughcut-plan.ready {
+  background: #edf4e7;
+}
+.roughcut-timeline {
+  padding-left: 24px;
+}
+.roughcut-timeline li {
+  padding: 10px 0;
+  border-bottom: 1px solid #dce4d6;
+}
+.roughcut-timeline li > div {
+  display: grid;
+  gap: 4px;
+}
+.roughcut-timeline button {
+  margin-top: 8px;
+  font-size: 11px;
+}
+.roughcut details {
+  margin: 14px 0;
+}
+.roughcut summary {
+  cursor: pointer;
+  font-size: 12px;
+}
+.roughcut-jobs {
+  display: grid;
+  gap: 12px;
+}
+.roughcut-jobs article {
+  padding: 14px;
+  border: 1px solid #dce2d6;
+  border-radius: 10px;
+}
+.roughcut-jobs article > small {
+  display: block;
+  overflow-wrap: anywhere;
+  color: #746f64;
+  font-size: 10px;
+}
+.roughcut-result {
+  margin-top: 14px;
+}
+.roughcut-result video {
+  display: block;
+  max-width: 100%;
+  max-height: 440px;
+  margin-top: 14px;
+  background: #191b19;
+}
+.roughcut button {
+  white-space: normal;
+}
+.roughcut-audio {
+  margin-top: 14px;
+}
+@media (max-width: 700px) {
+  .roughcut {
+    padding: 14px;
+  }
+  .roughcut-options {
+    grid-template-columns: 1fr 1fr;
+  }
+  .roughcut-options > div {
+    grid-column: 1/-1;
+  }
+  .roughcut .cloud-section-head {
+    flex-wrap: wrap;
+  }
+  .roughcut .cloud-actions > button {
+    flex: 1 1 150px;
+  }
+  .roughcut-plan {
+    padding: 12px;
+  }
+}
 
-.roughcut-result audio{display:block;width:100%;margin-top:14px}.artifact-download{display:inline-flex;align-items:center;justify-content:center;padding:9px 12px;border:1px solid #cdd8c6;border-radius:7px;color:#314330;background:#fff;text-decoration:none;font-size:12px;min-height:36px}.artifact-download:hover{background:#eaf2e5}.artifact-download:focus-visible{outline:3px solid #709666;outline-offset:3px}@media(max-width:700px){.roughcut .cloud-actions>.artifact-download{flex:1 1 150px}}
-.roughcut-subtitle-choice{margin:16px 0;padding:14px;border:1px solid #d4ddce;border-radius:9px;background:#fff}.roughcut-subtitle-choice>label{display:flex;align-items:flex-start;gap:9px;font-size:13px;font-weight:600;line-height:1.6}.roughcut-subtitle-choice input{margin-top:4px;flex:0 0 auto}.subtitle-style-example{position:relative;width:min(100%,330px);aspect-ratio:16/9;background:linear-gradient(125deg,#223138,#546261);border-radius:7px;overflow:hidden}.subtitle-style-example span{position:absolute;bottom:12%;left:8%;right:8%;text-align:center;font-size:clamp(11px,2.6vw,15px);line-height:1.5;color:white;text-shadow:1px 1px 2px black,-1px -1px 2px black;font-weight:600}.subtitle-cue-text{white-space:pre-wrap}.roughcut-subtitle-plan{padding:10px 0;border-top:1px solid #d4ddce}
+.roughcut-result audio {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+}
+.artifact-download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 12px;
+  border: 1px solid #cdd8c6;
+  border-radius: 7px;
+  color: #314330;
+  background: #fff;
+  text-decoration: none;
+  font-size: 12px;
+  min-height: 36px;
+}
+.artifact-download:hover {
+  background: #eaf2e5;
+}
+.artifact-download:focus-visible {
+  outline: 3px solid #709666;
+  outline-offset: 3px;
+}
+@media (max-width: 700px) {
+  .roughcut .cloud-actions > .artifact-download {
+    flex: 1 1 150px;
+  }
+}
+.roughcut-subtitle-choice {
+  margin: 16px 0;
+  padding: 14px;
+  border: 1px solid #d4ddce;
+  border-radius: 9px;
+  background: #fff;
+}
+.roughcut-subtitle-choice > label {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+.roughcut-subtitle-choice input {
+  margin-top: 4px;
+  flex: 0 0 auto;
+}
+.subtitle-style-example {
+  position: relative;
+  width: min(100%, 330px);
+  aspect-ratio: 16/9;
+  background: linear-gradient(125deg, #223138, #546261);
+  border-radius: 7px;
+  overflow: hidden;
+}
+.subtitle-style-example span {
+  position: absolute;
+  bottom: 12%;
+  left: 8%;
+  right: 8%;
+  text-align: center;
+  font-size: clamp(11px, 2.6vw, 15px);
+  line-height: 1.5;
+  color: white;
+  text-shadow:
+    1px 1px 2px black,
+    -1px -1px 2px black;
+  font-weight: 600;
+}
+.subtitle-cue-text {
+  white-space: pre-wrap;
+}
+.roughcut-subtitle-plan {
+  padding: 10px 0;
+  border-top: 1px solid #d4ddce;
+}

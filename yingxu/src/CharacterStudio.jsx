@@ -1,48 +1,548 @@
-import {legacyReason} from './i18n/legacyReasons.js';
-import {useI18n} from './i18n/I18nProvider.jsx';
-import React,{useEffect,useRef,useState} from 'react';
-import {ArrowRight,Check,ImagePlus,Plus,Shirt,Trash2,Upload,Users} from 'lucide-react';
-import {store,children} from './store.js';
-import {uploadLookImage} from './media-operations.js';
-import {createUploadGate} from './workspace-context.js';
-import {getFile,uploadFile} from './media.js';
-import {gallerySlots,effectiveLook,characterPath,lookReferences,lookShots,addLook,editLook,bindLook,deleteLook} from './character-model.js';
+import { legacyReason } from './i18n/legacyReasons.js';
+import { useI18n } from './i18n/I18nProvider.jsx';
+import React, { useEffect, useRef, useState } from 'react';
+import { ArrowRight, Check, ImagePlus, Plus, Shirt, Trash2, Upload, Users } from 'lucide-react';
+import { store, children } from './store.js';
+import { uploadLookImage } from './media-operations.js';
+import { createUploadGate } from './workspace-context.js';
+import { getFile, uploadFile } from './media.js';
+import {
+  gallerySlots,
+  effectiveLook,
+  characterPath,
+  lookReferences,
+  lookShots,
+  addLook,
+  editLook,
+  bindLook,
+  deleteLook,
+} from './character-model.js';
 import './character-studio.css';
 
-function Field({label,children:content}){
- const {t:lt,locale}=useI18n();return <label className="cs-field"><span>{label}</span>{React.isValidElement(content)?React.cloneElement(content,{'aria-label':label}):content}</label>}
-function Thumb({asset,label}){
- const {t:lt,locale}=useI18n();
-  const [url,setUrl]=useState(''),[error,setError]=useState('');
-  useEffect(()=>{let alive=true,objectUrl='';setUrl('');setError('');if(asset?.data.fileId)getFile(asset.data.fileId).then(blob=>{if(!alive)return;if(blob){objectUrl=URL.createObjectURL(blob);setUrl(objectUrl)}else setError(lt('character.ui7'))}).catch(()=>alive&&setError(lt('character.ui8')));return()=>{alive=false;if(objectUrl)URL.revokeObjectURL(objectUrl)}},[asset?.data.fileId]);
-  return <div className="cs-thumb">{url&&!error?<img src={url} alt={label} onError={()=>setError(lt('character.ui3'))}/>:<><ImagePlus size={25}/><span>{error||(!asset?lt('character.ui13'):asset.data.fileId?lt('character.ui10'):lt('character.ui7'))}</span></>}</div>;
+function Field({ label, children: content }) {
+  const { t: lt, locale } = useI18n();
+  return (
+    <label className="cs-field">
+      <span>{label}</span>
+      {React.isValidElement(content)
+        ? React.cloneElement(content, { 'aria-label': label })
+        : content}
+    </label>
+  );
 }
-function LookDetails({project,character,look,commit}){
- const {t:lt,locale}=useI18n();
-  const uploadGate=useRef(createUploadGate());
-  const [name,setName]=useState(look.name),[description,setDescription]=useState(look.description||''),[busy,setBusy]=useState('');
-  useEffect(()=>{setName(look.name);setDescription(look.description||'')},[look.name,look.description]);
-  const images=project.entities.filter(e=>e.type==='image');
-  const patch=(data)=>commit(p=>editLook(p,character.id,look.id,data));
-  async function upload(slot,file){if(!file)return;await uploadGate.current.run(async()=>{setBusy(slot);try{await uploadLookImage({store,characterId:character.id,lookId:look.id,slot,file,upload:uploadFile});}catch(error){store.notify(legacyReason(error.message,locale))}finally{setBusy('')}})}
-  return <div className="cs-look-details" data-testid="character-look-details"><div className="cs-fields"><Field label={lt('character.ui18')}><input value={name} maxLength={100} onChange={e=>setName(e.target.value)} onBlur={()=>{if(name!==look.name&&!patch({name}))setName(look.name)}} placeholder={lt('character.ui20')}/></Field><Field label={lt('character.ui19')}><textarea value={description} maxLength={3000} rows={3} onChange={e=>setDescription(e.target.value)} onBlur={()=>description!==look.description&&patch({description})} placeholder={lt('character.ui21')}/></Field></div><p className="cs-hint">{lt('character.savedVersion',{version:look.version})}</p><div className="cs-gallery">{Object.keys(gallerySlots).map(slot=>{const label=lt('character.slot.'+slot);const asset=images.find(e=>e.id===look.gallery?.[slot]);return <section key={slot} className="cs-gallery-slot" data-testid={`look-slot-${slot}`}><h4>{lt('character.reference',{label})}</h4><Thumb asset={asset} label={lt('character.referenceAlt',{character:character.title,look:look.name,label})}/><Field label={lt('character.chooseReference',{label})}><select value={asset?.id||''} onChange={e=>patch({gallery:{[slot]:e.target.value}})}><option value="">{lt('legacy.route38')}</option>{images.map(e=><option key={e.id} value={e.id}>{e.title}{e.data.missingFile||!e.data.fileId?lt('character.ui1'):''}</option>)}</select></Field><label className={'cs-upload '+(busy?'busy':'')}><Upload size={14}/>{busy===slot?lt('character.ui9'):lt('character.uploadReference',{label})}<input aria-label={lt('character.uploadReference',{label})} type="file" accept="image/png,image/jpeg,image/webp,image/gif" disabled={!!busy} onChange={e=>{const file=e.target.files?.[0];e.target.value='';upload(slot,file)}}/></label>{asset&&<span className="cs-file-name">{asset.data.fileName||asset.title}</span>}</section>})}</div><p className="cs-hint">{lt('legacy.explain3')}</p></div>;
+function Thumb({ asset, label }) {
+  const { t: lt, locale } = useI18n();
+  const [url, setUrl] = useState(''),
+    [error, setError] = useState('');
+  useEffect(() => {
+    let alive = true,
+      objectUrl = '';
+    setUrl('');
+    setError('');
+    if (asset?.data.fileId)
+      getFile(asset.data.fileId)
+        .then((blob) => {
+          if (!alive) return;
+          if (blob) {
+            objectUrl = URL.createObjectURL(blob);
+            setUrl(objectUrl);
+          } else setError(lt('character.ui7'));
+        })
+        .catch(() => alive && setError(lt('character.ui8')));
+    return () => {
+      alive = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [asset?.data.fileId]);
+  return (
+    <div className="cs-thumb">
+      {url && !error ? (
+        <img src={url} alt={label} onError={() => setError(lt('character.ui3'))} />
+      ) : (
+        <>
+          <ImagePlus size={25} />
+          <span>
+            {error ||
+              (!asset
+                ? lt('character.ui13')
+                : asset.data.fileId
+                  ? lt('character.ui10')
+                  : lt('character.ui7'))}
+          </span>
+        </>
+      )}
+    </div>
+  );
+}
+function LookDetails({ project, character, look, commit }) {
+  const { t: lt, locale } = useI18n();
+  const uploadGate = useRef(createUploadGate());
+  const [name, setName] = useState(look.name),
+    [description, setDescription] = useState(look.description || ''),
+    [busy, setBusy] = useState('');
+  useEffect(() => {
+    setName(look.name);
+    setDescription(look.description || '');
+  }, [look.name, look.description]);
+  const images = project.entities.filter((e) => e.type === 'image');
+  const patch = (data) => commit((p) => editLook(p, character.id, look.id, data));
+  async function upload(slot, file) {
+    if (!file) return;
+    await uploadGate.current.run(async () => {
+      setBusy(slot);
+      try {
+        await uploadLookImage({
+          store,
+          characterId: character.id,
+          lookId: look.id,
+          slot,
+          file,
+          upload: uploadFile,
+        });
+      } catch (error) {
+        store.notify(legacyReason(error.message, locale));
+      } finally {
+        setBusy('');
+      }
+    });
+  }
+  return (
+    <div className="cs-look-details" data-testid="character-look-details">
+      <div className="cs-fields">
+        <Field label={lt('character.ui18')}>
+          <input
+            value={name}
+            maxLength={100}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={() => {
+              if (name !== look.name && !patch({ name })) setName(look.name);
+            }}
+            placeholder={lt('character.ui20')}
+          />
+        </Field>
+        <Field label={lt('character.ui19')}>
+          <textarea
+            value={description}
+            maxLength={3000}
+            rows={3}
+            onChange={(e) => setDescription(e.target.value)}
+            onBlur={() => description !== look.description && patch({ description })}
+            placeholder={lt('character.ui21')}
+          />
+        </Field>
+      </div>
+      <p className="cs-hint">{lt('character.savedVersion', { version: look.version })}</p>
+      <div className="cs-gallery">
+        {Object.keys(gallerySlots).map((slot) => {
+          const label = lt('character.slot.' + slot);
+          const asset = images.find((e) => e.id === look.gallery?.[slot]);
+          return (
+            <section key={slot} className="cs-gallery-slot" data-testid={`look-slot-${slot}`}>
+              <h4>{lt('character.reference', { label })}</h4>
+              <Thumb
+                asset={asset}
+                label={lt('character.referenceAlt', {
+                  character: character.title,
+                  look: look.name,
+                  label,
+                })}
+              />
+              <Field label={lt('character.chooseReference', { label })}>
+                <select
+                  value={asset?.id || ''}
+                  onChange={(e) => patch({ gallery: { [slot]: e.target.value } })}
+                >
+                  <option value="">{lt('legacy.route38')}</option>
+                  {images.map((e) => (
+                    <option key={e.id} value={e.id}>
+                      {e.title}
+                      {e.data.missingFile || !e.data.fileId ? lt('character.ui1') : ''}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <label className={'cs-upload ' + (busy ? 'busy' : '')}>
+                <Upload size={14} />
+                {busy === slot ? lt('character.ui9') : lt('character.uploadReference', { label })}
+                <input
+                  aria-label={lt('character.uploadReference', { label })}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  disabled={!!busy}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    upload(slot, file);
+                  }}
+                />
+              </label>
+              {asset && <span className="cs-file-name">{asset.data.fileName || asset.title}</span>}
+            </section>
+          );
+        })}
+      </div>
+      <p className="cs-hint">{lt('legacy.explain3')}</p>
+    </div>
+  );
 }
 
-export default function CharacterStudio({project,chapterId,onAdd,onInspect}){
- const {t:lt,locale}=useI18n();
-  const characters=project.entities.filter(e=>e.type==='character'),chapters=project.entities.filter(e=>e.type==='chapter').sort((a,b)=>a.order-b.order);
-  const [characterId,setCharacterId]=useState(''),[lookId,setLookId]=useState(''),[name,setName]=useState(''),[deleteOpen,setDeleteOpen]=useState(false),[replacement,setReplacement]=useState(''),[activeChapterId,setActiveChapterId]=useState(chapterId||'');
-  const character=characters.find(e=>e.id===characterId)||characters[0],looks=character?.data.looks||[],look=looks.find(l=>l.id===lookId)||looks[0];
-  const chapter=chapters.find(e=>e.id===(activeChapterId||chapterId))||chapters[0],scenes=chapter?children(project,chapter.id).filter(e=>e.type==='scene'):[];
-  useEffect(()=>{if(chapterId)setActiveChapterId(chapterId)},[chapterId]);
-  useEffect(()=>{if(project.journey?.focusCharacterId){setCharacterId(project.journey.focusCharacterId);setLookId(project.journey.focusLookId||'');}},[project.journey?.focusCharacterId,project.journey?.focusLookId]);
-  const commit=(mutate)=>{let result;const ok=store.editProject(p=>{result=mutate(p);return result.ok});if(!ok&&result?.error)store.notify(legacyReason(result.error,locale));return !!ok};
-  const latest=project.journey?.characterChange,affected=(latest?.shotIds||[]).map(id=>project.entities.find(e=>e.id===id)).filter(Boolean);
-  const references=character&&look?lookReferences(project,character.id,look.id):[],usedShots=character&&look?lookShots(project,character.id,look.id):[];
-  function create(){if(!character)return;const id=`look-${crypto.randomUUID()}`;if(commit(p=>addLook(p,character.id,{id,name}))){setLookId(id);setName('');setDeleteOpen(false)}}
-  const switchCharacter=id=>{setCharacterId(id);setLookId('');setDeleteOpen(false)};
-  return <section className="character-studio" data-testid="character-studio"><header className="cs-header"><div><span className="cs-kicker">CHARACTER CONTINUITY</span><h3><Shirt size={19}/>{lt('legacy.route39')}</h3><p>{lt('legacy.explain1')}</p></div></header>{!character?<div className="cs-empty"><Users size={28}/><h4>{lt('legacy.route40')}</h4><p>{lt('legacy.route41')}</p><button onClick={()=>onAdd('character')}><Plus size={15}/>{lt('legacy.route42')}</button></div>:<><div className="cs-identity"><Field label={lt('character.ui22')}><select value={character.id} onChange={e=>switchCharacter(e.target.value)}>{characters.map(c=><option key={c.id} value={c.id}>{c.title}</option>)}</select></Field><div><strong>{lt('character.fixedIdentity',{name:character.title})}</strong><p>{character.description||lt('character.ui14')}</p><button onClick={()=>onInspect(character.id)}>{lt('legacy.route43')}<ArrowRight size={13}/></button></div></div><div className="cs-looks-head"><h4>{lt('legacy.route44')} <span>{looks.length}</span></h4><span>{lt('legacy.route45')}</span></div><div className="cs-look-tabs" role="group" aria-label={lt('legacy.route53')}>{looks.map(l=><button key={l.id} aria-pressed={l.id===look?.id} data-testid={`character-look-${l.id}`} onClick={()=>{setLookId(l.id);setDeleteOpen(false)}}><Shirt size={14}/>{l.name}{l.id===look?.id&&<Check size={13}/>}</button>)}</div><form className="cs-new-look" onSubmit={e=>{e.preventDefault();create()}}><Field label={lt('character.ui23')}><input value={name} maxLength={100} onChange={e=>setName(e.target.value)} placeholder={looks.length?lt('character.ui15'):lt('character.ui16')}/></Field><button type="submit" disabled={!name.trim()}><Plus size={15}/>{lt('legacy.route46')}</button></form>{look&&<><LookDetails key={`${character.id}:${look.id}`} project={project} character={character} look={look} commit={commit}/><div className="cs-look-use"><span>{lt('character.usage',{name:look.name,shots:usedShots.length,bindings:references.length})}</span><button className="cs-delete-button" onClick={()=>{setDeleteOpen(!deleteOpen);setReplacement('')}}><Trash2 size={13}/>{lt('legacy.route47')}</button></div>{deleteOpen&&<div className="cs-delete-panel" data-testid="look-delete-panel"><h4>{lt('character.beforeDelete',{name:look.name})}</h4><p>{lt('legacy.explain5')}</p>{references.length>0&&<><ul>{references.map(e=><li key={e.id}>{characterPath(project,e.id)}</li>)}</ul><Field label={lt('character.ui24')}><select value={replacement} onChange={e=>setReplacement(e.target.value)}><option value="">{lt('legacy.route48')}</option>{looks.filter(l=>l.id!==look.id).map(l=><option key={l.id} value={l.id}>{lt('character.replaceWith',{name:l.name})}</option>)}</select></Field></>}<div className="cs-actions"><button onClick={()=>setDeleteOpen(false)}>{lt('legacy.route49')}</button><button data-testid="confirm-delete-look" onClick={()=>{if(commit(p=>deleteLook(p,character.id,look.id,replacement))){setDeleteOpen(false);setLookId('')}}}><Trash2 size={14}/>{lt('legacy.route50')}</button></div></div>}</>}
-    <section className="cs-casting" data-testid="character-casting"><div className="cs-looks-head"><h4>{lt('character.cast',{name:character.title})}</h4><span>{lt('legacy.route51')}</span></div>{chapters.length>0&&<Field label={lt('character.ui25')}><select value={chapter?.id||''} onChange={e=>setActiveChapterId(e.target.value)}>{chapters.map(c=><option key={c.id} value={c.id}>{c.title}</option>)}</select></Field>}{!scenes.length?<p className="cs-empty-text">{lt('legacy.explain6')}</p>:!looks.length?<p className="cs-empty-text">{lt('legacy.explain2')}</p>:scenes.map(scene=>{const sceneBinding=scene.data.cast?.find(c=>c.characterId===character.id),sceneLook=looks.find(l=>l.id===sceneBinding?.lookId),shots=children(project,scene.id).filter(e=>e.type==='shot');return <article className="cs-scene" key={scene.id} data-testid={`cast-scene-${scene.id}`}><div className="cs-scene-top"><button className="cs-scene-name" onClick={()=>onInspect(scene.id)}>{scene.title}<ArrowRight size={12}/></button><Field label={lt('character.sceneDefault',{title:scene.title})}><select value={sceneLook?.id||''} onChange={e=>commit(p=>bindLook(p,scene.id,character.id,e.target.value))}><option value="">{lt('legacy.route52')}</option>{looks.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></Field></div>{shots.length?<details className="cs-shots"><summary>{lt('character.inspectBindings',{count:shots.length})}</summary>{shots.map(shot=>{const effective=effectiveLook(project,shot,character.id),currentLook=looks.find(l=>l.id===effective?.lookId),own=shot.data.cast?.find(c=>c.characterId===character.id);return <div key={shot.id} className="cs-shot" data-testid={`cast-shot-${shot.id}`}><div><strong>{shot.title}</strong><span className={own?'override':''}>{currentLook?`${effective.inherited?lt('character.ui12'):lt('character.ui2')} · ${currentLook.name}`:lt('character.ui4')}</span></div><Field label={lt('character.shotOverride',{title:shot.title})}><select value={own?.lookId||''} onChange={e=>commit(p=>bindLook(p,shot.id,character.id,e.target.value))}><option value="">{sceneLook?lt('character.follow',{name:sceneLook.name}):lt('character.ui17')}</option>{looks.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></Field></div>})}</details>:<p className="cs-hint">{lt('legacy.explain4')}</p>}</article>})}</section></>}
-    {latest&&<aside className="cs-impact" data-testid="character-impact" role="status"><h4>{latest.characterName} · {latest.reason}</h4><p>{affected.length?lt('character.affected',{count:affected.length}):lt('character.ui11')}</p>{affected.length>0&&<ul>{affected.map(shot=><li key={shot.id}><button onClick={()=>onInspect(shot.id)}>{characterPath(project,shot.id)}<ArrowRight size={13}/></button><span>{shot.status==='review'?lt('character.ui6'):lt('character.ui5')}</span></li>)}</ul>}<p className="cs-hint">{lt('legacy.explain7')}</p></aside>}
-  </section>;
+export default function CharacterStudio({ project, chapterId, onAdd, onInspect }) {
+  const { t: lt, locale } = useI18n();
+  const characters = project.entities.filter((e) => e.type === 'character'),
+    chapters = project.entities
+      .filter((e) => e.type === 'chapter')
+      .sort((a, b) => a.order - b.order);
+  const [characterId, setCharacterId] = useState(''),
+    [lookId, setLookId] = useState(''),
+    [name, setName] = useState(''),
+    [deleteOpen, setDeleteOpen] = useState(false),
+    [replacement, setReplacement] = useState(''),
+    [activeChapterId, setActiveChapterId] = useState(chapterId || '');
+  const character = characters.find((e) => e.id === characterId) || characters[0],
+    looks = character?.data.looks || [],
+    look = looks.find((l) => l.id === lookId) || looks[0];
+  const chapter = chapters.find((e) => e.id === (activeChapterId || chapterId)) || chapters[0],
+    scenes = chapter ? children(project, chapter.id).filter((e) => e.type === 'scene') : [];
+  useEffect(() => {
+    if (chapterId) setActiveChapterId(chapterId);
+  }, [chapterId]);
+  useEffect(() => {
+    if (project.journey?.focusCharacterId) {
+      setCharacterId(project.journey.focusCharacterId);
+      setLookId(project.journey.focusLookId || '');
+    }
+  }, [project.journey?.focusCharacterId, project.journey?.focusLookId]);
+  const commit = (mutate) => {
+    let result;
+    const ok = store.editProject((p) => {
+      result = mutate(p);
+      return result.ok;
+    });
+    if (!ok && result?.error) store.notify(legacyReason(result.error, locale));
+    return !!ok;
+  };
+  const latest = project.journey?.characterChange,
+    affected = (latest?.shotIds || [])
+      .map((id) => project.entities.find((e) => e.id === id))
+      .filter(Boolean);
+  const references = character && look ? lookReferences(project, character.id, look.id) : [],
+    usedShots = character && look ? lookShots(project, character.id, look.id) : [];
+  function create() {
+    if (!character) return;
+    const id = `look-${crypto.randomUUID()}`;
+    if (commit((p) => addLook(p, character.id, { id, name }))) {
+      setLookId(id);
+      setName('');
+      setDeleteOpen(false);
+    }
+  }
+  const switchCharacter = (id) => {
+    setCharacterId(id);
+    setLookId('');
+    setDeleteOpen(false);
+  };
+  return (
+    <section className="character-studio" data-testid="character-studio">
+      <header className="cs-header">
+        <div>
+          <span className="cs-kicker">CHARACTER CONTINUITY</span>
+          <h3>
+            <Shirt size={19} />
+            {lt('legacy.route39')}
+          </h3>
+          <p>{lt('legacy.explain1')}</p>
+        </div>
+      </header>
+      {!character ? (
+        <div className="cs-empty">
+          <Users size={28} />
+          <h4>{lt('legacy.route40')}</h4>
+          <p>{lt('legacy.route41')}</p>
+          <button onClick={() => onAdd('character')}>
+            <Plus size={15} />
+            {lt('legacy.route42')}
+          </button>
+        </div>
+      ) : (
+        <>
+          <div className="cs-identity">
+            <Field label={lt('character.ui22')}>
+              <select value={character.id} onChange={(e) => switchCharacter(e.target.value)}>
+                {characters.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.title}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <div>
+              <strong>{lt('character.fixedIdentity', { name: character.title })}</strong>
+              <p>{character.description || lt('character.ui14')}</p>
+              <button onClick={() => onInspect(character.id)}>
+                {lt('legacy.route43')}
+                <ArrowRight size={13} />
+              </button>
+            </div>
+          </div>
+          <div className="cs-looks-head">
+            <h4>
+              {lt('legacy.route44')} <span>{looks.length}</span>
+            </h4>
+            <span>{lt('legacy.route45')}</span>
+          </div>
+          <div className="cs-look-tabs" role="group" aria-label={lt('legacy.route53')}>
+            {looks.map((l) => (
+              <button
+                key={l.id}
+                aria-pressed={l.id === look?.id}
+                data-testid={`character-look-${l.id}`}
+                onClick={() => {
+                  setLookId(l.id);
+                  setDeleteOpen(false);
+                }}
+              >
+                <Shirt size={14} />
+                {l.name}
+                {l.id === look?.id && <Check size={13} />}
+              </button>
+            ))}
+          </div>
+          <form
+            className="cs-new-look"
+            onSubmit={(e) => {
+              e.preventDefault();
+              create();
+            }}
+          >
+            <Field label={lt('character.ui23')}>
+              <input
+                value={name}
+                maxLength={100}
+                onChange={(e) => setName(e.target.value)}
+                placeholder={looks.length ? lt('character.ui15') : lt('character.ui16')}
+              />
+            </Field>
+            <button type="submit" disabled={!name.trim()}>
+              <Plus size={15} />
+              {lt('legacy.route46')}
+            </button>
+          </form>
+          {look && (
+            <>
+              <LookDetails
+                key={`${character.id}:${look.id}`}
+                project={project}
+                character={character}
+                look={look}
+                commit={commit}
+              />
+              <div className="cs-look-use">
+                <span>
+                  {lt('character.usage', {
+                    name: look.name,
+                    shots: usedShots.length,
+                    bindings: references.length,
+                  })}
+                </span>
+                <button
+                  className="cs-delete-button"
+                  onClick={() => {
+                    setDeleteOpen(!deleteOpen);
+                    setReplacement('');
+                  }}
+                >
+                  <Trash2 size={13} />
+                  {lt('legacy.route47')}
+                </button>
+              </div>
+              {deleteOpen && (
+                <div className="cs-delete-panel" data-testid="look-delete-panel">
+                  <h4>{lt('character.beforeDelete', { name: look.name })}</h4>
+                  <p>{lt('legacy.explain5')}</p>
+                  {references.length > 0 && (
+                    <>
+                      <ul>
+                        {references.map((e) => (
+                          <li key={e.id}>{characterPath(project, e.id)}</li>
+                        ))}
+                      </ul>
+                      <Field label={lt('character.ui24')}>
+                        <select
+                          value={replacement}
+                          onChange={(e) => setReplacement(e.target.value)}
+                        >
+                          <option value="">{lt('legacy.route48')}</option>
+                          {looks
+                            .filter((l) => l.id !== look.id)
+                            .map((l) => (
+                              <option key={l.id} value={l.id}>
+                                {lt('character.replaceWith', { name: l.name })}
+                              </option>
+                            ))}
+                        </select>
+                      </Field>
+                    </>
+                  )}
+                  <div className="cs-actions">
+                    <button onClick={() => setDeleteOpen(false)}>{lt('legacy.route49')}</button>
+                    <button
+                      data-testid="confirm-delete-look"
+                      onClick={() => {
+                        if (commit((p) => deleteLook(p, character.id, look.id, replacement))) {
+                          setDeleteOpen(false);
+                          setLookId('');
+                        }
+                      }}
+                    >
+                      <Trash2 size={14} />
+                      {lt('legacy.route50')}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+          <section className="cs-casting" data-testid="character-casting">
+            <div className="cs-looks-head">
+              <h4>{lt('character.cast', { name: character.title })}</h4>
+              <span>{lt('legacy.route51')}</span>
+            </div>
+            {chapters.length > 0 && (
+              <Field label={lt('character.ui25')}>
+                <select
+                  value={chapter?.id || ''}
+                  onChange={(e) => setActiveChapterId(e.target.value)}
+                >
+                  {chapters.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.title}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+            {!scenes.length ? (
+              <p className="cs-empty-text">{lt('legacy.explain6')}</p>
+            ) : !looks.length ? (
+              <p className="cs-empty-text">{lt('legacy.explain2')}</p>
+            ) : (
+              scenes.map((scene) => {
+                const sceneBinding = scene.data.cast?.find((c) => c.characterId === character.id),
+                  sceneLook = looks.find((l) => l.id === sceneBinding?.lookId),
+                  shots = children(project, scene.id).filter((e) => e.type === 'shot');
+                return (
+                  <article
+                    className="cs-scene"
+                    key={scene.id}
+                    data-testid={`cast-scene-${scene.id}`}
+                  >
+                    <div className="cs-scene-top">
+                      <button className="cs-scene-name" onClick={() => onInspect(scene.id)}>
+                        {scene.title}
+                        <ArrowRight size={12} />
+                      </button>
+                      <Field label={lt('character.sceneDefault', { title: scene.title })}>
+                        <select
+                          value={sceneLook?.id || ''}
+                          onChange={(e) =>
+                            commit((p) => bindLook(p, scene.id, character.id, e.target.value))
+                          }
+                        >
+                          <option value="">{lt('legacy.route52')}</option>
+                          {looks.map((l) => (
+                            <option key={l.id} value={l.id}>
+                              {l.name}
+                            </option>
+                          ))}
+                        </select>
+                      </Field>
+                    </div>
+                    {shots.length ? (
+                      <details className="cs-shots">
+                        <summary>
+                          {lt('character.inspectBindings', { count: shots.length })}
+                        </summary>
+                        {shots.map((shot) => {
+                          const effective = effectiveLook(project, shot, character.id),
+                            currentLook = looks.find((l) => l.id === effective?.lookId),
+                            own = shot.data.cast?.find((c) => c.characterId === character.id);
+                          return (
+                            <div
+                              key={shot.id}
+                              className="cs-shot"
+                              data-testid={`cast-shot-${shot.id}`}
+                            >
+                              <div>
+                                <strong>{shot.title}</strong>
+                                <span className={own ? 'override' : ''}>
+                                  {currentLook
+                                    ? `${effective.inherited ? lt('character.ui12') : lt('character.ui2')} · ${currentLook.name}`
+                                    : lt('character.ui4')}
+                                </span>
+                              </div>
+                              <Field label={lt('character.shotOverride', { title: shot.title })}>
+                                <select
+                                  value={own?.lookId || ''}
+                                  onChange={(e) =>
+                                    commit((p) =>
+                                      bindLook(p, shot.id, character.id, e.target.value),
+                                    )
+                                  }
+                                >
+                                  <option value="">
+                                    {sceneLook
+                                      ? lt('character.follow', { name: sceneLook.name })
+                                      : lt('character.ui17')}
+                                  </option>
+                                  {looks.map((l) => (
+                                    <option key={l.id} value={l.id}>
+                                      {l.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </Field>
+                            </div>
+                          );
+                        })}
+                      </details>
+                    ) : (
+                      <p className="cs-hint">{lt('legacy.explain4')}</p>
+                    )}
+                  </article>
+                );
+              })
+            )}
+          </section>
+        </>
+      )}
+      {latest && (
+        <aside className="cs-impact" data-testid="character-impact" role="status">
+          <h4>
+            {latest.characterName} · {latest.reason}
+          </h4>
+          <p>
+            {affected.length
+              ? lt('character.affected', { count: affected.length })
+              : lt('character.ui11')}
+          </p>
+          {affected.length > 0 && (
+            <ul>
+              {affected.map((shot) => (
+                <li key={shot.id}>
+                  <button onClick={() => onInspect(shot.id)}>
+                    {characterPath(project, shot.id)}
+                    <ArrowRight size={13} />
+                  </button>
+                  <span>
+                    {shot.status === 'review' ? lt('character.ui6') : lt('character.ui5')}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="cs-hint">{lt('legacy.explain7')}</p>
+        </aside>
+      )}
+    </section>
+  );
 }

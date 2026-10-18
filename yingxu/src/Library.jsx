@@ -1,73 +1,736 @@
-import React,{useEffect,useMemo,useRef,useState,useSyncExternalStore} from 'react';
-import {useI18n} from './i18n/I18nProvider.jsx';
-import {createCloudClient} from './cloud-client.js';
-import {createLibraryController,libraryKey} from './library-commands.js';
-import {TrashMenu,useTrash} from './UniversalTrash.jsx';
-import {ChatDialog} from './QuickChatControls.jsx';
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useI18n } from './i18n/I18nProvider.jsx';
+import { createCloudClient } from './cloud-client.js';
+import { createLibraryController, libraryKey } from './library-commands.js';
+import { TrashMenu, useTrash } from './UniversalTrash.jsx';
+import { ChatDialog } from './QuickChatControls.jsx';
 import MediaLibraryUpload from './MediaLibraryUpload.jsx';
-import {store} from './store.js';
-import {cloudController as cloud} from './cloud-controller.js';
-import {UserRound,MapPin,Box,Files,Image as ImageIcon,Film,Music,SlidersHorizontal,X} from 'lucide-react';
+import { store } from './store.js';
+import { cloudController as cloud } from './cloud-controller.js';
+import {
+  UserRound,
+  MapPin,
+  Box,
+  Files,
+  Image as ImageIcon,
+  Film,
+  Music,
+  SlidersHorizontal,
+  X,
+} from 'lucide-react';
 import StudioHeader from './StudioHeader.jsx';
 import LibraryView from './v2/LibraryView.jsx';
-import {useThumbnailSource} from './use-thumbnail-source.js';
-const TYPE_ICONS={character:UserRound,location:MapPin,prop:Box,file:Files,image:ImageIcon,video:Film,audio:Music};
-function LibraryPanel({detail,title,onClose,children}){const {t}=useI18n(),[mobile,setMobile]=useState(()=>typeof window!=='undefined'&&window.matchMedia('(max-width:760px)').matches);useEffect(()=>{const q=window.matchMedia('(max-width:760px)'),update=()=>setMobile(q.matches);q.addEventListener('change',update);return()=>q.removeEventListener('change',update);},[]);useEffect(()=>{if(!detail||mobile)return;const escape=e=>{if(e.key==='Escape'){e.preventDefault();onClose();}};window.addEventListener('keydown',escape);return()=>window.removeEventListener('keydown',escape);},[detail,mobile,onClose]);return detail&&!mobile?<aside className="libp-detail" aria-label={title}><header><strong>{title}</strong><button onClick={onClose} aria-label={t('trash.close')}><X size={16}/></button></header>{children}</aside>:<ChatDialog title={title} onClose={onClose} className={detail?'library-detail-dialog':''}>{children}</ChatDialog>;}
-const copy=value=>structuredClone(value),link=(project,entity)=>'/?'+new URLSearchParams({project,...(entity?{entity}:{})});
-export function LibraryMedia({row,api,detail=false}){
- const {t}=useI18n(),[failed,setFailed]=useState('');
- const id=row.artifact_id||row.asset_id,kind=row.artifact_id?'artifacts':'assets';
- const imageRead=row.type==='image'||!detail&&row.type==='video';
- const path=imageRead?(detail?row.preview_url:row.thumbnail_url):detail&&id?`/v1/${kind}/${encodeURIComponent(id)}/content`:null;
- let url='';try{if(path)url=api.nativeContentURL(path);}catch{}
- const thumbnail=useThumbnailSource(api,url,{enabled:!detail&&imageRead}),src=detail?url:thumbnail.src;
- const onError=()=>{setFailed(url);thumbnail.finish();};
- if(!imageRead&&!detail)return null;
- if(!url||failed===url)return <span ref={thumbnail.ref} className={detail?'library-preview-error detail':'library-preview-error'}>{t('library.previewUnavailable')}</span>;
- if(imageRead)return src?<img ref={thumbnail.ref} className="library-media" src={src} alt={row.title||''} loading="lazy" decoding="async" onLoad={thumbnail.finish} onError={onError}/>:<span ref={thumbnail.ref} className="library-preview-error" aria-hidden="true"/>;
- if(row.type==='audio')return <audio className="library-media" src={url} controls preload="none" onError={onError}/>;
- return <video className="library-media" src={url} controls playsInline preload="metadata" onError={onError}/>;
+import { useThumbnailSource } from './use-thumbnail-source.js';
+const TYPE_ICONS = {
+  character: UserRound,
+  location: MapPin,
+  prop: Box,
+  file: Files,
+  image: ImageIcon,
+  video: Film,
+  audio: Music,
+};
+function LibraryPanel({ detail, title, onClose, children }) {
+  const { t } = useI18n(),
+    [mobile, setMobile] = useState(
+      () => typeof window !== 'undefined' && window.matchMedia('(max-width:760px)').matches,
+    );
+  useEffect(() => {
+    const q = window.matchMedia('(max-width:760px)'),
+      update = () => setMobile(q.matches);
+    q.addEventListener('change', update);
+    return () => q.removeEventListener('change', update);
+  }, []);
+  useEffect(() => {
+    if (!detail || mobile) return;
+    const escape = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', escape);
+    return () => window.removeEventListener('keydown', escape);
+  }, [detail, mobile, onClose]);
+  return detail && !mobile ? (
+    <aside className="libp-detail" aria-label={title}>
+      <header>
+        <strong>{title}</strong>
+        <button onClick={onClose} aria-label={t('trash.close')}>
+          <X size={16} />
+        </button>
+      </header>
+      {children}
+    </aside>
+  ) : (
+    <ChatDialog title={title} onClose={onClose} className={detail ? 'library-detail-dialog' : ''}>
+      {children}
+    </ChatDialog>
+  );
 }
-export default function Library({account,active=true}){
- const {t}=useI18n(),trash=useTrash(),identity=useRef(account);identity.current=account;
- useEffect(()=>{if(active)document.title=t('library.title')+' · Inkseq';},[active,t]);
- const workspace=useSyncExternalStore(store.subscribe,store.getState,store.getState);
- const api=useMemo(()=>{const c=createCloudClient();c.setAccount(account);return c;},[account]);
- const controller=useMemo(()=>createLibraryController({api,account,getAccount:()=>identity.current,storage:localStorage}),[api,account]);
- const [showUpload,setShowUpload]=useState(false),[filters,setFilters]=useState({project_id:'',type:'image',work:'',tag:'',q:'',unused:''}),[rows,setRows]=useState([]),[counts,setCounts]=useState(null),[next,setNext]=useState(null),[projects,setProjects]=useState([]),[selected,setSelected]=useState([]),[busy,setBusy]=useState(false),[loading,setLoading]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState(''),[imported,setImported]=useState(null),[dialog,setDialog]=useState(null),[revision,setRevision]=useState(0);
- const epoch=useRef(0),dialogEpoch=useRef(0);
- // Effects can reconnect while the cached page keeps its hook state. Restore
- // the owner fence on setup as well as render; cleanup must retire only its owner.
- useEffect(()=>{identity.current=account;return()=>{if(identity.current===account)identity.current=null;epoch.current++;dialogEpoch.current++;};},[account]);
- let pending=null;try{pending=controller.pending();}catch{pending={};}
- const countsScope=JSON.stringify([account,...Object.entries(filters).filter(([key])=>key!=='type')]);
- const errorText=e=>t(e?.message?.startsWith('library.')?e.message:'library.failed');
- async function load(append=false){const n=++epoch.current,owner=account;setLoading(true);setError('');try{const data=await controller.list(filters,append?next:0);if(n!==epoch.current||identity.current!==owner)return;setRows(old=>append?[...old,...data.items.filter(v=>!old.some(x=>libraryKey(x.target)===libraryKey(v.target)))]:data.items);setNext(data.next_offset);setCounts({scope:countsScope,value:data.counts||null});if(!append)setSelected([]);}catch(e){if(n===epoch.current&&identity.current===owner)setError(errorText(e));}finally{if(n===epoch.current)setLoading(false);}}
- useEffect(()=>{setRows([]);setCounts(null);setProjects([]);setSelected([]);setDialog(null);setError('');const owner=account;let live=true;if(account)(async()=>{const all=[];let offset=0;while(live){const result=await api.projects({limit:100,offset});if(!live||identity.current!==owner)return;const page=result.projects||[];all.push(...page);if(page.length<100)break;offset+=page.length;}if(live)setProjects([...new Map(all.map(p=>[p.id,p])).values()]);})().catch(e=>{if(live&&identity.current===owner)setError(errorText(e));});return()=>{live=false;};},[account,api]);
- useEffect(()=>{if(account&&active)void load();else setLoading(false);return()=>{epoch.current++;};},[account,controller,active,filters,revision]);
- useEffect(()=>{const changed=()=>setRevision(v=>v+1);window.addEventListener('inkseq-trash-changed',changed);return()=>window.removeEventListener('inkseq-trash-changed',changed);},[]);
- const currentRows=rows.filter(row=>selected.includes(libraryKey(row.target))),locked=busy||!!pending||trash?.busy||!!trash?.pending;
- function guardDraft(projectId){const s=store.getState();if(s.workspace.mode==='cloud'&&s.project.id===projectId&&s.workspace.dirty)throw Error('library.localDraft');return s;}
- async function run(fn){if(busy)return;const owner=account;setBusy(true);setError('');setMessage('');setImported(null);try{const result=await fn();if(identity.current!==owner)return;setRevision(v=>v+1);if(result?.state==='blocked')setMessage(t('library.blocked'));else if(result?.state==='pending')setMessage(t('library.pending'));else{if(result?.state==='completed')setImported({project:result.target_project_id,entity:result.entity_ids?.[result.source?.id]});setMessage(result?.state==='opened'?'':t(result?.state==='completed'?'library.copied':'library.saved'));setDialog(null);dialogEpoch.current++;}return result;}catch(e){if(identity.current===owner)setError(errorText(e));}finally{if(identity.current===owner)setBusy(false);}}
- async function actions(items,ops){if(!items.length||new Set(items.map(x=>x.target.project_id)).size!==1||new Set(items.map(x=>x.project_version)).size!==1)throw Error('library.changed');const pid=items[0].target.project_id,before=guardDraft(pid),body={expected_version:items[0].project_version,actions:ops};const result=await controller.actions(pid,body);const live=store.getState();if(identity.current===account&&before.workspace.mode==='cloud'&&before.project.id===pid&&live.workspaceEpoch===before.workspaceEpoch&&!live.workspace.dirty)store.applyCloudCommand(result.project,{account,expectedVersion:before.workspace.serverVersion,version:result.version,expectedProject:before.project});return result;}
- async function detail(row){const n=++dialogEpoch.current;setDialog({kind:'detail',row});try{const value=await controller.usage(row.target);if(n===dialogEpoch.current&&identity.current===account)setDialog({kind:'detail',row:value});}catch(e){if(n===dialogEpoch.current)setError(errorText(e));}}
- async function fileDialog(items){const n=++dialogEpoch.current;setDialog({kind:'file',items,profiles:[],profile:'',variant:''});try{const profiles=[];let offset=0;do{const value=await controller.list({project_id:items[0].target.project_id,type:'profile'},offset);profiles.push(...value.items);offset=value.next_offset;}while(offset!==null);if(n===dialogEpoch.current&&identity.current===account)setDialog({kind:'file',items,profiles,profile:'',variant:''});}catch(e){if(n===dialogEpoch.current)setError(errorText(e));}}
- async function chooseDestination(id){const n=++dialogEpoch.current;setDialog(old=>({...old,destination:id,target:null}));if(!id)return;try{const result=await api.request('/v1/projects/'+encodeURIComponent(id));if(n===dialogEpoch.current&&identity.current===account)setDialog(old=>old?.kind==='import'&&old.destination===id?{...old,target:result}:old);}catch(e){if(n===dialogEpoch.current)setError(errorText(e));}}
- function importDialog(row){dialogEpoch.current++;setDialog({kind:'import',row:copy(row),destination:'',target:null});}
- const dismiss=()=>{if(!busy){dialogEpoch.current++;setDialog(null);}};
- if(!account)return <LibraryView account={account} filters={filters} setFilters={setFilters} next={null}/>;
- const canEdit=!!filters.project_id&&currentRows.length>0,canFile=canEdit&&currentRows.every(r=>['image','video','audio'].includes(r.type));
- const feedback=<>{error&&<p role="alert">{error} <button disabled={loading||busy} onClick={()=>load()}>{t('library.refresh')}</button></p>}{message&&<p role="status">{message}</p>}{imported&&<a href={link(imported.project,imported.entity)}>{t('library.openImported')}</a>}{pending&&<section role="status"><p>{t('library.pending')}</p><button disabled={busy} onClick={()=>run(()=>controller.recover())}>{t('library.check')}</button><button disabled={busy} onClick={()=>run(()=>controller.resume())}>{t('library.resume')}</button></section>}</>;
- const uploadPanel=<section className="card-box"><label className="field"><span>{t('library.source')}</span><select value={filters.project_id} onChange={e=>setFilters({...filters,project_id:e.target.value})}><option value="">{t('library.choose')}</option>{projects.map(p=><option key={p.id} value={p.id}>{p.title}</option>)}</select></label><p>{t('library.uploadHelp')}</p>{!filters.project_id?<p>{t('library.oneStory')}</p>:workspace.workspace.mode==='cloud'&&workspace.project.id===filters.project_id?<><MediaLibraryUpload/><button disabled={locked||!workspace.workspace.dirty} onClick={()=>run(()=>cloud.save())}>{t('library.uploadSave')}</button></>:<button disabled={locked} onClick={()=>run(async()=>{if(store.getState().workspace.dirty)throw Error('library.localDraft');await cloud.open(filters.project_id);return {state:'opened'};})}>{t('library.uploadOpen')}</button>}</section>;
- return <LibraryView account={account} filters={filters} setFilters={setFilters} projects={projects} rows={rows} counts={counts?.scope===countsScope?counts.value:null} selected={selected} setSelected={setSelected} libraryKey={libraryKey} locked={locked} loading={loading} next={next} onMore={()=>load(true)} onRefresh={()=>load()} onUpload={()=>setShowUpload(v=>!v)} showUpload={showUpload} uploadPanel={uploadPanel} onTags={()=>{if(canEdit)setDialog({kind:'tags',items:copy(currentRows),value:''});}} onFile={()=>{if(canFile)fileDialog(copy(currentRows));}} onDelete={()=>{if(canEdit)trash.request('trash',currentRows.map(r=>r.target));}} onDetail={detail} openKey={dialog?.kind==='detail'?libraryKey(dialog.row.target):null} renderMedia={row=><LibraryMedia row={row} api={api}/>} feedback={!dialog&&feedback}>
-{dialog&&<LibraryPanel detail={dialog.kind==='detail'} title={t('library.'+({detail:'detail',tags:'applyTags',rename:'rename',file:'fileInto',import:'import'}[dialog.kind]))} onClose={dismiss}>{feedback}{dialog.kind==='detail'?<>
-<LibraryMedia key={libraryKey(dialog.row.target)} row={dialog.row} api={api} detail/>
-<label className="field"><span>{t('library.name')}</span><div className="library-name-edit"><input readOnly value={dialog.row.title}/>{filters.project_id&&<button className="small" disabled={locked} onClick={()=>setDialog({kind:'rename',items:[copy(dialog.row)],value:dialog.row.title})}>{t('library.rename')}</button>}</div></label>
-<div className="field"><span>{t('library.tagHeading')}</span><div className="libp-tags">{dialog.row.tags.map(tag=><span key={tag} className="tagchip on">{tag}</span>)}{filters.project_id&&<button className="small ghost" disabled={locked} onClick={()=>setDialog({kind:'tags',items:[copy(dialog.row)],value:dialog.row.tags.join(', ')})}>{t('library.applyTags')}</button>}</div></div>
-<small className="muted">{t('trash.kind.'+dialog.row.type)} · {t('library.source')}: {dialog.row.source_project_title||dialog.row.project_title}</small>
-<div className="libp-uses"><b>{t('library.usage')}</b>{dialog.row.usage.map(u=><a className="use-shot" key={u.project_id+':'+u.shot_id} href={link(u.project_id,u.shot_id)}>{t('library.shot')}</a>)}{!dialog.row.usage.length&&<small className="muted">{t('library.unused')}</small>}</div>
-<p className="muted library-usage-note">{t('library.usageNote')}</p>
-<div className="libp-actions"><button className="small" disabled={locked} onClick={()=>importDialog(dialog.row)}>{t('library.import')}</button><a className="small" href={link(dialog.row.target.project_id,dialog.row.target.kind==='entity'?dialog.row.target.id:null)}>{t('library.edit')}</a></div>
-</>:['tags','rename'].includes(dialog.kind)?<form onSubmit={e=>{e.preventDefault();const d=copy(dialog);run(()=>actions(d.items,d.kind==='tags'?[{op:'library.tag',targets:d.items.map(r=>({kind:r.target.kind,id:r.target.id})),tags:[...new Set(d.value.split(',').map(s=>s.trim()).filter(Boolean))]}]:[{op:'library.rename',target:{kind:d.items[0].target.kind,id:d.items[0].target.id},title:d.value}]))}}><label>{t(dialog.kind==='tags'?'library.tags':'library.name')}<input value={dialog.value} disabled={locked} onChange={e=>setDialog({...dialog,value:e.target.value})}/></label><button disabled={locked||dialog.kind==='rename'&&!dialog.value.trim()}>{t('library.save')}</button></form>:dialog.kind==='file'?<><label>{t('library.chooseProfile')}<select disabled={locked} value={dialog.profile} onChange={e=>setDialog({...dialog,profile:e.target.value})}><option value="">{t('library.chooseProfile')}</option>{dialog.profiles.map(p=><option key={p.target.id} value={p.target.id}>{p.title}</option>)}</select></label><button disabled={locked||!dialog.profile} onClick={()=>{const d=copy(dialog);run(()=>actions(d.items,[{op:'library.file',profile_id:d.profile,targets:d.items.map(r=>({kind:r.target.kind,id:r.target.id}))}]));}}>{t('library.fileInto')}</button></>:<><p>{dialog.row.title}</p><label>{t('library.destination')}<select disabled={locked} value={dialog.destination} onChange={e=>chooseDestination(e.target.value)}><option value="">{t('library.choose')}</option>{projects.filter(p=>p.id!==dialog.row.target.project_id).map(p=><option key={p.id} value={p.id}>{p.title}</option>)}</select></label><button disabled={locked||!dialog.target} onClick={()=>{const d=copy(dialog);run(()=>{guardDraft(d.destination);return controller.startImport({source:{...d.row.target,expected_version:d.row.project_version},target_project_id:d.destination,expected_project_version:d.target.version});});}}>{t('library.copy')}</button></>}<button disabled={busy} onClick={dismiss}>{t('library.close')}</button></LibraryPanel>}
- </LibraryView>;
+const copy = (value) => structuredClone(value),
+  link = (project, entity) =>
+    '/?' + new URLSearchParams({ project, ...(entity ? { entity } : {}) });
+export function LibraryMedia({ row, api, detail = false }) {
+  const { t } = useI18n(),
+    [failed, setFailed] = useState('');
+  const id = row.artifact_id || row.asset_id,
+    kind = row.artifact_id ? 'artifacts' : 'assets';
+  const imageRead = row.type === 'image' || (!detail && row.type === 'video');
+  const path = imageRead
+    ? detail
+      ? row.preview_url
+      : row.thumbnail_url
+    : detail && id
+      ? `/v1/${kind}/${encodeURIComponent(id)}/content`
+      : null;
+  let url = '';
+  try {
+    if (path) url = api.nativeContentURL(path);
+  } catch {}
+  const thumbnail = useThumbnailSource(api, url, { enabled: !detail && imageRead }),
+    src = detail ? url : thumbnail.src;
+  const onError = () => {
+    setFailed(url);
+    thumbnail.finish();
+  };
+  if (!imageRead && !detail) return null;
+  if (!url || failed === url)
+    return (
+      <span
+        ref={thumbnail.ref}
+        className={detail ? 'library-preview-error detail' : 'library-preview-error'}
+      >
+        {t('library.previewUnavailable')}
+      </span>
+    );
+  if (imageRead)
+    return src ? (
+      <img
+        ref={thumbnail.ref}
+        className="library-media"
+        src={src}
+        alt={row.title || ''}
+        loading="lazy"
+        decoding="async"
+        onLoad={thumbnail.finish}
+        onError={onError}
+      />
+    ) : (
+      <span ref={thumbnail.ref} className="library-preview-error" aria-hidden="true" />
+    );
+  if (row.type === 'audio')
+    return <audio className="library-media" src={url} controls preload="none" onError={onError} />;
+  return (
+    <video
+      className="library-media"
+      src={url}
+      controls
+      playsInline
+      preload="metadata"
+      onError={onError}
+    />
+  );
+}
+export default function Library({ account, active = true }) {
+  const { t } = useI18n(),
+    trash = useTrash(),
+    identity = useRef(account);
+  identity.current = account;
+  useEffect(() => {
+    if (active) document.title = t('library.title') + ' · Inkseq';
+  }, [active, t]);
+  const workspace = useSyncExternalStore(store.subscribe, store.getState, store.getState);
+  const api = useMemo(() => {
+    const c = createCloudClient();
+    c.setAccount(account);
+    return c;
+  }, [account]);
+  const controller = useMemo(
+    () =>
+      createLibraryController({
+        api,
+        account,
+        getAccount: () => identity.current,
+        storage: localStorage,
+      }),
+    [api, account],
+  );
+  const [showUpload, setShowUpload] = useState(false),
+    [filters, setFilters] = useState({
+      project_id: '',
+      type: 'image',
+      work: '',
+      tag: '',
+      q: '',
+      unused: '',
+    }),
+    [rows, setRows] = useState([]),
+    [counts, setCounts] = useState(null),
+    [next, setNext] = useState(null),
+    [projects, setProjects] = useState([]),
+    [selected, setSelected] = useState([]),
+    [busy, setBusy] = useState(false),
+    [loading, setLoading] = useState(false),
+    [error, setError] = useState(''),
+    [message, setMessage] = useState(''),
+    [imported, setImported] = useState(null),
+    [dialog, setDialog] = useState(null),
+    [revision, setRevision] = useState(0);
+  const epoch = useRef(0),
+    dialogEpoch = useRef(0);
+  // Effects can reconnect while the cached page keeps its hook state. Restore
+  // the owner fence on setup as well as render; cleanup must retire only its owner.
+  useEffect(() => {
+    identity.current = account;
+    return () => {
+      if (identity.current === account) identity.current = null;
+      epoch.current++;
+      dialogEpoch.current++;
+    };
+  }, [account]);
+  let pending = null;
+  try {
+    pending = controller.pending();
+  } catch {
+    pending = {};
+  }
+  const countsScope = JSON.stringify([
+    account,
+    ...Object.entries(filters).filter(([key]) => key !== 'type'),
+  ]);
+  const errorText = (e) => t(e?.message?.startsWith('library.') ? e.message : 'library.failed');
+  async function load(append = false) {
+    const n = ++epoch.current,
+      owner = account;
+    setLoading(true);
+    setError('');
+    try {
+      const data = await controller.list(filters, append ? next : 0);
+      if (n !== epoch.current || identity.current !== owner) return;
+      setRows((old) =>
+        append
+          ? [
+              ...old,
+              ...data.items.filter(
+                (v) => !old.some((x) => libraryKey(x.target) === libraryKey(v.target)),
+              ),
+            ]
+          : data.items,
+      );
+      setNext(data.next_offset);
+      setCounts({ scope: countsScope, value: data.counts || null });
+      if (!append) setSelected([]);
+    } catch (e) {
+      if (n === epoch.current && identity.current === owner) setError(errorText(e));
+    } finally {
+      if (n === epoch.current) setLoading(false);
+    }
+  }
+  useEffect(() => {
+    setRows([]);
+    setCounts(null);
+    setProjects([]);
+    setSelected([]);
+    setDialog(null);
+    setError('');
+    const owner = account;
+    let live = true;
+    if (account)
+      (async () => {
+        const all = [];
+        let offset = 0;
+        while (live) {
+          const result = await api.projects({ limit: 100, offset });
+          if (!live || identity.current !== owner) return;
+          const page = result.projects || [];
+          all.push(...page);
+          if (page.length < 100) break;
+          offset += page.length;
+        }
+        if (live) setProjects([...new Map(all.map((p) => [p.id, p])).values()]);
+      })().catch((e) => {
+        if (live && identity.current === owner) setError(errorText(e));
+      });
+    return () => {
+      live = false;
+    };
+  }, [account, api]);
+  useEffect(() => {
+    if (account && active) void load();
+    else setLoading(false);
+    return () => {
+      epoch.current++;
+    };
+  }, [account, controller, active, filters, revision]);
+  useEffect(() => {
+    const changed = () => setRevision((v) => v + 1);
+    window.addEventListener('inkseq-trash-changed', changed);
+    return () => window.removeEventListener('inkseq-trash-changed', changed);
+  }, []);
+  const currentRows = rows.filter((row) => selected.includes(libraryKey(row.target))),
+    locked = busy || !!pending || trash?.busy || !!trash?.pending;
+  function guardDraft(projectId) {
+    const s = store.getState();
+    if (s.workspace.mode === 'cloud' && s.project.id === projectId && s.workspace.dirty)
+      throw Error('library.localDraft');
+    return s;
+  }
+  async function run(fn) {
+    if (busy) return;
+    const owner = account;
+    setBusy(true);
+    setError('');
+    setMessage('');
+    setImported(null);
+    try {
+      const result = await fn();
+      if (identity.current !== owner) return;
+      setRevision((v) => v + 1);
+      if (result?.state === 'blocked') setMessage(t('library.blocked'));
+      else if (result?.state === 'pending') setMessage(t('library.pending'));
+      else {
+        if (result?.state === 'completed')
+          setImported({
+            project: result.target_project_id,
+            entity: result.entity_ids?.[result.source?.id],
+          });
+        setMessage(
+          result?.state === 'opened'
+            ? ''
+            : t(result?.state === 'completed' ? 'library.copied' : 'library.saved'),
+        );
+        setDialog(null);
+        dialogEpoch.current++;
+      }
+      return result;
+    } catch (e) {
+      if (identity.current === owner) setError(errorText(e));
+    } finally {
+      if (identity.current === owner) setBusy(false);
+    }
+  }
+  async function actions(items, ops) {
+    if (
+      !items.length ||
+      new Set(items.map((x) => x.target.project_id)).size !== 1 ||
+      new Set(items.map((x) => x.project_version)).size !== 1
+    )
+      throw Error('library.changed');
+    const pid = items[0].target.project_id,
+      before = guardDraft(pid),
+      body = { expected_version: items[0].project_version, actions: ops };
+    const result = await controller.actions(pid, body);
+    const live = store.getState();
+    if (
+      identity.current === account &&
+      before.workspace.mode === 'cloud' &&
+      before.project.id === pid &&
+      live.workspaceEpoch === before.workspaceEpoch &&
+      !live.workspace.dirty
+    )
+      store.applyCloudCommand(result.project, {
+        account,
+        expectedVersion: before.workspace.serverVersion,
+        version: result.version,
+        expectedProject: before.project,
+      });
+    return result;
+  }
+  async function detail(row) {
+    const n = ++dialogEpoch.current;
+    setDialog({ kind: 'detail', row });
+    try {
+      const value = await controller.usage(row.target);
+      if (n === dialogEpoch.current && identity.current === account)
+        setDialog({ kind: 'detail', row: value });
+    } catch (e) {
+      if (n === dialogEpoch.current) setError(errorText(e));
+    }
+  }
+  async function fileDialog(items) {
+    const n = ++dialogEpoch.current;
+    setDialog({ kind: 'file', items, profiles: [], profile: '', variant: '' });
+    try {
+      const profiles = [];
+      let offset = 0;
+      do {
+        const value = await controller.list(
+          { project_id: items[0].target.project_id, type: 'profile' },
+          offset,
+        );
+        profiles.push(...value.items);
+        offset = value.next_offset;
+      } while (offset !== null);
+      if (n === dialogEpoch.current && identity.current === account)
+        setDialog({ kind: 'file', items, profiles, profile: '', variant: '' });
+    } catch (e) {
+      if (n === dialogEpoch.current) setError(errorText(e));
+    }
+  }
+  async function chooseDestination(id) {
+    const n = ++dialogEpoch.current;
+    setDialog((old) => ({ ...old, destination: id, target: null }));
+    if (!id) return;
+    try {
+      const result = await api.request('/v1/projects/' + encodeURIComponent(id));
+      if (n === dialogEpoch.current && identity.current === account)
+        setDialog((old) =>
+          old?.kind === 'import' && old.destination === id ? { ...old, target: result } : old,
+        );
+    } catch (e) {
+      if (n === dialogEpoch.current) setError(errorText(e));
+    }
+  }
+  function importDialog(row) {
+    dialogEpoch.current++;
+    setDialog({ kind: 'import', row: copy(row), destination: '', target: null });
+  }
+  const dismiss = () => {
+    if (!busy) {
+      dialogEpoch.current++;
+      setDialog(null);
+    }
+  };
+  if (!account)
+    return <LibraryView account={account} filters={filters} setFilters={setFilters} next={null} />;
+  const canEdit = !!filters.project_id && currentRows.length > 0,
+    canFile = canEdit && currentRows.every((r) => ['image', 'video', 'audio'].includes(r.type));
+  const feedback = (
+    <>
+      {error && (
+        <p role="alert">
+          {error}{' '}
+          <button disabled={loading || busy} onClick={() => load()}>
+            {t('library.refresh')}
+          </button>
+        </p>
+      )}
+      {message && <p role="status">{message}</p>}
+      {imported && (
+        <a href={link(imported.project, imported.entity)}>{t('library.openImported')}</a>
+      )}
+      {pending && (
+        <section role="status">
+          <p>{t('library.pending')}</p>
+          <button disabled={busy} onClick={() => run(() => controller.recover())}>
+            {t('library.check')}
+          </button>
+          <button disabled={busy} onClick={() => run(() => controller.resume())}>
+            {t('library.resume')}
+          </button>
+        </section>
+      )}
+    </>
+  );
+  const uploadPanel = (
+    <section className="card-box">
+      <label className="field">
+        <span>{t('library.source')}</span>
+        <select
+          value={filters.project_id}
+          onChange={(e) => setFilters({ ...filters, project_id: e.target.value })}
+        >
+          <option value="">{t('library.choose')}</option>
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.title}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p>{t('library.uploadHelp')}</p>
+      {!filters.project_id ? (
+        <p>{t('library.oneStory')}</p>
+      ) : workspace.workspace.mode === 'cloud' && workspace.project.id === filters.project_id ? (
+        <>
+          <MediaLibraryUpload />
+          <button
+            disabled={locked || !workspace.workspace.dirty}
+            onClick={() => run(() => cloud.save())}
+          >
+            {t('library.uploadSave')}
+          </button>
+        </>
+      ) : (
+        <button
+          disabled={locked}
+          onClick={() =>
+            run(async () => {
+              if (store.getState().workspace.dirty) throw Error('library.localDraft');
+              await cloud.open(filters.project_id);
+              return { state: 'opened' };
+            })
+          }
+        >
+          {t('library.uploadOpen')}
+        </button>
+      )}
+    </section>
+  );
+  return (
+    <LibraryView
+      account={account}
+      filters={filters}
+      setFilters={setFilters}
+      projects={projects}
+      rows={rows}
+      counts={counts?.scope === countsScope ? counts.value : null}
+      selected={selected}
+      setSelected={setSelected}
+      libraryKey={libraryKey}
+      locked={locked}
+      loading={loading}
+      next={next}
+      onMore={() => load(true)}
+      onRefresh={() => load()}
+      onUpload={() => setShowUpload((v) => !v)}
+      showUpload={showUpload}
+      uploadPanel={uploadPanel}
+      onTags={() => {
+        if (canEdit) setDialog({ kind: 'tags', items: copy(currentRows), value: '' });
+      }}
+      onFile={() => {
+        if (canFile) fileDialog(copy(currentRows));
+      }}
+      onDelete={() => {
+        if (canEdit)
+          trash.request(
+            'trash',
+            currentRows.map((r) => r.target),
+          );
+      }}
+      onDetail={detail}
+      openKey={dialog?.kind === 'detail' ? libraryKey(dialog.row.target) : null}
+      renderMedia={(row) => <LibraryMedia row={row} api={api} />}
+      feedback={!dialog && feedback}
+    >
+      {dialog && (
+        <LibraryPanel
+          detail={dialog.kind === 'detail'}
+          title={t(
+            'library.' +
+              {
+                detail: 'detail',
+                tags: 'applyTags',
+                rename: 'rename',
+                file: 'fileInto',
+                import: 'import',
+              }[dialog.kind],
+          )}
+          onClose={dismiss}
+        >
+          {feedback}
+          {dialog.kind === 'detail' ? (
+            <>
+              <LibraryMedia key={libraryKey(dialog.row.target)} row={dialog.row} api={api} detail />
+              <label className="field">
+                <span>{t('library.name')}</span>
+                <div className="library-name-edit">
+                  <input readOnly value={dialog.row.title} />
+                  {filters.project_id && (
+                    <button
+                      className="small"
+                      disabled={locked}
+                      onClick={() =>
+                        setDialog({
+                          kind: 'rename',
+                          items: [copy(dialog.row)],
+                          value: dialog.row.title,
+                        })
+                      }
+                    >
+                      {t('library.rename')}
+                    </button>
+                  )}
+                </div>
+              </label>
+              <div className="field">
+                <span>{t('library.tagHeading')}</span>
+                <div className="libp-tags">
+                  {dialog.row.tags.map((tag) => (
+                    <span key={tag} className="tagchip on">
+                      {tag}
+                    </span>
+                  ))}
+                  {filters.project_id && (
+                    <button
+                      className="small ghost"
+                      disabled={locked}
+                      onClick={() =>
+                        setDialog({
+                          kind: 'tags',
+                          items: [copy(dialog.row)],
+                          value: dialog.row.tags.join(', '),
+                        })
+                      }
+                    >
+                      {t('library.applyTags')}
+                    </button>
+                  )}
+                </div>
+              </div>
+              <small className="muted">
+                {t('trash.kind.' + dialog.row.type)} · {t('library.source')}:{' '}
+                {dialog.row.source_project_title || dialog.row.project_title}
+              </small>
+              <div className="libp-uses">
+                <b>{t('library.usage')}</b>
+                {dialog.row.usage.map((u) => (
+                  <a
+                    className="use-shot"
+                    key={u.project_id + ':' + u.shot_id}
+                    href={link(u.project_id, u.shot_id)}
+                  >
+                    {t('library.shot')}
+                  </a>
+                ))}
+                {!dialog.row.usage.length && <small className="muted">{t('library.unused')}</small>}
+              </div>
+              <p className="muted library-usage-note">{t('library.usageNote')}</p>
+              <div className="libp-actions">
+                <button
+                  className="small"
+                  disabled={locked}
+                  onClick={() => importDialog(dialog.row)}
+                >
+                  {t('library.import')}
+                </button>
+                <a
+                  className="small"
+                  href={link(
+                    dialog.row.target.project_id,
+                    dialog.row.target.kind === 'entity' ? dialog.row.target.id : null,
+                  )}
+                >
+                  {t('library.edit')}
+                </a>
+              </div>
+            </>
+          ) : ['tags', 'rename'].includes(dialog.kind) ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const d = copy(dialog);
+                run(() =>
+                  actions(
+                    d.items,
+                    d.kind === 'tags'
+                      ? [
+                          {
+                            op: 'library.tag',
+                            targets: d.items.map((r) => ({ kind: r.target.kind, id: r.target.id })),
+                            tags: [
+                              ...new Set(
+                                d.value
+                                  .split(',')
+                                  .map((s) => s.trim())
+                                  .filter(Boolean),
+                              ),
+                            ],
+                          },
+                        ]
+                      : [
+                          {
+                            op: 'library.rename',
+                            target: { kind: d.items[0].target.kind, id: d.items[0].target.id },
+                            title: d.value,
+                          },
+                        ],
+                  ),
+                );
+              }}
+            >
+              <label>
+                {t(dialog.kind === 'tags' ? 'library.tags' : 'library.name')}
+                <input
+                  value={dialog.value}
+                  disabled={locked}
+                  onChange={(e) => setDialog({ ...dialog, value: e.target.value })}
+                />
+              </label>
+              <button disabled={locked || (dialog.kind === 'rename' && !dialog.value.trim())}>
+                {t('library.save')}
+              </button>
+            </form>
+          ) : dialog.kind === 'file' ? (
+            <>
+              <label>
+                {t('library.chooseProfile')}
+                <select
+                  disabled={locked}
+                  value={dialog.profile}
+                  onChange={(e) => setDialog({ ...dialog, profile: e.target.value })}
+                >
+                  <option value="">{t('library.chooseProfile')}</option>
+                  {dialog.profiles.map((p) => (
+                    <option key={p.target.id} value={p.target.id}>
+                      {p.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                disabled={locked || !dialog.profile}
+                onClick={() => {
+                  const d = copy(dialog);
+                  run(() =>
+                    actions(d.items, [
+                      {
+                        op: 'library.file',
+                        profile_id: d.profile,
+                        targets: d.items.map((r) => ({ kind: r.target.kind, id: r.target.id })),
+                      },
+                    ]),
+                  );
+                }}
+              >
+                {t('library.fileInto')}
+              </button>
+            </>
+          ) : (
+            <>
+              <p>{dialog.row.title}</p>
+              <label>
+                {t('library.destination')}
+                <select
+                  disabled={locked}
+                  value={dialog.destination}
+                  onChange={(e) => chooseDestination(e.target.value)}
+                >
+                  <option value="">{t('library.choose')}</option>
+                  {projects
+                    .filter((p) => p.id !== dialog.row.target.project_id)
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.title}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <button
+                disabled={locked || !dialog.target}
+                onClick={() => {
+                  const d = copy(dialog);
+                  run(() => {
+                    guardDraft(d.destination);
+                    return controller.startImport({
+                      source: { ...d.row.target, expected_version: d.row.project_version },
+                      target_project_id: d.destination,
+                      expected_project_version: d.target.version,
+                    });
+                  });
+                }}
+              >
+                {t('library.copy')}
+              </button>
+            </>
+          )}
+          <button disabled={busy} onClick={dismiss}>
+            {t('library.close')}
+          </button>
+        </LibraryPanel>
+      )}
+    </LibraryView>
+  );
 }

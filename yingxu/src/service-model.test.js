@@ -1,15 +1,128 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {executionStatus,inputUsage} from './service-model.js';
-const entity=(id,type,data={})=>({id,type,title:id,data});
-const limits={max_images:9,max_videos:3,max_audios:3,max_total_files:12,min_clip_duration:2,max_clip_duration:15,max_total_video_duration:15,max_total_audio_duration:15,max_guides:8};
-test('service state never equates login, mock or enabled execution with verified model quality',()=>{assert.equal(executionStatus(null).kind,'unknown');assert.equal(executionStatus({execution_enabled:false,simulation:true}).kind,'offline');assert.equal(executionStatus({execution_enabled:true,simulation:true}).kind,'simulation');assert.match(executionStatus({execution_enabled:true,simulation:false}).detail,/不等于已验证所有配置/);});
-test('reference usage deduplicates common links, uses explicit clip and reports aggregate duration',()=>{const project={entities:[entity('shot','shot',{referenceRanges:{l1:{start:1,end:9,fileId:'a'},l2:{start:1,end:9,fileId:'a'}}}),entity('a','video',{fileId:'a',metadata:{duration:60}}),entity('b','video',{fileId:'b',metadata:{source_duration:9}}),entity('sound','audio',{fileId:'s'})],links:[{id:'l1',source:'a',target:'shot',role:'motion'},{id:'l2',source:'a',target:'shot',role:'reference'},{id:'l3',source:'b',target:'shot',role:'reference'},{id:'l4',source:'sound',target:'shot',role:'audio'}]},before=structuredClone(project),result=inputUsage(project,'shot',{limits});assert.equal(result.groups.video.count,2);assert.equal(result.groups.video.duration,17);assert.equal(result.unknownDurations,1);assert.match(result.issues.join(' '),/合计17秒，超过15秒/);assert.deepEqual(project,before);});
-test('missing files and stale ranges stay visible without being counted as ready inputs',()=>{const project={entities:[entity('shot','shot',{referenceRanges:{l:{start:1,end:4,fileId:'old'}},h3:{guides:Array(9).fill({media_id:'a'})}}),entity('a','video',{fileId:'new',metadata:{duration:10}}),entity('missing','image',{})],links:[{id:'l',source:'a',target:'shot',role:'motion'},{id:'m',source:'missing',target:'shot',role:'reference'}]},result=inputUsage(project,'shot',{limits});assert.equal(result.total,0);assert.match(result.issues.join(' '),/选段已过期/);assert.match(result.issues.join(' '),/缺少文件/);assert.match(result.issues.join(' '),/锚点超过8/);});
+import { executionStatus, inputUsage } from './service-model.js';
+const entity = (id, type, data = {}) => ({ id, type, title: id, data });
+const limits = {
+  max_images: 9,
+  max_videos: 3,
+  max_audios: 3,
+  max_total_files: 12,
+  min_clip_duration: 2,
+  max_clip_duration: 15,
+  max_total_video_duration: 15,
+  max_total_audio_duration: 15,
+  max_guides: 8,
+};
+test('service state never equates login, mock or enabled execution with verified model quality', () => {
+  assert.equal(executionStatus(null).kind, 'unknown');
+  assert.equal(executionStatus({ execution_enabled: false, simulation: true }).kind, 'offline');
+  assert.equal(executionStatus({ execution_enabled: true, simulation: true }).kind, 'simulation');
+  assert.match(
+    executionStatus({ execution_enabled: true, simulation: false }).detail,
+    /不等于已验证所有配置/,
+  );
+});
+test('reference usage deduplicates common links, uses explicit clip and reports aggregate duration', () => {
+  const project = {
+      entities: [
+        entity('shot', 'shot', {
+          referenceRanges: {
+            l1: { start: 1, end: 9, fileId: 'a' },
+            l2: { start: 1, end: 9, fileId: 'a' },
+          },
+        }),
+        entity('a', 'video', { fileId: 'a', metadata: { duration: 60 } }),
+        entity('b', 'video', { fileId: 'b', metadata: { source_duration: 9 } }),
+        entity('sound', 'audio', { fileId: 's' }),
+      ],
+      links: [
+        { id: 'l1', source: 'a', target: 'shot', role: 'motion' },
+        { id: 'l2', source: 'a', target: 'shot', role: 'reference' },
+        { id: 'l3', source: 'b', target: 'shot', role: 'reference' },
+        { id: 'l4', source: 'sound', target: 'shot', role: 'audio' },
+      ],
+    },
+    before = structuredClone(project),
+    result = inputUsage(project, 'shot', { limits });
+  assert.equal(result.groups.video.count, 2);
+  assert.equal(result.groups.video.duration, 17);
+  assert.equal(result.unknownDurations, 1);
+  assert.match(result.issues.join(' '), /合计17秒，超过15秒/);
+  assert.deepEqual(project, before);
+});
+test('missing files and stale ranges stay visible without being counted as ready inputs', () => {
+  const project = {
+      entities: [
+        entity('shot', 'shot', {
+          referenceRanges: { l: { start: 1, end: 4, fileId: 'old' } },
+          h3: { guides: Array(9).fill({ media_id: 'a' }) },
+        }),
+        entity('a', 'video', { fileId: 'new', metadata: { duration: 10 } }),
+        entity('missing', 'image', {}),
+      ],
+      links: [
+        { id: 'l', source: 'a', target: 'shot', role: 'motion' },
+        { id: 'm', source: 'missing', target: 'shot', role: 'reference' },
+      ],
+    },
+    result = inputUsage(project, 'shot', { limits });
+  assert.equal(result.total, 0);
+  assert.match(result.issues.join(' '), /选段已过期/);
+  assert.match(result.issues.join(' '), /缺少文件/);
+  assert.match(result.issues.join(' '), /锚点超过8/);
+});
 
-test('first and last frame are separate constraints and mixed modes are explained before preflight',()=>{const p={entities:[entity('shot','shot'),entity('image','image',{fileId:'image'})],links:[{id:'f',source:'image',target:'shot',role:'firstFrame'},{id:'l',source:'image',target:'shot',role:'lastFrame'}]};const usage=inputUsage(p,'shot',{mode:'ref',limits});assert.equal(usage.frames,2);assert.equal(usage.total,0);assert.equal(usage.groups.image.count,0);assert.match(usage.issues.join(' '),/不能同时使用首尾帧/);});
-test('full-control input usage keeps supported REF anchors and FL video/soundtrack roles usable',()=>{
-  const p={entities:[entity('shot','shot'),entity('frame','image',{fileId:'frame'}),entity('motion','video',{fileId:'motion',metadata:{duration:5}}),entity('sound','audio',{fileId:'sound',metadata:{duration:3}})],links:[{id:'f',source:'frame',target:'shot',role:'firstFrame'},{id:'v',source:'motion',target:'shot',role:'motion'},{id:'a',source:'sound',target:'shot',role:'audio'}]},input_support={first_frame:true,last_frame:true,reference_images:false,reference_video:false,reference_audio:false,video_conditioning:true,kept_soundtrack:true};
-  const ref=inputUsage(p,'shot',{mode:'ref',limits,input_support:{...input_support,reference_images:true,reference_video:true,reference_audio:true}});assert.equal(ref.frames,1);assert.deepEqual(ref.issues,[]);
-  const fl=inputUsage(p,'shot',{mode:'fl',limits,input_support});assert.equal(fl.groups.video.count,1);assert.equal(fl.groups.audio.count,1);assert.deepEqual(fl.issues,[]);
+test('first and last frame are separate constraints and mixed modes are explained before preflight', () => {
+  const p = {
+    entities: [entity('shot', 'shot'), entity('image', 'image', { fileId: 'image' })],
+    links: [
+      { id: 'f', source: 'image', target: 'shot', role: 'firstFrame' },
+      { id: 'l', source: 'image', target: 'shot', role: 'lastFrame' },
+    ],
+  };
+  const usage = inputUsage(p, 'shot', { mode: 'ref', limits });
+  assert.equal(usage.frames, 2);
+  assert.equal(usage.total, 0);
+  assert.equal(usage.groups.image.count, 0);
+  assert.match(usage.issues.join(' '), /不能同时使用首尾帧/);
+});
+test('full-control input usage keeps supported REF anchors and FL video/soundtrack roles usable', () => {
+  const p = {
+      entities: [
+        entity('shot', 'shot'),
+        entity('frame', 'image', { fileId: 'frame' }),
+        entity('motion', 'video', { fileId: 'motion', metadata: { duration: 5 } }),
+        entity('sound', 'audio', { fileId: 'sound', metadata: { duration: 3 } }),
+      ],
+      links: [
+        { id: 'f', source: 'frame', target: 'shot', role: 'firstFrame' },
+        { id: 'v', source: 'motion', target: 'shot', role: 'motion' },
+        { id: 'a', source: 'sound', target: 'shot', role: 'audio' },
+      ],
+    },
+    input_support = {
+      first_frame: true,
+      last_frame: true,
+      reference_images: false,
+      reference_video: false,
+      reference_audio: false,
+      video_conditioning: true,
+      kept_soundtrack: true,
+    };
+  const ref = inputUsage(p, 'shot', {
+    mode: 'ref',
+    limits,
+    input_support: {
+      ...input_support,
+      reference_images: true,
+      reference_video: true,
+      reference_audio: true,
+    },
+  });
+  assert.equal(ref.frames, 1);
+  assert.deepEqual(ref.issues, []);
+  const fl = inputUsage(p, 'shot', { mode: 'fl', limits, input_support });
+  assert.equal(fl.groups.video.count, 1);
+  assert.equal(fl.groups.audio.count, 1);
+  assert.deepEqual(fl.issues, []);
 });

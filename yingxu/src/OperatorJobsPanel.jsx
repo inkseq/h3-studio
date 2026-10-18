@@ -1,23 +1,310 @@
-import {useI18n} from './i18n/I18nProvider.jsx';
-import {usePageActive} from './AppRouteCache.jsx';
-import React,{useEffect,useRef,useState} from 'react';
-import {cancellationReasons,canCancelJob,jobStatus,jobDiagnostics,selectionCurrent} from './operator-jobs-model.js';
-import {time} from './p4-operator-model.js';
+import { useI18n } from './i18n/I18nProvider.jsx';
+import { usePageActive } from './AppRouteCache.jsx';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  cancellationReasons,
+  canCancelJob,
+  jobStatus,
+  jobDiagnostics,
+  selectionCurrent,
+} from './operator-jobs-model.js';
+import { time } from './p4-operator-model.js';
 
-export function OperatorJobsTable({jobs=[],selected=[],disabled=false,onSelect=()=>{}}){const {t,locale}=useI18n();
-  return <div className="p4-admin-jobs-table"><table><thead><tr><th>{t('operator.copy27')}</th><th>{t('operator.copy28')}</th><th>{t('operator.copy29')}</th><th>{t('operator.copy30')}</th></tr></thead><tbody>{jobs.map(job=><tr key={job.id}><td><input type="checkbox" aria-label={t('operatorPanel.selectJob',{id:job.id})} checked={selected.some(row=>row.id===job.id)} disabled={disabled||!canCancelJob(job)||selected.length>=100&&!selected.some(row=>row.id===job.id)} onChange={event=>onSelect(job,event.target.checked)}/></td><td><b>{job.owner_id}</b><small>#{job.id.slice(0,8)}</small>{job.project_id&&<small>{job.project_id}</small>}</td><td>{jobStatus(job.status,locale)}{jobDiagnostics(job,locale).map((line,index)=><small key={index}>{line}</small>)}<small>{canCancelJob(job)?t('operator.status66'):job.cancellable_reason||t('operator.status67')}</small></td><td>{time(job.created_at,locale)}</td></tr>)}</tbody></table></div>;
+export function OperatorJobsTable({
+  jobs = [],
+  selected = [],
+  disabled = false,
+  onSelect = () => {},
+}) {
+  const { t, locale } = useI18n();
+  return (
+    <div className="p4-admin-jobs-table">
+      <table>
+        <thead>
+          <tr>
+            <th>{t('operator.copy27')}</th>
+            <th>{t('operator.copy28')}</th>
+            <th>{t('operator.copy29')}</th>
+            <th>{t('operator.copy30')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {jobs.map((job) => (
+            <tr key={job.id}>
+              <td>
+                <input
+                  type="checkbox"
+                  aria-label={t('operatorPanel.selectJob', { id: job.id })}
+                  checked={selected.some((row) => row.id === job.id)}
+                  disabled={
+                    disabled ||
+                    !canCancelJob(job) ||
+                    (selected.length >= 100 && !selected.some((row) => row.id === job.id))
+                  }
+                  onChange={(event) => onSelect(job, event.target.checked)}
+                />
+              </td>
+              <td>
+                <b>{job.owner_id}</b>
+                <small>#{job.id.slice(0, 8)}</small>
+                {job.project_id && <small>{job.project_id}</small>}
+              </td>
+              <td>
+                {jobStatus(job.status, locale)}
+                {jobDiagnostics(job, locale).map((line, index) => (
+                  <small key={index}>{line}</small>
+                ))}
+                <small>
+                  {canCancelJob(job)
+                    ? t('operator.status66')
+                    : job.cancellable_reason || t('operator.status67')}
+                </small>
+              </td>
+              <td>{time(job.created_at, locale)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
-function CancelReview({jobs,reason,busy,current,onClose,onConfirm}){const {t,locale}=useI18n();
-  const active=usePageActive(),ref=useRef(),opener=useRef(globalThis.document?.activeElement),label=cancellationReasons.some(item=>item.code===reason)?t('operator.reason.'+reason):reason;
-  useEffect(()=>{const dialog=ref.current;if(!active){dialog.close();return;}dialog.showModal();return()=>{dialog.close();if(opener.current?.isConnected&&!opener.current.closest('[inert]'))opener.current.focus();};},[active]);
-  return <dialog ref={ref} className="p4-dialog" aria-label={t('operator.status120')} onCancel={event=>{event.preventDefault();if(!busy)onClose();}}><header><div><h2>{t('operator.confirmJobs',{count:jobs.length})}</h2><p>{t('operator.copy31')}</p></div><button disabled={busy} aria-label={t('operator.status121')} onClick={onClose}>{t('operator.copy32')}</button></header><ul className="p4-cancel-review">{jobs.map(job=><li key={job.id}>{job.owner_id} · #{job.id.slice(0,8)} · {jobStatus(job.status,locale)}</li>)}</ul><p>{t('operator.copy33')}<b>{label}</b></p><p className="p4-meta">{t('operator.copy34')}</p>{!current&&<p role="alert" className="p4-warning">{t('operator.copy35')}</p>}<footer><button disabled={busy} onClick={onClose}>{t('operator.copy36')}</button><button className="p4-primary" disabled={busy||!current} onClick={onConfirm}>{busy?t('operator.status68'):t('operator.status69')}</button></footer></dialog>;
+function CancelReview({ jobs, reason, busy, current, onClose, onConfirm }) {
+  const { t, locale } = useI18n();
+  const active = usePageActive(),
+    ref = useRef(),
+    opener = useRef(globalThis.document?.activeElement),
+    label = cancellationReasons.some((item) => item.code === reason)
+      ? t('operator.reason.' + reason)
+      : reason;
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!active) {
+      dialog.close();
+      return;
+    }
+    dialog.showModal();
+    return () => {
+      dialog.close();
+      if (opener.current?.isConnected && !opener.current.closest('[inert]')) opener.current.focus();
+    };
+  }, [active]);
+  return (
+    <dialog
+      ref={ref}
+      className="p4-dialog"
+      aria-label={t('operator.status120')}
+      onCancel={(event) => {
+        event.preventDefault();
+        if (!busy) onClose();
+      }}
+    >
+      <header>
+        <div>
+          <h2>{t('operator.confirmJobs', { count: jobs.length })}</h2>
+          <p>{t('operator.copy31')}</p>
+        </div>
+        <button disabled={busy} aria-label={t('operator.status121')} onClick={onClose}>
+          {t('operator.copy32')}
+        </button>
+      </header>
+      <ul className="p4-cancel-review">
+        {jobs.map((job) => (
+          <li key={job.id}>
+            {job.owner_id} · #{job.id.slice(0, 8)} · {jobStatus(job.status, locale)}
+          </li>
+        ))}
+      </ul>
+      <p>
+        {t('operator.copy33')}
+        <b>{label}</b>
+      </p>
+      <p className="p4-meta">{t('operator.copy34')}</p>
+      {!current && (
+        <p role="alert" className="p4-warning">
+          {t('operator.copy35')}
+        </p>
+      )}
+      <footer>
+        <button disabled={busy} onClick={onClose}>
+          {t('operator.copy36')}
+        </button>
+        <button className="p4-primary" disabled={busy || !current} onClick={onConfirm}>
+          {busy ? t('operator.status68') : t('operator.status69')}
+        </button>
+      </footer>
+    </dialog>
+  );
 }
-export default function OperatorJobsPanel({controller,state,busy=false}){const {t,locale}=useI18n();
-  const [selected,setSelected]=useState([]),[reason,setReason]=useState(''),[review,setReview]=useState(null),[notice,setNotice]=useState(''),[error,setError]=useState(''),[loading,setLoading]=useState(false),generation=useRef(0);
-  const value=state.adminJobs,jobs=value?.jobs||[],current=selectionCurrent(selected,jobs),blocked=busy||loading;
-  useEffect(()=>{generation.current++;setSelected([]);setReason('');setReview(null);setNotice('');setError('');void read();return()=>{generation.current++;};},[controller,state.account]);
-  async function read(after_id){const current=generation.current;setLoading(true);setError('');try{await controller.readJobAdmin({after_id});}catch(error){if(generation.current===current)setError(error.message);}finally{if(generation.current===current)setLoading(false);}}
-  function select(job,checked){setReview(null);setNotice('');setSelected(rows=>checked?[...rows.filter(row=>row.id!==job.id),job]:rows.filter(row=>row.id!==job.id));}
-  async function cancel(){if(!review||blocked)return;const current=generation.current;setError('');try{const result=await controller.cancelJobs(review.jobs,review.reason);if(generation.current===current){setNotice(t('operatorPanel.cancelled',{count:result.cancelled_job_ids.length,id:result.command_id}));setSelected([]);setReview(null);}}catch(error){if(generation.current===current){setError(error.message);setReview(null);}}}
-  return <section className="p4-panel p4-admin-jobs" aria-label={t('operator.status122')}><header className="p4-between"><div><h3>{t('operator.copy37')}</h3><p className="p4-meta">{t('operator.copy38')}</p></div><button disabled={blocked} onClick={()=>void read()}>{loading?t('operator.status70'):t('operator.status71')}</button></header>{notice&&<p role="status" className="p4-note">{notice}</p>}{error&&<p role="alert" className="p4-error">{error}</p>}{value?<>{jobs.length?<><div className="p4-between p4-jobs-selection"><button disabled={blocked||!jobs.some(canCancelJob)} onClick={()=>{setSelected(jobs.filter(canCancelJob).slice(0,100));setReview(null);setNotice('');}}>{t('operator.copy39')}</button><span>{t('operatorPanel.selected',{count:selected.length})}</span></div><OperatorJobsTable jobs={jobs} selected={selected} disabled={blocked} onSelect={select}/>{selected.length>0&&!current&&<p role="status" className="p4-warning">{t('operator.copy40')}</p>}</>:<p>{t('operator.copy41')}</p>}{value.next_after_id&&<button disabled={blocked} onClick={()=>void read(value.next_after_id)}>{t('operator.copy42')}</button>}<div className="p4-jobs-actions"><label>{t('operator.copy43')}<select aria-label={t('operator.status123')} value={reason} disabled={blocked} onChange={event=>{setReason(event.target.value);setReview(null);}}><option value="">{t('operator.copy44')}</option>{cancellationReasons.map(item=><option key={item.code} value={item.code}>{t('operator.reason.'+item.code)}</option>)}</select></label><button className="p4-primary" disabled={blocked||!current||!reason} onClick={()=>setReview({jobs:structuredClone(selected),reason})}>{t('operatorPanel.reviewCancel',{count:selected.length||''})}</button></div><small>{t('operator.copy45')}</small></>:<p role="status">{t('operator.copy46')}</p>}{review&&<CancelReview jobs={review.jobs} reason={review.reason} busy={blocked} current={selectionCurrent(review.jobs,jobs)} onClose={()=>setReview(null)} onConfirm={()=>void cancel()}/>}</section>;
+export default function OperatorJobsPanel({ controller, state, busy = false }) {
+  const { t, locale } = useI18n();
+  const [selected, setSelected] = useState([]),
+    [reason, setReason] = useState(''),
+    [review, setReview] = useState(null),
+    [notice, setNotice] = useState(''),
+    [error, setError] = useState(''),
+    [loading, setLoading] = useState(false),
+    generation = useRef(0);
+  const value = state.adminJobs,
+    jobs = value?.jobs || [],
+    current = selectionCurrent(selected, jobs),
+    blocked = busy || loading;
+  useEffect(() => {
+    generation.current++;
+    setSelected([]);
+    setReason('');
+    setReview(null);
+    setNotice('');
+    setError('');
+    void read();
+    return () => {
+      generation.current++;
+    };
+  }, [controller, state.account]);
+  async function read(after_id) {
+    const current = generation.current;
+    setLoading(true);
+    setError('');
+    try {
+      await controller.readJobAdmin({ after_id });
+    } catch (error) {
+      if (generation.current === current) setError(error.message);
+    } finally {
+      if (generation.current === current) setLoading(false);
+    }
+  }
+  function select(job, checked) {
+    setReview(null);
+    setNotice('');
+    setSelected((rows) =>
+      checked
+        ? [...rows.filter((row) => row.id !== job.id), job]
+        : rows.filter((row) => row.id !== job.id),
+    );
+  }
+  async function cancel() {
+    if (!review || blocked) return;
+    const current = generation.current;
+    setError('');
+    try {
+      const result = await controller.cancelJobs(review.jobs, review.reason);
+      if (generation.current === current) {
+        setNotice(
+          t('operatorPanel.cancelled', {
+            count: result.cancelled_job_ids.length,
+            id: result.command_id,
+          }),
+        );
+        setSelected([]);
+        setReview(null);
+      }
+    } catch (error) {
+      if (generation.current === current) {
+        setError(error.message);
+        setReview(null);
+      }
+    }
+  }
+  return (
+    <section className="p4-panel p4-admin-jobs" aria-label={t('operator.status122')}>
+      <header className="p4-between">
+        <div>
+          <h3>{t('operator.copy37')}</h3>
+          <p className="p4-meta">{t('operator.copy38')}</p>
+        </div>
+        <button disabled={blocked} onClick={() => void read()}>
+          {loading ? t('operator.status70') : t('operator.status71')}
+        </button>
+      </header>
+      {notice && (
+        <p role="status" className="p4-note">
+          {notice}
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="p4-error">
+          {error}
+        </p>
+      )}
+      {value ? (
+        <>
+          {jobs.length ? (
+            <>
+              <div className="p4-between p4-jobs-selection">
+                <button
+                  disabled={blocked || !jobs.some(canCancelJob)}
+                  onClick={() => {
+                    setSelected(jobs.filter(canCancelJob).slice(0, 100));
+                    setReview(null);
+                    setNotice('');
+                  }}
+                >
+                  {t('operator.copy39')}
+                </button>
+                <span>{t('operatorPanel.selected', { count: selected.length })}</span>
+              </div>
+              <OperatorJobsTable
+                jobs={jobs}
+                selected={selected}
+                disabled={blocked}
+                onSelect={select}
+              />
+              {selected.length > 0 && !current && (
+                <p role="status" className="p4-warning">
+                  {t('operator.copy40')}
+                </p>
+              )}
+            </>
+          ) : (
+            <p>{t('operator.copy41')}</p>
+          )}
+          {value.next_after_id && (
+            <button disabled={blocked} onClick={() => void read(value.next_after_id)}>
+              {t('operator.copy42')}
+            </button>
+          )}
+          <div className="p4-jobs-actions">
+            <label>
+              {t('operator.copy43')}
+              <select
+                aria-label={t('operator.status123')}
+                value={reason}
+                disabled={blocked}
+                onChange={(event) => {
+                  setReason(event.target.value);
+                  setReview(null);
+                }}
+              >
+                <option value="">{t('operator.copy44')}</option>
+                {cancellationReasons.map((item) => (
+                  <option key={item.code} value={item.code}>
+                    {t('operator.reason.' + item.code)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              className="p4-primary"
+              disabled={blocked || !current || !reason}
+              onClick={() => setReview({ jobs: structuredClone(selected), reason })}
+            >
+              {t('operatorPanel.reviewCancel', { count: selected.length || '' })}
+            </button>
+          </div>
+          <small>{t('operator.copy45')}</small>
+        </>
+      ) : (
+        <p role="status">{t('operator.copy46')}</p>
+      )}
+      {review && (
+        <CancelReview
+          jobs={review.jobs}
+          reason={review.reason}
+          busy={blocked}
+          current={selectionCurrent(review.jobs, jobs)}
+          onClose={() => setReview(null)}
+          onConfirm={() => void cancel()}
+        />
+      )}
+    </section>
+  );
 }

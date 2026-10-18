@@ -1,1 +1,35 @@
-.story-screen button,.modal-actions button,.inspector button{white-space:normal;overflow-wrap:anywhere}.story-account-panel,.inspector .field{min-width:0}.story-account-panel small{overflow-wrap:anywhere}@media(max-width:760px){.story-screen button,.modal button,.inspector button{min-height:44px}.modal-actions,.project-tools,.inspector-tools{flex-wrap:wrap;gap:8px}.node-palette{grid-template-columns:repeat(auto-fit,minmax(100px,1fr))}.modal input,.modal select,.inspector input,.inspector select{max-width:100%}}
+.story-screen button,
+.modal-actions button,
+.inspector button {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.story-account-panel,
+.inspector .field {
+  min-width: 0;
+}
+.story-account-panel small {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .story-screen button,
+  .modal button,
+  .inspector button {
+    min-height: 44px;
+  }
+  .modal-actions,
+  .project-tools,
+  .inspector-tools {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .node-palette {
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+  }
+  .modal input,
+  .modal select,
+  .inspector input,
+  .inspector select {
+    max-width: 100%;
+  }
+}

@@ -21,6 +21,7 @@ class YingxuSnapshotTests(unittest.TestCase):
         self.source, self.target = self.root / "source", self.root / "target"
         (self.source / "src").mkdir(parents=True)
         for name in snapshot.ROOT_FILES:
+            (self.source / name).parent.mkdir(parents=True, exist_ok=True)
             (self.source / name).write_text(
                 "{}" if name.endswith("json") else "source", encoding="utf-8"
             )
@@ -54,6 +55,33 @@ class YingxuSnapshotTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "modified"):
             snapshot.verify_snapshot(self.target)
+
+    def test_only_exact_dev_tooling_files_are_included(self):
+        (self.source / "tools" / "private.mjs").write_text("exclude", encoding="utf-8")
+        result = snapshot.synchronize(self.source, self.target, write=True)
+        for name in (
+            ".prettierignore",
+            ".prettierrc.json",
+            "eslint.config.js",
+            "tools/check-changed.mjs",
+        ):
+            self.assertIn(name, result["files"])
+        self.assertNotIn("tools/private.mjs", result["files"])
+        for name in ("tools/private.mjs", ".env", ".github/workflows/source.yml"):
+            with self.assertRaisesRegex(ValueError, "outside the source allowlist"):
+                snapshot._safe_relative(name)
+
+    def test_dev_tooling_parent_links_are_not_followed(self):
+        tools = self.source / "tools"
+        outside = self.root / "actual-tools"
+        tools.rename(outside)
+        try:
+            tools.symlink_to(outside, target_is_directory=True)
+        except OSError:
+            self.skipTest("This Windows process cannot create symlinks")
+        with self.assertRaisesRegex(ValueError, "link/junction"):
+            snapshot.synchronize(self.source, self.target, write=True)
+        self.assertFalse(self.target.exists())
 
     def test_only_explicit_acceptance_document_is_snapshotted(self):
         (self.source / "src" / "NOVICE-STORIES-AC.md").write_bytes(

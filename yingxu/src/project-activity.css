@@ -1,1 +1,121 @@
-.project-activity{padding:32px;max-width:1100px;margin:auto}.project-activity>header{display:flex;justify-content:space-between;align-items:start;gap:20px}.project-activity h1{font-size:30px;margin:8px 0}.project-activity h2{margin-top:30px;font-size:20px}.project-activity p{color:#647469;line-height:1.65}.project-activity h2 span{font-size:13px;color:#637367}.activity-intro,.agent-link-banner{display:flex;align-items:center;gap:16px;padding:18px;border:1px solid #d3dfd4;border-radius:12px;background:#f3f7ed}.activity-intro span{flex:1;line-height:1.6}.activity-empty{border:1px dashed #cbd7c9;border-radius:12px;padding:24px}.activity-events{padding:0;list-style:none}.activity-events li{padding:18px 0;border-bottom:1px solid #dce4da}.activity-event-head{display:flex;justify-content:space-between;gap:12px;line-height:1.6}.activity-event-head span,.activity-events small{color:#657568;font-size:12px}.activity-targets{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.activity-targets span{font-size:12px;color:#7b857b}.agent-link-banner{margin:16px 24px;flex-wrap:wrap}.agent-link-banner>div:first-child{flex:1}.agent-link-banner>div+div{display:flex;gap:8px}.agent-link-banner p{font-size:13px;margin:6px 0}.agent-header-entry{white-space:nowrap}.agent-public-link{font-size:12px}.project-activity .cloud-job-list{max-height:none}@media(max-width:760px){.project-activity{padding:20px 14px}.project-activity>header,.activity-event-head{flex-direction:column}.activity-intro{flex-wrap:wrap}.agent-link-banner{margin:12px}.agent-header-entry{padding:8px!important;font-size:12px}.agent-link-banner>div+div{flex-wrap:wrap}}
+.project-activity {
+  padding: 32px;
+  max-width: 1100px;
+  margin: auto;
+}
+.project-activity > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 20px;
+}
+.project-activity h1 {
+  font-size: 30px;
+  margin: 8px 0;
+}
+.project-activity h2 {
+  margin-top: 30px;
+  font-size: 20px;
+}
+.project-activity p {
+  color: #647469;
+  line-height: 1.65;
+}
+.project-activity h2 span {
+  font-size: 13px;
+  color: #637367;
+}
+.activity-intro,
+.agent-link-banner {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid #d3dfd4;
+  border-radius: 12px;
+  background: #f3f7ed;
+}
+.activity-intro span {
+  flex: 1;
+  line-height: 1.6;
+}
+.activity-empty {
+  border: 1px dashed #cbd7c9;
+  border-radius: 12px;
+  padding: 24px;
+}
+.activity-events {
+  padding: 0;
+  list-style: none;
+}
+.activity-events li {
+  padding: 18px 0;
+  border-bottom: 1px solid #dce4da;
+}
+.activity-event-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  line-height: 1.6;
+}
+.activity-event-head span,
+.activity-events small {
+  color: #657568;
+  font-size: 12px;
+}
+.activity-targets {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.activity-targets span {
+  font-size: 12px;
+  color: #7b857b;
+}
+.agent-link-banner {
+  margin: 16px 24px;
+  flex-wrap: wrap;
+}
+.agent-link-banner > div:first-child {
+  flex: 1;
+}
+.agent-link-banner > div + div {
+  display: flex;
+  gap: 8px;
+}
+.agent-link-banner p {
+  font-size: 13px;
+  margin: 6px 0;
+}
+.agent-header-entry {
+  white-space: nowrap;
+}
+.agent-public-link {
+  font-size: 12px;
+}
+.project-activity .cloud-job-list {
+  max-height: none;
+}
+@media (max-width: 760px) {
+  .project-activity {
+    padding: 20px 14px;
+  }
+  .project-activity > header,
+  .activity-event-head {
+    flex-direction: column;
+  }
+  .activity-intro {
+    flex-wrap: wrap;
+  }
+  .agent-link-banner {
+    margin: 12px;
+  }
+  .agent-header-entry {
+    padding: 8px !important;
+    font-size: 12px;
+  }
+  .agent-link-banner > div + div {
+    flex-wrap: wrap;
+  }
+}

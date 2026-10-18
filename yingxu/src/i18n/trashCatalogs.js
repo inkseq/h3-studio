@@ -1,16 +1,145 @@
-export const trashCatalogs={en:{'trash.menu':'More actions','trash.title':'Trash','trash.rename':'Rename','trash.edit':'Edit','trash.move':'Move to trash','trash.restore':'Restore','trash.purge':'Delete permanently','trash.empty':'Empty trash','trash.undo':'Undo','trash.moved':'Moved to trash','trash.confirm':'Permanently delete the selected items?','trash.irreversible':'This cannot be undone. Existing task and spending records are retained.','trash.cancel':'Cancel','trash.all':'All kinds','trash.selectAll':'Select all','trash.more':'Load more','trash.none':'Trash is empty','trash.signIn':'Sign in to manage your trash.','trash.pending':'The original operation needs checking. Do not start another one.','trash.check':'Check original operation','trash.resume':'Resume original operation','trash.failed':'The operation could not be verified. Your original selection is retained.','trash.running':'Work is still running or its outcome is unresolved.','trash.minimum':'Keep at least one chapter and scene.','trash.changed':'The item changed. Refresh and select it again.','trash.refresh':'Refresh','trash.saved':'Saved','trash.save':'Save','trash.name':'Name','trash.restored':'Restored','trash.deleted':'Permanently deleted','trash.unavailable':'This item is not currently available for that action.'},zh:{'trash.menu':'更多操作','trash.title':'回收站','trash.rename':'重命名','trash.edit':'编辑','trash.move':'移到回收站','trash.restore':'恢复','trash.purge':'永久删除','trash.empty':'清空回收站','trash.undo':'撤销','trash.moved':'已移到回收站','trash.confirm':'永久删除所选内容？','trash.irreversible':'此操作无法撤销。原任务与费用记录仍会保留。','trash.cancel':'取消','trash.all':'全部类型','trash.selectAll':'全选','trash.more':'加载更多','trash.none':'回收站为空','trash.signIn':'登录后管理回收站。','trash.pending':'原操作结果需要核对，请勿另起新操作。','trash.check':'核对原操作','trash.resume':'继续原操作','trash.failed':'无法核实操作结果，已保留原选择。','trash.running':'任务仍在运行或结果尚未确定。','trash.minimum':'至少保留一个章节和场景。','trash.changed':'内容已变化，请刷新后重新选择。','trash.refresh':'刷新','trash.saved':'已保存','trash.save':'保存','trash.name':'名称','trash.restored':'已恢复','trash.deleted':'已永久删除','trash.unavailable':'当前无法对此内容执行该操作。'}};
+export const trashCatalogs = {
+  en: {
+    'trash.menu': 'More actions',
+    'trash.title': 'Trash',
+    'trash.rename': 'Rename',
+    'trash.edit': 'Edit',
+    'trash.move': 'Move to trash',
+    'trash.restore': 'Restore',
+    'trash.purge': 'Delete permanently',
+    'trash.empty': 'Empty trash',
+    'trash.undo': 'Undo',
+    'trash.moved': 'Moved to trash',
+    'trash.confirm': 'Permanently delete the selected items?',
+    'trash.irreversible': 'This cannot be undone. Existing task and spending records are retained.',
+    'trash.cancel': 'Cancel',
+    'trash.all': 'All kinds',
+    'trash.selectAll': 'Select all',
+    'trash.more': 'Load more',
+    'trash.none': 'Trash is empty',
+    'trash.signIn': 'Sign in to manage your trash.',
+    'trash.pending': 'The original operation needs checking. Do not start another one.',
+    'trash.check': 'Check original operation',
+    'trash.resume': 'Resume original operation',
+    'trash.failed': 'The operation could not be verified. Your original selection is retained.',
+    'trash.running': 'Work is still running or its outcome is unresolved.',
+    'trash.minimum': 'Keep at least one chapter and scene.',
+    'trash.changed': 'The item changed. Refresh and select it again.',
+    'trash.refresh': 'Refresh',
+    'trash.saved': 'Saved',
+    'trash.save': 'Save',
+    'trash.name': 'Name',
+    'trash.restored': 'Restored',
+    'trash.deleted': 'Permanently deleted',
+    'trash.unavailable': 'This item is not currently available for that action.',
+  },
+  zh: {
+    'trash.menu': '更多操作',
+    'trash.title': '回收站',
+    'trash.rename': '重命名',
+    'trash.edit': '编辑',
+    'trash.move': '移到回收站',
+    'trash.restore': '恢复',
+    'trash.purge': '永久删除',
+    'trash.empty': '清空回收站',
+    'trash.undo': '撤销',
+    'trash.moved': '已移到回收站',
+    'trash.confirm': '永久删除所选内容？',
+    'trash.irreversible': '此操作无法撤销。原任务与费用记录仍会保留。',
+    'trash.cancel': '取消',
+    'trash.all': '全部类型',
+    'trash.selectAll': '全选',
+    'trash.more': '加载更多',
+    'trash.none': '回收站为空',
+    'trash.signIn': '登录后管理回收站。',
+    'trash.pending': '原操作结果需要核对，请勿另起新操作。',
+    'trash.check': '核对原操作',
+    'trash.resume': '继续原操作',
+    'trash.failed': '无法核实操作结果，已保留原选择。',
+    'trash.running': '任务仍在运行或结果尚未确定。',
+    'trash.minimum': '至少保留一个章节和场景。',
+    'trash.changed': '内容已变化，请刷新后重新选择。',
+    'trash.refresh': '刷新',
+    'trash.saved': '已保存',
+    'trash.save': '保存',
+    'trash.name': '名称',
+    'trash.restored': '已恢复',
+    'trash.deleted': '已永久删除',
+    'trash.unavailable': '当前无法对此内容执行该操作。',
+  },
+};
 
-Object.assign(trashCatalogs.en,{'trash.close':'Dismiss','trash.unsaved':'Save your current changes before moving this item to trash.','trash.untitled':'Untitled','trash.retention':'Items stay here until you explicitly delete them permanently. Restoring does not rerun tasks.','trash.conversations':'Manage conversation trash','trash.summary':'Objects to remove: {removed} ({bytes} bytes). Shared objects retained: {kept}.'});
-Object.assign(trashCatalogs.zh,{'trash.close':'关闭','trash.unsaved':'请先保存当前修改，再移到回收站。','trash.untitled':'未命名','trash.retention':'内容将一直保留，直到你明确永久删除。恢复不会重新运行任务。','trash.conversations':'管理对话回收站','trash.summary':'待删除对象：{removed} 个（{bytes} 字节）；保留共享对象：{kept} 个。'});
-Object.assign(trashCatalogs.en,{"trash.kind.project": "Story", "trash.kind.chapter": "Chapter", "trash.kind.scene": "Scene", "trash.kind.shot": "Shot", "trash.kind.character": "Character", "trash.kind.location": "Location", "trash.kind.prop": "Prop", "trash.kind.look": "Look", "trash.kind.location_version": "Location version", "trash.kind.image": "Image", "trash.kind.video": "Video", "trash.kind.audio": "Audio", "trash.kind.asset": "File", "trash.kind.artifact": "Generated version", "trash.kind.take": "Take"});
-Object.assign(trashCatalogs.zh,{"trash.kind.project": "故事", "trash.kind.chapter": "章节", "trash.kind.scene": "场景", "trash.kind.shot": "镜头", "trash.kind.character": "角色", "trash.kind.location": "地点", "trash.kind.prop": "道具", "trash.kind.look": "造型", "trash.kind.location_version": "地点版本", "trash.kind.image": "图片", "trash.kind.video": "视频", "trash.kind.audio": "音频", "trash.kind.asset": "文件", "trash.kind.artifact": "生成版本", "trash.kind.take": "版本"});
+Object.assign(trashCatalogs.en, {
+  'trash.close': 'Dismiss',
+  'trash.unsaved': 'Save your current changes before moving this item to trash.',
+  'trash.untitled': 'Untitled',
+  'trash.retention':
+    'Items stay here until you explicitly delete them permanently. Restoring does not rerun tasks.',
+  'trash.conversations': 'Manage conversation trash',
+  'trash.summary': 'Objects to remove: {removed} ({bytes} bytes). Shared objects retained: {kept}.',
+});
+Object.assign(trashCatalogs.zh, {
+  'trash.close': '关闭',
+  'trash.unsaved': '请先保存当前修改，再移到回收站。',
+  'trash.untitled': '未命名',
+  'trash.retention': '内容将一直保留，直到你明确永久删除。恢复不会重新运行任务。',
+  'trash.conversations': '管理对话回收站',
+  'trash.summary': '待删除对象：{removed} 个（{bytes} 字节）；保留共享对象：{kept} 个。',
+});
+Object.assign(trashCatalogs.en, {
+  'trash.kind.project': 'Story',
+  'trash.kind.chapter': 'Chapter',
+  'trash.kind.scene': 'Scene',
+  'trash.kind.shot': 'Shot',
+  'trash.kind.character': 'Character',
+  'trash.kind.location': 'Location',
+  'trash.kind.prop': 'Prop',
+  'trash.kind.look': 'Look',
+  'trash.kind.location_version': 'Location version',
+  'trash.kind.image': 'Image',
+  'trash.kind.video': 'Video',
+  'trash.kind.audio': 'Audio',
+  'trash.kind.asset': 'File',
+  'trash.kind.artifact': 'Generated version',
+  'trash.kind.take': 'Take',
+});
+Object.assign(trashCatalogs.zh, {
+  'trash.kind.project': '故事',
+  'trash.kind.chapter': '章节',
+  'trash.kind.scene': '场景',
+  'trash.kind.shot': '镜头',
+  'trash.kind.character': '角色',
+  'trash.kind.location': '地点',
+  'trash.kind.prop': '道具',
+  'trash.kind.look': '造型',
+  'trash.kind.location_version': '地点版本',
+  'trash.kind.image': '图片',
+  'trash.kind.video': '视频',
+  'trash.kind.audio': '音频',
+  'trash.kind.asset': '文件',
+  'trash.kind.artifact': '生成版本',
+  'trash.kind.take': '版本',
+});
 
-trashCatalogs.en['trash.cloudOnly']='Open the saved story to use recoverable trash.';trashCatalogs.zh['trash.cloudOnly']='请打开已保存的故事，以使用可恢复的回收站。';
-Object.assign(trashCatalogs.en,{'trash.manage':'Manage story items','trash.search':'Find an item'});Object.assign(trashCatalogs.zh,{'trash.manage':'管理故事内容','trash.search':'查找内容'});
+trashCatalogs.en['trash.cloudOnly'] = 'Open the saved story to use recoverable trash.';
+trashCatalogs.zh['trash.cloudOnly'] = '请打开已保存的故事，以使用可恢复的回收站。';
+Object.assign(trashCatalogs.en, {
+  'trash.manage': 'Manage story items',
+  'trash.search': 'Find an item',
+});
+Object.assign(trashCatalogs.zh, { 'trash.manage': '管理故事内容', 'trash.search': '查找内容' });
 
-Object.assign(trashCatalogs.en,{'trash.selectAll':'Select loaded items','trash.emptyFiltered':'Delete all items of this kind'});Object.assign(trashCatalogs.zh,{'trash.selectAll':'选择已加载内容','trash.emptyFiltered':'永久删除此类型的全部内容'});
+Object.assign(trashCatalogs.en, {
+  'trash.selectAll': 'Select loaded items',
+  'trash.emptyFiltered': 'Delete all items of this kind',
+});
+Object.assign(trashCatalogs.zh, {
+  'trash.selectAll': '选择已加载内容',
+  'trash.emptyFiltered': '永久删除此类型的全部内容',
+});
 
-trashCatalogs.en['trash.kind.conversation']='Conversation';trashCatalogs.zh['trash.kind.conversation']='对话';
+trashCatalogs.en['trash.kind.conversation'] = 'Conversation';
+trashCatalogs.zh['trash.kind.conversation'] = '对话';
 
-trashCatalogs.en['trash.filters']='Filters and selection';
-trashCatalogs.zh['trash.filters']='筛选与选择';
+trashCatalogs.en['trash.filters'] = 'Filters and selection';
+trashCatalogs.zh['trash.filters'] = '筛选与选择';

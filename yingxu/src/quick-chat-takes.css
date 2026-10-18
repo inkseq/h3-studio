@@ -1,3 +1,99 @@
-.qc-takes{margin:16px 0;min-width:0}.qc-takes header,.qc-take-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.qc-take-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}.qc-take-grid article{border:1px solid #cbd8d0;border-radius:9px;padding:7px;min-width:0}.qc-take-grid article.selected{outline:2px solid #38785b}.qc-take-grid video,.qc-take-grid img{width:100%;height:110px;object-fit:contain}.qc-take-grid label{display:flex;align-items:center;gap:6px;font-size:12px}.qc-take-placeholder{height:110px;display:grid;place-items:center;background:#eef3ef}.qc-take-compare{display:grid;grid-template-columns:1fr 1fr;gap:12px}.qc-take-compare section{min-width:0}.qc-take-compare video{width:100%;max-height:50vh}.qc-take-actions{margin-top:10px}.qc-takes button{min-height:36px}.qc-take-grid button{max-width:100%;overflow-wrap:anywhere}@media(max-width:760px){.qc-take-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.qc-takes button,.qc-take-grid label{min-height:44px}.qc-take-compare{gap:8px}.qc-take-compare button{width:100%;min-height:44px}.qc-take-actions>*{max-width:100%}}
+.qc-takes {
+  margin: 16px 0;
+  min-width: 0;
+}
+.qc-takes header,
+.qc-take-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.qc-take-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+.qc-take-grid article {
+  border: 1px solid #cbd8d0;
+  border-radius: 9px;
+  padding: 7px;
+  min-width: 0;
+}
+.qc-take-grid article.selected {
+  outline: 2px solid #38785b;
+}
+.qc-take-grid video,
+.qc-take-grid img {
+  width: 100%;
+  height: 110px;
+  object-fit: contain;
+}
+.qc-take-grid label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.qc-take-placeholder {
+  height: 110px;
+  display: grid;
+  place-items: center;
+  background: #eef3ef;
+}
+.qc-take-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.qc-take-compare section {
+  min-width: 0;
+}
+.qc-take-compare video {
+  width: 100%;
+  max-height: 50vh;
+}
+.qc-take-actions {
+  margin-top: 10px;
+}
+.qc-takes button {
+  min-height: 36px;
+}
+.qc-take-grid button {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .qc-take-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .qc-takes button,
+  .qc-take-grid label {
+    min-height: 44px;
+  }
+  .qc-take-compare {
+    gap: 8px;
+  }
+  .qc-take-compare button {
+    width: 100%;
+    min-height: 44px;
+  }
+  .qc-take-actions > * {
+    max-width: 100%;
+  }
+}
 
-.qc-take-recipe{white-space:pre-wrap;overflow-wrap:anywhere;max-height:40vh;overflow:auto}.qc-card-count input{width:5rem}.qc-take-preferences{min-height:44px;margin:8px;text-align:left}
+.qc-take-recipe {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 40vh;
+  overflow: auto;
+}
+.qc-card-count input {
+  width: 5rem;
+}
+.qc-take-preferences {
+  min-height: 44px;
+  margin: 8px;
+  text-align: left;
+}
