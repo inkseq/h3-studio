@@ -57,6 +57,7 @@ export default function QuickChatControls({capabilities,settings,copiesMax=4,bin
   const groupLabels={'音画日程 · 实验项':t('adjunct.experimentalSchedule'),'参考与时间':t('chatControls.copy14'),'随机性与采样':t('chatControls.copy15'),'运行与导出':t('chatControls.copy16')};
   return <ChatDialog title={scope==='next'?t('chatControls.copy17'):t('chatControls.copy18')} onClose={onClose} className="qc-controls-dialog" eyebrow={t('quickView.advanced')}>
     <form onSubmit={save}>
+      <div className="qc-controls-body">
       <p className="qc-muted">{t('workspace.copy73')}</p>
       {!recipe?<p role="alert">{t('workspace.copy74')}</p>:<>
         <details className="quick-model-details"><summary>{t('quickView.modelDetails')}</summary><DeploymentProfileSelect capabilities={capabilities} value={draft.deployment_profile_id} mode={recipe?.mode} disabled={busy} onChange={value=>setDraft({...draft,deployment_profile_id:value})}/></details><label className="qc-field"><span>{t('workspace.copy75')}</span><select aria-label={t('workspace.copy75')} value={pendingMode?.intent||mode} onChange={e=>changeMode(e.target.value)}>
@@ -82,6 +83,7 @@ export default function QuickChatControls({capabilities,settings,copiesMax=4,bin
         {Object.keys(schema).some(name=>!allGroups.has(name)&&!['guides','video_audio','width','height'].includes(name))&&<details><summary>{t('workspace.copy86')}</summary><div className="qc-form-grid">{fields(Object.keys(schema).filter(name=>!allGroups.has(name)&&!['guides','video_audio','width','height'].includes(name)))}</div></details>}
       </>}
       {error&&<p className="qc-error" role="alert">{error}</p>}
+      </div>
       <div className="qc-dialog-footer"><span>{scope==='next'?t('chatControls.copy23'):t('chatControls.copy24')}</span><button className="qc-primary" disabled={busy||!recipe}>{t('workspace.copy87')}</button></div>
     </form>
   </ChatDialog>;

@@ -5,6 +5,7 @@ export function libraryTarget(value){if(!value||!['entity','asset','artifact'].i
 export function checkedLibraryPage(value,offset=0){
  if(value?.storage_scope!=='project'||value.usage_scope!=='authorized_projects'||value.aggregate_read_only!==true||!Array.isArray(value.items)||value.next_offset!==null&&(!Number.isSafeInteger(value.next_offset)||value.next_offset<=offset))throw Error('library.invalid');
  const seen=new Set();for(const row of value.items){const key=libraryKey(libraryTarget(row.target));if(seen.has(key)||!Number.isSafeInteger(row.project_version)||row.project_version<1||typeof row.title!=='string'||!Array.isArray(row.tags)||row.tags.some(t=>typeof t!=='string')||!Array.isArray(row.usage))throw Error('library.invalid');seen.add(key);}
+ if(value.counts!==undefined){const keys=['character','location','prop','file','image','video','audio','inbox'];if(value.counts_scope!=='authorized_filtered_except_type'||!value.counts||Array.isArray(value.counts)||Object.keys(value.counts).length!==keys.length||keys.some(key=>!Number.isSafeInteger(value.counts[key])||value.counts[key]<0))throw Error('library.invalid');}
  return value;
 }
 export async function checkedLibraryImport(value,op){

@@ -8,7 +8,7 @@ import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {createP4OperatorClient} from './p4-operator-client.js';
 import {createP4OperatorController} from './p4-operator-controller.js';
-import {batchRows,costLabel,groupedNodes,initialRows,lifetimeBody,phase,preparationSteps,preparationView,transferProgress,previewCurrent,queueLabel,rate,todayMetrics,workspaceStale} from './p4-operator-model.js';
+import {batchRows,costLabel,groupedNodes,initialRows,lifetimeBody,phase,preparationSteps,preparationView,transferProgress,previewCurrent,queueLabel,rate,testTaskBody,todayMetrics,workspaceStale} from './p4-operator-model.js';
 
 const memory=()=>{const values=new Map();return {getItem:key=>values.get(key)||null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)};};
 function client(overrides={}){let account;return {setAccount:value=>{account=value;},reset(){},state:async()=>({capacity_backend:'dstack-v1',operator:{account,admin:false},nodes:[],groups:[],queue:[]}),catalog:async()=>({profiles:[]}),...overrides};}
@@ -170,6 +170,16 @@ test('default batch is FL+REF but group/add/find/queue defaults to exactly one m
 test('manual stop policy accepts no fixed deadline and finite keep time must be future',()=>{
   assert.deepEqual(lifetimeBody({keep_on:'until_stopped',idle_minutes:10}),{keep_on:'until_stopped',hold_seconds:0,idle_shutdown_seconds:600});assert.equal(lifetimeBody({keep_on:'until',idle_minutes:10,until:'1970-01-01T00:00'}),null);assert.equal(lifetimeBody({keep_on:'idle',idle_minutes:0}),null);
   const selection={profile_id:'fl',group_id:null,keep_on:'idle',hold_seconds:0,idle_shutdown_seconds:600},preview={capacity_backend:'dstack-v1',can_start:true,preview_id:'p',expires_at:1100,hard_deadline:null,lifecycle:lifecycle(),hourly_cost_microusd:850000,reservation_microusd:920834};assert.equal(previewCurrent(preview,selection,1000000),true);assert.equal(previewCurrent(preview,{...selection,keep_on:'until_stopped'},1000000),false);assert.equal(previewCurrent({...preview,profile_id:'ref'},selection,1000000),false);assert.equal(previewCurrent({...preview,group_id:'another'},selection,1000000),false);
+});
+
+test('task budget attribution is explicit and a preview cannot switch its frozen acceptance task',()=>{
+  assert.deepEqual(testTaskBody(false,''),{});
+  assert.deepEqual(testTaskBody(true,'issue-267'),{test_task_id:'issue-267'});
+  for(const invalid of ['',null,'new task','a'.repeat(101),'issue/267'])assert.equal(testTaskBody(true,invalid),null);
+  const selection={profile_id:'fl',group_id:null,keep_on:'idle',hold_seconds:0,test_task_id:'issue-267'},preview={capacity_backend:'dstack-v1',can_start:true,preview_id:'p',expires_at:1100,hard_deadline:null,lifecycle:lifecycle({test_gpu_guard:{version:2,task_id:'issue-267'}}),hourly_cost_microusd:850000,reservation_microusd:920834};
+  assert.equal(previewCurrent(preview,selection,1000000),true);
+  assert.equal(previewCurrent(preview,{...selection,test_task_id:'another-task'},1000000),false);
+  assert.equal(previewCurrent({...preview,lifecycle:lifecycle()},selection,1000000),false);
 });
 
 test('missing queue estimates and costs are unavailable rather than zero or ready capacity',()=>{

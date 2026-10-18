@@ -81,6 +81,9 @@
 .sb-workspace .media-empty,.sb-portal .media-empty{display:inline-flex;align-items:center;justify-content:center;background:var(--surface-2);color:var(--muted);text-align:center}
 .sb-workspace .tile>.media-empty,.sb-portal .tile>.media-empty{width:100%;height:100%}
 .sb-workspace .screen video{object-fit:contain}
+.sb-workspace .screen{container-type:size}
+.sb-workspace .screen-picture{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(100cqw,calc(100cqh * var(--media-aspect,1.7777778)));height:min(100cqh,calc(100cqw / var(--media-aspect,1.7777778)));overflow:hidden}
+.sb-workspace .screen-picture>.screen-cap{max-height:100%;overflow:hidden}
 .sb-workspace .storyboard-media-error{position:absolute;inset:8px 8px auto;z-index:2;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding:8px;background:#17211bee;color:var(--ink);border:1px solid var(--line-2);border-radius:8px;font-size:12px}
 .sb-workspace :is(.who.small .chip,.track.audio,.ticks,.ver em,.ver i.x,.slot-empty small,.sent-prompt em,.sent-item small,.frame-pick,.lib-tabs button small,.lib-sep,.tile-audio small,.tile-name,.tile-badge,.tile-used,.tile-play .play,.vtabs button em,.vimg small,.take-top em),.sb-portal :is(.tile-name,.tile-badge,.tile-audio small,.tile-used,.vtabs button em,.vimg small){font-size:11px}
 .sb-workspace .tseg-title{font-size:11px;color:#fff;text-shadow:0 1px 2px #000;background:linear-gradient(transparent,#000b);bottom:0;padding:8px 4px 3px;left:0;right:0}
