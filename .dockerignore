@@ -11,6 +11,12 @@
 !platform_app.py
 !studio_platform/
 !studio_platform/*.py
+!studio_platform/migrations/
+!studio_platform/migrations/__init__.py
+!studio_platform/migrations/env.py
+!studio_platform/migrations/versions/
+!studio_platform/migrations/versions/__init__.py
+!studio_platform/migrations/versions/v20261019_0001_platform_baseline.py
 !studio_platform/inference/
 !studio_platform/inference/*.py
 !studio_platform/runtime_hosts/
