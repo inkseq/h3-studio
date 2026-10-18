@@ -165,7 +165,9 @@ def keep_policy(root, containers):
                 metadata = json.loads(manifest_path.read_text())
                 release.require(metadata.get('commit') == directory.name, 'retention_directory_identity_invalid')
                 approval(root, kind, directory.name, manifest_path)
-                expected = {'platform': release.FILES | {manifest_name},
+                if kind == 'platform':
+                    metadata = release.manifest(artifact, directory.name)
+                expected = set(metadata['files']) | {manifest_name} if kind == 'platform' else {
                     'migration': {'artifact', 'sources', 'overlay.yaml'},
                     'frontend': {'index.html', manifest_name}}[kind]
                 release.require({entry.name for entry in directory.iterdir()} == expected, 'retention_bundle_shape_unknown')

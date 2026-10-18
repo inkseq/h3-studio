@@ -153,6 +153,20 @@ class RetentionTests(unittest.TestCase):
             retention.bundle(self.root, source, 'platform', self.api, installed=True)
         self.api.head_object.assert_not_called()
 
+    def test_target_aware_platform_versions_fill_newest_slots_but_unlisted_files_do_not(self):
+        newest = ('2' * 40, '3' * 40, '4' * 40)
+        for index, commit in enumerate(newest):
+            folder, _ = self.platform(commit, targeted=True)
+            timestamp = 2_000_000_000_000_000_000 + index
+            os.utime(folder, ns=(timestamp, timestamp))
+        foreign, _ = self.platform('5' * 40, targeted=True)
+        (foreign / 'FOREIGN_ASSET').write_bytes(b'UNIQUE')
+        os.utime(foreign, ns=(2_000_000_000_000_000_010,) * 2)
+        kept, _, extras = retention.keep_policy(self.root, [])
+        self.assertEqual(extras, list(reversed(newest)))
+        self.assertEqual(kept, {self.current, self.previous, self.front, *newest})
+        self.api.head_object.assert_not_called()
+
     def test_explicit_rollback_and_inflight_tuple_are_pinned_beyond_newest_three(self):
         for relative, document in (
                 ('release-retention-pins.json', {'version': 1, 'commits': [self.old]}),
