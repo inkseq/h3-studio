@@ -168,7 +168,7 @@ def containers(*, runner=subprocess.run):
             values[service] = None
             continue
         # Render only identity and health; never fetch Config.Env or mount paths.
-        template = '{"project":{{json (index .Config.Labels "com.docker.compose.project")}},"service":{{json (index .Config.Labels "com.docker.compose.service")}},"running":{{json .State.Running}},"restarting":{{json .State.Restarting}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}}}'
+        template = '{"project":{{json (index .Config.Labels "com.docker.compose.project")}},"service":{{json (index .Config.Labels "com.docker.compose.service")}},"running":{{json .State.Running}},"restarting":{{json .State.Restarting}},"health":{{with (index .State "Health")}}{{json (index . "Status")}}{{else}}null{{end}}}'
         row = json.loads(docker(['inspect', '--format', template, names[0]], runner=runner))
         require(row['project'] == 'sixnine-platform' and row['service'] == service, 'alert_container_identity_changed')
         running = row['running'] is True and row['restarting'] is not True

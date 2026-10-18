@@ -220,6 +220,47 @@ class MonitorTests(unittest.TestCase):
                 _, host, _ = monitor.observe({'total': 2000, 'idle': 800}, proc=proc)
                 self.assertIsNone(host['cpu_percent'])
 
+    def test_observer_accepts_healthless_optional_services_but_checks_core_health_and_running(self):
+        identities = {service: format(index + 1, '064x') for index, service in enumerate(monitor.SERVICES)}
+        states = {service: {'Running': True, 'Restarting': False,
+            **({'Health': {'Status': 'healthy'}} if service in ('app', 'db', 'dstack') else {})}
+            for service in monitor.SERVICES}
+        snapshot = {'version': 1, 'observed_at': 1000, 'complete': True,
+            'gpus': [], 'jobs': [], 'failures': [], 'test_spend': None}
+        def runner(args, **kwargs):
+            if args[1] == 'ps':
+                service = next(part.removeprefix('label=com.docker.compose.service=') for part in args
+                    if part.startswith('label=com.docker.compose.service='))
+                return SimpleNamespace(returncode=0, stdout=(identities[service] + '\n').encode())
+            if args[1] == 'inspect':
+                service = next(name for name, identity in identities.items() if identity == args[-1])
+                value = states[service]
+                # Docker's Go-template map lookup fails for an absent Health
+                # field; caddy/controller need no healthcheck to be running.
+                if 'Health' not in value and '.State.Health' in args[3]:
+                    return SimpleNamespace(returncode=1, stdout=b'')
+                row = {'project': 'sixnine-platform', 'service': service,
+                    'running': value['Running'], 'restarting': value['Restarting'],
+                    'health': value.get('Health', {}).get('Status')}
+                return SimpleNamespace(returncode=0, stdout=json.dumps(row).encode())
+            self.assertEqual(args[1:3], ['exec', identities['app']])
+            value = snapshot if '-m' in args else {'health_ok': True, 'http_requests': 10, 'http_5xx': 0}
+            return SimpleNamespace(returncode=0, stdout=json.dumps(value).encode())
+        with tempfile.TemporaryDirectory() as temporary:
+            proc = Path(temporary)
+            (proc / 'stat').write_text('cpu 100 0 100 800 0 0 0 0 0 0\n')
+            (proc / 'meminfo').write_text('MemTotal: 1000 kB\nMemAvailable: 400 kB\n')
+            observed, host, _ = monitor.observe(None, runner=runner, proc=proc)
+            self.assertEqual(observed, snapshot)
+            self.assertTrue(host['processes_ok'])
+            for service in ('app', 'db', 'dstack'):
+                with self.subTest(missing_required_health=service):
+                    health = states[service].pop('Health')
+                    self.assertFalse(monitor.observe(None, runner=runner, proc=proc)[1]['processes_ok'])
+                    states[service]['Health'] = health
+            states['controller']['Running'] = False
+            self.assertFalse(monitor.observe(None, runner=runner, proc=proc)[1]['processes_ok'])
+
     def test_disk_80_90_use_actual_filesystem_sample_metric_and_sns_dedup(self):
         statvfs = Mock(return_value=SimpleNamespace(f_blocks=1000, f_bfree=240, f_bavail=190, f_frsize=4096))
         value = monitor.disk_sample(statvfs=statvfs)
