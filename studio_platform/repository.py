@@ -193,6 +193,15 @@ spending_confirmations = Table("platform_spending_confirmations", metadata,
     Column("plan_id", String(36), primary_key=True), Column("actor_id", String(200), primary_key=True),
     Column("plan_hash", String(64), nullable=False), Column("settings_version", Integer, nullable=False),
     Column("expires_at", Float, nullable=False), Column("consumed_reference", String(200)))
+billing_adjustments = Table("platform_billing_adjustments", metadata,
+    Column("id", String(36), primary_key=True), Column("tenant_id", String(200), nullable=False),
+    Column("owner_id", String(200), nullable=False), Column("reference_type", String(30), nullable=False),
+    Column("reference_id", String(200), nullable=False), Column("kind", String(30), nullable=False),
+    Column("action_id", String(36), nullable=False), Column("actor_id", String(200), nullable=False),
+    Column("reason", String(1000), nullable=False), Column("evidence_sha256", String(64), nullable=False),
+    Column("evidence_note", String(2000), nullable=False),
+    Column("basis_exposure_microusd", BigInteger, nullable=False), Column("created_at", Float, nullable=False),
+    UniqueConstraint("tenant_id", "owner_id", "reference_type", "reference_id", "kind"))
 artifacts = Table(
     "platform_artifacts", metadata, Column("id", String(36), primary_key=True),
     Column("job_id", String(36), ForeignKey("platform_jobs.id"), nullable=False),

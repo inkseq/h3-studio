@@ -7,8 +7,7 @@ const bucket=value=>value&&fields.every(field=>amount(value[field]))
 
 // Presentation only. The server remains authoritative for attribution, day
 // boundaries, reconciliation and admission; never derive these from a cap total.
-export function spendingBreakdown(usage,scope){
-  const value=usage?.breakdown;
+function readBreakdown(usage,scope,value){
   if(!['account','connection'].includes(scope)||value?.schema_version!==1||value.attribution_scope!==scope
       ||usage.timezone!=='Australia/Sydney'||typeof usage.day!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(usage.day))return null;
   const totals=bucket(value),job=bucket(value.by_kind?.job),instance=bucket(value.by_kind?.instance);
@@ -20,6 +19,13 @@ export function spendingBreakdown(usage,scope){
     result.unattributedActor=value.unattributed_actor_exposure_microusd;
   }
   return result;
+}
+
+export const spendingBreakdown=(usage,scope)=>readBreakdown(usage,scope,usage?.breakdown);
+export function spendingChargeBreakdown(usage,scope){
+  const raw=usage?.charge_breakdown,result=readBreakdown(usage,scope,raw);
+  return result&&amount(raw.waived_reference_count)&&amount(raw.waived_exposure_microusd)
+    ?{...result,waivedCount:raw.waived_reference_count,waivedExposure:raw.waived_exposure_microusd}:null;
 }
 
 export function admissionExposure(usage,limit){

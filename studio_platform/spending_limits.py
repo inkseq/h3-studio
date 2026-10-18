@@ -252,7 +252,7 @@ def _display_reference(rows, start, now):
     return value
 
 
-def usage_breakdown(connection, tenant, owner, now, *, actor_id=None):
+def usage_breakdown(connection, tenant, owner, now, *, actor_id=None, excluded_references=None):
     """Strict display attribution, independent of conservative admission caps.
 
     Account exposure includes known-owner obligations with unknown old actors.
@@ -272,6 +272,8 @@ def usage_breakdown(connection, tenant, owner, now, *, actor_id=None):
     for row in connection.execute(query).mappings():
         references.setdefault((row["reference_type"], row["reference_id"]), []).append(row)
     value = empty_usage_breakdown(actor_id=actor_id)
+    if excluded_references is not None:
+        value.update(waived_reference_count=0, waived_exposure_microusd=0)
     for (kind, _), rows in references.items():
         owners = {row["account_owner"] for row in rows if row["account_owner"] is not None}
         tenant_conflict = False
@@ -290,6 +292,10 @@ def usage_breakdown(connection, tenant, owner, now, *, actor_id=None):
         if actor_id and (owners != {owner} or actor != actor_id):
             continue
         current = _display_reference(rows, start, now)
+        if excluded_references is not None and (kind, row["reference_id"]) in excluded_references:
+            value["waived_reference_count"] += 1
+            value["waived_exposure_microusd"] += current["exposure_microusd"]
+            continue
         if not owners:
             value["unattributed_exposure_microusd"] += current["exposure_microusd"]
             continue
@@ -302,10 +308,16 @@ def usage_breakdown(connection, tenant, owner, now, *, actor_id=None):
 
 
 def public_usage(connection, tenant, owner, now, *, actor_id=None):
+    from .repository import billing_adjustments
+    waived = {(r.reference_type, r.reference_id) for r in connection.execute(select(
+        billing_adjustments.c.reference_type, billing_adjustments.c.reference_id).where(
+            billing_adjustments.c.tenant_id == tenant, billing_adjustments.c.owner_id == owner,
+            billing_adjustments.c.kind == "full_waiver"))}
     value = {"projected_microusd": daily_projection(connection, tenant, owner, now, actor_id=actor_id),
         "day": datetime.fromtimestamp(now, timezone.utc).astimezone(ZoneInfo("Australia/Sydney")).date().isoformat(),
         "timezone": "Australia/Sydney", "includes_unresolved_prior_days": True,
-        "breakdown": usage_breakdown(connection, tenant, owner, now, actor_id=actor_id)}
+        "breakdown": usage_breakdown(connection, tenant, owner, now, actor_id=actor_id),
+        "charge_breakdown": usage_breakdown(connection, tenant, owner, now, actor_id=actor_id, excluded_references=waived)}
     if actor_id is None:
         from .invoice_checks import public_reconciliation
         value["reconciliation"] = public_reconciliation(connection, tenant, owner, now)

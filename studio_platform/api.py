@@ -756,6 +756,8 @@ def create_app(settings: Settings, *, repository=None, storage=None, quick_chat_
     register_dstack_routes(app, service=dstack_operator)
     from .operator_budget_routes import register_routes as register_budget_routes
     register_budget_routes(app)
+    from .operator_billing_routes import register_routes as register_billing_routes
+    register_billing_routes(app)
     from .spending_routes import register_routes as register_spending_routes
     register_spending_routes(app)
     from .operator_jobs import register_routes as register_operator_jobs

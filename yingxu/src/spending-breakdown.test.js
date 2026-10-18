@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {spendingBreakdown,admissionExposure,spendingReconciliation} from './spending-breakdown.js';
+import {spendingBreakdown,spendingChargeBreakdown,admissionExposure,spendingReconciliation} from './spending-breakdown.js';
 
 const bucket=overrides=>({settled_today_microusd:0,reserved_microusd:0,awaiting_invoice_estimate_microusd:0,
   awaiting_invoice_count:0,prior_day_pending_estimate_microusd:0,legacy_settled_unknown_date_microusd:0,
@@ -56,6 +56,18 @@ test('zero is available only from a complete contract and cap exposure remains a
   assert.deepEqual(admissionExposure(raw,0),{amount:195_000_000,limit:0,percent:null});
   assert.equal(admissionExposure({projected_microusd:null},20_000_000),null);
   assert.equal(admissionExposure(raw,-1),null);
+});
+
+test('net user charges are independent from retained costs and admission, and never borrow another assistant attribution',()=>{
+  const raw=usage('connection',{settled_today_microusd:4_000_000,exposure_microusd:8_000_000});
+  raw.charge_breakdown={...structuredClone(raw.breakdown),...bucket(),waived_reference_count:97,waived_exposure_microusd:8_000_000};
+  assert.equal(spendingChargeBreakdown(raw,'connection').totals.exposure_microusd,0);
+  assert.equal(spendingBreakdown(raw,'connection').totals.exposure_microusd,8_000_000);
+  assert.equal(admissionExposure(raw,20_000_000).amount,195_000_000);
+  assert.equal(spendingChargeBreakdown(raw,'account'),null);
+  delete raw.charge_breakdown.by_kind.instance.reserved_microusd;
+  assert.equal(spendingChargeBreakdown(raw,'connection'),null);
+  delete raw.charge_breakdown;assert.equal(spendingChargeBreakdown(raw,'connection'),null);
 });
 
 test('provider observation is optional, explicit and never turned into final or settled money',()=>{

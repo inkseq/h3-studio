@@ -2,28 +2,31 @@ import {translate} from './i18n/locale.js';
 import {createP4OperatorClient} from './p4-operator-client.js';
 import {cancellationBody,cancellationReceipt,validAdminJobs,validCancellationBody} from './operator-jobs-model.js';
 import {hostPolicyBody,hostPolicyReceipt,validHostAudit,validHostPage,validHostPolicyBody} from './operator-host-model.js';
+import {billingOperation,billingReceipt,billingReferenceKey,validBillingOperation,validBillingPage,validBillingPreview,validBillingRequest} from './operator-billing-model.js';
 
 const pendingKey=account=>'sixnine:operator:dstack:pending:'+account;
-const methods=new Set(['start','stop','hold','createGroup','move','groupStop','groupHold','updateBudget','updatePrice','cancelJobs','updateHostPolicy']);
+const methods=new Set(['start','stop','hold','createGroup','move','groupStop','groupHold','updateBudget','updatePrice','cancelJobs','updateHostPolicy','applyBilling']);
 // These application admission refusals happen before a rental is accepted.
 // A bare/provider 429 or an unknown write response must keep its original key.
 const rejectedStart=(operation,error)=>operation.method==='start'&&error.status===429&&
   ['budget_exceeded','budget_not_configured','capacity_unavailable'].includes(error.detail?.code);
 /** UI command journal only. Runtime, jobs, groups and accounting remain API-owned. */
 export function createP4OperatorController({client=createP4OperatorClient(),storage=globalThis.localStorage,locale='zh'}={}){
-  let epoch=0,reading=false,budgetReading=0,jobReading=0,hostReading={owner:0,admin:0,audit:0,target:0},state={account:null,snapshot:null,catalog:null,hosts:null,adminSnapshot:null,adminBudgets:null,adminPrices:null,budgetAudits:null,adminJobs:null,adminHosts:null,hostAudits:null,hostTarget:null,pending:null,busy:false,loading:false,error:'',denied:false};
+  let billingReading=0;
+  let epoch=0,reading=false,budgetReading=0,jobReading=0,hostReading={owner:0,admin:0,audit:0,target:0},state={account:null,snapshot:null,catalog:null,hosts:null,adminSnapshot:null,adminBudgets:null,adminPrices:null,budgetAudits:null,billingReferences:null,billingFilter:null,adminJobs:null,adminHosts:null,hostAudits:null,hostTarget:null,pending:null,busy:false,loading:false,error:'',denied:false};
   const message=key=>translate(typeof locale==='function'?locale(state.account):locale,'operatorError.'+key);
+  const billMessage=key=>translate(typeof locale==='function'?locale(state.account):locale,'billing.'+key);
   const listeners=new Set(),emit=patch=>{state={...state,...patch};listeners.forEach(fn=>fn());};
   const guard=(account,version)=>{if(account!==state.account||version!==epoch)throw Error(message('copy1'));};
   function pending(value){if(!storage||!state.account)throw Error(message('copy2'));if(value)storage.setItem(pendingKey(state.account),JSON.stringify(value));else storage.removeItem(pendingKey(state.account));emit({pending:value});}
   async function refresh(admin=false){
     if(!state.account||reading)return;
     reading=true;const account=state.account,version=epoch;emit({loading:true});
-    try{const [snapshot,catalog]=await Promise.all([client.state(),client.catalog()]);guard(account,version);if(snapshot.operator?.account!==account)throw Error(message('copy3'));emit({snapshot,catalog,denied:false,error:'',...(snapshot.operator?.admin!==true?{adminSnapshot:null,adminBudgets:null,adminPrices:null,budgetAudits:null,adminJobs:null,adminHosts:null,hostAudits:null,hostTarget:null}:{})});if(admin&&snapshot.operator?.admin===true){const value=await client.adminState();guard(account,version);if(value.operator?.account!==account||value.operator?.admin!==true)throw Error(message('copy4'));emit({adminSnapshot:value});}return snapshot;}
-    catch(error){if(version===epoch)emit({error:error.message,denied:error.status===403,...([401,403].includes(error.status)?{snapshot:null,catalog:null,hosts:null,adminSnapshot:null,adminBudgets:null,adminPrices:null,budgetAudits:null,adminJobs:null,adminHosts:null,hostAudits:null,hostTarget:null}:{})});throw error;}
+    try{const [snapshot,catalog]=await Promise.all([client.state(),client.catalog()]);guard(account,version);if(snapshot.operator?.account!==account)throw Error(message('copy3'));emit({snapshot,catalog,denied:false,error:'',...(snapshot.operator?.admin!==true?{adminSnapshot:null,adminBudgets:null,adminPrices:null,budgetAudits:null,billingReferences:null,billingFilter:null,adminJobs:null,adminHosts:null,hostAudits:null,hostTarget:null}:{})});if(admin&&snapshot.operator?.admin===true){const value=await client.adminState();guard(account,version);if(value.operator?.account!==account||value.operator?.admin!==true)throw Error(message('copy4'));emit({adminSnapshot:value});}return snapshot;}
+    catch(error){if(version===epoch)emit({error:error.message,denied:error.status===403,...([401,403].includes(error.status)?{snapshot:null,catalog:null,hosts:null,adminSnapshot:null,adminBudgets:null,adminPrices:null,budgetAudits:null,billingReferences:null,billingFilter:null,adminJobs:null,adminHosts:null,hostAudits:null,hostTarget:null}:{})});throw error;}
     finally{if(version===epoch){reading=false;emit({loading:false});}}
   }
-  async function readAdmin(){const account=state.account,version=epoch;if(state.snapshot?.operator?.admin!==true)throw Error(message('copy5'));try{const value=await client.adminState();guard(account,version);if(value.operator?.account!==account||value.operator?.admin!==true)throw Error(message('copy4'));emit({adminSnapshot:value});return value;}catch(error){if(version===epoch)emit({error:error.message,adminSnapshot:null,adminBudgets:null,adminPrices:null,budgetAudits:null,adminJobs:null,adminHosts:null,hostAudits:null,hostTarget:null,...(error.status===403&&state.snapshot?{snapshot:{...state.snapshot,operator:{...state.snapshot.operator,admin:false}}}:{})});throw error;}}
+  async function readAdmin(){const account=state.account,version=epoch;if(state.snapshot?.operator?.admin!==true)throw Error(message('copy5'));try{const value=await client.adminState();guard(account,version);if(value.operator?.account!==account||value.operator?.admin!==true)throw Error(message('copy4'));emit({adminSnapshot:value});return value;}catch(error){if(version===epoch)emit({error:error.message,adminSnapshot:null,adminBudgets:null,adminPrices:null,budgetAudits:null,billingReferences:null,billingFilter:null,adminJobs:null,adminHosts:null,hostAudits:null,hostTarget:null,...(error.status===403&&state.snapshot?{snapshot:{...state.snapshot,operator:{...state.snapshot.operator,admin:false}}}:{})});throw error;}}
   async function readBudgetAdmin({after_id}={}){
     const account=state.account,version=epoch,request=++budgetReading,prior=state.adminBudgets;
     if(state.snapshot?.operator?.admin!==true)throw Error(message('copy5'));
@@ -37,7 +40,7 @@ export function createP4OperatorController({client=createP4OperatorClient(),stor
       if(after_id&&(state.adminBudgets!==prior||page.next_after_id===after_id))throw Error(message('budgetPageChanged'));
       const budgets=after_id?{...page,budgets:[...new Map([...prior.budgets,...page.budgets].map(row=>[row.id,row])).values()]}:page;
       emit({adminBudgets:budgets,adminPrices:prices,budgetAudits:audits});return {budgets,prices,audits};
-    }catch(error){if(version===epoch&&request===budgetReading)emit({adminBudgets:null,adminPrices:null,budgetAudits:null,adminJobs:null,adminHosts:null,hostAudits:null,hostTarget:null,error:error.message,...(error.status===403&&state.snapshot?{snapshot:{...state.snapshot,operator:{...state.snapshot.operator,admin:false}}}:{})});throw error;}
+    }catch(error){if(version===epoch&&request===budgetReading)emit({adminBudgets:null,adminPrices:null,budgetAudits:null,billingReferences:null,billingFilter:null,adminJobs:null,adminHosts:null,hostAudits:null,hostTarget:null,error:error.message,...(error.status===403&&state.snapshot?{snapshot:{...state.snapshot,operator:{...state.snapshot.operator,admin:false}}}:{})});throw error;}
   }
   async function readJobAdmin({after_id}={}){
     const account=state.account,version=epoch,request=++jobReading;
@@ -46,6 +49,41 @@ export function createP4OperatorController({client=createP4OperatorClient(),stor
     if(after_id&&prior?.next_after_id!==after_id)throw Error(message('copy7'));
     try{const value=await client.adminJobs({after_id});guard(account,version);if(state.snapshot?.operator?.admin!==true)throw Object.assign(Error(message('copy8')),{status:403});if(request!==jobReading)throw Error(message('copy9'));if(!validAdminJobs(value,account))throw Error(message('copy10'));if(after_id&&(state.adminJobs!==prior||value.next_after_id===after_id))throw Error(message('copy7'));emit({adminJobs:after_id?{...value,jobs:[...new Map([...prior.jobs,...value.jobs].map(job=>[job.id,job])).values()]}:value});return value;}
     catch(error){if(version===epoch&&request===jobReading)emit({error:error.message,...([401,403].includes(error.status)?{adminJobs:null,adminHosts:null,hostAudits:null,hostTarget:null}:{}),...(error.status===403&&state.snapshot?{snapshot:{...state.snapshot,operator:{...state.snapshot.operator,admin:false}}}:{})});throw error;}
+  }
+  async function readBillingReferences({owner_id,after,created_after,created_before}={}){
+    const account=state.account,version=epoch,request=++billingReading,prior=state.billingReferences;
+    const filter={owner_id,...(created_after!==undefined?{created_after}:{}),...(created_before!==undefined?{created_before}:{})};
+    if(state.snapshot?.operator?.admin!==true)throw Error(message('copy5'));
+    if(after&&(!prior||prior.owner_id!==owner_id||prior.next_cursor!==after||JSON.stringify(state.billingFilter)!==JSON.stringify(filter)))throw Error(billMessage('pageChanged'));
+    try{
+      const value=await client.billingReferences({...filter,after,limit:100});guard(account,version);
+      if(state.snapshot?.operator?.admin!==true)throw Object.assign(Error(message('budgetPermissionChanged')),{status:403});
+      if(request!==billingReading)throw Error(message('budgetReadSuperseded'));
+      if(!validBillingPage(value,owner_id)||after&&(state.billingReferences!==prior||value.next_cursor===after))throw Error(billMessage('pageChanged'));
+      emit({billingFilter:filter,billingReferences:after?{...value,items:[...new Map([...prior.items,...value.items].map(row=>[billingReferenceKey(row),row])).values()]}:value});return value;
+    }catch(error){if(version===epoch&&request===billingReading)emit({billingReferences:null,billingFilter:null,error:error.message,...(error.status===403&&state.snapshot?{snapshot:{...state.snapshot,operator:{...state.snapshot.operator,admin:false}}}:{})});throw error;}
+  }
+  async function finishBilling(value,operation,account,version){
+    guard(account,version);
+    if(state.snapshot?.operator?.admin!==true)throw Error(message('budgetPermissionChanged'));
+    if(!billingReceipt(value,operation))throw Error(billMessage('receiptUnconfirmed'));
+    pending(null);
+    try{await readBillingReferences(state.billingFilter?.owner_id===operation.billing.owner_id?state.billingFilter:{owner_id:operation.billing.owner_id});}catch{}
+    try{await readBudgetAdmin();}catch{}
+    return value;
+  }
+  async function sendBilling(operation){
+    const account=state.account,version=epoch;
+    try{return await finishBilling(await client.applyBilling(operation.body,operation.key),operation,account,version);}
+    catch(error){guard(account,version);if(error.detail?.no_mutation_committed===true&&error.detail.code!=='billing_idempotency_conflict')pending(null);if([401,403].includes(error.status))emit({billingReferences:null,billingFilter:null,...(state.snapshot?{snapshot:{...state.snapshot,operator:{...state.snapshot.operator,admin:false}}}:{})});throw error;}
+  }
+  async function recoverBilling(operation){
+    const account=state.account,version=epoch;
+    await readAdmin();guard(account,version);
+    let value;
+    try{value=await client.billingActionByKey(operation.key);}
+    catch(error){guard(account,version);if(error.status===404&&error.detail?.code==='billing_action_not_found')return sendBilling(operation);throw error;}
+    return finishBilling(value,operation,account,version);
   }
   async function readHosts({admin=false,offset=0}={}){
     const account=state.account,version=epoch,key=admin?'admin':'owner',request=++hostReading[key],field=admin?'adminHosts':'hosts',prior=state[field];
@@ -97,8 +135,10 @@ export function createP4OperatorController({client=createP4OperatorClient(),stor
   }
   const nodeCommand=(method,node,body)=>command(method,[node.id],body,async(account,version)=>({...body,expected_version:(await freshNode(node,account,version)).version}));
   return {client,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},getState:()=>state,
-    async setAccount(account){epoch++;reading=false;budgetReading++;jobReading++;for(const key of Object.keys(hostReading))hostReading[key]++;client.setAccount(account);let saved=null;try{saved=account?JSON.parse(storage?.getItem(pendingKey(account))||'null'):null;}catch{saved={corrupt:true};}emit({account,snapshot:null,catalog:null,hosts:null,adminSnapshot:null,adminBudgets:null,adminPrices:null,budgetAudits:null,adminJobs:null,adminHosts:null,hostAudits:null,hostTarget:null,pending:saved,busy:false,loading:false,error:'',denied:false});if(account)try{await refresh();}catch{}},
-    refresh,readAdmin,readBudgetAdmin,readJobAdmin,readHosts,readHostAudit,readHostTarget,poll:admin=>state.busy?Promise.resolve():refresh(admin),
+    async setAccount(account){epoch++;reading=false;budgetReading++;jobReading++;billingReading++;for(const key of Object.keys(hostReading))hostReading[key]++;client.setAccount(account);let saved=null;try{saved=account?JSON.parse(storage?.getItem(pendingKey(account))||'null'):null;}catch{saved={corrupt:true};}emit({account,snapshot:null,catalog:null,hosts:null,adminSnapshot:null,adminBudgets:null,adminPrices:null,budgetAudits:null,billingReferences:null,billingFilter:null,adminJobs:null,adminHosts:null,hostAudits:null,hostTarget:null,pending:saved,busy:false,loading:false,error:'',denied:false});if(account)try{await refresh();}catch{}},
+    refresh,readAdmin,readBudgetAdmin,readJobAdmin,readBillingReferences,readHosts,readHostAudit,readHostTarget,poll:admin=>state.busy?Promise.resolve():refresh(admin),
+    async previewBilling(body){const account=state.account,version=epoch;if(state.pending)throw Error(message('copy31'));if(!validBillingRequest(body))throw Error(billMessage('invalid'));const original=structuredClone(body);await readAdmin();guard(account,version);const value=await client.previewBilling(original);guard(account,version);if(state.snapshot?.operator?.admin!==true||!validBillingPreview(value,original))throw Error(billMessage('previewChanged'));return {...value,operator_account:account};},
+    applyBilling:preview=>act(async()=>{if(state.pending)throw Error(message('copy31'));const account=state.account,version=epoch,prepared=billingOperation(preview);if(!prepared||preview.operator_account!==account)throw Error(billMessage('previewChanged'));await readAdmin();guard(account,version);if(!billingOperation(preview))throw Error(billMessage('previewChanged'));const operation={account,method:'applyBilling',args:[],...structuredClone(prepared),key:'operator-'+crypto.randomUUID(),created_at:Date.now()};pending(operation);return sendBilling(operation);}),
     async preview(body){const account=state.account,version=epoch;const value=await client.preview(body);guard(account,version);return value;},stopImpact:(kind,target)=>client.stopImpact(kind,target),
     async metrics(nodeId){const account=state.account,version=epoch;const value=await client.metrics(nodeId);guard(account,version);if(value?.node_id!==nodeId)throw Error(message('copy36'));return value;},
     start:preview=>command('start',[],{preview_id:preview.preview_id}),
@@ -112,7 +152,7 @@ export function createP4OperatorController({client=createP4OperatorClient(),stor
     updatePrice:(row,max,ceiling)=>command('updatePrice',[row.id],{expected_snapshot:row.snapshot,max_price_microusd:max,price_ceiling_microusd:ceiling},async(account,version)=>{await readAdmin();guard(account,version);return {expected_snapshot:row.snapshot,max_price_microusd:max,price_ceiling_microusd:ceiling};}),
     cancelJobs:(jobs,reason)=>command('cancelJobs',[],null,async(account,version)=>{const body=cancellationBody(jobs,reason);if(!body)throw Error(message('copy37'));await readAdmin();guard(account,version);return body;}),
     updateHostPolicy:(host,selection)=>command('updateHostPolicy',[],null,async(account,version)=>{const body=hostPolicyBody(host,selection);if(!body)throw Error(message('copy38'));await readAdmin();guard(account,version);if(state.snapshot?.operator?.admin!==true)throw Error(message('copy39'));return body;}),
-    recover:()=>act(async()=>{const account=state.account,version=epoch,original=state.pending;if(!original||original.corrupt||original.account!==state.account||!methods.has(original.method)||!Array.isArray(original.args)||typeof original.key!=='string')throw Error(message('copy40'));if(['cancelJobs','updateHostPolicy'].includes(original.method)){if(original.args.length!==0||!(original.method==='cancelJobs'?validCancellationBody(original.body):validHostPolicyBody(original.body)))throw Error(message('copy41'));await readAdmin();guard(account,version);if(state.snapshot?.operator?.admin!==true)throw Error(message('copy42'));}return ['updateBudget','updatePrice'].includes(original.method)?reconcilePolicy(original):send(original);}),
+    recover:()=>act(async()=>{const account=state.account,version=epoch,original=state.pending;if(!original||original.corrupt||original.account!==state.account||!methods.has(original.method)||!Array.isArray(original.args)||typeof original.key!=='string')throw Error(message('copy40'));if(original.method==='applyBilling'){if(original.args.length!==0||!validBillingOperation(original))throw Error(message('copy41'));return recoverBilling(original);}if(['cancelJobs','updateHostPolicy'].includes(original.method)){if(original.args.length!==0||!(original.method==='cancelJobs'?validCancellationBody(original.body):validHostPolicyBody(original.body)))throw Error(message('copy41'));await readAdmin();guard(account,version);if(state.snapshot?.operator?.admin!==true)throw Error(message('copy42'));}return ['updateBudget','updatePrice'].includes(original.method)?reconcilePolicy(original):send(original);}),
     destroy(){epoch++;client.reset();listeners.clear();},
   };
 }

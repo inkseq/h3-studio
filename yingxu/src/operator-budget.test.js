@@ -153,10 +153,10 @@ test('actual budget cards show sparse recorded dates and legacy uncertainty with
   const english=renderWithLocale(module,React.createElement(module.exports.BudgetAccounts,{budgets:[retiredRow],compact:true}),'en');
   const originalCosts=row({cost_breakdown:costBreakdown(),spent_microusd:84715946,reserved_microusd:0});
   const pendingCosts=renderWithLocale(module,React.createElement(module.exports.BudgetAccounts,{budgets:[originalCosts],compact:true}));
-  assert.match(pendingCosts,/已确认生成账单.*\$0\.00/);assert.match(pendingCosts,/181 笔生成账单待出账.*\$162\.40/);
+  assert.match(pendingCosts,/已记录生成成本分摊.*\$0\.00/);assert.match(pendingCosts,/181 条生成预估等待成本分摊.*\$162\.40/);
   assert.match(pendingCosts,/已确认 GPU 租金账单.*\$84\.72/);assert.match(pendingCosts,/实际费用未知/);assert.match(pendingCosts,/不代表免费生成/);assert.match(pendingCosts,/账户层级不能相加/);
   const pendingEnglish=renderWithLocale(module,React.createElement(module.exports.BudgetAccounts,{budgets:[originalCosts],compact:true}),'en');
-  assert.match(pendingEnglish,/181 generation invoices pending/);assert.match(pendingEnglish,/Actual charges are unknown/);assert.match(pendingEnglish,/Confirmed GPU rental invoices/);assert.doesNotMatch(pendingEnglish,/operatorPanel\./);
+  assert.match(pendingEnglish,/181 generation estimates await cost allocation/);assert.match(pendingEnglish,/Actual charges are unknown/);assert.match(pendingEnglish,/Confirmed GPU rental invoices/);assert.doesNotMatch(pendingEnglish,/operatorPanel\./);
   assert.match(english,/original fixed cap is retired/);assert.match(english,/Pending invoice estimate/);assert.doesNotMatch(english,/原固定额度|operatorPanel\./);
 });
 

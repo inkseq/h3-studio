@@ -74,6 +74,8 @@ inventory.json
 !studio_platform/batches.py
 !studio_platform/manage.py
 !studio_platform/repository.py
+!studio_platform/operator_billing.py
+!studio_platform/operator_billing_routes.py
 !studio_platform/queue.py
 !studio_platform/job_cancellation.py
 !studio_platform/job_events.py
