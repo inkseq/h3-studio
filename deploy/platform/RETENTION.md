@@ -56,6 +56,38 @@ immutable conditional-create objects. Partial, unapproved, foreign or unexpected
 directories remain on disk and appear as `unproven_or_partial_artifact`; a human
 can review them separately rather than broadening an automatic path glob.
 
+The same controller also considers the exact historical publication namespace
+`publication/<40-hex-commit>/<32-hex-nonce>/platform-release` and
+`migration-release`. Current/previous, newest-three, explicit rollback,
+in-flight and container bind pins take priority here too; publication copies
+do not consume installed-version slots. A payload needs the original
+root-protected nonce journal's terminal verified status, exact authority-file
+SHA/binding/download receipts, and the original publisher's nonblocking nonce
+lock in addition to the release lock. Unknown, busy, missing or partial
+publication evidence is retained. Apply reacquires all selected nonce locks and
+rechecks the original journal/authority/lock identities before any deletion.
+Payloads still require the normal manifest, independent approval, image
+validation and immutable S3 member-size/SHA/AES256 restore proof.
+
+Only a corresponding **complete validated payload** can justify selecting its
+exact `archives/platform-transport.tar.gz` or
+`archives/migration-transport.tar.gz` file. The original authority must bind the
+compressed size/SHA and every member to that payload. A bounded streaming
+single-gzip/raw-TAR check rejects PAX/GNU extensions, links, duplicates, unknown
+members, changed bytes, bad padding, trailing streams and excess decompression
+before selecting the file. Its restore unit is the independently approved
+release **members**, fetched/applied by the existing normal release tools from
+immutable S3 objects. Retention does not promise byte-identical recreation of
+the consumed gzip wrapper or replay a publisher intent. A partial payload
+cannot qualify an otherwise intact transport archive by filename alone.
+
+File removal is restricted to those two exact filenames under the validated
+namespace, using the existing no-follow descriptor/inode/hash boundary. Never
+remove the `archives` parent, nonce/SHA parents, publisher transport or source,
+SDK, authority, journal, lock, recovery script or unknown file. These controls
+remain the original evidence after cache deletion. Publication failure reasons
+in the retention receipt stay bounded/static and never contain AWS error text.
+
 Deletion validates all trees first, rejects symlinks/hardlinks/devices/path
 escapes, hashes each file, and uses Linux directory descriptors and no-follow
 operations with inode/content rechecks. Pointer/in-use changes reject the plan.
