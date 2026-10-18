@@ -8,14 +8,18 @@ considered. Unknown/partial artifacts stay on disk for an explicit review.
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack, contextmanager
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
 import stat
 import sys
+import tarfile
 import time
+import zlib
 
 import release
 
@@ -25,6 +29,7 @@ ENV = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8",
 MAX_ENTRIES = 8192
 MAX_OBJECTS = 4096
 EXTRA_RELEASES = 3
+NONCE = re.compile(r'[0-9a-f]{32}\Z')
 
 
 def safe_directory(path, *, incoming=False):
@@ -135,6 +140,11 @@ def closure(root, containers):
                 pieces = Path(ref).parts
                 if ref and Path(ref).is_relative_to(prefix) and len(pieces) > len(prefix.parts):
                     kept.add(commit_value(pieces[len(prefix.parts)]))
+            prefix = root / 'publication'
+            if ref and Path(ref).is_relative_to(prefix) and len(Path(ref).parts) > len(prefix.parts):
+                commit = Path(ref).parts[len(prefix.parts)]
+                if release.SHA.fullmatch(commit):
+                    kept.add(commit)
     return kept, observed
 
 
@@ -241,7 +251,7 @@ def remote_proof(api, commit, prefix, payloads):
             and response.get('ServerSideEncryption') == 'AES256', 'retention_s3_restore_proof_missing')
 
 
-def bundle(root, directory, kind, api, *, installed=False, image_cache=None):
+def bundle(root, directory, kind, api, *, installed=False, image_cache=None, publication_commit=None):
     """Return validated local tree + exact immutable publisher restore proof."""
     manifest_name = {'platform': 'release-manifest.json', 'migration': 'migration-manifest.json',
                      'frontend': 'frontend-manifest.json'}[kind]
@@ -250,8 +260,15 @@ def bundle(root, directory, kind, api, *, installed=False, image_cache=None):
     release.regular(artifact / manifest_name, maximum=262144)
     raw = json.loads((artifact / manifest_name).read_text())
     commit = commit_value(raw.get('commit'))
-    release.require(directory.name == commit or directory.name.startswith(('.download-', '.release-',
-        '.migration-download-', '.migration-release-', '.frontend-download-')), 'retention_directory_identity_invalid')
+    if publication_commit is not None:
+        pieces = directory.relative_to(root).parts
+        release.require(not installed and kind in {'platform','migration'} and len(pieces) == 4
+            and pieces[0] == 'publication' and pieces[1] == commit == publication_commit
+            and NONCE.fullmatch(pieces[2]) and pieces[3] == kind+'-release',
+            'retention_publication_namespace_invalid')
+    else:
+        release.require(directory.name == commit or directory.name.startswith(('.download-', '.release-',
+            '.migration-download-', '.migration-release-', '.frontend-download-')), 'retention_directory_identity_invalid')
     approval(root, kind, commit, artifact / manifest_name)
     if kind == 'platform':
         value = release.manifest(artifact, commit)
@@ -301,6 +318,232 @@ def bundle(root, directory, kind, api, *, installed=False, image_cache=None):
                 'dispatch-image.tar.gz'), image_value)
         image_ids = sorted(set(cache[key]) | {image_id})
     return {**snapshot, 'commit': commit, 'kind': kind, 'image_ids': image_ids}
+
+
+@contextmanager
+def publication_lock(root, nonce):
+    """Original publisher lock; never create it or take over a live publisher."""
+    import fcntl
+    release.require(type(nonce) is str and NONCE.fullmatch(nonce), 'retention_publication_nonce_invalid')
+    path = root / 'publication' / (nonce+'.lock')
+    safe_ancestors(root,path)
+    release.regular(path,root_owned=True,maximum=16384)
+    before = identity(path.lstat())
+    release.require(not before[2] & 0o077,'retention_publication_lock_unprotected')
+    descriptor = os.open(path,os.O_RDWR|os.O_NOFOLLOW)
+    try:
+        release.require(identity(os.fstat(descriptor)) == before, 'retention_publication_lock_changed')
+        fcntl.flock(descriptor,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        yield before
+        release.require(identity(os.fstat(descriptor)) == before and identity(path.lstat()) == before,
+            'retention_publication_lock_changed')
+    finally:
+        os.close(descriptor)
+
+
+def publication_context(root, commit, nonce, observed):
+    """Validate only the original completed publisher's protected metadata.
+
+    These records remain on disk. They grant no new publish/deploy authority;
+    independent manifest approval and immutable S3 proof are still required.
+    """
+    value = read_json(root,'publication/'+nonce+'.json',observed)
+    fields = {'binding','created_at','downloads','publication_started_at','publisher_exit_code',
+        'status','verified_at','verified_object_count'}
+    binding = value.get('binding')
+    release.require(set(value) == fields and type(binding) is dict and set(binding) == {
+        'version','authority_sha256','commit','policy_name','policy_sha256','host_id','inventory_sha256'}
+        and type(binding['version']) is int and binding['version'] == 1 and binding['commit'] == commit
+        and all(type(binding[name]) is str and release.DIGEST.fullmatch(binding[name])
+            for name in ('authority_sha256','policy_sha256','inventory_sha256'))
+        and type(binding['policy_name']) is str and binding['policy_name'].endswith('-'+nonce)
+        and type(binding['host_id']) is str and re.fullmatch(r'i-[0-9a-f]{8,17}',binding['host_id'])
+        and value['status'] == 'immutable_objects_verified_pending_independent_host_approval'
+        and type(value['publisher_exit_code']) is int and value['publisher_exit_code'] == 0
+        and type(value['verified_object_count']) is int and value['verified_object_count'] == 16
+        and all(type(value[name]) in (int,float) and math.isfinite(value[name]) and value[name] > 0
+            for name in ('created_at','publication_started_at','verified_at'))
+        and value['created_at'] <= value['publication_started_at'] <= value['verified_at']
+        and type(value['downloads']) is dict, 'retention_publication_not_terminal')
+    relative = 'publication/publication-authority-'+commit[:12]+'.json'
+    authority = read_json(root,relative,observed)
+    release.require(observed[relative]['sha256'] == binding['authority_sha256']
+        and type(authority.get('version')) is int and authority['version'] == 1
+        and authority.get('purpose') == 'temporary-exact-ci-publication-only'
+        and authority.get('commit') == commit and authority.get('host_id') == binding['host_id']
+        and authority.get('policy_name') == binding['policy_name']
+        and authority.get('policy_sha256') == binding['policy_sha256']
+        and authority.get('inventory_sha256') == binding['inventory_sha256']
+        and authority.get('bucket') == 'sixnine-platform-releases-829135631045-ap-southeast-1'
+        and authority.get('region') == 'ap-southeast-1'
+        and type(authority.get('staging')) is list and len(authority['staging']) == 3,
+        'retention_publication_authority_unknown')
+    names = {'platform-transport.tar.gz','migration-transport.tar.gz','publisher-source-transport.tar.gz'}
+    release.require({row.get('filename') for row in authority['staging']} == names
+        and set(value['downloads']) == names,'retention_publication_downloads_unknown')
+    for row in authority['staging']:
+        name = row['filename']; download = value['downloads'][name]
+        expected = f'publication-staging/{commit}/{nonce}/{name}'
+        release.require(row.get('key') == expected and type(row.get('sha256')) is str
+            and release.DIGEST.fullmatch(row['sha256']) and type(download) is dict
+            and set(download) == {'key','requested_at','verified_sha256'}
+            and download['key'] == expected and download['verified_sha256'] == row['sha256']
+            and type(download['requested_at']) in (int,float) and math.isfinite(download['requested_at'])
+            and value['created_at'] <= download['requested_at'] <= value['publication_started_at'],
+            'retention_publication_downloads_unknown')
+    return authority
+
+
+def publication_transport(root, leaf, payload, authority):
+    """Prove a transport is only a wrapper for this complete restorable bundle.
+
+    Every member already has independent approval and immutable S3 restore
+    proof from bundle(). This verifies the original wrapper SHA and exact
+    member bytes, not a speculative staging-prefix restore capability.
+    """
+    filename = payload['kind']+'-transport.tar.gz'
+    path = leaf/'archives'/filename
+    safe_ancestors(root,path); release.regular(path,root_owned=True,maximum=1024**3)
+    row = next(value for value in authority['staging'] if value['filename'] == filename)
+    expected = {name:value for name,value in payload['entries'].items() if name}
+    release.require(all('/' not in name and item['kind']=='file' for name,item in expected.items())
+        and type(row.get('size_bytes')) is int and 0 < row['size_bytes'] <= 1024**3
+        and type(row.get('members')) is list and len(row['members']) == len(expected)
+        and {value.get('path') for value in row['members']} == set(expected),
+        'retention_publication_transport_unknown')
+    for value in row['members']:
+        member = expected[value['path']]
+        release.require(type(value.get('size_bytes')) is int
+            and value['size_bytes'] == member['identity'][4] and value.get('sha256') == member['sha256'],
+            'retention_publication_transport_unknown')
+    before = identity(path.lstat())
+    release.require(before[4] == row['size_bytes'],'retention_publication_transport_changed')
+    class HashedReader:
+        def __init__(self, source):
+            self.source,self.size,self.sha = source,0,hashlib.sha256()
+        def read(self,size=1024*1024):
+            block = self.source.read(min(size,1024*1024) if size>=0 else 1024*1024)
+            self.size += len(block)
+            release.require(self.size <= row['size_bytes'],'retention_publication_transport_changed')
+            self.sha.update(block)
+            return block
+    descriptor = os.open(path,os.O_RDONLY|getattr(os,'O_NOFOLLOW',0))
+    with os.fdopen(descriptor,'rb') as source:
+        release.require(identity(os.fstat(source.fileno())) == before,'retention_publication_transport_changed')
+        hashed = HashedReader(source); seen = set()
+        maximum = sum(512 + ((item['identity'][4]+511)//512)*512 for item in expected.values())+tarfile.RECORDSIZE
+        class GzipReader:
+            def __init__(self):
+                self.decoder,self.pending,self.total,self.ended = zlib.decompressobj(31),b'',0,False
+            def read(self,size):
+                release.require(0 < size <= 1024*1024,'retention_publication_transport_unsafe')
+                output = []
+                while size and not self.ended:
+                    block = self.pending or hashed.read(65536)
+                    release.require(block,'retention_publication_transport_incomplete')
+                    value = self.decoder.decompress(block,size)
+                    self.pending = self.decoder.unconsumed_tail
+                    self.total += len(value)
+                    release.require(self.total <= maximum,'retention_publication_transport_unsafe')
+                    output.append(value);size -= len(value)
+                    if self.decoder.eof:
+                        # Exactly one complete gzip stream, with valid CRC,
+                        # no extra member, compressed trailer or raw suffix.
+                        release.require(not self.decoder.unused_data and not hashed.read(1),
+                            'retention_publication_transport_trailing')
+                        self.ended = True
+                return b''.join(output)
+        decoded = GzipReader()
+        while True:
+            header = decoded.read(512)
+            release.require(len(header) == 512,'retention_publication_transport_incomplete')
+            if not any(header):
+                second = decoded.read(512)
+                release.require(len(second) == 512 and not any(second),'retention_publication_transport_trailing')
+                while block := decoded.read(1024*1024):
+                    release.require(not any(block),'retention_publication_transport_trailing')
+                break
+            entry = tarfile.TarInfo.frombuf(header,'utf-8','strict')
+            # Inspect each raw header BEFORE tarfile can process PAX/GNU
+            # extensions or allocate their untrusted declared payload.
+            release.require(entry.type in {tarfile.REGTYPE,tarfile.AREGTYPE} and not entry.linkname
+                and entry.name in expected and entry.name not in seen
+                and entry.size == expected[entry.name]['identity'][4], 'retention_publication_transport_unsafe')
+            seen.add(entry.name);digest = hashlib.sha256();remaining = entry.size
+            while remaining:
+                block = decoded.read(min(remaining,1024*1024))
+                release.require(block,'retention_publication_transport_incomplete')
+                remaining -= len(block);digest.update(block)
+            padding = (-entry.size)%512
+            if padding:
+                block = decoded.read(padding)
+                release.require(len(block) == padding and not any(block),'retention_publication_transport_trailing')
+            release.require(digest.hexdigest() == expected[entry.name]['sha256'],
+                'retention_publication_transport_changed')
+        release.require(seen == set(expected) and hashed.size == row['size_bytes']
+            and hashed.sha.hexdigest() == row['sha256'] and identity(os.fstat(source.fileno())) == before
+            and identity(path.lstat()) == before, 'retention_publication_transport_changed')
+    return {'relative':path.relative_to(root).as_posix(),'commit':payload['commit'],
+        'kind':'publication_transport','image_ids':[],'bytes':row['size_bytes'],
+        'entries':{'':{'identity':before,'kind':'file','sha256':row['sha256']}}}
+
+
+def publication_payloads(root, kept, api, observed, image_cache):
+    """Only complete, independently approved payload dirs; never parent sweeps."""
+    parent = root/'publication'
+    if not parent.exists() and not parent.is_symlink():
+        return [],[],[]
+    safe_ancestors(root,parent); safe_directory(parent)
+    candidates, retained, contexts = [],[],[]
+    for namespace in sorted(parent.iterdir()):
+        if not release.SHA.fullmatch(namespace.name):
+            continue  # SDK, authorities, recovery scripts and nonce records stay.
+        release.require(len(contexts)+len(retained)<512,'retention_publication_count_limit')
+        if namespace.name in kept:
+            retained.append({'relative':namespace.relative_to(root).as_posix(),'reason':'rollback_or_in_use'})
+            continue
+        try:
+            safe_directory(namespace)
+        except Exception:
+            retained.append({'relative':namespace.relative_to(root).as_posix(),'reason':'unproven_publication'})
+            continue
+        for index,leaf in enumerate(sorted(namespace.iterdir())):
+            release.require(index < 128 and len(contexts)+len(retained)<512,'retention_publication_count_limit')
+            if not NONCE.fullmatch(leaf.name):
+                continue
+            context = {'commit':namespace.name,'nonce':leaf.name}
+            try:
+                safe_directory(leaf)
+                with publication_lock(root,leaf.name) as lock_identity:
+                    facts = {}
+                    authority = publication_context(root,namespace.name,leaf.name,facts)
+                    facts['publication/'+leaf.name+'.lock'] = {'identity':lock_identity}
+                    selected = []
+                    for kind in ('platform','migration'):
+                        directory = leaf/(kind+'-release')
+                        try:
+                            selected.append(bundle(root,directory,kind,api,image_cache=image_cache,
+                                publication_commit=namespace.name))
+                        except Exception:
+                            retained.append({'relative':directory.relative_to(root).as_posix(),
+                                'reason':'unproven_or_partial_artifact'})
+                    if selected:
+                        for payload in list(selected):
+                            try:
+                                selected.append(publication_transport(root,leaf,payload,authority))
+                            except Exception:
+                                retained.append({'relative':(leaf/'archives'/(payload['kind']+'-transport.tar.gz')).relative_to(root).as_posix(),
+                                    'reason':'unproven_publication_transport'})
+                        for item in selected:
+                            item['publication_nonce'] = leaf.name
+                # A failed lock/path recheck must not leak any candidate from
+                # this context into an otherwise accepted plan.
+                if selected:
+                    candidates.extend(selected); contexts.append(context)
+                    observed.update(facts)
+            except Exception:
+                retained.append({'relative':leaf.relative_to(root).as_posix(),'reason':'unproven_publication'})
+    return candidates,retained,contexts
 
 
 def plan_locked(root=release.ROOT, *, api, command=release.command):
@@ -355,6 +598,8 @@ def plan_locked(root=release.ROOT, *, api, command=release.command):
                     retained.append({'relative': item['relative'], 'reason': 'rollback_or_in_use'})
             except Exception:
                 retained.append({'relative': directory.name, 'reason': 'unproven_or_partial_artifact'})
+    publication, publication_retained, contexts = publication_payloads(root,kept,api,observed,image_cache)
+    candidates.extend(publication);retained.extend(publication_retained)
     protected_images = {item.get('Image') for item in containers}
     for commit in sorted(kept):
         directory = root / 'releases' / commit
@@ -380,6 +625,7 @@ def plan_locked(root=release.ROOT, *, api, command=release.command):
     image_candidates = eligible_image_tags(images, candidates, protected_images)
     return {'version': 1, 'state': 'retention_plan', 'kept_commits': sorted(kept), 'pointers': observed,
         'newest_extra_commits': extras,
+        'publication_contexts': contexts,
         'candidates': candidates, 'retained': retained, 'image_candidates': image_candidates,
         'protected_images': sorted(value for value in protected_images if value),
         'reclaimable_file_bytes': sum(item['bytes'] for item in candidates)}
@@ -427,6 +673,25 @@ def delete_tree(root, snapshot):
         for part in relative.split('/')[:-1]:
             fd = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd); descriptors.append(fd)
         parent_fd, leaf = fd, relative.split('/')[-1]
+        if snapshot['entries']['']['kind'] == 'file':
+            pieces = relative.split('/')
+            release.require(len(pieces) == 5 and pieces[0]=='publication' and release.SHA.fullmatch(pieces[1])
+                and NONCE.fullmatch(pieces[2]) and pieces[3]=='archives'
+                and pieces[4] in {'platform-transport.tar.gz','migration-transport.tar.gz'},
+                'retention_delete_file_scope_invalid')
+            handle = os.open(leaf,os.O_RDONLY|os.O_NOFOLLOW,dir_fd=parent_fd)
+            try:
+                entry = snapshot['entries']['']
+                release.require(identity(os.fstat(handle)) == tuple(entry['identity']), 'retention_delete_entry_changed')
+                digest = hashlib.sha256()
+                while block := os.read(handle,1024*1024):
+                    digest.update(block)
+                release.require(digest.hexdigest() == entry['sha256'] and identity(os.stat(leaf,dir_fd=parent_fd,
+                    follow_symlinks=False)) == tuple(entry['identity']), 'retention_delete_file_changed')
+                os.unlink(leaf,dir_fd=parent_fd);os.fsync(parent_fd)
+                return
+            finally:
+                os.close(handle)
         target = os.open(leaf, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
         descriptors.append(target)
         entries = snapshot['entries']
@@ -474,8 +739,21 @@ def delete_tree(root, snapshot):
 
 
 def apply_locked(root, plan, *, command=release.command, prune_cache=True):
+    with ExitStack() as locks:
+        publication_observed = {}
+        for context in plan.get('publication_contexts',[]):
+            commit,nonce = commit_value(context['commit']),context['nonce']
+            lock_identity = locks.enter_context(publication_lock(root,nonce))
+            publication_context(root,commit,nonce,publication_observed)
+            publication_observed['publication/'+nonce+'.lock'] = {'identity':lock_identity}
+        return _apply_locked(root,plan,command=command,prune_cache=prune_cache,
+            publication_observed=publication_observed)
+
+
+def _apply_locked(root, plan, *, command, prune_cache, publication_observed):
     containers, _ = docker_snapshot(command)
     kept, observed, _ = keep_policy(root, containers)
+    observed.update(publication_observed)
     release.require(sorted(kept) == plan['kept_commits'] and observed == plan['pointers'], 'retention_plan_stale')
     # Validate ALL trees before the first delete; an altered later artifact may
     # not leave a partially applied earlier plan that appeared fully accepted.
