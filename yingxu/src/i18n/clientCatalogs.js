@@ -1,6 +1,7 @@
 export const clientCatalogs={
   en:{
     'client.budgetIdentity':'The account budget identity or cumulative records could not be confirmed. Refresh before continuing.',
+    'client.billingIdentity':'The requested account charge references could not be confirmed. Reload before continuing.',
     'client.consoleIdentity':'The console state could not be confirmed. Refresh before continuing.',
     'client.priceIdentity':'The price administrator identity could not be confirmed. Refresh before continuing.',
     'client.jobsIdentity':'The administrator identity or original job state could not be confirmed. Refresh before continuing.',
@@ -41,6 +42,7 @@ export const clientCatalogs={
   },
   zh:{
     'client.budgetIdentity':'账户预算身份或累计记录尚未确认，请刷新。',
+    'client.billingIdentity':'所选账户的费用记录身份尚未确认，请重新读取。',
     'client.consoleIdentity':'控制台状态尚未确认，请刷新。',
     'client.priceIdentity':'价格管理身份尚未确认，请刷新。',
     'client.jobsIdentity':'管理员任务身份或原状态尚未确认，请刷新。',

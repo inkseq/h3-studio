@@ -4,6 +4,7 @@ import {translateForAccount} from './i18n/locale.js';
 import {validBudgetPage} from './operator-budget-model.js';
 import {validAdminJobs} from './operator-jobs-model.js';
 import {validHostAudit,validHostPage} from './operator-host-model.js';
+import {validBillingPage} from './operator-billing-model.js';
 
 const ROOT='/v1/operator/dstack',id=value=>encodeURIComponent(value);
 export function createP4OperatorClient(options={}){
@@ -24,6 +25,10 @@ export function createP4OperatorClient(options={}){
     budgets:options=>budgets(false,options),adminBudgets:options=>budgets(true,options),
     budgetAudit:()=>api.request('/v1/operator/admin/budgets/audit'),
     updateBudget:(budgetId,body,key)=>api.request('/v1/operator/admin/budgets/'+id(budgetId),{method:'PUT',body,key}),
+    async billingReferences({owner_id,after,limit=50,created_after,created_before}){const query=new URLSearchParams({owner_id,limit,...(after?{after}:{}),...(created_after!==undefined?{created_after}:{}),...(created_before!==undefined?{created_before}:{})});const value=await api.request('/v1/operator/admin/billing/references?'+query);if(!validBillingPage(value,owner_id))throw new CloudError(message('billingIdentity'));return value;},
+    previewBilling:body=>api.request('/v1/operator/admin/billing/previews',{method:'POST',body}),
+    applyBilling:(body,key)=>api.request('/v1/operator/admin/billing/actions',{method:'POST',body,key}),
+    billingActionByKey:key=>api.request('/v1/operator/admin/billing/actions/by-key?key='+id(key)),
     async adminPrices(){const value=await api.request(ROOT+'/admin/prices');if(value?.operator?.account!==account||value.operator.admin!==true||!Array.isArray(value.profiles)||!Array.isArray(value.audits))throw new CloudError(message('priceIdentity'));return value;},
     updatePrice:(profileId,body,key)=>api.request(ROOT+'/admin/prices/'+id(profileId),{method:'PUT',body,key}),
     async adminJobs({after_id,limit=100}={}){const value=await api.request('/v1/operator/admin/jobs?limit='+limit+(after_id?'&after_id='+id(after_id):''));if(!validAdminJobs(value,account))throw new CloudError(message('jobsIdentity'));return value;},
