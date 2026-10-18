@@ -7,13 +7,14 @@ appear in output. The daily projection is the existing guard, not a new ledger.
 import json
 import math
 import time
+import uuid
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, case, func, or_, select
 
 from .alert_conditions import STATES, identity
-from .dstack_test_budget import ACCOUNT, projected_cost, validate_guard
+from .dstack_test_budget import ACCOUNT, projected_cost, validate_guard, guard_limit
 from .generation_diagnostics import WANGP_VALIDATION_CODES, COMMON_CODES, _WORKER_CODES
 from .inference.protocol import INFERENCE_FAILURE_CODES
 from .operator_capacity import operator_nodes
@@ -103,12 +104,12 @@ def read_snapshot(repo, *, now, tenant_id, test_guard=None, wake_window_seconds=
             operator_nodes.c.intent_id == instance_intents.c.id).outerjoin(scaler_actions,
                 scaler_actions.c.intent_id == instance_intents.c.id)).where(
                     operator_nodes.c.payload["tenant_id"].as_string() == tenant_id)
-        # Latest historical guard remains relevant after all GPUs stop. Fetch
-        # only that guard, while GPU observations contain current instances.
-        guard_node = connection.execute(node_query.where(
-            operator_nodes.c.payload["lifecycle"]["test_gpu_guard"]["daily_limit_microusd"].as_integer().is_not(None))
-            .order_by(instance_intents.c.created_at.desc(), instance_intents.c.id.desc()).limit(1)).mappings().first()
-        guards = [validate_guard(guard_node["lifecycle"]["test_gpu_guard"])] if guard_node else []
+        # Keep original task attribution after stop. This remains a read of
+        # original rows, not a daily counter or a new spending authority.
+        guard_rows = _rows(connection, node_query.where(
+            operator_nodes.c.payload["lifecycle"]["test_gpu_guard"]["version"].as_integer().is_not(None))
+            .order_by(instance_intents.c.created_at.desc(), instance_intents.c.id.desc()))
+        guards = [validate_guard(row["lifecycle"]["test_gpu_guard"]) for row in guard_rows]
         nodes = _rows(connection, node_query.where(instance_intents.c.provider_instance_id.is_not(None),
             instance_intents.c.state != "destroyed", or_(operator_nodes.c.runtime_state.is_(None), operator_nodes.c.runtime_state != "stopped")))
         for node in nodes:
@@ -176,9 +177,23 @@ def read_snapshot(repo, *, now, tenant_id, test_guard=None, wake_window_seconds=
             guard = validate_guard(test_guard) if test_guard is not None else guards[0] if guards else None
             if guard is None:
                 raise ValueError("alert_test_guard_unconfirmed")
-            result["test_spend"] = {"day": datetime.fromtimestamp(now, timezone.utc).astimezone(
-                ZoneInfo("Australia/Sydney")).date().isoformat(), "projected_microusd": projected_cost(connection, guard, now),
-                "limit_microusd": guard["daily_limit_microusd"]}
+            task_guards = {}
+            for value in ([guard] if test_guard is not None else guards):
+                if value["version"] == 2:
+                    task_guards.setdefault(value["task_id"], value)
+            if task_guards:
+                from .spending_limits import ADMIN_OWNER, read_settings
+                limits = read_settings(connection, tenant_id, ADMIN_OWNER)
+                result["test_spend"] = {"scope": "acceptance_task", "tasks": [
+                    {"task_id": task, "resource_id": str(uuid.uuid5(uuid.NAMESPACE_URL, f"inkseq:test:{tenant_id}:{task}")),
+                     "projected_microusd": projected_cost(connection, value, now),
+                     "limit_microusd": min(guard_limit(value), limits["value"]["test_task_limit_microusd"])
+                        if limits["version"] else guard_limit(value)}
+                    for task, value in sorted(task_guards.items())]}
+            else:
+                result["test_spend"] = {"day": datetime.fromtimestamp(now, timezone.utc).astimezone(
+                    ZoneInfo("Australia/Sydney")).date().isoformat(), "projected_microusd": projected_cost(connection, guard, now),
+                    "limit_microusd": guard_limit(guard)}
     return result
 
 

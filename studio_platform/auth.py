@@ -83,10 +83,12 @@ def digest(value: str) -> str:
 
 
 class Auth:
-    def __init__(self, engine, *, tenant="sixnine", mode="password", session_seconds=43200, clock=time.time):
+    def __init__(self, engine, *, tenant="sixnine", mode="password", session_seconds=7*86400, clock=time.time):
         self.engine = engine
         self.tenant = tenant
         self.mode = mode
+        if type(session_seconds) is not int or not 1 <= session_seconds <= 365*86400:
+            raise ValueError("Invalid browser session duration")
         self.session_seconds = session_seconds
         self.clock = clock
         with engine.begin() as connection:
@@ -194,15 +196,32 @@ class Auth:
     def session(self, token):
         if not isinstance(token, str) or not TOKEN.fullmatch(token):
             return None
-        with self.engine.connect() as conn:
+        now = self.clock()
+        with self.engine.begin() as conn:
             row = conn.execute(select(sessions).where(sessions.c.tenant == self.tenant, sessions.c.token_hash == digest(token),
-                sessions.c.expires > self.clock(), sessions.c.auth_mode == self.mode)).mappings().first()
+                sessions.c.expires > now, sessions.c.auth_mode == self.mode)).mappings().first()
             if not row:
                 return None
             if self.mode == "password":
                 account = conn.execute(select(accounts).where(accounts.c.tenant == self.tenant, accounts.c.username == row["username"])).mappings().first()
                 if not account or account["disabled"] or account["updated"] != row["password_version"] or not self.ready(conn):
                     return None
+            # Slide at most hourly (half the TTL for short explicit test/config
+            # durations). Polling and media reads do not write on every request.
+            interval = min(3600, self.session_seconds / 2)
+            if row["expires"] <= now + self.session_seconds - interval:
+                statement = update(sessions).where(sessions.c.tenant == self.tenant,
+                    sessions.c.token_hash == row["token_hash"], sessions.c.expires > now,
+                    sessions.c.auth_mode == self.mode,
+                    sessions.c.password_version == row["password_version"])
+                if self.mode == "password":
+                    statement = statement.where(select(accounts.c.username).where(
+                        accounts.c.tenant == self.tenant, accounts.c.username == row["username"],
+                        accounts.c.disabled == 0, accounts.c.updated == row["password_version"]).exists())
+                # Update-only: a concurrent logout/password change cannot
+                # recreate a deleted session. Never shorten a concurrent renewal.
+                conn.execute(statement.where(sessions.c.expires < now+self.session_seconds)
+                    .values(expires=now+self.session_seconds))
         return Principal(row["username"], "browser:"+row["username"], auth_mode=row["auth_mode"],
             password_version=row["password_version"], session_hash=row["token_hash"])
 

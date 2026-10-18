@@ -113,7 +113,12 @@ export function lifetimeBody({keep_on='idle',idle_minutes=10,until},now=Date.now
 }
 export function previewCurrent(preview,selection,now=Date.now()){
   const policy=dstackLifecycle(preview);
+  if(Object.hasOwn(selection||{},'test_task_id')&&(policy?.test_gpu_guard?.version!==2||policy.test_gpu_guard.task_id!==selection.test_task_id))return false;
   return preview?.capacity_backend==='dstack-v1'&&preview.can_start===true&&typeof preview.preview_id==='string'&&finite(preview.expires_at)&&preview.expires_at*1000>now&&policy&&typeof selection?.profile_id==='string'&&policy.keep_on===selection.keep_on&&(!Object.hasOwn(selection,'idle_shutdown_seconds')||policy.idle_shutdown_seconds===selection.idle_shutdown_seconds)&&(!preview.profile_id||preview.profile_id===selection.profile_id)&&(!Object.hasOwn(preview,'group_id')||preview.group_id===selection.group_id)&&finite(preview.hourly_cost_microusd)&&preview.hourly_cost_microusd>0&&(!Object.hasOwn(selection,'max_price_microusd')||preview.max_price_microusd===selection.max_price_microusd&&preview.hourly_cost_microusd===selection.max_price_microusd)&&finite(preview.reservation_microusd)&&preview.reservation_microusd>=0;
+}
+export function testTaskBody(required,value){
+  if(!required)return {};
+  return typeof value==='string'&&/^[A-Za-z0-9_.:-]{1,100}$/.test(value)?{test_task_id:value}:null;
 }
 export function batchRows(rows,profiles){
   if(!Array.isArray(rows)||!rows.length||rows.length>16)return null;

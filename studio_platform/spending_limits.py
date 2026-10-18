@@ -17,7 +17,7 @@ from .repository import (BudgetExceeded, Conflict, NotFound, budget_accounts,
 from .dstack_test_budget import day_window
 
 USER_DEFAULTS = {"daily_limit_microusd": 0, "ask_above_microusd": 0, "connection_limits": {}}
-ADMIN_DEFAULTS = {"test_daily_limit_microusd": 20_000_000,
+ADMIN_DEFAULTS = {"test_task_limit_microusd": 20_000_000,
     "max_hourly_price_microusd": 1_000_000, "fleet_hourly_limit_microusd": 1_000_000, "idle_shutdown_seconds": 600,
     "max_runtime_seconds": 7200}
 ADMIN_OWNER = "__admin__"
@@ -37,7 +37,7 @@ def admin_defaults(service=None):
         return dict(ADMIN_DEFAULTS)
     policy, profiles = service.policy, service.profiles.values()
     guard = policy.get("test_gpu_guard", {})
-    return {"test_daily_limit_microusd": guard.get("daily_limit_microusd", ADMIN_DEFAULTS["test_daily_limit_microusd"]),
+    return {"test_task_limit_microusd": guard.get("task_limit_microusd", guard.get("daily_limit_microusd", ADMIN_DEFAULTS["test_task_limit_microusd"])),
         "max_hourly_price_microusd": max((p["max_price_microusd"] for p in profiles), default=ADMIN_DEFAULTS["max_hourly_price_microusd"]),
         "fleet_hourly_limit_microusd": policy.get("max_hourly_cost_microusd", ADMIN_DEFAULTS["fleet_hourly_limit_microusd"]),
         "idle_shutdown_seconds": policy.get("idle_shutdown_seconds", ADMIN_DEFAULTS["idle_shutdown_seconds"]),
@@ -61,11 +61,22 @@ def read_settings(connection, tenant, owner, *, admin_defaults=None):
     row = connection.execute(select(spending_settings).where(
         spending_settings.c.tenant_id == tenant, spending_settings.c.owner_id == owner)).mappings().first()
     defaults = (admin_defaults or ADMIN_DEFAULTS) if owner == ADMIN_OWNER else USER_DEFAULTS
+    value = dict(row["value"]) if row else {**defaults, **({"connection_limits": {}} if owner != ADMIN_OWNER else {})}
     return {"version": row["version"] if row else 0,
-            "value": dict(row["value"]) if row else {**defaults, **({"connection_limits": {}} if owner != ADMIN_OWNER else {})}}
+            "value": canonical_admin(value) if owner == ADMIN_OWNER else value}
+
+
+def canonical_admin(value):
+    """Read old audited settings without a migration or changing their cap."""
+    if isinstance(value, dict) and "test_daily_limit_microusd" in value and "test_task_limit_microusd" not in value:
+        value = {**value, "test_task_limit_microusd": value["test_daily_limit_microusd"]}
+        del value["test_daily_limit_microusd"]
+    return value
 
 
 def validate_settings(value, *, admin=False):
+    if admin:
+        value = canonical_admin(value)
     fields = ADMIN_DEFAULTS if admin else USER_DEFAULTS
     if not isinstance(value, dict) or set(value) != set(fields):
         raise ValueError("spending_settings_invalid")

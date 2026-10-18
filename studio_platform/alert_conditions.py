@@ -142,7 +142,21 @@ def evaluate(snapshot, previous_state, *, environment, now, host=None, threshold
                 count > config["wake_count"] if type(count) is int and count >= 0 else None, since=first)
         state["observed_jobs"] = observed
         spend = snapshot.get("test_spend")
-        if isinstance(spend, dict):
+        if isinstance(spend, dict) and spend.get("scope") == "acceptance_task" and isinstance(spend.get("tasks"), list):
+            # A scoped snapshot supersedes only the retired global warning;
+            # each acceptance task keeps its own stable notification identity.
+            for percent in (80, 100):
+                condition("test_spend_"+str(percent), None, False)
+            for task in spend["tasks"]:
+                resource = identity(task.get("resource_id")) if isinstance(task, dict) else None
+                if resource is None:
+                    continue
+                amount, limit = task.get("projected_microusd"), task.get("limit_microusd")
+                for percent in (80, 100):
+                    condition("test_spend_"+str(percent), resource,
+                        amount*100 >= limit*percent if type(amount) is int and amount >= 0
+                            and type(limit) is int and limit > 0 else None)
+        elif isinstance(spend, dict):
             amount, limit = spend.get("projected_microusd"), spend.get("limit_microusd")
             for percent in (80, 100):
                 condition("test_spend_"+str(percent), None,

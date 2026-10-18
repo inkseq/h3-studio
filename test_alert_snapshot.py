@@ -106,21 +106,34 @@ class BudgetAlertSnapshotTests(budget_fixture.DailyTestBudgetTests):
         with self.repo.engine.connect() as c:
             before=[dict(row)for row in c.execute(select(budget_reservations)).mappings()]
         first=self.snapshot()
-        self.assertEqual(first["test_spend"]["projected_microusd"],1_812_500)
+        self.assertEqual(first["test_spend"]["scope"],"acceptance_task")
+        self.assertEqual(first["test_spend"]["tasks"][0]["projected_microusd"],1_812_500)
         self.now=day_window(self.now)[1]+1
         next_day=self.snapshot()
         with self.repo.engine.connect() as c:
-            expected=projected_cost(c,budget_fixture.GUARD,self.now)
+            expected=projected_cost(c,self.rows()[1]['payload']['lifecycle']['test_gpu_guard'],self.now)
             self.assertEqual([dict(row)for row in c.execute(select(budget_reservations)).mappings()],before)
-        self.assertEqual(next_day["test_spend"]["projected_microusd"],expected)
+        self.assertEqual(next_day["test_spend"]["tasks"][0]["projected_microusd"],expected)
         self.assertGreater(expected,0)
-        self.assertNotEqual(first["test_spend"]["day"],next_day["test_spend"]["day"])
+        self.assertEqual(first["test_spend"]["tasks"][0]["resource_id"],next_day["test_spend"]["tasks"][0]["resource_id"])
 
-    def test_settled_daily_actuals_clear_by_sydney_day_without_mutations(self):
+    def test_settled_task_actuals_do_not_reset_by_calendar(self):
         self.history(amount=1_812_500,actual=19_000_000)
-        self.assertEqual(self.snapshot()["test_spend"]["projected_microusd"],19_000_000)
+        self.assertEqual(self.snapshot()["test_spend"]["tasks"][0]["projected_microusd"],19_000_000)
         self.now=day_window(self.now)[1]+1
-        self.assertEqual(self.snapshot()["test_spend"]["projected_microusd"],0)
+        self.assertEqual(self.snapshot()["test_spend"]["tasks"][0]["projected_microusd"],19_000_000)
+
+    def test_legacy_guard_snapshot_remains_readable_until_scoped_tasks_exist(self):
+        self.history(amount=1_812_500,actual=19_000_000)
+        intent,node=self.rows()
+        payload=copy.deepcopy(node['payload'])
+        payload['lifecycle']['test_gpu_guard']=copy.deepcopy(budget_fixture.GUARD)
+        payload['request'].pop('test_task_id')
+        with self.repo.transaction() as c:
+            c.execute(update(operator_nodes).values(payload=payload))
+        self.assertEqual(self.snapshot()['test_spend']['projected_microusd'],19_000_000)
+        self.now=day_window(self.now)[1]+1
+        self.assertEqual(self.snapshot()['test_spend']['projected_microusd'],0)
 
     def test_gpu_original_idle_setting_and_unsafe_attempt_obligations(self):
         node_id=self.start()["node_id"]

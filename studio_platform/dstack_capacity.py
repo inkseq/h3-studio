@@ -156,6 +156,7 @@ class CapacityRequest:
     lifecycle_version: int = 1
     host_selection: dict | None = None
     test_max_duration_s: int | None = None
+    test_task_id: str | None = None
 
     def __post_init__(self):
         _uuid(self.intent_id)
@@ -176,6 +177,9 @@ class CapacityRequest:
         _require(self.test_max_duration_s is None or self.lifecycle_version == 2
             and type(self.test_max_duration_s) is int and 60 <= self.test_max_duration_s <= 86400,
             "dstack_test_duration_invalid")
+        from .dstack_test_budget import valid_task_id
+        _require(self.test_task_id is None or self.test_max_duration_s is not None
+            and valid_task_id(self.test_task_id), "dstack_test_task_invalid")
         _require(type(self.created_at) in (int, float) and math.isfinite(self.created_at)
             and self.created_at > 0, "dstack_deadline_invalid")
         if self.lifecycle_version == 2:
@@ -230,6 +234,8 @@ class CapacityRequest:
         if self.backend == "vastai":
             configuration["backend_options"] = [{"type": "vastai", "offer_order": "price",
                 "min_reliability": self.min_reliability}]
+        if self.test_task_id is not None:
+            configuration["tags"]["inkseq_test_task"] = self.test_task_id
         spec = {"run_name": self.run_name, "configuration": configuration, "ssh_key_pub": ssh_key_pub}
         if self.host_selection is not None:
             # Native 0.22.3 uses this selector for backend offers AND fleet

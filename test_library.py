@@ -28,6 +28,29 @@ class LibraryTests(unittest.TestCase):
     def action(self,actions,key='metadata'):
         return self.client.post('/v1/projects/story-one/actions',json={'expected_version':self.current()['version'],'actions':actions},headers={'Idempotency-Key':key})
     def import_body(self):return {'source':{'project_id':'story-one','kind':'entity','id':'hero'},'target_project_id':'target','expected_project_version':self.current('target')['version']}
+
+    def test_category_counts_share_authorized_snapshot_before_type_and_pagination(self):
+        self.prepare()
+        fixture.GenerationDraftTests.source(self,'spare','image')
+        first=self.client.get('/v1/library',params={'type':'character','limit':1}).json()
+        self.assertEqual(first['counts_scope'],'authorized_filtered_except_type')
+        self.assertEqual(first['counts'],{'character':1,'location':0,'prop':0,'image':2,'video':0,'audio':0,'file':2,'inbox':1})
+        self.assertEqual(len(first['items']),1)
+        page=self.client.get('/v1/library',params={'type':'image','limit':1,'offset':1}).json()
+        self.assertEqual(page['counts'],first['counts'])
+        images=self.client.get('/v1/library',params={'type':'image'}).json()['items']
+        portrait=next(row for row in images if row['target']['id']=='file-one')
+        self.assertEqual(portrait['filed_in'],['hero'])  # Look imageIds, not only legacy libraryFileIds.
+        self.assertFalse(portrait['inbox'])
+        inbox=self.client.get('/v1/library',params={'type':'inbox'}).json()
+        self.assertEqual([row['asset_id'] for row in inbox['items']],['spare'])
+        searched=self.client.get('/v1/library',params={'type':'character','q':'spare'}).json()
+        self.assertEqual(searched['items'],[])
+        self.assertEqual((searched['counts']['character'],searched['counts']['image']),(0,1))
+        self.login('supervan')
+        foreign=self.client.get('/v1/library').json()
+        self.assertFalse(foreign['items'])
+        self.assertTrue(all(value==0 for value in foreign['counts'].values()))
     def importing(self,body,key='import'):
         return self.client.post('/v1/library/imports',json=body,headers={'Idempotency-Key':key})
     def test_tags_usage_scope_filters_and_atomic_file_into_profile(self):

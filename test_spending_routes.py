@@ -49,5 +49,31 @@ class SpendingRouteTests(unittest.TestCase):
         repo.clock=lambda:original_now+120
         self.assertEqual(self.client.post('/v1/account/spending-confirmations',json={'plan_id':expired['id']}).status_code,409)
 
+    def test_admin_task_limit_preserves_legacy_alias_cas_and_audit(self):
+        from sqlalchemy import insert,select
+        from studio_platform.repository import spending_settings,outbox
+        from studio_platform.spending_limits import ADMIN_OWNER,ADMIN_DEFAULTS
+        path='/v1/operator/admin/spending-settings'
+        legacy={**ADMIN_DEFAULTS,'test_daily_limit_microusd':17_000_000}
+        del legacy['test_task_limit_microusd']
+        with self.app.state.repository.transaction() as c:
+            c.execute(insert(spending_settings).values(tenant_id='sixnine',owner_id=ADMIN_OWNER,version=1,
+                value=legacy,updated_at=1.,actor_id='browser:superdan'))
+        current=self.client.get(path).json()
+        self.assertEqual(current['test_budget_scope'],'acceptance_task')
+        self.assertEqual(current['value']['test_task_limit_microusd'],17_000_000)
+        self.assertNotIn('test_daily_limit_microusd',current['value'])
+        # Old UI payloads use the original audited route and normalize once.
+        result=self.client.put(path,json={'expected_version':1,'value':{**legacy,'test_daily_limit_microusd':18_000_000}})
+        self.assertEqual(result.status_code,200)
+        self.assertEqual(result.json()['value']['test_task_limit_microusd'],18_000_000)
+        self.assertEqual(self.client.put(path,json={'expected_version':1,'value':current['value']}).status_code,409)
+        ambiguous={**current['value'],'test_daily_limit_microusd':1}
+        self.assertEqual(self.client.put(path,json={'expected_version':2,'value':ambiguous}).status_code,422)
+        with self.app.state.repository.engine.connect() as c:
+            audits=list(c.execute(select(outbox).where(outbox.c.event_type=='spending.settings_updated')).mappings())
+            self.assertEqual(len(audits),1)
+            self.assertEqual(audits[0]['payload']['new']['value']['test_task_limit_microusd'],18_000_000)
+
 
 if __name__=='__main__':unittest.main()

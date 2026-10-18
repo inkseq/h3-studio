@@ -722,7 +722,7 @@ class DstackOperator:
         require(self.policy.get("enabled") is True and self.capacity is not None, "dstack_capacity_disabled")
         require(self.repo.clock() < self.policy["expires_at"], "dstack_authority_expired")
 
-    def _capacity_request(self, profile, intent_id, created_at, deadline, duration, *, lifecycle_version=1, test_max_duration=None):
+    def _capacity_request(self, profile, intent_id, created_at, deadline, duration, *, lifecycle_version=1, test_max_duration=None, test_task_id=None):
         return CapacityRequest(intent_id=intent_id, backend=profile["backend"], profile_id=profile["runtime_profile_id"],
             mode=profile["mode"], model_id=profile["model_id"], configuration_id=profile["configuration_id"],
             manifest_digest=profile["manifest_digest"], image=profile["image"], gpu_names=tuple(profile["gpu_names"]),
@@ -731,6 +731,7 @@ class DstackOperator:
             created_at=created_at, hard_deadline=deadline, max_duration_s=duration,
             regions=tuple(profile.get("regions", [])), min_reliability=profile.get("min_reliability", .9),
             lifecycle_version=lifecycle_version,
+            test_task_id=test_task_id,
             test_max_duration_s=(test_max_duration or self.policy.get("test_gpu_guard", {}).get("max_runtime_seconds")
                 if lifecycle_version == 2 else None))
 
@@ -765,7 +766,7 @@ class DstackOperator:
                 return self._admin_limits(connection)
         return read_settings(connection, self.settings.tenant_id, ADMIN_OWNER, admin_defaults=admin_defaults(self))
 
-    def _lifecycle(self, body, now, expected_runtime, *, limits=None):
+    def _lifecycle(self, body, now, expected_runtime, *, limits=None, original_guard=None):
         limits = limits or self._admin_limits()["value"]
         keep = body.get("keep_on", "until" if body.get("hold_seconds", 0) else "idle")
         hold = body.get("hold_seconds", 0)
@@ -781,11 +782,15 @@ class DstackOperator:
             "idle_shutdown_seconds": idle, "reservation_seconds": self.policy["reservation_seconds"],
             "expected_runtime_s": expected_runtime}
         if guard is not None:
+            from .dstack_test_budget import task_guard, valid_task_id, validate_guard
+            require(original_guard is not None or valid_task_id(body.get("test_task_id")), "dstack_test_task_required", 422)
             require(limits["max_runtime_seconds"] > expected_runtime + guard["stop_margin_seconds"],
                 "dstack_test_runtime_limit_reached", 422)
-            result["test_gpu_guard"] = copy.deepcopy(guard)
-            result["test_gpu_guard"].update(daily_limit_microusd=limits["test_daily_limit_microusd"],
-                max_runtime_seconds=limits["max_runtime_seconds"])
+            result["test_gpu_guard"] = (copy.deepcopy(validate_guard(original_guard)) if original_guard is not None else
+                task_guard(guard, body["test_task_id"], limit=limits["test_task_limit_microusd"],
+                    max_runtime=limits["max_runtime_seconds"]))
+        else:
+            require("test_task_id" not in body, "dstack_test_task_invalid", 422)
         return result
 
     def fund_window(self, connection, intent, node, now):
@@ -839,6 +844,7 @@ class DstackOperator:
         profiles.sort(key=lambda item: item["runtime_profile_id"] != default)
         return {"capacity_backend": BACKEND_MARKER, "enabled": self.policy.get("enabled") is True,
             "lifecycle_version": self.policy.get("lifecycle_version", 1),
+            "test_task_id_required": self.policy.get("test_gpu_guard") is not None,
             "operator": {"account": owner},
             "profiles": profiles}
 
@@ -864,6 +870,8 @@ class DstackOperator:
         continuing = self.policy.get("lifecycle_version") == 2
         allowed = {"profile_id", "ttl_seconds", "keep_on", "hold_seconds", "idle_shutdown_seconds", "group_id"} if continuing else {"profile_id", "ttl_seconds", "group_id"}
         allowed.add("max_price_microusd")
+        if self.policy.get("test_gpu_guard") is not None:
+            allowed.add("test_task_id")
         require(isinstance(body, dict) and "profile_id" in body and not set(body)-allowed
             and (continuing or {"profile_id", "ttl_seconds"} <= set(body)), "dstack_preview_invalid", 422)
         require(safe_id(body["profile_id"]), "dstack_preview_invalid", 422)
@@ -893,7 +901,8 @@ class DstackOperator:
         preview_id = str(uuid.uuid4())
         request = self._capacity_request(profile, preview_id, now, None if continuing else now + ttl,
             None if continuing else ttl, lifecycle_version=2 if continuing else 1,
-            test_max_duration=lifecycle.get("test_gpu_guard", {}).get("max_runtime_seconds") if lifecycle else None)
+            test_max_duration=lifecycle.get("test_gpu_guard", {}).get("max_runtime_seconds") if lifecycle else None,
+            test_task_id=lifecycle.get("test_gpu_guard", {}).get("task_id") if lifecycle else None)
         offers=plan_offers(self.capacity.plan(request, self.config["ssh_public_key"]),request)
         require(bool(offers),"dstack_no_compatible_offers")
         if request.backend == "vastai":
@@ -1139,9 +1148,15 @@ class DstackOperator:
             now = self.repo.clock()
             guard = value.get("lifecycle", {}).get("test_gpu_guard")
             if guard is not None:
-                from .dstack_test_budget import projected_cost
+                from .dstack_test_budget import projected_cost, guard_limit, limit_reason, validate_guard
+                try:
+                    validate_guard(guard)
+                except ValueError:
+                    raise OperatorError("dstack_test_guard_invalid", 422) from None
+                require(guard["version"] == 2 and value["request"].get("test_task_id") == guard["task_id"],
+                    "dstack_test_task_required", 422)
                 require(projected_cost(connection, guard, now) + value["reservation_microusd"]
-                    < guard["daily_limit_microusd"], "dstack_test_daily_limit_reached")
+                    < guard_limit(guard), limit_reason(guard))
             usage = self._limits(connection, profile["max_price_microusd"])
             original = value["request"]
             host_selection = original.get("host_selection")
@@ -1180,7 +1195,7 @@ class DstackOperator:
                 continuing=continuing, capacity_usage=usage, active_instance_ids=usage["active_instance_ids"])
             request = self._capacity_request(profile, intent["id"], now, original["hard_deadline"], original["max_duration_s"],
                 lifecycle_version=original.get("lifecycle_version", 1),
-                test_max_duration=original.get("test_max_duration_s"))
+                test_max_duration=original.get("test_max_duration_s"), test_task_id=original.get("test_task_id"))
             if host_selection is not None:
                 request = replace(request, host_selection=copy.deepcopy(host_selection))
             binding = request.binding(self.config["ssh_public_key"])
@@ -1355,7 +1370,8 @@ class DstackOperator:
                 options = {"idle_shutdown_seconds": original_policy["idle_shutdown_seconds"], **body}
                 # Alter only the shutdown preference; frozen accounts and the
                 # protected execution quote are not client-editable.
-                candidate = self._lifecycle(options, now, original_policy["expected_runtime_s"])
+                candidate = self._lifecycle(options, now, original_policy["expected_runtime_s"],
+                    original_guard=original_policy.get("test_gpu_guard"))
                 if "keep_on" not in body and "hold_seconds" not in body:
                     candidate["keep_on"] = original_policy["keep_on"]
                     candidate["hold_until"] = original_policy["hold_until"]

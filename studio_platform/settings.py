@@ -82,7 +82,7 @@ class Settings:
     tenant_id: str = "sixnine"
     max_upload_bytes: int = 512 * 1024 * 1024
     max_project_bytes: int = 8 * 1024 * 1024
-    session_seconds: int = 12 * 3600
+    session_seconds: int = 7 * 86400
     storage_provider: str = "local"
     storage_bucket: str = ""
     storage_profile: str = ""
@@ -149,6 +149,8 @@ class Settings:
             object.__setattr__(self, "database_url", "sqlite:///" + (self.data_dir / "platform.sqlite3").as_posix())
         if self.auth_mode not in {"password", "local-test"}:
             raise ValueError("Use password or explicit local-test authentication")
+        if type(self.session_seconds) is not int or not 1 <= self.session_seconds <= 365*86400:
+            raise ValueError("Invalid browser session duration")
         if (not isinstance(self.public_origin_aliases, tuple)
                 or any(not isinstance(origin, str) for origin in self.public_origin_aliases)
                 or len(set(self.public_origin_aliases)) != len(self.public_origin_aliases)
@@ -194,6 +196,13 @@ class Settings:
     @classmethod
     def from_environment(cls):
         default = Path(__file__).resolve().parents[1] / ".platform-data"
+        session_seconds = os.environ.get("INKSEQ_BROWSER_SESSION_SECONDS")
+        legacy_session_seconds = os.environ.get("SIXNINE_SESSION_SECONDS")
+        if session_seconds is not None and legacy_session_seconds is not None and session_seconds != legacy_session_seconds:
+            raise ValueError("Conflicting browser session duration settings")
+        duration = session_seconds if session_seconds is not None else legacy_session_seconds
+        if duration is not None and (not duration.isascii() or not duration.isdigit()):
+            raise ValueError("Invalid browser session duration")
         return cls(
             data_dir=Path(os.environ.get("SIXNINE_DATA", str(default))),
             database_url=database_url_from_environment(),
@@ -201,6 +210,7 @@ class Settings:
             public_origin_aliases=tuple(os.environ["PUBLIC_ORIGIN_ALIASES"].split(",")) if os.environ.get("PUBLIC_ORIGIN_ALIASES") else (),
             local_ui_origins=tuple(x.strip() for x in os.environ.get("SIXNINE_LOCAL_UI_ORIGINS", "").split(",") if x.strip()),
             auth_mode=os.environ.get("SIXNINE_AUTH_MODE", "password"),
+            session_seconds=int(duration) if duration is not None else 7*86400,
             generation_enabled=os.environ.get("SIXNINE_GENERATION_ENABLED", "0") == "1",
             execution_backend=os.environ.get("SIXNINE_EXECUTION_BACKEND", "disabled"),
             storage_provider=os.environ.get("SIXNINE_STORAGE_PROVIDER", "local"),

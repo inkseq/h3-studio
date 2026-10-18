@@ -473,6 +473,210 @@ class RetentionTests(unittest.TestCase):
         self.assertIn(['image', 'rm', 'sixnine-platform:' + self.old], self.calls)
         self.assertFalse(any(call[:2] == ['image', 'rm'] and call[2].startswith('sha256:') for call in self.calls))
 
+    def publication(self, commit=None):
+        commit=commit or self.old;nonce='8'*32
+        parent=self.root/'publication';parent.mkdir(exist_ok=True)
+        leaf=parent/commit/nonce;leaf.mkdir(parents=True)
+        platform=leaf/'platform-release';shutil.copytree(self.root/'releases'/commit,platform)
+        archives=leaf/'archives';archives.mkdir()
+        publisher=leaf/'publisher';publisher.mkdir();(publisher/'preserve.py').write_bytes(b'PUBLISHER')
+        (parent/'sdk-boto3').mkdir(exist_ok=True);(parent/'sdk-boto3/keep').write_bytes(b'SDK')
+        staging=[]
+        for name,folder in (('platform-transport.tar.gz',platform),('migration-transport.tar.gz',None),
+                ('publisher-source-transport.tar.gz',publisher)):
+            members=[]
+            with tarfile.open(archives/name,'w:gz',format=tarfile.USTAR_FORMAT) as tar:
+                for path in sorted(folder.iterdir()) if folder else []:
+                    data=path.read_bytes();header=tarfile.TarInfo(path.name);header.size=len(data)
+                    tar.addfile(header,io.BytesIO(data))
+                    members.append({'path':path.name,'size_bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()})
+            staging.append({'filename':name,'key':f'publication-staging/{commit}/{nonce}/{name}',
+                'size_bytes':(archives/name).stat().st_size,'sha256':release.checksum(archives/name),'members':members})
+        authority={'version':1,'purpose':'temporary-exact-ci-publication-only','commit':commit,
+            'host_id':'i-'+'1'*17,'policy_name':'sixnine-publish-'+commit[:12]+'-'+nonce,
+            'policy_sha256':'1'*64,'inventory_sha256':'2'*64,
+            'bucket':'sixnine-platform-releases-829135631045-ap-southeast-1','region':'ap-southeast-1','staging':staging}
+        ap=parent/('publication-authority-'+commit[:12]+'.json');ap.write_text(json.dumps(authority))
+        journal={'binding':{key:authority[key] for key in ('version','commit','host_id','policy_name','policy_sha256','inventory_sha256')},
+            'created_at':1,'downloads':{row['filename']:{'key':row['key'],'requested_at':2,'verified_sha256':row['sha256']} for row in staging},
+            'publication_started_at':3,'publisher_exit_code':0,'status':'immutable_objects_verified_pending_independent_host_approval',
+            'verified_at':4,'verified_object_count':16}
+        journal['binding']['authority_sha256']=release.checksum(ap)
+        jp=parent/(nonce+'.json');jp.write_text(json.dumps(journal))
+        lp=parent/(nonce+'.lock');lp.touch();lp.chmod(0o600)
+        return leaf,jp,ap
+
+    @unittest.skipUnless(os.name=='posix','Original publisher flock and no-follow filesystem boundary')
+    def test_publication_full_payload_and_exact_transport_only_preserve_control_files(self):
+        leaf,journal,authority=self.publication();value=self.plan()
+        selected=[v for v in value['candidates'] if v['relative'].startswith('publication/')]
+        self.assertEqual({v['relative'] for v in selected},{str((leaf/'platform-release').relative_to(self.root)),
+            str((leaf/'archives/platform-transport.tar.gz').relative_to(self.root))})
+        self.assertEqual(value['publication_contexts'],[{'commit':self.old,'nonce':leaf.name}])
+        original={path:path.read_bytes() for path in (journal,authority,leaf/'publisher/preserve.py',
+            leaf/'archives/publisher-source-transport.tar.gz',leaf/'archives/migration-transport.tar.gz',
+            self.root/'publication/sdk-boto3/keep')}
+        result=retention.apply_locked(self.root,value,command=self.command)
+        self.assertEqual(sum(v['bytes'] for v in value['candidates']),result['removed_file_bytes'])
+        self.assertFalse((leaf/'platform-release').exists());self.assertFalse((leaf/'archives/platform-transport.tar.gz').exists())
+        self.assertTrue((leaf/'archives').is_dir());self.assertTrue((leaf.parent).is_dir())
+        for path,body in original.items():self.assertEqual(path.read_bytes(),body)
+
+    @unittest.skipUnless(os.name=='posix','Original publisher locking')
+    def test_publication_current_rollback_extras_and_container_binds_win(self):
+        for commit in (self.current,self.previous,*self.extras):
+            with self.subTest(commit=commit):
+                leaf,_,_=self.publication(commit)
+                self.assertFalse(any(v['relative'].startswith(str(leaf.parent.relative_to(self.root))) for v in self.plan()['candidates']))
+        leaf,_,_=self.publication()
+        self.containers=[{'Id':'1'*64,'Image':self.image_details[2]['Id'],'State':{'Running':False},
+            'Mounts':[{'Type':'bind','Source':str(leaf/'platform-release')}],'Config':{'Labels':{}}}]
+        self.assertIn(self.old,self.plan()['kept_commits'])
+        self.assertFalse(any(v['relative'].startswith('publication/') for v in self.plan()['candidates']))
+
+    @unittest.skipUnless(os.name=='posix','Original publisher locking')
+    def test_publication_explicit_rollback_and_inflight_pins_prevent_nonce_io(self):
+        leaf,_,_=self.publication()
+        for relative,pin in (('release-retention-pins.json',{'version':1,'commits':[self.old]}),
+                ('environment-release-intent.json',{'version':1,'commit':self.old,'candidate_sha256':'0'*64,'state':'in_progress'})):
+            with self.subTest(relative=relative):
+                (self.root/relative).write_text(json.dumps(pin))
+                with patch.object(retention,'publication_lock',side_effect=AssertionError('pinned namespace never entered')):
+                    self.assertFalse(any(v['relative'].startswith('publication/') for v in self.plan()['candidates']))
+                (self.root/relative).unlink()
+
+    @unittest.skipUnless(os.name=='posix','Original publisher locking')
+    def test_publication_pending_or_malformed_journal_and_wrong_authority_are_retained(self):
+        leaf,journal,authority=self.publication();original=journal.read_bytes()
+        variants=({'status':'publishing'}, {'publisher_exit_code':True},{'verified_object_count':True},
+            {'verified_at':float('nan')},{'extra':'unknown'},{'binding':{}},{'downloads':{}})
+        for change in variants:
+            journal.write_text(json.dumps({**json.loads(original),**change}))
+            self.assertFalse(any(v['relative'].startswith('publication/') for v in self.plan()['candidates']),change)
+        journal.write_bytes(original);authority.write_bytes(authority.read_bytes()+b' ')
+        self.assertFalse(any(v['relative'].startswith('publication/') for v in self.plan()['candidates']))
+
+    @unittest.skipUnless(os.name=='posix','Original publisher locking')
+    def test_publication_busy_nonce_prevents_plan_and_apply_without_any_deletion(self):
+        leaf,_,_=self.publication();value=self.plan()
+        with retention.publication_lock(self.root,leaf.name):
+            self.assertFalse(any(v['relative'].startswith('publication/') for v in self.plan()['candidates']))
+            with self.assertRaises(BlockingIOError):retention.apply_locked(self.root,value,command=self.command)
+        self.assertTrue((self.root/'releases'/self.old).exists());self.assertTrue((leaf/'platform-release').exists())
+
+    @unittest.skipUnless(os.name=='posix','Original publisher locking')
+    def test_publication_changed_intent_or_archive_aborts_before_all_deletions(self):
+        leaf,journal,_=self.publication();value=self.plan();original=journal.read_bytes()
+        changed=json.loads(original);changed['verified_at']=5;journal.write_text(json.dumps(changed))
+        with self.assertRaisesRegex(release.ReleaseError,'plan_stale'):
+            retention.apply_locked(self.root,value,command=self.command)
+        self.assertTrue((self.root/'releases'/self.old).exists())
+        journal.write_bytes(original);value=self.plan()
+        archive=leaf/'archives/platform-transport.tar.gz';archive.write_bytes(archive.read_bytes()+b'CHANGED')
+        with self.assertRaisesRegex(release.ReleaseError,'plan_tree_changed'):
+            retention.apply_locked(self.root,value,command=self.command)
+        self.assertTrue((self.root/'releases'/self.old).exists())
+
+    @unittest.skipUnless(os.name=='posix','Original publisher locking and protected file types')
+    def test_publication_wrong_s3_or_partial_payload_never_qualifies_transport(self):
+        leaf,_,_=self.publication();image=leaf/'platform-release/image.tar.gz'
+        image.unlink()
+        self.assertFalse(any(v['relative'].startswith('publication/') for v in self.plan()['candidates']))
+        image.write_bytes((self.root/'releases'/self.old/'image.tar.gz').read_bytes())
+        self.s3[f'releases/{self.old}/image.tar.gz']['Metadata']['sha256']='0'*64
+        self.assertFalse(any(v['relative'].startswith('publication/') for v in self.plan()['candidates']))
+
+    @unittest.skipUnless(os.name=='posix','Original publisher locking and no-follow filesystem boundary')
+    def test_publication_links_unknown_shape_and_transport_hash_mismatch_stay(self):
+        leaf,_,_=self.publication();extra=leaf/'platform-release/UNKNOWN';extra.write_bytes(b'KEEP')
+        self.assertFalse(any(v['relative'].startswith('publication/') for v in self.plan()['candidates']))
+        extra.unlink();archive=leaf/'archives/platform-transport.tar.gz';original=archive.read_bytes()
+        archive.write_bytes(original+b'JUNK')
+        self.assertNotIn(str(archive.relative_to(self.root)),{v['relative'] for v in self.plan()['candidates']})
+        archive.write_bytes(original);os.link(archive,leaf/'archive-alias')
+        self.assertNotIn(str(archive.relative_to(self.root)),{v['relative'] for v in self.plan()['candidates']})
+        (leaf/'archive-alias').unlink();archive.unlink();archive.symlink_to(self.root/'platform-data/user-media')
+        self.assertNotIn(str(archive.relative_to(self.root)),{v['relative'] for v in self.plan()['candidates']})
+
+    def rebind_transport_fixture(self, leaf, journal, authority, filename, data, members=None):
+        path=leaf/'archives'/filename;path.write_bytes(data)
+        value=json.loads(authority.read_text());row=next(v for v in value['staging'] if v['filename']==filename)
+        row.update(size_bytes=len(data),sha256=hashlib.sha256(data).hexdigest())
+        if members is not None:row['members']=members
+        authority.write_text(json.dumps(value))
+        state=json.loads(journal.read_text());state['binding']['authority_sha256']=release.checksum(authority)
+        state['downloads'][filename]['verified_sha256']=row['sha256'];journal.write_text(json.dumps(state))
+
+    @unittest.skipUnless(os.name=='posix','Streaming gzip/TAR plus original nonce lock')
+    def test_publication_transport_rejects_malicious_or_noncanonical_stream_even_when_authority_hash_matches(self):
+        leaf,journal,authority=self.publication();directory=leaf/'platform-release'
+        rows=[(p.name,p.read_bytes()) for p in sorted(directory.iterdir())]
+        filename='platform-transport.tar.gz';relative=str((leaf/'archives'/filename).relative_to(self.root))
+        for kind in ('duplicate','symlink','pax','unexpected','size','tar_suffix','gzip_suffix','gzip_member','truncated','decompression_bound'):
+            with self.subTest(kind=kind):
+                raw=io.BytesIO()
+                with tarfile.open(fileobj=raw,mode='w',format=tarfile.PAX_FORMAT if kind=='pax' else tarfile.USTAR_FORMAT) as archive:
+                    for index,(name,data) in enumerate(rows):
+                        header=tarfile.TarInfo(name);header.size=len(data)
+                        if index==0 and kind=='symlink':header.type=tarfile.SYMTYPE;header.linkname='/etc/shadow';header.size=0
+                        if index==0 and kind=='pax':header.pax_headers={'comment':'hidden extension'}
+                        if index==0 and kind=='size':header.size+=1;data+=b'x'
+                        archive.addfile(header,io.BytesIO(data))
+                    if kind in {'duplicate','unexpected'}:
+                        header=tarfile.TarInfo(rows[0][0] if kind=='duplicate' else 'UNIQUE');header.size=1
+                        archive.addfile(header,io.BytesIO(b'x'))
+                value=raw.getvalue()
+                if kind=='tar_suffix':value+=b'NONZERO'
+                if kind=='decompression_bound':value+=b'\0'*(1024*1024)
+                packed=gzip.compress(value)
+                if kind=='gzip_suffix':packed+=b'JUNK'
+                if kind=='gzip_member':packed+=gzip.compress(b'')
+                if kind=='truncated':packed=packed[:-4]
+                self.rebind_transport_fixture(leaf,journal,authority,filename,packed)
+                plan=self.plan()
+                self.assertNotIn(relative,{item['relative'] for item in plan['candidates']})
+                self.assertIn({'relative':relative,'reason':'unproven_publication_transport'},plan['retained'])
+
+    @unittest.skipUnless(os.name=='posix','Actual migration manifest/image proof and descriptor unlink')
+    def test_publication_complete_migration_payload_transport_and_restore_unit(self):
+        leaf,journal,authority=self.publication()
+        spec=__import__('importlib.util',fromlist=['spec_from_file_location']).spec_from_file_location(
+            'retention_fixture_trusted_maintenance',Path(__file__).parent/'deploy/dstack/maintenance.py')
+        helper=__import__('importlib.util',fromlist=['module_from_spec']).module_from_spec(spec);spec.loader.exec_module(helper)
+        directory=leaf/'migration-release';directory.mkdir()
+        config=json.dumps({'os':'linux','architecture':'amd64','rootfs':{'type':'layers','diff_ids':[]},
+            'config':{'Env':['ROLE=dispatch'],'Labels':{'org.opencontainers.image.revision':self.old}}}).encode()
+        image_id='sha256:'+hashlib.sha256(config).hexdigest();raw=io.BytesIO()
+        with tarfile.open(fileobj=raw,mode='w') as archive:
+            for name,data in ((image_id[7:]+'.json',config),('manifest.json',json.dumps([{
+                'Config':image_id[7:]+'.json','RepoTags':['sixnine-dispatch:'+self.old],'Layers':[]}]).encode())):
+                entry=tarfile.TarInfo(name);entry.size=len(data);archive.addfile(entry,io.BytesIO(data))
+        for name in helper.FILES:
+            (directory/name).write_bytes(gzip.compress(raw.getvalue()) if name=='dispatch-image.tar.gz' else b'INERT')
+        manifest={'version':1,'commit':self.old,'platform_manifest_sha256':release.checksum(leaf/'platform-release/release-manifest.json'),
+            'source_index_sha256':'3'*64,'dispatch':{'image':'sixnine-dispatch:'+self.old,'image_id':image_id},
+            'files':{name:release.checksum(directory/name) for name in helper.FILES}}
+        (directory/'migration-manifest.json').write_text(json.dumps(manifest))
+        (self.root/'approved-migrations').mkdir();(self.root/'approved-migrations'/(self.old+'.sha256')).write_text(release.checksum(directory/'migration-manifest.json'))
+        self.register(self.old,'migration/',directory)
+        packed=io.BytesIO();members=[]
+        with tarfile.open(fileobj=packed,mode='w:gz',format=tarfile.USTAR_FORMAT) as archive:
+            for path in sorted(directory.iterdir()):
+                data=path.read_bytes();entry=tarfile.TarInfo(path.name);entry.size=len(data);archive.addfile(entry,io.BytesIO(data))
+                members.append({'path':path.name,'size_bytes':len(data),'sha256':hashlib.sha256(data).hexdigest()})
+        self.rebind_transport_fixture(leaf,journal,authority,'migration-transport.tar.gz',packed.getvalue(),members)
+        with patch.object(release,'migration_helper',return_value=helper):
+            value=self.plan()
+            selected={item['relative'] for item in value['candidates'] if item['relative'].startswith('publication/')}
+            self.assertEqual(selected,{str((leaf/name).relative_to(self.root)) for name in
+                ('platform-release','migration-release','archives/platform-transport.tar.gz','archives/migration-transport.tar.gz')})
+            retention.apply_locked(self.root,value,command=self.command)
+        self.assertFalse(directory.exists());self.assertFalse((leaf/'archives/migration-transport.tar.gz').exists())
+        self.assertTrue((leaf/'archives/publisher-source-transport.tar.gz').exists())
+        # Restore bytes are the immutable approved release members; no publisher
+        # replay or byte-identical reconstruction of the consumed gzip wrapper.
+        self.assertEqual(self.s3[f'releases/{self.old}/migration/dispatch-image.tar.gz']['Metadata']['sha256'],manifest['files']['dispatch-image.tar.gz'])
+
 
 if __name__ == '__main__':
     unittest.main()

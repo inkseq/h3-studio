@@ -1,5 +1,8 @@
 export const settingsCatalogs = {
   en: {
+    'settings.testTask':'Test GPU limit per acceptance task (USD)',
+    'settings.testTaskId':'Acceptance task ID',
+    'settings.testTaskHelp':'Use the same ID for this issue’s machines and retries. Other tasks keep their own spending records.',
     'settings.account':'Account','settings.defaults':'Generation defaults','settings.defaultsHelp':'Edit take limits and folding in Quick Create. Global, story and shot recipe defaults are available in the story editor.','settings.storyDefaults':'Open stories to edit recipe defaults',
     'settings.documentTitle':'Settings · Inkseq',
     'settings.title':'Settings', 'settings.back':'Back to creation', 'settings.budget':'My budget',
@@ -23,6 +26,9 @@ export const settingsCatalogs = {
     'errors.spending_usage_unconfirmed':'Spending is not yet confirmed. Reconcile the existing charge before submitting again.',
   },
   zh: {
+    'settings.testTask':'每次验收任务的测试 GPU 上限（美元）',
+    'settings.testTaskId':'验收任务编号',
+    'settings.testTaskHelp':'同一项改动的机器和重试沿用同一编号；其他任务的费用记录保持独立。',
     'settings.account':'\u8d26\u6237','settings.defaults':'\u751f\u6210\u9ed8\u8ba4\u503c','settings.defaultsHelp':'\u5728\u5feb\u901f\u521b\u4f5c\u4e2d\u8c03\u6574\u7248\u672c\u6570\u4e0a\u9650\u548c\u6298\u53e0\u6570\u3002\u5168\u5c40\u3001\u6545\u4e8b\u53ca\u955c\u5934\u914d\u65b9\u9ed8\u8ba4\u503c\u53ef\u5728\u6545\u4e8b\u7f16\u8f91\u5668\u4e2d\u4fee\u6539\u3002','settings.storyDefaults':'\u6253\u5f00\u6545\u4e8b\u4fee\u6539\u914d\u65b9\u9ed8\u8ba4\u503c',
     'settings.documentTitle':'设置 · 映序',
     'settings.title':'设置', 'settings.back':'返回创作', 'settings.budget':'我的预算',
@@ -52,3 +58,6 @@ settingsCatalogs.zh['settings.costDetails']='费用详情';
 
 Object.assign(settingsCatalogs.en,{'settings.videoCache':'Video cache','settings.videoCacheClear':'Clear','settings.videoCacheUnavailable':'Video cache is unavailable in this browser.','settings.videoCacheChecking':'Checking video cache…','settings.videoCacheUsage':'{amount} MB used · {count} videos · up to 1 GB','settings.videoCacheUsageOne':'{amount} MB used · 1 video · up to 1 GB','settings.videoCacheHelp':'Played videos up to 64 MB are kept here. Access is checked before replay. Signing out clears cached copies; originals stay online.'});
 Object.assign(settingsCatalogs.zh,{'settings.videoCache':'视频缓存','settings.videoCacheClear':'清空','settings.videoCacheUnavailable':'此浏览器暂时无法使用视频缓存。','settings.videoCacheChecking':'正在读取缓存…','settings.videoCacheUsage':'已用 {amount} MB · {count} 条视频 · 最多 1 GB','settings.videoCacheUsageOne':'已用 {amount} MB · 1 条视频 · 最多 1 GB','settings.videoCacheHelp':'缓存已播放且不超过 64 MB 的视频，重播前仍会核对权限。退出登录会清空缓存，线上原件保留。'});
+
+Object.assign(settingsCatalogs.en,{'settings.h3Defaults':'H3 generation defaults','settings.storyDefaultsScope':'These account defaults are used by story shots that inherit them. Quick Create keeps its own next-generation settings.','settings.defaultsRecommended':'Using recommended values','settings.defaultsChangedOne':'1 saved override','settings.defaultsChanged':'{count} saved overrides','settings.allDefaultParameters':'All default parameters','settings.editStoryDefaults':'Edit defaults in the current story','settings.chooseStoryDefaults':'Choose a story to edit defaults','settings.defaultsFailed':'Generation defaults could not be loaded. Existing settings are retained.','settings.recommended':'Recommended','settings.enabled':'On','settings.disabled':'Off'});
+Object.assign(settingsCatalogs.zh,{'settings.h3Defaults':'H3 生成默认值','settings.storyDefaultsScope':'账户默认值用于继承它们的故事镜头；快速创作保留自己的下一次生成设置。','settings.defaultsRecommended':'全部使用推荐值','settings.defaultsChangedOne':'已保存 1 项修改','settings.defaultsChanged':'已保存 {count} 项修改','settings.allDefaultParameters':'全部默认参数','settings.editStoryDefaults':'在当前故事中修改默认值','settings.chooseStoryDefaults':'选择故事并修改默认值','settings.defaultsFailed':'暂时无法读取生成默认值，原设置保留。','settings.recommended':'推荐值','settings.enabled':'开','settings.disabled':'关'});

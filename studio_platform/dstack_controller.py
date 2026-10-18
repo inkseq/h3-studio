@@ -338,7 +338,7 @@ class DstackController:
                 # Preserve any running task/result and request normal drain.
                 funded = False
                 reason = error.args[0] if error.args and error.args[0] in {
-                    "dstack_test_daily_limit_reached", "dstack_test_runtime_limit_reached",
+                    "dstack_test_daily_limit_reached", "dstack_test_task_limit_reached", "dstack_test_runtime_limit_reached",
                     "dstack_test_budget_unconfirmed", "dstack_test_guard_unconfirmed"} else "dstack_spend_limit_reached"
                 self._request_stop(node, reason_code=reason)
             with self.repo.engine.connect() as connection:
