@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -185,8 +186,322 @@ def completed_summary(operation, day):
     return {'state': 'already_completed', 'day': day, **coverage(read(operation/'completed.json'))}
 
 
-def run():
-    require(os.geteuid() == 0, 'backup_root_required')
+
+MAX_RETENTION_JSON = 16 * 1024**2
+MAX_RETENTION_FILES = 100002
+UUID4 = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}')
+
+
+def identity(info):
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+        info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def unique_json(data):
+    def pairs(values):
+        result = {}
+        for key, value in values:
+            require(key not in result, 'backup_retention_duplicate_json_key')
+            result[key] = value
+        return result
+    return json.loads(data, object_pairs_hook=pairs,
+        parse_constant=lambda _: require(False, 'backup_retention_nonfinite_json'))
+
+
+def retention_json(path, *, root_only=False, maximum=MAX_RETENTION_JSON):
+    # The outer operation remains a root-owned traversal barrier. The original
+    # transfer intent/report is uid10001-owned, never a host credential mount.
+    anchor = STATE if path.is_relative_to(STATE) else ROOT if path.is_relative_to(ROOT) else None
+    require(anchor is not None,'backup_retention_json_scope')
+    for parent in [path.parent, *path.parent.parents]:
+        info = parent.lstat()
+        require(stat.S_ISDIR(info.st_mode) and info.st_uid in ((0,) if root_only else (0,10001))
+            and not info.st_mode & 0o022, 'backup_retention_json_parent')
+        if parent == anchor: break  # Trusted root was checked before taking the release lock.
+    before = path.lstat()
+    require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1
+        and before.st_uid in ((0,) if root_only else (0,10001)) and not before.st_mode & 0o022
+        and 0 < before.st_size <= maximum,'backup_retention_json_invalid')
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, 'rb') as source:
+        opened = os.fstat(source.fileno())
+        require(identity(opened) == identity(before) and stat.S_ISREG(opened.st_mode)
+            and opened.st_nlink == 1 and opened.st_uid in ((0,) if root_only else (0,10001))
+            and not opened.st_mode & 0o022 and 0 < opened.st_size <= maximum, 'backup_retention_json_invalid')
+        data = source.read(maximum+1)
+        require(len(data) == opened.st_size and identity(os.fstat(source.fileno())) == identity(opened)
+            and identity(path.lstat()) == identity(before), 'backup_retention_json_changed')
+    return {'value': unique_json(data), 'sha256': hashlib.sha256(data).hexdigest(), 'identity': identity(before)}
+
+
+def retention_operation(operation, cfg):
+    day = operation.name
+    require(datetime.strptime(day, '%Y-%m-%d').date().isoformat() == day, 'backup_retention_day')
+    protected(operation, True)
+    require(stat.S_IMODE(operation.stat().st_mode) == 0o700, 'backup_operation_not_private')
+    paths = {name: retention_json(operation/name, root_only=True)
+        for name in ('intent.json','completed.json','target.json','receipt.json')}
+    intent, complete, target, receipt = (paths[name]['value'] for name in
+        ('intent.json','completed.json','target.json','receipt.json'))
+    require(type(intent) is dict and set(intent) == {'version','day','commit','image','operation_id','automatic_retry'}
+        and type(intent['version']) is int and intent['version'] in (1,2,3)
+        and intent['day'] == complete.get('day') == day and complete.get('commit') == intent['commit']
+        and isinstance(intent['commit'],str) and re.fullmatch('[0-9a-f]{40}',intent['commit'])
+        and isinstance(intent['image'],str) and re.fullmatch('sha256:[0-9a-f]{64}',intent['image'])
+        and isinstance(intent['operation_id'],str) and UUID4.fullmatch(intent['operation_id'])
+        and intent['automatic_retry'] is False, 'backup_retention_original_intent')
+    require(type(complete) is dict and set(complete) == {'version','day','commit','completion_sha256',
+        'completion_version_id','receipt_sha256','restore_verified'} | set(coverage(complete))
+        and type(complete['version']) is int and complete['version'] == intent['version']
+        and complete['restore_verified'] is False and complete['receipt_sha256'] == paths['receipt.json']['sha256']
+        and complete['completion_sha256'] == receipt.get('completion_sha256')
+        and complete['completion_version_id'] == receipt.get('completion_version_id'), 'backup_retention_original_completion')
+    require(target == receipt.get('target') == {**cfg['target'],'prefix':'business-backups/'+intent['operation_id']}
+        and copy_receipt(operation/'receipt.json',target) == receipt
+        and receipt['format'] == 'sixnine-private-backup-copy-v'+str(intent['version'])
+        and coverage(complete) == coverage(receipt), 'backup_retention_original_receipt')
+    return {'day':day,'operation_id':intent['operation_id'],'operation':operation,'metadata':paths,
+        'target':target,'receipt':receipt,
+        'app':ROOT/'platform-data'/'business-backups'/intent['operation_id'], 'transport':operation/'snapshot'}
+
+
+def retention_inventory(item):
+    original = retention_json(item['operation']/'output'/'transfer'/'intent.json')
+    value = original['value']; receipt = item['receipt']
+    require(type(value) is dict and value.get('target') == item['target']
+        and value.get('format') == receipt['format'] and value.get('phase') == 'before_remote_write'
+        and isinstance(value.get('operation_id'),str) and UUID4.fullmatch(value['operation_id'])
+        and value.get('snapshot_manifest_sha256') == receipt['snapshot_manifest_sha256']
+        and value.get('objects') == receipt['objects'] and value.get('bytes') == receipt['bytes']
+        and coverage(value) == coverage(receipt), 'backup_retention_transfer_identity')
+    files = value.get('files')
+    require(type(files) is list and 2 <= len(files) <= MAX_RETENTION_FILES, 'backup_retention_inventory_limit')
+    result = {}
+    for entry in files:
+        require(type(entry) is dict and set(entry) == {'name','size_bytes','sha256'}, 'backup_retention_inventory')
+        name = entry['name']
+        require(isinstance(name,str) and (name in ('manifest.json','database.sqlite3')
+            or re.fullmatch(r'media/[0-9a-f]{64}\.bin',name)) and name not in result
+            and type(entry['size_bytes']) is int and 0 < entry['size_bytes'] <= 512*1024**2
+            and isinstance(entry['sha256'],str) and re.fullmatch('[0-9a-f]{64}',entry['sha256']), 'backup_retention_inventory')
+        require(name != 'manifest.json' or entry['size_bytes'] <= MAX_RETENTION_JSON,'backup_retention_manifest_limit')
+        result[name] = entry
+    require({'manifest.json','database.sqlite3'} <= set(result) and len(result) == receipt['objects']+2
+        and sum(v['size_bytes'] for v in result.values()) == receipt['bytes']
+        and files[-1]['name'] == 'manifest.json' and result['manifest.json']['sha256'] == receipt['snapshot_manifest_sha256'],
+        'backup_retention_inventory_identity')
+    item['metadata']['output/transfer/intent.json'] = original
+    item['files'] = result
+    return original
+
+
+def retention_remote(item, image, evidence):
+    original = retention_inventory(item)
+    output = evidence/'output'; new_directory(output); os.chown(output,10001,10001)
+    docker(transport(image,'inkseq-backup-retention-'+str(uuid.uuid4()),[
+        (item['operation']/'target.json','/target.json',True),
+        (item['operation']/'receipt.json','/receipt.json',True),
+        (item['operation']/'output'/'transfer','/receipts',True), (output,'/output',False)],
+        ['reconcile','--execute','--target','/target.json','--receipt','/receipt.json',
+         '--receipts','/receipts','--reconciliation','/output/reconciliation']),timeout=1800)
+    report = retention_json(output/'reconciliation'/'reconciliation.json')
+    value = report['value']; inventory = value.get('verified_files')
+    require(value.get('classification') == 'complete' and value.get('code') == 'backup_copy_complete_bytes_verified'
+        and value.get('cloud_write_operations') == 0 and value.get('automatic_retry') is False
+        and value.get('restore_verified') is False and value.get('target') == item['target']
+        and value.get('operation_id') == original['value']['operation_id']
+        and value.get('original_intent_sha256') == hashlib.sha256(json.dumps(original['value'],
+            sort_keys=True,separators=(',',':'),allow_nan=False).encode()).hexdigest()
+        and value.get('snapshot_manifest_sha256') == item['receipt']['snapshot_manifest_sha256']
+        and value.get('transfer_receipt') == item['receipt'] and value.get('missing_current_files') == []
+        and type(inventory) is list and len(inventory) == len(item['files']), 'backup_retention_remote_unverified')
+    require(all(type(v) is dict and set(v) == {'name','size_bytes','sha256','version_id'}
+        and isinstance(v['version_id'],str) and 1 <= len(v['version_id']) <= 1024 for v in inventory)
+        and [{k:v for k,v in entry.items() if k!='version_id'} for entry in inventory] == original['value']['files'],
+        'backup_retention_remote_inventory')
+    item['remote_report_sha256'] = report['sha256']
+
+
+def snapshot_scope(path):
+    if path.parent == ROOT/'platform-data'/'business-backups' and UUID4.fullmatch(path.name):
+        return ROOT
+    if path.parent.parent == STATE and path.name == 'snapshot' and re.fullmatch(r'\d{4}-\d{2}-\d{2}',path.parent.name):
+        return STATE
+    raise ValueError('backup_retention_snapshot_scope')
+
+
+def open_snapshot(path):
+    base = snapshot_scope(path); handles = []; chain = []
+    try:
+        fd = os.open(base,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW); handles.append(fd)
+        device = os.fstat(fd).st_dev
+        for part in path.relative_to(base).parts:
+            before = os.stat(part,dir_fd=fd,follow_symlinks=False)
+            child = os.open(part,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd); handles.append(child)
+            info = os.fstat(child)
+            require(identity(info) == identity(before) and info.st_dev == device and info.st_uid in (0,10001)
+                and not info.st_mode & 0o022, 'backup_retention_snapshot_parent')
+            chain.append((part,info.st_dev,info.st_ino,info.st_mode,info.st_uid,info.st_gid))
+            fd = child
+        return handles,chain
+    except Exception:
+        for fd in reversed(handles): os.close(fd)
+        raise
+
+
+def snapshot_tree(path, files, *, hash_files=True):
+    handles,chain = open_snapshot(path)
+    try:
+        fd = handles[-1]; info = os.fstat(fd); entries = {'':{'identity':identity(info),'kind':'directory'}}
+        require(set(os.listdir(fd)) == {'manifest.json','database.sqlite3','media'}, 'backup_retention_snapshot_extra')
+        media = os.open('media',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd); handles.append(media)
+        info = os.fstat(media)
+        require(info.st_dev == os.fstat(fd).st_dev and info.st_uid in (0,10001) and not info.st_mode & 0o022,
+            'backup_retention_snapshot_media')
+        entries['media'] = {'identity':identity(info),'kind':'directory'}
+        require(set(os.listdir(media)) == {name.split('/')[1] for name in files if name.startswith('media/')},
+            'backup_retention_snapshot_extra')
+        for name, expected in files.items():
+            parent,leaf = (media,name.split('/')[1]) if name.startswith('media/') else (fd,name)
+            before = os.stat(leaf,dir_fd=parent,follow_symlinks=False)
+            require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1
+                and before.st_uid in (0,10001) and not before.st_mode & 0o077
+                and before.st_size == expected['size_bytes'],'backup_retention_snapshot_file')
+            handle = os.open(leaf,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=parent)
+            try:
+                opened = os.fstat(handle)
+                require(identity(before) == identity(opened) and stat.S_ISREG(opened.st_mode) and opened.st_nlink == 1
+                    and opened.st_dev == os.fstat(fd).st_dev and opened.st_uid in (0,10001)
+                    and not opened.st_mode & 0o077 and opened.st_size == expected['size_bytes'], 'backup_retention_snapshot_file')
+                if hash_files:
+                    digest = hashlib.sha256(); size = 0
+                    while block := os.read(handle,1024*1024):
+                        size += len(block); require(size <= expected['size_bytes'],'backup_retention_snapshot_changed'); digest.update(block)
+                    require(size == expected['size_bytes'] and digest.hexdigest() == expected['sha256'], 'backup_retention_snapshot_hash')
+                require(identity(os.fstat(handle)) == identity(opened)
+                    and identity(os.stat(leaf,dir_fd=parent,follow_symlinks=False)) == identity(before), 'backup_retention_snapshot_changed')
+                entries[name] = {'identity':identity(opened),'kind':'file','sha256':expected['sha256']}
+            finally: os.close(handle)
+        return {'path':str(path),'chain':chain,'entries':entries,'bytes':sum(v['size_bytes'] for v in files.values())}
+    finally:
+        for fd in reversed(handles): os.close(fd)
+
+
+def unchanged(item):
+    for name, expected in item['metadata'].items():
+        actual = retention_json(item['operation']/name,root_only=not name.startswith('output/'))
+        require(actual == expected,'backup_retention_metadata_changed')
+
+
+def remove_snapshot(tree, files):
+    path = Path(tree['path'])
+    require(snapshot_tree(path,files,hash_files=False) == tree,'backup_retention_tree_changed')
+    handles,chain = open_snapshot(path)
+    try:
+        require(chain == tree['chain'],'backup_retention_tree_changed')
+        parent,fd = handles[-2:]; entries = tree['entries']
+        for name in sorted(files):
+            require(identity(os.stat(path.name,dir_fd=parent,follow_symlinks=False))[:5] == entries['']['identity'][:5],
+                'backup_retention_delete_parent_changed')
+            directory,leaf = (fd,name)
+            media = None
+            if name.startswith('media/'):
+                media = os.open('media',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd)
+                require(identity(os.fstat(media))[:5] == entries['media']['identity'][:5]
+                    and identity(os.stat('media',dir_fd=fd,follow_symlinks=False))[:5] == entries['media']['identity'][:5],
+                    'backup_retention_delete_parent_changed')
+                directory,leaf = media,name.split('/')[1]
+            try:
+                before = os.stat(leaf,dir_fd=directory,follow_symlinks=False)
+                require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1
+                    and identity(before) == entries[name]['identity'],'backup_retention_delete_changed')
+                handle = os.open(leaf,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=directory)
+                try:
+                    require(identity(os.fstat(handle)) == entries[name]['identity']
+                        and identity(os.stat(leaf,dir_fd=directory,follow_symlinks=False)) == entries[name]['identity'],
+                        'backup_retention_delete_changed')
+                    digest = hashlib.sha256(); size = 0
+                    while block := os.read(handle,1024*1024):
+                        size += len(block); require(size <= files[name]['size_bytes'],'backup_retention_delete_hash'); digest.update(block)
+                    require(size == files[name]['size_bytes'] and digest.hexdigest() == files[name]['sha256']
+                        and identity(os.fstat(handle)) == entries[name]['identity']
+                        and identity(os.stat(leaf,dir_fd=directory,follow_symlinks=False)) == entries[name]['identity'],
+                        'backup_retention_delete_hash')
+                    os.unlink(leaf,dir_fd=directory)
+                finally: os.close(handle)
+            finally:
+                if media is not None: os.close(media)
+        require(set(os.listdir(fd)) == {'media'},'backup_retention_delete_extra')
+        require(os.stat('media',dir_fd=fd,follow_symlinks=False).st_ino == entries['media']['identity'][1], 'backup_retention_delete_changed')
+        os.rmdir('media',dir_fd=fd)
+        require(not os.listdir(fd) and os.stat(path.name,dir_fd=parent,follow_symlinks=False).st_ino == entries['']['identity'][1],
+            'backup_retention_delete_changed')
+        os.rmdir(path.name,dir_fd=parent); os.fsync(parent)
+    finally:
+        for fd in reversed(handles): os.close(fd)
+
+
+def retain_backups(cfg, image, *, apply=False):
+    """Only original completed scheduled copies; manual/unknown data is retained."""
+    require(type(apply) is bool,'backup_retention_mode')
+    evidence = STATE/('retention-'+str(uuid.uuid4())); new_directory(evidence)
+    retained = []; operations = []
+    for path in sorted(STATE.glob('????-??-??'),reverse=True):
+        try: operations.append(retention_operation(path,cfg))
+        except Exception: retained.append({'day':path.name,'reason':'original_operation_unconfirmed'})
+    require(operations,'backup_retention_no_completed_operation')
+    latest = operations[0]
+    require(not any(v['day'] > latest['day'] for v in retained),'backup_retention_newest_unconfirmed')
+    require(latest['app'].exists() or latest['app'].is_symlink(),'backup_retention_newest_app_missing')
+    candidates = []; latest_tree = None; checked = []; total_entries = 0
+    for item in operations:
+        paths = [path for path in (item['app'],item['transport']) if path.exists() or path.is_symlink()]
+        if not paths: continue
+        try:
+            folder = evidence/item['day']; new_directory(folder)
+            retention_remote(item,image,folder)
+            trees = [snapshot_tree(path,item['files']) for path in paths]
+            total_entries += sum(len(tree['entries']) for tree in trees)
+            require(total_entries <= MAX_RETENTION_FILES,'backup_retention_plan_limit')
+            if item is latest:
+                latest_tree = next(tree for tree in trees if tree['path'] == str(item['app']))
+            checked.append(item)
+            for tree in trees:
+                if tree is not latest_tree: candidates.append((item,tree))
+        except Exception:
+            retained.append({'day':item['day'],'reason':'remote_or_local_unverified'})
+            if item is latest: raise ValueError('backup_retention_newest_unverified') from None
+    require(latest_tree is not None,'backup_retention_newest_unverified')
+    plan = {'version':1,'state':'backup_retention_plan','apply':apply,'newest_day':latest['day'],
+        'kept_app_operation_id':latest['operation_id'],'retained':retained,
+        'candidates':[{'day':item['day'],'operation_id':item['operation_id'],'path':tree['path'],
+            'bytes':tree['bytes'],'inventory_sha256':hashlib.sha256(json.dumps(tree,sort_keys=True).encode()).hexdigest(),
+            'remote_report_sha256':item['remote_report_sha256']} for item,tree in candidates],
+        'candidate_bytes':sum(tree['bytes'] for _,tree in candidates),'cloud_write_operations':0,
+        'original_metadata_removed':False,'remote_versions_removed':False}
+    record(evidence/'plan.json',plan)  # Durable evidence precedes the first unlink.
+    if not apply: return {**plan,'evidence':str(evidence)}
+    for item in checked: unchanged(item)
+    require(snapshot_tree(latest['app'],latest['files']) == latest_tree,'backup_retention_newest_changed')
+    for item,tree in candidates:
+        require(snapshot_tree(Path(tree['path']),item['files']) == tree,'backup_retention_tree_changed')
+    removed = []
+    for item,tree in candidates:
+        unchanged(item); unchanged(latest)
+        require(snapshot_tree(latest['app'],latest['files'],hash_files=False) == latest_tree,'backup_retention_newest_changed')
+        remove_snapshot(tree,item['files']); removed.append({'path':tree['path'],'bytes':tree['bytes']})
+    result = {**plan,'state':'backup_retention_applied','removed':removed,'removed_bytes':sum(v['bytes'] for v in removed)}
+    record(evidence/'completed.json',result)
+    return {**result,'evidence':str(evidence)}
+
+
+def retention_after_success(cfg, image):
+    try: return retain_backups(cfg,image,apply=True)
+    except Exception: return {'state':'backup_retention_deferred','automatic_retry':False}
+
+
+def run(mode="daily"):
+    require(os.geteuid() == 0 and mode in ('daily','retention-plan','retention-apply'), 'backup_root_or_mode_required')
     cfg = validate_config(read(CONFIG), Path('/var/lib/cloud/data/instance-id').read_text().strip())
     protected(STATE, True); protected(HELPERS, True)
     # Load only already installed root-controlled release validation helpers.
@@ -203,11 +518,6 @@ def run():
         directory = ROOT/'releases'/commit
         release.approved_manifest(ROOT, directory, commit)
         manifest = release.manifest(directory, commit)
-        # A previous unknown transfer blocks new prefixes: reconciliation first.
-        operation = STATE/day
-        if check_history(STATE, day):
-            return completed_summary(operation, day)
-        require(shutil.disk_usage(ROOT).free >= 5*1024**3, 'backup_disk_reserve_required')
         ids = docker(['ps', '--quiet', '--filter', 'label=com.docker.compose.project=sixnine-platform',
             '--filter', 'label=com.docker.compose.service=app']).split()
         require(len(ids) == 1 and re.fullmatch('[0-9a-f]{12,64}', ids[0]), 'backup_app_identity')
@@ -217,6 +527,13 @@ def run():
         require(app['image'] == image and app['running'] is True, 'backup_app_image_mismatch')
         require(any(m['Destination'] == '/data' and m['Source'] == str(ROOT/'platform-data')
             and m['Type'] == 'bind' for m in app['mounts']), 'backup_data_mount_mismatch')
+        if mode != 'daily':
+            return retain_backups(cfg,image,apply=mode == 'retention-apply')
+        # A previous unknown transfer blocks new prefixes: reconciliation first.
+        operation = STATE/day
+        if check_history(STATE, day):
+            return {**completed_summary(operation,day),'retention':retention_after_success(cfg,image)}
+        require(shutil.disk_usage(ROOT).free >= 5*1024**3, 'backup_disk_reserve_required')
         nonce = str(uuid.uuid4())
         new_directory(operation)
         record(operation/'intent.json', {'version': cfg['version'], 'day': day, 'commit': commit, 'image': image,
@@ -253,7 +570,8 @@ def run():
             'completion_sha256': receipt['completion_sha256'], 'completion_version_id': receipt['completion_version_id'],
             'receipt_sha256': hashlib.sha256((operation/'receipt.json').read_bytes()).hexdigest(),
             'restore_verified': False, **coverage(receipt)})
-        return {'state': 'copied_not_restored', 'day': day, **coverage(receipt)}
+        return {'state': 'copied_not_restored', 'day': day, **coverage(receipt),
+            'retention':retention_after_success(cfg,image)}
     finally:
         os.close(lockfd)
 
@@ -300,8 +618,11 @@ def restore(day, *, allow_incomplete=False):
 
 if __name__ == '__main__':
     try:
-        require(len(sys.argv) == 1 or len(sys.argv) in (3, 4) and sys.argv[1] == '--restore-day' and (len(sys.argv) == 3 or sys.argv[3] == '--allow-incomplete'), 'backup_fixed_invocation_required')
-        print(json.dumps(run() if len(sys.argv) == 1 else restore(sys.argv[2], allow_incomplete=len(sys.argv) == 4)))
+        retention = {'--retention-plan':'retention-plan','--retention-apply':'retention-apply'}
+        require(len(sys.argv) == 1 or len(sys.argv) == 2 and sys.argv[1] in retention
+            or len(sys.argv) in (3,4) and sys.argv[1] == '--restore-day' and (len(sys.argv) == 3 or sys.argv[3] == '--allow-incomplete'), 'backup_fixed_invocation_required')
+        print(json.dumps(run() if len(sys.argv) == 1 else run(retention[sys.argv[1]]) if len(sys.argv) == 2
+            else restore(sys.argv[2],allow_incomplete=len(sys.argv) == 4)))
     except Exception:
         print('{"state":"backup_failed_or_unknown","automatic_retry":false}', file=sys.stderr)
         raise SystemExit(1) from None

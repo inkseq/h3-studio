@@ -19,7 +19,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/var/lib/inkseq-business-backup /srv/sixnine/release.lock
+ReadWritePaths=/var/lib/inkseq-business-backup /srv/sixnine/release.lock /srv/sixnine/platform-data/business-backups
 
 [Install]
 WantedBy=multi-user.target
