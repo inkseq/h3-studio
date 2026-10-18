@@ -203,6 +203,7 @@ class ShardTests(unittest.TestCase):
             set(ci.POSTGRES_MODULES) - expected,
             {
                 "test_schema_version",
+                "test_schema_baseline",
                 "test_operator_manual_review",
                 "test_capacity_market_refresh",
                 "test_capacity_candidates",
