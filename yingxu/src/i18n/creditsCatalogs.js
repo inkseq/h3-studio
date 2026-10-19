@@ -2,6 +2,7 @@
 export const creditsCatalogs = {
   en: {
     'settings.credits': 'Credits',
+    'assistant.name': 'AI assistant',
     'pricing.title': 'Pricing',
     'pricing.lead':
       'Pay only for what you generate. Buy credits once, use them whenever you like: 1 credit = US$0.01, and the price depends on the quality tier and video length.',
@@ -84,6 +85,7 @@ export const creditsCatalogs = {
   },
   zh: {
     'settings.credits': '我的积分',
+    'assistant.name': 'AI 助手',
     'pricing.title': '价格',
     'pricing.lead':
       '用多少付多少。积分一次买好，随时用：1 积分 = 0.01 美元，价格按画质档位和视频时长计算。',

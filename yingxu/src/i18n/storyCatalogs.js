@@ -300,7 +300,7 @@ export const storyCatalogs = {
     'story.copy272': 'Unlink ',
     'story.copy273': 'Unlinked. The material is preserved; this can be undone.',
     'story.copy274':
-      "This step's image or music recipe is not connected to execution. Its configuration is preserved; H3 video will not replace it.",
+      "This step's image or music recipe is not connected to execution. Its configuration is preserved; video generation will not replace it.",
     'story.copy275': 'Not confirmed',
     'story.copy276':
       'Version confirmed. Downstream links need manual review; nothing regenerates automatically.',
@@ -644,8 +644,7 @@ export const storyCatalogs = {
     'story.copy271': '内容缺失',
     'story.copy272': '解除关联 ',
     'story.copy273': '已解除关联，素材保留；可以撤销。',
-    'story.copy274':
-      '这个步骤的图片或音乐配方尚未接入执行服务，已保留原配置；不会用 H3 视频配方替代。',
+    'story.copy274': '这个步骤的图片或音乐配方尚未接入执行服务，已保留原配置；不会用视频配方替代。',
     'story.copy275': '尚未确认',
     'story.copy276': '已确认本版。下游关联需要人工复核，不会自动重新生成。',
     'story.copy277': '确认本版',

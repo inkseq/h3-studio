@@ -425,7 +425,7 @@ export const legacyCatalogs = {
     'legacy.explain17':
       'Only loaded batches are shown, with their last-read status. Pages may overlap as new batches arrive; refreshing preserves loaded history.',
     'legacy.explain18':
-      'CPU simulation is active. Outputs are watermarked and do not represent real H3 results; model cost is $0.',
+      'CPU simulation is active. Outputs are watermarked and do not represent real results, and no credits are used.',
     'legacy.explain19':
       'No generation capacity is enabled. Preflight and editing remain available; submission is disabled.',
     'legacy.explain20':
@@ -771,8 +771,8 @@ export const legacyCatalogs = {
     'jobs.estimatedCost': 'Estimated {amount} {currency}; actual execution settlement applies.',
     'jobs.costUnavailable': 'Cost information is unavailable.',
     'cloud.shot1': ' · Earlier version',
-    'cloud.shot2': 'H3 · Cloud plan',
-    'cloud.shot3': 'H3 · Local draft',
+    'cloud.shot2': 'Video · Cloud plan',
+    'cloud.shot3': 'Video · Local draft',
     'cloud.shot4': 'All-reference',
     'cloud.shot5': 'Tiled decoding',
     'cloud.shot6': 'Native resolution',
@@ -818,7 +818,7 @@ export const legacyCatalogs = {
     'cloud.shot43': 'Inputs changed; run preflight again',
     'cloud.shot44': 'This plan has been submitted',
     'cloud.shot45':
-      'This text is the generation prompt. Simulation does not call H3. Chapter scripts and reference purposes are not automatically added to the prompt.',
+      'This text is the generation prompt. Simulation does not run real generation. Chapter scripts and reference purposes are not automatically added to the prompt.',
     'cloud.shot46': 'Sampler',
     'cloud.shot47': 'Sampling steps',
     'cloud.shot48': 'The anchor must be before the generated clip’s end.',
@@ -834,7 +834,7 @@ export const legacyCatalogs = {
     'cloud.shot58': 'Preflight passed; awaiting your submission confirmation',
     'cloud.shot59': '③ Prompt and all generation controls',
     'cloud.presetTail': '. Unset options use this preset; explicit choices stay unchanged.',
-    'cloud.shotHeading': 'H3 generation for {title}',
+    'cloud.shotHeading': 'Video generation for {title}',
     'cloud.currentMode': 'Current mode: {mode} · Change it above the media area',
     'cloud.aspectNote':
       'Planned project aspect: {planned}; this shot generates {current}. Settings are saved independently and do not automatically change existing shots.',
@@ -1375,7 +1375,7 @@ export const legacyCatalogs = {
       'The timeline, media or output settings changed. Preflight again; the old plan will not apply to these edits.',
     'rough.ui31': 'This preflight expired. Run it again.',
     'rough.ui32':
-      'Includes simulated sources; the whole output retains a SIMULATION watermark. This tests editing, not actual H3 generation quality.',
+      'Includes simulated sources; the whole output retains a SIMULATION watermark. This tests editing, not actual generation quality.',
     'rough.ui33':
       'Preflight verifies files and editing rules, not which model generated uploaded videos. A completed rough cut does not mean generation quality passed review.',
     'rough.ui34': ' · Simulated source',
@@ -1848,7 +1848,7 @@ export const legacyCatalogs = {
     'legacy.explain16': '素材库里还没有音频。上传后可在这里选段和试听；静音作品无需添加。',
     'legacy.explain17':
       '仅列出已载入批次，历史状态以最近读取为准；新批次进入时分页可能重叠，刷新最新记录会保留已载历史。',
-    'legacy.explain18': '当前执行 CPU 模拟，产物带水印，不代表 H3 真实效果；模型费用为 $0。',
+    'legacy.explain18': '当前执行 CPU 模拟，产物带水印，不代表真实效果，也不扣积分。',
     'legacy.explain19': '当前没有启用生成容量。预检和项目编辑可用，提交保持关闭。',
     'legacy.explain20':
       '当前筛选没有镜头。调整筛选，或到故事与章节新增镜头；不会自动选中其他章节。',
@@ -2162,8 +2162,8 @@ export const legacyCatalogs = {
     'jobs.estimatedCost': '预计 {amount} {currency}；以实际执行结算为准。',
     'jobs.costUnavailable': '费用信息暂不可用。',
     'cloud.shot1': ' · 旧版本',
-    'cloud.shot2': 'H3 · 云计划',
-    'cloud.shot3': 'H3 · 本机草稿',
+    'cloud.shot2': '视频 · 云计划',
+    'cloud.shot3': '视频 · 本机草稿',
     'cloud.shot4': '全能参考',
     'cloud.shot5': '分块解码',
     'cloud.shot6': '原生分辨率',
@@ -2206,7 +2206,7 @@ export const legacyCatalogs = {
     'cloud.shot43': '输入已改变，请重新预检',
     'cloud.shot44': '这份计划已提交',
     'cloud.shot45':
-      '这段文字作为生成任务的提示词；模拟模式不会调用 H3。章节剧本和参考用途不会自动变成提示词。',
+      '这段文字作为生成任务的提示词；模拟模式不会真正生成。章节剧本和参考用途不会自动变成提示词。',
     'cloud.shot46': '采样器',
     'cloud.shot47': '采样步数',
     'cloud.shot48': '锚点必须在生成片段结束之前。',
@@ -2222,7 +2222,7 @@ export const legacyCatalogs = {
     'cloud.shot58': '预检通过，等待你确认提交',
     'cloud.shot59': '③ 提示词与全部生成控制',
     'cloud.presetTail': '。未设置的选项采用此预设，已有明确选择保持不变。',
-    'cloud.shotHeading': '{title}的H3生成',
+    'cloud.shotHeading': '{title}的视频生成',
     'cloud.currentMode': '当前方式：{mode} · 可在素材区上方切换',
     'cloud.aspectNote':
       '项目计划画幅 {planned}；此镜头当前生成 {current}。参数各自保存，不会自动改变已有镜头。',
@@ -2711,8 +2711,7 @@ export const legacyCatalogs = {
     'rough.ui29': '粗剪仍有阻塞项',
     'rough.ui30': '时间线、素材或输出设置已改变，请重新预检；旧计划不会用于当前修改。',
     'rough.ui31': '本次预检已过期，请重新预检。',
-    'rough.ui32':
-      '包含模拟来源，整片保留 SIMULATION 水印。可验收剪辑流程，不能当作 H3 的实际生成效果。',
+    'rough.ui32': '包含模拟来源，整片保留 SIMULATION 水印。可验收剪辑流程，不能当作实际生成效果。',
     'rough.ui33':
       '预检验证文件与剪辑规则，不验证上传视频由哪个模型生成。完成粗剪也不代表生成质量已通过审片。',
     'rough.ui34': ' · 模拟来源',
