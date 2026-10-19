@@ -123,7 +123,7 @@ class WorkOSBackupTests(unittest.TestCase):
         counts = backup.verify_local(original)["tables"]
 
         def export(_engine, destination, **_options):
-            shutil.copyfile(original / "database.sqlite3", destination)
+            shutil.copy2(original / "database.sqlite3", destination)
             return counts
 
         source = self.root / "hosted-backup"

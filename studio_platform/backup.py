@@ -1011,9 +1011,7 @@ def backup_configured(
         from .workos_config import load_credentials
 
         try:
-            hosted_users = snapshot(
-                load_credentials(settings.workos_config_file)
-            )
+            hosted_users = snapshot(load_credentials(settings.workos_config_file))
         except ValueError:
             hosted_users = dict(
                 version=1,
