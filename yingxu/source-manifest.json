@@ -203,7 +203,7 @@
     "src/i18n/workspace-language.css": "6590c0450a0e591c3c0e2e8dbe0b14f118c8825114054b4e32f6a2b5f60f52f1",
     "src/i18n/workspaceCatalogs.js": "653020a2a0117cc4e5c2ee0a23a5b25bb2a14e6780cf7442ff4f98c603f99a11",
     "src/legacy-seed.json": "302a2b0e2c9577f4043827776c270b67e2ccb8ae94933126c0587fce95cd92cf",
-    "src/legal-content.js": "51655622dc8a48e06a0a4ed4a73d075011f4b1376ad7417612198b444729cf35",
+    "src/legal-content.js": "a4c1912d080c6b9d3bfc19713a73f826892bab37f4cbe7d116a2d9bf4975358c",
     "src/library-commands.js": "0abc891c95e97abe66aeaa5064bfdd335ffb4baea9b968767b3c9f8f665c1be4",
     "src/library-commands.test.js": "fec3fe6576b468f2a7127fbc6d3969754a4f5061c2e9dd73d1c3f042efc6ccf7",
     "src/library-loading.test.js": "ebd44b9909f21550a7c7a920bc2626f1389532dcd8b044f0b0bbd972b03da94e",
