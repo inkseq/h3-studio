@@ -318,6 +318,16 @@ class StagingQATests(LedgerCase):
             [("grant", 2000, self.admin.actor_id)],
         )
         self.assertEqual(len(self.rows(admin_audit)), 3)
+        from studio_platform.identity_admin import IdentityAdmin
+
+        overview = IdentityAdmin(self.repo, self.settings).list_users(
+            qa_admin, q='qa-user'
+        )
+        self.assertEqual(len(overview['items']), 1)
+        self.assertEqual(overview['items'][0]['balance'], 2000)
+        self.assertEqual(overview['items'][0]['used_30d'], 0)
+        self.assertEqual(len(self.rows(entries)), 1)
+        self.assertEqual(len(self.rows(admin_audit)), 3)
 
 
 class LocalProvisionTests(unittest.TestCase):
