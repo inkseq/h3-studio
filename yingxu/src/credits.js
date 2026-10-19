@@ -61,6 +61,17 @@ export function insufficientCredits(status, detail) {
   return need === null || have === null ? null : { need, have };
 }
 
+// API times arrive as Unix seconds (the platform default), milliseconds or ISO strings.
+export function apiDate(value) {
+  if (typeof value === 'number' && Number.isFinite(value))
+    return new Date(value < 1e11 ? value * 1000 : value);
+  if (typeof value === 'string' && value) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  return null;
+}
+
 export function formatCredits(value, locale = 'en') {
   return Number.isSafeInteger(value)
     ? new Intl.NumberFormat(locale === 'zh' ? 'zh-CN' : 'en-US').format(value)

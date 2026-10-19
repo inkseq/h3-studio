@@ -5,7 +5,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { History, ShieldCheck, Users } from 'lucide-react';
 import { createCloudClient } from './cloud-client.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
-import { formatCredits } from './credits.js';
+import { apiDate, formatCredits } from './credits.js';
 import './admin.css';
 
 function useClient(account) {
@@ -210,19 +210,19 @@ function AdminAudit({ api, active }) {
   return (
     <div className="card-box">
       {list.error && <p role="alert">{list.error}</p>}
-      <div className="credit-log">
+      <div className="audit-log">
         {list.rows.map((row, index) => (
           <div key={row.id || index}>
             <History size={14} aria-hidden="true" />
-            <span className="clip">
-              {[row.action, row.target, row.reason].filter(Boolean).join(' · ')}
+            <span>
+              <b>{[row.action, row.target].filter(Boolean).join(' · ')}</b>
+              {row.reason && <small className="clip">{row.reason}</small>}
+              <small className="muted">
+                {[row.actor, apiDate(row.created_at)?.toLocaleString(locale)]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </small>
             </span>
-            <small className="muted">
-              {[row.actor, row.created_at && new Date(row.created_at).toLocaleString(locale)]
-                .filter(Boolean)
-                .join(' · ')}
-            </small>
-            <b />
           </div>
         ))}
       </div>
