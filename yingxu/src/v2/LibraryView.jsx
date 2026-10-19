@@ -1,6 +1,6 @@
 // View ported from design/inkseq-v2-prototype/src/library.jsx.
 // All ownership, uploads, commands and receipts are supplied by Library.jsx.
-import React from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Box,
   Check,
@@ -31,6 +31,50 @@ const ICONS = {
   inbox: Inbox,
 };
 
+// Drag the sidebar edge to resize it (desktop); the width is a per-browser convenience.
+const SIDE_MIN = 180,
+  SIDE_MAX = 420,
+  SIDE_DEFAULT = 240,
+  SIDE_KEY = 'inkseq.librarySideWidth';
+const clampSide = (value) => Math.min(SIDE_MAX, Math.max(SIDE_MIN, Math.round(value)));
+function useSideWidth() {
+  const [width, setWidth] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem(SIDE_KEY));
+      return saved ? clampSide(saved) : SIDE_DEFAULT;
+    } catch {
+      return SIDE_DEFAULT;
+    }
+  });
+  const latest = useRef(width);
+  const save = (value) => {
+    latest.current = value;
+    setWidth(value);
+    try {
+      localStorage.setItem(SIDE_KEY, String(value));
+    } catch {}
+  };
+  const start = (event) => {
+    event.preventDefault();
+    const origin = event.clientX,
+      from = latest.current;
+    const move = (e) => save(clampSide(from + e.clientX - origin));
+    const stop = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', stop);
+      document.body.classList.remove('libp-resizing');
+    };
+    document.body.classList.add('libp-resizing');
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop);
+  };
+  const key = (event) => {
+    if (event.key === 'ArrowLeft') save(clampSide(latest.current - 16));
+    if (event.key === 'ArrowRight') save(clampSide(latest.current + 16));
+  };
+  return { width, start, key, reset: () => save(SIDE_DEFAULT) };
+}
+
 export default function LibraryView({
   account,
   filters = { type: 'image' },
@@ -58,6 +102,7 @@ export default function LibraryView({
   feedback,
   children,
 }) {
+  const side = useSideWidth();
   const { t } = useI18n(),
     profile = ['character', 'location', 'prop'].includes(filters.type),
     tags = [...new Set(rows.flatMap((r) => r.tags || []))];
@@ -115,7 +160,7 @@ export default function LibraryView({
   return (
     <div className="home lib-shell">
       <StudioHeader account={account} active="library" />
-      <div className="libp">
+      <div className="libp" style={{ '--lib-side': side.width + 'px' }}>
         <aside className="libp-side">
           <div className="libp-group">{t('library.view.profiles')}</div>
           {['character', 'location', 'prop'].map((k) => {
@@ -227,6 +272,19 @@ export default function LibraryView({
             </div>
           </details>
         </aside>
+        <div
+          className="libp-resize"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={t('library.resizeSidebar')}
+          aria-valuenow={side.width}
+          aria-valuemin={SIDE_MIN}
+          aria-valuemax={SIDE_MAX}
+          tabIndex={0}
+          onPointerDown={side.start}
+          onKeyDown={side.key}
+          onDoubleClick={side.reset}
+        />
         <main
           className="libp-main"
           onDragOver={(e) => {

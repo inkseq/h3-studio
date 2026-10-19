@@ -854,7 +854,8 @@ export function createStore({ storage, now = () => Date.now(), seed = legacySeed
         selectedId: null,
         scopeId: null,
         section: 'journey',
-        notice: '云项目已打开；原本机作品保留。',
+        // Only worth saying when a local work was open and stays in this browser.
+        notice: state.workspace.mode === 'local' ? '云项目已打开；原本机作品保留。' : null,
       };
       persist();
       emit();

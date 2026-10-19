@@ -225,3 +225,79 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Resizable sidebar; nothing inside may force sideways scrolling. */
+.lib-shell .libp {
+  position: relative;
+  grid-template-columns: var(--lib-side, 240px) 1fr auto;
+}
+.lib-shell .libp-side {
+  overflow-x: hidden;
+}
+.lib-shell .libp-side > * {
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.lib-shell .libp-side > button > span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+.lib-shell .library-source-tools > div,
+.lib-shell .library-source-tools select {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.lib-shell .library-source-tools select {
+  width: 100%;
+}
+.libp-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--lib-side, 240px) - 3px);
+  width: 6px;
+  cursor: col-resize;
+  z-index: 3;
+}
+.libp-resize:hover,
+.libp-resize:focus-visible,
+body.libp-resizing .libp-resize {
+  background: var(--accent, #c7f36b);
+  opacity: 0.45;
+  outline: none;
+}
+body.libp-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+/* The detail panel's "open in story editor" link reads as a button next to Import. */
+.libp-actions {
+  align-items: center;
+}
+.libp-actions > a.small {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--line-2, #2b302d);
+  border-radius: var(--r-sm, 8px);
+  color: var(--ink, #eef2ef);
+  text-decoration: none;
+  font-size: 13px;
+}
+.libp-actions > a.small:hover {
+  background: var(--surface-3, #232825);
+}
+@media (max-width: 900px) {
+  .lib-shell .libp {
+    grid-template-columns: 1fr;
+  }
+  .libp-resize {
+    display: none;
+  }
+}
