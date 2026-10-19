@@ -82,6 +82,13 @@ That path never constructs a Principal or admits/cancels jobs. An already
 requested cancellation may finish by reading only its own original terminal job
 statuses. Content lifecycle gates and header CAS remain active. Explicit
 same-actor resume updates the existing grant reference and original run only.
+Known finite business refusals (including render inputs, spending confirmation
+and budget limits) show `blocked` with their safe original error code. The
+workflow durably waits; it does not retry admission until explicit same-run
+resume. Unexpected exceptions remain errors, rather than being relabelled as
+an authorization or budget refusal. The creator can open an Agent-created run
+with the ordinary Story URL's `project=<project_id>&film=<run_id>` query, using
+the same owner-fenced GET; the URL grants no access.
 
 ## CPU checkpoint recovery
 
@@ -98,6 +105,9 @@ chapter job/artifact IDs are retained. Export render version4 copies their
 validated H264/24fps/dimensions/frame-count bitstreams at concat; chapters are
 not re-encoded. Separate original audio is mixed using the existing sample-grid
 contract. The original ArtifactWriter handles uncertain R2 PUTs.
+On the DBOS path a shared CPU-operation OFD lock is also acquired before any
+original job claim and passed to FFmpeg. A surviving child therefore fences all
+CPU configurations after a controller process crash, not just its own attempt.
 
 `register_film_workflows(DBOS,service,principal_for)` registers one stable named
 workflow and no-automatic-retry domain step. Only tenant/owner/project/run IDs
