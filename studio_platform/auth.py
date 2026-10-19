@@ -436,6 +436,14 @@ class Auth:
             return row
         if owner not in USERS:
             return None
+        if check_identity:
+            identity = account_identity(connection, self.tenant, owner)
+            if identity is not None and identity.get("status") != "active":
+                return None
+        # Explicit local-test grants have no password backing row. Keep their
+        # original fixed-query path; hydrate still enforces canonical status.
+        if source == "local-test":
+            return {"owner": owner} if version == 0.0 else None
         statement = select(accounts).where(
             accounts.c.tenant == self.tenant, accounts.c.username == owner
         )
@@ -444,10 +452,6 @@ class Auth:
             .mappings()
             .first()
         )
-        if check_identity:
-            identity = account_identity(connection, self.tenant, owner)
-            if identity is not None and identity.get("status") != "active":
-                return None
         if source == "password":
             return (
                 row
@@ -457,9 +461,7 @@ class Auth:
                 and self.ready(connection)
                 else None
             )
-        # Preserve the explicit legacy local-test mode, including accounts with
-        # no password rows. New canonical users never inherit this test login.
-        return {"owner": owner} if source == "local-test" and version == 0.0 else None
+        return None
 
     def issue_workos_session(self, owner, workos_user_id):
         """Trusted verified-SDK callback only, after its canonical upsert commits."""
