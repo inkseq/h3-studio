@@ -12,6 +12,7 @@ from .auth import Principal
 from .credit_schema import entries as entry_table, prices
 from .credits_pricing import (
     PricingError,
+    admin_margin_estimate,
     configuration,
     current,
     public_prices,
@@ -226,6 +227,8 @@ class CreditAPI:
             return value
 
     def admin_prices(self, principal):
+        from .payments_routes import current_packs
+
         with self.repo.engine.connect() as connection:
             self._actor(connection, principal)
             value = current(connection, self.settings.tenant_id)
@@ -240,6 +243,9 @@ class CreditAPI:
                 "revision": value["revision"],
                 "rates": value["rates"],
                 **value["configuration"],
+                "margin_estimate": admin_margin_estimate(
+                    value, current_packs(connection, self.settings.tenant_id)
+                ),
                 "report_30d": {"captured_credits": captured, "provider_cost_usd": None},
             }
 
