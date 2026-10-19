@@ -23,6 +23,7 @@ from .spending_limits import (
     validate_settings,
     public_usage,
     admin_defaults,
+    credit_settings,
 )
 
 
@@ -78,12 +79,18 @@ def register_routes(app):
                 if admin
                 else None,
             )
+            if not admin:
+                # Old clients cannot erase newly configured credit limits, and
+                # credit clients cannot reinterpret the retained provider caps.
+                value = validate_settings({**old["value"], **value})
             if body["expected_version"] != old["version"]:
                 raise Conflict("spending_settings_changed")
-            if not admin and set(value["connection_limits"]) - owned_keys(
-                connection, principal.owner
-            ):
-                raise NotFound("connection_not_found")
+            if not admin:
+                selected_keys = set(value["connection_limits"]) | set(
+                    value.get("connection_credit_limits", {})
+                )
+                if selected_keys - owned_keys(connection, principal.owner):
+                    raise NotFound("connection_not_found")
             if old["value"] == value:
                 return {**old, "changed": False}
             values = {
@@ -116,6 +123,8 @@ def register_routes(app):
                     old['value']['connection_limits'],
                     value['connection_limits'],
                     repo.clock(),
+                    old_credit_limits=old['value'].get('connection_credit_limits', {}),
+                    new_credit_limits=value.get('connection_credit_limits', {}),
                 )
             repo._emit(
                 connection,
@@ -138,7 +147,10 @@ def register_routes(app):
                 "code": "spending_confirmation_required",
                 "plan_id": error.plan_id,
                 "plan_ids": error.plan_ids,
-                "estimate_microusd": error.amount,
+                (
+                    "credits" if error.unit == "credits" else "estimate_microusd"
+                ): error.amount,
+                "unit": error.unit,
                 "message_key": "errors.spendingConfirmationRequired",
                 "messages": {
                     "en": "This quote needs your approval before submission.",
@@ -154,6 +166,11 @@ def register_routes(app):
         principal = human(request)
         with repo.engine.connect() as connection:
             value = read_settings(connection, settings.tenant_id, principal.owner)
+            from .credits import credit_policy, daily_projection as credit_projection
+
+            credit_mode = credit_policy(connection, settings.tenant_id)["enabled"]
+            if credit_mode:
+                value = credit_settings(connection, settings.tenant_id, principal.owner)
             keys = [
                 dict(row)
                 for row in connection.execute(
@@ -171,7 +188,17 @@ def register_routes(app):
                 {
                     **value,
                     "account": principal.owner,
-                    "usage": public_usage(
+                    "unit": "credits" if credit_mode else "microusd",
+                    "usage": {
+                        "exposure_credits": credit_projection(
+                            connection,
+                            settings.tenant_id,
+                            principal.owner,
+                            repo.clock(),
+                        )
+                    }
+                    if credit_mode
+                    else public_usage(
                         connection, settings.tenant_id, principal.owner, repo.clock()
                     ),
                     "connections": [
@@ -179,8 +206,14 @@ def register_routes(app):
                             "actor_id": "key:" + key["id"],
                             "name": key["name"],
                             "revoked": key["revoked_at"] is not None,
-                            "daily_limit_microusd": value["value"][
-                                "connection_limits"
+                            (
+                                "daily_limit_credits"
+                                if credit_mode
+                                else "daily_limit_microusd"
+                            ): value["value"][
+                                "connection_credit_limits"
+                                if credit_mode
+                                else "connection_limits"
                             ].get("key:" + key["id"], 0),
                         }
                         for key in keys
@@ -192,7 +225,19 @@ def register_routes(app):
     @app.put("/v1/account/spending-settings")
     def update_user(request: Request, body: dict):
         principal = human(request)
-        return response(update_value(principal, principal.owner, body))
+        result = update_value(principal, principal.owner, body)
+        from .credits import credit_policy
+
+        with repo.engine.connect() as connection:
+            if credit_policy(connection, settings.tenant_id)["enabled"]:
+                result = {
+                    **result,
+                    "value": credit_settings(
+                        connection, settings.tenant_id, principal.owner
+                    )["value"],
+                    "unit": "credits",
+                }
+        return response(result)
 
     @app.get("/v1/operator/admin/spending-settings")
     def read_admin(request: Request):
@@ -252,12 +297,22 @@ def register_routes(app):
             config = read_settings(connection, settings.tenant_id, principal.owner)
             for plan in selected:
                 store_confirmation(connection, principal, plan, config)
+            quote = [plan["execution_plan"].get("credit_quote") for plan in selected]
+            credit_mode = all(
+                isinstance(item, dict) and item.get("enforced") is True
+                for item in quote
+            )
+            if any(quote) and not credit_mode:
+                raise Conflict("credit_quote_required")
             return response(
                 {
                     "plan_ids": ids,
-                    "estimate_microusd": sum(
-                        p["estimated_cost_microusd"] for p in selected
-                    ),
+                    ("credits" if credit_mode else "estimate_microusd"): sum(
+                        item["credits"] for item in quote
+                    )
+                    if credit_mode
+                    else sum(p["estimated_cost_microusd"] for p in selected),
+                    "unit": "credits" if credit_mode else "microusd",
                     "single_use": True,
                 }
             )

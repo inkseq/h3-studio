@@ -109,6 +109,8 @@ class GenerationRead:
     @staticmethod
     def execution(execution):
         # User-relevant admission, never operator approval/budget identities.
+        from .credits_pricing import public_quote
+
         return {
             "admission_state": execution.get(
                 "admission_state", "queued" if execution.get("enabled") else "blocked"
@@ -116,6 +118,7 @@ class GenerationRead:
             "enabled": bool(execution.get("enabled")),
             "quote_known": bool(execution.get("quote_known")),
             "backend": execution.get("backend"),
+            **public_quote(execution),
             **(
                 {"budget_error_code": "budget_exceeded"}
                 if execution.get("budget_error_code") == "budget_exceeded"
@@ -169,6 +172,8 @@ class GenerationRead:
         }
 
     def public_job(self, job, *, artifact_records=None, cancellation=None):
+        from .credits_pricing import public_quote
+
         stored_request = job["request"]
         visible = {
             k: job.get(k)
@@ -184,6 +189,7 @@ class GenerationRead:
             )
         }
         visible.update(
+            **public_quote(job["execution_plan"]),
             client_ref=stored_request.get("client_ref", {}),
             phase=job["status"],
             recipe_id=stored_request.get("recipe_id"),
@@ -376,6 +382,24 @@ class GenerationPlanning:
                 execution["timing_hint"] = hint
         enabled, blockers = execution["enabled"], execution["blockers"]
         simulation = self.settings.execution_backend == "mock"
+        from .credits_pricing import (
+            hide_dollar_estimate,
+            public_quote,
+            quote,
+            user_estimate,
+        )
+
+        with self.repo.engine.connect() as connection:
+            credit_quote = quote(
+                connection,
+                self.access.tenant_id,
+                principal.owner,
+                compiled,
+                execution=execution,
+            )
+        if credit_quote is not None:
+            execution["credit_quote"] = credit_quote
+        hide_dollars = hide_dollar_estimate(execution, principal)
         plan = self.repo.create_plan(
             self.access.scope(principal, project_id),
             compiled,
@@ -385,7 +409,7 @@ class GenerationPlanning:
             plan_id=plan_id,
         )
         if plan_id is not None:
-            return self.retained_plan(plan)
+            return self.retained_plan(plan, principal)
         return {
             "plan_id": plan["id"],
             "status": "ready" if enabled else "blocked",
@@ -398,13 +422,17 @@ class GenerationPlanning:
             "warnings": ["本地模拟：不调用模型，不代表H3速度或质量"]
             if simulation
             else [],
-            "estimate": admission.estimate,
+            "estimate": user_estimate(admission.estimate, hide_dollars=hide_dollars),
+            **public_quote(execution),
             "execution": self.read.execution(execution),
             "simulation": simulation,
         }
 
-    def retained_plan(self, plan):
+    def retained_plan(self, plan, principal=None):
         compiled, execution = plan["request"], plan["execution_plan"]
+        from .credits_pricing import hide_dollar_estimate, public_quote, user_estimate
+
+        hide_dollars = hide_dollar_estimate(execution, principal)
         return {
             "plan_id": plan["id"],
             "status": "ready" if execution.get("enabled") else "blocked",
@@ -414,12 +442,16 @@ class GenerationPlanning:
             "client_ref": compiled["client_ref"],
             "expires_at": plan["expires_at"],
             "blockers": execution.get("blockers", []),
-            "estimate": {
-                "cost_microusd": plan["estimated_cost_microusd"]
-                if execution.get("quote_known") is True
-                else None,
-                "final_bill": False,
-            },
+            "estimate": user_estimate(
+                {
+                    "cost_microusd": plan["estimated_cost_microusd"]
+                    if execution.get("quote_known") is True
+                    else None,
+                    "final_bill": False,
+                },
+                hide_dollars=hide_dollars,
+            ),
+            **public_quote(execution),
             "execution": self.read.execution(execution),
             "simulation": execution.get("backend") == "mock",
         }

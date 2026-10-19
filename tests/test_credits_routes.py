@@ -1,0 +1,517 @@
+"""Public quote, owner isolation and audited pricing/credit APIs; offline SQL."""
+
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+import uuid
+
+from sqlalchemy import Column, MetaData, String, Table, func, insert, select, update
+
+from studio_platform.auth import Auth, Principal
+from studio_platform.credit_schema import metadata as credit_metadata, prices
+from studio_platform.credits import CreditError
+from studio_platform.credits_pricing import (
+    DEFAULT_RATES,
+    PricingError,
+    hide_dollar_estimate,
+    public_quote,
+    quote,
+    user_estimate,
+)
+from studio_platform.credits_routes import CreditAPI
+from studio_platform.identity_schema import admin_audit, metadata, users
+from test_platform_repository import LedgerCase
+
+
+class CreditsRouteTests(LedgerCase):
+    def setUp(self):
+        super().setUp()
+        self.auth = Auth(self.repo.engine, mode="local-test", clock=lambda: self.now)
+        self.marker = Table(
+            "alembic_version",
+            MetaData(),
+            Column("version_num", String(32), primary_key=True),
+        )
+        self.ids = {owner: str(uuid.uuid4()) for owner in ("superdan", "supervan")}
+        with self.repo.transaction() as connection:
+            metadata.create_all(connection)
+            credit_metadata.create_all(connection)
+            self.marker.create(connection)
+            connection.execute(insert(self.marker).values(version_num="20261019_0004"))
+            for owner, ident in self.ids.items():
+                connection.execute(
+                    insert(users).values(
+                        id=ident,
+                        tenant="sixnine",
+                        owner=owner,
+                        role="admin" if owner == "superdan" else "user",
+                        status="active",
+                        display_name=owner,
+                        created_at=self.now,
+                        updated_at=self.now,
+                    )
+                )
+        self.settings = SimpleNamespace(tenant_id="sixnine")
+        self.service = CreditAPI(self.repo, self.settings)
+        self.admin = Principal(
+            "superdan", "browser:superdan", role="admin", identity_source="canonical"
+        )
+        self.user = Principal(
+            "supervan", "browser:supervan", identity_source="canonical"
+        )
+
+    def count(self, table):
+        with self.repo.engine.connect() as connection:
+            return connection.execute(
+                select(func.count()).select_from(table)
+            ).scalar_one()
+
+    def publish(self, **extra):
+        return self.service.publish(
+            self.admin,
+            {"expected_revision": None, "rates": dict(DEFAULT_RATES), **extra},
+            key="first-price",
+        )
+
+    def enable(self):
+        revision = self.publish()["revision"]
+        self.service.policy(
+            self.admin,
+            {
+                "expected_revision": revision,
+                "enabled": True,
+                "reason": "Disposable acceptance",
+            },
+            key="enable",
+        )
+        return revision
+
+    @staticmethod
+    def compiled(**extra):
+        return {
+            "recipe_id": "h3-base-fl2va-v1",
+            "request": {"model": "MiniMax-H3-Pruned-Rank8-INT8", "steps": 20},
+            "output_spec": {
+                "frames": 124,
+                "width": 832,
+                "height": 480,
+                "actual_duration": 999,
+            },
+            **extra,
+        }
+
+    def get_quote(self, compiled=None, **extra):
+        with self.repo.engine.connect() as connection:
+            return quote(
+                connection, "sixnine", "supervan", compiled or self.compiled(), **extra
+            )
+
+    def test_reads_zero_without_creating_or_granting_a_balance(self):
+        self.assertEqual(
+            self.service.balance(self.user),
+            {
+                "balance": 0,
+                "held": 0,
+                "available": 0,
+                "today_used": 0,
+                "daily_limit": 0,
+            },
+        )
+        self.assertIsNone(self.get_quote())
+        self.assertEqual(
+            self.service.history(self.user), {"entries": [], "next_cursor": None}
+        )
+
+    def test_unadopted_credit_endpoints_fail_closed(self):
+        with self.repo.transaction() as connection:
+            connection.execute(update(self.marker).values(version_num="20261019_0003"))
+        with self.assertRaises(PricingError) as error:
+            self.service.balance(self.user)
+        self.assertEqual(error.exception.status, 503)
+
+    def test_publish_is_immutable_cas_audited_and_idempotent(self):
+        first = self.publish()
+        self.assertEqual(self.publish(), first)
+        self.assertEqual(self.count(prices), 1)
+        self.assertEqual(self.count(admin_audit), 1)
+        with self.assertRaisesRegex(PricingError, "idempotency_conflict"):
+            self.service.publish(
+                self.admin,
+                {"expected_revision": None, "rates": {**DEFAULT_RATES, "standard": 5}},
+                key="first-price",
+            )
+        with self.assertRaisesRegex(PricingError, "credit_prices_changed"):
+            self.service.publish(
+                self.admin, {"expected_revision": None, "rates": dict(DEFAULT_RATES)}
+            )
+        second = self.service.publish(
+            self.admin,
+            {
+                "expected_revision": first["revision"],
+                "rates": {**DEFAULT_RATES, "standard": 5},
+                "welcome_credits": 25,
+            },
+        )
+        self.assertNotEqual(second["revision"], first["revision"])
+        self.assertEqual(self.count(prices), 2)
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(
+                connection.execute(
+                    select(prices.c.rates).where(prices.c.revision == first["revision"])
+                ).scalar_one(),
+                DEFAULT_RATES,
+            )
+
+    def test_racing_publish_uses_one_original_revision(self):
+        def publish(_):
+            try:
+                return self.service.publish(
+                    self.admin,
+                    {"expected_revision": None, "rates": dict(DEFAULT_RATES)},
+                )["revision"]
+            except PricingError as error:
+                return error.code
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            values = list(executor.map(publish, range(3)))
+        self.assertEqual(values.count("credit_prices_changed"), 2)
+        self.assertEqual(self.count(prices), 1)
+        self.assertEqual(self.count(admin_audit), 1)
+
+    def test_quote_uses_exact_frames_one_take_and_no_client_tier_discount(self):
+        revision = self.enable()
+        standard = self.get_quote()
+        self.assertEqual(
+            (
+                standard["credits"],
+                standard["frames"],
+                standard["fps"],
+                standard["takes"],
+            ),
+            (21, 124, 24, 1),
+        )
+        self.assertEqual(standard["price_revision"], revision)
+        self.assertEqual(standard["output_seconds"], 124 / 24)
+        low_steps = self.compiled(
+            request={
+                "model": "MiniMax-H3-Pruned-Rank8-INT8",
+                "steps": 3,
+                "tier": "fast",
+                "speed_preset": "taomate",
+            }
+        )
+        self.assertEqual(self.get_quote(low_steps)["tier"], "standard")
+        for compiled in (
+            self.compiled(request={"model": "MiniMax-H3-Base-INT8", "steps": 3}),
+            self.compiled(output_spec={"frames": 124, "width": 1376, "height": 768}),
+        ):
+            self.assertEqual(
+                (self.get_quote(compiled)["tier"], self.get_quote(compiled)["credits"]),
+                ("refine", 62),
+            )
+
+    def test_cpu_assembly_is_free_only_with_server_render_backend(self):
+        self.enable()
+        render = self.compiled(recipe_id="chapter-roughcut-v1")
+        self.assertGreater(self.get_quote(render)["credits"], 0)
+        free = self.get_quote(render, execution={"backend": "cpu-render"})
+        self.assertEqual((free["tier"], free["credits"]), ("render", 0))
+        self.assertGreater(
+            self.get_quote(execution={"backend": "cpu-render"})["credits"], 0
+        )
+
+    def test_new_price_does_not_reprice_frozen_plan_and_projection_is_read_only(self):
+        revision = self.enable()
+        frozen = self.get_quote()
+        self.service.publish(
+            self.admin,
+            {"expected_revision": revision, "rates": {**DEFAULT_RATES, "standard": 10}},
+        )
+        self.assertEqual(self.get_quote()["credits"], 52)
+        self.assertEqual(frozen["credits"], 21)
+        projection = public_quote({"credit_quote": frozen})
+        self.assertEqual(set(projection), {"credits", "price_revision", "breakdown"})
+        self.assertNotIn("user_id", projection)
+        self.assertTrue(hide_dollar_estimate({"credit_quote": frozen}, self.user))
+        self.assertFalse(hide_dollar_estimate({"credit_quote": frozen}, self.admin))
+        self.assertFalse(hide_dollar_estimate({}, self.user))
+        self.assertEqual(
+            user_estimate(
+                {"cost_microusd": 500, "estimated_seconds": 45}, hide_dollars=True
+            ),
+            {"estimated_seconds": 45},
+        )
+
+    def test_pricing_basis_keeps_unmeasured_provider_cost_null(self):
+        self.publish()
+        value = self.service.admin_prices(self.admin)
+        self.assertEqual(value["cost_multiplier"], 3)
+        self.assertEqual(value["fee_rate"], 0.07)
+        self.assertEqual(value["basis"]["standard"]["seconds_per_5s_clip"], 87)
+        self.assertIsNone(value["basis"]["standard"]["hourly_usd"])
+        self.assertIsNone(value["report_30d"]["provider_cost_usd"])
+
+    def test_storyboard_and_film_sum_actual_quotes_without_dollar_or_database_reads(
+        self,
+    ):
+        from studio_platform.film_runs import FilmRuns
+        from studio_platform.storyboard_versions import StoryboardVersions
+
+        self.enable()
+        frozen = self.get_quote()
+        plans = [
+            {
+                **public_quote({"credit_quote": frozen}),
+                "status": "ready",
+                "estimate": {"cost_microusd": 500},
+            }
+            for _ in range(3)
+        ]
+        receipt = {
+            "id": "preflight",
+            "project_id": "story",
+            "project_version": 1,
+            "fingerprint": "a" * 64,
+            "items": [{"plan": plan, "machine_seconds": 90} for plan in plans],
+        }
+        # Pure DTO helpers must never turn a long list into per-job SQL reads.
+        with patch.object(
+            self.repo.engine,
+            "connect",
+            side_effect=AssertionError("No DTO database reads"),
+        ):
+            user = StoryboardVersions._public_preflight(receipt, self.user)
+            admin = StoryboardVersions._public_preflight(receipt, self.admin)
+            self.assertEqual(user["credits"], 63)
+            self.assertNotIn("cost_microusd", user["estimate"])
+            self.assertTrue(
+                all(
+                    "cost_microusd" not in item["plan"]["estimate"]
+                    for item in user["items"]
+                )
+            )
+            self.assertEqual(admin["estimate"]["cost_microusd"], 1500)
+            film = {
+                "generation": [
+                    {"shot_id": str(n), **plan} for n, plan in enumerate(plans)
+                ],
+                "chapters": [],
+                "export": {"artifact_id": None},
+                "results": {},
+                "counts": {},
+                "estimate": {"cost_microusd": 1500, "final_bill": False},
+            }
+            public_film = FilmRuns.public(film, self.user)
+            self.assertEqual(public_film["credits"], 63)
+            self.assertNotIn("cost_microusd", public_film["estimate"])
+            self.assertEqual(
+                FilmRuns.public(film, self.admin)["estimate"]["cost_microusd"], 1500
+            )
+        receipt["items"].append({"plan": None})
+        self.assertIsNone(
+            StoryboardVersions._public_preflight(receipt, self.user)["credits"]
+        )
+
+    def test_real_generation_plan_hash_freezes_quote_before_price_change(self):
+        from studio_platform.assets import AssetService
+        from studio_platform.execution_policy import ExecutionPolicies
+        from studio_platform.generation_services import (
+            GenerationAccess,
+            GenerationPlanning,
+            GenerationRead,
+        )
+        from studio_platform.repository import request_hash
+        from studio_platform.settings import Settings
+        from studio_platform.storage import LocalObjectStore
+
+        revision = self.enable()
+        settings = Settings(
+            Path(self.temp.name),
+            generation_enabled=True,
+            execution_backend="mock",
+            database_url=self.url,
+        )
+        access = GenerationAccess(self.repo, "sixnine")
+        read = GenerationRead(self.repo, access)
+        planning = GenerationPlanning(
+            repo=self.repo,
+            assets=AssetService(
+                self.repo.engine,
+                LocalObjectStore(Path(self.temp.name) / "objects"),
+                Path(self.temp.name),
+            ),
+            settings=settings,
+            policies=ExecutionPolicies(settings, self.repo),
+            access=access,
+            read=read,
+        )
+        project = {
+            "id": "credit-story",
+            "links": [],
+            "entities": [
+                {
+                    "id": "shot-one",
+                    "type": "shot",
+                    "version": 1,
+                    "title": "Shot",
+                    "description": "Offline fixture",
+                    "data": {},
+                }
+            ],
+        }
+        body = {
+            "recipe_id": "h3-base-fl2va-v1",
+            "prompt": "Offline quote fixture",
+            "client_ref": {
+                "project_id": project["id"],
+                "shot_id": "shot-one",
+                "shot_version": 1,
+            },
+            "controls": {"duration": 5, "resolution": "480P", "seed": "42"},
+        }
+        result = planning.create(self.user, body, project)
+        saved = self.repo.get_plan(
+            access.scope(self.user, project["id"]), result["plan_id"]
+        )
+        self.assertEqual(
+            saved["execution_plan"]["credit_quote"]["price_revision"], revision
+        )
+        self.assertEqual(saved["plan_hash"], request_hash(saved["execution_plan"]))
+        self.assertNotIn("cost_microusd", result["estimate"])
+        self.service.publish(
+            self.admin,
+            {"expected_revision": revision, "rates": {**DEFAULT_RATES, "refine": 30}},
+        )
+        retained = planning.retained_plan(saved, self.user)
+        self.assertEqual(
+            (retained["credits"], retained["price_revision"]),
+            (result["credits"], revision),
+        )
+        self.assertNotEqual(
+            planning.create(self.user, body, project)["credits"], result["credits"]
+        )
+        self.assertIn(
+            "cost_microusd", planning.retained_plan(saved, self.admin)["estimate"]
+        )
+
+    def test_admin_is_fresh_human_canonical_and_tenant_scoped(self):
+        for principal in (
+            self.user,
+            Principal("superdan", "key:admin", machine=True, role="admin"),
+        ):
+            with self.assertRaisesRegex(PricingError, "admin_required"):
+                self.service.admin_prices(principal)
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(users).where(users.c.owner == "superdan").values(role="user")
+            )
+        with self.assertRaisesRegex(PricingError, "admin_required"):
+            self.publish()
+        self.assertEqual(self.count(admin_audit), 0)
+
+    def test_adjust_is_one_entry_one_audit_and_user_visible_reason(self):
+        body = {"delta": 100, "reason": "Staging acceptance grant"}
+        first = self.service.adjust(self.admin, self.ids["supervan"], body, key="grant")
+        self.assertEqual(
+            self.service.adjust(self.admin, self.ids["supervan"], body, key="grant"),
+            first,
+        )
+        self.assertEqual(self.service.balance(self.user)["balance"], 100)
+        self.assertEqual(self.service.balance(self.admin)["balance"], 0)
+        self.assertEqual(self.count(admin_audit), 1)
+        history = self.service.history(self.user)["entries"]
+        self.assertEqual(len(history), 1)
+        self.assertEqual(
+            (history[0]["kind"], history[0]["amount"], history[0]["reason"]),
+            ("adjust", 100, body["reason"]),
+        )
+        self.assertIsInstance(history[0]["created_at"], str)
+        with self.assertRaisesRegex(PricingError, "idempotency_conflict"):
+            self.service.adjust(
+                self.admin, self.ids["supervan"], {**body, "delta": 200}, key="grant"
+            )
+
+    def test_audit_failure_rolls_back_credit_entry_and_account(self):
+        with patch.object(
+            self.service, "_audit", side_effect=RuntimeError("synthetic audit failure")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "synthetic"):
+                self.service.adjust(
+                    self.admin,
+                    self.ids["supervan"],
+                    {"delta": 100, "reason": "Atomic grant"},
+                    key="failed",
+                )
+        self.assertEqual(self.service.balance(self.user)["balance"], 0)
+        self.assertEqual(self.service.history(self.user)["entries"], [])
+
+    def test_policy_requires_a_published_price_reason_and_idempotency(self):
+        with self.assertRaisesRegex(PricingError, "credit_prices_unavailable"):
+            self.service.policy(
+                self.admin,
+                {"expected_revision": None, "enabled": True, "reason": "No price yet"},
+                key="empty",
+            )
+        revision = self.publish()["revision"]
+        body = {
+            "expected_revision": revision,
+            "enabled": True,
+            "reason": "Activate staging",
+        }
+        with self.assertRaisesRegex(PricingError, "idempotency_key_required"):
+            self.service.policy(self.admin, body)
+        value = self.service.policy(self.admin, body, key="activate")
+        self.assertEqual(self.service.policy(self.admin, body, key="activate"), value)
+        self.assertEqual(value, {"active_revision": revision, "enabled": True})
+        self.assertEqual(self.count(admin_audit), 2)
+
+    def test_https_public_prices_account_and_exact_402_error_contract(self):
+        from fastapi.testclient import TestClient
+        from studio_platform.api import create_app
+        from studio_platform.settings import Settings
+
+        self.publish()
+        app = create_app(
+            Settings(
+                Path(self.temp.name) / "api",
+                auth_mode="local-test",
+                database_url=self.url,
+            ),
+            repository=self.repo,
+        )
+
+        @app.get("/v1/disposable-credit-refusal")
+        def refusal():
+            raise CreditError(
+                "insufficient_credits",
+                402,
+                detail="Not enough credits.",
+                need=21,
+                have=0,
+            )
+
+        with TestClient(app) as client:
+            self.assertEqual(client.get("/v1/credits/prices").status_code, 200)
+            self.assertEqual(client.get("/v1/credits").status_code, 401)
+            client.post(
+                "/api/auth/login", json={"username": "supervan"}
+            ).raise_for_status()
+            result = client.get("/v1/credits")
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(
+                set(result.json()),
+                {"balance", "held", "available", "today_used", "daily_limit"},
+            )
+            self.assertEqual(client.get("/v1/admin/credits/prices").status_code, 403)
+            refused = client.get("/v1/disposable-credit-refusal")
+            self.assertEqual(refused.status_code, 402)
+            self.assertEqual(
+                refused.json(),
+                {
+                    "code": "insufficient_credits",
+                    "detail": "Not enough credits.",
+                    "need": 21,
+                    "have": 0,
+                },
+            )

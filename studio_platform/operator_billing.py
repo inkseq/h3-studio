@@ -825,6 +825,17 @@ class OperatorBilling(OperatorBudgets):
                             created_at=now,
                         )
                     )
+                    if kind == "job":
+                        from .credits import refund_job
+
+                        refund_job(
+                            conn,
+                            self.repo,
+                            value["reference"],
+                            actor=principal.actor_id,
+                            reason=request["reason"],
+                            idempotency_key="job:" + ident + ":waive",
+                        )
                 elif kind == "instance":
                     self.repo.settle_instance_cost(
                         ident,

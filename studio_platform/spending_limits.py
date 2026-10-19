@@ -32,6 +32,11 @@ USER_DEFAULTS = {
     "ask_above_microusd": 0,
     "connection_limits": {},
 }
+CREDIT_DEFAULTS = {
+    "daily_limit_credits": 0,
+    "ask_above_credits": 0,
+    "connection_credit_limits": {},
+}
 ADMIN_DEFAULTS = {
     "test_task_limit_microusd": 20_000_000,
     "max_hourly_price_microusd": 1_000_000,
@@ -80,10 +85,11 @@ def admin_defaults(service=None):
 
 
 class SpendingConfirmationRequired(Conflict):
-    def __init__(self, plan_id, amount, *, plan_ids=None):
+    def __init__(self, plan_id, amount, *, plan_ids=None, unit="microusd"):
         super().__init__("spending_confirmation_required")
         self.plan_id, self.amount = plan_id, amount
         self.plan_ids = plan_ids or [plan_id]
+        self.unit = unit
 
 
 def lock_owner(connection, tenant, owner):
@@ -115,6 +121,8 @@ def read_settings(connection, tenant, owner, *, admin_defaults=None):
         if row
         else {**defaults, **({"connection_limits": {}} if owner != ADMIN_OWNER else {})}
     )
+    if owner != ADMIN_OWNER:
+        value = {**USER_DEFAULTS, **value}
     return {
         "version": row["version"] if row else 0,
         "value": canonical_admin(value) if owner == ADMIN_OWNER else value,
@@ -139,10 +147,15 @@ def canonical_admin(value):
 def validate_settings(value, *, admin=False):
     if admin:
         value = canonical_admin(value)
-    fields = ADMIN_DEFAULTS if admin else USER_DEFAULTS
-    if not isinstance(value, dict) or set(value) != set(fields):
+    fields = ADMIN_DEFAULTS if admin else {**USER_DEFAULTS, **CREDIT_DEFAULTS}
+    allowed = (
+        (set(fields),)
+        if admin
+        else (set(USER_DEFAULTS), set(CREDIT_DEFAULTS), set(fields))
+    )
+    if not isinstance(value, dict) or set(value) not in allowed:
         raise ValueError("spending_settings_invalid")
-    for key in set(fields) - {"connection_limits"}:
+    for key in set(value) - {"connection_limits", "connection_credit_limits"}:
         money(value[key])  # rejects bool, negative and storage overflow
         if admin and value[key] == 0:
             raise ValueError("spending_settings_invalid")
@@ -153,14 +166,68 @@ def validate_settings(value, *, admin=False):
         ):
             raise ValueError("spending_settings_invalid")
     else:
-        limits = value["connection_limits"]
-        if not isinstance(limits, dict) or len(limits) > 1000:
-            raise ValueError("spending_settings_invalid")
-        for key, cap in limits.items():
-            if not isinstance(key, str) or not key.startswith("key:") or len(key) > 200:
+        for field in {"connection_limits", "connection_credit_limits"} & set(value):
+            limits = value[field]
+            if not isinstance(limits, dict) or len(limits) > 1000:
                 raise ValueError("spending_settings_invalid")
-            money(cap)
+            for key, cap in limits.items():
+                if (
+                    not isinstance(key, str)
+                    or not key.startswith("key:")
+                    or len(key) > 200
+                ):
+                    raise ValueError("spending_settings_invalid")
+                money(cap)
     return value
+
+
+def credit_settings(connection, tenant, owner):
+    stored = read_settings(connection, tenant, owner)
+    value = {
+        key: stored["value"].get(key, {} if isinstance(default, dict) else default)
+        for key, default in CREDIT_DEFAULTS.items()
+    }
+    return {"version": stored["version"], "value": validate_settings(value)}
+
+
+def check_credit_spending(connection, repo, scope, job, amount, *, actor_id):
+    """Called by credit hold after original admission owns the spending lock.
+
+    Credit units never reinterpret old microUSD settings. Unknown holds count
+    across midnight; accepted settlement never enters this admission helper.
+    """
+    from .credits import CreditError, daily_projection as credit_projection
+
+    value = credit_settings(connection, scope.tenant_id, scope.owner_id)["value"]
+    for cap, actor, code in (
+        (value["daily_limit_credits"], None, "user_daily_limit_reached"),
+        (
+            value["connection_credit_limits"].get(actor_id, 0),
+            actor_id,
+            "connection_daily_limit_reached",
+        ),
+    ):
+        money(cap)
+        if cap:
+            used = credit_projection(
+                connection,
+                scope.tenant_id,
+                scope.owner_id,
+                repo.clock(),
+                actor_id=actor,
+            )
+            if used + amount > cap:
+                raise CreditError(
+                    code,
+                    402,
+                    detail="This generation exceeds the configured credit spending limit.",
+                    need=amount,
+                    have=max(0, cap - used),
+                    messages={
+                        "en": "This generation exceeds the configured credit spending limit.",
+                        "zh": "本次生成超过设置的积分额度，请调整限额或稍后再试。",
+                    },
+                )
 
 
 def daily_projection(connection, tenant, owner, now, *, actor_id=None):
@@ -321,8 +388,23 @@ def admit_spending(
     ):
         raise Conflict("spending_settings_changed")
     value, now = settings["value"], repo.clock()
+    credit_job = None
+    if reference_type == "job":
+        candidate = (
+            connection.execute(select(jobs).where(jobs.c.id == reference_id))
+            .mappings()
+            .one()
+        )
+        quoted = candidate["execution_plan"].get("credit_quote")
+        if isinstance(quoted, dict) and quoted.get("enforced") is True:
+            from .credits import credit_policy
+
+            if not credit_policy(connection, scope.tenant_id)["enabled"]:
+                raise Conflict("credit_policy_changed_repreflight")
+            credit_job = candidate
     if (
         increment
+        and credit_job is None
         and value["daily_limit_microusd"]
         and daily_projection(connection, scope.tenant_id, scope.owner_id, now)
         + increment
@@ -332,6 +414,7 @@ def admit_spending(
     cap = value["connection_limits"].get(actor_id, 0)
     if (
         increment
+        and credit_job is None
         and cap
         and daily_projection(
             connection, scope.tenant_id, scope.owner_id, now, actor_id=actor_id
@@ -340,10 +423,21 @@ def admit_spending(
         > cap
     ):
         raise BudgetExceeded("connection_daily_limit_reached")
+    credit_amount = (
+        credit_job["execution_plan"]["credit_quote"]["credits"]
+        if credit_job is not None
+        else None
+    )
+    threshold = (
+        value.get("ask_above_credits", 0)
+        if credit_job is not None
+        else value["ask_above_microusd"]
+    )
+    confirmation_amount = credit_amount if credit_job is not None else amount
     if (
         reference_type == "job"
         and (not origin or increment)
-        and (confirmation_required or value["ask_above_microusd"])
+        and (confirmation_required or threshold)
     ):
         job = (
             connection.execute(select(jobs).where(jobs.c.id == reference_id))
@@ -376,12 +470,19 @@ def admit_spending(
             and confirmation["settings_version"] == settings["version"]
             and confirmation["expires_at"] > now
             and confirmation["consumed_reference"] in (None, reference_id)
-            and amount <= plan["estimated_cost_microusd"]
+            and confirmation_amount
+            <= (
+                plan["execution_plan"]["credit_quote"]["credits"]
+                if credit_job is not None
+                else plan["estimated_cost_microusd"]
+            )
         )
-        if not valid and (
-            confirmation_required or amount > value["ask_above_microusd"]
-        ):
-            raise SpendingConfirmationRequired(plan["id"], amount)
+        if not valid and (confirmation_required or confirmation_amount > threshold):
+            raise SpendingConfirmationRequired(
+                plan["id"],
+                confirmation_amount,
+                unit="credits" if credit_job is not None else "microusd",
+            )
         if valid:
             connection.execute(
                 update(spending_confirmations)
@@ -636,7 +737,8 @@ def check_submission_confirmation(repo, tenant, principal, plan_ids):
         lock_owner(connection, tenant, principal.owner)
         settings = read_settings(connection, tenant, principal.owner)
         threshold = settings["value"]["ask_above_microusd"]
-        if not threshold or not plan_ids:
+        credit_threshold = settings["value"].get("ask_above_credits", 0)
+        if not (threshold or credit_threshold) or not plan_ids:
             return SubmissionSpendingCheck(False, settings["version"])
         selected = []
         for plan_id in plan_ids:
@@ -654,7 +756,20 @@ def check_submission_confirmation(repo, tenant, principal, plan_ids):
             if not plan:
                 raise NotFound("plan_not_found")
             selected.append(plan)
-        total = sum(plan["estimated_cost_microusd"] for plan in selected)
+        quoted = [plan["execution_plan"].get("credit_quote") for plan in selected]
+        credit_mode = all(
+            isinstance(item, dict) and item.get("enforced") is True for item in quoted
+        )
+        if any(quoted) and not credit_mode:
+            raise Conflict("credit_quote_required")
+        threshold = credit_threshold if credit_mode else threshold
+        total = (
+            sum(money(item["credits"]) for item in quoted)
+            if credit_mode
+            else sum(plan["estimated_cost_microusd"] for plan in selected)
+        )
+        if not threshold:
+            return SubmissionSpendingCheck(False, settings["version"])
         if total <= threshold:
             return SubmissionSpendingCheck(False, settings["version"])
         for plan in selected:
@@ -678,7 +793,10 @@ def check_submission_confirmation(repo, tenant, principal, plan_ids):
                 or grant["consumed_reference"]
             ):
                 raise SpendingConfirmationRequired(
-                    selected[0]["id"], total, plan_ids=[p["id"] for p in selected]
+                    selected[0]["id"],
+                    total,
+                    plan_ids=[p["id"] for p in selected],
+                    unit="credits" if credit_mode else "microusd",
                 )
         return SubmissionSpendingCheck(True, settings["version"])
 
@@ -715,6 +833,10 @@ def unquoted_spend_blocked(connection, tenant, principal, *, now=None):
         ):
             return True
     value = read_settings(connection, tenant, principal.owner)["value"]
+    from .credits import credit_policy
+
+    if credit_policy(connection, tenant)["enabled"]:
+        return True
     return bool(
         value["daily_limit_microusd"]
         or value["ask_above_microusd"]

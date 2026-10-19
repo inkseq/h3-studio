@@ -659,12 +659,26 @@ class StoryboardVersions:
             row = self._document(conn, scope, "storyboard_preflight", ident)
         if not row:
             raise NotFound("storyboard_preflight_not_found")
-        return self._public_preflight(row["payload"])
+        return self._public_preflight(row["payload"], principal)
 
     @staticmethod
-    def _public_preflight(value):
+    def _public_preflight(value, principal=None):
+        from .credits_pricing import aggregate_quotes, user_estimate
+
         items = copy.deepcopy(value["items"])
         complete = all(item.get("plan") for item in items)
+        credit_summary = aggregate_quotes(
+            [item.get("plan") for item in items], complete=complete
+        )
+        hide_dollars = bool(credit_summary) and (
+            principal is None or principal.machine or principal.role != "admin"
+        )
+        if hide_dollars:
+            for item in items:
+                if item.get("plan"):
+                    item["plan"]["estimate"] = user_estimate(
+                        item["plan"]["estimate"], hide_dollars=True
+                    )
         costs = [
             item["plan"]["estimate"].get("cost_microusd")
             for item in items
@@ -682,6 +696,7 @@ class StoryboardVersions:
             if complete
             else "pending",
             "items": items,
+            **credit_summary,
             "request_hash": value["fingerprint"],
             "no_generation_submitted": True,
             **(
@@ -692,18 +707,21 @@ class StoryboardVersions:
             "ready": not value.get("blocked", False)
             and complete
             and all(item["plan"]["status"] == "ready" for item in items),
-            "estimate": {
-                "cost_microusd": sum(costs)
-                if complete and all(type(c) is int for c in costs)
-                else None,
-                "machine_seconds": sum(runtimes)
-                if complete and all(type(v) in (int, float) for v in runtimes)
-                else None,
-                "kind": "budget_reservation",
-                "final_bill": False,
-                "runtime_kind": "planned_machine_allowance",
-                "eta_seconds": None,
-            },
+            "estimate": user_estimate(
+                {
+                    "cost_microusd": sum(costs)
+                    if complete and all(type(c) is int for c in costs)
+                    else None,
+                    "machine_seconds": sum(runtimes)
+                    if complete and all(type(v) in (int, float) for v in runtimes)
+                    else None,
+                    "kind": "budget_reservation",
+                    "final_bill": False,
+                    "runtime_kind": "planned_machine_allowance",
+                    "eta_seconds": None,
+                },
+                hide_dollars=hide_dollars,
+            ),
         }
 
     def preflight(self, principal, project_id, body, key):
@@ -745,7 +763,7 @@ class StoryboardVersions:
                     raise Conflict("edit_idempotency_conflict")
                 value = old["payload"]
                 if value.get("blocked"):
-                    return self._public_preflight(value)
+                    return self._public_preflight(value, principal)
             else:
                 project_row = self._document(
                     conn,
@@ -869,7 +887,7 @@ class StoryboardVersions:
                 continue
             try:
                 plan = self.repo.get_plan(scope, item["plan_id"])
-                result = self.admission.planning.retained_plan(plan)
+                result = self.admission.planning.retained_plan(plan, principal)
             except NotFound:
                 current = self.access.project(principal, project_id, "jobs:write")
                 try:
@@ -947,7 +965,7 @@ class StoryboardVersions:
                     True,
                 )
                 if payload.get("blocked"):
-                    return self._public_preflight(payload)
+                    return self._public_preflight(payload, principal)
         return self.get_preflight(principal, project_id, ident)
 
 

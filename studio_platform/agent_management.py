@@ -204,7 +204,17 @@ def record_refusal(engine, tenant, principal, code, now):
             )
 
 
-def synchronize_cap_versions(conn, tenant, owner, before, after, now):
+def synchronize_cap_versions(
+    conn,
+    tenant,
+    owner,
+    before,
+    after,
+    now,
+    *,
+    old_credit_limits=None,
+    new_credit_limits=None,
+):
     """Called within the original owner lock and global settings transaction.
 
     A removed map entry means zero/unlimited. Only actual effective cap changes
@@ -215,6 +225,15 @@ def synchronize_cap_versions(conn, tenant, owner, before, after, now):
         for actor in set(before) | set(after)
         if before.get(actor, 0) != after.get(actor, 0)
     }
+    old_credit_limits, new_credit_limits = (
+        old_credit_limits or {},
+        new_credit_limits or {},
+    )
+    changed.update(
+        actor
+        for actor in set(old_credit_limits) | set(new_credit_limits)
+        if old_credit_limits.get(actor, 0) != new_credit_limits.get(actor, 0)
+    )
     for actor in sorted(changed):
         row = connection_for_actor(conn, tenant, owner, actor)
         if row is None:
@@ -391,12 +410,51 @@ class AgentManagementMixin:
         }
 
     def _management_public(self, conn, row, value):
+        from .credits import credit_policy, daily_projection as credit_projection
+        from .spending_limits import credit_settings
+
         authorization = json.loads(row['authorization'])
         control = read_doc(
             conn, self.tenant, row['owner'], 'connection_state', row['id']
         )
         state = control['payload'] if control else {}
         key_id = row.get('key_id')
+        credit_mode = credit_policy(conn, self.tenant)['enabled']
+        if credit_mode:
+            config = (
+                credit_settings(conn, self.tenant, row['owner']) if key_id else None
+            )
+            cap = (
+                config['value']['connection_credit_limits'].get('key:' + key_id, 0)
+                if key_id
+                else authorization.get('daily_limit_credits', 0)
+            )
+            value = dict(value)
+            value.pop('daily_limit_microusd', None)
+            is_paused = bool(state.get('paused'))
+            return {
+                **value,
+                'scope': authorization.get('scope', {'kind': 'all'}),
+                'permission': authorization.get('permission', 'generate'),
+                'paused': is_paused,
+                'state_version': control['version'] if control else 0,
+                'unit': 'credits',
+                'daily_limit_credits': cap,
+                'usage': {
+                    'exposure_credits': credit_projection(
+                        conn,
+                        self.tenant,
+                        row['owner'],
+                        self.clock(),
+                        actor_id='key:' + key_id,
+                    )
+                    if key_id
+                    else 0
+                },
+                'status': 'paused'
+                if is_paused and value['status'] == 'connected'
+                else value['status'],
+            }
         config = read_settings(conn, self.tenant, row['owner']) if key_id else None
         cap = (
             config['value']['connection_limits'].get('key:' + key_id, 0)
@@ -431,6 +489,7 @@ class AgentManagementMixin:
             'paused': is_paused,
             'state_version': control['version'] if control else 0,
             'daily_limit_microusd': cap,
+            'unit': 'microusd',
             'usage': usage,
             'status': 'paused'
             if is_paused and value['status'] == 'connected'
@@ -442,15 +501,21 @@ class AgentManagementMixin:
 
         if (
             not isinstance(body, dict)
-            or set(body) - {'expected_version', 'paused', 'daily_limit_microusd'}
+            or set(body)
+            - {
+                'expected_version',
+                'paused',
+                'daily_limit_microusd',
+                'daily_limit_credits',
+            }
             or type(body.get('expected_version')) is not int
             or body['expected_version'] < 0
             or ('paused' in body and type(body['paused']) is not bool)
         ):
             raise ConnectError('connection_update_invalid', 422)
-        if 'daily_limit_microusd' in body:
+        for field in {'daily_limit_microusd', 'daily_limit_credits'} & set(body):
             try:
-                money(body['daily_limit_microusd'])
+                money(body[field])
             except ValueError:
                 raise ConnectError('connection_daily_limit_invalid', 422) from None
         with self.engine.begin() as conn:
@@ -513,15 +578,18 @@ class AgentManagementMixin:
                 value,
                 self.clock(),
             )
-            if 'daily_limit_microusd' in body:
+            if {'daily_limit_microusd', 'daily_limit_credits'} & set(body):
                 config = read_settings(conn, self.tenant, principal.owner)
-                updated = {
-                    **config['value'],
-                    'connection_limits': {
-                        **config['value']['connection_limits'],
-                        'key:' + row['key_id']: body['daily_limit_microusd'],
-                    },
-                }
+                updated = copy.deepcopy(config['value'])
+                for field, map_name in (
+                    ('daily_limit_microusd', 'connection_limits'),
+                    ('daily_limit_credits', 'connection_credit_limits'),
+                ):
+                    if field in body:
+                        updated[map_name] = {
+                            **updated.get(map_name, {}),
+                            'key:' + row['key_id']: body[field],
+                        }
                 values = {
                     'value': updated,
                     'version': config['version'] + 1,
