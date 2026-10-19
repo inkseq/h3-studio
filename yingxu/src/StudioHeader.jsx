@@ -1,15 +1,25 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Cpu, Images, LayoutGrid, MessageSquare, Settings2, Trash2, UserRound } from 'lucide-react';
 import { LanguageSwitcher, useI18n } from './i18n/I18nProvider.jsx';
 import { navigateApp } from './app-navigation.js';
+import { readAccess } from './account-access.js';
 
 export default function StudioHeader({ account, active = 'works', accountMenu }) {
   const { t } = useI18n();
+  // GPUs only for accounts the backend lets view capacity (#304); regular users never run machines.
+  const [access, setAccess] = useState(null);
+  useEffect(() => {
+    let live = true;
+    readAccess().then((value) => live && setAccess(value));
+    return () => {
+      live = false;
+    };
+  }, []);
   const links = [
     ['works', '/', 'v2.works', LayoutGrid],
     ['quick', '/quick-chat', 'nav.quickCreate', MessageSquare],
     ['library', '/library', 'library.title', Images],
-    ['operator', '/operator', 'v2.gpus', Cpu],
+    ...(access?.gpus || active === 'operator' ? [['operator', '/operator', 'v2.gpus', Cpu]] : []),
     ['settings', '/settings', 'settings.title', Settings2],
   ];
   // Port of prototype pages.jsx/AppHeader. Only navigation and account data differ.

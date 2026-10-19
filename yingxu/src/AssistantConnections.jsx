@@ -280,7 +280,15 @@ export default function AssistantConnections({
           code: created.code,
           scope: scopeLabel(connection.scope),
           permission: permissionLabel(connection.permission),
-          cap: dollars(connection.daily_limit_microusd),
+          // #322: no cap sentence for view-only connections, and 0 means "no cap of its own", never "0 USD".
+          capSentence:
+            connection.permission === 'organise'
+              ? t('assistants.capSentence.organise')
+              : !connection.daily_limit_microusd
+                ? t('assistants.capSentence.none')
+                : t('assistants.capSentence.cap', {
+                    cap: dollars(connection.daily_limit_microusd),
+                  }),
           date: date(connection.expires_at),
         })
       : '';

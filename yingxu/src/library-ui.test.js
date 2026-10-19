@@ -31,7 +31,8 @@ test('uninitialized account library renders one sign-in state without inventing 
     assert.match(html, /Sign in to browse your library/);
     assert.match(html, /class="empty-state"/);
     assert.match(html, /aria-label="Sign in"/);
-    assert.equal((html.match(/nav-ico/g) || []).length, 5);
+    // Signed out: no GPUs entry (h3-studio#304); works, quick create, library, settings.
+    assert.equal((html.match(/nav-ico/g) || []).length, 4);
     assert.doesNotMatch(
       html,
       /Import copy|Replace tags|libp-side|libp-head|library-source-tools|class="lib-search"/,

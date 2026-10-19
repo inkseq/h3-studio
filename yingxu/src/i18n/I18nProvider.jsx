@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { Globe } from 'lucide-react';
 import { isLocale, LOCALE_STORAGE_KEY, readLocale, rememberLocale, translate } from './locale.js';
 
 const I18nContext = createContext(null);
@@ -51,14 +52,16 @@ export function LanguageSwitcher() {
   const { locale, setLocale, t } = useI18n();
   const key = locale === 'en' ? 'locale.switchToChinese' : 'locale.switchToEnglish';
   return (
+    // Globe + the CURRENT language (same control as inkseq.tv); one click switches.
     <button
       type="button"
-      className="language-switch"
+      className="language-switch keep-label"
       title={t(key)}
       aria-label={t(key)}
       onClick={() => setLocale(locale === 'en' ? 'zh' : 'en')}
     >
-      {locale === 'en' ? '中文' : 'EN'}
+      <Globe size={14} aria-hidden="true" />
+      <span>{locale === 'en' ? 'EN' : '中'}</span>
     </button>
   );
 }
