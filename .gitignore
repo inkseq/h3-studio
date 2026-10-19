@@ -705,3 +705,4 @@ inventory.json
 !tests/test_output_moderation.py
 !tests/test_content_admission.py
 !docs/CONTENT-POLICY.md
+!tests/test_content_creators.py

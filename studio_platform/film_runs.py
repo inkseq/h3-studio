@@ -11,6 +11,7 @@ import math
 import uuid
 
 from sqlalchemy import insert, select, update
+from .generation_services import freeze_generation_policy
 
 from .repository import (
     Conflict,
@@ -602,10 +603,14 @@ class FilmRuns:
                     "run_id": run_id,
                     "snapshot_hash": snapshot_hash,
                 }
+                execution = copy.deepcopy(plan["execution_plan"])
+                freeze_generation_policy(
+                    self.repo, self.tenant, principal.owner, compiled, execution
+                )
                 frozen = self.repo.create_plan(
                     self.access.scope(principal, project_id),
                     compiled,
-                    plan["execution_plan"],
+                    execution,
                     expires_at=plan["expires_at"],
                     estimated_cost_microusd=plan["estimated_cost_microusd"],
                     plan_id=plan_id,
@@ -873,6 +878,10 @@ class FilmRuns:
             )
         if credit_quote is not None:
             admission.execution["credit_quote"] = credit_quote
+        freeze_generation_policy(
+            self.repo, self.tenant, principal.owner, compiled, admission.execution
+        )
+        digest = request_hash(compiled)
         plan = self.repo.create_plan(
             self.access.scope(principal, value["project_id"]),
             compiled,

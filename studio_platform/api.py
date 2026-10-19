@@ -1185,6 +1185,11 @@ def create_app(
             )
         if credit_quote is not None:
             admission.execution["credit_quote"] = credit_quote
+        from .generation_services import freeze_generation_policy
+
+        freeze_generation_policy(
+            repo, settings.tenant_id, principal.owner, compiled, admission.execution
+        )
         plan = repo.create_plan(
             scope(principal, project_id),
             compiled,
