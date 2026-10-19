@@ -535,7 +535,7 @@ class FilmRuns:
                     "shot_ids": missing,
                     "copies": 1,
                 },
-                run_id + ":shots",
+                run_id + "-shots",
             )
             if preview.get("blocked"):
                 raise Conflict("film_generation_preflight_blocked")

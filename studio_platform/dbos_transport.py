@@ -374,6 +374,19 @@ class DurableSlots:
                     raise Conflict("dbos_slot_disabled")
                 current = _Slot(slot.spec, runner, context, threading.Lock())
                 self._slots[intent_id] = current
+            # The existing controller calls ensure after its fresh native
+            # observation. Idle DBOS slots have no WorkerRunner turn to renew
+            # registration. Keep only an already-live lease/fence; expiry or
+            # UNKNOWN still needs explicit native idle proof in the controller.
+            if slot.spec.backend != "cpu-render":
+                worker = current.runner.control.get(slot.spec.worker_id)
+                if worker["expires_at"] > self.repo.clock() and worker["state"] not in {
+                    "unknown",
+                    "retired",
+                }:
+                    current.runner.control.heartbeat(
+                        slot.spec.worker_id, worker["fence"]
+                    )
             # Original incarnation/fence checked by this existing observation.
             if slot.spec.dispatch_backend == "hatchet-v1":
                 current.runner._consumer_observation = record_consumer(

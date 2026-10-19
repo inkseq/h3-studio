@@ -87,6 +87,23 @@ DEFAULT_SETTINGS = {
     "controls": {"duration": 5, "resolution": "480P"},
     "copies": 1,
 }
+ADMISSION_REFRESH_CODES = frozenset(
+    {
+        "execution_policy_changed_or_unavailable",
+        "capacity_approval_unavailable",
+        "configuration_output_delivery_conflict",
+        "job_reservation_requires_reconciliation",
+        "upstream_stop_unconfirmed",
+        "shot_version_conflict",
+        "plan_expired",
+        "budget_exceeded",
+        "quick_chat_execution_required",
+        "plan_not_available",
+        "storyboard_defaults_changed",
+        "chapter_timeline_changed",
+        "preflight_stale",
+    }
+)
 
 
 def default_next_settings(settings):
@@ -2822,7 +2839,16 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
             p = execution["payload"]
             try:
                 self.hooks.refresh_planned(principal, p["job_id"], p["resume_plan_id"])
-            except (Conflict, BudgetExceeded, ValueError, QuickChatError):
+            except (Conflict, BudgetExceeded, ValueError, QuickChatError) as error:
+                # Only finite service codes are public; arbitrary exception
+                # text may contain source inputs, paths or provider details.
+                code = (
+                    error.code
+                    if isinstance(error, QuickChatError)
+                    else (error.args[0] if len(error.args) == 1 else None)
+                )
+                if not isinstance(code, str) or code not in ADMISSION_REFRESH_CODES:
+                    code = "admission_refresh_blocked"
                 with self.repo.transaction() as conn:
                     current = self._get(
                         conn,
@@ -2840,7 +2866,7 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
                                 **current["payload"],
                                 "resume_plan_id": None,
                                 "status": "admission_blocked",
-                                "error_code": "admission_refresh_blocked",
+                                "error_code": code,
                             },
                         )
                 blocked.add(p["item_id"])
