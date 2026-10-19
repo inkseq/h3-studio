@@ -639,7 +639,7 @@ function StoryLibraryCard({ story, reader, working, onOpen }) {
 export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) {
   const { t, locale } = useI18n();
   const library = useStoryLibrary(state),
-    { c, stories, working, act } = library,
+    { c, stories, working, act, pending } = library,
     [query, setQuery] = useState(''),
     [creating, setCreating] = useState(false),
     [title, setTitle] = useState(''),
@@ -685,7 +685,18 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
       .includes(query.trim().toLocaleLowerCase()),
   );
   return (
-    <section className="home-main works-page" aria-labelledby="story-library-heading">
+    <section
+      className={'home-main works-page' + (pending ? ' is-opening' : '')}
+      aria-labelledby="story-library-heading"
+      aria-busy={pending ? 'true' : undefined}
+    >
+      {/* Opening a story: one clear status instead of a dimmed, half-read grid. */}
+      {pending && (
+        <div className="story-opening" role="status">
+          <span className="story-opening-spinner" aria-hidden="true" />
+          {pending}
+        </div>
+      )}
       <header className="home-head">
         <h1 className="page-title" id="story-library-heading" tabIndex={-1}>
           <LayoutGrid size={22} />

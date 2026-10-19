@@ -55,6 +55,7 @@ export const libraryCatalogs = {
     'library.fileInto': 'File into profile',
     'library.pickStoryFirst':
       'Tags and filing are per story: pick a source story on the left first.',
+    'library.resizeSidebar': 'Drag to resize the sidebar; double-click to reset',
     'library.chooseProfile': 'Choose a profile',
     'library.variant': 'Look or location version',
     'library.main': 'Main profile',
@@ -158,6 +159,7 @@ export const libraryCatalogs = {
     'library.applyTags': '替换标签',
     'library.fileInto': '归入档案',
     'library.pickStoryFirst': '标签和归档按故事管理：先在左边选一个来源故事。',
+    'library.resizeSidebar': '拖动调整侧栏宽度，双击恢复默认',
     'library.chooseProfile': '选择档案',
     'library.variant': '造型或地点版本',
     'library.main': '主档案',

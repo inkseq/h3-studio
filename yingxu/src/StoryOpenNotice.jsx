@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useEffect, useId, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { usePageActive } from './AppRouteCache.jsx';
 import { useCloud } from './CloudStudio.jsx';
 import { cloudController as cloud } from './cloud-controller.js';
 import { store } from './store.js';
@@ -6,6 +8,30 @@ import { useI18n } from './i18n/I18nProvider.jsx';
 import { download } from './media.js';
 import { storyTitle } from './story-open.js';
 import './story-open.css';
+
+// Several routes mount this notice; only one active instance shows the choice dialog.
+let dialogOwner = null;
+const owners = new Set();
+function useDialogOwner(active) {
+  const id = useId(),
+    [, refresh] = useState(0);
+  useEffect(() => {
+    const notify = () => refresh((n) => n + 1);
+    if (active) {
+      owners.add(notify);
+      if (!dialogOwner) dialogOwner = id;
+    }
+    return () => {
+      owners.delete(notify);
+      if (dialogOwner === id) {
+        dialogOwner = null;
+        for (const other of owners) other();
+      }
+    };
+  }, [active, id]);
+  if (active && !dialogOwner) dialogOwner = id;
+  return dialogOwner === id;
+}
 
 const jsonDownload = (value, name) =>
   download(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }), name);
@@ -15,7 +41,8 @@ const jsonDownload = (value, name) =>
 export default function StoryOpenNotice({ onOpened, onClose, projectId, waiting = false }) {
   const { t } = useI18n(),
     c = useCloud(),
-    opening = c.projectOpen;
+    opening = c.projectOpen,
+    pageActive = usePageActive();
   const matching =
     opening?.account === c.account && (!projectId || opening.projectId === projectId);
   const offer = matching ? c.draftOffer : null,
@@ -35,7 +62,20 @@ export default function StoryOpenNotice({ onOpened, onClose, projectId, waiting 
     cloud.dismissProjectOpen();
     onClose?.();
   };
+  // A version choice or an open error needs an answer: show it as a centred dialog
+  // instead of a banner at the top of the page that is easy to miss.
+  const choice = matching && (c.draftOffer || c.legacyOffer?.record || opening?.status === 'error');
+  // Server rendering and tests have no document: keep the inline notice there.
+  const portal = typeof document !== 'undefined';
+  const ownsDialog = useDialogOwner(portal && pageActive && !!choice) || !portal;
+  useEffect(() => {
+    if (!choice || !ownsDialog || waiting) return undefined;
+    const onKey = (event) => event.key === 'Escape' && close();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
   if (!matching && !waiting) return null;
+  if (choice && !ownsDialog) return null;
   if (!c.account)
     return (
       <section className="story-open-notice" role="status">
@@ -43,9 +83,12 @@ export default function StoryOpenNotice({ onOpened, onClose, projectId, waiting 
         {c.sessionReady && <a href="/settings">{t('storyOpen.signInLink')}</a>}
       </section>
     );
-  return (
+  const notice = (
     <section
-      className="story-open-notice"
+      className={'story-open-notice' + (choice && portal ? ' story-open-dialog' : '')}
+      role={choice && portal ? 'dialog' : undefined}
+      aria-modal={choice && portal ? 'true' : undefined}
+      onClick={choice && portal ? (event) => event.stopPropagation() : undefined}
       aria-label={
         legacy
           ? t('storyOpen.legacyTitle')
@@ -144,6 +187,14 @@ export default function StoryOpenNotice({ onOpened, onClose, projectId, waiting 
       )}
     </section>
   );
+  return choice && portal
+    ? createPortal(
+        <div className="story-open-overlay" onClick={waiting ? undefined : close}>
+          {notice}
+        </div>,
+        document.body,
+      )
+    : notice;
 }
 
 export function PreservedStoryDrafts({ account, projectId }) {

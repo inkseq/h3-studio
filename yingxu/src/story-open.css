@@ -9,6 +9,24 @@
   max-width: 100%;
   overflow-wrap: anywhere;
 }
+.story-open-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(5, 6, 5, 0.65);
+  backdrop-filter: blur(4px);
+}
+.story-open-notice.story-open-dialog {
+  margin: 0;
+  width: min(520px, 100%);
+  max-height: 86vh;
+  overflow: auto;
+  background: var(--surface, #141715);
+  box-shadow: var(--shadow-lg, 0 20px 60px rgba(0, 0, 0, 0.45));
+}
 .story-open-heading {
   display: flex;
   align-items: start;
@@ -108,4 +126,43 @@
 
 .cloud-projects .cloud-error {
   color: var(--bad, #a33a30) !important;
+}
+
+/* Opening a story from My stories. */
+.works-page.is-opening {
+  position: relative;
+}
+.works-page.is-opening > :not(.story-opening) {
+  opacity: 0.35;
+  pointer-events: none;
+  transition: opacity 0.12s;
+}
+.story-opening {
+  position: fixed;
+  left: 50%;
+  top: 45%;
+  transform: translate(-50%, -50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border-radius: 999px;
+  background: var(--surface-2, #1b1f1c);
+  border: 1px solid var(--line-2, #2b302d);
+  box-shadow: var(--shadow-lg, 0 20px 60px rgba(0, 0, 0, 0.45));
+  font-size: 14px;
+}
+.story-opening-spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--line-2, #2b302d);
+  border-top-color: var(--accent, #c7f36b);
+  animation: story-opening-spin 0.8s linear infinite;
+}
+@keyframes story-opening-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
