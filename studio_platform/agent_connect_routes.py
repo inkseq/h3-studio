@@ -184,12 +184,15 @@ def register_routes(app, *, service=None):
                 "authorization_profile_id",
                 "authorization_profile_version",
                 "daily_limit_microusd",
+                "daily_limit_credits",
                 "scope",
                 "permission",
             },
             required={"authorization_profile_id", "authorization_profile_version"},
         )
         try:
+            if 'daily_limit_credits' in value and value['daily_limit_credits'] is None:
+                raise ConnectError('connection_daily_limit_invalid', 422)
             return await run_in_threadpool(
                 service.issue,
                 principal,
@@ -199,6 +202,7 @@ def register_routes(app, *, service=None):
                 idempotency_key=request.headers.get("idempotency-key"),
                 origin=origin(request),
                 daily_limit_microusd=value.get("daily_limit_microusd", 0),
+                daily_limit_credits=value.get("daily_limit_credits"),
                 scope=value.get("scope"),
                 permission=value.get("permission"),
             )
@@ -226,7 +230,12 @@ def register_routes(app, *, service=None):
         source_guard(request, browser=True)
         value = await body(
             request,
-            allowed={"expected_version", "paused", "daily_limit_microusd"},
+            allowed={
+                "expected_version",
+                "paused",
+                "daily_limit_microusd",
+                "daily_limit_credits",
+            },
             required={"expected_version"},
         )
         return service.change_connection(

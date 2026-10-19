@@ -819,6 +819,9 @@ class TaskQueue:
                 from .settlement_recovery import release_terminal_job
 
                 release_terminal_job(repo, connection, lease.job_id)
+            from .credits import capture as capture_credits
+
+            capture_credits(connection, repo, job)
             repo._emit(
                 connection,
                 "job.succeeded",
@@ -880,6 +883,9 @@ class TaskQueue:
                 from .settlement_recovery import release_terminal_job
 
                 release_terminal_job(repo, connection, lease.job_id)
+            from .credits import release as release_credits
+
+            release_credits(connection, repo, job, reason=error_code)
             repo._emit(
                 connection,
                 "job.failed",
@@ -930,6 +936,9 @@ class TaskQueue:
                 from .settlement_recovery import release_terminal_job
 
                 release_terminal_job(repo, connection, lease.job_id)
+            from .credits import release as release_credits
+
+            release_credits(connection, repo, job, reason="cancellation_confirmed")
             repo._emit(
                 connection, "job.cancelled", lease.job_id, {"job_id": lease.job_id}
             )

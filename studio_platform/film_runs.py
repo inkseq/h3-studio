@@ -336,7 +336,7 @@ class FilmRuns:
         self.access.project(principal, project_id, "jobs:read")
         with self.repo.engine.connect() as conn:
             value = self._row(conn, principal, project_id, run_id)["payload"]
-            result = self.public(value)
+            result = self.public(value, principal)
             transport = getattr(self.repo, "generation_transport", None)
             if (
                 transport is not None
@@ -360,7 +360,9 @@ class FilmRuns:
         return result
 
     @staticmethod
-    def public(value):
+    def public(value, principal=None):
+        from .credits_pricing import aggregate_quotes, user_estimate
+
         # Do not return frozen object keys, runtime configuration or private inputs.
         result = {
             key: copy.deepcopy(value.get(key))
@@ -393,9 +395,21 @@ class FilmRuns:
             ),
             export_completed=int(bool(value["export"]["artifact_id"])),
         )
+        credits = aggregate_quotes(value["generation"]) or value.get(
+            "credit_summary", {}
+        )
+        result.update(credits)
+        hide_dollars = bool(credits) and (
+            principal is None or principal.machine or principal.role != "admin"
+        )
+        result["estimate"] = user_estimate(
+            result["estimate"], hide_dollars=hide_dollars
+        )
         return result
 
     def preflight(self, principal, project_id, body, key):
+        from .credits_pricing import public_quote
+
         identifier(key)
         if (
             type(body) is not dict
@@ -441,7 +455,7 @@ class FilmRuns:
                 or old["actor_id"] != principal.actor_id
             ):
                 raise Conflict("film_idempotency_conflict")
-            return self.public(old)
+            return self.public(old, principal)
         except NotFound:
             pass
         if record["version"] != body["expected_version"]:
@@ -603,6 +617,7 @@ class FilmRuns:
                 )
                 generation.append(
                     {
+                        **public_quote(frozen["execution_plan"]),
                         "shot_id": item["shot_id"],
                         "plan_id": frozen["id"],
                         "source_plan_id": item["plan_id"],
@@ -649,6 +664,18 @@ class FilmRuns:
                 "generate": len(missing),
             },
         }
+        if not generation:
+            from .credits import credit_policy
+
+            with self.repo.engine.connect() as connection:
+                policy = credit_policy(connection, self.tenant)
+            if policy["enabled"]:
+                value["credit_summary"] = {
+                    "credits": 0,
+                    "price_revision": policy["active_revision"],
+                    "price_revisions": [policy["active_revision"]],
+                    "breakdown": [],
+                }
         self.repo.put_document(
             film_scope(self.tenant, principal.owner, project_id),
             KIND,
@@ -656,7 +683,7 @@ class FilmRuns:
             value,
             expected_version=0,
         )
-        return self.public(value)
+        return self.public(value, principal)
 
     def submit(self, principal, project_id, body, key):
         identifier(key)
@@ -716,7 +743,7 @@ class FilmRuns:
             if self.enqueue is None:
                 raise Conflict("film_transport_unavailable")
             self.enqueue(conn, self.tenant, principal.owner, project_id, run_id)
-        return self.public(value)
+        return self.public(value, principal)
 
     def cancel(self, principal, project_id, run_id):
         value = self._mutate(
@@ -734,7 +761,7 @@ class FilmRuns:
                 self.repo.request_cancel(
                     self.access.scope(principal, project_id), item["job_id"]
                 )
-        return self.public(value)
+        return self.public(value, principal)
 
     def resume(self, principal, project_id, run_id):
         def resume(value):
@@ -757,7 +784,7 @@ class FilmRuns:
             raise Conflict("film_transport_unavailable")
         with self.repo.transaction() as conn:
             self.enqueue(conn, self.tenant, principal.owner, project_id, run_id)
-        return self.public(value)
+        return self.public(value, principal)
 
     def _admit(self, principal, value, items, suffix):
         pending = [
@@ -834,6 +861,18 @@ class FilmRuns:
         admission = self.app.state.generation_planning.policies.evaluate(
             compiled, self.access.scope(principal, value["project_id"]), digest
         )
+        from .credits_pricing import quote as quote_credits
+
+        with self.repo.engine.connect() as connection:
+            credit_quote = quote_credits(
+                connection,
+                self.tenant,
+                principal.owner,
+                compiled,
+                execution=admission.execution,
+            )
+        if credit_quote is not None:
+            admission.execution["credit_quote"] = credit_quote
         plan = self.repo.create_plan(
             self.access.scope(principal, value["project_id"]),
             compiled,

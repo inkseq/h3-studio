@@ -223,6 +223,10 @@ def create_app(
                 "en": "This connection can organise drafts but cannot perform paid work. Ask the owner for a generation grant.",
                 "zh": "此连接可整理草稿，但不能执行付费操作；如需生成，请让所有者授予生成权限。",
             },
+            "credit_limits_review_required": {
+                "en": "The owner must review and save credit limits before this previously limited connection or account can generate. Existing safeguards have not been removed.",
+                "zh": "此账户或连接原有消费限制，请让所有者先核对并保存积分限额，再继续生成；原有保障不会自动移除。",
+            },
         }
         if code in guidance:
             return JSONResponse(
@@ -441,6 +445,7 @@ def create_app(
         public_paths = {"/healthz", "/api/auth/config", "/api/auth/login"}
         if request.method == "GET":
             public_paths.update({"/api/auth/workos/start", "/api/auth/workos/callback"})
+            public_paths.add("/v1/credits/prices")
         public_frontend = is_public_frontend(settings, request.method, request.url.path)
         public_discovery = (
             request.method in {"GET", "HEAD"} and request.url.path in AGENT_PUBLIC_PATHS
@@ -608,13 +613,20 @@ def create_app(
     def whoami(request: Request):
         principal = request.state.principal
         operator = is_admin(principal, repo, settings, legacy_capacity=True)
+        from .credits import CreditError
+        from .credits_pricing import PricingError
+
+        try:
+            credit_summary = {"enabled": True, **app.state.credits.balance(principal)}
+        except (CreditError, PricingError):
+            credit_summary = {"available": False, "balance": None, "held": None}
         return {
             "username": principal.owner,
             "actor_id": principal.actor_id,
             "machine": principal.machine,
             "authentication": principal.auth_mode or settings.auth_mode,
             **public_identity(principal, repo, settings),
-            "credits": {"available": False, "balance": None, "held": None},
+            "credits": credit_summary,
             "scopes": list(principal.scopes),
             "features": {
                 "storyboard_workspace": not principal.machine
@@ -1149,6 +1161,23 @@ def create_app(
         admission = execution_policies.evaluate(
             compiled, scope(principal, project_id), fingerprint
         )
+        from .credits_pricing import (
+            quote as quote_credits,
+            public_quote,
+            hide_dollar_estimate,
+            user_estimate,
+        )
+
+        with repo.engine.connect() as connection:
+            credit_quote = quote_credits(
+                connection,
+                settings.tenant_id,
+                principal.owner,
+                compiled,
+                execution=admission.execution,
+            )
+        if credit_quote is not None:
+            admission.execution["credit_quote"] = credit_quote
         plan = repo.create_plan(
             scope(principal, project_id),
             compiled,
@@ -1163,10 +1192,14 @@ def create_app(
             "client_ref": compiled["client_ref"],
             "output_spec": compiled["output_spec"],
             "timeline": timeline,
+            **public_quote(admission.execution),
             "expires_at": plan["expires_at"],
             "blockers": admission.execution["blockers"],
             "warnings": warnings,
-            "estimate": admission.estimate,
+            "estimate": user_estimate(
+                admission.estimate,
+                hide_dollars=hide_dollar_estimate(admission.execution, principal),
+            ),
             "execution": public_execution(admission.execution),
             "simulation": compiled["simulation"],
         }
@@ -1444,6 +1477,9 @@ def create_app(
     from .workos_routes import register_routes as register_workos_routes
 
     register_workos_routes(app)
+    from .credits_routes import register_routes as register_credit_routes
+
+    register_credit_routes(app)
     from .frontend import register_routes as register_frontend_routes
 
     register_frontend_routes(app)

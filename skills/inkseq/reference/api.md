@@ -14,6 +14,30 @@ GET/PATCH `/v1/account/agent-connection-settings`: `{expected_version:INTEGER,va
 
 GET `/v1/account/agent-connections/{id}` returns public authorization/status, `state_version`, `paused`, effective `daily_limit_microusd` and conservative `usage`. PATCH uses `{expected_version:state_version,paused:BOOLEAN}` and/or `daily_limit_microusd`, with one stable key. Zero adds no connection cap. DELETE revokes access, not creations. Activity GET `.../{id}/activity?limit=20&offset=0` yields safe event IDs/types/times and `next_offset`, not prompts or ledger contents. `created_by` is immutable proven attribution; unknown historical/browser attribution remains null.
 
+## Credit quotes and limits
+
+When `/api/auth/me` reports `credits.enabled:true`, customer amounts are integer
+credits, independently of the retained provider USD ledger. GET `/v1/credits`
+returns `{balance,held,available,today_used,daily_limit}`; available is balance
+minus held. GET `/v1/credits/entries?cursor=...` reads the original append-only
+history. GET `/v1/credits/prices` is public. Immutable preflights expose `credits`,
+`price_revision` and `breakdown`; aggregate credits can be null while incomplete.
+Use that original quote, not a local duration or price calculation. Ordinary
+credit-mode projections omit supplier dollar estimates; legacy quotes retain
+their explicit units.
+
+Owner/browser spending settings in credit mode return `unit:"credits"`,
+`daily_limit_credits`, `ask_above_credits` and `connection_credit_limits`.
+Connection creation/update supports explicit `daily_limit_credits`; read its
+returned `unit`. Existing `daily_limit_microusd` settings are retained separately,
+never converted or treated as credits. Neither mode permits Agent self-approval,
+self-increasing caps, or repeated submission after an unknown outcome.
+HTTP402 `insufficient_credits` includes integer `need` and `have`; return the
+same draft and request a top-up. A hold happens with original job admission,
+validated success captures once, proven failure/cancellation releases, and
+unknown execution retains the hold. Human confirmation is still required when
+the exact original quote exceeds the owner's threshold.
+
 ## Quick Create requests
 
 Let B = `/v1/quick-chat/sessions/SESSION`.
@@ -173,8 +197,9 @@ reused without proven recipe freshness. Report that warning; do not replace the
 take automatically. The frozen run is independent of subsequent editable Story
 changes; changing the intended film requires a deliberate new preflight.
 
-Inspect `estimate.cost_microusd`, `quote_known` and `final_bill:false`; null cost
-is unknown, not free. `confirm:true` records the requested film; it is **not**
+Inspect returned `credits` and `price_revision` in credit mode, otherwise
+`estimate.cost_microusd`; null or incomplete quotes are unknown, not free.
+`confirm:true` records the requested film; it is **not**
 human spending approval, a cap increase or a whole-film lump-sum reservation.
 Every shot/chapter/export uses the original batch/job admission and accounting.
 If the server requires human confirmation, the signed-in owner must approve the

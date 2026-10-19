@@ -666,6 +666,13 @@ inventory.json
 !studio_platform/film_routes.py
 !studio_platform/film_workflows.py
 
-# Optional M1 customer-credit reader and frozen additive schema.
+# M1 customer credits; no runtime accounts or credential files.
 !studio_platform/credit_schema.py
+!studio_platform/credits.py
+!studio_platform/credits_routes.py
+!studio_platform/credits_pricing.py
 !studio_platform/migrations/versions/v20261019_0004_customer_credits.py
+!tests/test_credit_admission.py
+!tests/test_credit_identity_billing.py
+!tests/test_agent_credit_caps.py
+!tests/test_credit_limit_migration.py

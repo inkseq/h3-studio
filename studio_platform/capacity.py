@@ -1369,6 +1369,9 @@ class ColdStartCoordinator:
                         .where(capacity_waiters.c.job_id == jid)
                         .values(state="failed")
                     )
+                    from .credits import release as release_credits
+
+                    release_credits(connection, self.repo, job, reason=reason)
                     self.repo._emit(
                         connection,
                         "job.failed",

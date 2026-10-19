@@ -460,6 +460,28 @@ class WorkOSAuth:
                 "terms_accepted_at": None,
             }
             connection.execute(insert(users).values(**row))
+            from .credits import credit_policy, grant
+
+            if credit_policy(connection, self.settings.tenant_id)["enabled"]:
+                from .credits_pricing import current
+
+                welcome = current(connection, self.settings.tenant_id)["configuration"][
+                    "welcome_credits"
+                ]
+                if welcome:
+                    grant(
+                        connection,
+                        self.settings.tenant_id,
+                        row["owner"],
+                        welcome,
+                        actor="system:authkit-welcome",
+                        reason="New account welcome credits",
+                        idempotency_key="welcome:" + ident,
+                        now=now,
+                        reference_type="signup",
+                        reference_id=ident,
+                        origin="workos",
+                    )
             return row
 
     def callback(self, *, code, state, cookie, origin, principal=None, cancelled=False):

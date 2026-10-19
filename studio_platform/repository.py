@@ -2087,6 +2087,9 @@ class Repository:
                         confirmation_required=confirmation_required,
                         spending_settings_version=spending_settings_version,
                     )
+                    from .credits import hold as hold_credits
+
+                    hold_credits(connection, self, scope, row, spending_actor)
                 if initial_status == "waiting_capacity":
                     from .capacity import admit_waiter
 
@@ -2129,6 +2132,16 @@ class Repository:
         spending_settings_version=None,
     ):
         with self.transaction() as connection:
+            from .identity import account_status, lock_account_gate
+
+            lock_account_gate(connection)
+            state = account_status(connection, scope.tenant_id, scope.owner_id)
+            if state != "active":
+                raise Conflict(
+                    "account_suspended"
+                    if state == "suspended"
+                    else "account_unavailable"
+                )
             self._content_write_guard(connection, scope)
             self._locked(
                 connection, select(capacity_gate).where(capacity_gate.c.id == "global")
@@ -2172,6 +2185,9 @@ class Repository:
                 confirmation_required=confirmation_required,
                 spending_settings_version=spending_settings_version,
             )
+            from .credits import hold as hold_credits
+
+            hold_credits(connection, self, scope, job, spending_actor)
             status = (
                 "waiting_capacity"
                 if plan["execution_plan"].get("admission_state") == "waiting_capacity"
@@ -2754,6 +2770,10 @@ class Repository:
                     )
                 )
         connection.execute(update(jobs).where(jobs.c.id == job_id).values(**values))
+        if immediate:
+            from .credits import release as release_credits
+
+            release_credits(connection, self, job, reason="cancelled_before_submission")
         self._emit(
             connection,
             "job.cancel_requested",

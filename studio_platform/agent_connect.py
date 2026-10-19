@@ -245,6 +245,7 @@ class AgentConnect(AgentManagementMixin):
         idempotency_key,
         origin,
         daily_limit_microusd=0,
+        daily_limit_credits=None,
         scope=None,
         permission=None,
     ):
@@ -252,6 +253,8 @@ class AgentConnect(AgentManagementMixin):
 
         try:
             money(daily_limit_microusd)
+            if daily_limit_credits is not None:
+                money(daily_limit_credits)
         except ValueError:
             raise ConnectError("connection_daily_limit_invalid", 422) from None
         if not isinstance(name, str) or not 1 <= len(name.strip()) <= 80:
@@ -279,6 +282,8 @@ class AgentConnect(AgentManagementMixin):
         }
         if daily_limit_microusd:
             request_value["daily_limit_microusd"] = daily_limit_microusd
+        if daily_limit_credits is not None:
+            request_value["daily_limit_credits"] = daily_limit_credits
         if scope is not None or permission is not None:
             request_value.update(scope=scope, permission=permission)
         request_hash = digest(
@@ -353,6 +358,8 @@ class AgentConnect(AgentManagementMixin):
                 )
             if daily_limit_microusd:
                 authorization["daily_limit_microusd"] = daily_limit_microusd
+            if daily_limit_credits is not None:
+                authorization["daily_limit_credits"] = daily_limit_credits
             encoded = json.dumps(authorization, sort_keys=True, separators=(",", ":"))
             row = dict(
                 tenant=self.tenant,
@@ -373,8 +380,9 @@ class AgentConnect(AgentManagementMixin):
             row["id"] = connection_id
             conn.execute(insert(connections).values(**row))
             self._emit(conn, row, "issued")
+            public = self._public_grant(conn, row)
         return {
-            "connection": self._public(row),
+            "connection": public,
             "code": code,
             "code_available": True,
             "replayed": False,
@@ -423,6 +431,17 @@ class AgentConnect(AgentManagementMixin):
         if key:
             result["key"] = self.auth.public_key(key)
         return result
+
+    def _public_grant(self, conn, row, key=None):
+        """Keep legacy exchange independent of a provider-accounting database."""
+        from .credits import credit_policy
+
+        value = self._public(row, key)
+        return (
+            self._management_public(conn, row, value)
+            if credit_policy(conn, self.tenant)['enabled']
+            else value
+        )
 
     def _public_current(self, conn, row):
         key = (
@@ -698,7 +717,7 @@ class AgentConnect(AgentManagementMixin):
                         raise ConnectError("connection_unavailable", 410)
                     self._emit(conn, row, "recovered")
                     return {
-                        "connection": self._public(dict(row), dict(key)),
+                        "connection": self._public_grant(conn, dict(row), dict(key)),
                         "key": self.auth.public_key(key),
                         "recovered": True,
                     }
@@ -774,16 +793,26 @@ class AgentConnect(AgentManagementMixin):
                 from .spending_limits import lock_owner, read_settings
                 from .repository import spending_settings
 
-                cap = authorization.get("daily_limit_microusd", 0)
-                if cap:
+                selected_caps = {
+                    field: authorization[field]
+                    for field in ('daily_limit_microusd', 'daily_limit_credits')
+                    if field in authorization
+                }
+                if selected_caps:
                     lock_owner(conn, self.tenant, row["owner"])
                     config = read_settings(conn, self.tenant, row["owner"])
-                    limits = {
-                        **config["value"]["connection_limits"],
-                        "key:" + key["id"]: cap,
-                    }
+                    updated = dict(config['value'])
+                    for field, map_name in (
+                        ('daily_limit_microusd', 'connection_limits'),
+                        ('daily_limit_credits', 'connection_credit_limits'),
+                    ):
+                        if field in selected_caps:
+                            updated[map_name] = {
+                                **updated.get(map_name, {}),
+                                'key:' + key['id']: selected_caps[field],
+                            }
                     stored = {
-                        "value": {**config["value"], "connection_limits": limits},
+                        "value": updated,
                         "version": config["version"] + 1,
                         "actor_id": "browser:" + row["owner"],
                         "updated_at": now,
@@ -806,7 +835,7 @@ class AgentConnect(AgentManagementMixin):
                 row = dict(row) | claimed
                 self._emit(conn, row, "exchanged")
                 return {
-                    "connection": self._public(row, key),
+                    "connection": self._public_grant(conn, row, key),
                     "key": self.auth.public_key(key),
                     "recovered": False,
                 }
