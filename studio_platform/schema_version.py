@@ -10,6 +10,8 @@ import re
 from sqlalchemy import MetaData, Table, inspect
 
 BASELINE_REVISION = "20261019_0001"
+WORKFLOW_REVISION = "20261019_0002"
+KNOWN_REVISIONS = frozenset({BASELINE_REVISION, WORKFLOW_REVISION})
 
 
 class SchemaVersionError(Exception):
@@ -40,11 +42,10 @@ def read_schema_version(connection, *, schema=None):
     table = Table(
         "alembic_version", MetaData(), autoload_with=connection, schema=schema
     )
-    if list(connection.execute(table.select().limit(2)).scalars()) != [
-        BASELINE_REVISION
-    ]:
+    values = list(connection.execute(table.select().limit(2)).scalars())
+    if len(values) != 1 or values[0] not in KNOWN_REVISIONS:
         raise SchemaVersionError("schema_revision_requires_review")
-    return BASELINE_REVISION
+    return values[0]
 
 
 def read_sqlite_schema_version(db):
@@ -67,8 +68,7 @@ def read_sqlite_schema_version(db):
         )
     ):
         raise SchemaVersionError("schema_version_table_requires_review")
-    if list(db.execute("SELECT version_num FROM alembic_version LIMIT 2")) != [
-        (BASELINE_REVISION,)
-    ]:
+    values = list(db.execute("SELECT version_num FROM alembic_version LIMIT 2"))
+    if len(values) != 1 or values[0][0] not in KNOWN_REVISIONS:
         raise SchemaVersionError("schema_revision_requires_review")
-    return BASELINE_REVISION
+    return values[0][0]

@@ -16,6 +16,7 @@ from studio_platform.backup import (
 )
 from studio_platform.schema_version import (
     BASELINE_REVISION,
+    WORKFLOW_REVISION,
     SchemaVersionError,
     read_schema_version,
     read_sqlite_schema_version,
@@ -104,6 +105,19 @@ class SchemaVersionTests(LedgerCase):
                 ).scalar_one(),
                 "unknown",
             )
+
+    def test_workflow_marker_reader_is_dependency_isolated_without_writing_it(self):
+        self.marker(revision=WORKFLOW_REVISION)
+        with (
+            self.repo.engine.connect() as connection,
+            patch.dict('sys.modules', {'alembic': None, 'dbos': None}),
+        ):
+            self.assertEqual(read_schema_version(connection), WORKFLOW_REVISION)
+            if self.bootstrap is None:
+                self.assertEqual(
+                    read_sqlite_schema_version(connection.connection.driver_connection),
+                    WORKFLOW_REVISION,
+                )
 
     def test_extra_marker_column_is_not_a_looser_whitelist(self):
         self.marker(extra=True)

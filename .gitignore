@@ -70,8 +70,10 @@ inventory.json
 !studio_platform/repository.py
 !studio_platform/schema_version.py
 !studio_platform/workflow_schema.py
+!studio_platform/workflow_backup.py
 !studio_platform/migrations/data/
 !studio_platform/migrations/data/dbos_3_3_0_catalog.json
+!studio_platform/migrations/data/dbos_3_3_0_inkseq_workflows.sql
 !studio_platform/schema_registry.py
 !studio_platform/schema_baseline.py
 !studio_platform/migrations/
@@ -80,6 +82,7 @@ inventory.json
 !studio_platform/migrations/versions/
 !studio_platform/migrations/versions/__init__.py
 !studio_platform/migrations/versions/v20261019_0001_platform_baseline.py
+!studio_platform/migrations/versions/v20261019_0002_workflow_state.py
 !docs/SCHEMA-MIGRATIONS.md
 !studio_platform/operator_billing.py
 !studio_platform/operator_billing_routes.py

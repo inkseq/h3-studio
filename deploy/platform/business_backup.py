@@ -188,7 +188,7 @@ def completed_summary(operation, day):
 
 
 MAX_RETENTION_JSON = 16 * 1024**2
-MAX_RETENTION_FILES = 100002
+MAX_RETENTION_FILES = 100003
 UUID4 = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}')
 
 
@@ -280,13 +280,14 @@ def retention_inventory(item):
     for entry in files:
         require(type(entry) is dict and set(entry) == {'name','size_bytes','sha256'}, 'backup_retention_inventory')
         name = entry['name']
-        require(isinstance(name,str) and (name in ('manifest.json','database.sqlite3')
+        require(isinstance(name,str) and (name in ('manifest.json','database.sqlite3','workflow-state.json')
             or re.fullmatch(r'media/[0-9a-f]{64}\.bin',name)) and name not in result
             and type(entry['size_bytes']) is int and 0 < entry['size_bytes'] <= 512*1024**2
             and isinstance(entry['sha256'],str) and re.fullmatch('[0-9a-f]{64}',entry['sha256']), 'backup_retention_inventory')
         require(name != 'manifest.json' or entry['size_bytes'] <= MAX_RETENTION_JSON,'backup_retention_manifest_limit')
         result[name] = entry
-    require({'manifest.json','database.sqlite3'} <= set(result) and len(result) == receipt['objects']+2
+    require({'manifest.json','database.sqlite3'} <= set(result)
+        and len(result) == receipt['objects']+2+('workflow-state.json' in result)
         and sum(v['size_bytes'] for v in result.values()) == receipt['bytes']
         and files[-1]['name'] == 'manifest.json' and result['manifest.json']['sha256'] == receipt['snapshot_manifest_sha256'],
         'backup_retention_inventory_identity')
@@ -353,7 +354,8 @@ def snapshot_tree(path, files, *, hash_files=True):
     handles,chain = open_snapshot(path)
     try:
         fd = handles[-1]; info = os.fstat(fd); entries = {'':{'identity':identity(info),'kind':'directory'}}
-        require(set(os.listdir(fd)) == {'manifest.json','database.sqlite3','media'}, 'backup_retention_snapshot_extra')
+        require(set(os.listdir(fd)) == {'manifest.json','database.sqlite3','media'}
+            | ({'workflow-state.json'} if 'workflow-state.json' in files else set()), 'backup_retention_snapshot_extra')
         media = os.open('media',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd); handles.append(media)
         info = os.fstat(media)
         require(info.st_dev == os.fstat(fd).st_dev and info.st_uid in (0,10001) and not info.st_mode & 0o022,
