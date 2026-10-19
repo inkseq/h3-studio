@@ -676,3 +676,8 @@ inventory.json
 !tests/test_credit_identity_billing.py
 !tests/test_agent_credit_caps.py
 !tests/test_credit_limit_migration.py
+
+# Owner-authorized staging-only QA provisioning; credentials remain ignored.
+!studio_platform/staging_qa.py
+!tools/provision_staging_qa.py
+!tests/test_staging_qa.py

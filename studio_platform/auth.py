@@ -154,6 +154,7 @@ class Auth:
         mode="password",
         session_seconds=7 * 86400,
         clock=time.time,
+        staging_qa=False,
     ):
         self.engine = engine
         self.tenant = tenant
@@ -162,6 +163,7 @@ class Auth:
             raise ValueError("Invalid browser session duration")
         self.session_seconds = session_seconds
         self.clock = clock
+        self.staging_qa = staging_qa is True and mode == "password"
         with engine.begin() as connection:
             if engine.dialect.name == "postgresql":
                 connection.exec_driver_sql(
@@ -346,7 +348,7 @@ class Auth:
                 isinstance(password, str) and 0 < len(password.encode("utf-8")) <= 72
             )
             eligible = (
-                username in USERS
+                self._password_owner(username)
                 and row is not None
                 and not row["disabled"]
                 and self.ready()
@@ -398,6 +400,9 @@ class Auth:
         """Own issued WorkOS grants do not depend on provider SDK/config health."""
         return source == "workos" or source == self.mode
 
+    def _password_owner(self, owner):
+        return owner in USERS or self.staging_qa and owner in {"qa-admin", "qa-user"}
+
     def _grant_account(
         self, connection, owner, source, version, *, lock=False, check_identity=True
     ):
@@ -434,7 +439,10 @@ class Auth:
             ):
                 return None
             return row
-        if owner not in USERS:
+        if (
+            not (source == "password" and self._password_owner(owner))
+            and owner not in USERS
+        ):
             return None
         if check_identity:
             identity = account_identity(connection, self.tenant, owner)

@@ -96,6 +96,7 @@ class Settings:
     data_dir: Path
     database_url: str = field(repr=False, default="")
     public_origin: str = ""
+    deployment_target: str = "production"
     local_ui_origins: tuple[str, ...] = ()
     auth_mode: str = "password"
     generation_enabled: bool = False
@@ -128,6 +129,8 @@ class Settings:
     public_origin_aliases: tuple[str, ...] = ()
 
     def __post_init__(self):
+        if self.deployment_target not in {"production", "staging"}:
+            raise ValueError("Unsupported deployment target")
         if self.generation_queue not in {"postgres", "dbos"}:
             raise ValueError("Unsupported generation queue")
         if self.generation_queue == "dbos" and not self.database_url.startswith(
@@ -335,6 +338,7 @@ class Settings:
             data_dir=Path(os.environ.get("SIXNINE_DATA", str(default))),
             database_url=database_url_from_environment(),
             public_origin=public_origin_from_environment(),
+            deployment_target=os.environ.get("INKSEQ_DEPLOYMENT_TARGET", "production"),
             public_origin_aliases=tuple(os.environ["PUBLIC_ORIGIN_ALIASES"].split(","))
             if os.environ.get("PUBLIC_ORIGIN_ALIASES")
             else (),

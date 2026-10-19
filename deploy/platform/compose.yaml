@@ -103,6 +103,7 @@ services:
       SIXNINE_DATA: /data
       SIXNINE_DATABASE_URL_FILE: /run/secrets/app_database_url
       PUBLIC_ORIGIN: ${INKSEQ_PUBLIC_ORIGIN:-https://inkseq.com}
+      INKSEQ_DEPLOYMENT_TARGET: ${INKSEQ_DEPLOYMENT_TARGET:-production}
       PUBLIC_ORIGIN_ALIASES: ${INKSEQ_PUBLIC_ORIGIN_ALIASES-https://www.sixnine.art,https://sixnine.art}
       SIXNINE_AUTH_MODE: password
       INKSEQ_BROWSER_SESSION_SECONDS: ${INKSEQ_BROWSER_SESSION_SECONDS:-604800}
