@@ -735,6 +735,137 @@ class RenderTests(unittest.TestCase):
         with self.assertRaises(SubmissionUncertain):
             self.backend.submit(prepared, "failed")
 
+    def test_whole_film_export_copies_completed_chapter_video_without_reencoding(self):
+        self.video('red', 'red', seconds=1, size='256x256')
+        self.video('blue', 'blue', seconds=1, size='256x256')
+        shots = [
+            {
+                'shot_id': 'chapter-' + name,
+                'source_id': name,
+                'frames': 24,
+                'source_start_frame': 0,
+            }
+            for name in ('red', 'blue')
+        ]
+        job = self.job(shots=shots, render_version=4)
+        job['request']['request']['render']['subtitles'] = None
+        original, outputs = self.backend._run_process, []
+
+        def run(*args, **kwargs):
+            outputs.append(args[-1].name)
+            return original(*args, **kwargs)
+
+        with mock.patch.object(self.backend, '_run_process', side_effect=run):
+            result = self.execute(job, 'whole-film')
+        self.assertEqual(outputs, ['joined.mp4'])
+        self.assertEqual(
+            int(media.probe(result['video'])['streams'][0]['nb_frames']), 48
+        )
+        self.assertFalse(any(self.backend._directory('whole-film').glob('clip-*.mp4')))
+
+    @unittest.skipUnless(os.name == 'posix', 'Inherited POSIX CPU process fence')
+    def test_same_original_cpu_resume_reuses_completed_clip_checkpoint(self):
+        job = self.job()
+        prepared = self.backend.prepare(
+            job, 'resume-original', self.store, lambda: None
+        )
+        original = self.backend._run_process
+
+        def crash_after_first(*args, **kwargs):
+            original(*args, **kwargs)
+            if args[-1].name == 'clip-000.mp4':
+                raise Stopped()
+
+        with mock.patch.object(
+            self.backend, '_run_process', side_effect=crash_after_first
+        ):
+            with self.assertRaises(Stopped):
+                self.backend.submit(prepared, 'resume-original')
+        directory = self.backend._directory('resume-original')
+        checkpoint = self.backend._load(directory)['checkpoints']['clip-000.mp4']
+        restarted = CPURenderBackend(self.root / 'renders', enabled=True)
+        popen, outputs = subprocess.Popen, []
+
+        def launch(args, **kwargs):
+            if Path(args[0]).name == 'ffmpeg':
+                outputs.append(str(args[-1]))
+            return popen(args, **kwargs)
+
+        with mock.patch('subprocess.Popen', side_effect=launch):
+            task_id = restarted.resume(
+                job, 'resume-original', 'cpu-render-resume-original', lambda: None
+            )
+        self.assertFalse(any(name.endswith('clip-000.mp4') for name in outputs))
+        self.assertEqual(
+            restarted._load(directory)['checkpoints']['clip-000.mp4'], checkpoint
+        )
+        self.assertEqual(
+            restarted.reconcile('resume-original', task_id).state, 'succeeded'
+        )
+        self.assertEqual(task_id, 'cpu-render-resume-original')
+
+    @unittest.skipUnless(os.name == 'posix', 'Inherited POSIX CPU process fence')
+    def test_resume_refuses_live_inherited_child_and_legacy_receipt(self):
+        import sys
+
+        job = self.job()
+        prepared = self.backend.prepare(job, 'fenced', self.store, lambda: None)
+        with mock.patch.object(self.backend, '_render', side_effect=Stopped()):
+            with self.assertRaises(Stopped):
+                self.backend.submit(prepared, 'fenced')
+        directory = self.backend._directory('fenced')
+        with self.backend._process_fence(directory) as descriptor:
+            child = subprocess.Popen(
+                [sys.executable, '-c', 'import sys;sys.stdin.read()'],
+                pass_fds=(descriptor,),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        try:
+            with self.assertRaises(SubmissionUncertain):
+                self.backend.resume(job, 'fenced', 'cpu-render-fenced', lambda: None)
+        finally:
+            child.communicate(timeout=5)
+        state = self.backend._load(directory)
+        state.pop('cpu_checkpoint_version')
+        self.backend._save(directory, state)
+        with self.assertRaisesRegex(BackendError, 'resume_identity_unconfirmed'):
+            self.backend.resume(job, 'fenced', 'cpu-render-fenced', lambda: None)
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX same-receipt recovery')
+    def test_tampered_checkpoint_or_payload_never_starts_new_transcode(self):
+        job = self.job()
+        prepared = self.backend.prepare(
+            job, 'tampered-resume', self.store, lambda: None
+        )
+        original = self.backend._run_process
+
+        def crash_after_first(*args, **kwargs):
+            original(*args, **kwargs)
+            raise Stopped()
+
+        with mock.patch.object(
+            self.backend, '_run_process', side_effect=crash_after_first
+        ):
+            with self.assertRaises(Stopped):
+                self.backend.submit(prepared, 'tampered-resume')
+        bad_job = copy.deepcopy(job)
+        bad_job['request']['request']['duration'] = 1
+        with self.assertRaisesRegex(BackendError, 'resume_identity_unconfirmed'):
+            self.backend.resume(
+                bad_job, 'tampered-resume', 'cpu-render-tampered-resume', lambda: None
+            )
+        directory = self.backend._directory('tampered-resume')
+        (directory / 'clip-000.mp4').write_bytes(b'CHANGED')
+        with mock.patch(
+            'subprocess.Popen', side_effect=AssertionError('No new transcode')
+        ):
+            with self.assertRaises(SubmissionRejected):
+                self.backend.resume(
+                    job, 'tampered-resume', 'cpu-render-tampered-resume', lambda: None
+                )
+
     def test_source_ownership_hash_and_request_mutation_are_rejected(self):
         job = self.job()
         wrong_owner = copy.deepcopy(job)

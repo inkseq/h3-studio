@@ -12,7 +12,12 @@ RECIPE = "chapter-roughcut-v1"
 MODEL = "sixnine-chapter-roughcut-v1"
 CONFIGURATION = "cpu-render-v3"
 POOL = "cpu-render"
-CONFIGURATIONS = {1: "cpu-render-v1", 2: "cpu-render-v2", 3: CONFIGURATION}
+CONFIGURATIONS = {
+    1: "cpu-render-v1",
+    2: "cpu-render-v2",
+    3: CONFIGURATION,
+    4: CONFIGURATION,
+}
 DIMENSIONS = {
     "480P": {
         "16:9": (854, 480),
@@ -520,3 +525,80 @@ def validate_render_source(project, compiled):
         )
     except (KeyError, TypeError, NotFound):
         return False
+
+
+def compile_film_export(project_id, run_id, chapters):
+    """Compose exact completed chapter receipts; never read the mutable Story.
+
+    The original CPU timeline/mixing limits apply to this final export too.
+    A chapter job/artifact is reused, not re-admitted by film replay.
+    """
+    if not isinstance(chapters, list) or not 1 <= len(chapters) <= 50:
+        raise ValueError("film_chapter_count_limit")
+    sources, shots, tracks, frames = {}, [], [], 0
+    shape = chapters[0]["output_spec"]
+    for index, chapter in enumerate(chapters):
+        output = chapter["output_spec"]
+        if (
+            any(output.get(key) != shape.get(key) for key in ("width", "height", "fps"))
+            or output.get("fps") != 24
+            or type(output.get("frame_count")) is not int
+            or not 1 <= output["frame_count"] <= 14400
+        ):
+            raise ValueError("film_chapter_shape_mismatch")
+        video_id = "chapter-video-" + str(index)
+        sources[video_id] = chapter["video"]
+        shots.append(
+            {
+                "shot_id": chapter["chapter_id"],
+                "source_id": video_id,
+                "frames": output["frame_count"],
+                "source_start_frame": 0,
+            }
+        )
+        if chapter.get("audio") is not None:
+            audio_id = "chapter-audio-" + str(index)
+            sources[audio_id] = chapter["audio"]
+            tracks.append(
+                {
+                    "source_id": audio_id,
+                    "timeline_start": frames / 24,
+                    "source_start": 0,
+                    "source_end": output["frame_count"] / 24,
+                    "gain": 1,
+                }
+            )
+        frames += output["frame_count"]
+    if frames > 14400 or len(tracks) > 32:
+        raise ValueError("film_export_size_limit")
+    compiled = {
+        "recipe_id": RECIPE,
+        "client_ref": {"project_id": project_id, "chapter_id": "film-export"},
+        "request": {
+            "model": MODEL,
+            "duration": frames / 24,
+            "generate_audio": bool(tracks),
+            "export_crf": 18,
+            "render": {
+                "version": 4,
+                "shots": shots,
+                "audio_tracks": tracks,
+                "subtitles": None,
+            },
+        },
+        "sources": sources,
+        "output_spec": {
+            "width": shape["width"],
+            "height": shape["height"],
+            "fps": 24,
+            "frame_count": frames,
+            "actual_duration": frames / 24,
+        },
+        "simulation": any(item["simulation"] for item in sources.values()),
+        "server_source_hash": request_hash({"run_id": run_id, "chapters": chapters}),
+    }
+    # Apply the same immutable-source/count/byte/media bounds before planning.
+    from .render_backend import validate_render_request
+
+    validate_render_request(compiled)
+    return compiled
