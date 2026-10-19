@@ -1,6 +1,7 @@
 """Pinned Stripe test client and bounded provider DTOs, without ledger writes."""
 
 import math
+import logging
 import re
 from urllib.parse import urlsplit
 import uuid
@@ -22,6 +23,7 @@ EVENT_TYPES = frozenset(
 )
 MAX_BODY = 512 * 1024
 MAX_INTEGER = (1 << 63) - 1
+logger = logging.getLogger(__name__)
 
 
 class StripeGatewayError(Exception):
@@ -90,6 +92,17 @@ def provider_url(value, *, receipt=False):
     if not valid:
         raise StripeGatewayError("billing_provider_response_invalid", 502)
     return value
+
+
+def optional_receipt_url(value):
+    if value is None:
+        return None
+    try:
+        return provider_url(value, receipt=True)
+    except StripeGatewayError:
+        # Optional links never block settlement or history; keep originals intact.
+        logger.warning("billing_receipt_url_omitted")
+        return None
 
 
 def _metadata(obj, result):
@@ -169,9 +182,9 @@ def _charge(obj):
         result["amount_refunded"] = _integer(refunded)
         if result.get("amount_cents", MAX_INTEGER) < refunded:
             raise StripeGatewayError("billing_event_invalid", 400)
-    receipt = _get(obj, "receipt_url")
+    receipt = optional_receipt_url(_get(obj, "receipt_url"))
     if receipt is not None:
-        result["receipt_url"] = provider_url(receipt, receipt=True)
+        result["receipt_url"] = receipt
     return result
 
 

@@ -327,10 +327,37 @@ class PaymentRouteTests(LedgerCase):
             connection.execute(
                 update(payments)
                 .where(payments.c.id == own[0])
+                .values(
+                    receipt_url="https://legacy-unsupported.example.test/private-receipt"
+                )
+            )
+            connection.execute(
+                update(payments)
+                .where(payments.c.id == own[1])
                 .values(receipt_url="https://pay.stripe.com/receipts/test-receipt")
             )
-        first = self.api.history(self.user, limit=1)
-        second = self.api.history(self.user, before=first["next_cursor"], limit=1)
+        with self.assertLogs(
+            "studio_platform.stripe_client", level="WARNING"
+        ) as logged:
+            first = self.api.history(self.user, limit=1)
+            second = self.api.history(self.user, before=first["next_cursor"], limit=1)
+        self.assertEqual(
+            logged.output,
+            ["WARNING:studio_platform.stripe_client:billing_receipt_url_omitted"],
+        )
+        projected = {row["id"]: row for row in first["payments"] + second["payments"]}
+        self.assertIsNone(projected[own[0]]["receipt_url"])
+        self.assertEqual(
+            projected[own[1]]["receipt_url"],
+            "https://pay.stripe.com/receipts/test-receipt",
+        )
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(
+                connection.execute(
+                    select(payments.c.receipt_url).where(payments.c.id == own[0])
+                ).scalar_one(),
+                "https://legacy-unsupported.example.test/private-receipt",
+            )
         self.assertEqual(
             {first["payments"][0]["id"], second["payments"][0]["id"]}, set(own)
         )
@@ -391,3 +418,156 @@ class PaymentRouteTests(LedgerCase):
             {"url": "https://checkout.stripe.com/c/pay/original"},
         )
         self.gateway.checkout.assert_not_called()
+
+    def test_unsupported_optional_receipt_does_not_block_paid_or_refund_settlement(
+        self,
+    ):
+        import stripe
+        from studio_platform.credit_schema import accounts, entries
+
+        core = self.real_core()
+        prepared = core.begin_checkout(
+            self.user,
+            {**PACK, "revision": "fixture-v1"},
+            "receipt-original",
+            account_scope="acct_testaccount",
+        )
+        row = prepared["payment"]
+        config = {
+            "version": 1,
+            "account_id": "acct_testaccount",
+            "secret_key": "sk_test_" + "s" * 32,
+            "publishable_key": "pk_test_" + "p" * 32,
+            "webhook_secret": "whsec_" + "w" * 32,
+        }
+        path = Path(self.temp.name) / "stripe-receipt.json"
+        path.write_text(json.dumps(config))
+        path.chmod(0o600)
+        settings = SimpleNamespace(
+            **{
+                **vars(self.settings),
+                "stripe_config_file": path,
+                "deployment_target": "staging",
+                "public_origin": "https://staging.inkseq.com",
+                "public_origin_aliases": (),
+            }
+        )
+        provider = Mock()
+        gateway = StripeGateway(settings, client_factory=lambda _config: provider)
+        self.repo.generation_transport = SimpleNamespace(payment_event=Mock())
+        metadata = {
+            "payment_id": row["id"],
+            "user_id": row["user_id"],
+            "pack_id": row["pack_id"],
+            "pack_revision": row["pack_revision"],
+            "credits": str(row["credits"]),
+        }
+        charge = {
+            "object": "charge",
+            "id": "ch_optional",
+            "livemode": False,
+            "amount": 500,
+            "currency": "usd",
+            "payment_intent": "pi_optional",
+            "receipt_url": "https://unknown.example.test/private-receipt",
+            "metadata": metadata,
+        }
+        session = {
+            "object": "checkout.session",
+            "id": "cs_test_optional",
+            "livemode": False,
+            "mode": "payment",
+            "payment_status": "paid",
+            "amount_total": 500,
+            "currency": "usd",
+            "payment_intent": "pi_optional",
+            "metadata": metadata,
+        }
+
+        def signed(kind, ident, obj):
+            raw = json.dumps(
+                {
+                    "id": ident,
+                    "object": "event",
+                    "type": kind,
+                    "created": self.now,
+                    "livemode": False,
+                    "api_version": "2026-09-30.endive",
+                    "data": {"object": obj},
+                }
+            ).encode()
+            return gateway.verify_event(
+                raw,
+                stripe.WebhookSignature.generate_signature_header(
+                    raw.decode(), config["webhook_secret"]
+                ),
+            )
+
+        original = signed("checkout.session.completed", "evt_paid_optional", session)
+        provider.v1.checkout.sessions.retrieve.return_value = {
+            **session,
+            "line_items": {
+                "has_more": False,
+                "data": [
+                    {
+                        "quantity": 1,
+                        "price": {
+                            "id": PACK["price_id"],
+                            "livemode": False,
+                            "currency": "usd",
+                            "tax_behavior": "inclusive",
+                        },
+                    }
+                ],
+            },
+            "payment_intent": {"id": "pi_optional", "latest_charge": charge},
+        }
+        with self.assertLogs(
+            "studio_platform.stripe_client", level="WARNING"
+        ) as logged:
+            proof = gateway.resolve_event(original)
+            self.assertNotIn("receipt_url", proof["object"])
+            core.receive_event(original)
+            self.assertEqual(
+                core.process_event("sixnine", original["id"], proof=proof)["state"],
+                "processed",
+            )
+            refund = signed(
+                "charge.refunded",
+                "evt_refund_optional",
+                {**charge, "amount_refunded": 500},
+            )
+            self.assertNotIn("receipt_url", refund["object"])
+            core.receive_event(refund)
+            self.assertEqual(
+                core.process_event("sixnine", refund["id"])["state"], "processed"
+            )
+        self.assertEqual(
+            logged.output,
+            ["WARNING:studio_platform.stripe_client:billing_receipt_url_omitted"] * 2,
+        )
+        self.assertNotIn("unknown.example", " ".join(logged.output))
+        with self.repo.engine.connect() as connection:
+            account = (
+                connection.execute(
+                    select(accounts).where(accounts.c.user_id == self.ids["supervan"])
+                )
+                .mappings()
+                .one()
+            )
+            self.assertEqual((account["balance"], account["held"]), (0, 0))
+            kinds = (
+                connection.execute(
+                    select(entries.c.kind).where(
+                        entries.c.user_id == self.ids["supervan"]
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            self.assertCountEqual(kinds, ["purchase", "refund"])
+            self.assertIsNone(
+                connection.execute(
+                    select(payments.c.receipt_url).where(payments.c.id == row["id"])
+                ).scalar_one()
+            )

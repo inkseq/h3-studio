@@ -12,7 +12,13 @@ from .auth import Principal
 from .identity import account_identity, lock_account_gate
 from .identity_schema import admin_audit, users
 from .repository import documents, request_hash
-from .stripe_client import MAX_BODY, StripeGateway, StripeGatewayError, provider_url
+from .stripe_client import (
+    MAX_BODY,
+    StripeGateway,
+    StripeGatewayError,
+    optional_receipt_url,
+    provider_url,
+)
 
 PACK_SCOPE = {
     "owner_id": "__billing",
@@ -431,9 +437,7 @@ class PaymentAPI:
                 paid_at=datetime.fromtimestamp(row["paid_at"], timezone.utc).isoformat()
                 if row["paid_at"] is not None
                 else None,
-                receipt_url=provider_url(row["receipt_url"], receipt=True)
-                if row["receipt_url"] is not None
-                else None,
+                receipt_url=optional_receipt_url(row["receipt_url"]),
             )
             result.append(item)
         return {

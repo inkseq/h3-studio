@@ -1,10 +1,13 @@
 """Official SDK signing and closed Managed Payments/test-mode boundaries."""
 
 from dataclasses import replace
+import hashlib
+import hmac
 import json
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
+import time
 import unittest
 from unittest.mock import Mock, patch
 
@@ -206,6 +209,32 @@ class StripeClientTests(unittest.TestCase):
         self.assertNotIn("price_id", result["object"])
         with self.assertRaisesRegex(StripeGatewayError, "billing_signature_invalid"):
             self.gateway.verify_event(b"not json", "t=1,v1=bad")
+        self.factory.assert_not_called()
+
+    def test_real_sdk_signature_rejects_tampered_and_expired_payloads(self):
+        # No HTTP or fake Webhook implementation: exercise the pinned SDK verifier.
+        raw, _ = self.signed()
+
+        def signature(timestamp):
+            digest = hmac.new(
+                CONFIG["webhook_secret"].encode(),
+                str(timestamp).encode() + b"." + raw,
+                hashlib.sha256,
+            ).hexdigest()
+            return f"t={timestamp},v1={digest}"
+
+        current = int(time.time())
+        valid = signature(current)
+        self.assertEqual(self.gateway.verify_event(raw, valid)["id"], "evt_original")
+        for body, header in (
+            (raw.replace(b"evt_original", b"evt_tampered"), valid),
+            (raw, signature(current - 301)),
+        ):
+            with (
+                self.subTest(body=body == raw),
+                self.assertRaisesRegex(StripeGatewayError, "billing_signature_invalid"),
+            ):
+                self.gateway.verify_event(body, header)
         self.factory.assert_not_called()
 
     def test_live_or_version_mismatch_notifications_refused(self):
