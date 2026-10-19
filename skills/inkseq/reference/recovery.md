@@ -128,6 +128,9 @@ A timeout/5xx or missing local receipt does not prove a film was unaccepted.
 
 Logout, expiry, pause/revoke or scope changes block future admission. Do not
 transfer a connection's film to an unrestricted browser/another connection.
+An unavailable original grant displays `authorization_required` with
+`film_actor_grant_unavailable`; the same workflow waits instead of starting a
+replacement. Restore the original authority or use explicit same-actor resume.
 Independently accepted jobs still retain original recovery/collection and billing;
 revocation is not cancellation. Successful chapter/output receipts are reused.
 The CPU controller can recover only a matching original fenced checkpoint;

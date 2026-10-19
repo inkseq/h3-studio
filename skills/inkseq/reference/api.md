@@ -145,8 +145,8 @@ images or replacement look photos. Unsupported duration/output/input combination
 are explicit blockers; never trim parameters or references to force admission.
 
 Read the original run at bounded intervals, respecting Retry-After if present.
-Phases include `generating`, `chapters`, `exporting`, `admission_blocked`, `blocked`
-and `cancel_requested`; terminal phases are `completed` and `cancelled`.
+Phases include `generating`, `chapters`, `exporting`, `admission_blocked`, `blocked`,
+`authorization_required` and `cancel_requested`; terminal phases are `completed` and `cancelled`.
 `counts` includes `shots`, `reused`, `generate`, `generated_completed`,
 `chapters_completed` and `export_completed`. Preserve finite `error_code` and
 safe `generation[]`/`chapters[]`/`export` plan/job/artifact IDs. GET does not resume.

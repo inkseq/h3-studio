@@ -3,14 +3,16 @@
 import copy
 import asyncio
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
 import unittest
 import uuid
 from unittest.mock import Mock, patch
+from sqlalchemy import update
 
-from studio_platform.auth import Principal
+from studio_platform.auth import AuthenticationError, Principal
 from studio_platform.film_runs import (
     FilmRuns,
     KIND,
@@ -27,6 +29,7 @@ from studio_platform.repository import (
     Conflict,
     NotFound,
     request_hash,
+    jobs,
 )
 from test_platform_render_plans import story, source
 
@@ -631,6 +634,174 @@ class FilmTests(unittest.TestCase):
         self.assertEqual(waits, [{'topic': 'film_changed', 'timeout_seconds': 10}])
         self.assertFalse(registration[0]['retries_allowed'])
         self.assertEqual(service.turn.call_args.args[1:], ('story-one', 'film-one'))
+
+    def test_revoked_original_grant_waits_visibly_and_same_actor_resume_keeps_ids(self):
+        from studio_platform.film_workflows import register_film_workflows
+
+        preview = self.preview()
+        self.service._mutate(
+            self.principal,
+            'story-one',
+            preview['id'],
+            lambda value: value.update(
+                phase='generating',
+                accepted_at=self.repo.clock(),
+            ),
+        )
+        self._with_generation(preview['id'], 'original-job')
+        original = copy.deepcopy(self.raw(preview['id']))
+        resolver = Mock(
+            side_effect=[
+                AuthenticationError('private failure text'),
+                AuthenticationError(),
+                self.principal,
+            ]
+        )
+        waits, blocked_versions = [], []
+        renewed = replace(self.principal, session_hash='b' * 64)
+
+        class Runtime:
+            step = staticmethod(lambda **kwargs: lambda function: function)
+            workflow = staticmethod(lambda **kwargs: lambda function: function)
+
+            @staticmethod
+            async def recv_async(**kwargs):
+                waits.append(kwargs)
+                current = self.service.get(self.principal, 'story-one', preview['id'])
+                self.assertEqual(current['phase'], 'authorization_required')
+                self.assertEqual(current['error_code'], 'film_actor_grant_unavailable')
+                blocked_versions.append(
+                    self.repo.get_document(self.scope, KIND, preview['id'])['version']
+                )
+                if len(waits) == 2:
+                    self.assertEqual(blocked_versions[0], blocked_versions[1])
+                    resumed = self.service.resume(renewed, 'story-one', preview['id'])
+                    self.assertEqual(resumed['phase'], 'generating')
+
+        with patch.object(
+            self.service, 'turn', return_value={'terminal': True, 'phase': 'completed'}
+        ) as turn:
+            workflow = register_film_workflows(Runtime, self.service, resolver)
+            asyncio.run(workflow('tenant', 'owner', 'story-one', preview['id']))
+        self.assertEqual(len(waits), 2)
+        self.assertTrue(
+            all(
+                item == {'topic': 'film_changed', 'timeout_seconds': 10}
+                for item in waits
+            )
+        )
+        turn.assert_called_once_with(self.principal, 'story-one', preview['id'])
+        final = self.raw(preview['id'])
+        self.assertEqual(final['generation'], original['generation'])
+        self.assertEqual(final['snapshot_hash'], original['snapshot_hash'])
+        self.assertEqual(final['actor_grant']['session_hash'], renewed.session_hash)
+        self.enqueue.assert_called_once()
+        with self.assertRaisesRegex(Conflict, 'film_actor_mismatch'):
+            self.service.resume(
+                Principal('owner', 'another-actor'), 'story-one', preview['id']
+            )
+
+    def test_revoked_cancel_only_observes_own_terminal_original_jobs(self):
+        preview = self.preview()
+        plan = self.repo.create_plan(
+            self.scope, {'original': 'accepted'}, {}, expires_at=self.repo.clock() + 60
+        )
+        original_job = self.repo.create_job(
+            self.scope, plan['id'], 'original-job', initial_status='blocked'
+        )
+        self._with_generation(preview['id'], original_job['id'])
+        self.service._mutate(
+            self.principal,
+            'story-one',
+            preview['id'],
+            lambda value: value.update(
+                accepted_at=self.repo.clock(),
+                cancel_requested=True,
+                phase='cancel_requested',
+            ),
+        )
+        arguments = (
+            'tenant',
+            'owner',
+            'story-one',
+            preview['id'],
+            'film_actor_grant_unavailable',
+        )
+        before = self.repo.get_job(self.scope, original_job['id'])
+        waiting = self.service.record_execution_block(*arguments)
+        self.assertEqual(waiting['phase'], 'cancel_requested')
+        self.assertFalse(waiting['terminal'])
+        self.assertEqual(self.repo.get_job(self.scope, original_job['id']), before)
+        with self.repo.transaction() as conn:
+            conn.execute(
+                update(jobs)
+                .where(jobs.c.id == original_job['id'])
+                .values(status='succeeded')
+            )
+        terminal = self.repo.get_job(self.scope, original_job['id'])
+        self.assertEqual(
+            self.service.record_execution_block(*arguments)['phase'], 'cancelled'
+        )
+        self.assertEqual(self.repo.get_job(self.scope, original_job['id']), terminal)
+        self.enqueue.assert_not_called()
+
+    def test_controller_block_retains_scope_trash_and_finite_metadata_guards(self):
+        preview = self.preview()
+        self.service._mutate(
+            self.principal,
+            'story-one',
+            preview['id'],
+            lambda value: value.update(
+                accepted_at=self.repo.clock(), phase='generating'
+            ),
+        )
+        original = self.raw(preview['id'])
+        for tenant, owner, project_id in [
+            ('foreign', 'owner', 'story-one'),
+            ('tenant', 'foreign', 'story-one'),
+            ('tenant', 'owner', 'foreign'),
+        ]:
+            with self.assertRaises((NotFound, Conflict)):
+                self.service.record_execution_block(
+                    tenant,
+                    owner,
+                    project_id,
+                    preview['id'],
+                    'film_actor_grant_unavailable',
+                )
+        with self.assertRaisesRegex(ValueError, 'film_execution_block_invalid'):
+            self.service.record_execution_block(
+                'tenant',
+                'owner',
+                'story-one',
+                preview['id'],
+                'arbitrary private message',
+            )
+        with patch.object(
+            self.repo, '_content_write_guard', side_effect=Conflict('project_in_trash')
+        ):
+            with self.assertRaisesRegex(Conflict, 'project_in_trash'):
+                self.service.record_execution_block(
+                    'tenant',
+                    'owner',
+                    'story-one',
+                    preview['id'],
+                    'film_actor_grant_unavailable',
+                )
+        self.assertEqual(self.raw(preview['id']), original)
+
+    def test_non_authentication_error_is_not_masked_as_grant_wait(self):
+        from studio_platform.film_workflows import register_film_workflows
+
+        class Runtime:
+            step = staticmethod(lambda **kwargs: lambda function: function)
+            workflow = staticmethod(lambda **kwargs: lambda function: function)
+
+        workflow = register_film_workflows(
+            Runtime, self.service, Mock(side_effect=RuntimeError('original failure'))
+        )
+        with self.assertRaisesRegex(RuntimeError, 'original failure'):
+            asyncio.run(workflow('tenant', 'owner', 'story-one', 'original-run'))
 
 
 if __name__ == '__main__':

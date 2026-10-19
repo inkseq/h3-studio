@@ -76,6 +76,12 @@ and pause checks. No owner-ID-to-browser fallback is allowed. The session hash
 is a non-bearer identity, never a token and never part of workflow inputs/public
 responses. Revocation blocks future admissions; independently accepted jobs
 retain their original native reconciliation/collection and accounting.
+The controller records a finite `authorization_required` metadata state when
+original grant revalidation fails; it keeps the same durable workflow waiting.
+That path never constructs a Principal or admits/cancels jobs. An already
+requested cancellation may finish by reading only its own original terminal job
+statuses. Content lifecycle gates and header CAS remain active. Explicit
+same-actor resume updates the existing grant reference and original run only.
 
 ## CPU checkpoint recovery
 

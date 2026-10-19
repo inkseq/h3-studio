@@ -11,7 +11,15 @@ import uuid
 
 from sqlalchemy import insert, select, update
 
-from .repository import Conflict, NotFound, Scope, documents, identifier, request_hash
+from .repository import (
+    Conflict,
+    NotFound,
+    Scope,
+    documents,
+    jobs,
+    identifier,
+    request_hash,
+)
 from .render_plans import compile_render, compile_film_export, ordered_chapter
 
 KIND = "film_run"
@@ -166,6 +174,80 @@ class FilmRuns:
         )
         return copy.deepcopy(record["payload"]["actor_grant"])
 
+    def record_execution_block(self, tenant, owner, project_id, run_id, code):
+        """Controller-only finite metadata; never reconstruct admission grants.
+
+        A revoked grant cannot start/cancel work through this path. An already
+        requested cancellation may finish only by observing its own original
+        terminal jobs, whose native reconciliation continues independently.
+        """
+        if tenant != self.tenant:
+            raise NotFound("film_not_found")
+        for ident in (tenant, owner, project_id, run_id):
+            identifier(ident)
+        if code != "film_actor_grant_unavailable":
+            raise ValueError("film_execution_block_invalid")
+        scope = film_scope(tenant, owner, project_id)
+        with self.repo.transaction() as conn:
+            self.repo._content_write_guard(conn, scope)
+            row = self.repo._locked(
+                conn,
+                select(documents).where(
+                    self.repo._scope(documents, scope),
+                    documents.c.kind == KIND,
+                    documents.c.document_id == run_id,
+                ),
+            )
+            if row is None:
+                raise NotFound("film_not_found")
+            value = copy.deepcopy(row["payload"])
+            if (
+                value["workflow_version"] != VERSION
+                or value["project_id"] != project_id
+            ):
+                raise Conflict("film_workflow_version_mismatch")
+            if value.get("accepted_at") is None:
+                raise Conflict("film_confirmation_required")
+            if value["phase"] not in TERMINAL:
+                if value["cancel_requested"]:
+                    job_ids = {
+                        item["job_id"]
+                        for item in [
+                            *value["generation"],
+                            *value["chapters"],
+                            value["export"],
+                        ]
+                        if item.get("job_id")
+                    }
+                    states = (
+                        dict(
+                            conn.execute(
+                                select(jobs.c.id, jobs.c.status).where(
+                                    self.repo._scope(jobs, scope),
+                                    jobs.c.id.in_(job_ids),
+                                )
+                            ).all()
+                        )
+                        if job_ids
+                        else {}
+                    )
+                    value["phase"] = (
+                        "cancelled"
+                        if set(states) == job_ids
+                        and all(state in JOB_TERMINAL for state in states.values())
+                        else "cancel_requested"
+                    )
+                else:
+                    value.update(phase="authorization_required", error_code=code)
+                if value != row["payload"]:
+                    self._write_scoped(conn, scope, run_id, value, row)
+        return {
+            "terminal": value["phase"] in TERMINAL,
+            "phase": value["phase"],
+            "error_code": value.get("error_code"),
+            "wait_seconds": 10,
+        }
+
     def _row(self, conn, principal, project_id, run_id, *, lock=False):
         statement = select(documents).where(
             self.repo._scope(
@@ -185,6 +267,9 @@ class FilmRuns:
 
     def _write(self, conn, principal, project_id, run_id, payload, row=None):
         scope = film_scope(self.tenant, principal.owner, project_id)
+        return self._write_scoped(conn, scope, run_id, payload, row)
+
+    def _write_scoped(self, conn, scope, run_id, payload, row=None):
         self.repo._content_write_guard(conn, scope, payload)
         if (
             len(__import__('json').dumps(payload, ensure_ascii=False).encode())
@@ -194,9 +279,9 @@ class FilmRuns:
         if row is None:
             conn.execute(
                 insert(documents).values(
-                    tenant_id=self.tenant,
-                    owner_id=principal.owner,
-                    project_id=project_id,
+                    tenant_id=scope.tenant_id,
+                    owner_id=scope.owner_id,
+                    project_id=scope.project_id,
                     kind=KIND,
                     document_id=run_id,
                     payload=payload,
@@ -602,6 +687,8 @@ class FilmRuns:
             # manufacture owner-wide grants for a paused/revoked Agent key.
             value["actor_grant"] = actor_grant(principal)
             value["error_code"] = None
+            if value["phase"] == "authorization_required":
+                value["phase"] = "generating"
 
         value = self._mutate(principal, project_id, run_id, resume)
         # The deterministic workflow ID wakes the original run, never new jobs.
