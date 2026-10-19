@@ -290,18 +290,23 @@ export default function LibraryView({
             {selected.length > 0 && (
               <div className="libp-bulk">
                 <b>{t('library.selected', { count: selected.length })}</b>
-                <button disabled={locked || !filters.project_id} onClick={onTags}>
+                <button
+                  disabled={locked || !filters.project_id}
+                  title={filters.project_id ? undefined : t('library.pickStoryFirst')}
+                  onClick={onTags}
+                >
                   <Tag size={14} />
                   {t('library.applyTags')}
                 </button>
-                <button disabled={locked || !filters.project_id} onClick={onFile}>
+                <button
+                  disabled={locked || !filters.project_id}
+                  title={filters.project_id ? undefined : t('library.pickStoryFirst')}
+                  onClick={onFile}
+                >
                   {t('library.fileInto')}
                 </button>
-                <button
-                  className="small danger"
-                  disabled={locked || !filters.project_id}
-                  onClick={onDelete}
-                >
+                {/* Trash works across stories (one request carries every project's version). */}
+                <button className="small danger" disabled={locked} onClick={onDelete}>
                   <Trash2 size={13} />
                   {t('trash.move')}
                 </button>
