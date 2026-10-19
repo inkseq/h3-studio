@@ -86,6 +86,41 @@ def validate_workos(document):
             'migration_workos_configuration_invalid')
 
 
+def validate_stripe(document, *, target='production'):
+    """Only API and the existing DBOS consumer receive a staging test config."""
+    services, secrets = document['services'], document.get('secrets', {})
+    app_env = services['app'].get('environment', {})
+    selected = app_env.get('INKSEQ_STRIPE_CONFIG_FILE', '')
+    mode = app_env.get('INKSEQ_STRIPE_MODE', 'off')
+    require(selected in {'', '/run/secrets/stripe'} and mode in {'off', 'test'}
+            and (mode != 'test' or bool(selected)), 'migration_stripe_configuration_invalid')
+    require(not selected and mode == 'off' or target == 'staging',
+            'migration_stripe_production_forbidden')
+    for name, service in services.items():
+        environment = service.get('environment', {})
+        if name in {'app', 'controller'}:
+            require(environment.get('INKSEQ_STRIPE_CONFIG_FILE', '') == selected
+                    and environment.get('INKSEQ_STRIPE_MODE', 'off') == mode,
+                    'migration_stripe_configuration_split')
+            if selected:
+                require(environment.get('INKSEQ_DEPLOYMENT_TARGET') == 'staging'
+                        and environment.get('PUBLIC_ORIGIN') == 'https://staging.inkseq.com'
+                        and not environment.get('PUBLIC_ORIGIN_ALIASES')
+                        and environment.get('INKSEQ_GENERATION_QUEUE', 'postgres') == 'dbos',
+                        'migration_stripe_target_invalid')
+        else:
+            require(not {'INKSEQ_STRIPE_CONFIG_FILE', 'INKSEQ_STRIPE_MODE'} & set(environment)
+                    and 'stripe' not in secret_names(service), 'migration_stripe_outside_business')
+    configured = secrets.get('stripe')
+    if configured is None:
+        require(not selected, 'migration_stripe_configuration_invalid')
+        return  # Retained, unconfigured older releases stay compatible.
+    expected = '/run/sixnine-secrets/stripe' if selected else secrets['execution_profiles']['file']
+    require(configured.get('file') == expected
+            and all('stripe' in secret_names(services[name]) for name in ('app', 'controller')),
+            'migration_stripe_configuration_invalid')
+
+
 def validate_storage(document, *, target='production'):
     """One provider identity for API/worker; credentials never enter env/queue."""
     identity = deployment_target.profile(target)
@@ -186,7 +221,8 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, targe
         require(not any(key in environment for key in ("DSTACK_SERVER_ADMIN_TOKEN", "DSTACK_DATABASE_URL",
             "DATABASE_URL", "POSTGRES_PASSWORD", "ADMIN_PASSWORD", "SIXNINE_DATABASE_URL",
             "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_SESSION_TOKEN", "R2TOKEN", "R2_TOKEN",
-            "WORKOS_API_KEY", "INKSEQ_WORKOS_API_KEY",
+            "WORKOS_API_KEY", "INKSEQ_WORKOS_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_API_KEY",
+            "STRIPE_WEBHOOK_SECRET", "INKSEQ_STRIPE_SECRET_KEY", "INKSEQ_STRIPE_API_KEY", "INKSEQ_STRIPE_WEBHOOK_SECRET",
             "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")),
                 "migration_secret_value_in_compose")
         if name != "caddy":
@@ -212,6 +248,7 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, targe
         require(env.get("SIXNINE_TELEMETRY_CONFIG_FILE") == "/run/secrets/grafana_cloud", "migration_cloud_telemetry_missing")
     validate_storage(document, target=target)
     validate_workos(document)
+    validate_stripe(document, target=target)
     controller = services["controller"]
     targets = {volume["target"] for volume in controller.get("volumes", [])}
     require({"/dstack-runtime", "/dstack-sources"} <= targets and

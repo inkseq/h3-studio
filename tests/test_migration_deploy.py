@@ -255,6 +255,118 @@ class MigrationDeployTests(unittest.TestCase):
         ):
             validate(broken)
 
+    def test_stripe_opt_in_is_staging_only_and_shared_with_existing_dbos_consumer(self):
+        services = self.document['services']
+        for name in ('app', 'controller'):
+            self.assertEqual(services[name]['environment']['INKSEQ_STRIPE_MODE'], 'off')
+            self.assertEqual(
+                services[name]['environment']['INKSEQ_STRIPE_CONFIG_FILE'], ''
+            )
+        self.assertEqual(
+            self.document['secrets']['stripe']['file'],
+            self.document['secrets']['execution_profiles']['file'],
+        )
+        legacy = copy.deepcopy(self.document)
+        legacy['secrets'].pop('stripe')
+        for name in ('app', 'controller'):
+            service = legacy['services'][name]
+            service['environment'].pop('INKSEQ_STRIPE_MODE')
+            service['environment'].pop('INKSEQ_STRIPE_CONFIG_FILE')
+            service['secrets'] = [
+                item for item in service['secrets'] if item['source'] != 'stripe'
+            ]
+        validate(legacy)
+        environment = fixture_environment()
+        environment.update(
+            INKSEQ_DEPLOYMENT_TARGET='staging',
+            INKSEQ_PUBLIC_ORIGIN='https://staging.inkseq.com',
+            INKSEQ_PUBLIC_ORIGIN_ALIASES='',
+            INKSEQ_CADDY_PROFILE='Caddyfile.staging',
+            INKSEQ_GENERATION_QUEUE='dbos',
+            INKSEQ_STRIPE_MODE='test',
+            INKSEQ_STRIPE_CONFIG_FILE='/run/sixnine-secrets/stripe',
+        )
+        rendered = {}
+
+        def render(command, **kwargs):
+            result = subprocess.run(command, **kwargs)
+            if result.returncode == 0:
+                rendered.update(json.loads(result.stdout))
+            return result
+
+        check(
+            ROOT / 'deploy/platform/compose.yaml',
+            ROOT / 'deploy/dstack/platform-overlay.yaml',
+            environment=environment,
+            runner=render,
+        )
+        self.assertEqual(
+            rendered['secrets']['stripe']['file'], '/run/sixnine-secrets/stripe'
+        )
+        for name in ('app', 'controller'):
+            self.assertEqual(
+                rendered['services'][name]['environment']['INKSEQ_STRIPE_CONFIG_FILE'],
+                '/run/secrets/stripe',
+            )
+            self.assertEqual(
+                rendered['services'][name]['environment']['INKSEQ_DEPLOYMENT_TARGET'],
+                'staging',
+            )
+        # Turning off NEW checkouts retains the config for already accepted obligations.
+        for name in ('app', 'controller'):
+            rendered['services'][name]['environment']['INKSEQ_STRIPE_MODE'] = 'off'
+        validate(rendered, target='staging')
+        for mutate, code in (
+            (
+                lambda d: d['services']['controller']['environment'].update(
+                    INKSEQ_STRIPE_MODE='test'
+                ),
+                'migration_stripe_configuration_split',
+            ),
+            (
+                lambda d: d['services']['controller']['environment'].update(
+                    INKSEQ_DEPLOYMENT_TARGET='production'
+                ),
+                'migration_stripe_target_invalid',
+            ),
+            (
+                lambda d: d['services']['dstack']['secrets'].append(
+                    {'source': 'stripe'}
+                ),
+                'migration_stripe_outside_business',
+            ),
+            (
+                lambda d: d['secrets']['stripe'].update(
+                    file='/run/sixnine-secrets/workos'
+                ),
+                'migration_stripe_configuration_invalid',
+            ),
+            (
+                lambda d: d['services']['app']['environment'].update(
+                    STRIPE_SECRET_KEY='synthetic-private-value'
+                ),
+                'migration_secret_value_in_compose',
+            ),
+        ):
+            broken = copy.deepcopy(rendered)
+            mutate(broken)
+            with (
+                self.subTest(code=code),
+                self.assertRaisesRegex(ValueError, '^' + code + '$'),
+            ):
+                validate(broken, target='staging')
+        production = copy.deepcopy(self.document)
+        for name in ('app', 'controller'):
+            production['services'][name]['environment'].update(
+                INKSEQ_STRIPE_MODE='test',
+                INKSEQ_STRIPE_CONFIG_FILE='/run/secrets/stripe',
+            )
+        production['secrets']['stripe']['file'] = '/run/sixnine-secrets/stripe'
+        with self.assertRaisesRegex(
+            ValueError, '^migration_stripe_production_forbidden$'
+        ):
+            validate(production)
+
     def test_public_origin_and_proxy_only_phase_are_closed_and_consistent(self):
         self.assertEqual(
             self.document["services"]["app"]["environment"]["PUBLIC_ORIGIN"],

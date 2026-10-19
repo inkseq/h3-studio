@@ -125,12 +125,30 @@ class Settings:
     generation_queue: str = "postgres"
     title_config_file: Path | None = None
     workos_config_file: Path | None = None
+    stripe_config_file: Path | None = None
+    stripe_mode: str = "off"
     title_use_central: bool = False
     public_origin_aliases: tuple[str, ...] = ()
 
     def __post_init__(self):
         if self.deployment_target not in {"production", "staging"}:
             raise ValueError("Unsupported deployment target")
+        if self.stripe_mode not in {"off", "test"}:
+            raise ValueError("Unsupported Stripe mode")
+        if self.stripe_config_file is not None:
+            path = Path(self.stripe_config_file)
+            if not path.is_absolute() or ".." in path.parts:
+                raise ValueError("Stripe credential path must be absolute")
+            object.__setattr__(self, "stripe_config_file", path)
+        if self.stripe_mode == "test" and (
+            self.deployment_target != "staging"
+            or self.public_origin != "https://staging.inkseq.com"
+            or self.public_origin_aliases
+            or self.stripe_config_file is None
+        ):
+            raise ValueError(
+                "Stripe test mode requires its isolated staging configuration"
+            )
         if self.generation_queue not in {"postgres", "dbos"}:
             raise ValueError("Unsupported generation queue")
         if self.generation_queue == "dbos" and not self.database_url.startswith(
@@ -408,5 +426,9 @@ class Settings:
             workos_config_file=Path(os.environ["INKSEQ_WORKOS_CONFIG_FILE"])
             if os.environ.get("INKSEQ_WORKOS_CONFIG_FILE")
             else None,
+            stripe_config_file=Path(os.environ["INKSEQ_STRIPE_CONFIG_FILE"])
+            if os.environ.get("INKSEQ_STRIPE_CONFIG_FILE")
+            else None,
+            stripe_mode=os.environ.get("INKSEQ_STRIPE_MODE", "off"),
             title_use_central=os.environ.get("SIXNINE_TITLE_USE_CENTRAL", "0") == "1",
         )

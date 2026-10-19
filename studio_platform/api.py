@@ -449,6 +449,9 @@ def create_app(
         if request.method == "GET":
             public_paths.update({"/api/auth/workos/start", "/api/auth/workos/callback"})
             public_paths.add("/v1/credits/prices")
+            public_paths.add("/v1/billing/packs")
+        if request.method == "POST":
+            public_paths.add("/v1/billing/stripe/webhook")
         public_frontend = is_public_frontend(settings, request.method, request.url.path)
         public_discovery = (
             request.method in {"GET", "HEAD"} and request.url.path in AGENT_PUBLIC_PATHS
@@ -1486,6 +1489,11 @@ def create_app(
     from .credits_routes import register_routes as register_credit_routes
 
     register_credit_routes(app)
+    from .payments_routes import register_routes as register_payment_routes
+
+    register_payment_routes(
+        app, settings, repo, lambda request: request.state.principal
+    )
     from .frontend import register_routes as register_frontend_routes
 
     register_frontend_routes(app)
