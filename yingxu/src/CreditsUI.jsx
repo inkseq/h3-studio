@@ -22,6 +22,7 @@ import {
   entryList,
   formatCredits,
   formatPrice,
+  apiDate,
   packList,
   priceRates,
   waitForPurchase,
@@ -292,7 +293,7 @@ export function CreditsPanel({ account, active }) {
                   </span>
                   <small className="muted">
                     {entry.reason || entry.label ? t('credits.kind.' + entry.kind) + ' · ' : ''}
-                    {entry.created_at ? new Date(entry.created_at).toLocaleDateString(locale) : ''}
+                    {apiDate(entry.created_at)?.toLocaleDateString(locale) || ''}
                     {entry.receipt_url && (
                       <>
                         {' · '}

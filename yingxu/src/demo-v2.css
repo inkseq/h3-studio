@@ -2672,6 +2672,8 @@ button.qstatus:hover {
   grid-template-columns: 200px 1fr;
   gap: 28px;
   align-items: start;
+  /* Short tabs must not stretch the rows when the page fills the viewport (phone). */
+  align-content: start;
 }
 .snav {
   display: flex;
