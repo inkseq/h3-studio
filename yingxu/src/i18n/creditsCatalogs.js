@@ -1,7 +1,24 @@
-// Credits (#306/#307) and hosted sign-in (#305) strings.
+// Credits (#306/#307), hosted sign-in (#305), pricing and legal pages (#308).
 export const creditsCatalogs = {
   en: {
     'settings.credits': 'Credits',
+    'pricing.title': 'Pricing',
+    'pricing.lead':
+      'Pay only for what you generate. Buy credits once, use them whenever you like: 1 credit = US$0.01, and the price depends on the quality tier and video length.',
+    'pricing.packs': 'Credit packs',
+    'pricing.topUp': 'Top up',
+    'pricing.start': 'Start creating',
+    'pricing.fairTitle': 'How charging works',
+    'pricing.point.quote': 'You see the exact number of credits before you submit.',
+    'pricing.point.failed': 'Failed generations are returned to your balance automatically.',
+    'pricing.point.expiry': 'Credits never expire. No subscription.',
+    'pricing.point.refund': 'Unused credits can be refunded within 14 days of purchase.',
+    'pricing.point.caps': 'Set a daily limit for yourself and for each connected AI assistant.',
+    'pricing.point.stripe':
+      'Secure checkout by Stripe; tax is shown at checkout. Payments from mainland China are not supported yet.',
+    'legal.footer': 'Site links',
+    'legal.draft': 'Draft for review. This page is not yet in effect.',
+    'legal.version': 'Version {version}',
     'signIn.hosted': 'Continue with Google, GitHub or email',
     'signIn.consentBefore': 'By continuing you agree to the ',
     'signIn.terms': 'Terms',
@@ -67,6 +84,22 @@ export const creditsCatalogs = {
   },
   zh: {
     'settings.credits': '我的积分',
+    'pricing.title': '价格',
+    'pricing.lead':
+      '用多少付多少。积分一次买好，随时用：1 积分 = 0.01 美元，价格按画质档位和视频时长计算。',
+    'pricing.packs': '积分包',
+    'pricing.topUp': '去充值',
+    'pricing.start': '开始创作',
+    'pricing.fairTitle': '怎么扣积分',
+    'pricing.point.quote': '提交前就告诉你要用多少积分。',
+    'pricing.point.failed': '生成失败，积分自动退回。',
+    'pricing.point.expiry': '积分不会过期，不用订阅。',
+    'pricing.point.refund': '购买后 14 天内，未使用的积分可以退款。',
+    'pricing.point.caps': '可以给自己和每个 AI 助手设每日上限。',
+    'pricing.point.stripe': '通过 Stripe 安全付款，税费在付款页显示。暂时不支持中国大陆的付款。',
+    'legal.footer': '网站链接',
+    'legal.draft': '草稿，待审阅。本页内容尚未生效。',
+    'legal.version': '版本 {version}',
     'signIn.hosted': '用 Google、GitHub 或邮箱继续',
     'signIn.consentBefore': '继续即表示你同意',
     'signIn.terms': '服务条款',
