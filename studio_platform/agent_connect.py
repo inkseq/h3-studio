@@ -31,7 +31,6 @@ from sqlalchemy.exc import IntegrityError
 
 from .auth import (
     API_SCOPES,
-    USERS,
     Auth,
     AuthenticationError,
     Principal,
@@ -157,24 +156,11 @@ class AgentConnect(AgentManagementMixin):
             )
         )
 
-    def _account(self, conn, owner, password_version, *, lock=False):
-        from .identity import account_identity
-
-        identity = account_identity(conn, self.tenant, owner)
-        if identity is not None and identity["status"] != "active":
-            raise ConnectError("connection_authority_changed", 410)
-        statement = select(accounts).where(
-            accounts.c.tenant == self.tenant, accounts.c.username == owner
+    def _account(self, conn, owner, password_version, *, auth_mode=None, lock=False):
+        account = self.auth._grant_account(
+            conn, owner, auth_mode or self.auth.mode, password_version, lock=lock
         )
-        if lock:
-            statement = statement.with_for_update()
-        account = conn.execute(statement).mappings().first()
-        if self.auth.mode == "password" and (
-            not account
-            or account["disabled"]
-            or account["updated"] != password_version
-            or not self.auth.ready(conn)
-        ):
+        if account is None:
             raise ConnectError("connection_authority_changed", 410)
         return account
 
@@ -182,21 +168,25 @@ class AgentConnect(AgentManagementMixin):
         if (
             not isinstance(principal, Principal)
             or principal.machine
-            or principal.owner not in USERS
-            or principal.auth_mode != self.auth.mode
+            or not self.auth.source_supported(principal.auth_mode)
             or principal.password_version is None
             or not principal.session_hash
-            or self.auth.mode not in {"password", "local-test"}
         ):
             raise AuthenticationError("请使用网站账户登录后连接Agent")
-        self._account(conn, principal.owner, principal.password_version, lock=True)
+        self._account(
+            conn,
+            principal.owner,
+            principal.password_version,
+            auth_mode=principal.auth_mode,
+            lock=True,
+        )
         row = conn.execute(
             select(sessions.c.token_hash)
             .where(
                 sessions.c.tenant == self.tenant,
                 sessions.c.token_hash == principal.session_hash,
                 sessions.c.username == principal.owner,
-                sessions.c.auth_mode == self.auth.mode,
+                sessions.c.auth_mode == principal.auth_mode,
                 sessions.c.password_version == principal.password_version,
                 sessions.c.expires > self.clock(),
             )
@@ -371,7 +361,7 @@ class AgentConnect(AgentManagementMixin):
                 name=name.strip(),
                 code_hash=digest(code),
                 session_hash=principal.session_hash,
-                auth_mode=self.auth.mode,
+                auth_mode=principal.auth_mode,
                 password_version=principal.password_version,
                 created_at=now,
                 expires_at=now + policy["code_ttl_seconds"],
@@ -448,9 +438,11 @@ class AgentConnect(AgentManagementMixin):
             if row.get("key_id")
             else None
         )
-        unavailable = row["auth_mode"] != self.auth.mode
+        unavailable = not self.auth.source_supported(row["auth_mode"])
         try:
-            self._account(conn, row["owner"], row["password_version"])
+            self._account(
+                conn, row["owner"], row["password_version"], auth_mode=row["auth_mode"]
+            )
         except ConnectError:
             unavailable = True
         if row.get("claimed_at") is not None and not key:
@@ -461,6 +453,9 @@ class AgentConnect(AgentManagementMixin):
                 select(sessions.c.token_hash).where(
                     sessions.c.tenant == self.tenant,
                     sessions.c.token_hash == row["session_hash"],
+                    sessions.c.username == row["owner"],
+                    sessions.c.auth_mode == row["auth_mode"],
+                    sessions.c.password_version == row["password_version"],
                     sessions.c.expires > self.clock(),
                 )
             ).first()
@@ -624,7 +619,11 @@ class AgentConnect(AgentManagementMixin):
             with self.engine.begin() as conn:
                 self._begin(conn)
                 initial = conn.execute(
-                    select(connections.c.owner, connections.c.password_version).where(
+                    select(
+                        connections.c.owner,
+                        connections.c.password_version,
+                        connections.c.auth_mode,
+                    ).where(
                         connections.c.tenant == self.tenant,
                         connections.c.code_hash == digest(code),
                     )
@@ -632,7 +631,9 @@ class AgentConnect(AgentManagementMixin):
                 if not initial:
                     raise ConnectError()
                 # Same lock order as Auth.set_password: account before key rows.
-                self._account(conn, initial[0], initial[1], lock=True)
+                self._account(
+                    conn, initial[0], initial[1], auth_mode=initial[2], lock=True
+                )
                 row = (
                     conn.execute(
                         select(connections)
@@ -654,7 +655,9 @@ class AgentConnect(AgentManagementMixin):
                     or authorization["origin"] != origin
                 ):
                     raise ConnectError("connection_authorization_mismatch", 409)
-                if row["revoked_at"] is not None or row["auth_mode"] != self.auth.mode:
+                if row["revoked_at"] is not None or not self.auth.source_supported(
+                    row["auth_mode"]
+                ):
                     raise ConnectError("connection_unavailable", 410)
                 now = self.clock()
                 if row["claimed_at"] is not None:
@@ -689,6 +692,8 @@ class AgentConnect(AgentManagementMixin):
                         not key
                         or key["prefix"] != key_prefix
                         or key["token_hash"] != token_hash
+                        or key["auth_mode"] != row["auth_mode"]
+                        or key["password_version"] != row["password_version"]
                     ):
                         raise ConnectError("connection_unavailable", 410)
                     self._emit(conn, row, "recovered")
@@ -709,7 +714,7 @@ class AgentConnect(AgentManagementMixin):
                         sessions.c.tenant == self.tenant,
                         sessions.c.token_hash == row["session_hash"],
                         sessions.c.username == row["owner"],
-                        sessions.c.auth_mode == self.auth.mode,
+                        sessions.c.auth_mode == row["auth_mode"],
                         sessions.c.password_version == row["password_version"],
                         sessions.c.expires > now,
                     )
@@ -737,7 +742,7 @@ class AgentConnect(AgentManagementMixin):
                     projects=json.dumps(authorization["project_ids"]),
                     scopes=json.dumps(authorization["scopes"]),
                     all_projects=int(authorization["all_projects"]),
-                    auth_mode=self.auth.mode,
+                    auth_mode=row["auth_mode"],
                     password_version=row["password_version"],
                     created_at=now,
                     expires_at=authorization["key_expires_at"],

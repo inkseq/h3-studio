@@ -186,6 +186,21 @@ def completed_summary(operation, day):
     return {'state': 'already_completed', 'day': day, **coverage(read(operation/'completed.json'))}
 
 
+def require_hosted_coverage(operation):
+    """Warn only after the original business transfer is durably recorded."""
+    manifest = operation/'snapshot'/'manifest.json'
+    if manifest.exists():
+        hosted = read(manifest).get('hosted_users')
+        require(hosted is None or isinstance(hosted, dict) and hosted.get('status') == 'complete',
+            'backup_hosted_users_unavailable_business_confirmed')
+
+
+def finish_daily(operation, summary, cfg, image):
+    result = {**summary, 'retention':retention_after_success(cfg,image)}
+    require_hosted_coverage(operation)
+    return result
+
+
 
 MAX_RETENTION_JSON = 16 * 1024**2
 MAX_RETENTION_FILES = 100003
@@ -280,14 +295,14 @@ def retention_inventory(item):
     for entry in files:
         require(type(entry) is dict and set(entry) == {'name','size_bytes','sha256'}, 'backup_retention_inventory')
         name = entry['name']
-        require(isinstance(name,str) and (name in ('manifest.json','database.sqlite3','workflow-state.json')
+        require(isinstance(name,str) and (name in ('manifest.json','database.sqlite3','workflow-state.json','workos-users.json')
             or re.fullmatch(r'media/[0-9a-f]{64}\.bin',name)) and name not in result
             and type(entry['size_bytes']) is int and 0 < entry['size_bytes'] <= 512*1024**2
             and isinstance(entry['sha256'],str) and re.fullmatch('[0-9a-f]{64}',entry['sha256']), 'backup_retention_inventory')
         require(name != 'manifest.json' or entry['size_bytes'] <= MAX_RETENTION_JSON,'backup_retention_manifest_limit')
         result[name] = entry
     require({'manifest.json','database.sqlite3'} <= set(result)
-        and len(result) == receipt['objects']+2+('workflow-state.json' in result)
+        and len(result) == receipt['objects']+2+('workflow-state.json' in result)+('workos-users.json' in result)
         and sum(v['size_bytes'] for v in result.values()) == receipt['bytes']
         and files[-1]['name'] == 'manifest.json' and result['manifest.json']['sha256'] == receipt['snapshot_manifest_sha256'],
         'backup_retention_inventory_identity')
@@ -355,7 +370,8 @@ def snapshot_tree(path, files, *, hash_files=True):
     try:
         fd = handles[-1]; info = os.fstat(fd); entries = {'':{'identity':identity(info),'kind':'directory'}}
         require(set(os.listdir(fd)) == {'manifest.json','database.sqlite3','media'}
-            | ({'workflow-state.json'} if 'workflow-state.json' in files else set()), 'backup_retention_snapshot_extra')
+            | ({'workflow-state.json'} if 'workflow-state.json' in files else set())
+            | ({'workos-users.json'} if 'workos-users.json' in files else set()), 'backup_retention_snapshot_extra')
         media = os.open('media',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fd); handles.append(media)
         info = os.fstat(media)
         require(info.st_dev == os.fstat(fd).st_dev and info.st_uid in (0,10001) and not info.st_mode & 0o022,
@@ -534,7 +550,7 @@ def run(mode="daily"):
         # A previous unknown transfer blocks new prefixes: reconciliation first.
         operation = STATE/day
         if check_history(STATE, day):
-            return {**completed_summary(operation,day),'retention':retention_after_success(cfg,image)}
+            return finish_daily(operation,completed_summary(operation,day),cfg,image)
         require(shutil.disk_usage(ROOT).free >= 5*1024**3, 'backup_disk_reserve_required')
         nonce = str(uuid.uuid4())
         new_directory(operation)
@@ -572,8 +588,7 @@ def run(mode="daily"):
             'completion_sha256': receipt['completion_sha256'], 'completion_version_id': receipt['completion_version_id'],
             'receipt_sha256': hashlib.sha256((operation/'receipt.json').read_bytes()).hexdigest(),
             'restore_verified': False, **coverage(receipt)})
-        return {'state': 'copied_not_restored', 'day': day, **coverage(receipt),
-            'retention':retention_after_success(cfg,image)}
+        return finish_daily(operation,{'state':'copied_not_restored','day':day,**coverage(receipt)},cfg,image)
     finally:
         os.close(lockfd)
 
@@ -625,6 +640,7 @@ if __name__ == '__main__':
             or len(sys.argv) in (3,4) and sys.argv[1] == '--restore-day' and (len(sys.argv) == 3 or sys.argv[3] == '--allow-incomplete'), 'backup_fixed_invocation_required')
         print(json.dumps(run() if len(sys.argv) == 1 else run(retention[sys.argv[1]]) if len(sys.argv) == 2
             else restore(sys.argv[2],allow_incomplete=len(sys.argv) == 4)))
-    except Exception:
-        print('{"state":"backup_failed_or_unknown","automatic_retry":false}', file=sys.stderr)
+    except Exception as error:
+        state = 'backup_hosted_users_unavailable_business_confirmed' if str(error) == 'backup_hosted_users_unavailable_business_confirmed' else 'backup_failed_or_unknown'
+        print(json.dumps({'state':state,'automatic_retry':False}), file=sys.stderr)
         raise SystemExit(1) from None

@@ -69,6 +69,23 @@ def secret_names(service):
     return {item if isinstance(item, str) else item["source"] for item in service.get("secrets", [])}
 
 
+def validate_workos(document):
+    """Hosted sign-in is opt-in and its credential never reaches GPU control."""
+    services, secrets = document['services'], document.get('secrets', {})
+    selected = services['app'].get('environment', {}).get('INKSEQ_WORKOS_CONFIG_FILE', '')
+    require(selected in {'', '/run/secrets/workos'}, 'migration_workos_configuration_invalid')
+    for name, service in services.items():
+        require(name == 'app' or ('INKSEQ_WORKOS_CONFIG_FILE' not in service.get('environment', {})
+                and 'workos' not in secret_names(service)), 'migration_workos_outside_app')
+    configured = secrets.get('workos')
+    if configured is None:
+        require(not selected, 'migration_workos_configuration_invalid')
+        return
+    expected = '/run/sixnine-secrets/workos' if selected else secrets['execution_profiles']['file']
+    require(configured.get('file') == expected and 'workos' in secret_names(services['app']),
+            'migration_workos_configuration_invalid')
+
+
 def validate_storage(document, *, target='production'):
     """One provider identity for API/worker; credentials never enter env/queue."""
     identity = deployment_target.profile(target)
@@ -169,6 +186,7 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, targe
         require(not any(key in environment for key in ("DSTACK_SERVER_ADMIN_TOKEN", "DSTACK_DATABASE_URL",
             "DATABASE_URL", "POSTGRES_PASSWORD", "ADMIN_PASSWORD", "SIXNINE_DATABASE_URL",
             "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_SESSION_TOKEN", "R2TOKEN", "R2_TOKEN",
+            "WORKOS_API_KEY", "INKSEQ_WORKOS_API_KEY",
             "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN")),
                 "migration_secret_value_in_compose")
         if name != "caddy":
@@ -193,6 +211,7 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, targe
             and not volume.get("read_only") for volume in service.get("volumes", [])), "migration_assets_split")
         require(env.get("SIXNINE_TELEMETRY_CONFIG_FILE") == "/run/secrets/grafana_cloud", "migration_cloud_telemetry_missing")
     validate_storage(document, target=target)
+    validate_workos(document)
     controller = services["controller"]
     targets = {volume["target"] for volume in controller.get("volumes", [])}
     require({"/dstack-runtime", "/dstack-sources"} <= targets and

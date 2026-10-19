@@ -250,6 +250,8 @@ class Auth:
             )
 
     def change_password(self, username, old_password, new_password):
+        if username not in USERS:
+            raise ValueError("请在账户登录方式中管理 WorkOS 密码")
         if self.mode != "password":
             raise ValueError("当前测试登录模式不支持修改密码")
         self.reserve_login("password-change:" + username)
@@ -392,6 +394,99 @@ class Auth:
             )
         return token
 
+    def source_supported(self, source):
+        """Own issued WorkOS grants do not depend on provider SDK/config health."""
+        return source == "workos" or source == self.mode
+
+    def _grant_account(
+        self, connection, owner, source, version, *, lock=False, check_identity=True
+    ):
+        """Revalidate the original source without synthesizing password rows."""
+        from .identity import account_identity
+
+        if (
+            not isinstance(owner, str)
+            or not 1 <= len(owner) <= 80
+            or not self.source_supported(source)
+        ):
+            return None
+        if source == "workos":
+            if type(version) not in (int, float) or version != 0.0:
+                return None
+            from .identity_schema import users
+
+            identity = account_identity(connection, self.tenant, owner)
+            if identity is None or identity.get("status") != "active":
+                return None
+            statement = select(users).where(
+                users.c.tenant == self.tenant, users.c.owner == owner
+            )
+            row = (
+                connection.execute(statement.with_for_update() if lock else statement)
+                .mappings()
+                .first()
+            )
+            if (
+                row is None
+                or row["status"] != "active"
+                or not isinstance(row["workos_user_id"], str)
+                or not row["workos_user_id"]
+            ):
+                return None
+            return row
+        if owner not in USERS:
+            return None
+        if check_identity:
+            identity = account_identity(connection, self.tenant, owner)
+            if identity is not None and identity.get("status") != "active":
+                return None
+        # Explicit local-test grants have no password backing row. Keep their
+        # original fixed-query path; hydrate still enforces canonical status.
+        if source == "local-test":
+            return {"owner": owner} if version == 0.0 else None
+        statement = select(accounts).where(
+            accounts.c.tenant == self.tenant, accounts.c.username == owner
+        )
+        row = (
+            connection.execute(statement.with_for_update() if lock else statement)
+            .mappings()
+            .first()
+        )
+        if source == "password":
+            return (
+                row
+                if row is not None
+                and not row["disabled"]
+                and row["updated"] == version
+                and self.ready(connection)
+                else None
+            )
+        return None
+
+    def issue_workos_session(self, owner, workos_user_id):
+        """Trusted verified-SDK callback only, after its canonical upsert commits."""
+        if not isinstance(workos_user_id, str) or not 1 <= len(workos_user_id) <= 200:
+            raise AuthenticationError("WorkOS 登录身份不可用")
+        token, now = secrets.token_urlsafe(32), self.clock()
+        with self.engine.begin() as connection:
+            if self.engine.dialect.name == "sqlite":
+                connection.exec_driver_sql("BEGIN IMMEDIATE")
+            row = self._grant_account(connection, owner, "workos", 0.0, lock=True)
+            if row is None or row["workos_user_id"] != workos_user_id:
+                raise AuthenticationError("WorkOS 登录身份已改变，请重新登录")
+            connection.execute(
+                insert(sessions).values(
+                    tenant=self.tenant,
+                    token_hash=digest(token),
+                    username=owner,
+                    auth_mode="workos",
+                    password_version=0.0,
+                    created=now,
+                    expires=now + self.session_seconds,
+                )
+            )
+        return token
+
     def session(self, token):
         if not isinstance(token, str) or not TOKEN.fullmatch(token):
             return None
@@ -406,7 +501,7 @@ class Auth:
                         sessions.c.tenant == self.tenant,
                         sessions.c.token_hash == token_hash,
                         sessions.c.expires > now,
-                        sessions.c.auth_mode == self.mode,
+                        sessions.c.auth_mode.in_((self.mode, "workos")),
                     )
                 )
                 .mappings()
@@ -414,24 +509,17 @@ class Auth:
             )
             if not row:
                 return None
-            if self.mode == "password":
-                account = (
-                    conn.execute(
-                        select(accounts).where(
-                            accounts.c.tenant == self.tenant,
-                            accounts.c.username == row["username"],
-                        )
-                    )
-                    .mappings()
-                    .first()
+            if (
+                self._grant_account(
+                    conn,
+                    row["username"],
+                    row["auth_mode"],
+                    row["password_version"],
+                    check_identity=False,  # Fresh hydrate below checks legacy status/role.
                 )
-                if (
-                    not account
-                    or account["disabled"]
-                    or account["updated"] != row["password_version"]
-                    or not self.ready(conn)
-                ):
-                    return None
+                is None
+            ):
+                return None
             from .identity import hydrate
 
             principal = hydrate(
@@ -455,10 +543,10 @@ class Auth:
                     sessions.c.tenant == self.tenant,
                     sessions.c.token_hash == row["token_hash"],
                     sessions.c.expires > now,
-                    sessions.c.auth_mode == self.mode,
+                    sessions.c.auth_mode == row["auth_mode"],
                     sessions.c.password_version == row["password_version"],
                 )
-                if self.mode == "password":
+                if row["auth_mode"] == "password":
                     statement = statement.where(
                         select(accounts.c.username)
                         .where(
@@ -489,7 +577,11 @@ class Auth:
                 )
 
     def register_client(self, client_id, token, owner, project_ids, scopes):
-        if not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", client_id) or owner not in USERS:
+        if (
+            not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", client_id)
+            or not isinstance(owner, str)
+            or not 1 <= len(owner) <= 80
+        ):
             raise ValueError("Invalid client identity")
         if not isinstance(token, str) or not TOKEN.fullmatch(token):
             raise ValueError("Client token must be a high entropy URL-safe value")
@@ -512,6 +604,11 @@ class Auth:
         ):
             raise ValueError("Client must have explicit projects and scopes")
         with self.engine.begin() as conn:
+            if (
+                owner not in USERS
+                and self._grant_account(conn, owner, "workos", 0.0) is None
+            ):
+                raise ValueError("Invalid client identity")
             # Rotation changes the hash atomically and invalidates the old token.
             values = dict(
                 token_hash=digest(token),
@@ -580,7 +677,8 @@ class Auth:
         expires_in_days=90,
     ):
         if (
-            owner not in USERS
+            not isinstance(owner, str)
+            or not 1 <= len(owner) <= 80
             or not isinstance(name, str)
             or not 1 <= len(name.strip()) <= 80
         ):
@@ -618,7 +716,7 @@ class Auth:
             not isinstance(authenticated_session, Principal)
             or authenticated_session.machine
             or authenticated_session.owner != owner
-            or authenticated_session.auth_mode != self.mode
+            or not self.source_supported(authenticated_session.auth_mode)
             or authenticated_session.password_version is None
             or not authenticated_session.session_hash
         ):
@@ -632,21 +730,14 @@ class Auth:
             # Same lock order as password rotation: account, then session/key.
             # A request authenticated before rotation/logout must not mint a key
             # stamped with the replacement password's newer authority.
-            account = (
-                conn.execute(
-                    select(accounts)
-                    .where(
-                        accounts.c.tenant == self.tenant, accounts.c.username == owner
-                    )
-                    .with_for_update()
-                )
-                .mappings()
-                .first()
+            account = self._grant_account(
+                conn,
+                owner,
+                authenticated_session.auth_mode,
+                authenticated_session.password_version,
+                lock=True,
             )
-            from .identity import account_identity
-
-            identity = account_identity(conn, self.tenant, owner)
-            if identity is not None and identity["status"] != "active":
+            if account is None:
                 raise AuthenticationError("账户状态已改变，请重新登录")
             session = conn.execute(
                 select(sessions.c.token_hash)
@@ -654,23 +745,14 @@ class Auth:
                     sessions.c.tenant == self.tenant,
                     sessions.c.token_hash == authenticated_session.session_hash,
                     sessions.c.username == owner,
-                    sessions.c.auth_mode == self.mode,
+                    sessions.c.auth_mode == authenticated_session.auth_mode,
                     sessions.c.expires > self.clock(),
                     sessions.c.password_version
                     == authenticated_session.password_version,
                 )
                 .with_for_update()
             ).first()
-            if (
-                not session
-                or self.mode == "password"
-                and (
-                    not account
-                    or account["disabled"]
-                    or account["updated"] != authenticated_session.password_version
-                    or not self.ready(conn)
-                )
-            ):
+            if not session:
                 raise AuthenticationError("账户状态已改变，请重新登录")
             active = conn.execute(
                 select(personal_keys.c.id).where(
@@ -692,7 +774,7 @@ class Auth:
                 scopes=json.dumps(scopes),
                 projects=json.dumps(project_ids),
                 all_projects=int(all_projects),
-                auth_mode=self.mode,
+                auth_mode=authenticated_session.auth_mode,
                 password_version=authenticated_session.password_version,
                 created_at=now,
                 expires_at=now + expires_in_days * 86400,
@@ -759,7 +841,7 @@ class Auth:
                         predicate,
                         personal_keys.c.revoked_at.is_(None),
                         personal_keys.c.expires_at > now,
-                        personal_keys.c.auth_mode == self.mode,
+                        personal_keys.c.auth_mode.in_((self.mode, "workos")),
                     )
                 )
                 .mappings()
@@ -767,24 +849,17 @@ class Auth:
             )
             if not row:
                 return None
-            if self.mode == "password":
-                account = (
-                    conn.execute(
-                        select(accounts).where(
-                            accounts.c.tenant == self.tenant,
-                            accounts.c.username == row["owner"],
-                        )
-                    )
-                    .mappings()
-                    .first()
+            if (
+                self._grant_account(
+                    conn,
+                    row["owner"],
+                    row["auth_mode"],
+                    row["password_version"],
+                    check_identity=False,  # Fresh hydrate below checks legacy status/role.
                 )
-                if (
-                    not account
-                    or account["disabled"]
-                    or account["updated"] != row["password_version"]
-                    or not self.ready(conn)
-                ):
-                    return None
+                is None
+            ):
+                return None
             from .identity import hydrate
 
             principal = hydrate(
@@ -795,6 +870,8 @@ class Auth:
                     tuple(json.loads(row["projects"])),
                     tuple(json.loads(row["scopes"])),
                     bool(row["all_projects"]),
+                    auth_mode=row["auth_mode"],
+                    password_version=row["password_version"],
                 ),
                 conn,
                 self.tenant,
@@ -851,7 +928,12 @@ class Auth:
             "password_version",
             "session_hash",
         }
-        if owner not in USERS or type(grant) is not dict or set(grant) != fields:
+        if (
+            not isinstance(owner, str)
+            or not 1 <= len(owner) <= 80
+            or type(grant) is not dict
+            or set(grant) != fields
+        ):
             raise AuthenticationError("film_actor_grant_unavailable")
         actor = grant["actor_id"]
         principal = None
@@ -860,12 +942,12 @@ class Auth:
             if (
                 isinstance(hashed, str)
                 and re.fullmatch(r"[0-9a-f]{64}", hashed)
-                and grant["auth_mode"] == self.mode
+                and self.source_supported(grant["auth_mode"])
             ):
                 principal = self._session_hash(hashed)
-                if (
-                    principal is not None
-                    and principal.password_version != grant["password_version"]
+                if principal is not None and (
+                    principal.password_version != grant["password_version"]
+                    or principal.auth_mode != grant["auth_mode"]
                 ):
                     principal = None
         elif grant["machine"] is True and isinstance(actor, str):
@@ -886,6 +968,12 @@ class Auth:
             or principal.owner != owner
             or principal.actor_id != actor
             or principal.machine is not grant["machine"]
+            or grant["machine"] is True
+            and grant["auth_mode"] is not None
+            and (
+                principal.auth_mode != grant["auth_mode"]
+                or principal.password_version != grant["password_version"]
+            )
         ):
             raise AuthenticationError("film_actor_grant_unavailable")
         return principal
@@ -903,7 +991,11 @@ class Auth:
                 .mappings()
                 .first()
             )
-            if row and self.mode == "password":
+            source = "workos" if row and row["owner"] not in USERS else None
+            if row and source == "workos":
+                if self._grant_account(conn, row["owner"], "workos", 0.0) is None:
+                    return None
+            elif row and self.mode == "password":
                 active = conn.execute(
                     select(accounts.c.username).where(
                         accounts.c.tenant == self.tenant,
@@ -924,6 +1016,8 @@ class Auth:
                     True,
                     tuple(json.loads(row["projects"])),
                     tuple(json.loads(row["scopes"])),
+                    auth_mode=source,
+                    password_version=0.0 if source == "workos" else None,
                 ),
                 conn,
                 self.tenant,

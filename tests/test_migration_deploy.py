@@ -206,6 +206,55 @@ class MigrationDeployTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "^" + code + "$"):
             validate(value)
 
+    def test_workos_opt_in_is_app_only_and_uses_the_independent_fixed_file(self):
+        self.assertEqual(
+            self.document['services']['app']['environment'][
+                'INKSEQ_WORKOS_CONFIG_FILE'
+            ],
+            '',
+        )
+        self.assertEqual(
+            self.document['secrets']['workos']['file'],
+            self.document['secrets']['execution_profiles']['file'],
+        )
+        environment = fixture_environment()
+        environment['INKSEQ_WORKOS_CONFIG_FILE'] = '/run/sixnine-secrets/workos'
+        rendered = {}
+
+        def render(command, **kwargs):
+            result = subprocess.run(command, **kwargs)
+            if result.returncode == 0:
+                rendered.update(json.loads(result.stdout))
+            return result
+
+        check(
+            ROOT / 'deploy/platform/compose.yaml',
+            ROOT / 'deploy/dstack/platform-overlay.yaml',
+            environment=environment,
+            runner=render,
+        )
+        self.assertEqual(
+            rendered['services']['app']['environment']['INKSEQ_WORKOS_CONFIG_FILE'],
+            '/run/secrets/workos',
+        )
+        self.assertEqual(
+            rendered['secrets']['workos']['file'], '/run/sixnine-secrets/workos'
+        )
+        broken = copy.deepcopy(rendered)
+        broken['services']['controller']['environment']['INKSEQ_WORKOS_CONFIG_FILE'] = (
+            '/run/secrets/workos'
+        )
+        with self.assertRaisesRegex(ValueError, '^migration_workos_outside_app$'):
+            validate(broken)
+        broken = copy.deepcopy(rendered)
+        broken['secrets']['workos']['file'] = rendered['secrets']['execution_profiles'][
+            'file'
+        ]
+        with self.assertRaisesRegex(
+            ValueError, '^migration_workos_configuration_invalid$'
+        ):
+            validate(broken)
+
     def test_public_origin_and_proxy_only_phase_are_closed_and_consistent(self):
         self.assertEqual(
             self.document["services"]["app"]["environment"]["PUBLIC_ORIGIN"],
