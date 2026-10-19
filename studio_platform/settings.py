@@ -123,6 +123,7 @@ class Settings:
     recovery_backends: tuple[str, ...] = ()
     generation_queue: str = "postgres"
     title_config_file: Path | None = None
+    workos_config_file: Path | None = None
     title_use_central: bool = False
     public_origin_aliases: tuple[str, ...] = ()
 
@@ -157,6 +158,11 @@ class Settings:
             and not Path(self.title_config_file).is_absolute()
         ):
             raise ValueError("Title credential path must be absolute")
+        if self.workos_config_file is not None:
+            path = Path(self.workos_config_file)
+            if not path.is_absolute() or ".." in path.parts:
+                raise ValueError("WorkOS credential path must be absolute")
+            object.__setattr__(self, "workos_config_file", path)
         if type(self.title_use_central) is not bool or (
             self.title_config_file is not None and self.title_use_central
         ):
@@ -394,6 +400,9 @@ class Settings:
             ),
             title_config_file=Path(os.environ["SIXNINE_TITLE_CONFIG_FILE"])
             if os.environ.get("SIXNINE_TITLE_CONFIG_FILE")
+            else None,
+            workos_config_file=Path(os.environ["INKSEQ_WORKOS_CONFIG_FILE"])
+            if os.environ.get("INKSEQ_WORKOS_CONFIG_FILE")
             else None,
             title_use_central=os.environ.get("SIXNINE_TITLE_USE_CENTRAL", "0") == "1",
         )

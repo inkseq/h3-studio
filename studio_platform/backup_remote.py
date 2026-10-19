@@ -173,13 +173,18 @@ def _files(directory, manifest):
     }
     if 'workflow_state' in manifest:
         names.add('workflow-state.json')
+    if 'hosted_users' in manifest:
+        names.add('workos-users.json')
     need(len(names) <= MAX_FILES, "backup_file_count_limit")
     # Ignore no extras: a credential/staging file accidentally placed here must
     # never be copied, nor silently treated as covered by this backup receipt.
     need(
         {p.name for p in directory.iterdir()}
         == {"manifest.json", "database.sqlite3", "media"}
-        | ({'workflow-state.json'} if 'workflow_state' in manifest else set()),
+        | ({'workflow-state.json'} if 'workflow_state' in manifest else set())
+        | ({'workos-users.json'} if 'hosted_users' in manifest else set()),
+        # Optional hosted identity metadata is independently bounded and hashed
+        # by verify_local; it contains no authentication credentials.
         "backup_directory_has_unexpected_entries",
     )
     need(
@@ -567,7 +572,13 @@ def _completion(value, target, snapshot):
         need(
             isinstance(name, str)
             and (
-                name in ("database.sqlite3", "manifest.json", "workflow-state.json")
+                name
+                in (
+                    "database.sqlite3",
+                    "manifest.json",
+                    "workflow-state.json",
+                    "workos-users.json",
+                )
                 or re.fullmatch(r"media/[0-9a-f]{64}\.bin", name)
             )
             and name not in names,
@@ -595,7 +606,10 @@ def _completion(value, target, snapshot):
             value["coverage"]["available_bytes"]
             == sum(x["size_bytes"] for x in files if x["name"].startswith("media/"))
             and value["coverage"]["available_objects"]
-            == len(files) - 2 - ('workflow-state.json' in names),
+            == len(files)
+            - 2
+            - ('workflow-state.json' in names)
+            - ('workos-users.json' in names),
             "backup_coverage_inventory_mismatch",
         )
     return files

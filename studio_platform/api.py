@@ -439,6 +439,8 @@ def create_app(
             if request.headers.get("sec-fetch-site") == "cross-site":
                 return JSONResponse({"detail": "跨站写入请求被拒绝"}, status_code=403)
         public_paths = {"/healthz", "/api/auth/config", "/api/auth/login"}
+        if request.method == "GET":
+            public_paths.update({"/api/auth/workos/start", "/api/auth/workos/callback"})
         public_frontend = is_public_frontend(settings, request.method, request.url.path)
         public_discovery = (
             request.method in {"GET", "HEAD"} and request.url.path in AGENT_PUBLIC_PATHS
@@ -547,7 +549,7 @@ def create_app(
             "status": "ok",
             "generation_enabled": settings.generation_enabled,
             "execution_backend": settings.execution_backend,
-            "auth_ready": auth.ready(),
+            "auth_ready": auth.ready() or app.state.workos_auth.enabled(),
             "render_enabled": settings.render_enabled,
             "frontend_contract": FRONTEND_CONTRACT,
             "cloud_creation_enabled": False,
@@ -559,7 +561,8 @@ def create_app(
             "authentication": "password"
             if settings.auth_mode == "password"
             else "username-only-test",
-            "auth_ready": auth.ready(),
+            "auth_ready": auth.ready() or app.state.workos_auth.enabled(),
+            "hosted_sign_in": {"enabled": app.state.workos_auth.enabled()},
             "users": ["superdan", "supervan"]
             if settings.auth_mode == "local-test"
             else [],
@@ -609,7 +612,7 @@ def create_app(
             "username": principal.owner,
             "actor_id": principal.actor_id,
             "machine": principal.machine,
-            "authentication": settings.auth_mode,
+            "authentication": principal.auth_mode or settings.auth_mode,
             **public_identity(principal, repo, settings),
             "credits": {"available": False, "balance": None, "held": None},
             "scopes": list(principal.scopes),
@@ -1438,6 +1441,9 @@ def create_app(
     from .identity_admin_routes import register_routes as register_identity_admin_routes
 
     register_identity_admin_routes(app)
+    from .workos_routes import register_routes as register_workos_routes
+
+    register_workos_routes(app)
     from .frontend import register_routes as register_frontend_routes
 
     register_frontend_routes(app)

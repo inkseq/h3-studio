@@ -57,7 +57,8 @@ services:
       # Optional, separately scoped read credential. Empty disables queries.
       SIXNINE_STAGE_QUERY_CONFIG_FILE: ${SIXNINE_STAGE_QUERY_CONFIG_FILE:+/run/secrets/stage_query}
       SIXNINE_STORAGE_CREDENTIAL_FILE: ${SIXNINE_STORAGE_CREDENTIAL_FILE:+/run/secrets/r2_storage}
-    secrets: [execution_profiles, grafana_cloud, stage_query, r2_storage, dstack_operator_config, dstack_api_token, dstack_ssh_public_key]
+      INKSEQ_WORKOS_CONFIG_FILE: ${INKSEQ_WORKOS_CONFIG_FILE:+/run/secrets/workos}
+    secrets: [execution_profiles, grafana_cloud, stage_query, r2_storage, dstack_operator_config, dstack_api_token, dstack_ssh_public_key, workos]
     healthcheck:
       test: [CMD, python, -c, "import json,urllib.request; h=json.load(urllib.request.urlopen('http://127.0.0.1:8845/healthz',timeout=5)); assert h['auth_ready'] and h['render_enabled']==('${INKSEQ_FILM_ENABLED:-0}'=='1') and not h['cloud_creation_enabled']"]
 
@@ -180,6 +181,10 @@ services:
       dstack: {condition: service_healthy}
 
 secrets:
+  # Absent opt-in keeps the app setting empty. Its ignored fallback is the
+  # already-mounted noncredential recipe metadata, never another credential.
+  workos:
+    file: ${INKSEQ_WORKOS_CONFIG_FILE:-${SIXNINE_EXECUTION_PROFILES_SECRET_FILE}}
   execution_profiles:
     file: ${SIXNINE_EXECUTION_PROFILES_SECRET_FILE:?Protected original admission profiles required}
   grafana_cloud:

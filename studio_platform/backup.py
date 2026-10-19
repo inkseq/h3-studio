@@ -544,6 +544,7 @@ def _publish_media_backup(
     stores=None,
     allow_missing_media=False,
     classify_expected_deletions=False,
+    hosted_users=None,
 ):
     media = output / "media"
     media.mkdir(mode=0o700)
@@ -640,6 +641,11 @@ def _publish_media_backup(
         from .workflow_backup import inspect_file
 
         manifest['workflow_state'] = inspect_file(output)
+    if hosted_users is not None:
+        from .workos_backup import FILE, inspect_file, validate
+
+        _write_json(output / FILE, validate(hosted_users))
+        manifest['hosted_users'] = inspect_file(output)
     _write_json(output / "manifest.json", manifest)  # Success marker written last.
     _sync_directory(media)
     _sync_directory(output)
@@ -649,6 +655,8 @@ def _publish_media_backup(
         "media_bytes": manifest["media_bytes"],
         "pending_assets": pending,
     }
+    if 'hosted_users' in manifest:
+        result['hosted_users_state'] = manifest['hosted_users']['status']
     if allow_missing_media:
         result.update(
             coverage=manifest["coverage"],
@@ -891,6 +899,7 @@ def backup_postgres_engine(
     stores=None,
     allow_missing_media=False,
     classify_expected_deletions=False,
+    hosted_users=None,
 ):
     """Complete PG business + Local media backup; restore target is SQLite.
 
@@ -955,6 +964,7 @@ def backup_postgres_engine(
             stores=stores,
             allow_missing_media=allow_missing_media,
             classify_expected_deletions=classify_expected_deletions,
+            hosted_users=hosted_users,
         )
         return {
             **result,
@@ -980,8 +990,8 @@ def backup_configured(
 ):
     """Use the existing app's explicit DB/storage identity, never AWS defaults.
 
-    Runs as an operator command inside the existing isolated application
-    container. No schema creation, app startup, auth export or provider writes.
+    Runs inside the existing isolated application container. No schema creation,
+    app startup or provider writes; optional hosted metadata excludes all tokens.
     """
     from .settings import Settings
     from .storage import S3ObjectStore
@@ -995,6 +1005,24 @@ def backup_configured(
     ):
         raise BackupError("backup_opt_in_invalid")
     settings = settings or Settings.from_environment()
+    hosted_users = None
+    if getattr(settings, 'workos_config_file', None) is not None:
+        from .workos_backup import snapshot
+        from .workos_config import load_credentials
+
+        try:
+            hosted_users = snapshot(
+                load_credentials(settings.workos_config_file)
+            )
+        except ValueError:
+            hosted_users = dict(
+                version=1,
+                provider='workos',
+                client_id='configuration_unavailable',
+                observed_at=time.time(),
+                status='unavailable',
+                users=[],
+            )
     stores = {}
     local = settings.data_dir / "objects"
     if (local / "objects").is_dir() and (local / "staging").is_dir():
@@ -1035,6 +1063,7 @@ def backup_configured(
             max_media_bytes=max_media_bytes,
             allow_missing_media=allow_missing_media,
             classify_expected_deletions=classify_expected_deletions,
+            hosted_users=hosted_users,
         )
     finally:
         engine.dispose()
@@ -1095,6 +1124,12 @@ def verify_local(directory, *, allow_incomplete=False):
             read(directory, manifest['workflow_state'])
         elif (directory / 'workflow-state.json').exists():
             raise BackupError('backup_workflow_state_unreferenced')
+        if 'hosted_users' in manifest:
+            from .workos_backup import read
+
+            read(directory, manifest['hosted_users'])
+        elif (directory / 'workos-users.json').exists():
+            raise BackupError('backup_hosted_users_unreferenced')
         database = _regular(directory / "database.sqlite3", max_bytes=256 * MIB)
         if _digest(database) != manifest["database_sha256"]:
             raise BackupError("backup_database_checksum_mismatch")
@@ -1342,6 +1377,18 @@ def restore_local(backup_directory, destination, *, allow_incomplete=False):
         _create_business_schema(target / "platform.sqlite3")
         _restore_local_provider_metadata(target / "platform.sqlite3", manifest)
         held = _quarantine_restored_database(target / "platform.sqlite3")
+        if 'hosted_users' in manifest:
+            # Metadata is retained for manual provider portability. It never
+            # creates credentials, sessions or upstream accounts on restore.
+            with (
+                (source / 'workos-users.json').open('rb') as incoming,
+                (target / 'workos-users.json').open('xb') as output,
+            ):
+                if os.name != 'nt':
+                    os.fchmod(output.fileno(), 0o600)
+                _copy(incoming, output, 16 * MIB, manifest['hosted_users']['sha256'])
+                output.flush()
+                os.fsync(output.fileno())
         if 'workflow_state' in manifest:
             # Retain exact serialized SDK evidence; an isolated PostgreSQL restore
             # applies it only through workflow_backup.restore under its hold.
@@ -1367,6 +1414,8 @@ def restore_local(backup_directory, destination, *, allow_incomplete=False):
         if 'workflow_state' in manifest:
             hold['workflow_state'] = manifest['workflow_state']
             hold['workflow_restore'] = 'isolated_postgresql_only_requires_domain_review'
+        if 'hosted_users' in manifest:
+            hold['hosted_users'] = manifest['hosted_users']
         if manifest["version"] in (2, 3):
             hold.update(
                 coverage=manifest["coverage"],

@@ -50,6 +50,12 @@ inventory.json
 !studio_platform/__init__.py
 !studio_platform/api.py
 !studio_platform/settings.py
+!studio_platform/workos_config.py
+!studio_platform/workos_auth.py
+!studio_platform/workos_routes.py
+!studio_platform/workos_backup.py
+!tools/import_workos_credentials.py
+!tests/test_workos_credentials.py
 !studio_platform/capacity_types.py
 !studio_platform/native_bootstrap.py
 !studio_platform/provider_lifetime.py
