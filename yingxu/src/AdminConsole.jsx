@@ -2,7 +2,7 @@
 // Port of prototype account.jsx AdminPanel. The backend enforces require_admin on every route;
 // a tab whose endpoint is not deployed yet says so instead of failing.
 import React, { useEffect, useMemo, useState } from 'react';
-import { History, ShieldCheck, Users } from 'lucide-react';
+import { History, ShieldCheck, TrendingUp, Users } from 'lucide-react';
 import { createCloudClient } from './cloud-client.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { apiDate, formatCredits } from './credits.js';
@@ -203,6 +203,141 @@ function AdminUsers({ api, active }) {
   );
 }
 
+const usd = (value, digits = 2) =>
+  typeof value === 'number' && Number.isFinite(value) ? '$' + value.toFixed(digits) : '—';
+const pct = (value) =>
+  typeof value === 'number' && Number.isFinite(value) ? Math.round(value * 100) + '%' : '—';
+
+// Read-only pricing view from GET /v1/admin/credits/prices (#306). Margins use the worst-case
+// net per credit (tax-inclusive, fees, biggest bonus); per-tier margin needs real GPU cost.
+function AdminPricing({ api, active }) {
+  const { t, locale } = useI18n();
+  const [data, setData] = useState(null),
+    [state, setState] = useState('loading');
+  useEffect(() => {
+    if (!active) return undefined;
+    let live = true;
+    api
+      .request('/v1/admin/credits/prices')
+      .then((body) => {
+        if (!live) return;
+        setData(body);
+        setState('ready');
+      })
+      .catch((failure) => live && setState(failure.status === 404 ? 'missing' : 'error'));
+    return () => {
+      live = false;
+    };
+  }, [api, active]);
+  if (state === 'missing') return <p className="muted">{t('admin.notDeployed')}</p>;
+  if (state === 'error') return <p role="alert">{t('admin.pricingError')}</p>;
+  if (!data) return <p role="status">{t('settings.loading')}</p>;
+  const estimate = data.margin_estimate || {},
+    tiers = estimate.tiers || {},
+    a = estimate.assumptions || {};
+  return (
+    <>
+      <div className="card-box">
+        <h4>{t('admin.pricingTiers')}</h4>
+        <div className="margin-table">
+          <div className="head">
+            <span>{t('admin.pricingTier')}</span>
+            <span>{t('admin.pricingRate')}</span>
+            <span>{t('admin.pricingNet')}</span>
+            <span>{t('admin.pricingMaxGpu')}</span>
+            <span>{t('admin.pricingMargin')}</span>
+          </div>
+          {['fast', 'standard', 'refine'].map((tier) => {
+            const row = tiers[tier] || {},
+              basis = data.basis?.[tier] || {};
+            return (
+              <div key={tier} className={row.below_30_percent ? 'bad' : ''}>
+                <span>
+                  <b>{t('credits.tier.' + tier)}</b>
+                  <small className="muted">
+                    {[basis.gpu, basis.seconds_per_5s_clip && basis.seconds_per_5s_clip + 's']
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </small>
+                </span>
+                <span>
+                  {t('credits.perSecond', { count: data.rates?.[tier] ?? '—' })}
+                  <small className="muted">
+                    {t('credits.perClip', { count: row.credits_per_5s_clip ?? '—' })}
+                  </small>
+                </span>
+                <span>{usd(row.estimated_net_usd_per_5s_clip, 3)}</span>
+                <span>
+                  {usd(row.max_gpu_hourly_usd_for_30_percent)}/h
+                  <small className="muted">
+                    {t('admin.pricingBreakEven', { value: usd(row.break_even_gpu_hourly_usd) })}
+                  </small>
+                </span>
+                <span>
+                  {row.estimated_margin == null
+                    ? t('admin.pricingUnmeasured')
+                    : pct(row.estimated_margin)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        <small className="muted">
+          {t('admin.pricingAssumptions', {
+            tax: pct(a.consumer_tax_rate),
+            fee: pct(a.processing_and_mor_fee_rate),
+            fixed: usd(a.fixed_fee_usd_per_pack),
+            multiplier: data.cost_multiplier ?? '—',
+          })}
+        </small>
+      </div>
+      <div className="card-box">
+        <h4>{t('admin.pricingPacks')}</h4>
+        <div className="margin-table">
+          <div className="head">
+            <span>{t('admin.pricingPack')}</span>
+            <span>{t('admin.pricingPrice')}</span>
+            <span>{t('admin.balance')}</span>
+            <span>{t('admin.pricingNetPack')}</span>
+            <span>{t('admin.pricingPerCredit')}</span>
+          </div>
+          {(estimate.packs || []).map((pack) => (
+            <div key={pack.pack_id}>
+              <span>
+                <b>{pack.pack_id}</b>
+                {pack.pack_id === estimate.worst_case_pack_id && (
+                  <small className="muted">{t('admin.pricingWorst')}</small>
+                )}
+              </span>
+              <span>{usd(pack.amount_cents / 100)}</span>
+              <span>
+                {formatCredits(pack.credits, locale)}
+                {pack.bonus_percent ? (
+                  <small className="good"> +{pack.bonus_percent}%</small>
+                ) : null}
+              </span>
+              <span>{usd(pack.estimated_net_usd)}</span>
+              <span>{usd(pack.estimated_net_usd_per_credit, 4)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="card-box">
+        <h4>{t('admin.pricingReport')}</h4>
+        <p className="muted">
+          {t('admin.pricingReportBody', {
+            credits: formatCredits(data.report_30d?.captured_credits ?? 0, locale),
+            cost: usd(data.report_30d?.provider_cost_usd),
+          })}
+        </p>
+        <p className="muted">
+          {t('admin.pricingWelcome', { count: formatCredits(data.welcome_credits ?? 0, locale) })}
+        </p>
+      </div>
+    </>
+  );
+}
+
 function AdminAudit({ api, active }) {
   const { t, locale } = useI18n();
   const list = usePaged(api, '/v1/admin/audit', active);
@@ -250,6 +385,7 @@ export default function AdminConsole({ account, active, testMachines }) {
       <div className="seg admin-tabs" role="tablist">
         {[
           ['users', 'admin.users', Users],
+          ['pricing', 'admin.pricing', TrendingUp],
           ['machines', 'admin.machines', ShieldCheck],
           ['audit', 'admin.audit', History],
         ].map(([id, label, Icon]) => (
@@ -267,6 +403,7 @@ export default function AdminConsole({ account, active, testMachines }) {
         ))}
       </div>
       {tab === 'users' && <AdminUsers api={api} active={active} />}
+      {tab === 'pricing' && <AdminPricing api={api} active={active} />}
       {tab === 'machines' && testMachines}
       {tab === 'audit' && <AdminAudit api={api} active={active} />}
     </div>
