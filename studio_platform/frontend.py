@@ -36,6 +36,14 @@ HTML_ROUTES = frozenset(
         "/library/",
         "/trash",
         "/trash/",
+        "/pricing",
+        "/pricing/",
+        "/terms",
+        "/terms/",
+        "/privacy",
+        "/privacy/",
+        "/content",
+        "/content/",
     }
 )
 STATIC_CACHE_SCOPE_KEY = "sixnine.frontend_cache"

@@ -74,6 +74,7 @@ test_credit_limit_migration
 test_staging_qa
 test_payment_schema
 test_payments
+test_content_policy test_output_moderation test_content_admission
 """.split())
 
 # CPU ffmpeg/font fixtures have additional process/codec costs. These multipliers

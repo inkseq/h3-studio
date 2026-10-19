@@ -1969,6 +1969,29 @@ class Repository:
                 return
         raise Conflict("capacity_drain_repreflight")
 
+    def _check_generation_policy(self, connection, scope, plan, *, admitting=True):
+        """Check new work only, under the caller's original account gate."""
+        from .content_policy import (
+            ContentPolicyError,
+            require_generation_terms,
+            verify_input,
+        )
+
+        compiled, execution = plan["request"], plan["execution_plan"]
+        verify_input(
+            connection,
+            scope.tenant_id,
+            scope.owner_id,
+            compiled,
+            compiled.get("content_moderation"),
+        )
+        if admitting:
+            current = require_generation_terms(
+                connection, scope.tenant_id, scope.owner_id, execution, compiled
+            )
+            if current != execution.get("terms_acceptance"):
+                raise ContentPolicyError("terms_version_changed", 409)
+
     def create_job(
         self,
         scope,
@@ -2034,6 +2057,12 @@ class Repository:
                     if existing["request_hash"] != digest:
                         raise Conflict("idempotency_conflict")
                     return {**dict(existing), "created": False}
+                self._check_generation_policy(
+                    connection,
+                    scope,
+                    plan,
+                    admitting=initial_status in {"queued", "waiting_capacity"},
+                )
                 from .storyboard_versions import check_admission_source
 
                 check_admission_source(connection, self, scope, plan["request"])
@@ -2155,6 +2184,7 @@ class Repository:
                 .one()
             )
             self._content_write_guard(connection, scope, plan["request"])
+            self._check_generation_policy(connection, scope, plan)
             from .storyboard_versions import check_admission_source
 
             check_admission_source(connection, self, scope, plan["request"])

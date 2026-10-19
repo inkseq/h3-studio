@@ -550,8 +550,15 @@ class WorkOSAuth:
         }
 
     def account(self, principal):
+        from .content_policy import account_terms_metadata
+
         with self.repo.engine.connect() as connection:
-            return self.public(self._account(connection, principal))
+            row = self._account(connection, principal)
+            return self.public(row) | {
+                "terms": account_terms_metadata(
+                    connection, self.settings.tenant_id, row["owner"]
+                )
+            }
 
     def update_account(self, principal, body):
         with self.repo.transaction() as connection:

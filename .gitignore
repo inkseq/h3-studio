@@ -699,3 +699,9 @@ inventory.json
 !tests/test_payments_app.py
 !docs/BILLING-TEST-MODE.md
 !tests/test_stripe_credentials.py
+!studio_platform/content_policy.py
+!studio_platform/content_routes.py
+!tests/test_content_policy.py
+!tests/test_output_moderation.py
+!tests/test_content_admission.py
+!docs/CONTENT-POLICY.md

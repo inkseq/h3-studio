@@ -355,6 +355,13 @@ class GenerationPlanning:
             )
             compiled["authoring_context"] = copy.deepcopy(authoring_context)
             compiled["authoring_defaults_version"] = defaults_version
+        from .content_policy import check_input, require_generation_terms
+
+        moderation = check_input(
+            self.repo, self.access.tenant_id, principal.owner, compiled
+        )
+        if moderation is not None:
+            compiled["content_moderation"] = moderation
         admission = self.policies.evaluate(
             compiled, self.access.scope(principal, project_id), fingerprint
         )
@@ -404,8 +411,17 @@ class GenerationPlanning:
                 compiled,
                 execution=execution,
             )
-        if credit_quote is not None:
-            execution["credit_quote"] = credit_quote
+            if credit_quote is not None:
+                execution["credit_quote"] = credit_quote
+            terms = require_generation_terms(
+                connection,
+                self.access.tenant_id,
+                principal.owner,
+                execution,
+                compiled,
+            )
+        if terms is not None:
+            execution["terms_acceptance"] = terms
         hide_dollars = hide_dollar_estimate(execution, principal)
         plan = self.repo.create_plan(
             self.access.scope(principal, project_id),
