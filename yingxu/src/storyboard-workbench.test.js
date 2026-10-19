@@ -50,7 +50,7 @@ test('actual workbench renders its initial unread state without generation or de
   assert.doesNotMatch(html, />Delete<|>Move to trash<|workbench\./);
 });
 
-test('saved profile identity and controls absent from current schema remain visible', () => {
+test('saved controls stay visible while the model behind a recipe stays admin-only', () => {
   const html = renderToStaticMarkup(
     React.createElement(compiled.exports.RecipePreview, {
       take: {
@@ -66,7 +66,7 @@ test('saved profile identity and controls absent from current schema remain visi
       state: { capabilities: { recipes: [], deployment_profiles: [] }, materials: [] },
     }),
   );
-  assert.match(html, /OriginalModel/);
+  assert.doesNotMatch(html, /OriginalModel|retired-profile/);
   assert.match(html, /historical_strength/);
   assert.match(html, /0.73/);
   assert.match(html, /Original prompt/);

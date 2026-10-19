@@ -1,9 +1,10 @@
 import React from 'react';
+import { modelsVisible, profileLabel } from './model-visibility.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { recipeFor, effectiveControlSchema } from './quick-chat-model.js';
 import GenerationControl from './GenerationControl.jsx';
 export default function TakeRecipe({ take, state }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   if (!take?.recipe)
     return (
       <details>
@@ -30,7 +31,10 @@ export default function TakeRecipe({ take, state }) {
       <summary>{t('takes.recipe')}</summary>
       <p>
         {recipe?.mode === 'fl' ? t('workspace.status13') : t('workspace.status14')} ·{' '}
-        {profile?.label || value.model_id || value.deployment_profile_id || t('deployment.default')}
+        {profile
+          ? profileLabel(profile, locale)
+          : (modelsVisible() && (value.model_id || value.deployment_profile_id)) ||
+            t('deployment.default')}
       </p>
       <p className="qc-card-prompt">{value.prompt}</p>
       <fieldset disabled className="qc-form-grid">
