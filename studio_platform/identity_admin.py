@@ -388,6 +388,7 @@ class IdentityAdmin:
                 or type(after["time"]) not in (int, float)
                 or not math.isfinite(after["time"])
                 or not isinstance(after["source"], str)
+                or not isinstance(after["source"], str)
                 or after["source"] not in {"admin", "financial"}
                 or not _uuid(after["id"])
             ):

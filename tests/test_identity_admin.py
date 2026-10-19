@@ -3,6 +3,8 @@
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
+import base64
+import json
 import unittest
 from unittest.mock import patch
 import uuid
@@ -426,6 +428,18 @@ class IdentityAdminTests(LedgerCase):
         self.assertEqual(len(seen), len({row["id"] for row in seen}))
         self.assertNotIn("DO-NOT-EXPOSE", str(seen))
         self.assertNotIn("PRIVATE-", str(seen))
+        cursor = self.service.audit(self.admin, limit=1)["next_cursor"]
+        malformed = json.loads(
+            base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4))
+        )
+        malformed["position"]["source"] = []
+        cursor = (
+            base64.urlsafe_b64encode(json.dumps(malformed).encode())
+            .decode()
+            .rstrip("=")
+        )
+        with self.assertRaisesRegex(AdminError, "cursor"):
+            self.service.audit(self.admin, cursor=cursor)
 
     def test_http_contract_uses_details_and_blocks_admin_created_agent(self):
         from fastapi.testclient import TestClient
