@@ -1,4 +1,5 @@
 import { TrashMenu } from './UniversalTrash.jsx';
+import HostedSignIn from './HostedSignIn.jsx';
 import { translate } from './i18n/locale.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import './i18n/workspace-language.css';
@@ -293,6 +294,7 @@ export function CloudProjects({ onClose, quick = false, initialGrant = null }) {
           </>
         ) : (
           <form onSubmit={login}>
+            <HostedSignIn auth={c.auth} />
             <label>
               {t('account.copy76')}
               <input

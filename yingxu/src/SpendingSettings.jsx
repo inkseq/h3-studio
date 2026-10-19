@@ -10,11 +10,13 @@ import { useI18n } from './i18n/I18nProvider.jsx';
 import { readBrowserLocale } from './i18n/locale.js';
 import StudioHeader from './StudioHeader.jsx';
 import AccountPassword from './AccountPassword.jsx';
+import { CreditsPanel, useCredits } from './CreditsUI.jsx';
 import {
   UserRound,
   SlidersHorizontal,
   Bot,
   Wallet,
+  Coins,
   ShieldCheck,
   LogOut,
   RefreshCw,
@@ -47,6 +49,7 @@ const settingsSection = (search) => {
       assistants: 'assistants',
       agent: 'assistants',
       budget: 'budget',
+      credits: 'credits',
       admin: 'admin',
     }[value] || 'account'
   );
@@ -119,6 +122,8 @@ export default function SpendingSettings({ account }) {
     [admin, setAdmin] = useState(null),
     [draft, setDraft] = useState(null),
     [adminDraft, setAdminDraft] = useState(null);
+  // Credits appear once the backend serves /v1/credits (#306).
+  const credits = useCredits(account);
   const [busy, setBusy] = useState(false),
     [notice, setNotice] = useState(''),
     [error, setError] = useState(''),
@@ -255,6 +260,7 @@ export default function SpendingSettings({ account }) {
             ['account', 'settings.account', UserRound],
             ['defaults', 'settings.defaults', SlidersHorizontal],
             ['assistants', 'assistants.title', Bot],
+            ...(credits || section === 'credits' ? [['credits', 'settings.credits', Coins]] : []),
             ['budget', 'settings.budget', Wallet],
             ...(admin ? [['admin', 'settings.admin', ShieldCheck]] : []),
           ].map(([id, label, Icon]) => (
@@ -342,7 +348,8 @@ export default function SpendingSettings({ account }) {
           {(!user || !draft) &&
             section !== 'account' &&
             section !== 'defaults' &&
-            section !== 'assistants' && (
+            section !== 'assistants' &&
+            section !== 'credits' && (
               <p role="status">{busy ? t('settings.loading') : t('settings.login')}</p>
             )}
           {user && draft && (
@@ -423,6 +430,7 @@ export default function SpendingSettings({ account }) {
             </form>
           )}
           {admin && section === 'admin' && pageActive && <BudgetAdministration account={account} />}
+          {section === 'credits' && <CreditsPanel account={account} active={pageActive} />}
           <div id="my-assistants" hidden={section !== 'assistants'}>
             <AssistantConnections
               embedded

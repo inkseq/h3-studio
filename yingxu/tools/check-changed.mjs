@@ -20,6 +20,7 @@ const configFiles = new Set([
   '.prettierrc.json',
   'eslint.config.js',
   'tools/check-changed.mjs',
+  'tools/layout-audit.mjs',
 ]);
 const runtime = (file) => /^src\/.*\.(?:js|jsx|css)$/.test(file) || file === 'vite.config.js';
 const files = git('diff', '--name-only', '--diff-filter=ACMR', '-z', base, '--', sourceFolder)

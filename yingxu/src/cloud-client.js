@@ -1,5 +1,11 @@
 /* Same-origin application API only. This module never holds provider credentials. */
 import { readLocale, translate } from './i18n/locale.js';
+import { CREDITS_CHANGED, INSUFFICIENT_CREDITS, insufficientCredits } from './credits.js';
+// The credits chip and the not-enough-credits prompt listen for these (h3-studio#306).
+function announce(type, detail) {
+  if (typeof globalThis.dispatchEvent === 'function' && typeof CustomEvent === 'function')
+    globalThis.dispatchEvent(new CustomEvent(type, { detail }));
+}
 function uiLocale(account) {
   try {
     return readLocale(globalThis.localStorage, account);
@@ -221,6 +227,8 @@ export function createCloudClient({
             throw new CloudError(ui('client.contextChanged', expectedAccount), { status: 401 });
           }
           if (response.status === 401 && !anonymous) onUnauthorized();
+          const short = insufficientCredits(response.status, detail);
+          if (short) announce(INSUFFICIENT_CREDITS, short);
           // This closed response proves admission refused before a reservation.
           // Only the human's explicit approval permits one exact-key retry.
           if (
@@ -291,6 +299,7 @@ export function createCloudClient({
             ? null
             : await response.json();
         if (current !== epoch) throw new CloudError(ui('client.accountChanged', expectedAccount));
+        if (method !== 'GET' && !anonymous) announce(CREDITS_CHANGED);
         return result;
       }
     } catch (error) {
