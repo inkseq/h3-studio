@@ -38,6 +38,12 @@ def main(argv=None):
     postgres.add_argument("--destination", required=True, type=Path)
     postgres.add_argument("--pg-dump", default="pg_dump")
     postgres.add_argument("--schema", default="public")
+    postgres.add_argument(
+        '--include-workflows',
+        action='store_true',
+        help='Pinned SDK sidecar and business dump from one exported PG snapshot',
+    )
+    postgres.add_argument('--private-platform-network', action='store_true')
     portable = actions.add_parser(
         "postgres-local",
         help="One PG read-only snapshot + Local media; isolated SQLite restoration",
@@ -100,6 +106,8 @@ def main(argv=None):
                 args.destination,
                 pg_dump=args.pg_dump,
                 schema=args.schema,
+                include_workflows=args.include_workflows,
+                private_platform_network=args.private_platform_network,
             )
         print(json.dumps(result))
         return 0

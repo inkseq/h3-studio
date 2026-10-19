@@ -427,6 +427,32 @@ class FilesystemTests(unittest.TestCase):
         )
         return '{}'
 
+    def test_exact_workflow_sidecar_uses_original_fd_inventory_and_extra_file_refusal(
+        self,
+    ):
+        item = self.items[0]
+        path = item['app'] / 'workflow-state.json'
+        path.write_bytes(b'private-original-workflow-state')
+        path.chmod(0o600)
+        files = {
+            **item['files'],
+            'workflow-state.json': {
+                'name': 'workflow-state.json',
+                'size_bytes': path.stat().st_size,
+                'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+            },
+        }
+        tree = host.snapshot_tree(item['app'], files)
+        self.assertIn('workflow-state.json', tree['entries'])
+        extra = item['app'] / 'unknown.json'
+        extra.write_bytes(b'unique-unproven')
+        with self.assertRaisesRegex(ValueError, 'backup_retention_snapshot_extra'):
+            host.snapshot_tree(item['app'], files)
+        extra.unlink()
+        host.remove_snapshot(host.snapshot_tree(item['app'], files), files)
+        self.assertFalse(item['app'].exists())
+        self.assertTrue((item['operation'] / 'receipt.json').exists())
+
     def test_plan_is_non_destructive_and_apply_keeps_only_newest_app_payload_and_all_metadata(
         self,
     ):

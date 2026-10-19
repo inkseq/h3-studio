@@ -34,9 +34,9 @@ FORMAT = "sixnine-private-backup-copy-v1"
 FORMAT_V2 = "sixnine-private-backup-copy-v2"
 FORMAT_V3 = "sixnine-private-backup-copy-v3"
 MAX_FILE = 512 * MIB
-MAX_TOTAL = 40 * 1024 * MIB + 272 * MIB
+MAX_TOTAL = 40 * 1024 * MIB + 336 * MIB
 MAX_JSON = 16 * MIB
-MAX_FILES = 100002
+MAX_FILES = 100003
 
 
 class RemoteBackupError(Exception):
@@ -171,12 +171,15 @@ def _files(directory, manifest):
     names = {"manifest.json", "database.sqlite3"} | {
         "media/" + item["file"] for item in manifest["objects"]
     }
+    if 'workflow_state' in manifest:
+        names.add('workflow-state.json')
     need(len(names) <= MAX_FILES, "backup_file_count_limit")
     # Ignore no extras: a credential/staging file accidentally placed here must
     # never be copied, nor silently treated as covered by this backup receipt.
     need(
         {p.name for p in directory.iterdir()}
-        == {"manifest.json", "database.sqlite3", "media"},
+        == {"manifest.json", "database.sqlite3", "media"}
+        | ({'workflow-state.json'} if 'workflow_state' in manifest else set()),
         "backup_directory_has_unexpected_entries",
     )
     need(
@@ -564,7 +567,7 @@ def _completion(value, target, snapshot):
         need(
             isinstance(name, str)
             and (
-                name in ("database.sqlite3", "manifest.json")
+                name in ("database.sqlite3", "manifest.json", "workflow-state.json")
                 or re.fullmatch(r"media/[0-9a-f]{64}\.bin", name)
             )
             and name not in names,
@@ -591,7 +594,8 @@ def _completion(value, target, snapshot):
         need(
             value["coverage"]["available_bytes"]
             == sum(x["size_bytes"] for x in files if x["name"].startswith("media/"))
-            and value["coverage"]["available_objects"] == len(files) - 2,
+            and value["coverage"]["available_objects"]
+            == len(files) - 2 - ('workflow-state.json' in names),
             "backup_coverage_inventory_mismatch",
         )
     return files

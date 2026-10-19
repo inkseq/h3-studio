@@ -14,9 +14,13 @@
 !studio_platform/migrations/
 !studio_platform/migrations/__init__.py
 !studio_platform/migrations/env.py
+!studio_platform/migrations/data/
+!studio_platform/migrations/data/dbos_3_3_0_catalog.json
+!studio_platform/migrations/data/dbos_3_3_0_inkseq_workflows.sql
 !studio_platform/migrations/versions/
 !studio_platform/migrations/versions/__init__.py
 !studio_platform/migrations/versions/v20261019_0001_platform_baseline.py
+!studio_platform/migrations/versions/v20261019_0002_workflow_state.py
 !studio_platform/inference/
 !studio_platform/inference/*.py
 !studio_platform/runtime_hosts/

@@ -618,6 +618,10 @@ def _publish_media_backup(
                 objects, missing, classified=classify_expected_deletions
             ),
         )
+    if (output / 'workflow-state.json').exists():
+        from .workflow_backup import inspect_file
+
+        manifest['workflow_state'] = inspect_file(output)
     _write_json(output / "manifest.json", manifest)  # Success marker written last.
     _sync_directory(media)
     _sync_directory(output)
@@ -717,11 +721,12 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
                 or any(kind != "BASE TABLE" for kind in inventory.values())
             ):
                 raise BackupError("backup_database_schema_requires_review")
+            revision = None
             if "alembic_version" in inventory:
                 from .schema_version import SchemaVersionError, read_schema_version
 
                 try:
-                    read_schema_version(source, schema=schema)
+                    revision = read_schema_version(source, schema=schema)
                 except SchemaVersionError:
                     raise BackupError(
                         "backup_schema_revision_requires_review"
@@ -818,6 +823,19 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
                     if actual != count:
                         raise BackupError("backup_snapshot_count_mismatch")
                     counts[name] = actual
+            from .workflow_schema import WORKFLOW_REVISION, schema_exists
+
+            workflow_present = schema_exists(source)
+            if workflow_present or revision == WORKFLOW_REVISION:
+                if (
+                    schema != 'public'
+                    or revision != WORKFLOW_REVISION
+                    or not workflow_present
+                ):
+                    raise BackupError('backup_workflow_revision_requires_review')
+                from .workflow_backup import export
+
+                export(source, destination.parent, deadline=deadline)
             if destination.stat().st_size > 256 * MIB:
                 raise BackupError("backup_snapshot_size_or_time_limit")
         with closing(_open_sqlite_readonly(destination)) as db:
@@ -1041,6 +1059,12 @@ def verify_local(directory, *, allow_incomplete=False):
             raise BackupError("backup_manifest_reference_mismatch")
         if missing and not allow_incomplete:
             raise BackupError("backup_incomplete_requires_explicit_opt_in")
+        if 'workflow_state' in manifest:
+            from .workflow_backup import read
+
+            read(directory, manifest['workflow_state'])
+        elif (directory / 'workflow-state.json').exists():
+            raise BackupError('backup_workflow_state_unreferenced')
         database = _regular(directory / "database.sqlite3", max_bytes=256 * MIB)
         if _digest(database) != manifest["database_sha256"]:
             raise BackupError("backup_database_checksum_mismatch")
@@ -1288,6 +1312,18 @@ def restore_local(backup_directory, destination, *, allow_incomplete=False):
         _create_business_schema(target / "platform.sqlite3")
         _restore_local_provider_metadata(target / "platform.sqlite3", manifest)
         held = _quarantine_restored_database(target / "platform.sqlite3")
+        if 'workflow_state' in manifest:
+            # Retain exact serialized SDK evidence; an isolated PostgreSQL restore
+            # applies it only through workflow_backup.restore under its hold.
+            with (
+                (source / 'workflow-state.json').open('rb') as incoming,
+                (target / 'workflow-state.json').open('xb') as output,
+            ):
+                if os.name != 'nt':
+                    os.fchmod(output.fileno(), 0o600)
+                _copy(incoming, output, 256 * MIB, manifest['workflow_state']['sha256'])
+                output.flush()
+                os.fsync(output.fileno())
         hold = dict(
             version=1,
             execution_enabled=False,
@@ -1298,6 +1334,9 @@ def restore_local(backup_directory, destination, *, allow_incomplete=False):
             capacity_waiters_held=True,
             cloud_resources_may_still_bill=True,
         )
+        if 'workflow_state' in manifest:
+            hold['workflow_state'] = manifest['workflow_state']
+            hold['workflow_restore'] = 'isolated_postgresql_only_requires_domain_review'
         if manifest["version"] in (2, 3):
             hold.update(
                 coverage=manifest["coverage"],
@@ -1500,7 +1539,14 @@ def backup_postgres_local(
 
 
 def dump_postgres(
-    url_file, destination, *, pg_dump="pg_dump", schema="public", timeout_s=600
+    url_file,
+    destination,
+    *,
+    pg_dump="pg_dump",
+    schema="public",
+    timeout_s=600,
+    include_workflows=False,
+    private_platform_network=False,
 ):
     """Database-only explicit tool, not a verified full media backup/PG restore.
 
@@ -1509,7 +1555,11 @@ def dump_postgres(
     """
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,62}", schema):
         raise BackupError("backup_schema_invalid")
-    env = _postgres_environment(url_file)
+    if type(include_workflows) is not bool:
+        raise BackupError('backup_opt_in_invalid')
+    env = _postgres_environment(
+        url_file, private_platform_network=private_platform_network
+    )
     output = _private_new_directory(destination)
     command = [
         str(pg_dump),
@@ -1522,7 +1572,8 @@ def dump_postgres(
         "--file=" + str(output / "database.dump"),
     ]
     command += ["--table=" + schema + "." + name for name in sorted(_tables())]
-    try:
+
+    def run_dump():
         subprocess.run(
             command,
             env=env,
@@ -1533,23 +1584,79 @@ def dump_postgres(
             check=True,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
+
+    workflow_state = None
+    engine = None
+    try:
+        if include_workflows:
+            query = {'sslmode': env['PGSSLMODE']}
+            if 'PGSSLROOTCERT' in env:
+                query['sslrootcert'] = env['PGSSLROOTCERT']
+            engine = create_engine(
+                URL.create(
+                    'postgresql+psycopg',
+                    username=env['PGUSER'],
+                    password=env['PGPASSWORD'],
+                    host=env['PGHOST'],
+                    port=int(env['PGPORT']),
+                    database=env['PGDATABASE'],
+                    query=query,
+                ),
+                hide_parameters=True,
+            )
+            with (
+                engine.connect().execution_options(
+                    isolation_level='REPEATABLE READ'
+                ) as connection,
+                connection.begin(),
+            ):
+                connection.exec_driver_sql('SET TRANSACTION READ ONLY')
+                connection.exec_driver_sql("SET LOCAL statement_timeout = '600s'")
+                connection.exec_driver_sql(
+                    "SET LOCAL idle_in_transaction_session_timeout = '600s'"
+                )
+                from .schema_version import read_schema_version, WORKFLOW_REVISION
+                from .workflow_schema import schema_exists
+
+                revision = read_schema_version(connection, schema=schema)
+                present = schema_exists(connection)
+                if present or revision == WORKFLOW_REVISION:
+                    if (
+                        schema != 'public'
+                        or revision != WORKFLOW_REVISION
+                        or not present
+                    ):
+                        raise BackupError('backup_workflow_revision_requires_review')
+                    from .workflow_backup import export
+
+                    workflow_state = export(connection, output)
+                snapshot = connection.exec_driver_sql(
+                    'SELECT pg_export_snapshot()'
+                ).scalar_one()
+                if not re.fullmatch(r'[A-Za-z0-9-]{1,100}', snapshot):
+                    raise BackupError('backup_snapshot_identifier_invalid')
+                command.append('--snapshot=' + snapshot)
+                run_dump()
+        else:
+            run_dump()
         archive = _regular(output / "database.dump")
         if not archive.stat().st_size:
             raise BackupError("backup_postgres_dump_empty")
         if os.name != "nt":
             archive.chmod(0o600)
-        _write_json(
-            output / "manifest.json",
-            dict(
-                version=1,
-                kind="postgres-database-only",
-                database_sha256=_digest(archive),
-                media_included=False,
-                restore_verified=False,
-                authentication_included=False,
-                created_at=time.time(),
-            ),
+        manifest = dict(
+            version=1,
+            kind="postgres-database-only",
+            database_sha256=_digest(archive),
+            media_included=False,
+            restore_verified=False,
+            authentication_included=False,
+            created_at=time.time(),
         )
+        if workflow_state:
+            manifest['workflow_state'] = workflow_state
+            manifest['consistent_business_workflow_snapshot'] = True
+        _write_json(output / "manifest.json", manifest)
         return {
             "state": "postgres_database_dumped",
             "media_included": False,
@@ -1557,3 +1664,6 @@ def dump_postgres(
         }
     except Exception:
         raise BackupError("backup_postgres_dump_failed_no_secret_output") from None
+    finally:
+        if engine is not None:
+            engine.dispose()
