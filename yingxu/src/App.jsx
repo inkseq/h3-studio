@@ -4,6 +4,7 @@ import { exportSrt } from './caption-model.js';
 import { chapterHandover, shotListCsv } from './handover-model.js';
 import StudioHeader from './StudioHeader.jsx';
 import { LowCreditsDialog } from './CreditsUI.jsx';
+import { LegalPage, PricingPage } from './PublicPages.jsx';
 import Library from './Library.jsx';
 import UniversalTrash, {
   TrashProvider,
@@ -1335,6 +1336,10 @@ function AppContent() {
       <Library key={account || 'signed-out'} account={account} active={active} />
     ),
     '/trash': ({ active }) => <UniversalTrash active={active} />,
+    '/pricing': () => <PricingPage account={account} />,
+    '/terms': () => <LegalPage account={account} doc="terms" />,
+    '/privacy': () => <LegalPage account={account} doc="privacy" />,
+    '/content': () => <LegalPage account={account} doc="content" />,
     '/settings': ({ active }) => (
       <SpendingSettings key={account || 'signed-out'} account={account} active={active} />
     ),
