@@ -61,6 +61,8 @@ Example response projection: `{"batch_id":"BATCH","status":"active"}`; inspect i
 
 Read a shot's `/versions` for immutable recipes; old missing recipes stay unknown. `storyboard.restore` restores known effective settings without generating. `storyboard.star`, atomic bulk draft/final/move, account→story→shot defaults and project-local profile forks use the [story contract](reference/api.md#storyboard-versions-and-bulk-work). Duration/seed stay per shot; no automatic deletion or global usage search.
 
+For an authorized whole-film request, check `capabilities.story_film.enabled`, then follow [one-click film](reference/api.md#one-click-film). Preflight freezes the story; inspect reuse, missing shots and cost before confirming. Observe/resume that original run, retaining per-shot budgets and grants. Read [film recovery](reference/recovery.md#one-click-film-recovery) after an uncertain response.
+
 ## Upload and organise references
 
 1. Identify the authorized session/project; read `capabilities.upload_constraints`. Preserve original media, with no silent cropping or transcoding.
@@ -101,11 +103,3 @@ Example response projection: `{"preview_id":"PREVIEW","expires_at":1790000000}`;
 ```
 
 This is a user-facing summary example, not a fabricated API receipt. See recovery for stale settings, owner cap, human confirmation and unknown charges.
-
-
-### Find and import library references
-1. Read `GET /v1/library?tag=rain&type=file`; follow `next_offset`.
-2. Inspect `/v1/library/usage` for a returned target; unused is not purge permission.
-3. Tag/file with original story CAS or explicitly import to another authorized story.
-4. Keep the import key/body; observe its receipt before resuming. See [API](reference/api.md#project-scoped-library-and-explicit-imports-238).
-Example: `python scripts/inkseq.py request GET '/v1/library?tag=rain'`. Imports never generate.

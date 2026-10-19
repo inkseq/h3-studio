@@ -9,6 +9,13 @@ no executor, FFmpeg, database migration or provider request.
 
 All routes use the existing authenticated owner/project grants and content
 lifecycle gates. Browser and Agent use identical routes.
+Authenticated capabilities expose `story_film={enabled,workflow_version}`;
+disabled is not permission for an alternative submission route. The public
+[Agent API reference](../skills/inkseq/reference/api.md#one-click-film) documents
+exact request bodies, original write keys, artifact URLs and helper commands;
+[film recovery](../skills/inkseq/reference/recovery.md#one-click-film-recovery)
+covers uncertain confirmation and explicit same-run resume. The Skill does not
+grant spending authority or create a separate whole-film budget.
 
 * `POST /v1/projects/{project_id}/films/preflights`, `Idempotency-Key`: body
   `{expected_version, resolution, aspect?, burn_subtitles?}`. Output contains
