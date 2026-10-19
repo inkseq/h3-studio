@@ -68,6 +68,7 @@ test_creation_history_storage test_creation_history_routes test_postgres_dispatc
 test_demand_wakeup test_dstack_allocation_proof test_alert_snapshot test_alert_http
 test_identity_schema test_identity_queue test_identity_adoption test_identity_admin
 test_workos_auth test_workos_grants
+test_credit_schema
 """.split())
 
 # CPU ffmpeg/font fixtures have additional process/codec costs. These multipliers

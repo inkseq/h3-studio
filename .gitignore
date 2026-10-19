@@ -665,3 +665,7 @@ inventory.json
 !studio_platform/film_runs.py
 !studio_platform/film_routes.py
 !studio_platform/film_workflows.py
+
+# Optional M1 customer-credit reader and frozen additive schema.
+!studio_platform/credit_schema.py
+!studio_platform/migrations/versions/v20261019_0004_customer_credits.py
