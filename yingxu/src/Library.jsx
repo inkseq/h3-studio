@@ -494,7 +494,7 @@ export default function Library({ account, active = true }) {
         if (canFile) fileDialog(copy(currentRows));
       }}
       onDelete={() => {
-        if (canEdit)
+        if (currentRows.length)
           trash.request(
             'trash',
             currentRows.map((r) => r.target),
