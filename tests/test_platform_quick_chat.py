@@ -18,6 +18,8 @@ from sqlalchemy import insert, select, update
 from studio_platform.api import create_app
 from studio_platform.auth import Principal
 from studio_platform.capabilities import VERSION
+from studio_platform.content_policy import ContentPolicyError
+from studio_platform.credits import CreditError
 from studio_platform.quick_chat import (
     DEFAULT_SETTINGS,
     EMPTY_INPUTS,
@@ -839,6 +841,42 @@ class QuickChatTests(unittest.TestCase):
         )
         self.assertNotIn(marker, json.dumps(persisted))
 
+    def test_preflight_typed_refusals_are_durable_per_item(self):
+        original = self.service.hooks.preflight
+        for index, error in enumerate(
+            (
+                ContentPolicyError("content_moderation_refused", 422),
+                CreditError("insufficient_credits", 402, detail="Not enough credits."),
+            )
+        ):
+            with self.subTest(code=error.code):
+                revision = self.card(copies=2, key=f"typed-pf-card-{index}")["revision"]
+                call_count = 0
+
+                def fail_second(*args, **kwargs):
+                    nonlocal call_count
+                    call_count += 1
+                    if call_count == 2:
+                        raise error
+                    return original(*args, **kwargs)
+
+                with mock.patch.object(
+                    self.service.hooks, "preflight", side_effect=fail_second
+                ):
+                    preflight = self.preflight(revision, key=f"typed-pf-{index}")
+                self.assertEqual(preflight["status"], "blocked")
+                self.assertIsNotNone(preflight["items"][0]["plan"])
+                self.assertIsNone(preflight["items"][1]["plan"])
+                self.assertEqual(preflight["items"][1]["error_code"], error.code)
+                self.assertEqual(
+                    self.service.get_preflight(
+                        self.principal, self.sid, preflight["id"]
+                    ),
+                    preflight,
+                )
+                with self.repo.engine.connect() as conn:
+                    self.assertEqual(len(conn.execute(select(jobs)).all()), 0)
+
     def test_preflight_normal_plan_keeps_whole_batch_estimate(self):
         revision = self.card(copies=2)["revision"]
         preflight = self.preflight(revision)
@@ -1013,6 +1051,53 @@ class QuickChatTests(unittest.TestCase):
         with self.repo.engine.connect() as conn:
             self.assertEqual(len(conn.execute(select(jobs)).all()), 2)
 
+    def test_typed_admission_refusals_preserve_other_accepted_items(self):
+        original = self.service.hooks.enqueue
+        for index, error in enumerate(
+            (
+                ContentPolicyError("terms_acceptance_required"),
+                CreditError("insufficient_credits", 402),
+            )
+        ):
+            with self.subTest(code=error.code):
+                revision = self.card(copies=3, key=f"typed-admit-card-{index}")[
+                    "revision"
+                ]
+                preflight = self.preflight(revision, key=f"typed-admit-pf-{index}")
+                call_count = 0
+
+                def fail_middle(*args, **kwargs):
+                    nonlocal call_count
+                    call_count += 1
+                    if call_count == 2:
+                        raise error
+                    return original(*args, **kwargs)
+
+                with mock.patch.object(
+                    self.service.hooks, "enqueue", side_effect=fail_middle
+                ):
+                    result = self.submit(
+                        revision, preflight, key=f"typed-admit-{index}"
+                    )
+                self.assertEqual(
+                    [item["status"] for item in result["items"]],
+                    ["queued", "admission_blocked", "queued"],
+                )
+                self.assertEqual(result["items"][1]["error_code"], error.code)
+                original_ids = [item["job_id"] for item in result["items"]]
+                replay = self.submit(revision, preflight, key=f"typed-admit-{index}")
+                self.assertEqual(
+                    [item["job_id"] for item in replay["items"]], original_ids
+                )
+                self.assertEqual(
+                    [item["status"] for item in replay["items"]],
+                    ["queued", "admission_blocked", "queued"],
+                )
+                with self.repo.engine.connect() as conn:
+                    self.assertEqual(
+                        len(conn.execute(select(jobs)).all()), 3 * (index + 1)
+                    )
+
     def test_admission_refresh_preserves_only_finite_diagnostic_and_original_job(self):
         revision = self.card()["revision"]
         initial = self.preflight(revision)
@@ -1034,6 +1119,11 @@ class QuickChatTests(unittest.TestCase):
                     QuickChatError("shot_version_conflict", "PRIVATE TEXT"),
                     "shot_version_conflict",
                 ),
+                (
+                    ContentPolicyError("content_moderation_changed"),
+                    "content_moderation_changed",
+                ),
+                (CreditError("insufficient_credits", 402), "insufficient_credits"),
                 (ValueError("PRIVATE PATH OR PROMPT"), "admission_refresh_blocked"),
             )
         ):

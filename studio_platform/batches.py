@@ -24,6 +24,8 @@ from sqlalchemy import (
 from sqlalchemy.exc import IntegrityError
 from fastapi import Header, HTTPException, Query, Request
 
+from .content_policy import ContentPolicyError
+from .credits import CreditError
 from .repository import (
     Scope,
     Conflict,
@@ -421,7 +423,14 @@ def register_routes(app):
                     {"job_id": job["id"], "error_code": None},
                 )
                 activate(principal, record, job["id"])
-            except (NotFound, Conflict, BudgetExceeded, ValueError) as error:
+            except (
+                NotFound,
+                Conflict,
+                BudgetExceeded,
+                ValueError,
+                ContentPolicyError,
+                CreditError,
+            ) as error:
                 from .agent_management import record_refusal
 
                 record_refusal(
@@ -435,7 +444,9 @@ def register_routes(app):
 
                 if isinstance(error, SpendingConfirmationRequired):
                     raise
-                if isinstance(error, BudgetExceeded):
+                if isinstance(error, (ContentPolicyError, CreditError)):
+                    code = error.code
+                elif isinstance(error, BudgetExceeded):
                     code = str(error)
                     if code not in {
                         "budget_exceeded",
