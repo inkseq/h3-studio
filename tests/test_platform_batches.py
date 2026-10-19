@@ -229,7 +229,9 @@ class BatchReadBoundaryTests(unittest.TestCase):
             )
         job_queries = [columns for sql, columns in statements if "platform_jobs" in sql]
         self.assertEqual(job_queries, [{"id", "status"}])
-        self.assertLessEqual(len(statements), 5)
+        # Includes two fixed PostgreSQL identity-schema probes at authentication;
+        # business reads remain scalar and independent of the number of jobs.
+        self.assertLessEqual(len(statements), 7)
 
     def test_detail_uses_bounded_dto_and_bulk_artifacts_without_n_plus_one(self):
         self.ready()
@@ -298,7 +300,8 @@ class BatchReadBoundaryTests(unittest.TestCase):
             columns for _, columns in statements if "_actual_cost_microusd" in columns
         ]
         self.assertEqual(len(proof_queries), 1)
-        self.assertLessEqual(len(statements), 10)
+        # The same two fixed identity probes also precede this request.
+        self.assertLessEqual(len(statements), 12)
 
     def test_list_pages_ten_batches_and_rejects_oversize_page(self):
         self.ready()

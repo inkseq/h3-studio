@@ -1285,8 +1285,7 @@ class DstackOperator:
                 safe_id(profile[key])
                 for key in ("id", "owner_id", "project_id", "pool", "configuration_id")
             )
-            and profile["owner_id"]
-            in getattr(self.settings, "operator_capacity_owners", ())
+            and self._capacity_owner_known(profile["owner_id"])
             and isinstance(profile["budget_account_ids"], list)
             and profile["budget_account_ids"]
             and len(profile["budget_account_ids"])
@@ -1357,24 +1356,31 @@ class DstackOperator:
         return profile
 
     def authorize(self, principal):
-        require(principal is not None, "operator_login_required", 401)
-        require(
-            not principal.machine
-            and principal.owner
-            in getattr(self.settings, "operator_capacity_owners", ()),
-            "operator_forbidden",
-            403,
+        from .identity import require_admin
+
+        return require_admin(
+            principal,
+            self.repo,
+            self.settings,
+            legacy_capacity=True,
+            legacy_code="operator_forbidden",
         )
-        return principal.owner
+
+    def _capacity_owner_known(self, owner):
+        from .identity import capacity_owner_known
+
+        return capacity_owner_known(self.repo, self.settings, owner)
 
     def authorize_admin(self, principal):
-        owner = self.authorize(principal)
-        require(
-            owner in getattr(self.settings, "operator_admin_owners", ()),
-            "operator_admin_forbidden",
-            403,
+        from .identity import require_admin
+
+        self.authorize(principal)
+        return require_admin(
+            principal,
+            self.repo,
+            self.settings,
+            legacy_code="operator_admin_forbidden",
         )
-        return owner
 
     def _enabled(self):
         require(
@@ -2489,7 +2495,7 @@ class DstackOperator:
             and (
                 node["payload"].get("owner_id") == owner
                 or allow_admin
-                and owner in getattr(self.settings, "operator_admin_owners", ())
+                and self._is_admin(principal)
             ),
             "dstack_node_not_found",
             404,
@@ -2498,6 +2504,15 @@ class DstackOperator:
 
     def state(self, principal):
         owner = self.authorize(principal)
+        return self._state_for_owner(owner)
+
+    def _is_admin(self, principal):
+        from .identity import is_admin
+
+        return is_admin(principal, self.repo, self.settings)
+
+    def _state_for_owner(self, owner):
+        # Internal read projection: caller must authorize the original actor.
         now = self.repo.clock()
         result = []
         with self.repo.engine.connect() as connection:

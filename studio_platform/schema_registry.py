@@ -5,7 +5,7 @@ remain authoritative until the frozen Alembic baseline is separately adopted.
 """
 
 
-def metadata_families():
+def metadata_families(*, include_identity=False):
     # These three modules extend repository.metadata; register them before
     # collecting it, independent of which API/worker happened to import first.
     from . import operator_capacity, capacity_market, dstack_workspace
@@ -21,7 +21,7 @@ def metadata_families():
     from .auth import metadata as auth
     from .agent_connect import metadata as agent_connect
 
-    return dict(
+    families = dict(
         repository=repository,
         assets=assets,
         asset_journal=asset_journal,
@@ -34,14 +34,19 @@ def metadata_families():
         auth=auth,
         agent_connect=agent_connect,
     )
+    if include_identity:
+        from .identity_schema import metadata as identity
+
+        families["identity"] = identity
+    return families
 
 
-def platform_metadata():
+def platform_metadata(*, include_identity=False):
     """One metadata view for validation, including auth but not legacy DBs."""
     from sqlalchemy import MetaData
 
     result = MetaData()
-    for family in metadata_families().values():
+    for family in metadata_families(include_identity=include_identity).values():
         for table in family.tables.values():
             if table.key in result.tables:
                 raise ValueError("duplicate_platform_table")

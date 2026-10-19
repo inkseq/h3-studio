@@ -756,6 +756,13 @@ class WorkerControl:
                 if worker["current_job_id"] == job["id"]
                 else "original_attempt_requires_reconciliation"
             )
+        from .identity import account_status
+
+        account = account_status(connection, job["tenant_id"], job["owner_id"])
+        if account != "active":
+            return (
+                "account_suspended" if account == "suspended" else "account_unavailable"
+            )
         if (
             worker["expires_at"] <= self.repo.clock()
             or worker["state"] != "ready"
@@ -848,6 +855,10 @@ class WorkerControl:
     ):
         """Claim and bind slot atomically in the same ledger transaction."""
         with self.repo.transaction() as connection:
+            from .identity import lock_account_gate
+
+            if purpose == "generate":
+                lock_account_gate(connection)
             worker = self._worker(connection, worker_id, lock=True)
             if worker["pool"] != pool or worker["state"] in ("registered", "retired"):
                 return None

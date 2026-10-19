@@ -25,9 +25,14 @@ class OperatorBudgets:
         identifier(principal.actor_id)
 
     def _admin(self, principal):
-        self._human(principal)
-        if principal.owner not in self.settings.operator_admin_owners:
-            raise OperatorError("operator_admin_required", 403)
+        from .identity import require_admin
+
+        require_admin(
+            principal,
+            self.repo,
+            self.settings,
+            machine_code="operator_budgets_human_required",
+        )
 
     def owned(self, principal, allowed_budget_ids=None, *, limit=100, after_id=None):
         self._human(principal)

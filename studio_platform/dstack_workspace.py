@@ -7,7 +7,6 @@ commands continue through DstackOperator's original journals and spend checks.
 from __future__ import annotations
 
 import copy
-from dataclasses import replace
 import math
 import uuid
 
@@ -46,12 +45,10 @@ operator_groups = Table(
 )
 
 
-def is_admin(settings, principal):
-    return bool(
-        principal is not None
-        and not principal.machine
-        and principal.owner in getattr(settings, "operator_admin_owners", ())
-    )
+def is_admin(settings, principal, repository):
+    from .identity import is_admin as canonical_admin
+
+    return canonical_admin(principal, repository, settings)
 
 
 def owned_group(connection, settings, owner, group_id):
@@ -287,7 +284,7 @@ class DstackWorkspace:
     def _authorize(self, principal, *, admin=False):
         owner = self.service.authorize(principal)
         if admin:
-            require(is_admin(self.settings, principal), "operator_admin_forbidden", 403)
+            self.service.authorize_admin(principal)
         return owner
 
     def _journal(self, connection, principal, key, kind, body):
@@ -454,13 +451,19 @@ class DstackWorkspace:
         from .dstack_preparation import preparation_view
 
         owner = self._authorize(principal, admin=admin)
-        owners = set(self.settings.operator_capacity_owners) if admin else {owner}
+        from .identity import operator_owners
+
+        owners = operator_owners(self.repo, self.settings) if admin else {owner}
         now = self.repo.clock()
         projected = {}
         # Delegation is read-only and follows an explicit administrator guard.
         # Browser authentication identity remains unchanged on every mutation.
         for account in sorted(owners):
-            current = self.service.state(replace(principal, owner=account))
+            current = (
+                self.service._state_for_owner(account)
+                if admin
+                else self.service.state(principal)
+            )
             for node in current["nodes"]:
                 projected[node["node_id"]] = {**node, "owner_id": account}
         result, groups = [], []
@@ -725,7 +728,10 @@ class DstackWorkspace:
                         }
                     )
         return {
-            "operator": {"account": owner, "admin": is_admin(self.settings, principal)},
+            "operator": {
+                "account": owner,
+                "admin": is_admin(self.settings, principal, self.repo),
+            },
             "capacity_backend": BACKEND_MARKER,
             "enabled": self.service.policy.get("enabled") is True,
             "observed_at": now,

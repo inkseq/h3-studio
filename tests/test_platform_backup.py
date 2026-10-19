@@ -704,7 +704,20 @@ class BackupTests(unittest.TestCase):
             output.write_bytes(b"fake-custom-format-archive")
             return subprocess.CompletedProcess(command, 0)
 
-        with mock.patch("studio_platform.backup.subprocess.run", side_effect=fake):
+        engine = mock.MagicMock()
+        connection = engine.connect.return_value.execution_options.return_value.__enter__.return_value
+        connection.exec_driver_sql.return_value.scalar_one.return_value = "000001-1"
+        with (
+            mock.patch("studio_platform.backup.subprocess.run", side_effect=fake),
+            mock.patch("studio_platform.backup.create_engine", return_value=engine),
+            mock.patch(
+                "studio_platform.schema_version.read_schema_version", return_value=None
+            ),
+            mock.patch(
+                "studio_platform.identity_schema.validate_connection",
+                return_value=False,
+            ),
+        ):
             result = dump_postgres(
                 url_file, self.root / "pg-backup", pg_dump="fake-pg-dump"
             )

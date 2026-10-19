@@ -117,11 +117,13 @@ class ExpectedDeletionTests(unittest.TestCase):
                 if mutation:
                     mutation(db, payload, spec, action_id, ident)
                 db.commit()
+                existing = backup._check_db(db, published=True)
                 return {
                     name: db.execute('SELECT COUNT(*) FROM "' + name + '"').fetchone()[
                         0
                     ]
                     for name in backup._tables()
+                    if name in existing
                 }
 
         def run(*args, **kwargs):

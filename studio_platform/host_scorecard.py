@@ -91,20 +91,23 @@ class OperatorHosts:
         self.store = HostPolicyStore(repo, settings.tenant_id)
 
     def _authorize(self, principal, *, admin=False):
-        require(principal is not None, "operator_login_required", 401)
-        require(
-            not principal.machine
-            and principal.owner in self.settings.operator_capacity_owners,
-            "operator_forbidden",
-            403,
+        from .identity import require_admin
+
+        owner = require_admin(
+            principal,
+            self.repo,
+            self.settings,
+            legacy_capacity=True,
+            legacy_code="operator_forbidden",
         )
         if admin:
-            require(
-                principal.owner in self.settings.operator_admin_owners,
-                "operator_admin_forbidden",
-                403,
+            require_admin(
+                principal,
+                self.repo,
+                self.settings,
+                legacy_code="operator_admin_forbidden",
             )
-        return principal.owner
+        return owner
 
     def _page(self, limit, offset):
         require(

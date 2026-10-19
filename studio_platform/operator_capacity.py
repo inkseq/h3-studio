@@ -791,14 +791,15 @@ class OperatorCapacity(OperatorExtensions):
         )
 
     def authorize(self, principal):
-        require(principal is not None, "operator_login_required", 401)
-        allowed = tuple(getattr(self.settings, "operator_capacity_owners", ()) or ())
-        require(
-            not principal.machine and principal.owner in allowed,
-            "operator_forbidden",
-            403,
+        from .identity import require_admin
+
+        return require_admin(
+            principal,
+            self.repo,
+            self.settings,
+            legacy_capacity=True,
+            legacy_code="operator_forbidden",
         )
-        return principal.owner
 
     def offers(self, principal, chosen):
         self.authorize(principal)

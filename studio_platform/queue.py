@@ -112,6 +112,10 @@ class TaskQueue:
             if connection is None
             else nullcontext(connection) as connection
         ):
+            from .identity import account_active, lock_account_gate
+
+            if purpose == "generate":
+                lock_account_gate(connection)
             self._scheduler_lock(connection, pool)
             # Prompt/source snapshots can be MiB each. Scheduling candidates
             # contain scalars only; load and lock one selected job at a time.
@@ -132,6 +136,10 @@ class TaskQueue:
                     selected["status"] not in states[purpose]
                     or selected["not_before"] > repo.clock()
                     or selected["lease_worker_id"] is not None
+                ):
+                    continue
+                if purpose == "generate" and not account_active(
+                    connection, selected["tenant_id"], selected["owner_id"]
                 ):
                     continue
                 if validator is not None and validator(selected) is not True:
@@ -454,9 +462,19 @@ class TaskQueue:
     ):
         repo = self.repository
         with repo.transaction() as connection:
+            from .identity import account_status, lock_account_gate
+
+            lock_account_gate(connection)
             job = self._leased(connection, lease)
             if job["status"] not in allowed:
                 raise InvalidTransition("invalid_job_transition")
+            account = account_status(connection, job["tenant_id"], job["owner_id"])
+            if account != "active":
+                raise Conflict(
+                    "account_suspended"
+                    if account == "suspended"
+                    else "account_unavailable"
+                )
             connection.execute(
                 update(jobs)
                 .where(jobs.c.id == lease.job_id)

@@ -51,6 +51,35 @@ class WorkspaceTests(LedgerCase):
             self.owner, {"preview_id": preview["preview_id"]}, key or uuid.uuid4().hex
         )["node_id"]
 
+    def test_canonical_admin_reads_regular_users_nodes_without_impersonating_them(self):
+        from studio_platform.identity_schema import users, admin_audit
+
+        node_id = self.start_node()
+        users.create(self.repo.engine)
+        admin_audit.create(self.repo.engine)
+        with self.repo.engine.begin() as connection:
+            for number, owner, role in (
+                (1, "superdan", "user"),
+                (2, "supervan", "admin"),
+            ):
+                connection.execute(
+                    insert(users).values(
+                        id=f"00000000-0000-4000-8000-{number:012}",
+                        tenant=self.settings.tenant_id,
+                        owner=owner,
+                        display_name=owner,
+                        role=role,
+                        status="active",
+                        created_at=self.now,
+                        updated_at=self.now,
+                    )
+                )
+        state = self.workspace.state(self.other_owner, admin=True)
+        self.assertEqual([row["node_id"] for row in state["nodes"]], [node_id])
+        self.assertTrue(state["operator"]["admin"])
+        with self.assertRaisesRegex(OperatorError, "admin_required"):
+            self.workspace.state(self.owner)
+
     def test_no_capacity_terminal_stays_ended_after_stop_with_pending_bill_and_history(
         self,
     ):

@@ -28,7 +28,13 @@ from sqlalchemy import (
 )
 
 from .migrations.versions import v20261019_0001_platform_baseline as baseline
-from .schema_version import BASELINE_REVISION, SchemaVersionError, read_schema_version
+from .schema_version import (
+    BASELINE_REVISION,
+    IDENTITY_REVISION,
+    WORKFLOW_REVISIONS,
+    SchemaVersionError,
+    read_schema_version,
+)
 
 REVISION = baseline.revision
 if REVISION != BASELINE_REVISION:
@@ -80,6 +86,9 @@ def _default(value):
         return "'unknown'"
     if value in {"0", "'0'", "'0'::integer"}:
         return "0"
+    for literal in ("user", "active"):
+        if value in {"'" + literal + "'", "'" + literal + "'::character varying"}:
+            return "'" + literal + "'"
     return value
 
 
@@ -88,6 +97,12 @@ def _check(value):
     # PG deparses each term inside parentheses. Reject every other grammar
     # instead of stripping semantically meaningful parentheses/quotes in SQL.
     value = str(value)
+    from .identity_schema import IdentitySchemaError, normalize_check
+
+    try:
+        return normalize_check(value)
+    except IdentitySchemaError:
+        pass
     if re.search(r"[^a-zA-Z_0-9\s()><=]", value):
         raise BaselineError("schema_check_expression_requires_review")
     if value.count("(") != value.count(")"):
@@ -198,10 +213,10 @@ def reflected_signature(connection, *, schema=None):
     ):
         raise BaselineError("schema_unexpected_database_objects")
     if connection.dialect.name == "postgresql":
-        from .workflow_schema import INKSEQ_WORKFLOW_SCHEMA, WORKFLOW_REVISION, validate
+        from .workflow_schema import INKSEQ_WORKFLOW_SCHEMA, validate
 
         workflow_schema = None
-        if schema is None and validate_version_table(connection) == WORKFLOW_REVISION:
+        if schema is None and validate_version_table(connection) in WORKFLOW_REVISIONS:
             try:
                 workflow_schema = validate(connection)
             except Exception:
@@ -270,7 +285,7 @@ def reflected_signature(connection, *, schema=None):
             for constraint in table.constraints
             if isinstance(constraint, UniqueConstraint) and constraint.name
         }
-        for table in frozen_metadata().tables.values()
+        for table in _reader_metadata().tables.values()
     }
     result = {}
     for table in tables:
@@ -360,6 +375,18 @@ def reflected_signature(connection, *, schema=None):
 def compare_schema(connection, *, schema=None):
     expected = metadata_signature(frozen_metadata(), connection.dialect)
     actual, version = reflected_signature(connection, schema=schema)
+    from .identity_schema import (
+        IdentitySchemaError,
+        frozen_metadata as identity_metadata,
+        present_tables,
+    )
+
+    try:
+        present = present_tables(actual)
+    except IdentitySchemaError as error:
+        raise BaselineError(str(error)) from None
+    if present or version == IDENTITY_REVISION:
+        expected.update(metadata_signature(identity_metadata(), connection.dialect))
     differences = []
     for name in sorted(expected.keys() | actual.keys()):
         if name not in actual:
@@ -387,10 +414,20 @@ def compare_schema(connection, *, schema=None):
         column_count=sum(len(table["columns"]) for table in actual.values()),
         differences=differences,
     )
-    from .workflow_schema import WORKFLOW_REVISION, CATALOG_SHA256
+    from .workflow_schema import CATALOG_SHA256
 
-    if version == WORKFLOW_REVISION:
+    if version in WORKFLOW_REVISIONS:
         result['workflow_catalog_sha256'] = CATALOG_SHA256
+    return result
+
+
+def _reader_metadata():
+    """Frozen baseline plus recognized optional family, without initializing it."""
+    from .identity_schema import frozen_metadata as identity_metadata
+
+    result = frozen_metadata()
+    for table in identity_metadata().tables.values():
+        table.to_metadata(result)
     return result
 
 

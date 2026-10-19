@@ -422,7 +422,9 @@ class CandidateTests(LedgerCase):
         actor = Principal("superdan", "browser", auth_mode="password")
         service = OperatorCapacity(
             self.repo,
-            SimpleNamespace(operator_capacity_owners=("superdan",)),
+            SimpleNamespace(
+                tenant_id=self.scope.tenant_id, operator_capacity_owners=("superdan",)
+            ),
             self.registry,
         )
         service.update_policy(

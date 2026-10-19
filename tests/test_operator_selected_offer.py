@@ -53,7 +53,9 @@ class SelectedOfferTests(OperatorCase):
         self.registry = OperatorRegistry((self.binding,), catalog=public_catalog)
         self.service = OperatorCapacity(
             self.repo,
-            SimpleNamespace(operator_capacity_owners=("superdan",)),
+            SimpleNamespace(
+                tenant_id=self.scope.tenant_id, operator_capacity_owners=("superdan",)
+            ),
             self.registry,
         )
         self.repo.configure_pool("test", max_instances=4, max_physical_gpus=4)
