@@ -1435,6 +1435,9 @@ def create_app(
     from .operator_host_routes import register_routes as register_operator_host_routes
 
     register_operator_host_routes(app)
+    from .identity_admin_routes import register_routes as register_identity_admin_routes
+
+    register_identity_admin_routes(app)
     from .frontend import register_routes as register_frontend_routes
 
     register_frontend_routes(app)

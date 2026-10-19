@@ -14,6 +14,8 @@ import json
 from pathlib import Path
 import re
 import sys
+import time
+import uuid
 
 from sqlalchemy import (
     CheckConstraint,
@@ -24,6 +26,7 @@ from sqlalchemy import (
     UniqueConstraint,
     create_engine,
     inspect,
+    select,
     text,
 )
 
@@ -550,6 +553,140 @@ def adopt_workflows(connection, *, expected_fingerprint):
     return dict(state='adopted_workflows', before=before, after=after)
 
 
+def adopt_identity(
+    connection, *, expected_fingerprint, tenant_id, admin_owners=(), clock=time.time
+):
+    """Atomically adopt users and bootstrap legacy identities exactly once.
+
+    Operational prerequisite: under the existing host release.lock, verify that
+    both the current and previous approved images contain the identity reader
+    bridge before invoking this command. The app container cannot inspect the
+    host's release authority; accepting a self-asserted flag is not such proof.
+    This function never constructs services, modifies password rows or settles
+    jobs, rentals or money. A repeated adopted call does not bootstrap again.
+    """
+    from .auth import accounts
+    from .identity import lock_account_gate
+    from .identity_schema import (
+        IdentitySchemaError,
+        TABLE_NAMES,
+        users,
+        validate_connection,
+    )
+    from .schema_version import WORKFLOW_REVISION
+
+    if (
+        not connection.in_transaction()
+        or connection.dialect.name != 'postgresql'
+        or not re.fullmatch(r'[a-f0-9]{64}', expected_fingerprint or '')
+        or not isinstance(tenant_id, str)
+        or not 1 <= len(tenant_id) <= 200
+        or not isinstance(admin_owners, tuple)
+        or any(
+            not isinstance(owner, str) or not 1 <= len(owner) <= 80
+            for owner in admin_owners
+        )
+        or len(set(admin_owners)) != len(admin_owners)
+    ):
+        raise BaselineError('identity_adoption_requires_verified_transaction')
+    connection.exec_driver_sql("SET LOCAL lock_timeout = '5s'")
+    connection.exec_driver_sql("SET LOCAL statement_timeout = '30s'")
+    # The account gate precedes schema, account, job and capacity locks. Reader
+    # A also takes its shared side before pre-adoption admission/claims.
+    lock_account_gate(connection, exclusive=True)
+    connection.exec_driver_sql('SELECT pg_advisory_xact_lock(685939796868749721)')
+    before = compare_schema(connection)
+    if before['schema_fingerprint'] != expected_fingerprint:
+        raise BaselineError('schema_snapshot_changed')
+    if not before['matches'] or before['recorded_revision'] not in {
+        WORKFLOW_REVISION,
+        IDENTITY_REVISION,
+    }:
+        raise BaselineError('identity_adoption_requires_adopted_workflows')
+    if before['recorded_revision'] == IDENTITY_REVISION:
+        return dict(
+            state='already_adopted', before=before, after=before, backfilled_users=0
+        )
+    if TABLE_NAMES & set(inspect(connection).get_table_names()):
+        raise BaselineError('identity_unrecorded_family_requires_review')
+    legacy = list(
+        connection.execute(
+            select(accounts.c.tenant, accounts.c.username, accounts.c.disabled)
+            .order_by(accounts.c.tenant, accounts.c.username)
+            .with_for_update()
+        ).mappings()
+    )
+    if any(
+        not isinstance(row['tenant'], str)
+        or not 1 <= len(row['tenant']) <= 200
+        or not isinstance(row['username'], str)
+        or not 1 <= len(row['username']) <= 80
+        or type(row['disabled']) is not int
+        for row in legacy
+    ):
+        raise BaselineError('identity_legacy_accounts_require_review')
+    if not any(
+        row['tenant'] == tenant_id
+        and row['username'] in admin_owners
+        and not row['disabled']
+        for row in legacy
+    ):
+        raise BaselineError('identity_bootstrap_active_admin_required')
+    now = clock()
+    if type(now) not in (float, int) or not 0 < now < 100_000_000_000:
+        raise BaselineError('identity_bootstrap_clock_invalid')
+    from alembic import command
+
+    config = alembic_config()
+    config.attributes.update(
+        verified_baseline_connection=connection,
+        verified_baseline_mode='upgrade',
+        verified_identity_mode=True,
+    )
+    command.upgrade(config, IDENTITY_REVISION)
+    for row in legacy:
+        # Stable internal ids do not replace or rewrite business owner strings.
+        ident = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                'inkseq.users.v1:'
+                + json.dumps([row['tenant'], row['username']], separators=(',', ':')),
+            )
+        )
+        connection.execute(
+            users.insert().values(
+                id=ident,
+                tenant=row['tenant'],
+                owner=row['username'],
+                role='admin'
+                if row['tenant'] == tenant_id and row['username'] in admin_owners
+                else 'user',
+                status='suspended' if row['disabled'] else 'active',
+                display_name=row['username'],
+                email=None,
+                email_verified=0,
+                workos_user_id=None,
+                created_at=now,
+                updated_at=now,
+                terms_version=None,
+                terms_accepted_at=None,
+            )
+        )
+    try:
+        validate_connection(connection)
+    except IdentitySchemaError as error:
+        raise BaselineError(str(error)) from None
+    after = compare_schema(connection)
+    if not after['matches'] or after['recorded_revision'] != IDENTITY_REVISION:
+        raise BaselineError('identity_adoption_verification_failed')
+    return dict(
+        state='adopted_identity',
+        before=before,
+        after=after,
+        backfilled_users=len(legacy),
+    )
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Schema-only baseline verification and guarded adoption"
@@ -573,6 +710,11 @@ def main(argv=None):
         help='Guarded pinned SDK schema adoption after reader bridge release',
     )
     workflows.add_argument('--expected-fingerprint', required=True)
+    identity = commands.add_parser(
+        'adopt-identity',
+        help='Adopt users after current and previous approved reader images are verified under release.lock',
+    )
+    identity.add_argument('--expected-fingerprint', required=True)
     args = parser.parse_args(argv)
     engine = None
     try:
@@ -596,6 +738,21 @@ def main(argv=None):
                 result = adopt_workflows(
                     connection, expected_fingerprint=args.expected_fingerprint
                 )
+            elif args.command == 'adopt-identity':
+                from .settings import Settings
+
+                settings = Settings.from_environment()
+                result = adopt_identity(
+                    connection,
+                    expected_fingerprint=args.expected_fingerprint,
+                    tenant_id=settings.tenant_id,
+                    admin_owners=tuple(
+                        sorted(
+                            set(settings.operator_admin_owners)
+                            | set(settings.operator_capacity_owners)
+                        )
+                    ),
+                )
             else:
                 result = adopt_baseline(
                     connection, expected_fingerprint=args.expected_fingerprint
@@ -603,7 +760,8 @@ def main(argv=None):
         print(json.dumps(result, sort_keys=True))
         return (
             0
-            if args.command in {"adopt", 'adopt-workflows'} or result["matches"]
+            if args.command in {"adopt", 'adopt-workflows', 'adopt-identity'}
+            or result["matches"]
             else 1
         )
     except BaselineError as error:

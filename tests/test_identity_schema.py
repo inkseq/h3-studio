@@ -240,13 +240,16 @@ class IdentityReaderTests(unittest.TestCase):
                 self.assertTrue(identity.validate_sqlite(db))
             self.assertNotIn(b"never-export-password", destination.read_bytes())
 
-    def test_frozen_definition_has_no_adoption_entry_point_and_metadata_is_exact(self):
+    def test_frozen_definition_requires_verified_adoption_and_metadata_is_exact(self):
         self.assertEqual(
             metadata_signature(identity.frozen_metadata(), self.engine.dialect),
             metadata_signature(identity.metadata, self.engine.dialect),
         )
-        with self.assertRaisesRegex(RuntimeError, "reader_bridge_cannot_adopt"):
-            identity.frozen.upgrade()
+        with patch("alembic.context.is_offline_mode", return_value=True):
+            with self.assertRaisesRegex(
+                RuntimeError, "identity_verified_adoption_required"
+            ):
+                identity.frozen.upgrade()
         for value in (
             "((role)::text = ANY ((ARRAY['user'::character varying, 'admin'::character varying])::text[]))",
             "status IN ('active', 'suspended')",

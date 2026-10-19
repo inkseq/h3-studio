@@ -56,9 +56,13 @@ inventory.json
 !studio_platform/central_registry.py
 !studio_platform/identity_schema.py
 !studio_platform/identity.py
+!studio_platform/identity_admin.py
+!studio_platform/identity_admin_routes.py
 !studio_platform/migrations/versions/v20261019_0003_account_roles.py
 !tests/test_identity_schema.py
 !tests/test_identity_queue.py
+!tests/test_identity_admin.py
+!tests/test_identity_adoption.py
 !studio_platform/auth.py
 !studio_platform/capabilities.py
 !studio_platform/generation_draft.py
