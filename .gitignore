@@ -698,3 +698,4 @@ inventory.json
 !tests/test_stripe_client.py
 !tests/test_payments_app.py
 !docs/BILLING-TEST-MODE.md
+!tests/test_stripe_credentials.py
