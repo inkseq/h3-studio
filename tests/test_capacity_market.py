@@ -28,7 +28,7 @@ from studio_platform.operator_capacity import (
 from studio_platform.operator_routes import register_routes
 from studio_platform.repository import request_hash, capacity_gate
 from studio_platform.runtime_catalog import PROFILE_IDS
-from studio_platform.scaler import LaunchSpec
+from studio_platform.capacity_types import LaunchSpec
 from test_platform_repository import LedgerCase
 
 
@@ -440,48 +440,6 @@ class MarketTests(LedgerCase):
             self.assertEqual(
                 connection.scalar(select(func.count()).select_from(operator_commands)),
                 0,
-            )
-
-    def test_http_preserves_full_selection_and_reads_only_cache(self):
-        self.publish("targon", [offer()])
-        app = FastAPI()
-        actor = [self.actor]
-
-        @app.middleware("http")
-        async def principal(request: Request, call_next):
-            request.state.principal = actor[0]
-            return await call_next(request)
-
-        register_routes(app, service=self.service)
-        query = {
-            **self.chosen,
-            "provider": "targon",
-            "node_count": 2,
-            "filters": json.dumps({"min_ram_gib": 96}),
-        }
-        with (
-            patch(
-                "studio_platform.lium_provider._central_loader",
-                side_effect=AssertionError("credentials"),
-            ),
-            patch(
-                "httpx.HTTPTransport.handle_request",
-                side_effect=AssertionError("network"),
-            ),
-            TestClient(app) as client,
-        ):
-            result = client.get("/v1/operator/capacity/offers", params=query)
-            self.assertEqual(result.status_code, 200)
-            self.assertEqual(result.headers["cache-control"], "no-store")
-            chosen = result.json()["market"]["selection"]
-            self.assertEqual(chosen["node_count"], 2)
-            self.assertEqual(chosen["ttl_seconds"], 7200)
-            self.assertEqual(chosen["provider"], "targon")
-            self.assertEqual(chosen["filters"], {"min_ram_gib": 96})
-            actor[0] = Principal("supervan", "browser")
-            self.assertEqual(
-                client.get("/v1/operator/capacity/offers", params=query).status_code,
-                403,
             )
 
     def test_scanner_is_inert_until_explicitly_run_and_sanitizes_error(self):

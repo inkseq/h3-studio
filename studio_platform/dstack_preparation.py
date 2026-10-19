@@ -11,7 +11,7 @@ import copy
 import math
 
 from .dstack_capacity import NATIVE_REASON_CODES
-from .lium_bootstrap import BOOT_FAILURE_CODES, BOOT_PHASES
+from .native_bootstrap import BOOT_FAILURE_CODES, BOOT_PHASES
 
 PHASES = BOOT_PHASES | {
     "provisioning",

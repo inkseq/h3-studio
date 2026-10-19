@@ -1,7 +1,8 @@
 """Fail-closed CI selection from the complete local Git diff, never an API list.
 
-Only modifications to reviewed paths may reduce checks. Added, removed, renamed,
-type-changed, malformed or unknown paths require the complete platform checks.
+Only reviewed paths may reduce checks. Prose-only additions/archive moves use
+the same light gate as prose edits. Executable additions/removals, type changes,
+malformed or unknown paths require the complete platform checks.
 An explicit frontend release has its own artifact contract and targeted gates;
 it is not an assertion that unrelated backend changes have passed their tests.
 """
@@ -13,6 +14,11 @@ import os
 from pathlib import Path
 import re
 import subprocess
+
+if __package__:
+    from .ci_test_shards import SLOW_MODULE_PATHS
+else:
+    from ci_test_shards import SLOW_MODULE_PATHS
 
 
 # This exact allowlist is also the release preparation dirty-document exemption.
@@ -53,9 +59,9 @@ workflow/owner-changes.md
 FRONTEND_ROOT = frozenset({"yingxu/index.html", "yingxu/package.json", "yingxu/package-lock.json",
                            "yingxu/vite.config.js", "yingxu/source-manifest.json",
                            "yingxu/src/NOVICE-STORIES-AC.md"})
-# Ordinary backend changes still run the complete Python and PostgreSQL suites
-# plus the platform image/runtime check. Security, money, queue and provider
-# code is deliberately absent: it falls back to all current platform/UI checks.
+# Reviewed backend changes run both suites and the platform image; only the
+# explicit slow-module dependency list can narrow unrelated CPU integration.
+# Security, money, queue and provider code falls back to every current check.
 BACKEND_MODULES = frozenset({"agent_discovery", "caption_server", "diagnostics", "generation_draft",
                              "guided", "guided_schema", "media", "media_process", "project_activity",
                              "project_validation", "render_backend", "render_cli", "render_plans"})
@@ -70,6 +76,10 @@ def path_kind(path: str) -> str:
         return "full"
     if path in DOCUMENTS or path in GOVERNANCE_DOCUMENTS:
         return "docs"
+    if (re.fullmatch(r"docs/(?:[\w.-]+/)*[\w.-]+\.md", path)
+            and not re.search(r"(?:^|[._/-])(?:security|auth|credentials?|secrets?)(?:[._/-]|$)",
+                              path, re.IGNORECASE)):
+        return "docs"
     if path in FRONTEND_ROOT or re.fullmatch(r"yingxu/src/(?:[\w.-]+/)*[\w.-]+\.(?:js|jsx|css|json)", path):
         return "frontend"
     if path in {f"studio_platform/{name}.py" for name in BACKEND_MODULES}:
@@ -79,7 +89,7 @@ def path_kind(path: str) -> str:
     return "full"
 
 
-def selection(kinds, *, reason: str) -> dict:
+def selection(kinds, *, reason: str, slow_modules=None) -> dict:
     kinds = set(kinds)
     full = "full" in kinds
     backend = full or "backend" in kinds
@@ -94,6 +104,7 @@ def selection(kinds, *, reason: str) -> dict:
         # Credential helpers and unknown/critical changes take the complete
         # path. Native Keychain proof cannot be replaced by Linux mocks.
         "macos_helper": full,
+        "slow_modules": None if full else slow_modules,
     }
 
 
@@ -101,14 +112,17 @@ def classify(changes: list[tuple[str, str]]) -> dict:
     kinds = []
     for status, path in changes:
         # --no-renames produces A+D for moves. Never hide a backend deletion
-        # behind the new frontend/doc path. Type changes also force full checks.
-        if status != "M":
-            return selection({"full"}, reason="non-modification-requires-full")
+        # behind a new doc path. Only prose A+D is safe to classify lightly.
         kind = path_kind(path)
+        if status != "M" and not (status in {"A", "D"} and kind == "docs"):
+            return selection({"full"}, reason="non-modification-requires-full")
         if kind == "full":
             return selection({"full"}, reason="unknown-or-critical-path")
         kinds.append(kind)
-    return selection(kinds, reason="complete-local-diff")
+    paths = {path for _, path in changes}
+    slow_modules = sorted(name for name, dependencies in SLOW_MODULE_PATHS.items()
+                          if paths & dependencies)
+    return selection(kinds, reason="complete-local-diff", slow_modules=slow_modules)
 
 
 def parse_diff(raw: bytes) -> list[tuple[str, str]]:
@@ -241,9 +255,11 @@ def main() -> None:
     args.output.write_text(json.dumps(result, sort_keys=True, indent=2) + "\n", encoding="utf-8")
     if target := os.environ.get("GITHUB_OUTPUT"):
         with open(target, "a", encoding="utf-8") as stream:
-            for key in (*GATES, "category", "action", "tested_sha"):
+            for key in (*GATES, "category", "action", "tested_sha", "slow_modules"):
                 value = result[key]
-                stream.write(f"{key}={str(value).lower() if isinstance(value, bool) else value}\n")
+                rendered = json.dumps(value, separators=(",", ":")) if key == "slow_modules" else (
+                    str(value).lower() if isinstance(value, bool) else value)
+                stream.write(f"{key}={rendered}\n")
     print(json.dumps(result, sort_keys=True))
 
 

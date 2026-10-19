@@ -221,6 +221,6 @@ R2 可以后续通过同一 storage adapter 比较真实传输费用；Hippius �
 - 单机限制与意图绑定：`studio_platform/on_demand_scaler.py`、`studio_platform/capacity.py`、`studio_platform/repository.py`。
 - 有限双机基础与全池失败隔离缺口：`studio_platform/production_scaler.py`；需求计算 `studio_platform/autoscale.py`。
 - 队列与 unknown 保护：`studio_platform/queue.py`、`studio_platform/worker.py`、`studio_platform/scaler.py`。
-- 本地真实任务启动策略：`QUEUED-TASK-START.zh-CN.md`、`studio_platform/queued_task_runner.py` 及四个 `test_platform_queued_*` 模块。
+- 该旧启动策略已退役；当前 dstack/DBOS 边界见 [RUNTIME-INVENTORY.md](RUNTIME-INVENTORY.md)。
 - 历史生产证据：`.platform-demand-live/OVERNIGHT-FIX-20261005.zh-CN.md`、`GPU-RECOVERY-HANDOFF.md`；本文件不更新其线上状态。
 - 前端 canonical：`C:/Users/danmo/Desktop/inference/video-studio-design/studio-app`；`h3-studio/yingxu` 为发布快照，不直接编辑。

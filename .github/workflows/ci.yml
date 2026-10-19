@@ -73,6 +73,7 @@ jobs:
       category: ${{ steps.scope.outputs.category }}
       action: ${{ steps.scope.outputs.action }}
       tested_sha: ${{ steps.scope.outputs.tested_sha }}
+      slow_modules: ${{ steps.scope.outputs.slow_modules }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -149,7 +150,9 @@ jobs:
           python -m ruff format --check
           python -m ruff check
       - name: Complete offline suite shard (temporary data, no model inference)
-        run: python tools/ci_test_shards.py --suite python --shard-index ${{ matrix.shard }} --shard-count 6 --timing-output ci-timings/python-${{ matrix.shard }}.json
+        env:
+          CI_SLOW_TEST_MODULES: ${{ needs.changes.outputs.slow_modules }}
+        run: python tools/ci_test_shards.py --suite python --shard-index ${{ matrix.shard }} --shard-count 6 --slow-modules "$CI_SLOW_TEST_MODULES" --timing-output ci-timings/python-${{ matrix.shard }}.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -244,7 +247,8 @@ jobs:
       - name: Complete PostgreSQL suite shard (isolated CI service)
         env:
           PLATFORM_TEST_DATABASE_URL: postgresql+psycopg://sixnine_test:sixnine-ci-test-only@127.0.0.1:5432/sixnine_test
-        run: python tools/ci_test_shards.py --suite postgres --shard-index ${{ matrix.shard }} --shard-count 6 --timing-output ci-timings/postgres-${{ matrix.shard }}.json
+          CI_SLOW_TEST_MODULES: ${{ needs.changes.outputs.slow_modules }}
+        run: python tools/ci_test_shards.py --suite postgres --shard-index ${{ matrix.shard }} --shard-count 6 --slow-modules "$CI_SLOW_TEST_MODULES" --timing-output ci-timings/postgres-${{ matrix.shard }}.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

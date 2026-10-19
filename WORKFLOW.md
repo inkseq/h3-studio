@@ -1,48 +1,20 @@
 # Inkseq delivery workflow
 
-Current owner process: 2026-10-15, #200. Start with [AGENTS.md](AGENTS.md); read this only when delivery coordination needs detail. Latest owner decisions are in [workflow/owner-changes.md](workflow/owner-changes.md).
+[#328](https://github.com/inkseq/h3-studio/issues/328) and [AGENTS.md](AGENTS.md) define the current lanes, tiers, cadence and safety. Latest owner decisions: [workflow/owner-changes.md](workflow/owner-changes.md). Older process text is archived under `docs/archive/workflow-20261019/` and is not a current gate.
 
-## One task, one authority
+## One bounded issue
+Read latest owner comments and concurrent claims/PRs; claim integration owner, worktree/branch, base and contracts before editing. Never reset shared/preserved checkouts. Put a shared API contract in the issue before backend/frontend implementation. Claude owns studio-app and yingxu; Codex owns backend and operations. Keep one issue in progress plus one in review per lane.
 
-Use issues in `inkseq/h3-studio` and https://github.com/orgs/inkseq/projects/1. Read the assigned issue's latest owner comments, dependencies, claims and related open PRs. `workflow/project.json` contains routing IDs, not current status. Architecture/decisions/contracts are read only for the affected area; do not bulk-load historical reports.
+## Checks and staging
+Use the smallest checks appropriate to the changed behavior, once per related slice. Keep required CI's single `test` aggregate; no bypass or self-hosted runners. Tier0 has CI + staging self-check, PR description only. Tier1 adds affected tests and one short issue comment. Tier2 retains safety/isolation/unknown-outcome tests, non-author safety review and the relevant staging acceptance checklist. Record review scope/revision and findings in the PR; the author's own review is not independent.
 
-Before editing, claim the bounded scope: integration owner, branch/worktree, base commit, affected files/contracts and next deliverable. Preserve existing checkouts and coordinate overlapping contracts. Do not infer abandonment from silence. Agents open and merge routine PRs; the user does not do manual PR work.
+Automatic main staging is separate from production. Promote identical accepted image/frontend bytes, without rebuilding, on Tuesday/Friday. Claude signs off Tier2. Record source merged, staged, owner accepted and production separately. GPU checks batch into the approved acceptance window, not a new rental for each edit. Never present an untested checklist item as passed.
 
-## Select the smallest adequate process
+## Handoff and authority
+GitHub technical descriptions are English. Owner handoffs are Chinese, about10lines: exact versions, what is usable, changes, checks and unfinished issue links. No long Tier0/1 receipts. Request-to-usable time is pending until verified live. Release claims with `Session: Unclaimed`; leave unfinished work Ready or blocked by its actual dependency. Issues close on production promotion.
 
-| Risk | Scope | Checks and review |
-|---|---|---|
-| Low | UI, copy/styles/docs, read-only diagnostics/preview tools, non-billing UI flags | Affected checks/build, merge, applicable frontend/app release, one live browser check. No independent review, live GPU or private evidence file. |
-| Medium | API/contracts, queue/dispatch, storage writes, additive migrations | Affected checks, one independent review, release. Live GPU only if the generation path changes. |
-| High | Money, credentials, user-data deletion, GPU rental/stop, provider accounts | Existing strict path: affected safety/integration tests, independent non-author review, exact-version protected release and relevant live operational acceptance. |
+Preserve original financial/job/media history and protect unknown outcomes. An API read, merged PR, board item or old receipt grants no extra mutation authority. Do not repeat completed financial operations. All development/GPU tests use staging. Keep max_price, idle stop, maximum runtime, task-scoped USD20 safety and stop-at-completion; protect owner production machines.
 
-When uncertain, choose the lower tier and state it in one line. A high-risk slice does not impose extra GPU tests or evidence files on unrelated low-risk changes in its batch. Reviews go in the PR: reviewer, exact revision/scope, findings/fixes and result. Never call the author's own review independent.
+After two hours without direction, record a five-line problem/evidence/options checkpoint and choose another bounded approach. Record material out-of-scope findings in an existing issue or one follow-up. Ask only for budget overrun, permanent user-data deletion, credential/provider-account changes or a product/legal decision outside the specification.
 
-Make related changes locally, then run necessary regression once. Do not repeat unchanged successful checks. Required CI remains the single `test` aggregate; no check bypass or self-hosted runner is introduced. Preserve complete test coverage across the existing shards.
-
-Source merge is not release. Use the existing exact-version release route appropriate to the changed service. High-risk release approval/rollback checks remain. After #195, main automatically deploys to staging; production promotes the accepted image digest and frontend bytes without rebuild. Until then, the owner has authorized small P0 #193/#126/#194 production fixes.
-
-## Time and operating authority
-
-If an investigation or fix still has no clear direction after two hours, record a five-line checkpoint: observed problem, evidence, tried approach, options and the selected next bounded approach. Resolve the blocker autonomously under the latest owner authority; ask only for budget overrun, permanent user-data deletion or credential/provider-account changes. Do not let documenting uncertainty replace fixing a clear issue. Finish, close or settle when evidence supports it; retain only genuinely uncertain money/data obligations.
-
-Test GPU spend is pre-authorized up to **USD20 per change/acceptance task** (issue/PR acceptance ID), not per calendar day. Count that task's confirmed spend plus committed price for its running machines; unresolved projections from other tasks do not consume this allowance. Keep the limit editable in Settings → Admin, original ownership/accounting, max_price, idle stop and maximum runtime; stop near the task limit and when testing finishes. Tests use staging only. Supervan's production machines/jobs are never touched. This does not settle old invoices or erase reservations (CR-20261018-32).
-
-Latest human decisions take precedence. Record each mid-course decision once as `CR-YYYYMMDD-n` in `workflow/owner-changes.md`, with date, decision and affected issues. Replace conflicting current requirements in the same change; retain old evidence in Git or `docs/archive/`. Do not create a parallel plan/task database.
-
-## Acceptance and handoff
-
-Use a short **Chinese handoff of at most about 10 lines**, including GitHub owner-facing handoffs. GitHub titles, technical descriptions and code remain English. State:
-
-1. What changed and risk tier.
-2. Whether it is live and what owner/supervan can do now, including where to open it.
-3. What passed; remaining material limits/issues with links.
-4. Request-to-usable time: issue `createdAt` to first verified live handoff, or pending.
-
-Put detailed acceptance mapping, hashes, command IDs, receipts and review notes in the PR or one linked file, not long issue comments. Low-risk work needs no private evidence file. State a limitation only when it affects use or a decision. Mark each original acceptance checkbox only when satisfied; a composite box needs all its parts. A test count alone is not acceptance.
-
-Record new material bugs, money/data risks or out-of-scope work in an existing issue or a bounded follow-up before handoff. Keep fixed small in-scope findings in PR evidence. Preserve original jobs, attempts, budget records and assets; unknown results require reconciliation rather than duplicate submission.
-
-Project fields: `Status` (Backlog/Ready/In progress/In review/Done), `Blocked`, `Release`, `Session`. On handoff/relinquishment set Session to Unclaimed. An unfinished leaf task becomes Ready if actionable, otherwise Backlog/Blocked with its dependency. Parent rollups may be partly delivered without an active claim. Done requires the issue's acceptance, including actual deployment when specified.
-
-Keep source on a remote branch at useful checkpoints. Do not reset preserved feature checkouts or delete branches as a completion ritual. Never put secrets, signed URLs, private prompts/media, environments or runtime data into GitHub.
+Release contracts: [DEVELOPMENT-RELEASE.zh-CN.md](DEVELOPMENT-RELEASE.zh-CN.md), `deploy/platform/`, `deploy/dstack/RELEASE.md`. API/queue sources: `studio_platform/`; generation contract: `docs/GENERATION-CONTRACT.md`. Board IDs are routing data in `workflow/project.json`, never live acceptance evidence.

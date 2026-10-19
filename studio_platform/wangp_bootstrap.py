@@ -17,7 +17,7 @@ import stat
 import threading
 import time
 
-from .lium_bootstrap import (
+from .native_bootstrap import (
     BootError,
     SSHHost,
     REMOTE_ROOT,
@@ -395,7 +395,7 @@ print(json.dumps({'packages':dict(line.split('\\t',1) for line in rows[:10000]),
 
     def _capture_system_observation(self):
         """Keep the first safe inventory on CPU before transferring dependencies."""
-        from .lium_bootstrap import provider_instance_id
+        from .native_bootstrap import provider_instance_id
 
         instance_id = self.coordinates.get('instance_id')
         provider_instance_id(getattr(self.config, 'provider', 'lium'), instance_id)

@@ -15,7 +15,7 @@ from studio_platform.control import WorkerControl, WorkerSpec
 from studio_platform.execution_policy import ExecutionPolicies
 from studio_platform.autoscale import ScalePolicy
 from studio_platform.capabilities import MODEL, compile_request
-from studio_platform.scaler import LaunchSpec, ScaleCoordinator
+from studio_platform.capacity_types import LaunchSpec
 from studio_platform.settings import Settings
 from studio_platform.repository import (
     BudgetExceeded,
@@ -30,7 +30,6 @@ from studio_platform.repository import (
 from test_platform_repository import LedgerCase
 from test_platform_api import generation_request
 from test_platform_execution_policy import policy
-from test_platform_scaler import FakeProvider
 import test_platform_capacity as fixture
 
 
@@ -90,11 +89,7 @@ class PoolMemberTests(LedgerCase):
             instance_reservation_microusd=200_000,
             hard_deadline=self.now + 3600,
         )
-        self.provider = FakeProvider()
-        self.scaler = ScaleCoordinator(self.repo, provider=self.provider, enabled=True)
-        self.controller = ColdStartCoordinator(
-            self.repo, scaler=self.scaler, enabled=True
-        )
+        self.controller = ColdStartCoordinator(self.repo, enabled=True)
         self.value.update(backend="wangp-worker", engine_manifest_digest=DIGEST)
         self.value["envelope"]["controls"].pop("ref_image_size")
         self.write()
@@ -179,11 +174,6 @@ class PoolMemberTests(LedgerCase):
     def test_pool_opt_in_is_immutable_and_legacy_hash_and_controller_remain_unchanged(
         self,
     ):
-        self.assertEqual(
-            self.controller.tick("leader", "cold-approval"),
-            {"state": "capacity_pool_controller_not_implemented"},
-        )
-        self.assertEqual(self.provider.creates, [])
         self.assertEqual(self.rows(instance_intents), [])
         with self.assertRaisesRegex(Conflict, "immutable"):
             self.approve(backend="wangp-worker", engine_manifest_digest=DIGEST)
@@ -210,34 +200,6 @@ class PoolMemberTests(LedgerCase):
                 ),
             )
 
-    def test_finite_controller_rejects_opt_in_even_when_all_legacy_identity_checks_match(
-        self,
-    ):
-        from studio_platform.production_scaler import FiniteController
-
-        p = self.grant["payload"]
-        owner = SimpleNamespace(
-            config=SimpleNamespace(
-                tenant=p["tenant_id"],
-                pool=p["pool"],
-                configuration_id=p["configuration_id"],
-                recipe_ids=p["recipe_ids"],
-                execution_policy_sha256=p["policy_hash"],
-                scope=Scope(**p["budget_scope"]),
-                budget_account_ids=p["budget_account_ids"],
-                scale_policy=p["scale_policy"],
-                launches=[p["launch"]],
-            ),
-            stopping=lambda: False,
-            policies=SimpleNamespace(capacity_approval_current=lambda _: True),
-        )
-        self.assertTrue(
-            FiniteController.approval_current(
-                owner, {k: v for k, v in p.items() if k != "pool_members"}
-            )
-        )
-        self.assertFalse(FiniteController.approval_current(owner, p))
-
     def test_warm_admission_cannot_drop_pool_binding_even_after_revocation(self):
         self.member("a")
         self.worker("a")
@@ -263,7 +225,6 @@ class PoolMemberTests(LedgerCase):
         )
         with self.assertRaisesRegex(Conflict, "not_approved"):
             self.repo.reserve_capacity_member("cold-approval", "c")
-        self.assertEqual(self.provider.creates, [])
 
     def test_member_binding_and_existing_ledger_reservation_rollback_together(self):
         with self.assertRaisesRegex(RuntimeError, "rollback"):

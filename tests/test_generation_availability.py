@@ -33,7 +33,7 @@ from studio_platform.runtime_catalog import (
     profile_output_delivery,
     public_catalog,
 )
-from studio_platform.scaler import LaunchSpec
+from studio_platform.capacity_types import LaunchSpec
 import test_platform_execution_profiles as profile_tests
 from test_platform_execution_profiles import PRUNED, INT8
 from test_platform_execution_policy import policy as legacy_policy

@@ -18,7 +18,7 @@ from test_operator_capacity import OperatorCase
 class ExtensionTests(OperatorCase):
     def prepare(self, *, headroom=True):
         self.create(chosen={**self.chosen, "ttl_seconds": 900})
-        self.controller.tick()
+        self.seed_running()
         node = self.service.state(self.actor)["nodes"][0]
         self.node_id = node["id"]
         with self.repo.transaction() as conn:
@@ -117,7 +117,7 @@ class ExtensionTests(OperatorCase):
             self.assertEqual(
                 current_node["payload"]["selection"], node["payload"]["selection"]
             )
-        self.assertEqual(len(self.provider.creates), 1)
+        self.assertEqual(len(self.seeded_instances), 1)
 
     def test_provider_hard_stop_is_specific_unsupported_not_fake_success(self):
         self.prepare(headroom=False)
@@ -135,7 +135,7 @@ class ExtensionTests(OperatorCase):
                 {"preview_id": preview["preview_id"]},
                 "blocked",
             )
-        self.assertEqual(len(self.provider.creates), 1)
+        self.assertEqual(len(self.seeded_instances), 1)
 
     def test_stop_wins_stale_preview_and_newer_deadline_cannot_be_overwritten(self):
         node = self.prepare()

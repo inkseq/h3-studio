@@ -21,7 +21,8 @@ from studio_platform.inference.wangp_contract import (
     canonical_json,
     operation_id,
 )
-from studio_platform.queued_task_runner import QueuedTaskRunner, QUEUED_TASK_PROFILE
+from studio_platform.worker import WorkerRunner
+from studio_platform.qualification_profiles import QUEUED_TASK_PROFILE
 from studio_platform.repository import attempts, budget_reservations
 from studio_platform.runtime_hosts.wangp import WanGPHost
 from studio_platform.runtime_hosts.wangp_receipts import ReceiptJournal
@@ -224,7 +225,7 @@ class FailureRetentionTests(LedgerCase):
         )
 
     def runner(self):
-        return QueuedTaskRunner(
+        return WorkerRunner(
             self.repo,
             None,
             self.root / "worker",
@@ -232,11 +233,6 @@ class FailureRetentionTests(LedgerCase):
             control=self.control,
             retry_after_s=0,
             submission_guard=lambda _: True,
-            stop_new=lambda: False,
-            job_allowed=lambda _: True,
-            collection_lock_dir=self.root / "collection",
-            qualification_evidence_file=self.evidence,
-            evidence_identity=self.identity,
         )
 
     def begin(self):
@@ -303,9 +299,7 @@ class FailureRetentionTests(LedgerCase):
         self.assertEqual(receipt.reason, code)
         self.assertEqual((receipt.stop_proven, receipt.job_id), (True, original["id"]))
         self.assertEqual(calls.count(("POST", "/v1/operations")), 1)
-        self.assertNotIn(
-            "PRIVATE", canonical_json(receipt.to_dict()) + self.evidence.read_text()
-        )
+        self.assertNotIn("PRIVATE", canonical_json(receipt.to_dict()))
 
     def test_unrecognized_upstream_error_crosses_http_as_static_unknown(self):
         self.result.errors = [NS(stage=PRIVATE, message=PRIVATE)]
@@ -315,11 +309,7 @@ class FailureRetentionTests(LedgerCase):
         current = self.repo.get_job(self.scope, original["id"])
         code = "wangp_unknown_unclassified"
         self.assertEqual(current["error_code"], code)
-        self.assertEqual(
-            self.runner().verification_summary()["failures"][0]["error_code"], code
-        )
         self.assertEqual(calls.count(("POST", "/v1/operations")), 1)
-        self.assertNotIn("PRIVATE", self.evidence.read_text())
 
     def test_failed_session_survives_host_and_cpu_restart_without_replay_or_secret_text(
         self,
@@ -372,7 +362,6 @@ class FailureRetentionTests(LedgerCase):
             ),
             ("invoice_pending", budget["reserved_microusd"], None),
         )
-        self.assertTrue(self.control.get("worker")["drain_requested"])
         self.host.close()
         self.journal = ReceiptJournal(
             self.journal_path, slot_key="slot-1", manifest_digest=self.engine.digest
@@ -381,16 +370,10 @@ class FailureRetentionTests(LedgerCase):
         self.backend.transport = self.host
         self.assertEqual(self.host.inspect(attempt["upstream_task_id"]).reason, code)
         fresh = self.runner()
-        self.assertEqual(
-            fresh.verification_summary()["failures"][0]["error_code"], code
-        )
-        self.assertFalse(fresh.verification_summary()["generation_verified"])
-        self.new_job("later-explicit-job")
         fresh.run_once("worker", "finite-pool")
         self.assertEqual(len(self.upstream.calls), 1)
         for text in (
             canonical_json(receipt.to_dict()),
-            self.evidence.read_text(),
             self.journal_path.read_bytes().decode("utf-8", errors="ignore"),
         ):
             for forbidden in (
@@ -458,7 +441,6 @@ class FailureRetentionTests(LedgerCase):
             self.repo.get_job(self.scope, original["id"])["error_code"],
             "upstream_generation_failed",
         )
-        self.assertNotIn("PRIVATE", self.evidence.read_text())
 
 
 if __name__ == "__main__":

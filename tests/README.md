@@ -4,14 +4,29 @@ Run commands from the repository root. Tests and their synthetic fixture data
 live here; application and deployment sources stay in their existing locations.
 
 The authoritative CI runner preserves the original `unittest` module names,
-`load_tests` hooks, module/class fixtures, PostgreSQL module list, and duplicate
-test-ID occurrences:
+`load_tests` hooks, module/class fixtures and the maintained PostgreSQL module
+list. Imported aliases of the same test ID run once; inherited tests on distinct
+classes still run. Measured module timings balance the six parallel shards,
+with test counts as the fallback for new modules:
 
 ```sh
 python tools/ci_test_shards.py --suite python --plan
 python tools/ci_test_shards.py --suite python --shard-index 0 --shard-count 6
 python tools/ci_test_shards.py --suite postgres --plan
 ```
+
+CI runs all money, GPU, queue and authentication invariants. Only the explicitly
+listed slow CPU/media and PostgreSQL backup suites may be skipped for unrelated
+reviewed source paths. Unknown paths, executable additions/removals, sensitive
+changes and manual platform checks run the full suites. `--slow-modules` consumes
+the classifier's JSON list; omitting it (or passing `null`) means full coverage.
+Prose-only additions and archive moves do not require runtime tests. The single
+required `test` check still rejects failures, cancellations and accidental skips.
+
+`tools/ci_test_timings.json` comes from the linked successful hosted run, not a
+performance promise. Refresh it from the existing per-shard timing artifacts
+when balancing drifts. Test time, artifact publication and staging deployment
+are separate measurements: shortening the tests alone cannot bound deployment.
 
 For a focused test module, expose this directory on the test process import path:
 
@@ -24,10 +39,8 @@ command. The CI workflows set this path for focused commands. Complete discovery
 also works with `python -m unittest discover -s tests -p 'test_*.py'`.
 
 Pytest adoption is a separate collection-compatibility step: its normal unittest
-collector does not support the five existing `load_tests` hooks. Do not replace
-the shard runner until collection parity, including hook-selected cases and
-duplicate occurrences, has been demonstrated. No tests have been removed or
-rewritten as pytest fixtures in this layout change.
+collector does not support the existing `load_tests` hooks. Do not replace the
+shard runner without preserving hook-selected cases and fixture behaviour.
 
 ## Python style
 

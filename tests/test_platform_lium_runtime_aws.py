@@ -6,14 +6,12 @@ import json
 import os
 import unittest
 
-import httpx
 
-from studio_platform.lium_provider import (
+from studio_platform.lium_identity import (
     BASE_URL,
     KEY_VARIABLE,
     PROFILE,
     SERVICE,
-    LiumProvider,
 )
 from studio_platform.lium_runtime_aws import (
     AwsLiumLoader,
@@ -57,7 +55,7 @@ class FakeSecrets:
 
 
 class LiumRuntimeTests(unittest.TestCase):
-    def test_explicit_profile_pinned_version_once_in_memory_and_provider_compatibility(
+    def test_explicit_profile_pinned_version_once_in_memory(
         self,
     ):
         secrets = FakeSecrets()
@@ -73,21 +71,7 @@ class LiumRuntimeTests(unittest.TestCase):
         self.assertEqual(loaded[0].api_key, SYNTHETIC)
         self.assertNotIn(SYNTHETIC, repr(loaded[0]))
         self.assertEqual(dict(os.environ), before)
-        requests = []
-
-        def respond(request):
-            requests.append((str(request.url), request.headers.get("X-API-Key")))
-            return httpx.Response(200, json=[])
-
-        provider = LiumProvider(
-            enabled=True, loader=loader, transport=httpx.MockTransport(respond)
-        )
-        try:
-            self.assertEqual(provider._rows("pods"), [])
-            self.assertEqual(requests, [(BASE_URL + "/pods", SYNTHETIC)])
-        finally:
-            provider.close()
-            loader.close()
+        loader.close()
         self.assertTrue(secrets.closed)
 
     def test_wrong_requested_identity_denied_before_client_construction(self):

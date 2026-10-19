@@ -25,7 +25,7 @@ class OperatorExtensions:
             operator_heartbeats,
             CONTROLLER_FRESH_SECONDS,
         )
-        from .operator_controller import provider_lifetime_current
+        from .provider_lifetime import provider_lifetime_current
 
         now = self.repo.clock()
         policy = self._policy(connection)

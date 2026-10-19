@@ -19,7 +19,7 @@ from test_operator_capacity import OperatorCase
 class ManagedAdmissionTests(OperatorCase):
     def prepare(self, *, duration=120, profile=None):
         self.create()
-        self.controller.tick()
+        self.seed_running()
         self.control = WorkerControl(self.repo)
         with self.repo.engine.connect() as conn:
             self.worker = dict(
@@ -115,7 +115,7 @@ class ManagedAdmissionTests(OperatorCase):
         self.assertEqual(self.control.queued_diagnostic(before)["reason_code"], reason)
         self.assertEqual(self.repo.get_job(self.scope, self.job["id"]), before)
         self.assertEqual(self.repo.get_budget("owner-budget"), budget)
-        self.assertEqual(len(self.provider.creates), 1)
+        self.assertEqual(len(self.seeded_instances), 1)
 
     def test_stale_provider_proof_is_not_ready_despite_fresh_worker(self):
         self.prepare()
@@ -219,7 +219,7 @@ class ManagedAdmissionTests(OperatorCase):
         )
         self.assertIsNotNone(collection)
         self.assertEqual(collection.job["id"], self.job["id"])
-        self.assertEqual(len(self.provider.creates), 1)
+        self.assertEqual(len(self.seeded_instances), 1)
 
     def test_consumer_shutdown_withdraws_only_exact_fence_incarnation_observation(self):
         import copy

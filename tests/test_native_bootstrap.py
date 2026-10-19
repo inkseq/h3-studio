@@ -1,8 +1,6 @@
-"""Cold WanGP lifecycle checks with fake SSH/runtime and temporary ledgers only."""
+"""Current native SSH/report contracts; local fakes only, never rent or bootstrap."""
 
-from dataclasses import replace
 import contextlib
-import hashlib
 import io
 import json
 import socket
@@ -15,236 +13,10 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from studio_platform.inference.wangp_contract import EngineManifest, HostReadiness
-from studio_platform.fleet import read_config as read_fleet
-from studio_platform.lium_bootstrap import BootConfig, BootController, BootError
-from studio_platform.qualification_profiles import QUEUED_TASK_PROFILE
-from studio_platform.wangp_bootstrap import (
-    SOURCE_NAMES,
-    WanGPSSHHost,
-    connect_backend,
-    read_sources,
-    validate_report,
-)
-from test_platform_repository import LedgerCase
-from test_platform_lium_bootstrap import FakeFleet, POD, GPU
+from studio_platform.native_bootstrap import BootError
+from studio_platform.wangp_bootstrap import SOURCE_NAMES, WanGPSSHHost
 
-
-class WanGPBootTests(LedgerCase):
-    def setUp(self):
-        super().setUp()
-        self.root = Path(self.temp.name)
-        self.sources = self.root / 'sources'
-        self.sources.mkdir()
-        raw = (
-            Path(__file__).resolve().parents[1] / 'deploy/wangp/manifest.json'
-        ).read_bytes()
-        self.manifest = EngineManifest.from_dict(json.loads(raw))
-        for name, content in {
-            'wangp-manifest.json': raw,
-            'wangp-bootstrap.py': b'# offline fake',
-            'wangp-runtime.json': b'{}',
-            'wangp-package.tar.gz': b'offline fixture',
-        }.items():
-            (self.sources / name).write_bytes(content)
-        self.config = BootConfig(
-            self.root / 'boot',
-            self.sources,
-            self.root / 'key',
-            self.root / 'known',
-            18900,
-            'test-wangp',
-            enabled=True,
-            qualification_profile=QUEUED_TASK_PROFILE,
-            execution_backend='wangp-worker',
-            engine_manifest_digest=self.manifest.digest,
-        )
-        self.repo.configure_pool('wangp-cold', max_instances=1, max_physical_gpus=1)
-        self.intent = self.repo.reserve_instance_intent(
-            self.scope,
-            'wangp-cold',
-            'cold',
-            physical_gpus=1,
-            slots=1,
-            reserved_cost_microusd=100_000,
-            hard_deadline=self.now + 10000,
-            budget_account_ids=('owner-budget',),
-            dry_run=False,
-            provider='lium',
-        )
-        self.repo.update_instance(self.intent['id'], 'creating')
-        self.repo.update_instance(
-            self.intent['id'], 'starting', provider_instance_id=POD
-        )
-        self.host = Host(self.manifest)
-        self.backend = SimpleNamespace(is_idle=lambda: True)
-        self.provider = SimpleNamespace(ssh_connection=lambda *a: {})
-
-    def boot(self, **options):
-        return BootController(
-            self.repo,
-            self.provider,
-            replace(self.config, **options),
-            ssh_factory=lambda *a: self.host,
-            fleet_factory=FakeFleet,
-        )
-
-    def connect(self, boot, intent, directory, state):
-        state['runtime_incarnation'] = 'a' * 32
-        boot._save(directory / 'bootstrap-state.json', state)
-        return self.backend
-
-    def test_runtime_ready_never_claims_inference_and_fleet_is_engine_bound(self):
-        boot = self.boot(fleet_enabled=True)
-        with patch('studio_platform.wangp_bootstrap.connect_backend', self.connect):
-            result = boot.tick(self.intent['id'])
-        self.assertEqual(result['state'], 'fleet_running')
-        self.assertFalse(result['generation_verified'])
-        slot = boot.fleet.config.slots[0]
-        self.assertEqual(slot.spec.backend, 'wangp-worker')
-        self.assertEqual(slot.spec.engine_manifest_digest, self.manifest.digest)
-        self.assertEqual(slot.comfy_revision, '')
-        self.assertEqual(self.host.starts, 1)
-        self.assertEqual(set(self.host.identity['sources']), SOURCE_NAMES)
-        # Exercise the same persisted file/parser boundary used by run_child;
-        # checking only FakeFleet's in-memory config misses schema mismatches.
-        fleet_path = self.config.work_dir / self.intent['id'] / 'fleet.json'
-        persisted = read_fleet(fleet_path)
-        self.assertEqual(json.loads(fleet_path.read_text())['version'], 2)
-        self.assertEqual(persisted, boot.fleet.config)
-        self.assertEqual(persisted.fingerprint(), boot.fleet.config.fingerprint())
-
-    def test_lost_start_response_reconnects_original_without_install_or_start(self):
-        self.host.lose_start = True
-        with patch('studio_platform.wangp_bootstrap.connect_backend', self.connect):
-            self.assertEqual(
-                self.boot().tick(self.intent['id'])['state'], 'bootstrap_start_unknown'
-            )
-            self.host.lose_start = False
-            self.assertEqual(
-                self.boot().tick(self.intent['id'])['state'], 'runtime_ready'
-            )
-        self.assertEqual((self.host.starts, self.host.uploads), (1, 1))
-
-    def test_native_delivery_capability_binds_boot_marker_slot_and_reconnect(self):
-        from studio_platform.inference.outputs import NATIVE_DELIVERY
-
-        boot = self.boot(fleet_enabled=True, output_delivery=NATIVE_DELIVERY)
-        with patch('studio_platform.wangp_bootstrap.connect_backend', self.connect):
-            result = boot.tick(self.intent['id'])
-        self.assertEqual(result['state'], 'fleet_running')
-        self.assertEqual(
-            boot.fleet.config.slots[0].spec.output_delivery, NATIVE_DELIVERY
-        )
-        self.assertEqual(self.host.identity['output_delivery'], NATIVE_DELIVERY)
-        self.assertEqual(self.host.starts, 1)
-
-    def test_wrong_manifest_and_missing_marker_never_register_or_relaunch(self):
-        self.host.lose_start = True
-        self.boot().tick(self.intent['id'])
-        self.host.identity = None
-        self.assertEqual(
-            self.boot().tick(self.intent['id'])['state'], 'bootstrap_start_unknown'
-        )
-        self.assertEqual(self.host.starts, 1)
-        files, manifest = read_sources(self.config)
-        report = self.host.report()
-        report['engine_manifest_digest'] = 'b' * 64
-        with self.assertRaisesRegex(BootError, 'identity_unconfirmed'):
-            validate_report(self.config, report, manifest)
-        with self.assertRaisesRegex(BootError, 'manifest_mismatch'):
-            read_sources(replace(self.config, engine_manifest_digest='b' * 64))
-
-    def test_old_smoke_profile_cannot_authorize_wangp(self):
-        for changes in (
-            {'smoke_enabled': True},
-            {'qualification_profile': ''},
-            {'recipe_ids': ('h3-base-fl2va-v1', 'h3-base-ref2va-v1')},
-        ):
-            with self.assertRaises(ValueError):
-                replace(self.config, **changes)
-
-    def test_changed_incarnation_retains_evidence_and_closes_transport(self):
-        boot = self.boot()
-        directory = self.config.work_dir / self.intent['id']
-        directory.mkdir(parents=True)
-        token = directory / 'wangp-token'
-        token.write_text('SYNTHETIC-ONLY-' + 'x' * 40)
-        token.chmod(0o600)
-        state = {'hardware': {'gpu': {'uuid': GPU}}, 'runtime_incarnation': 'b' * 32}
-        closed = []
-        transport = SimpleNamespace(
-            close=lambda: closed.append(True),
-            readiness=lambda: HostReadiness(
-                self.manifest.digest, self.intent['id'], 'a' * 32, True
-            ),
-        )
-        with patch(
-            'studio_platform.wangp_bootstrap.HTTPWanGPTransport', return_value=transport
-        ):
-            with self.assertRaisesRegex(BootError, 'incarnation_changed'):
-                connect_backend(
-                    boot, {**self.intent, 'provider_instance_id': POD}, directory, state
-                )
-        self.assertEqual(state['runtime_incarnation'], 'b' * 32)
-        self.assertEqual(closed, [True])
-
-    def test_idle_probe_uses_identity_bound_runtime_readiness(self):
-        boot = self.boot()
-        with patch('studio_platform.wangp_bootstrap.connect_backend', self.connect):
-            boot.tick(self.intent['id'])
-        self.assertTrue(boot.idle_probe(self.intent['id'], POD).idle)
-        self.backend.is_idle = lambda: False
-        self.assertFalse(boot.idle_probe(self.intent['id'], POD).idle)
-
-    def test_existing_backend_rejects_changed_incarnation_for_new_work(self):
-        from studio_platform.inference.wangp import WanGPBackend
-
-        info = HostReadiness(self.manifest.digest, self.intent['id'], 'a' * 32, True)
-        transport = SimpleNamespace(readiness=lambda: info)
-        backend = WanGPBackend(
-            enabled=True,
-            slot_key=self.intent['id'],
-            manifest=self.manifest,
-            compiler=lambda *a: None,
-            transport=transport,
-            expected_incarnation='a' * 32,
-        )
-        self.assertTrue(backend.is_idle())
-        info = HostReadiness(self.manifest.digest, self.intent['id'], 'b' * 32, True)
-        self.assertFalse(backend.is_idle())
-
-
-class Host:
-    def __init__(self, manifest):
-        self.manifest = manifest
-        self.starts = self.uploads = 0
-        self.identity = None
-        self.lose_start = False
-
-    def upload(self, files):
-        assert set(files) == SOURCE_NAMES
-        self.uploads += 1
-
-    def start(self, identity):
-        self.starts += 1
-        self.identity = identity
-        if self.lose_start:
-            raise OSError('synthetic lost response')
-
-    def report(self):
-        return {
-            'identity': self.identity,
-            'state': 'ready',
-            'engine_manifest_digest': self.manifest.digest,
-            'source_revision': self.manifest.document['source_revision'],
-            'runtime_verified': True,
-            'gpus': [{'uuid': GPU}],
-            'runtime': {'gpu_total_bytes': 180 * 1024**3},
-        }
-
-    def open_tunnel(self, port):
-        pass
+POD = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 
 
 class SystemDiagnosisTests(unittest.TestCase):
@@ -470,7 +242,7 @@ class SystemDiagnosisTests(unittest.TestCase):
 
 class SSHRecoveryTests(unittest.TestCase):
     def command_host(self, *, never_ack=False):
-        from studio_platform.lium_bootstrap import SSHHost
+        from studio_platform.native_bootstrap import SSHHost
 
         class Channel:
             def __init__(self):
@@ -562,7 +334,7 @@ class SSHRecoveryTests(unittest.TestCase):
         host.start.assert_not_called()
 
     def test_existing_tunnel_reuses_pinned_connection_without_replaying_start(self):
-        from studio_platform.lium_bootstrap import SSHHost
+        from studio_platform.native_bootstrap import SSHHost
         import tempfile
 
         class Echo(socketserver.BaseRequestHandler):
@@ -640,7 +412,3 @@ class SSHRecoveryTests(unittest.TestCase):
                 finally:
                     host.close()
                     server.shutdown()
-
-
-if __name__ == '__main__':
-    unittest.main()

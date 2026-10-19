@@ -37,7 +37,7 @@ from .repository import (
     attempts,
     scaler_receipts,
 )
-from .scaler import LaunchSpec, _safe_id
+from .capacity_types import LaunchSpec, _safe_id
 from .inference.outputs import validate_delivery_policy
 
 
@@ -1170,38 +1170,6 @@ class ColdStartCoordinator:
             "provider_calls_enabled": False,
         }
 
-    def _before_create(self, approval_id):
-        with self.repo.engine.connect() as connection:
-            row = (
-                connection.execute(
-                    select(capacity_approvals).where(
-                        capacity_approvals.c.id == approval_id
-                    )
-                )
-                .mappings()
-                .one()
-            )
-            demand = (
-                connection.execute(
-                    select(jobs)
-                    .join(capacity_waiters, capacity_waiters.c.job_id == jobs.c.id)
-                    .where(
-                        capacity_waiters.c.approval_id == approval_id,
-                        capacity_waiters.c.state == "waiting_capacity",
-                        capacity_waiters.c.deadline > self.repo.clock(),
-                        jobs.c.status.in_(("waiting_capacity", "queued")),
-                    )
-                    .limit(1)
-                )
-                .mappings()
-                .first()
-            )
-            return bool(
-                demand
-                and proven_unsubmitted_capacity_job(connection, demand)
-                and self._valid(row)
-            )
-
     def _attach(self, connection, intent, approval_id):
         approval = self.repo._locked(
             connection,
@@ -1516,81 +1484,8 @@ class ColdStartCoordinator:
                 .values(error_code=code, updated_at=self.repo.clock())
             )
 
-    def tick(self, leader_id, approval_id):
+    def tick(self, *args, **kwargs):
+        """The retired custom allocator cannot submit a provider operation."""
         if not self.enabled:
             return {"state": "disabled"}
-        if self.scaler is None:
-            return {"state": "cloud_controller_not_configured"}
-        approval = self._approval(approval_id)
-        if pool_member_ids(approval["payload"]):
-            return {"state": "capacity_pool_controller_not_implemented"}
-        activated, failed = self._advance(approval)
-        with self.repo.engine.connect() as connection:
-            cycle = (
-                connection.execute(
-                    select(capacity_cycles).where(
-                        capacity_cycles.c.approval_id == approval_id
-                    )
-                )
-                .mappings()
-                .first()
-            )
-            rows = connection.execute(
-                select(
-                    jobs.c.id,
-                    jobs.c.owner_id,
-                    jobs.c.created_at,
-                    jobs.c.expected_runtime_s,
-                )
-                .join(capacity_waiters, capacity_waiters.c.job_id == jobs.c.id)
-                .where(
-                    capacity_waiters.c.approval_id == approval_id,
-                    capacity_waiters.c.state == "waiting_capacity",
-                    capacity_waiters.c.deadline > self.repo.clock(),
-                    jobs.c.status.in_(("waiting_capacity", "queued")),
-                )
-                .order_by(jobs.c.created_at, jobs.c.id)
-                .limit(4096)
-            ).mappings()
-            demands = [
-                Demand(
-                    r["id"],
-                    r["owner_id"],
-                    r["created_at"],
-                    r["expected_runtime_s"],
-                    "operator-qualified",
-                )
-                for r in rows
-            ]
-        p = approval["payload"]
-        policy = ScalePolicy(**p["scale_policy"])
-        # Existing cycle is permanently single-use. Keep reconciliation and
-        # drain active, but prevent a second proposal even after it is destroyed.
-        if cycle or not self._valid(approval):
-            policy = replace(policy, max_instances=0, max_physical_gpus=0)
-        if not demands and cycle is None:
-            return {
-                "state": "no_waiters",
-                "activated": len(activated),
-                "failed": len(failed),
-            }
-        result = self.scaler.tick(
-            leader_id,
-            Scope(**p["budget_scope"]),
-            p["pool"],
-            demands,
-            (),
-            policy=policy,
-            launch=LaunchSpec(**p["launch"]),
-            budget_account_ids=p["budget_account_ids"],
-            on_intent_reserved=lambda conn, intent: self._attach(
-                conn, intent, approval_id
-            ),
-            before_create=lambda: self._before_create(approval_id),
-        )
-        newly_activated, newly_failed = self._advance(approval)
-        return {
-            **result,
-            "activated": len(activated) + len(newly_activated),
-            "failed": len(failed) + len(newly_failed),
-        }
+        raise Conflict("legacy_capacity_runtime_retired")

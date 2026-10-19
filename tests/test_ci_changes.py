@@ -20,6 +20,7 @@ class ChangeClassificationTests(unittest.TestCase):
         for gate in ("python", "postgres", "frontend", "containers"):
             self.assertTrue(result[gate], gate)
         self.assertTrue(result["macos_helper"])
+        self.assertIsNone(result["slow_modules"])
 
     def test_only_explicit_document_modifications_skip_heavy_checks(self):
         result = ci.classify(
@@ -51,10 +52,35 @@ class ChangeClassificationTests(unittest.TestCase):
         result = ci.classify(changes)
         self.assertEqual(result["category"], "docs")
         self.assertFalse(any(result[gate] for gate in ci.GATES))
-        for status in ("A", "D", "T"):
-            for path in paths:
-                with self.subTest(status=status, path=path):
-                    self.assert_full(ci.classify([(status, path)]))
+        for path in paths:
+            self.assert_full(ci.classify([("T", path)]))
+
+    def test_prose_additions_and_archives_do_not_run_runtime_suites(self):
+        result = ci.classify(
+            [
+                ("D", "docs/old-guide.md"),
+                ("A", "docs/archive/20261019/old-guide.md"),
+                ("A", "docs/new-guide.md"),
+            ]
+        )
+        self.assertEqual(result["category"], "docs")
+        self.assertFalse(any(result[gate] for gate in ci.GATES))
+        for path in (
+            "docs/new-security.md",
+            "docs/auth-policy.md",
+            "docs/secrets.md",
+            "skills/inkseq/SKILL.md",
+            "tools/new-guide.md",
+        ):
+            self.assert_full(ci.classify([("A", path)]))
+        self.assert_full(
+            ci.classify(
+                [
+                    ("D", "studio_platform/auth.py"),
+                    ("A", "docs/archive/removed-auth.md"),
+                ]
+            )
+        )
 
     def test_governance_docs_cannot_hide_critical_changes(self):
         for path in (
@@ -133,6 +159,23 @@ class ChangeClassificationTests(unittest.TestCase):
         self.assertTrue(combined["frontend"])
         self.assertTrue(combined["python"])
 
+    def test_slow_cpu_integration_selection_tracks_only_reviewed_dependencies(self):
+        unrelated = ci.classify([("M", "studio_platform/agent_discovery.py")])
+        self.assertEqual(unrelated["slow_modules"], [])
+        media = ci.classify([("M", "studio_platform/render_backend.py")])
+        self.assertIn("test_platform_render_backend", media["slow_modules"])
+        self.assertIn("test_platform_render_subtitles", media["slow_modules"])
+        self.assertNotIn("test_platform_backup_postgres", media["slow_modules"])
+        for path in (
+            "studio_platform/repository.py",
+            "studio_platform/auth.py",
+            "studio_platform/dstack_controller.py",
+            "studio_platform/dbos_transport.py",
+        ):
+            self.assert_full(
+                ci.classify([("M", "studio_platform/agent_discovery.py"), ("M", path)])
+            )
+
     def test_native_keychain_gate_cannot_be_skipped_for_helper_or_unknown_changes(self):
         for path in (
             "skills/inkseq/scripts/connect.py",
@@ -179,8 +222,9 @@ class ChangeClassificationTests(unittest.TestCase):
 
     def test_added_removed_renamed_and_type_changed_safe_paths_still_require_full(self):
         for status in ("A", "D", "T", "U", "R100", "C100"):
-            for path in ("README.md", "yingxu/src/New.jsx"):
+            for path in ("yingxu/src/New.jsx", "tools/new-guide.md"):
                 self.assert_full(ci.classify([(status, path)]))
+        self.assert_full(ci.classify([("T", "README.md")]))
         self.assert_full(
             ci.classify(
                 [("D", "studio_platform/auth.py"), ("A", "yingxu/src/Auth.jsx")]

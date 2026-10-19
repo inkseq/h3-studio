@@ -36,6 +36,7 @@ inventory.json
 !tools/
 !tools/ci_media_tools.py
 !tools/ci_test_shards.py
+!tools/ci_test_timings.json
 !tools/check_aws_release_account.py
 !tools/h3_pro6000_pilot_runtime.py
 !deploy/
@@ -49,6 +50,10 @@ inventory.json
 !studio_platform/__init__.py
 !studio_platform/api.py
 !studio_platform/settings.py
+!studio_platform/capacity_types.py
+!studio_platform/native_bootstrap.py
+!studio_platform/provider_lifetime.py
+!studio_platform/central_registry.py
 !studio_platform/auth.py
 !studio_platform/capabilities.py
 !studio_platform/generation_draft.py
@@ -530,6 +535,9 @@ inventory.json
 !docs/archive/workflow-20261008/WORKFLOW.md
 !docs/archive/workflow-20261008/WORKFLOW.zh-CN.md
 !docs/archive/workflow-20261008/README.md
+!docs/archive/workflow-20261019/
+!docs/archive/workflow-20261019/AGENTS.pre-328.md
+!docs/archive/workflow-20261019/WORKFLOW.pre-328.md
 
 # Additive native controls epoch; source and isolated tests only.
 !studio_platform/inference/wangp_profile_dispatch.py

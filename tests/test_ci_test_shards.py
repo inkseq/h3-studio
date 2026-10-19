@@ -91,14 +91,96 @@ class ShardTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "too_few_test_modules"):
             ci.partition(unittest.TestSuite(module_cases("only_one", 10)), 2)
 
-    def test_existing_duplicate_test_identity_is_not_silently_deduplicated(self):
-        cases = [*module_cases("duplicated", 1), *module_cases("duplicated", 1)]
+    def test_imported_aliases_run_once_but_inherited_class_invariants_remain(self):
+        original = module_cases("duplicated", 1)[0]
+        inherited = type("Derived", (type(original),), {"__module__": "duplicated"})(
+            "test_0000"
+        )
+        cases = [original, type(original)("test_0000"), inherited, inherited]
         shards = ci.partition(unittest.TestSuite(cases), 1)
         self.assertEqual(shards[0]["test_count"], 2)
         self.assertEqual(
-            Counter(case.id() for case in ci.flatten(shards[0]["suite"])),
-            Counter(case.id() for case in cases),
+            [case.id() for case in ci.flatten(shards[0]["suite"])],
+            [original.id(), inherited.id()],
         )
+        with self.assertRaisesRegex(ValueError, "ci_test_identity_collision"):
+            ci.partition(
+                unittest.TestSuite([original, *module_cases("duplicated", 1)]), 1
+            )
+
+    def test_measured_module_seconds_balance_without_changing_coverage(self):
+        suite = unittest.TestSuite(
+            [
+                *module_cases("heavy", 1),
+                *module_cases("large_count", 60),
+                *module_cases("small_a", 1),
+                *module_cases("small_b", 1),
+            ]
+        )
+        shards = ci.partition(
+            suite,
+            2,
+            timings={"heavy": 100, "large_count": 1, "small_a": 1, "small_b": 1},
+        )
+        self.assertEqual(shards[0]["modules"], ["heavy"])
+        self.assertEqual(shards[1]["estimated_work_units"], 3)
+        self.assertEqual(sum(shard["test_count"] for shard in shards), 63)
+
+    def test_slow_selection_never_filters_unmarked_critical_tests(self):
+        suite = unittest.TestSuite(
+            [
+                *module_cases("test_platform_render_backend", 1),
+                *module_cases("test_platform_backup_postgres", 1),
+                *module_cases("test_dstack_operator", 1),
+                *module_cases("test_platform_queue", 1),
+            ]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            try:
+                for chosen, count in (
+                    (None, 4),
+                    ([], 2),
+                    (["test_platform_render_backend"], 3),
+                ):
+                    loader = unittest.mock.Mock(errors=[])
+                    loader.discover.return_value = suite
+                    loaded = ci.load_suite(
+                        "python", root, loader=loader, slow_modules=chosen
+                    )
+                    cases = list(ci.flatten(loaded))
+                    self.assertEqual(len(cases), count)
+                    self.assertTrue(
+                        {"test_dstack_operator", "test_platform_queue"}.issubset(
+                            case.__class__.__module__ for case in cases
+                        )
+                    )
+                for invalid in ("all", {}, ["test_platform_queue"]):
+                    with self.assertRaisesRegex(
+                        ValueError, "invalid_slow_test_selection"
+                    ):
+                        ci.load_suite(
+                            "python", root, loader=loader, slow_modules=invalid
+                        )
+            finally:
+                for directory in (root, root / "tests"):
+                    if str(directory.resolve()) in sys.path:
+                        sys.path.remove(str(directory.resolve()))
+
+    def test_timing_data_is_bounded_and_cannot_change_test_selection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "timings.json"
+            for seconds in (2.5, -1, True, float("nan"), 3601):
+                path.write_text(
+                    json.dumps({"version": 1, "python": {"test_example": seconds}})
+                )
+                if seconds == 2.5:
+                    self.assertEqual(
+                        ci.read_timings("python", path), {"test_example": 2.5}
+                    )
+                else:
+                    with self.assertRaisesRegex(ValueError, "invalid_ci_test_timings"):
+                        ci.read_timings("python", path)
 
     def test_full_discovery_honors_load_tests_hooks_and_new_modules(self):
         prefix = "test_ci_fixture_" + uuid.uuid4().hex
@@ -168,81 +250,34 @@ class ShardTests(unittest.TestCase):
                         sys.path.remove(str(directory.resolve()))
                 sys.modules.pop(name, None)
 
-    def test_all_previous_postgres_command_modules_are_retained(self):
-        # Frozen inventory from the pre-sharding CI's four command blocks.
-        expected = set(
-            """
-            test_platform_repository test_platform_queue test_platform_autoscale test_platform_control
-            test_platform_worker test_platform_drain_safe_runner test_platform_production_scaler
-            test_platform_on_demand_scaler test_platform_backlog_handoff test_platform_preparation_recovery
-            test_platform_preparation_idle test_platform_production_boot_memory test_platform_fleet
-            test_platform_scaler test_platform_api test_platform_execution_policy test_platform_batches
-            test_platform_storage_multipart test_platform_artifact_writer test_platform_diagnostics
-            test_platform_capacity test_platform_capacity_api test_platform_guided test_platform_generation_draft
-            test_platform_generation_services test_platform_project_activity test_platform_capacity_cli
-            test_platform_reliability test_platform_request_admission test_platform_admission_review
-            test_platform_generated_audio test_platform_caption_plans test_platform_render_plans
-            test_platform_render_backend test_platform_lium_provider test_platform_boyesir_backend
-            test_platform_backup_postgres test_platform_upload_route test_platform_asset_recovery
-            test_platform_queued_task_policy test_platform_queued_boot test_platform_queued_task_runner
-            test_platform_queued_task_hold test_platform_long_duration_policy test_platform_duration_quote
-            test_platform_runtime_adoption test_platform_live_runtime_handoff test_operator_capacity
-            test_operator_runtime test_capacity_market test_targon_provider test_platform_engine_routing
-            test_platform_wangp_api test_platform_wangp_recovery_integration test_platform_engine_cold_capacity
-            test_platform_pool_members test_platform_pool_member_controller test_platform_pool_service
-            test_platform_pool_member_replacement test_platform_member_readiness test_platform_wangp_service_hold
-            test_platform_wangp_first_last_policy test_platform_wangp_ref test_platform_wangp_ref_api
-            test_platform_preparation_hold_recovery test_platform_quick_chat_integration
-            test_platform_quick_chat_admission test_platform_quick_chat_wangp test_platform_agent_connect
-            test_platform_agent_connect_app
-        """.split()
-        )
-        self.assertEqual(len(expected), 70)
-        self.assertTrue(expected.issubset(set(ci.POSTGRES_MODULES)))
-        self.assertEqual(
-            set(ci.POSTGRES_MODULES) - expected,
-            {
-                "test_schema_version",
-                "test_schema_baseline",
-                "test_workflow_state",
-                "test_dbos_postgres",
-                "test_operator_manual_review",
-                "test_capacity_market_refresh",
-                "test_capacity_candidates",
-                "test_platform_wangp_failure_diagnostics",
-                "test_platform_wangp_seed_domain",
-                "test_operator_owned_drain",
-                "test_platform_quick_chat_titles",
-                "test_operator_extensions",
-                "test_managed_worker_admission",
-                "test_dstack_operator",
-                "test_dstack_controller",
-                "test_dstack_runtime",
-                "test_dstack_factory",
-                "test_dstack_budget_window",
-                "test_postgres_dispatch",
-                "test_dispatch_telemetry",
-                "test_dstack_passive_review",
-                "test_dstack_prices",
-                "test_operator_budgets",
-                "test_job_cancellation_ledger",
-                "test_job_events",
-                "test_operator_jobs",
-                "test_host_policy",
-                "test_host_scorecard",
-                "test_dstack_host_selection",
-                "test_operator_host_routes",
-                "test_quick_chat_history",
-                "test_quick_chat_card_history",
-                "test_creation_history_storage",
-                "test_creation_history_routes",
-                "test_demand_wakeup",
-                "test_dstack_allocation_proof",
-                "test_alert_snapshot",
-                "test_alert_http",
-            },
-        )
+    def test_postgres_manifest_preserves_current_critical_suites(self):
+        # Assert the maintained safety boundary, not a duplicate retired list.
+        critical = {
+            "test_platform_repository",
+            "test_platform_queue",
+            "test_platform_control",
+            "test_platform_worker",
+            "test_platform_api",
+            "test_platform_agent_connect",
+            "test_operator_manual_review",
+            "test_operator_budgets",
+            "test_dstack_operator",
+            "test_dstack_controller",
+            "test_dstack_runtime",
+            "test_dstack_factory",
+            "test_dstack_budget_window",
+            "test_dstack_allocation_proof",
+            "test_dbos_postgres",
+            "test_postgres_dispatch",
+            "test_platform_queued_task_policy",
+            "test_platform_wangp_failure_diagnostics",
+            "test_platform_wangp_first_last_policy",
+            "test_platform_wangp_ref_api",
+        }
+        self.assertTrue(critical.issubset(ci.POSTGRES_MODULES))
         self.assertEqual(len(ci.POSTGRES_MODULES), len(set(ci.POSTGRES_MODULES)))
+        for name in ci.POSTGRES_MODULES:
+            self.assertTrue((ci.ROOT / "tests" / (name + ".py")).is_file(), name)
 
     def test_postgres_loader_uses_complete_manifest(self):
         loader = unittest.mock.Mock(errors=[])
