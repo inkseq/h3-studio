@@ -204,6 +204,8 @@ class ShardTests(unittest.TestCase):
             {
                 "test_schema_version",
                 "test_schema_baseline",
+                "test_workflow_state",
+                "test_dbos_postgres",
                 "test_operator_manual_review",
                 "test_capacity_market_refresh",
                 "test_capacity_candidates",

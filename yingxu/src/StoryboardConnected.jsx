@@ -1,4 +1,5 @@
 import TakeRecipe from './QuickChatTakeRecipe.jsx';
+import StoryFilmControl from './StoryFilmControl.jsx';
 import { formatMoneyMicros } from './money.js';
 import { createQuickChatClient } from './quick-chat-client.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -790,6 +791,14 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
   return (
     <>
       <StoryboardWorkspace
+        filmControl={
+          <StoryFilmControl
+            cloudState={c}
+            workspaceState={s}
+            onSave={cloud.save}
+            otherBusy={busy || !!adapter.state.workbenchPending}
+          />
+        }
         onNewScene={onNewScene}
         adapter={adapter}
         onLegacyGuide={onLegacyGuide}

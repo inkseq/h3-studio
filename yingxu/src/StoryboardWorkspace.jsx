@@ -108,7 +108,7 @@ function QueueSummary() {
     </div>
   );
 }
-function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene }) {
+function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmControl }) {
   const { t, locale } = useI18n();
   const { state, dispatch } = useStoryboardUI(),
     player = usePlayer(state.shots),
@@ -317,6 +317,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene }) {
               </small>
             </div>
             <div className="row tight chapter-actions">
+              {filmControl}
               <QueueSummary />
               {!groups.length && (
                 <button
@@ -573,7 +574,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene }) {
     </div>
   );
 }
-function StoryboardShell({ onLegacyGuide, onCanvas, onNewScene }) {
+function StoryboardShell({ onLegacyGuide, onCanvas, onNewScene, filmControl }) {
   const { t, locale } = useI18n();
   const { state, dispatch, db, clearError } = useStoryboardUI(),
     [selected, setSelected] = useState(null),
@@ -724,6 +725,7 @@ function StoryboardShell({ onLegacyGuide, onCanvas, onNewScene }) {
           </div>
         )}
         <StoryboardLayoutA
+          filmControl={filmControl}
           onNewScene={onNewScene}
           selected={selected}
           setSelected={showSelected}
@@ -746,11 +748,16 @@ function StoryboardShell({ onLegacyGuide, onCanvas, onNewScene }) {
     </DndContext>
   );
 }
-export function StoryboardWorkspace({ adapter, onLegacyGuide, onCanvas, onNewScene }) {
+export function StoryboardWorkspace({ adapter, onLegacyGuide, onCanvas, onNewScene, filmControl }) {
   const { t, locale } = useI18n();
   return (
     <StoryboardUIProvider adapter={adapter}>
-      <StoryboardShell onNewScene={onNewScene} onLegacyGuide={onLegacyGuide} onCanvas={onCanvas} />
+      <StoryboardShell
+        onNewScene={onNewScene}
+        onLegacyGuide={onLegacyGuide}
+        onCanvas={onCanvas}
+        filmControl={filmControl}
+      />
     </StoryboardUIProvider>
   );
 }

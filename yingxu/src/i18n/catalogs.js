@@ -1,4 +1,5 @@
 import { quickViewCatalogs } from './quickViewCatalogs.js';
+import { filmCatalogs } from './filmCatalogs.js';
 import { sessionTakeCatalogs } from './sessionTakeCatalogs.js';
 import { storyOpenCatalogs } from './storyOpenCatalogs.js';
 import { v2Catalogs } from './v2Catalogs.js';
@@ -25,6 +26,7 @@ import { storyboardCatalogs } from './storyboardCatalogs.js';
 import { legacyCatalogs } from './legacyCatalogs.js';
 export const catalogs = {
   en: {
+    ...filmCatalogs.en,
     ...sessionTakeCatalogs.en,
     ...storyOpenCatalogs.en,
     ...v2Catalogs.en,
@@ -73,6 +75,7 @@ export const catalogs = {
     'locale.switchToEnglish': 'Switch to English',
   },
   zh: {
+    ...filmCatalogs.zh,
     ...sessionTakeCatalogs.zh,
     ...storyOpenCatalogs.zh,
     ...v2Catalogs.zh,

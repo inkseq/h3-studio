@@ -5,8 +5,10 @@ export function storyboardCommandStore({
   account,
   projectId,
   keyFactory = () => crypto.randomUUID(),
+  namespace = 'storyboard',
 }) {
-  const name = `inkseq-storyboard-command-v1:${account}:${projectId}`;
+  if (!['storyboard', 'film'].includes(namespace)) throw Error('workbench.pendingCorrupt');
+  const name = `inkseq-${namespace === 'film' ? 'story-film' : 'storyboard'}-command-v1:${account}:${projectId}`;
   const read = () => {
     try {
       return JSON.parse(storage.getItem(name) || 'null');

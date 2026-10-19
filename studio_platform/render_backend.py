@@ -7,11 +7,13 @@ one synchronous, journalled CPU attempt, never blindly replayed after a crash.
 from __future__ import annotations
 
 import hashlib
+from contextlib import contextmanager
 import json
 import math
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -97,16 +99,20 @@ def validate_render_request(
     _require(
         isinstance(render, dict)
         and type(render.get("version")) is int
-        and render["version"] in (1, 2, 3),
+        and render["version"] in (1, 2, 3, 4),
         "invalid_render_version",
     )
     _require(
         set(render)
         == {"version", "shots", "audio_tracks"}
-        | ({"subtitles"} if render["version"] == 3 else set()),
+        | ({"subtitles"} if render["version"] >= 3 else set()),
         "invalid_render_version",
     )
     shots, tracks = render["shots"], render["audio_tracks"]
+    _require(
+        render["version"] != 4 or render.get("subtitles") is None,
+        "film_export_captions_must_be_in_chapters",
+    )
     _require(
         isinstance(shots, list)
         and 1 <= len(shots) <= 50
@@ -150,6 +156,9 @@ def validate_render_request(
             and 0 <= first < 86400
             and first + shot["frames"] <= 86400,
             "invalid_render_source_start_frame",
+        )
+        _require(
+            render["version"] != 4 or first == 0, "film_export_chapter_range_invalid"
         )
         frames += shot["frames"]
         used[shot["source_id"]] = "video"
@@ -674,6 +683,16 @@ class CPURenderBackend:
                         ),
                         "render_source_dimensions_limit",
                     )
+                    if payload["request"]["render"]["version"] == 4:
+                        from fractions import Fraction
+
+                        _require(
+                            streams[0].get("codec_name") == "h264"
+                            and streams[0].get("width") == shape["width"]
+                            and streams[0].get("height") == shape["height"]
+                            and Fraction(streams[0].get("avg_frame_rate", "0")) == 24,
+                            "film_export_chapter_codec_mismatch",
+                        )
                 else:
                     _require(
                         not any(
@@ -691,6 +710,21 @@ class CPURenderBackend:
                     >= (shot.get("source_start_frame", 0) + shot["frames"]) / 24,
                     "render_source_video_too_short",
                 )
+                if payload["request"]["render"]["version"] == 4:
+                    metadata = media.probe(
+                        self._path(
+                            directory, state["inputs"][shot["source_id"]]["filename"]
+                        )
+                    )
+                    stream = next(
+                        item
+                        for item in metadata["streams"]
+                        if item.get("codec_type") == "video"
+                    )
+                    _require(
+                        int(stream.get("nb_frames", 0)) == shot["frames"],
+                        "film_export_chapter_frames_mismatch",
+                    )
             for track in payload["request"]["render"]["audio_tracks"]:
                 actual_duration = state["inputs"][track["source_id"]]["duration"]
                 enough = (
@@ -763,6 +797,21 @@ class CPURenderBackend:
         return total
 
     def _run_process(self, args, directory, tag, heartbeat, deadline, output=None):
+        state = self._load(directory) if output is not None else {}
+        checkpoint_key = output.name if output is not None else None
+        argument_hash = _hash([str(item) for item in args])
+        checkpoint = state.get("checkpoints", {}).get(checkpoint_key)
+        if checkpoint is not None:
+            _require(
+                output is not None
+                and checkpoint["arguments"] == argument_hash
+                and output.is_file()
+                and output.stat().st_size == checkpoint["size_bytes"]
+                and _digest(output) == checkpoint["sha256"],
+                "render_checkpoint_changed",
+            )
+            heartbeat()
+            return
         with self._mutex:
             if self._active[tag]["cancelled"].is_set():
                 raise _Cancelled()
@@ -786,6 +835,21 @@ class CPURenderBackend:
             stderr=subprocess.DEVNULL,
             creationflags=flags,
             cwd=directory,
+            **(
+                {
+                    "pass_fds": tuple(
+                        fd
+                        for fd in (
+                            self._active[tag]["process_fence"],
+                            getattr(self, "_operation_fence_fd", None),
+                        )
+                        if fd is not None
+                    )
+                }
+                if os.name == "posix"
+                and self._active[tag].get("process_fence") is not None
+                else {}
+            ),
         )
         with self._mutex:
             entry = self._active[tag]
@@ -817,6 +881,15 @@ class CPURenderBackend:
                     "render_output_limit",
                 )
             self._check_work_size(directory)
+            if output is not None:
+                with output.open("r+b") as stream:
+                    os.fsync(stream.fileno())
+                state.setdefault("checkpoints", {})[checkpoint_key] = {
+                    "arguments": argument_hash,
+                    "size_bytes": output.stat().st_size,
+                    "sha256": _digest(output),
+                }
+                self._save(directory, state)
         finally:
             if process.poll() is None:
                 process.kill()
@@ -837,7 +910,7 @@ class CPURenderBackend:
                 and _digest(path) == source["object"]["sha256"],
                 "render_source_changed",
             )
-        if shape["simulation"]:
+        if shape["simulation"] and render["version"] != 4:
             from PIL import Image, ImageDraw, ImageFont
 
             marker = Image.new("RGBA", (width, height), (0, 0, 0, 0))
@@ -851,6 +924,16 @@ class CPURenderBackend:
             source = self._path(
                 directory, state["inputs"][shot["source_id"]]["filename"]
             )
+            if render["version"] == 4:
+                # The completed chapter is already normalized and captioned.
+                # Copy its bitstream at concat; never rebuild a finished chapter.
+                clips.append(source)
+                total_clip_bytes += source.stat().st_size
+                _require(
+                    total_clip_bytes <= self.max_output_bytes,
+                    "render_combined_video_size_limit",
+                )
+                continue
             output = self._path(directory, f"clip-{index:03d}.mp4")
             first = shot.get("source_start_frame", 0)
             # Normalize the source timeline and frame rate before choosing the
@@ -1130,7 +1213,8 @@ class CPURenderBackend:
                 final,
             )
         else:
-            joined.replace(final)
+            # Keep the verified concat checkpoint available after a crash.
+            shutil.copyfile(joined, final)
         self._verify_outputs(directory, state)
         outputs = {
             "video": "result.mp4",
@@ -1198,6 +1282,86 @@ class CPURenderBackend:
                 "render_audio_verification_failed",
             )
 
+    @contextmanager
+    def _process_fence(self, directory):
+        """An inherited OFD flock also fences an orphaned FFmpeg child."""
+        if os.name != "posix":
+            yield None
+            return
+        import fcntl
+
+        path = self._path(directory, "cpu-process.lock")
+        descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        try:
+            _require(os.fstat(descriptor).st_nlink == 1, "render_process_fence_invalid")
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise SubmissionUncertain("render_original_process_active") from None
+            yield descriptor
+        finally:
+            # Closing our FD cannot release a lock still held by an orphan.
+            os.close(descriptor)
+
+    def _execute(self, state, directory, tag, heartbeat, *, resumed=False):
+        with self._process_fence(directory) as process_fence:
+            state["phase"] = "submitting"
+            if not resumed:
+                state["cpu_checkpoint_version"] = 1 if os.name == "posix" else 0
+            self._save(directory, state)
+            with self._mutex:
+                self._active[tag] = {
+                    "process": None,
+                    "cancelled": threading.Event(),
+                    "process_fence": process_fence,
+                }
+            try:
+                self._render(state, directory, tag, heartbeat)
+                # _run_process persists each checkpoint using its own fresh copy.
+                state["checkpoints"] = self._load(directory).get("checkpoints", {})
+                state["phase"] = "succeeded"
+                self._save(directory, state)
+                return state["task_id"]
+            except _Cancelled:
+                state["phase"] = "cancelled"
+                self._save(directory, state)
+                return state["task_id"]
+            except Exception:
+                state["phase"] = "failed"
+                self._save(directory, state)
+                raise SubmissionRejected("render_cpu_attempt_failed") from None
+            finally:
+                with self._mutex:
+                    self._active.pop(tag, None)
+
+    def resume(self, job, tag, task_id, heartbeat):
+        """Recover only the same fenced CPU receipt, never a new GPU submit."""
+        if not self.enabled:
+            raise NotReady("backend_disabled")
+        directory = self._directory(tag)
+        with _slot_lock(directory, "attempt") as acquired:
+            if not acquired:
+                raise SubmissionUncertain("render_attempt_busy")
+            state = self._load(directory)
+            _require(
+                os.name == "posix"
+                and state.get("cpu_checkpoint_version") == 1
+                and state.get("phase") == "submitting"
+                and state.get("tag") == tag
+                and state.get("task_id") == task_id == "cpu-render-" + tag
+                and state.get("identity")
+                == _hash(
+                    {
+                        "owner": job["owner_id"],
+                        "job": job["id"],
+                        "payload": job["request"],
+                    }
+                ),
+                "render_resume_identity_unconfirmed",
+            )
+            heartbeat()  # Original WorkerRunner lease/fence, not SDK authority.
+            return self._execute(state, directory, tag, heartbeat, resumed=True)
+
     def submit(self, prepared, tag):
         if not self.enabled:
             raise NotReady("backend_disabled")
@@ -1213,26 +1377,7 @@ class CPURenderBackend:
             )
             if state["phase"] != "prepared":
                 raise SubmissionUncertain("render_submission_already_recorded")
-            state["phase"] = "submitting"
-            self._save(directory, state)  # Durable intent before the first FFmpeg.
-            with self._mutex:
-                self._active[tag] = {"process": None, "cancelled": threading.Event()}
-            try:
-                self._render(state, directory, tag, prepared["heartbeat"])
-                state["phase"] = "succeeded"
-                self._save(directory, state)
-                return state["task_id"]
-            except _Cancelled:
-                state["phase"] = "cancelled"
-                self._save(directory, state)
-                return state["task_id"]
-            except Exception:
-                state["phase"] = "failed"
-                self._save(directory, state)
-                raise SubmissionRejected("render_cpu_attempt_failed") from None
-            finally:
-                with self._mutex:
-                    self._active.pop(tag, None)
+            return self._execute(state, directory, tag, prepared["heartbeat"])
 
     def reconcile(self, tag, task_id=None):
         directory = self._directory(tag)

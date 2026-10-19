@@ -100,6 +100,81 @@ Do not automatically chain admission. Pending/unknown retains the original key/b
 
 GET `/v1/projects/PROJECT/storyboard/profiles` reports project-local shot usage only. `storyboard.fork_profile` action takes `profile_id,new_profile_id,shot_ids,title?`; one CAS copies a character/location/prop and rewires selected shots, leaving original profiles, unselected shots and other projects untouched. Authorized cross-project discovery and current-authoring usage are available through `GET /v1/library` and `GET /v1/library/usage`; writes retain original project permissions. 中文：旧配方缺失显示未知；预检不生成，未知结果保留原操作；档案副本只改所选镜头，删除撤销另属 #236。
 
+### One-click film
+
+Use this only for the user's authorized whole-story output. Read authenticated
+`GET /v1/capabilities`: `story_film.enabled` must be true; retain its
+`workflow_version`. Disabled/missing means unavailable, not permission to submit
+each shot separately. The connection needs this owned story and the existing
+project/asset/job scopes for the work; organise-only does not permit generation.
+
+Let F = `/v1/projects/PROJECT/films`. Read the project's current integer version,
+selected takes/ranges and generation drafts first. Configure intended profiles,
+materials, captions and parameters through normal story actions before preflight.
+
+| Intent | Method/path | Exact body / result |
+|---|---|---|
+| Freeze and preflight | POST F`/preflights`, saved Idempotency-Key | `{expected_version:VERSION,resolution:"720P",aspect:"16:9",burn_subtitles:false}`; only `expected_version` is required. Resolution defaults720P; aspect may be omitted, burn_subtitles defaultsfalse. Inspect returned run `id`, `project_version`, `snapshot_hash`, `workflow_version`, `generation`, `chapters`, `estimate`, `counts`, `warnings`. |
+| Confirm original run | POST F, separate saved Idempotency-Key | `{preflight_id:RUN_ID,confirm:true,spending_settings_version:CURRENT_SETTINGS_VERSION}`; the settings version is optional but, when supplied, must be current. Response202 is accepted orchestration, not finished video. |
+| Observe | GET F`/RUN_ID` | No body/key; use original run ID. |
+| Request cancellation | POST F`/RUN_ID/cancel` | No body/key. Cancels original work and stops future admission; `cancel_requested` is not yet `cancelled`. |
+| Explicit resume | POST F`/RUN_ID/resume` | No body/key. Same actor/grant and original run/jobs; not a failed-job regeneration API. |
+
+Preflight creates no generation job. Reused selected takes retain their ranges;
+missing/outdated shots receive original immutable plans and seeds in
+`generation[].plan_id`. Known recipe changes affect freshness; ordinary selection
+does not. `film_selected_recipe_unknown` means an authorized historical take is
+reused without proven recipe freshness. Report that warning; do not replace the
+take automatically. The frozen run is independent of subsequent editable Story
+changes; changing the intended film requires a deliberate new preflight.
+
+Inspect `estimate.cost_microusd`, `quote_known` and `final_bill:false`; null cost
+is unknown, not free. `confirm:true` records the requested film; it is **not**
+human spending approval, a cap increase or a whole-film lump-sum reservation.
+Every shot/chapter/export uses the original batch/job admission and accounting.
+If the server requires human confirmation, the signed-in owner must approve the
+exact returned generation plan IDs through the existing spending-confirmation
+flow. The Agent must not call that browser-only approval as itself. A header or
+202 response cannot bypass a paused/revoked grant, current scopes, asset/trash
+rules, quotes or per-connection/owner limits.
+
+The original controller generates missing shots, renders all chapters, burns
+already confirmed captions when requested, then concatenates the film and saves
+its original video/separate audio artifacts. It does not generate caption text,
+images or replacement look photos. Unsupported duration/output/input combinations
+are explicit blockers; never trim parameters or references to force admission.
+
+Read the original run at bounded intervals, respecting Retry-After if present.
+Phases include `generating`, `chapters`, `exporting`, `admission_blocked`, `blocked`,
+`authorization_required` and `cancel_requested`; terminal phases are `completed` and `cancelled`.
+`counts` includes `shots`, `reused`, `generate`, `generated_completed`,
+`chapters_completed` and `export_completed`. Preserve finite `error_code` and
+safe `generation[]`/`chapters[]`/`export` plan/job/artifact IDs. GET does not resume.
+
+On completion, `export.artifact_id` identifies the final video and `export.job_id`
+its original job. GET `/v1/jobs/EXPORT_JOB_ID/artifacts`; match the returned video
+ID and inspect each actual audio artifact. Use its advertised `content_url` or
+`download_url` and full `sha256`; do not infer a separate audio file from video
+metadata or expose R2 object keys/signed redirects. Chapter artifact IDs use the
+same original routes. No adoption into the editable Story is implied.
+
+Existing helper commands suffice; save non-secret bodies in the named JSON files:
+
+```sh
+python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID request POST /v1/projects/PROJECT/films/preflights --json-file film-preflight.json --idempotency-key saved-film-preflight-key --output film-preflight-receipt.json
+# Inspect the receipt and existing permission/confirmation requirements first.
+python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID request POST /v1/projects/PROJECT/films --json-file film-confirm.json --idempotency-key saved-film-confirm-key --output film-accepted.json
+python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID request GET /v1/projects/PROJECT/films/RUN_ID --output film-observed-1.json
+python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID request GET /v1/jobs/EXPORT_JOB_ID/artifacts --output film-artifacts.json
+python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID download /v1/artifacts/VIDEO_ARTIFACT_ID/content --output film.mp4 --sha256 RETURNED_VIDEO_SHA256
+```
+
+The helper's `poll --job` observes a job, not a film run. Use generic GET for the
+film header and a fresh receipt filename per observation. Downloads default to a
+512MiB client limit; explicitly choose `--max-bytes` from the actual artifact size
+if needed, retaining the SHA check. See [film recovery](recovery.md#one-click-film-recovery)
+before repeating a write.
+
 ### Input slots and partial edits
 
 `shot.configure_generation` accepts optional `recipe_id`, `prompt`, `controls`, `inputs`. Omitted fields/slots preserve current values. Controls merge by field. Explicit `[]` clears a list slot; `null` clears first/last frame. Changing only the recipe does **not** erase incompatible references: inspect saved inputs and preflight errors, and clear incompatible slots explicitly when requested.

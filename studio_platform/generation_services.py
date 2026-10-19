@@ -425,6 +425,15 @@ class GenerationPlanning:
         }
 
     def check_source(self, project, compiled, principal=None):
+        if "film_source_ref" in compiled:
+            if principal is None:
+                raise Conflict("film_source_not_authorized")
+            from .film_runs import validate_film_source
+
+            scope = self.access.scope(principal, project["id"])
+            with self.repo.engine.connect() as connection:
+                validate_film_source(connection, self.repo, scope, compiled)
+            return
         if "authoring_defaults_version" in compiled:
             from .storyboard_versions import preferences
 

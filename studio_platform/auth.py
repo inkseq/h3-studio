@@ -382,13 +382,16 @@ class Auth:
     def session(self, token):
         if not isinstance(token, str) or not TOKEN.fullmatch(token):
             return None
+        return self._session_hash(digest(token), renew=True)
+
+    def _session_hash(self, token_hash, *, renew=False):
         now = self.clock()
         with self.engine.begin() as conn:
             row = (
                 conn.execute(
                     select(sessions).where(
                         sessions.c.tenant == self.tenant,
-                        sessions.c.token_hash == digest(token),
+                        sessions.c.token_hash == token_hash,
                         sessions.c.expires > now,
                         sessions.c.auth_mode == self.mode,
                     )
@@ -419,7 +422,7 @@ class Auth:
             # Slide at most hourly (half the TTL for short explicit test/config
             # durations). Polling and media reads do not write on every request.
             interval = min(3600, self.session_seconds / 2)
-            if row["expires"] <= now + self.session_seconds - interval:
+            if renew and row["expires"] <= now + self.session_seconds - interval:
                 statement = update(sessions).where(
                     sessions.c.tenant == self.tenant,
                     sessions.c.token_hash == row["token_hash"],
@@ -717,13 +720,16 @@ class Auth:
     def personal_bearer(self, token):
         if not isinstance(token, str) or not TOKEN.fullmatch(token):
             return None
+        return self._personal_grant(personal_keys.c.token_hash == digest(token))
+
+    def _personal_grant(self, predicate):
         now = self.clock()
         with self.engine.begin() as conn:
             row = (
                 conn.execute(
                     select(personal_keys).where(
                         personal_keys.c.tenant == self.tenant,
-                        personal_keys.c.token_hash == digest(token),
+                        predicate,
                         personal_keys.c.revoked_at.is_(None),
                         personal_keys.c.expires_at > now,
                         personal_keys.c.auth_mode == self.mode,
@@ -793,12 +799,68 @@ class Auth:
     def static_bearer(self, token):
         if not isinstance(token, str) or not TOKEN.fullmatch(token):
             return None
+        return self._static_grant(clients.c.token_hash == digest(token))
+
+    def workflow_principal(self, owner, grant):
+        """Revalidate an accepted workflow's original grant without a token.
+
+        Controller-only; no HTTP route exposes this method. A workflow cannot
+        prolong a browser session, inherit an owner's browser permissions, or
+        recover a paused/revoked/expired connection by copying old scopes.
+        """
+        fields = {
+            "actor_id",
+            "machine",
+            "auth_mode",
+            "password_version",
+            "session_hash",
+        }
+        if owner not in USERS or type(grant) is not dict or set(grant) != fields:
+            raise AuthenticationError("film_actor_grant_unavailable")
+        actor = grant["actor_id"]
+        principal = None
+        if grant["machine"] is False and actor == "browser:" + owner:
+            hashed = grant["session_hash"]
+            if (
+                isinstance(hashed, str)
+                and re.fullmatch(r"[0-9a-f]{64}", hashed)
+                and grant["auth_mode"] == self.mode
+            ):
+                principal = self._session_hash(hashed)
+                if (
+                    principal is not None
+                    and principal.password_version != grant["password_version"]
+                ):
+                    principal = None
+        elif grant["machine"] is True and isinstance(actor, str):
+            from sqlalchemy import and_
+
+            if actor.startswith("key:"):
+                principal = self._personal_grant(
+                    and_(
+                        personal_keys.c.id == actor[4:], personal_keys.c.owner == owner
+                    )
+                )
+            elif actor.startswith("client:"):
+                principal = self._static_grant(
+                    and_(clients.c.id == actor[7:], clients.c.owner == owner)
+                )
+        if (
+            principal is None
+            or principal.owner != owner
+            or principal.actor_id != actor
+            or principal.machine is not grant["machine"]
+        ):
+            raise AuthenticationError("film_actor_grant_unavailable")
+        return principal
+
+    def _static_grant(self, predicate):
         with self.engine.connect() as conn:
             row = (
                 conn.execute(
                     select(clients).where(
                         clients.c.tenant == self.tenant,
-                        clients.c.token_hash == digest(token),
+                        predicate,
                         clients.c.disabled == 0,
                     )
                 )

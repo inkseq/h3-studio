@@ -34,6 +34,64 @@ class PlatformAuthTests(unittest.TestCase):
         for who in ("superdan", "supervan"):
             self.auth.set_password(who, self.password)
 
+    def test_workflow_browser_grant_does_not_renew_and_logout_revokes_it(self):
+        self.provision()
+        token = self.auth.login("superdan", self.password)
+        principal = self.auth.session(token)
+        grant = {
+            key: getattr(principal, key)
+            for key in (
+                "actor_id",
+                "machine",
+                "auth_mode",
+                "password_version",
+                "session_hash",
+            )
+        }
+        with self.repo.engine.connect() as connection:
+            expires = connection.execute(select(sessions.c.expires)).scalar_one()
+        self.now += 7200
+        self.assertEqual(
+            self.auth.workflow_principal("superdan", grant).owner, "superdan"
+        )
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(
+                connection.execute(select(sessions.c.expires)).scalar_one(), expires
+            )
+        with self.assertRaises(AuthenticationError):
+            self.auth.workflow_principal("supervan", grant)
+        self.auth.logout(token)
+        with self.assertRaises(AuthenticationError):
+            self.auth.workflow_principal("superdan", grant)
+
+    def test_workflow_key_grant_rechecks_current_scope_and_revocation(self):
+        self.provision()
+        token = self.auth.login("superdan", self.password)
+        key = self.auth.create_key(
+            "superdan",
+            authenticated_session=self.auth.session(token),
+            name="workflow-test",
+            scopes=["projects:read", "jobs:read", "jobs:write"],
+            project_ids=["owned-story"],
+        )
+        principal = self.auth.bearer(key["api_key"])
+        grant = {
+            field: getattr(principal, field)
+            for field in (
+                "actor_id",
+                "machine",
+                "auth_mode",
+                "password_version",
+                "session_hash",
+            )
+        }
+        current = self.auth.workflow_principal("superdan", grant)
+        self.assertTrue(current.allows("owned-story", "jobs:write"))
+        self.assertFalse(current.allows("foreign-story", "jobs:write"))
+        self.auth.revoke_key("superdan", key["id"])
+        with self.assertRaises(AuthenticationError):
+            self.auth.workflow_principal("superdan", grant)
+
     def test_unprovisioned_and_partial_provision_do_not_authenticate(self):
         self.assertFalse(self.auth.ready())
         self.auth.set_password("superdan", self.password)

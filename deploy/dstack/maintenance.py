@@ -40,6 +40,9 @@ LEGACY_HELPER_PAIRS = {commit: (
         "07da40322559ee5a12829be6884c541c401d852a")}
 # Exact retained current/previous helper bytes before the staging upgrade.
 RETAINED_DSTACK_HELPER_PAIRS = {
+    # Exact retained staging reader/current pair before DBOS writer adoption.
+    'baa0e351fcd0a3f7e4f3678dd1282a38ef0f6a96': ('3bf05a2128bd80b809c7ab0577a4ce49903890a5c58f7d0a49b6ea19ce0ebb69', '860d696caca2f6162f66ef194c915f05d4ff31f8293aedff35b039b441d317e0'),
+    '6ccf461c178f9c3f9a4013c041844174687dbef4': ('3bf05a2128bd80b809c7ab0577a4ce49903890a5c58f7d0a49b6ea19ce0ebb69', '860d696caca2f6162f66ef194c915f05d4ff31f8293aedff35b039b441d317e0'),
     "46130d852459f12d81d09c7e23178a8544d1d4d4": ("2e52c10800c619de4b62ea4909e6865a34013886179bff30ea8af1ea79baf917", "03e056e4b56b471d2feb2709725c7974c1c301b929fa4b342f1a33e1a1e5ba9a"),
     "02681cacaf98822b5072a028fa9b313976d1c0ca": ("2e52c10800c619de4b62ea4909e6865a34013886179bff30ea8af1ea79baf917", "03e056e4b56b471d2feb2709725c7974c1c301b929fa4b342f1a33e1a1e5ba9a"),
     'b5902a1cf9bf2b32fe2de7ea35ca1cc7bbde3524': ('a4d0c782ab523b30c7f4db0b958b785480e17bb5ac0578edb93c47055d80c080', '0d8db5801395b3ecbf3ceea9109c187fb9e39f1de08473694c9ed45df0a23534'),
@@ -69,7 +72,8 @@ OPTIONAL_PATH_FIELDS = frozenset({"SIXNINE_STAGE_QUERY_CONFIG_FILE", "SIXNINE_ST
 STORAGE_FIELDS = frozenset({"SIXNINE_STORAGE_PROVIDER", "SIXNINE_STORAGE_ENDPOINT", "SIXNINE_STORAGE_REGION",
     "SIXNINE_STORAGE_BUCKET", "SIXNINE_STORAGE_PROFILE", "SIXNINE_STORAGE_CREDENTIAL_FILE"})
 OPTIONAL_FIELDS = frozenset({"SIXNINE_OPERATOR_ADMIN_OWNERS", "SIXNINE_STORYBOARD_OWNERS", 'INKSEQ_DEPLOYMENT_TARGET',
-    'INKSEQ_RESOURCE_PROFILE', 'INKSEQ_CPU_CGROUP_PARENT'}) | OPTIONAL_PATH_FIELDS | STORAGE_FIELDS
+    'INKSEQ_RESOURCE_PROFILE', 'INKSEQ_CPU_CGROUP_PARENT', 'INKSEQ_GENERATION_QUEUE',
+    'INKSEQ_FILM_ENABLED'}) | OPTIONAL_PATH_FIELDS | STORAGE_FIELDS
 LEGACY_MARKERS = ("operator-capacity/active.json", "gpu-acceptance/active.json", "gpu-scaler/active.json")
 STORYBOARD_FLAG = "SIXNINE_STORYBOARD_OWNERS"
 STORYBOARD_RECEIPT = "storyboard-maintenance.json"
@@ -395,6 +399,10 @@ def settings_document(value):
         elif key.endswith("_VOLUME"):
             release.require(re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", text), "migration_volume_reference_invalid")
     env = value["environment"]
+    queue = env.get('INKSEQ_GENERATION_QUEUE', 'postgres')
+    film = env.get('INKSEQ_FILM_ENABLED', '0')
+    release.require(queue in {'postgres','dbos'} and film in {'0','1'}
+        and (film == '0' or queue == 'dbos'), 'migration_workflow_settings_invalid')
     deployment_target.resources(env)
     storage_settings(env)
     release.require((env["SIXNINE_MIGRATION_GENERATION_ENABLED"], env["SIXNINE_MIGRATION_EXECUTION_BACKEND"])

@@ -20,6 +20,7 @@ WORKFLOW_REVISION = "20261019_0002"
 WORKFLOW_POLLING_SECONDS = 10.0
 DATA = Path(__file__).with_name("migrations") / "data"
 CATALOG_SHA256 = "e3e6b1085a85bf4916c822c66e3a530dab3b15c056f1a82b5b4b2bba0b832f5b"
+DDL_SHA256 = "a519e12175f3551f738ae701fc62603af54397ff084567eb7e46e266b059e77b"
 
 
 class WorkflowSchemaError(Exception):
@@ -113,6 +114,25 @@ def schema_exists(connection):
             {"s": INKSEQ_WORKFLOW_SCHEMA},
         ).first()
     )
+
+
+def initialize(connection):
+    """Frozen pinned final DDL in the caller's guarded Alembic transaction."""
+    require(connection.in_transaction(), 'workflow_migration_transaction_required')
+    require(not schema_exists(connection), 'workflow_schema_already_exists')
+    raw = (DATA / 'dbos_3_3_0_inkseq_workflows.sql').read_bytes()
+    require(
+        hashlib.sha256(raw).hexdigest() == DDL_SHA256, 'workflow_frozen_ddl_changed'
+    )
+    require(connection.dialect.driver == 'psycopg', 'workflow_psycopg_required')
+    # exec_driver_sql passes an empty DBAPI parameters mapping. Escape literal
+    # percent signs so psycopg does not rewrite PL/pgSQL format('%s', ...) body
+    # text into parameter tokens, even though it sits inside SQL dollar quotes.
+    connection.exec_driver_sql(raw.decode('utf-8').replace('%', '%%'))
+    connection.exec_driver_sql(
+        'INSERT INTO inkseq_workflows.dbos_migrations (version) VALUES (123)'
+    )
+    return validate(connection)
 
 
 def catalog(connection):

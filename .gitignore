@@ -635,3 +635,9 @@ inventory.json
 !requirements.workflow-dbos.lock.txt
 !requirements.workflow-procrastinate.in
 !requirements.workflow-procrastinate.lock.txt
+
+# Existing-ledger durable transport and film orchestration (#295).
+!studio_platform/dbos_transport.py
+!studio_platform/film_runs.py
+!studio_platform/film_routes.py
+!studio_platform/film_workflows.py

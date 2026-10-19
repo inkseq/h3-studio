@@ -205,6 +205,42 @@ jobs:
         timeout-minutes: 10
         run: python tools/ci_media_tools.py install "${{ runner.temp }}/sixnine-ci-apt"
       - run: python -m pip install --require-hashes -r requirements.dispatch.lock.txt
+      - name: Bind native backup client to the existing PostgreSQL 17 service
+        env:
+          POSTGRES_TEST_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          # Ubuntu24.04's host pg_dump16 cannot dump the PostgreSQL17 service.
+          # Reuse that exact, already-pulled service's client; no new install.
+          docker exec "$POSTGRES_TEST_CONTAINER" pg_dump --version
+          python - <<'PY'
+          import os, pathlib, re
+          container = os.environ['POSTGRES_TEST_CONTAINER']
+          if not re.fullmatch(r'[a-f0-9]{64}', container):
+              raise SystemExit('Expected the exact isolated CI service container')
+          wrapper = pathlib.Path(os.environ['RUNNER_TEMP']) / 'inkseq-ci-pg-dump'
+          wrapper.write_text('''#!/usr/bin/env python3
+          import os, subprocess, sys
+          arguments = sys.argv[1:]
+          outputs = [value[7:] for value in arguments if value.startswith('--file=')]
+          if len(outputs) != 1:
+              raise SystemExit('One original dump output is required')
+          command = ['docker', 'exec']
+          for name in ('PGHOST', 'PGPORT', 'PGUSER', 'PGPASSWORD', 'PGDATABASE',
+                       'PGSSLMODE', 'PGCONNECT_TIMEOUT', 'PGAPPNAME'):
+              if name in os.environ:
+                  command += ['--env', name]
+          command += ['CONTAINER_ID', 'pg_dump']
+          command += [value for value in arguments if not value.startswith('--file=')]
+          # The service sees its own loopback DB; only binary dump bytes cross
+          # stdout. The existing backup function owns all failure redaction.
+          descriptor = os.open(outputs[0], os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+          with os.fdopen(descriptor, 'wb') as archive:
+              subprocess.run(command, stdout=archive, check=True, timeout=590)
+          '''.replace('CONTAINER_ID', container))
+          wrapper.chmod(0o700)
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write('PLATFORM_TEST_PG_DUMP=' + str(wrapper) + '\n')
+          PY
       - name: Complete PostgreSQL suite shard (isolated CI service)
         env:
           PLATFORM_TEST_DATABASE_URL: postgresql+psycopg://sixnine_test:sixnine-ci-test-only@127.0.0.1:5432/sixnine_test

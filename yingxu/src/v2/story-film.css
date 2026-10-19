@@ -1,0 +1,156 @@
+.story-film-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.film-complete-notice {
+  color: var(--accent);
+  font-size: 11px;
+}
+.film-dialog {
+  width: min(640px, calc(100vw - 24px));
+  color: var(--ink);
+}
+.film-dialog p {
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.film-dialog .film-options {
+  display: grid;
+  gap: 12px;
+  padding-block: 12px;
+  border-block: 1px solid var(--line);
+}
+.film-dialog .film-options > label:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.film-dialog select {
+  height: 32px;
+  min-width: 100px;
+}
+.film-dialog .film-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.5;
+}
+.film-dialog .film-check input {
+  flex: none;
+  min-height: 0;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+}
+.film-dialog .film-save,
+.film-dialog .film-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.film-dialog button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  height: 32px;
+  max-width: 100%;
+  white-space: normal;
+}
+.film-dialog .film-options > button,
+.film-dialog .film-run > .primary {
+  width: 100%;
+  height: 36px;
+}
+.film-dialog .film-run {
+  display: grid;
+  gap: 10px;
+  padding-block: 14px;
+}
+.film-dialog .film-run p {
+  margin: 0;
+}
+.film-dialog .film-run-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.film-dialog .film-run-title > span,
+.film-dialog .muted,
+.film-dialog small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.film-dialog .film-estimate {
+  font-size: 16px;
+}
+.film-dialog .film-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.film-dialog .film-steps li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.film-dialog .film-steps li > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.film-dialog .film-steps .complete {
+  color: var(--accent);
+}
+.film-dialog progress {
+  width: 100%;
+  height: 6px;
+  grid-column: 1/-1;
+  accent-color: var(--accent);
+}
+.film-dialog .film-result {
+  display: grid;
+  gap: 10px;
+}
+.film-dialog .film-result video {
+  width: 100%;
+  max-height: 320px;
+  background: #111;
+  object-fit: contain;
+  border-radius: 8px;
+}
+.film-dialog .film-pending {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.film-dialog details p,
+.film-dialog details code {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+@media (max-width: 600px) {
+  .film-dialog .film-actions > button {
+    flex: 1 1 45%;
+    min-height: 36px;
+    height: 36px;
+  }
+  .film-dialog .film-save > button {
+    width: 100%;
+    height: 36px;
+  }
+}
