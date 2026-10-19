@@ -176,6 +176,61 @@ class PreparationTests(unittest.TestCase):
         )
         self.assertEqual(waiting["reason_code"], "matching_worker_unavailable")
 
+    def test_factory_failures_have_static_specific_messages(self):
+        for code, text in (
+            ("dstack_runtime_ports_exhausted", "模型连接端口已用完"),
+            ("dstack_runtime_port_conflict", "端口与另一台机器冲突"),
+            ("dstack_runtime_source_selection_missing", "所选模型和运行模式的源码"),
+        ):
+            with self.subTest(code=code):
+                view = self.view({"observed_at": 200}, {"reason_code": code})
+                self.assertEqual(view["reason_code"], code)
+                self.assertIn(text, view["reason_text"])
+
+    def test_stopped_reason_supersedes_old_error_without_inventing_billing_proof(self):
+        binding = {
+            "observed_at": 160,
+            "first_stopped_at": 160,
+            "preparation": {
+                "phase": "failed",
+                "reason_code": "dstack_runtime_ports_exhausted",
+                "model": {"state": "loading"},
+            },
+        }
+        for code, expected in (
+            ("dstack_never_allocated", "dstack_never_allocated"),
+            (
+                "dstack_no_capacity_billing_pending",
+                "dstack_no_capacity_billing_pending",
+            ),
+            ("dstack_run_terminal_billing_pending", None),
+            (None, None),
+        ):
+            with self.subTest(code=code):
+                view = self.view(
+                    binding,
+                    {
+                        "lifecycle_phase": "stopped",
+                        "reason_code": code,
+                        "native_ready": True,
+                        "dispatch_reason_code": "matching_worker_unavailable",
+                    },
+                )
+                self.assertEqual(view["phase"], "stopped")
+                self.assertEqual(view["reason_code"], expected)
+                self.assertNotIn("端口", view["reason_text"] or "")
+                self.assertNotIn("billing_state", view)
+                self.assertNotIn("no_allocation_proof", view)
+        # A pending/unknown result never becomes the confirmed no-allocation code.
+        pending = self.view(
+            {"observed_at": 200},
+            {"reason_code": "dstack_allocation_requires_reconciliation"},
+        )
+        self.assertEqual(
+            pending["reason_code"], "dstack_allocation_requires_reconciliation"
+        )
+        self.assertIn("尚未确认", pending["reason_text"])
+
     def test_native_timestamp_does_not_refresh_provider_read_age(self):
         binding = {"observed_at": 100}
         record_preparation(

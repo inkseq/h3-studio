@@ -160,6 +160,13 @@ class NativeVastSafetyTests(unittest.TestCase):
                 ("Invalid args: len(args) > 8192", (None, "args", "length_limit")),
                 ("error 400/3467: Invalid args: 'id' is required and must be a valid offer ID", (3467, "id", "required_or_invalid")),
                 ("Invalid args: 'id' is required and must be a valid offer ID", (None, "id", "required_or_invalid")),
+                ("Invalid args: disk size is too large: requested PRIVATE", (None, "disk", "out_of_range")),
+                ("Invalid disk size: PRIVATE", (None, "disk", "invalid")),
+                ("Missing template_id: PRIVATE", (None, "template_id", "required")),
+                ("Invalid args: 'image_login' is required: Bearer PRIVATE", (None, "image_login", "required")),
+                ("error 400/3499: Invalid args: env is not supported: PRIVATE", (3499, "env", "unsupported")),
+                ("Unsupported runtype: PRIVATE", (None, "runtype", "unsupported")),
+                ("Invalid PRIVATE: disk is too large", (None, "unknown", "unspecified")),
                 ("error 400/3499: Invalid args: env contains Bearer PRIVATE", (3499, "unknown", "unspecified")),
                 ("error 400/3499: PRIVATE nonstandard provider detail", (3499, "unknown", "unspecified")),
                 ("error 400/3471: Invalid args: len(args) > 4096 https://private.invalid/secret", (3471, "unknown", "unspecified")),
@@ -250,6 +257,23 @@ class NativeVastSafetyTests(unittest.TestCase):
             session.put.assert_called_once()
             session.delete.assert_not_called()
             received.close.assert_called_once()
+
+    def test_argument_diagnostic_logs_static_reason_and_public_disk_size_only(self):
+        for disk, expected in ((128, "128"), (128.5, "128.5"), (True, "None"),
+                               ("PRIVATE", "None"), (float("nan"), "None"),
+                               (float("inf"), "None"), (10 ** 400, "None")):
+            data = {"success": False, "error": "invalid_args", "ask_id": 123,
+                    "msg": "Invalid args: disk size is too large: PRIVATE https://private.invalid/token"}
+            with self.subTest(disk_type=type(disk).__name__), self.assertLogs(safety._logger, level="WARNING") as logs:
+                with self.assertRaises(safety.VastSafeReject) as caught:
+                    safety.create_instance_once(NS(put=Mock(return_value=response(400, data))), 123,
+                                                {"disk": disk, "env": {"TOKEN": "PRIVATE"}})
+            self.assertIn("field=disk reason=out_of_range", logs.output[0])
+            self.assertIn("disk_gb=" + expected, logs.output[0])
+            self.assertNotIn("PRIVATE", logs.output[0])
+            self.assertNotIn("https://", logs.output[0])
+            self.assertEqual(set(caught.exception.outcome), safety.OUTCOME_KEYS)
+            self.assertEqual(proof([attempt(123, caught.exception)])["outcome"], "no_allocation")
 
     def test_logging_failure_and_ambiguous_errors_cannot_change_allocation_classification(self):
         data = {"success": False, "error": "invalid_args", "ask_id": 123,

@@ -502,6 +502,30 @@ class DstackCapacityTests(unittest.TestCase):
                 self.assertFalse(value["ready"])
                 self.assertNotIn("secret", json.dumps(value))
 
+    def test_native_factory_port_and_source_failures_keep_specific_diagnostics(self):
+        self.start()
+        self.client.running()
+        for code in (
+            "dstack_runtime_ports_exhausted",
+            "dstack_runtime_port_conflict",
+            "dstack_runtime_port_changed",
+            "dstack_runtime_retained_port_invalid",
+            "dstack_runtime_stopped_port_unallocated",
+            "dstack_runtime_source_selection_missing",
+            "dstack_runtime_source_binding_invalid",
+            "dstack_runtime_source_set_invalid",
+            "dstack_runtime_configuration_missing",
+        ):
+            with self.subTest(code=code):
+                self.native.side_effect = DstackError(code)
+                value = self.capacity.observe(INTENT)
+                self.assertEqual(value["reason_code"], code)
+                self.assertEqual(value["state"], "runtime_unconfirmed")
+                self.assertFalse(value["ready"])
+                self.assertEqual(value["provider_instance_id"], "1234567")
+                self.assertEqual(value["billing_state"], "unsettled")
+        self.assertEqual((self.client.apply_count, self.client.stop_count), (1, 0))
+
     def test_native_progress_is_allowlisted_and_never_admits_capacity(self):
         self.start()
         self.client.running()
