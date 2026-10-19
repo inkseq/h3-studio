@@ -126,12 +126,77 @@ table allowlist to `pg_dump`; its dump/rehearsal does not retain authentication
 tables, the version table or separate workflow schemas. Neither current backup
 path is a full-database backup. After restoring either business-only format,
 check the normal schema and explicitly re-adopt the known revision. Workflow
-state backup/restore needs a separate reviewed contract before integration.
+state backup/restore follows the explicit contract below; a legacy business-only
+dump still does not contain SDK state.
 The no-Alembic `schema_version.py` reader ships in the preceding compatibility
 release, before the writer. Before live adoption, verify both current and
 previous rollback images include that reader; the writer must not be the first
 release that teaches backup to recognize its new marker. The reader constant
 and frozen revision must agree or adoption source refuses to load.
+
+## DBOS workflow-state adoption (#295)
+
+`20261019_0002` adds only `inkseq_workflows`, the pinned DBOS3.3.0 final
+13-table/three-function schema. The public59-table/444-column baseline and all
+existing business/financial rows remain unchanged. The frozen DDL and exact
+catalog are hashed resources; internal FK trigger OIDs are installation-specific,
+so their owner constraint/type/function are compared instead. All user triggers,
+function definitions, columns/defaults, indexes, constraints, enums and sequences
+remain exact. Unknown schemas or SDK catalog drift still refuse checks/backup.
+The SDK cannot run startup migrations. No `DBOS.migrate()` is called inside an
+Alembic transaction: guarded adoption applies frozen final DDL and the SDK's123
+marker in the original caller transaction/advisory lock.
+
+Deployment is reader-before-writer: first ship the known0002 reader and the
+sidecar-aware backup/transport/retention readers, leaving the marker at0001 and
+the executor disabled. Verify current AND previous rollback images understand
+the sidecar/marker. Only then, on staging, take the original verified backup,
+check the schema and run `python -m studio_platform.schema_baseline
+adopt-workflows --expected-fingerprint <exact-check-fingerprint>` under the
+existing release lock. The command refuses drift, stale fingerprints, missing
+baseline adoption and destructive downgrade. Production adoption/activation is
+held pending the owner's staged-batch acceptance. A source merge is not adoption.
+
+The existing portable PostgreSQL backup reads the exact SDK family through the
+SAME `REPEATABLE READ, READ ONLY` connection as its business SQLite export. The
+optional fixed `workflow-state.json` is pinned by size/SHA/schema/catalog in the
+original manifest; original S3 immutable-version/readback receipts include that
+file. Media format1/2/3 coverage retains its original meaning. This is not an
+authentication/credential backup or a new backup daemon. Text-encoded values
+preserve numeric precision, SQL NULL/JSON null, SDK IDs and serialized payloads;
+no workflow payload is deserialized or replayed by backup.
+
+For native offline rehearsal, the original `postgres-database-only` command's
+explicit `--include-workflows` option holds one exported PG snapshot for both
+the business `pg_dump --snapshot` and SDK sidecar. `--private-platform-network`
+retains the existing exact Compose identity opt-in. Copy its original
+`database.dump` as `rehearsal/incoming/production.dump`, the original manifest
+as `workflow-manifest.json` and the fixed sidecar alongside it, all private and
+root-protected. The original rehearsal validates all hashes and records them
+before creating its disconnected disposable DB. Its exact image restores SDK
+state only into that fixed rehearsal DB; no live credentials or network are
+attached. A legacy dump with no sidecar remains explicitly business-only.
+
+Portable SQLite recovery preserves the sidecar bytes in its existing
+`RECOVERY-HOLD.json` contract. Native SDK restoration retains all original
+workflow/step/message IDs and adds a reserved `inkseq.recovery/restored-state`
+entry in the SDK's existing `event_dispatch_kv`; schedules are paused. Both
+producer and executor must call `assert_execution_allowed` at startup, and
+the producer also checks it in each original enqueue/event transaction. This
+blocks accidental execution even though original statuses are retained. It
+does not claim provider billing stopped or reconcile leases/results. There is
+no automatic hold remover: original jobs/attempts, leases, cancellations,
+native tags and output receipts require explicit review before execution.
+
+The shared application version is `inkseq-workflows-v1`; one fixed executor ID
+per environment is used. Named queue/listener/scheduler intervals are10seconds;
+the SDK's internal queue/manager1second loop is an upstream limitation, not
+silently patched. DBOS3.3.0, croniter6.2.4 and PyYAML6.0.3 are CPU-only exact
+additions; every pre-existing runtime/telemetry pin is retained.
+
+Primary pinned references: [DBOS configuration](https://docs.dbos.dev/python/reference/configuration),
+[transactional client](https://docs.dbos.dev/python/reference/client),
+[DBOS3.3.0 migrations](https://github.com/dbos-inc/dbos-transact-py/blob/3.3.0/dbos/_migration.py).
 
 ## Verification and package decisions
 

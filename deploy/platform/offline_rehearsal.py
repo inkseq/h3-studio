@@ -50,6 +50,16 @@ def commands(commit, postgres_image, nonce):
     }
 
 
+def workflow_restore_command(plan, directory, commit):
+    command = list(plan['migrate'])
+    image_index = command.index('sixnine-platform:'+commit)
+    command[image_index:image_index] = ['--user','0:0','--mount',
+        'type=bind,src='+str(directory)+',dst=/backup,readonly']
+    command[image_index+5:] = ['python','-m','studio_platform.workflow_backup',
+        'restore-rehearsal','--directory','/backup']
+    return command
+
+
 def restore_copy(plan, source, environment):
     # The image entrypoint's temporary bootstrap server accepts Unix sockets
     # before database creation finishes. Only the final server listens on TCP.
@@ -94,10 +104,29 @@ def run(commit, *, root=release.ROOT):
     release.require(stat.S_IMODE(info.st_mode) == 0o600, 'rehearsal_private_dump_required')
     original = release.checksum(source)
     plan = commands(commit, environment['SIXNINE_POSTGRES_IMAGE'], uuid.uuid4().hex)
+    companions = [source.parent/'workflow-state.json', source.parent/'workflow-manifest.json']
+    workflow = None
+    if any(p.exists() or p.is_symlink() for p in companions):
+        for path in companions:
+            item = release.regular(path, root_owned=True, maximum=256*1024**2 if path.name == 'workflow-state.json' else 16*1024**2)
+            release.require(stat.S_IMODE(item.st_mode) == 0o600, 'rehearsal_private_workflow_required')
+        workflow = json.loads(companions[1].read_bytes())
+        release.require(workflow.get('kind') == 'postgres-database-only'
+            and workflow.get('version') == 1 and workflow.get('database_sha256') == original
+            and workflow.get('consistent_business_workflow_snapshot') is True
+            and workflow.get('workflow_state',{}).get('file') == 'workflow-state.json'
+            and workflow['workflow_state'].get('sha256') == release.checksum(companions[0])
+            and workflow['workflow_state'].get('size_bytes') == companions[0].stat().st_size,
+            'rehearsal_workflow_companion_mismatch')
+        workflow = {'state_sha256':release.checksum(companions[0]),'manifest_sha256':release.checksum(companions[1])}
+        # Same isolated socket/database and exact image, with only protected
+        # incoming evidence mounted read-only. No network/provider is attached.
+        plan['restore_workflows'] = workflow_restore_command(plan, source.parent, commit)
     intent = root/'rehearsal'/'intent.json'
     release.require(not intent.exists() and not intent.is_symlink(), 'rehearsal_existing_intent_requires_review')
     with intent.open('x', encoding='utf-8') as output:
-        json.dump({'version': 1, 'commit': commit, 'dump_sha256': original, 'name': plan['name'], 'volumes': plan['volumes']}, output)
+        json.dump({'version': 1, 'commit': commit, 'dump_sha256': original, 'name': plan['name'], 'volumes': plan['volumes'],
+            **({'workflow_state':workflow} if workflow else {})}, output)
         output.flush()
         import os
         os.fsync(output.fileno())
@@ -107,12 +136,18 @@ def run(commit, *, root=release.ROOT):
     release.command(plan['database'], environment=environment)
     restore_copy(plan, source, environment)
     release.command(plan['migrate'], environment=environment, timeout=600)
+    if workflow:
+        release.command(plan['restore_workflows'], environment=environment, timeout=600)
+        release.require(release.checksum(companions[0]) == workflow['state_sha256']
+            and release.checksum(companions[1]) == workflow['manifest_sha256'], 'rehearsal_workflow_original_changed')
     release.require(release.checksum(source) == original, 'rehearsal_original_dump_changed')
     release.command(['rm', '--force', plan['name']], environment=environment)
     for volume in plan['volumes']:
         release.command(['volume', 'rm', volume], environment=environment)
     receipt = {'state': 'offline_migration_rehearsal_passed', 'commit': commit,
         'dump_sha256': original, 'copy_published': False, 'original_retained': True}
+    if workflow:
+        receipt.update(workflow_state=workflow,workflow_execution='held',workflow_original_ids=True)
     # Keep the intent even on success. Repeating a rehearsal is a deliberate new
     # operation with a reviewed preserved intent, never a silent cleanup/replay.
     return receipt

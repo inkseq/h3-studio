@@ -198,20 +198,36 @@ def reflected_signature(connection, *, schema=None):
     ):
         raise BaselineError("schema_unexpected_database_objects")
     if connection.dialect.name == "postgresql":
-        # The platform currently owns only public. Do not silently ignore a
-        # second application schema or tables with generated/identity columns.
+        from .workflow_schema import INKSEQ_WORKFLOW_SCHEMA, WORKFLOW_REVISION, validate
+
+        workflow_schema = None
+        if schema is None and validate_version_table(connection) == WORKFLOW_REVISION:
+            try:
+                workflow_schema = validate(connection)
+            except Exception:
+                raise BaselineError('schema_workflow_catalog_requires_review') from None
+        # Only the exact adopted SDK family may accompany the public baseline.
         schemas = set(inspector.get_schema_names()) - {"information_schema", "public"}
         if (
             schema is None
             and (
                 connection.exec_driver_sql("SELECT current_schema()").scalar_one()
                 != "public"
-                or any(not name.startswith("pg_") for name in schemas)
+                or any(
+                    not name.startswith("pg_")
+                    and not (workflow_schema and name == INKSEQ_WORKFLOW_SCHEMA)
+                    for name in schemas
+                )
             )
         ) or inspector.get_materialized_view_names(schema=schema):
             raise BaselineError("schema_unexpected_database_objects")
-        if connection.exec_driver_sql(
-            "SELECT 1 FROM pg_trigger WHERE NOT tgisinternal LIMIT 1"
+        if connection.execute(
+            text(
+                "SELECT 1 FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid "
+                "JOIN pg_namespace n ON n.oid=c.relnamespace WHERE NOT t.tgisinternal "
+                "AND n.nspname <> :allowed LIMIT 1"
+            ),
+            {'allowed': INKSEQ_WORKFLOW_SCHEMA if workflow_schema else ''},
         ).first():
             raise BaselineError("schema_unexpected_database_objects")
         namespace = schema or "public"
@@ -359,7 +375,7 @@ def compare_schema(connection, *, schema=None):
             dict(schema=actual, version=version), sort_keys=True, separators=(",", ":")
         ).encode()
     ).hexdigest()
-    return dict(
+    result = dict(
         revision=REVISION,
         recorded_revision=version,
         authority="legacy_startup_compatibility"
@@ -371,6 +387,11 @@ def compare_schema(connection, *, schema=None):
         column_count=sum(len(table["columns"]) for table in actual.values()),
         differences=differences,
     )
+    from .workflow_schema import WORKFLOW_REVISION, CATALOG_SHA256
+
+    if version == WORKFLOW_REVISION:
+        result['workflow_catalog_sha256'] = CATALOG_SHA256
+    return result
 
 
 def alembic_config(*, dialect="postgresql", output=None):
@@ -445,6 +466,53 @@ def adopt_baseline(connection, *, expected_fingerprint, schema=None):
     )
 
 
+def adopt_workflows(connection, *, expected_fingerprint):
+    """Explicit additive writer under the original transaction/advisory lock.
+
+    Deploy the updated backup/readers as both current and rollback before this
+    operation. The SDK's migrate() is never called: frozen final DDL is applied
+    by Alembic in this SAME transaction, then the exact family is verified.
+    """
+    from .workflow_schema import WORKFLOW_REVISION, WorkflowSchemaError, validate
+
+    if (
+        not connection.in_transaction()
+        or connection.dialect.name != 'postgresql'
+        or not re.fullmatch(r'[a-f0-9]{64}', expected_fingerprint or '')
+    ):
+        raise BaselineError('workflow_adoption_requires_transaction_and_fingerprint')
+    connection.exec_driver_sql("SET LOCAL lock_timeout = '5s'")
+    connection.exec_driver_sql("SET LOCAL statement_timeout = '30s'")
+    connection.exec_driver_sql('SELECT pg_advisory_xact_lock(685939796868749721)')
+    before = compare_schema(connection)
+    if before['schema_fingerprint'] != expected_fingerprint:
+        raise BaselineError('schema_snapshot_changed')
+    if not before['matches'] or before['recorded_revision'] not in {
+        REVISION,
+        WORKFLOW_REVISION,
+    }:
+        raise BaselineError('workflow_adoption_requires_adopted_baseline')
+    if before['recorded_revision'] == WORKFLOW_REVISION:
+        return dict(state='already_adopted', before=before, after=before)
+    from alembic import command
+
+    config = alembic_config()
+    config.attributes.update(
+        verified_baseline_connection=connection,
+        verified_baseline_mode='upgrade',
+        verified_workflow_mode=True,
+    )
+    try:
+        command.upgrade(config, WORKFLOW_REVISION)
+        validate(connection)
+    except WorkflowSchemaError as error:
+        raise BaselineError(str(error)) from None
+    after = compare_schema(connection)
+    if not after['matches'] or after['recorded_revision'] != WORKFLOW_REVISION:
+        raise BaselineError('workflow_adoption_verification_failed')
+    return dict(state='adopted_workflows', before=before, after=after)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Schema-only baseline verification and guarded adoption"
@@ -463,6 +531,11 @@ def main(argv=None):
         "adopt", help="Adopt an exact checked schema under the existing migration lock"
     )
     adopt.add_argument("--expected-fingerprint", required=True)
+    workflows = commands.add_parser(
+        'adopt-workflows',
+        help='Guarded pinned SDK schema adoption after reader bridge release',
+    )
+    workflows.add_argument('--expected-fingerprint', required=True)
     args = parser.parse_args(argv)
     engine = None
     try:
@@ -482,12 +555,20 @@ def main(argv=None):
                 connection.exec_driver_sql("SET TRANSACTION READ ONLY")
                 connection.exec_driver_sql("SET LOCAL statement_timeout = '30s'")
                 result = compare_schema(connection)
+            elif args.command == 'adopt-workflows':
+                result = adopt_workflows(
+                    connection, expected_fingerprint=args.expected_fingerprint
+                )
             else:
                 result = adopt_baseline(
                     connection, expected_fingerprint=args.expected_fingerprint
                 )
         print(json.dumps(result, sort_keys=True))
-        return 0 if args.command == "adopt" or result["matches"] else 1
+        return (
+            0
+            if args.command in {"adopt", 'adopt-workflows'} or result["matches"]
+            else 1
+        )
     except BaselineError as error:
         print(json.dumps(dict(code=str(error))), file=sys.stderr)
         return 1
