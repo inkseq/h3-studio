@@ -191,6 +191,40 @@ COMMON_CODES = {
     'insufficient_scope',
     'version_conflict',
 }
+POLICY_DIAGNOSTICS = {
+    'content_moderation_refused': (
+        'This request did not pass the content policy. No generation credits were charged.',
+        '本次请求未通过内容规则，未扣生成积分。',
+    ),
+    'content_moderation_unavailable': (
+        'Content review is temporarily unavailable. The original request is retained.',
+        '内容审核暂不可用，原请求已保留。',
+    ),
+    'content_moderation_changed': (
+        'The content policy changed. Preview this request again.',
+        '内容规则已更新，请重新预览本次请求。',
+    ),
+    'content_moderation_receipt_invalid': (
+        'The content-review result could not be verified. The original request is retained.',
+        '内容审核结果尚未核实，原请求已保留。',
+    ),
+    'terms_acceptance_required': (
+        'Accept the current terms before starting a new paid request.',
+        '请先接受当前条款，再开始新的付费请求。',
+    ),
+    'terms_not_reviewed': (
+        'Purchases will open after the terms are approved.',
+        '条款批准后才会开放购买。',
+    ),
+    'terms_version_changed': (
+        'The terms changed. Accept the current version and preview again.',
+        '条款已更新，请接受当前版本后重新预览。',
+    ),
+    'terms_changed': (
+        'The terms changed. Accept the current version and preview again.',
+        '条款已更新，请接受当前版本后重新预览。',
+    ),
+}
 
 
 def preflight_diagnostic(error):
@@ -206,7 +240,15 @@ def preflight_diagnostic(error):
         and type(error.args[0]) is str
     ):
         text = error.args[0]
-        if text in WANGP_VALIDATION_CODES or text in COMMON_CODES:
+        if text in POLICY_DIAGNOSTICS:
+            en, zh = POLICY_DIAGNOSTICS[text]
+            result.update(
+                error_code=text,
+                error_stage='terms' if text.startswith('terms_') else 'moderation',
+                error_message=zh,
+                messages={'en': en, 'zh': zh},
+            )
+        elif text in WANGP_VALIDATION_CODES or text in COMMON_CODES:
             result['error_code'] = text
             result['error_message'] = (
                 '当前适配器尚未映射此输入或控制，请保留原设置并联系管理员。'
@@ -271,6 +313,8 @@ _WORKER_CODES = frozenset(
         'submission_response_unknown',
         'upstream_status_unknown',
         'generation_failure_unclassified',
+        'content_moderation_refused',
+        'content_moderation_unavailable',
     }
 )
 
@@ -313,6 +357,7 @@ def failure_reason(code):
         and code
         in WANGP_VALIDATION_CODES
         | COMMON_CODES
+        | POLICY_DIAGNOSTICS.keys()
         | INFERENCE_FAILURE_CODES
         | _WORKER_CODES
         else 'generation_failure_unclassified'
@@ -525,7 +570,7 @@ def safe_failure_summary(job, context=None):
         ),
     )
     code = failure_reason(job.get('error_code'))
-    return {
+    result = {
         'version': 1,
         'stage': failure_stage(code),
         'reason_code': code,
@@ -534,6 +579,14 @@ def safe_failure_summary(job, context=None):
         'automatic_generation_retry': False,
         'message': '生成未完成。请核对原任务的停止和费用状态，再手动重试；也可减少参考素材、时长或分辨率后重新确认。',
     }
+    if code == 'content_moderation_refused':
+        result['stage'] = 'moderation'
+        result['messages'] = {
+            'en': 'The video did not pass the content policy. No generation credits were charged.',
+            'zh': '视频未通过内容规则，本次未扣生成积分。',
+        }
+        result['message'] = result['messages']['zh']
+    return result
 
 
 def failure_notice_id(job, summary):

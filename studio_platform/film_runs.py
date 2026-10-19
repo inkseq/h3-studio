@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import copy
 import math
+import re
 import uuid
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import insert, inspect, select, update
+from .generation_services import freeze_generation_policy
 
 from .repository import (
     Conflict,
@@ -18,6 +20,7 @@ from .repository import (
     Scope,
     documents,
     jobs,
+    plans,
     identifier,
     request_hash,
 )
@@ -98,6 +101,86 @@ def validate_film_source(connection, repo, scope, compiled):
     ):
         raise Conflict("film_source_changed")
     return value
+
+
+def accepted_policy_admission(connection, repo, scope, plan, key):
+    """Only an exact original accepted Film batch keeps its input authorization.
+
+    This is not authority for an arbitrary copy of a Film plan. Normal account,
+    grant, source, budget and cancellation gates still run in the caller.
+    """
+    if not isinstance(key, str):
+        return False
+    matched = re.fullmatch(r"batch:([0-9a-f-]{36}):(0|[1-9][0-9]{0,2})", key)
+    if matched is None:
+        return False
+    try:
+        batch_id, index = matched[1], int(matched[2])
+        if str(uuid.UUID(batch_id)) != batch_id or any(
+            plan[field] != expected
+            for field, expected in (
+                ("tenant_id", scope.tenant_id),
+                ("owner_id", scope.owner_id),
+                ("project_id", scope.project_id),
+            )
+        ):
+            return False
+        compiled = plan["request"]
+        value = validate_film_source(connection, repo, scope, compiled)
+        accepted = value.get("accepted_at")
+        if (
+            type(accepted) not in (int, float)
+            or not math.isfinite(accepted)
+            or not 0 < accepted <= repo.clock()
+            or not isinstance(value.get("submission_hash"), str)
+            or re.fullmatch(r"[0-9a-f]{64}", value["submission_hash"]) is None
+            or value.get("id") != compiled["film_source_ref"]["run_id"]
+            or value.get("project_id") != scope.project_id
+            or value.get("plan_hashes", {}).get(plan["id"]) != request_hash(compiled)
+        ):
+            return False
+        from .batches import batches
+
+        if not inspect(connection).has_table(batches.name):
+            return False  # Optional older offline fixtures do not acquire DDL.
+        row = (
+            connection.execute(
+                select(batches).where(
+                    batches.c.id == batch_id,
+                    batches.c.tenant == scope.tenant_id,
+                    batches.c.owner == scope.owner_id,
+                    batches.c.project_id == scope.project_id,
+                    batches.c.actor_id == scope.actor_id,
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if row is None or row["cancel_requested"] is not None:
+            return False
+        chosen = {
+            value["id"] + ":shots": value["generation"],
+            value["id"] + ":chapters": value["chapters"],
+            value["id"] + ":export": [value["export"]],
+        }.get(row["idempotency_key"])
+        if not isinstance(chosen, list) or not 1 <= len(chosen) <= 100:
+            return False
+        expected = [item["plan_id"] for item in chosen]
+        if (
+            not all(isinstance(item, str) and item for item in expected)
+            or len(set(expected)) != len(expected)
+            or not 0 <= index < len(expected)
+            or expected[index] != plan["id"]
+            or not isinstance(row["items"], list)
+            or [item["plan_id"] for item in row["items"]] != expected
+            or row["fingerprint"]
+            != request_hash({"project_id": scope.project_id, "plan_ids": expected})
+        ):
+            return False
+        return True
+    except (KeyError, TypeError, ValueError, Conflict, NotFound):
+        # An old/malformed/unaccepted record falls back to today's policy.
+        return False
 
 
 def frozen_story(project, results):
@@ -602,10 +685,14 @@ class FilmRuns:
                     "run_id": run_id,
                     "snapshot_hash": snapshot_hash,
                 }
+                execution = copy.deepcopy(plan["execution_plan"])
+                freeze_generation_policy(
+                    self.repo, self.tenant, principal.owner, compiled, execution
+                )
                 frozen = self.repo.create_plan(
                     self.access.scope(principal, project_id),
                     compiled,
-                    plan["execution_plan"],
+                    execution,
                     expires_at=plan["expires_at"],
                     estimated_cost_microusd=plan["estimated_cost_microusd"],
                     plan_id=plan_id,
@@ -733,11 +820,40 @@ class FilmRuns:
         # Confirmation does no provider work. Enqueue is committed with its header.
         self.access.project(principal, project_id, "jobs:write")
         with self.repo.transaction() as conn:
+            from .identity import lock_account_gate
+
+            lock_account_gate(conn)
             self.repo._content_write_guard(
                 conn, film_scope(self.tenant, principal.owner, project_id)
             )
             row = self._row(conn, principal, project_id, run_id, lock=True)
             value = copy.deepcopy(row["payload"])
+            if not value.get("submission_hash"):
+                scope = self.access.scope(principal, project_id)
+                plan_ids = [item["plan_id"] for item in value["generation"]]
+                if len(set(plan_ids)) != len(plan_ids) or set(
+                    value["plan_hashes"]
+                ) != set(plan_ids):
+                    raise Conflict("film_source_changed")
+                for plan_id in plan_ids:
+                    plan = (
+                        conn.execute(
+                            select(plans).where(
+                                self.repo._scope(plans, scope), plans.c.id == plan_id
+                            )
+                        )
+                        .mappings()
+                        .first()
+                    )
+                    if plan is None or value["plan_hashes"][plan_id] != request_hash(
+                        plan["request"]
+                    ):
+                        raise Conflict("film_source_changed")
+                    # No batch key exists at parent acceptance: today's policy
+                    # must authorize every original child before it is frozen.
+                    self.repo._check_generation_policy(
+                        conn, scope, plan, admitting=True
+                    )
             accept(value)
             self._write(conn, principal, project_id, run_id, value, row)
             if self.enqueue is None:
@@ -873,6 +989,10 @@ class FilmRuns:
             )
         if credit_quote is not None:
             admission.execution["credit_quote"] = credit_quote
+        freeze_generation_policy(
+            self.repo, self.tenant, principal.owner, compiled, admission.execution
+        )
+        digest = request_hash(compiled)
         plan = self.repo.create_plan(
             self.access.scope(principal, value["project_id"]),
             compiled,

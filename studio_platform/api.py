@@ -450,6 +450,7 @@ def create_app(
             public_paths.update({"/api/auth/workos/start", "/api/auth/workos/callback"})
             public_paths.add("/v1/credits/prices")
             public_paths.add("/v1/billing/packs")
+            public_paths.add("/v1/legal/policy")
         if request.method == "POST":
             public_paths.add("/v1/billing/stripe/webhook")
         public_frontend = is_public_frontend(settings, request.method, request.url.path)
@@ -1184,6 +1185,11 @@ def create_app(
             )
         if credit_quote is not None:
             admission.execution["credit_quote"] = credit_quote
+        from .generation_services import freeze_generation_policy
+
+        freeze_generation_policy(
+            repo, settings.tenant_id, principal.owner, compiled, admission.execution
+        )
         plan = repo.create_plan(
             scope(principal, project_id),
             compiled,
@@ -1489,10 +1495,20 @@ def create_app(
     from .credits_routes import register_routes as register_credit_routes
 
     register_credit_routes(app)
+    from .content_routes import register_routes as register_content_routes
+    from .content_policy import reviewed_terms
+
+    register_content_routes(
+        app, settings, repo, lambda request: request.state.principal
+    )
     from .payments_routes import register_routes as register_payment_routes
 
     register_payment_routes(
-        app, settings, repo, lambda request: request.state.principal
+        app,
+        settings,
+        repo,
+        lambda request: request.state.principal,
+        terms_check=reviewed_terms,
     )
     from .frontend import register_routes as register_frontend_routes
 

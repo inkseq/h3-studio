@@ -683,7 +683,15 @@ class TaskQueue:
             repo._dispatch_wakeup(connection, lease.job_id)
             return repo._job(connection, lease.job_id)
 
-    def complete(self, lease, artifact_specs, *, actual_cost_microusd, settlement=None):
+    def complete(
+        self,
+        lease,
+        artifact_specs,
+        *,
+        actual_cost_microusd,
+        settlement=None,
+        moderation=None,
+    ):
         """Complete only AFTER controlled storage and media verification.
 
         Specs contain kind/object_key/size_bytes/sha256/validated=True, never signed
@@ -692,6 +700,8 @@ class TaskQueue:
         cancellation marker, rather than claiming the upstream was stopped in time.
         Optional settlement(connection, specs) atomically attributes existing
         storage reservations; it must perform only database work, never IO.
+        A verified moderation refusal keeps that same settlement and provider
+        cost, but publishes no artifact and releases customer credits.
         """
         cost = None if actual_cost_microusd is None else money(actual_cost_microusd)
         specs = canonical(artifact_specs)
@@ -741,6 +751,12 @@ class TaskQueue:
                 raise ValueError("invalid_artifact_evidence")
         repo = self.repository
         with repo.transaction() as connection:
+            from .content_policy import verify_output
+            from .identity import lock_account_gate
+
+            # Policy changes use the exclusive global gate. Take its shared
+            # side before owner/job locks, without reauthorizing accepted work.
+            lock_account_gate(connection)
             # Match the content-cleanup lock order: owner fence, then job lock.
             # The unlocked read identifies the owner only; _leased revalidates
             # the original lease after we hold the fence.
@@ -758,6 +774,10 @@ class TaskQueue:
                 and job["cancel_from_status"] == "collecting"
             ):
                 raise InvalidTransition("not_collecting")
+            moderation = verify_output(
+                connection, job, lease.attempt_id, specs, moderation
+            )
+            refused = moderation is not None and moderation["status"] == "refused"
             for spec in specs:
                 validate_delivery_evidence(job, spec, spec["kind"])
             assert_content_available(
@@ -772,7 +792,8 @@ class TaskQueue:
             if settlement is not None:
                 settlement(connection, specs)
             artifact_ids = []
-            for spec in specs:
+            public_specs = [] if refused else specs
+            for spec in public_specs:
                 artifact_id = str(uuid.uuid4())
                 artifact_ids.append(artifact_id)
                 connection.execute(
@@ -790,15 +811,19 @@ class TaskQueue:
                 "billing_status": "pending" if cost is None else "settled",
                 "completed_after_cancel_request": job["status"] == "cancel_requested",
             }
+            if moderation is not None:
+                result["moderation"] = moderation
+            status = "failed" if refused else "succeeded"
+            error_code = "content_moderation_refused" if refused else None
             if cost is not None:
                 repo._settle(connection, "job", lease.job_id, cost)
             connection.execute(
                 update(jobs)
                 .where(jobs.c.id == lease.job_id)
                 .values(
-                    status="succeeded",
+                    status=status,
                     result=result,
-                    error_code=None,
+                    error_code=error_code,
                     fence=job["fence"] + 1,
                     lease_worker_id=None,
                     lease_expires_at=None,
@@ -809,7 +834,8 @@ class TaskQueue:
                 update(attempts)
                 .where(attempts.c.id == lease.attempt_id)
                 .values(
-                    status="succeeded",
+                    status=status,
+                    error_code=error_code,
                     upstream_stopped=1,
                     actual_cost_microusd=cost,
                     updated_at=repo.clock(),
@@ -819,14 +845,22 @@ class TaskQueue:
                 from .settlement_recovery import release_terminal_job
 
                 release_terminal_job(repo, connection, lease.job_id)
-            from .credits import capture as capture_credits
+            from .credits import capture as capture_credits, release as release_credits
 
-            capture_credits(connection, repo, job)
+            if refused:
+                release_credits(connection, repo, job, reason=error_code)
+            else:
+                capture_credits(connection, repo, job)
+            payload = {"job_id": lease.job_id, "artifact_ids": artifact_ids}
+            if moderation is not None:
+                payload["moderation"] = moderation
+            if refused:
+                payload["error_code"] = error_code
             repo._emit(
                 connection,
-                "job.succeeded",
+                "job." + status,
                 lease.job_id,
-                {"job_id": lease.job_id, "artifact_ids": artifact_ids},
+                payload,
             )
             return repo._job(connection, lease.job_id)
 

@@ -8,6 +8,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import event, select
 
 from studio_platform.api import create_app
+from studio_platform.content_policy import ContentPolicyError
+from studio_platform.credits import CreditError
 from studio_platform.repository import BudgetExceeded, NotFound, jobs
 from studio_platform.queue import TaskQueue
 import test_platform_api as api_tests
@@ -135,6 +137,55 @@ class BatchCrashTests(unittest.TestCase):
         self.assertEqual(recovered["counts"], {"queued": 1})
         self.assertEqual(recovered["items"][0]["job_id"], original_job_id)
         self.assertEqual(len(self.rows()), 1)
+
+    def test_typed_admission_refusals_preserve_partial_batch_and_original_jobs(self):
+        self.ready()
+        original = self.app.state.enqueue_planned
+        for index, error in enumerate(
+            (
+                ContentPolicyError("terms_acceptance_required"),
+                CreditError("insufficient_credits", 402),
+            )
+        ):
+            with self.subTest(code=error.code):
+                body = {
+                    "client_project_id": "story-one",
+                    "plan_ids": [self.make_plan()["plan_id"] for _ in range(3)],
+                }
+                headers = {"Idempotency-Key": f"typed-refusal-{index}"}
+                call_count = 0
+
+                def fail_middle(*args, **kwargs):
+                    nonlocal call_count
+                    call_count += 1
+                    if call_count == 2:
+                        raise error
+                    return original(*args, **kwargs)
+
+                before = len(self.rows())
+                with patch.object(
+                    self.app.state, "enqueue_planned", side_effect=fail_middle
+                ):
+                    response = self.client.post(
+                        "/v1/batches", json=body, headers=headers
+                    )
+                self.assertEqual(response.status_code, 202, response.text)
+                items = response.json()["items"]
+                self.assertEqual(
+                    [item["status"] for item in items],
+                    ["queued", "admission_blocked", "queued"],
+                )
+                self.assertEqual(items[1]["error_code"], error.code)
+                original_ids = [item["job_id"] for item in items]
+                self.assertTrue(all(original_ids))
+                self.assertEqual(len(self.rows()), before + 3)
+                recovered = self.client.post("/v1/batches", json=body, headers=headers)
+                self.assertEqual(recovered.status_code, 202, recovered.text)
+                self.assertEqual(recovered.json()["counts"], {"queued": 3})
+                self.assertEqual(
+                    [item["job_id"] for item in recovered.json()["items"]], original_ids
+                )
+                self.assertEqual(len(self.rows()), before + 3)
 
     def test_cancel_after_link_prevents_late_activation(self):
         self.ready()

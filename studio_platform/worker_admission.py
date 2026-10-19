@@ -311,7 +311,7 @@ def managed_window_reason(
 
 
 def matching_dstack_queued_jobs(connection, intent, node):
-    """Read accepted unclaimed work that this exact owned run can execute.
+    """Read compatible accepted work in this run's shared tenant/pool.
 
     This pauses business idle only; it grants no slot, funding or dispatch.
     Original bound attempts retain their separate recovery obligations.
@@ -358,13 +358,13 @@ def matching_dstack_queued_jobs(connection, intent, node):
         original_delivery = profile_output_delivery(original["profile_id"])
     except ValueError:
         return ()
+    from .identity import account_status
+
     # Unclaimed work is not bound to this machine. A manual stop must leave it
     # queued for other capacity rather than hold a drained worker indefinitely.
     queued = connection.execute(
         select(jobs).where(
             jobs.c.tenant_id == payload["tenant_id"],
-            jobs.c.owner_id == payload["owner_id"],
-            jobs.c.project_id == payload["project_id"],
             jobs.c.pool == intent["pool"],
             jobs.c.status.in_(("queued", "waiting_capacity")),
             jobs.c.attempt_no == 0,
@@ -394,6 +394,18 @@ def matching_dstack_queued_jobs(connection, intent, node):
             or plan.get("configuration_id") != original["configuration_id"]
             or plan.get("engine_manifest_digest") != original["manifest_digest"]
         ):
+            continue
+        if plan.get("capacity_binding") is not None:
+            # Native no-deadline runs cannot satisfy pool-members-v1's finite
+            # member deadline. Never let private work keep shared capacity on.
+            # Preserve the old owner/project fence for finite legacy rows;
+            # their member eligibility remains with the original claim helper.
+            if intent.get("hard_deadline") is None or (
+                job["owner_id"] != payload["owner_id"]
+                or job["project_id"] != payload["project_id"]
+            ):
+                continue
+        if account_status(connection, job["tenant_id"], job["owner_id"]) != "active":
             continue
         matching.append(job)
     return tuple(matching)

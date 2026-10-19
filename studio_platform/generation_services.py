@@ -311,6 +311,23 @@ class GenerationRead:
         }
 
 
+def freeze_generation_policy(repo, tenant, owner, compiled, execution):
+    """Bind policy after each creator's final server-side request changes."""
+    from .content_policy import check_input, require_generation_terms
+
+    moderation = check_input(repo, tenant, owner, compiled)
+    if moderation is None:
+        compiled.pop("content_moderation", None)
+    else:
+        compiled["content_moderation"] = moderation
+    with repo.engine.connect() as connection:
+        terms = require_generation_terms(connection, tenant, owner, execution, compiled)
+    if terms is None:
+        execution.pop("terms_acceptance", None)
+    else:
+        execution["terms_acceptance"] = terms
+
+
 class GenerationPlanning:
     def __init__(self, *, repo, assets, settings, policies, access, read):
         self.repo, self.assets, self.settings, self.policies = (
@@ -404,8 +421,11 @@ class GenerationPlanning:
                 compiled,
                 execution=execution,
             )
-        if credit_quote is not None:
-            execution["credit_quote"] = credit_quote
+            if credit_quote is not None:
+                execution["credit_quote"] = credit_quote
+        freeze_generation_policy(
+            self.repo, self.access.tenant_id, principal.owner, compiled, execution
+        )
         hide_dollars = hide_dollar_estimate(execution, principal)
         plan = self.repo.create_plan(
             self.access.scope(principal, project_id),

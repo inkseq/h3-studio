@@ -14,6 +14,7 @@ from studio_platform.credits import CreditError
 from studio_platform.credits_pricing import (
     DEFAULT_RATES,
     PricingError,
+    admin_margin_estimate,
     hide_dollar_estimate,
     public_quote,
     quote,
@@ -251,6 +252,128 @@ class CreditsRouteTests(LedgerCase):
         self.assertEqual(value["basis"]["standard"]["seconds_per_5s_clip"], 87)
         self.assertIsNone(value["basis"]["standard"]["hourly_usd"])
         self.assertIsNone(value["report_30d"]["provider_cost_usd"])
+
+    def test_margin_uses_actual_catalog_tax_inside_price_and_bonus_only_once(self):
+        from studio_platform.payments_routes import PACK_SCOPE
+        from studio_platform.repository import documents
+
+        self.publish()
+        packs = [
+            {
+                "id": "starter",
+                "price_id": "price_starter",
+                "amount_cents": 500,
+                "credits": 500,
+                "bonus_percent": 0,
+                "currency": "usd",
+            },
+            {
+                "id": "pro",
+                "price_id": "price_pro",
+                "amount_cents": 10000,
+                "credits": 11500,
+                "bonus_percent": 15,
+                "currency": "usd",
+            },
+        ]
+        with self.repo.transaction() as connection:
+            # A conflicting other tenant must not become this tenant's price.
+            for tenant, current_packs in (
+                ("sixnine", packs),
+                ("another-tenant", [dict(packs[0], credits=999999)]),
+            ):
+                connection.execute(
+                    insert(documents).values(
+                        tenant_id=tenant,
+                        **PACK_SCOPE,
+                        version=1,
+                        updated_at=self.now,
+                        payload={"revision": "catalog-one", "packs": current_packs},
+                    )
+                )
+        before = {
+            table.name: self.count(table) for table in (documents, prices, admin_audit)
+        }
+        value = self.service.admin_prices(self.admin)
+        margin = value["margin_estimate"]
+        self.assertEqual(margin["pack_revision"], "catalog-one")
+        self.assertEqual(margin["worst_case_pack_id"], "pro")
+        # $100 / 1.25 - $7 - $0.20, divided by all 11,500 credited units.
+        self.assertAlmostEqual(margin["worst_case_net_usd_per_credit"], 72.8 / 11500)
+        self.assertEqual(margin["assumptions"]["processing_and_mor_fee_rate"], 0.07)
+        self.assertTrue(margin["assumptions"]["tax_inclusive"])
+        self.assertTrue(margin["assumptions"]["pack_credits_include_bonus"])
+        refine = margin["tiers"]["refine"]
+        self.assertAlmostEqual(
+            refine["estimated_net_usd_per_5s_clip"], 60 * 72.8 / 11500
+        )
+        self.assertEqual(refine["status"], "gpu_cost_unmeasured")
+        self.assertIsNone(refine["estimated_margin"])
+        self.assertIsNone(refine["below_30_percent"])
+        self.assertGreater(refine["max_gpu_hourly_usd_for_30_percent"], 0)
+        self.assertNotIn("price_pro", str(margin))
+        self.assertEqual(
+            before,
+            {
+                table.name: self.count(table)
+                for table in (documents, prices, admin_audit)
+            },
+        )
+        with self.repo.engine.connect() as connection:
+            from studio_platform.credits_pricing import public_prices
+
+            self.assertEqual(
+                set(public_prices(connection, "sixnine")), {"revision", "rates"}
+            )
+
+    def test_margin_does_not_make_up_packs_or_gpu_cost_or_rewrite_old_prices(self):
+        self.publish()
+        value = self.service.admin_prices(self.admin)
+        self.assertEqual(value["margin_estimate"]["packs"], [])
+        self.assertIsNone(value["margin_estimate"]["worst_case_net_usd_per_credit"])
+        for tier in value["margin_estimate"]["tiers"].values():
+            self.assertEqual(tier["status"], "catalog_unconfigured")
+            self.assertIsNone(tier["estimated_margin"])
+        with self.repo.engine.connect() as connection:
+            saved = connection.execute(select(prices.c.configuration)).scalar_one()
+        self.assertNotIn("margin_estimate", saved)
+        self.assertEqual(saved["fee_rate"], 0.07)
+
+    def test_margin_estimate_flags_measured_cost_risk_and_higher_fees(self):
+        import copy
+        from studio_platform.credits_pricing import DEFAULT_CONFIGURATION
+
+        config = copy.deepcopy(DEFAULT_CONFIGURATION)
+        config["basis"]["refine"]["hourly_usd"] = 2
+        price = {"rates": dict(DEFAULT_RATES), "configuration": config}
+        catalog = {
+            "revision": "fixture",
+            "packs": [
+                {
+                    "id": "pro",
+                    "credits": 11500,
+                    "amount_cents": 10000,
+                    "bonus_percent": 15,
+                }
+            ],
+        }
+        before = copy.deepcopy((price, catalog))
+        low = admin_margin_estimate(price, catalog)
+        self.assertTrue(low["tiers"]["refine"]["below_30_percent"])
+        self.assertEqual(low["tiers"]["refine"]["status"], "estimated")
+        self.assertEqual((price, catalog), before)
+        config["fee_rate"] = 0.10
+        higher_fee = admin_margin_estimate(price, catalog)
+        self.assertLess(
+            higher_fee["worst_case_net_usd_per_credit"],
+            low["worst_case_net_usd_per_credit"],
+        )
+        # Metadata never double-discounts the already-total pack credit count.
+        catalog["packs"][0]["bonus_percent"] = 0
+        self.assertEqual(
+            admin_margin_estimate(price, catalog)["worst_case_net_usd_per_credit"],
+            higher_fee["worst_case_net_usd_per_credit"],
+        )
 
     def test_credited_job_result_hides_provider_currency_without_changing_history(self):
         from studio_platform.generation_services import GenerationRead

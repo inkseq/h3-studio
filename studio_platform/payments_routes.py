@@ -35,6 +35,34 @@ class BillingError(Exception):
         super().__init__(code)
 
 
+def current_packs(connection, tenant):
+    """The original catalog, shared by billing and admin margin reads only."""
+    value = connection.execute(
+        select(documents.c.payload).where(
+            documents.c.tenant_id == tenant,
+            *[documents.c[key] == item for key, item in PACK_SCOPE.items()],
+        )
+    ).scalar_one_or_none()
+    if value is None:
+        return {"revision": None, "packs": []}
+    if (
+        type(value) is not dict
+        or set(value) != {"revision", "packs"}
+        or not isinstance(value["revision"], str)
+        or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", value["revision"])
+    ):
+        raise BillingError(
+            "billing_packs_unavailable", "Credit packs are unavailable.", 503
+        )
+    try:
+        validate_packs(value["packs"])
+    except BillingError:
+        raise BillingError(
+            "billing_packs_unavailable", "Credit packs are unavailable.", 503
+        ) from None
+    return value
+
+
 def _key(value):
     if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,160}", value):
         raise BillingError(
@@ -110,27 +138,7 @@ class PaymentAPI:
         )
 
     def _packs(self, connection):
-        value = connection.execute(
-            select(documents.c.payload).where(self._where())
-        ).scalar_one_or_none()
-        if value is None:
-            return {"revision": None, "packs": []}
-        if (
-            type(value) is not dict
-            or set(value) != {"revision", "packs"}
-            or not isinstance(value["revision"], str)
-            or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", value["revision"])
-        ):
-            raise BillingError(
-                "billing_packs_unavailable", "Credit packs are unavailable.", 503
-            )
-        try:
-            validate_packs(value["packs"])
-        except BillingError:
-            raise BillingError(
-                "billing_packs_unavailable", "Credit packs are unavailable.", 503
-            ) from None
-        return value
+        return current_packs(connection, self.settings.tenant_id)
 
     def _user(self, connection, principal, *, admin=False):
         if not isinstance(principal, Principal) or principal.machine:

@@ -35,6 +35,8 @@ from sqlalchemy import (
 
 from .auth import Principal
 from .capabilities import RECIPES, VERSION
+from .content_policy import ContentPolicyError
+from .credits import CreditError
 from .generation_draft import (
     input_entries,
     prepare_patch,
@@ -1833,12 +1835,21 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
                     "plan": canonical(plan),
                     "resolved_execution_hash": digest,
                 }
-            except (ValueError, Conflict, BudgetExceeded, QuickChatError) as exc:
+            except (
+                ValueError,
+                Conflict,
+                BudgetExceeded,
+                QuickChatError,
+                ContentPolicyError,
+                CreditError,
+            ) as exc:
                 from .generation_diagnostics import preflight_diagnostic
 
                 value = {**entry, **preflight_diagnostic(exc)}
                 if isinstance(exc, QuickChatError):
                     value.update(error_code=exc.code, error_message=exc.message)
+                elif isinstance(exc, CreditError):
+                    value.update(error_code=exc.code, error_message=exc.detail)
             with self.repo.transaction() as conn:
                 current = self._get(
                     conn, principal, record["id"], session_id, "preflight", lock=True
@@ -2271,7 +2282,14 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
                             "error_code": None,
                         },
                     )
-            except (Conflict, BudgetExceeded, ValueError, QuickChatError) as error:
+            except (
+                Conflict,
+                BudgetExceeded,
+                ValueError,
+                QuickChatError,
+                ContentPolicyError,
+                CreditError,
+            ) as error:
                 from .spending_limits import SpendingConfirmationRequired
 
                 if isinstance(error, SpendingConfirmationRequired):
@@ -2286,7 +2304,9 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
                 }
                 code = (
                     error.code
-                    if isinstance(error, QuickChatError)
+                    if isinstance(
+                        error, (QuickChatError, ContentPolicyError, CreditError)
+                    )
                     else str(error)
                     if str(error) in spending_codes
                     else "budget_exceeded"
@@ -2839,15 +2859,26 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
             p = execution["payload"]
             try:
                 self.hooks.refresh_planned(principal, p["job_id"], p["resume_plan_id"])
-            except (Conflict, BudgetExceeded, ValueError, QuickChatError) as error:
+            except (
+                Conflict,
+                BudgetExceeded,
+                ValueError,
+                QuickChatError,
+                ContentPolicyError,
+                CreditError,
+            ) as error:
                 # Only finite service codes are public; arbitrary exception
                 # text may contain source inputs, paths or provider details.
                 code = (
                     error.code
-                    if isinstance(error, QuickChatError)
+                    if isinstance(
+                        error, (QuickChatError, ContentPolicyError, CreditError)
+                    )
                     else (error.args[0] if len(error.args) == 1 else None)
                 )
-                if not isinstance(code, str) or code not in ADMISSION_REFRESH_CODES:
+                if not isinstance(error, (ContentPolicyError, CreditError)) and (
+                    not isinstance(code, str) or code not in ADMISSION_REFRESH_CODES
+                ):
                     code = "admission_refresh_blocked"
                 with self.repo.transaction() as conn:
                     current = self._get(

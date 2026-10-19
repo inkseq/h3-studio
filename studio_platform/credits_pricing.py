@@ -122,6 +122,104 @@ def public_prices(connection, tenant):
     return {key: value[key] for key in ("revision", "rates")}
 
 
+def admin_margin_estimate(price, catalog):
+    """Tax-inclusive estimate, never a fee invoice or a customer charge.
+
+    Pack credits already INCLUDE the published bonus. Existing immutable price
+    configurations and accepted quotes are not rewritten by this projection.
+    Missing measured GPU prices remain unknown, with useful break-even bounds.
+    """
+    config = price["configuration"]
+    tax = Fraction(1, 4)
+    fee = max(Fraction(7, 100), Fraction(str(config["fee_rate"])))
+    fixed_fee = Fraction(1, 5)
+    packs = []
+    for pack in catalog["packs"]:
+        gross = Fraction(pack["amount_cents"], 100)
+        net = gross / (1 + tax) - gross * fee - fixed_fee
+        packs.append(
+            {
+                "pack_id": pack["id"],
+                "amount_cents": pack["amount_cents"],
+                "credits": pack["credits"],
+                "bonus_percent": pack["bonus_percent"],
+                "estimated_net_usd": float(net),
+                "estimated_net_usd_per_credit": float(net / pack["credits"]),
+            }
+        )
+    worst = min(
+        packs,
+        key=lambda item: (item["estimated_net_usd_per_credit"], item["pack_id"]),
+        default=None,
+    )
+    net_credit = Fraction(str(worst["estimated_net_usd_per_credit"])) if worst else None
+    tiers = {}
+    for tier, rate in price["rates"].items():
+        basis = config["basis"][tier]
+        revenue = net_credit * rate * 5 if net_credit is not None else None
+        hourly = basis["hourly_usd"]
+        multiplier = Fraction(str(config["cost_multiplier"]))
+        duration = basis["seconds_per_5s_clip"]
+        cost = (
+            Fraction(str(hourly)) * duration * multiplier / 3600
+            if hourly is not None
+            else None
+        )
+        margin = (
+            (revenue - cost) / revenue
+            if revenue is not None and revenue > 0 and cost is not None
+            else None
+        )
+        break_even = (
+            revenue * 3600 / (duration * multiplier)
+            if revenue is not None and revenue > 0 and multiplier > 0
+            else None
+        )
+        tiers[tier] = {
+            "credits_per_5s_clip": rate * 5,
+            "estimated_net_usd_per_5s_clip": float(revenue)
+            if revenue is not None
+            else None,
+            "estimated_cost_usd_per_5s_clip": float(cost) if cost is not None else None,
+            "estimated_margin": float(margin) if margin is not None else None,
+            "below_30_percent": margin < Fraction(3, 10)
+            if margin is not None
+            else None,
+            "break_even_gpu_hourly_usd": float(break_even)
+            if break_even is not None
+            else None,
+            "max_gpu_hourly_usd_for_30_percent": float(break_even * Fraction(7, 10))
+            if break_even is not None
+            else None,
+            "status": "catalog_unconfigured"
+            if not worst
+            else "non_positive_net"
+            if revenue <= 0
+            else "gpu_cost_unmeasured"
+            if hourly is None
+            else "estimated",
+        }
+    return {
+        "estimated": True,
+        "currency": "usd",
+        "pack_revision": catalog["revision"],
+        "assumptions": {
+            "tax_inclusive": True,
+            "consumer_tax_rate": float(tax),
+            "processing_and_mor_fee_rate": float(fee),
+            "fixed_fee_usd_per_pack": float(fixed_fee),
+            "source": "owner_20261020_estimated_ceiling_not_actual_invoice",
+            "pack_credits_include_bonus": True,
+        },
+        "packs": packs,
+        "worst_case_pack_id": worst["pack_id"] if worst else None,
+        "worst_case_net_usd_per_credit": float(net_credit)
+        if net_credit is not None
+        else None,
+        "tiers": tiers,
+    }
+
+
 def public_quote(execution):
     value = execution.get("credit_quote")
     if not isinstance(value, dict) or value.get("enforced") is not True:
