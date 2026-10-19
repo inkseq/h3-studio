@@ -269,6 +269,39 @@ class StripeClientTests(unittest.TestCase):
         self.assertEqual(self.gateway.resolve_event(verified), verified)
         self.client.v1.checkout.sessions.retrieve.assert_not_called()
 
+    def test_missing_completion_status_is_resolved_by_provider_proof(self):
+        original = session(url=None)
+        del original["payment_status"]
+        verified = self.gateway.verify_event(*self.signed(original))
+        expanded = session(
+            url=None,
+            payment_status="paid",
+            line_items={
+                "has_more": False,
+                "data": [
+                    {
+                        "quantity": 1,
+                        "price": {
+                            "id": "price_actual",
+                            "livemode": False,
+                            "currency": "usd",
+                            "tax_behavior": "inclusive",
+                        },
+                    }
+                ],
+            },
+        )
+        self.client.v1.checkout.sessions.retrieve.return_value = expanded
+        proof = self.gateway.resolve_event(verified)
+        self.assertEqual(proof["object"]["payment_status"], "paid")
+        self.assertEqual(proof["object"]["price_id"], "price_actual")
+        self.assertTrue(
+            all(
+                proof["object"][key] == value
+                for key, value in verified["object"].items()
+            )
+        )
+
     def test_dispute_uses_original_charge_amount_not_partial_dispute_amount(self):
         obj = {
             "object": "dispute",

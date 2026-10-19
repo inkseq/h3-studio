@@ -352,7 +352,7 @@ class StripeGateway:
         try:
             if verified["type"] == "checkout.session.async_payment_succeeded" or (
                 verified["type"] == "checkout.session.completed"
-                and value.get("payment_status") == "paid"
+                and value.get("payment_status") not in {"unpaid", "no_payment_required"}
             ):
                 session = client.v1.checkout.sessions.retrieve(
                     value["session_id"],
