@@ -1,0 +1,329 @@
+"""Official SDK signing and closed Managed Payments/test-mode boundaries."""
+
+from dataclasses import replace
+import json
+from pathlib import Path
+from types import SimpleNamespace
+import tempfile
+import unittest
+from unittest.mock import Mock, patch
+
+import stripe
+
+from studio_platform.settings import Settings
+from studio_platform.stripe_client import API_VERSION, StripeGateway, StripeGatewayError
+from studio_platform.stripe_config import load_credentials, validate_credentials
+
+USER = "11111111-1111-4111-8111-111111111111"
+PAYMENT = "22222222-2222-4222-8222-222222222222"
+CONFIG = {
+    "version": 1,
+    "account_id": "acct_testaccount",
+    "secret_key": "sk_test_" + "s" * 32,
+    "publishable_key": "pk_test_" + "p" * 32,
+    "webhook_secret": "whsec_" + "w" * 32,
+}
+
+
+def payment():
+    return {
+        "id": PAYMENT,
+        "user_id": USER,
+        "pack_id": "starter",
+        "pack_revision": "r1",
+        "price_id": "price_starter",
+        "credits": 500,
+        "amount_cents": 500,
+        "currency": "usd",
+        "account_scope": CONFIG["account_id"],
+    }
+
+
+def session(**changes):
+    value = {
+        "object": "checkout.session",
+        "id": "cs_test_original",
+        "livemode": False,
+        "mode": "payment",
+        "amount_total": 500,
+        "currency": "usd",
+        "payment_status": "unpaid",
+        "url": "https://checkout.stripe.com/c/pay/cs_test_original#opaque",
+        "expires_at": 2000000000,
+        "metadata": {
+            "payment_id": PAYMENT,
+            "user_id": USER,
+            "pack_id": "starter",
+            "pack_revision": "r1",
+            "credits": "500",
+        },
+    }
+    value.update(changes)
+    return value
+
+
+class StripeClientTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.path = self.root / "stripe.json"
+        self.path.write_text(json.dumps(CONFIG))
+        self.path.chmod(0o600)
+        self.settings = Settings(
+            data_dir=self.root / "data",
+            deployment_target="staging",
+            public_origin="https://staging.inkseq.com",
+            stripe_mode="test",
+            stripe_config_file=self.path,
+        )
+        self.client = Mock()
+        self.client.v1.prices.retrieve.return_value = {
+            "id": "price_starter",
+            "active": True,
+            "livemode": False,
+            "type": "one_time",
+            "unit_amount": 500,
+            "currency": "usd",
+            "tax_behavior": "inclusive",
+        }
+        self.client.v1.checkout.sessions.create.return_value = session()
+        self.factory = Mock(return_value=self.client)
+        self.gateway = StripeGateway(self.settings, client_factory=self.factory)
+
+    def signed(self, obj=None, kind="checkout.session.completed", **changes):
+        event = {
+            "object": "event",
+            "id": "evt_original",
+            "type": kind,
+            "created": 1900000000,
+            "livemode": False,
+            "api_version": API_VERSION,
+            "data": {"object": obj or session()},
+        }
+        event.update(changes)
+        raw = json.dumps(event).encode()
+        signature = stripe.WebhookSignature.generate_signature_header(
+            raw.decode(), CONFIG["webhook_secret"]
+        )
+        return raw, signature
+
+    def test_test_only_settings_and_closed_private_configuration(self):
+        for changes in (
+            {"stripe_mode": "live"},
+            {"deployment_target": "production"},
+            {"public_origin": "https://inkseq.com"},
+            {"public_origin_aliases": ("https://other.example",)},
+            {"stripe_config_file": None},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                replace(self.settings, **changes)
+        with self.assertRaisesRegex(ValueError, "stripe_configuration_invalid"):
+            validate_credentials({**CONFIG, "secret_key": "sk_live_" + "l" * 32})
+        self.assertNotIn(CONFIG["secret_key"], repr(load_credentials(self.path)))
+        self.path.write_text(json.dumps(CONFIG)[:-1] + ',"secret_key":"ignored"}')
+        with self.assertRaisesRegex(ValueError, "stripe_configuration_invalid"):
+            load_credentials(self.path)
+
+    def test_off_blocks_new_purchase_but_retains_signed_obligation_processing(self):
+        gateway = StripeGateway(
+            replace(self.settings, stripe_mode="off"), client_factory=self.factory
+        )
+        with self.assertRaisesRegex(StripeGatewayError, "billing_unavailable"):
+            gateway.checkout(payment(), idempotency_key="original")
+        self.assertEqual(gateway.verify_event(*self.signed())["id"], "evt_original")
+        self.factory.assert_not_called()
+
+    def test_managed_checkout_uses_original_price_key_and_supported_parameters_only(
+        self,
+    ):
+        result = self.gateway.checkout(
+            payment(), idempotency_key="inkseq-checkout-original"
+        )
+        self.assertEqual(result["object"]["price_id"], "price_starter")
+        call = self.client.v1.checkout.sessions.create.call_args.kwargs
+        self.assertEqual(
+            call["options"], {"idempotency_key": "inkseq-checkout-original"}
+        )
+        params = call["params"]
+        self.assertEqual(
+            set(params),
+            {
+                "mode",
+                "managed_payments",
+                "line_items",
+                "client_reference_id",
+                "metadata",
+                "payment_intent_data",
+                "success_url",
+                "cancel_url",
+            },
+        )
+        self.assertEqual(params["managed_payments"], {"enabled": True})
+        self.assertEqual(
+            params["line_items"], [{"price": "price_starter", "quantity": 1}]
+        )
+        self.assertEqual(
+            params["payment_intent_data"], {"metadata": params["metadata"]}
+        )
+        self.assertEqual(params["metadata"]["payment_id"], PAYMENT)
+        self.assertEqual(
+            params["success_url"],
+            "https://staging.inkseq.com/settings?tab=credits&paid={CHECKOUT_SESSION_ID}",
+        )
+
+    def test_catalog_mismatch_never_creates_checkout(self):
+        for key, value in (
+            ("unit_amount", 600),
+            ("currency", "aud"),
+            ("tax_behavior", "exclusive"),
+            ("active", False),
+            ("livemode", True),
+        ):
+            with self.subTest(key=key):
+                price = self.client.v1.prices.retrieve.return_value
+                old = price[key]
+                price[key] = value
+                with self.assertRaisesRegex(
+                    StripeGatewayError, "billing_price_mismatch"
+                ):
+                    self.gateway.checkout(payment(), idempotency_key="original")
+                price[key] = old
+        self.client.v1.checkout.sessions.create.assert_not_called()
+
+    def test_signature_precedes_normalization_and_no_http_or_pii_persistence(self):
+        obj = session(
+            customer_details={
+                "email": "private@example.test",
+                "address": {"line1": "never retain"},
+            },
+            customer="cus_secret",
+        )
+        result = self.gateway.verify_event(*self.signed(obj))
+        self.assertEqual(result["object"]["user_id"], USER)
+        self.assertNotIn("private@example", json.dumps(result))
+        self.assertNotIn("customer", json.dumps(result))
+        self.assertNotIn("price_id", result["object"])
+        with self.assertRaisesRegex(StripeGatewayError, "billing_signature_invalid"):
+            self.gateway.verify_event(b"not json", "t=1,v1=bad")
+        self.factory.assert_not_called()
+
+    def test_live_or_version_mismatch_notifications_refused(self):
+        for changes in (
+            {"livemode": True},
+            {"api_version": "2025-03-31.basil"},
+            {"account": "acct_otheraccount"},
+        ):
+            with (
+                self.subTest(changes=changes),
+                self.assertRaisesRegex(StripeGatewayError, "billing_event_invalid"),
+            ):
+                self.gateway.verify_event(*self.signed(**changes))
+
+    def test_paid_proof_comes_from_single_actual_price_not_metadata_or_presentment(
+        self,
+    ):
+        obj = session(
+            payment_status="paid",
+            url=None,
+            payment_intent="pi_original",
+            presentment_details={
+                "presentment_amount": 900,
+                "presentment_currency": "aud",
+            },
+        )
+        verified = self.gateway.verify_event(*self.signed(obj))
+        expanded = session(
+            **{
+                **obj,
+                "line_items": {
+                    "has_more": False,
+                    "data": [
+                        {
+                            "quantity": 1,
+                            "price": {
+                                "id": "price_actual",
+                                "livemode": False,
+                                "currency": "usd",
+                                "tax_behavior": "inclusive",
+                            },
+                        }
+                    ],
+                },
+            }
+        )
+        self.client.v1.checkout.sessions.retrieve.return_value = expanded
+        result = self.gateway.resolve_event(verified)
+        self.assertEqual(result["object"]["price_id"], "price_actual")
+        self.assertEqual(result["object"]["amount_cents"], 500)
+        self.assertEqual(result["object"]["currency"], "usd")
+        self.assertNotIn("presentment_details", result["object"])
+        expanded["metadata"]["credits"] = "99999"
+        with self.assertRaisesRegex(
+            StripeGatewayError, "billing_provider_response_invalid"
+        ):
+            self.gateway.resolve_event(verified)
+
+    def test_unpaid_completion_has_no_provider_fetch(self):
+        verified = self.gateway.verify_event(*self.signed(session(url=None)))
+        self.assertEqual(self.gateway.resolve_event(verified), verified)
+        self.client.v1.checkout.sessions.retrieve.assert_not_called()
+
+    def test_dispute_uses_original_charge_amount_not_partial_dispute_amount(self):
+        obj = {
+            "object": "dispute",
+            "id": "dp_original",
+            "livemode": False,
+            "charge": "ch_original",
+            "amount": 100,
+            "currency": "usd",
+        }
+        verified = self.gateway.verify_event(
+            *self.signed(obj, kind="charge.dispute.created")
+        )
+        self.assertNotIn("amount_cents", verified["object"])
+        self.client.v1.charges.retrieve.return_value = {
+            "object": "charge",
+            "id": "ch_original",
+            "livemode": False,
+            "amount": 500,
+            "currency": "usd",
+            "payment_intent": "pi_original",
+        }
+        self.assertEqual(
+            self.gateway.resolve_event(verified)["object"]["amount_cents"], 500
+        )
+
+    def test_provider_error_and_redirect_host_are_sanitized(self):
+        self.client.v1.checkout.sessions.create.side_effect = stripe.APIConnectionError(
+            "secret " + CONFIG["secret_key"]
+        )
+        with self.assertRaises(StripeGatewayError) as caught:
+            self.gateway.checkout(payment(), idempotency_key="original")
+        self.assertTrue(caught.exception.unknown)
+        self.assertNotIn(
+            CONFIG["secret_key"], str(caught.exception) + caught.exception.detail
+        )
+        self.client.v1.checkout.sessions.create.side_effect = None
+        self.client.v1.checkout.sessions.create.return_value = session(
+            url="https://checkout.stripe.com.attacker.test/pay/original"
+        )
+        with self.assertRaisesRegex(
+            StripeGatewayError, "billing_provider_response_invalid"
+        ):
+            self.gateway.checkout(payment(), idempotency_key="original")
+
+    def test_sdk_factory_pins_api_version_and_fixed_endpoint(self):
+        from studio_platform.stripe_client import _default_client
+
+        client = _default_client(load_credentials(self.path))
+        self.addCleanup(client._requestor._client.close)
+        self.assertEqual(client._requestor._options.stripe_version, API_VERSION)
+        self.assertEqual(
+            client._requestor._options.base_addresses["api"], "https://api.stripe.com"
+        )
+        self.assertEqual(client._requestor._options.max_network_retries, 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
