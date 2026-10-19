@@ -69,6 +69,9 @@ inventory.json
 !studio_platform/manage.py
 !studio_platform/repository.py
 !studio_platform/schema_version.py
+!studio_platform/workflow_schema.py
+!studio_platform/migrations/data/
+!studio_platform/migrations/data/dbos_3_3_0_catalog.json
 !studio_platform/schema_registry.py
 !studio_platform/schema_baseline.py
 !studio_platform/migrations/
