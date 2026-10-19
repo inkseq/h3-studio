@@ -21,6 +21,7 @@ from studio_platform.repository import (
     attempts,
     budget_accounts,
     budget_reservations,
+    instance_intents,
     jobs,
     outbox,
     registered_workers,
@@ -136,7 +137,10 @@ class JobCancellationLedgerTests(ledger_fixture.LedgerCase):
                 fixture.repo.get_budget("owner:superdan")["reserved_microusd"], 0
             )
             self.assertEqual(fixture.repo.get_budget("capacity-budget"), rental_budget)
-            self.assertEqual(fixture.provider.creates, [])
+            with fixture.repo.engine.connect() as connection:
+                self.assertIsNone(
+                    connection.execute(select(instance_intents.c.id)).first()
+                )
         finally:
             fixture.tearDown()
 
