@@ -336,7 +336,28 @@ class FilmRuns:
         self.access.project(principal, project_id, "jobs:read")
         with self.repo.engine.connect() as conn:
             value = self._row(conn, principal, project_id, run_id)["payload"]
-        return self.public(value)
+            result = self.public(value)
+            transport = getattr(self.repo, "generation_transport", None)
+            if (
+                transport is not None
+                and value.get("accepted_at") is not None
+                and value["phase"] not in TERMINAL
+                and not value["cancel_requested"]
+                and value["phase"] not in {"blocked", "authorization_required"}
+                and transport.film_status(
+                    conn, self.tenant, principal.owner, project_id, run_id
+                )
+                == "ERROR"
+            ):
+                # An unexpected failed SDK step may not have updated the
+                # domain receipt. Expose explicit same-run resume without a
+                # read-side mutation, exception text, automatic epoch or retry.
+                result.update(
+                    phase="blocked",
+                    error_code="film_workflow_failed",
+                    failed_phase=value["phase"],
+                )
+        return result
 
     @staticmethod
     def public(value):

@@ -435,15 +435,21 @@ def register_routes(app):
 
                 if isinstance(error, SpendingConfirmationRequired):
                     raise
-                code = (
-                    "plan_not_available"
-                    if isinstance(error, NotFound)
-                    else (
-                        "budget_exceeded"
-                        if isinstance(error, BudgetExceeded)
+                if isinstance(error, BudgetExceeded):
+                    code = str(error)
+                    if code not in {
+                        "budget_exceeded",
+                        "connection_daily_limit_reached",
+                        "user_daily_limit_reached",
+                        "spending_usage_unconfirmed",
+                    }:
+                        code = "budget_exceeded"
+                else:
+                    code = (
+                        "plan_not_available"
+                        if isinstance(error, NotFound)
                         else "plan_no_longer_valid"
                     )
-                )
                 service.record_item(
                     principal, record["id"], index, {"error_code": code}
                 )

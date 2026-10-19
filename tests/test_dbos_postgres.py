@@ -258,6 +258,7 @@ class ClientTransactionTests(unittest.TestCase):
         args = ("test", "superdan", "project", "original-film")
         with self.repo.transaction() as connection:
             self.transport.enqueue_film(connection, *args)
+            self.assertEqual(self.transport.film_status(connection, *args), 'ENQUEUED')
         original = self.workflows()[0]["workflow_uuid"]
         with self.repo.transaction() as connection:
             self.transport.enqueue_film(connection, *args)
@@ -270,6 +271,12 @@ class ClientTransactionTests(unittest.TestCase):
                 ),
                 {"id": original},
             )
+            self.assertEqual(self.transport.film_status(connection, *args), 'ERROR')
+            self.assertIsNone(
+                self.transport.film_status(
+                    connection, 'test', 'foreign', 'project', 'original-film'
+                )
+            )
         with self.assertRaises(RuntimeError):
             with self.repo.transaction() as connection:
                 self.transport.enqueue_film(connection, *args)
@@ -277,6 +284,7 @@ class ClientTransactionTests(unittest.TestCase):
         self.assertEqual(len(self.workflows()), 1)
         with self.repo.transaction() as connection:
             self.transport.enqueue_film(connection, *args)
+            self.assertEqual(self.transport.film_status(connection, *args), 'ENQUEUED')
         rows = self.workflows()
         self.assertEqual(len(rows), 2)
         current = next(row for row in rows if row["status"] == "ENQUEUED")

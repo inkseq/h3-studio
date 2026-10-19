@@ -1105,6 +1105,8 @@ def create_app(
             "simulation": False,
         }
 
+    app.state.resolve_render_source = resolve_render_source
+
     @app.post("/v1/render-plans", status_code=201)
     def make_render_plan(request: Request, body: dict):
         principal = request.state.principal

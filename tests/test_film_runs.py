@@ -84,6 +84,72 @@ class FilmTests(unittest.TestCase):
     def raw(self, run_id):
         return self.repo.get_document(self.scope, KIND, run_id)['payload']
 
+    def test_failed_transport_is_visible_without_writing_or_restarting_work(self):
+        preview = self.preview()
+        self.service._mutate(
+            self.principal,
+            'story-one',
+            preview['id'],
+            lambda value: value.update(accepted_at=self.repo.clock(), phase='chapters'),
+        )
+        original = self.raw(preview['id'])
+        transport = SimpleNamespace(film_status=Mock(return_value='ERROR'))
+        self.repo.generation_transport = transport
+
+        current = self.service.get(self.principal, 'story-one', preview['id'])
+        self.assertEqual(current['phase'], 'blocked')
+        self.assertEqual(current['error_code'], 'film_workflow_failed')
+        self.assertEqual(current['failed_phase'], 'chapters')
+        self.assertEqual(self.raw(preview['id']), original)
+        self.enqueue.assert_not_called()
+        self.assertEqual(transport.film_status.call_count, 1)
+        self.assertEqual(
+            transport.film_status.call_args.args[1:],
+            ('tenant', 'owner', 'story-one', preview['id']),
+        )
+        with self.assertRaises(NotFound):
+            self.service.get(
+                Principal('foreign', 'browser'), 'story-one', preview['id']
+            )
+        self.assertEqual(transport.film_status.call_count, 1)
+
+        transport.film_status.return_value = 'ENQUEUED'
+        resumed = self.service.get(self.principal, 'story-one', preview['id'])
+        self.assertEqual(resumed['phase'], 'chapters')
+        self.assertNotIn('failed_phase', resumed)
+        self.assertEqual(self.raw(preview['id']), original)
+        self.enqueue.assert_not_called()
+
+    def test_transport_projection_preserves_cancellation_and_known_refusals(self):
+        preview = self.preview()
+        transport = SimpleNamespace(film_status=Mock(return_value='ERROR'))
+        self.repo.generation_transport = transport
+        for phase, cancel, error in (
+            ('preflight', False, None),
+            ('chapters', True, None),
+            ('completed', False, None),
+            ('cancelled', False, None),
+            ('blocked', False, 'film_render_input_blocked'),
+            ('authorization_required', False, 'film_actor_grant_unavailable'),
+        ):
+            with self.subTest(phase=phase, cancel=cancel):
+                self.service._mutate(
+                    self.principal,
+                    'story-one',
+                    preview['id'],
+                    lambda value: value.update(
+                        accepted_at=None if phase == 'preflight' else self.repo.clock(),
+                        phase=phase,
+                        cancel_requested=cancel,
+                        error_code=error,
+                    ),
+                )
+                current = self.service.get(self.principal, 'story-one', preview['id'])
+                self.assertEqual(current['phase'], phase)
+                self.assertEqual(current['error_code'], error)
+        transport.film_status.assert_not_called()
+        self.enqueue.assert_not_called()
+
     def test_preflight_reuses_selected_take_and_same_key_after_story_edit(self):
         self.project['entities'][2]['data']['selectedVideoRange'] = {
             'start': 1,

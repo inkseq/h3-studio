@@ -162,6 +162,27 @@ class GenerationTransport:
     def close(self):
         self.client.destroy()
 
+    def film_status(self, connection, tenant, owner, project, run_id):
+        """Read the latest original Film transport epoch; never wake or retry it."""
+        from .film_runs import VERSION as FILM_VERSION
+
+        base = "inkseq-film-" + workflow_id(tenant, owner, project, run_id)[11:]
+        return connection.execute(
+            text(
+                "SELECT status FROM inkseq_workflows.workflow_status "
+                "WHERE (workflow_uuid=:id OR workflow_uuid LIKE :prefix) "
+                "AND application_name=:application AND application_version=:version "
+                "AND name=:name ORDER BY created_at DESC,workflow_uuid DESC LIMIT 1"
+            ),
+            {
+                "id": base,
+                "prefix": base + "/%",
+                "application": APPLICATION,
+                "version": VERSION,
+                "name": FILM_VERSION,
+            },
+        ).scalar()
+
     def enqueue_film(self, connection, tenant, owner, project, run_id):
         from .film_runs import VERSION as FILM_VERSION
         from .workflow_schema import assert_execution_allowed
