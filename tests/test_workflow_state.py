@@ -36,6 +36,8 @@ from studio_platform.workflow_schema import (
     validate,
 )
 
+NATIVE_PG_DUMP = os.environ.get('PLATFORM_TEST_PG_DUMP', 'pg_dump')
+
 
 @unittest.skipUnless(
     os.environ.get('PLATFORM_TEST_DATABASE_URL'),
@@ -268,20 +270,33 @@ class WorkflowStateTests(unittest.TestCase):
             read(output, expected)
 
     @unittest.skipUnless(
-        shutil.which('pg_dump'), 'Local pinned PostgreSQL tools required'
+        shutil.which(NATIVE_PG_DUMP), 'Local pinned PostgreSQL tools required'
     )
     def test_native_dump_uses_same_exported_snapshot_and_retains_sdk_companion(self):
         self.seed()
         source = self.root / 'synthetic-url'
-        url = self.engine.url.set(password='synthetic-local-only').render_as_string(
-            hide_password=False
-        )
+        # Preserve the explicit CI/local password. Trust-only local clusters need
+        # a nonempty synthetic value to exercise the protected URL-file contract.
+        url = self.engine.url.set(
+            password=self.engine.url.password or 'synthetic-local-only'
+        ).render_as_string(hide_password=False)
         source.write_text(url)
         source.chmod(0o600)
-        result = dump_postgres(source, self.root / 'native', include_workflows=True)
+        result = dump_postgres(
+            source,
+            self.root / 'native',
+            pg_dump=NATIVE_PG_DUMP,
+            include_workflows=True,
+        )
         self.assertFalse(result['restore_verified'])
         manifest = json.loads((self.root / 'native/manifest.json').read_bytes())
         self.assertTrue(manifest['consistent_business_workflow_snapshot'])
+        self.assertEqual(
+            manifest['database_sha256'],
+            hashlib.sha256(
+                (self.root / 'native/database.dump').read_bytes()
+            ).hexdigest(),
+        )
         value = read(self.root / 'native', manifest['workflow_state'])
         self.assertEqual(
             value['tables']['workflow_status'][0]['workflow_uuid'], 'original-workflow'
