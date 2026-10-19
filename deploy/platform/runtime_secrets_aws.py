@@ -70,7 +70,7 @@ def value(api, name, initialize=False, *, target='production'):
 
 
 def write_runtime(name, content):
-    if name not in {"db_admin_password", "app_database_url", "google_titles", "workos"}:
+    if name not in {"db_admin_password", "app_database_url", "google_titles", "workos", "stripe"}:
         raise RuntimeError("Unexpected runtime secret")
     ROOT.mkdir(mode=0o700, exist_ok=True)
     info = ROOT.lstat()
@@ -198,6 +198,70 @@ def hydrate_workos(api, *, target='production'):
     write_runtime('workos', json.dumps(payload, separators=(',', ':'), sort_keys=True))
 
 
+def stripe_requested(*, target, root=Path('/srv/sixnine')):
+    """The existing protected rollout record is the only Stripe opt-in."""
+    path = root / 'migration' / 'paths.json'
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return False
+    for parent in (root, path.parent):
+        parent_info = parent.lstat()
+        if (not stat.S_ISDIR(parent_info.st_mode) or parent_info.st_uid != 0
+                or parent_info.st_mode & 0o022):
+            raise RuntimeError('Stripe rollout configuration is not protected')
+    fd = os.open(path, os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0))
+    try:
+        actual = os.fstat(fd)
+        if (not stat.S_ISREG(actual.st_mode) or actual.st_uid != 0
+                or actual.st_mode & 0o022 or actual.st_nlink != 1
+                or actual.st_size > 32768
+                or (actual.st_dev, actual.st_ino) != (info.st_dev, info.st_ino)):
+            raise RuntimeError('Stripe rollout configuration is not protected')
+        raw = os.read(fd, 32769)
+        if len(raw) != actual.st_size:
+            raise RuntimeError('Stripe rollout configuration changed')
+    finally:
+        os.close(fd)
+    from studio_platform.stripe_config import _unique
+    try:
+        value = json.loads(raw, object_pairs_hook=_unique)
+        environment = value['environment']
+        if type(environment) is not dict:
+            raise ValueError()
+        selected = deployment_target.environment(environment)
+        requested = environment.get('INKSEQ_STRIPE_CONFIG_FILE', '')
+        mode = environment.get('INKSEQ_STRIPE_MODE', 'off')
+        if (selected['name'] != target or mode not in {'off', 'test'}
+                or requested not in {'', '/run/sixnine-secrets/stripe'}
+                or mode == 'test' and not requested
+                or (requested or mode != 'off') and target != 'staging'
+                or requested and environment.get('INKSEQ_GENERATION_QUEUE', 'postgres') != 'dbos'):
+            raise ValueError()
+    except (KeyError, TypeError, ValueError, UnicodeError):
+        raise RuntimeError('Stripe rollout configuration is invalid') from None
+    return bool(requested)
+
+
+def hydrate_stripe(api, *, target='production'):
+    """Read an explicitly configured staging test credential, never initialize it."""
+    if target != 'staging':
+        raise RuntimeError('Stripe managed configuration requires staging')
+    from studio_platform.stripe_config import validate_credentials, _unique
+    name = deployment_target.profile(target)['secret_root'] + '/stripe'
+    try:
+        response = api.get_secret_value(SecretId=name)
+        raw = response['SecretString']
+        if not isinstance(raw, str) or len(raw) > 4096:
+            raise ValueError()
+        payload = json.loads(raw, object_pairs_hook=_unique)
+        validate_credentials(payload)
+    except Exception:
+        # Never replace the existing mounted inode with an invalid/fallback key.
+        raise RuntimeError('Stripe managed configuration is unavailable or invalid') from None
+    write_runtime('stripe', json.dumps(payload, separators=(',', ':'), sort_keys=True))
+
+
 def hydrate(initialize=False):
     if os.geteuid() != 0:
         raise RuntimeError("Host operator privileges required")
@@ -216,6 +280,8 @@ def hydrate(initialize=False):
         hydrate_titles(api, target=target)
         if workos_requested(target=target):
             hydrate_workos(api, target=target)
+        if stripe_requested(target=target):
+            hydrate_stripe(api, target=target)
 
 
 if __name__ == "__main__":

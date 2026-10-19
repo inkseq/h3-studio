@@ -8,6 +8,7 @@ x-migration-logs: &migration-logs
 
 x-business-environment: &business-environment
   PUBLIC_ORIGIN: ${INKSEQ_PUBLIC_ORIGIN:-https://inkseq.com}
+  INKSEQ_DEPLOYMENT_TARGET: ${INKSEQ_DEPLOYMENT_TARGET:-production}
   SIXNINE_DATA: /data
   SIXNINE_DATABASE_URL_FILE: /run/secrets/app_database_url
   SIXNINE_AUTH_MODE: password
@@ -23,6 +24,8 @@ x-business-environment: &business-environment
   SIXNINE_STORAGE_REGION: ${SIXNINE_STORAGE_REGION:-}
   SIXNINE_STORAGE_BUCKET: ${SIXNINE_STORAGE_BUCKET:-}
   SIXNINE_STORAGE_PROFILE: ${SIXNINE_STORAGE_PROFILE:-}
+  INKSEQ_STRIPE_MODE: ${INKSEQ_STRIPE_MODE:-off}
+  INKSEQ_STRIPE_CONFIG_FILE: ${INKSEQ_STRIPE_CONFIG_FILE:+/run/secrets/stripe}
 
 x-cpu-service: &cpu-service
   cgroup_parent: ${INKSEQ_CPU_CGROUP_PARENT:-}
@@ -58,7 +61,7 @@ services:
       SIXNINE_STAGE_QUERY_CONFIG_FILE: ${SIXNINE_STAGE_QUERY_CONFIG_FILE:+/run/secrets/stage_query}
       SIXNINE_STORAGE_CREDENTIAL_FILE: ${SIXNINE_STORAGE_CREDENTIAL_FILE:+/run/secrets/r2_storage}
       INKSEQ_WORKOS_CONFIG_FILE: ${INKSEQ_WORKOS_CONFIG_FILE:+/run/secrets/workos}
-    secrets: [execution_profiles, grafana_cloud, stage_query, r2_storage, dstack_operator_config, dstack_api_token, dstack_ssh_public_key, workos]
+    secrets: [execution_profiles, grafana_cloud, stage_query, r2_storage, dstack_operator_config, dstack_api_token, dstack_ssh_public_key, workos, stripe]
     healthcheck:
       test: [CMD, python, -c, "import json,urllib.request; h=json.load(urllib.request.urlopen('http://127.0.0.1:8845/healthz',timeout=5)); assert h['auth_ready'] and h['render_enabled']==('${INKSEQ_FILM_ENABLED:-0}'=='1') and not h['cloud_creation_enabled']"]
 
@@ -160,7 +163,7 @@ services:
       DSTACK_OPERATOR_CONFIG: /run/secrets/dstack_operator_config
       DSTACK_RUNTIME_CONFIG: /run/secrets/dstack_runtime_config
       SIXNINE_STORAGE_CREDENTIAL_FILE: ${SIXNINE_STORAGE_CREDENTIAL_FILE:+/run/secrets/r2_storage}
-    secrets: [app_database_url, execution_profiles, grafana_cloud, r2_storage, dstack_operator_config, dstack_runtime_config, dstack_api_token, dstack_ssh_public_key, gpu_ssh_key]
+    secrets: [app_database_url, execution_profiles, grafana_cloud, r2_storage, dstack_operator_config, dstack_runtime_config, dstack_api_token, dstack_ssh_public_key, gpu_ssh_key, stripe]
     volumes:
       - type: bind
         source: /srv/sixnine/platform-data
@@ -181,6 +184,9 @@ services:
       dstack: {condition: service_healthy}
 
 secrets:
+  # Default OFF leaves the alias unread; test opt-in uses one protected tmpfs file.
+  stripe:
+    file: ${INKSEQ_STRIPE_CONFIG_FILE:-${SIXNINE_EXECUTION_PROFILES_SECRET_FILE}}
   # Absent opt-in keeps the app setting empty. Its ignored fallback is the
   # already-mounted noncredential recipe metadata, never another credential.
   workos:

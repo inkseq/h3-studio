@@ -68,12 +68,12 @@ PATH_FIELDS = frozenset({"SIXNINE_EXECUTION_PROFILES_SECRET_FILE", "SIXNINE_GRAF
 OTHER_FIELDS = frozenset({"SIXNINE_OPERATOR_CAPACITY_OWNERS", "SIXNINE_HATCHET_POSTGRES_VOLUME",
     "SIXNINE_HATCHET_CONFIG_VOLUME", "SIXNINE_MIGRATION_GENERATION_ENABLED",
     "SIXNINE_MIGRATION_EXECUTION_BACKEND", "SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID"})
-OPTIONAL_PATH_FIELDS = frozenset({"SIXNINE_STAGE_QUERY_CONFIG_FILE", "SIXNINE_STORAGE_CREDENTIAL_FILE", "INKSEQ_WORKOS_CONFIG_FILE"})
+OPTIONAL_PATH_FIELDS = frozenset({"SIXNINE_STAGE_QUERY_CONFIG_FILE", "SIXNINE_STORAGE_CREDENTIAL_FILE", "INKSEQ_WORKOS_CONFIG_FILE", "INKSEQ_STRIPE_CONFIG_FILE"})
 STORAGE_FIELDS = frozenset({"SIXNINE_STORAGE_PROVIDER", "SIXNINE_STORAGE_ENDPOINT", "SIXNINE_STORAGE_REGION",
     "SIXNINE_STORAGE_BUCKET", "SIXNINE_STORAGE_PROFILE", "SIXNINE_STORAGE_CREDENTIAL_FILE"})
 OPTIONAL_FIELDS = frozenset({"SIXNINE_OPERATOR_ADMIN_OWNERS", "SIXNINE_STORYBOARD_OWNERS", 'INKSEQ_DEPLOYMENT_TARGET',
     'INKSEQ_RESOURCE_PROFILE', 'INKSEQ_CPU_CGROUP_PARENT', 'INKSEQ_GENERATION_QUEUE',
-    'INKSEQ_FILM_ENABLED'}) | OPTIONAL_PATH_FIELDS | STORAGE_FIELDS
+    'INKSEQ_FILM_ENABLED', 'INKSEQ_STRIPE_MODE'}) | OPTIONAL_PATH_FIELDS | STORAGE_FIELDS
 LEGACY_MARKERS = ("operator-capacity/active.json", "gpu-acceptance/active.json", "gpu-scaler/active.json")
 STORYBOARD_FLAG = "SIXNINE_STORYBOARD_OWNERS"
 STORYBOARD_RECEIPT = "storyboard-maintenance.json"
@@ -401,6 +401,15 @@ def settings_document(value):
     env = value["environment"]
     release.require(env.get('INKSEQ_WORKOS_CONFIG_FILE', '') in {'', '/run/sixnine-secrets/workos'},
         'migration_workos_configuration_path_invalid')
+    stripe_file = env.get('INKSEQ_STRIPE_CONFIG_FILE', '')
+    stripe_mode = env.get('INKSEQ_STRIPE_MODE', 'off')
+    release.require(stripe_file in {'', '/run/sixnine-secrets/stripe'}
+        and stripe_mode in {'off', 'test'}
+        and (stripe_mode != 'test' or bool(stripe_file))
+        and (not stripe_file and stripe_mode == 'off'
+            or deployment_target.environment(env)['name'] == 'staging'
+            and env.get('INKSEQ_GENERATION_QUEUE', 'postgres') == 'dbos'),
+        'migration_stripe_configuration_invalid')
     queue = env.get('INKSEQ_GENERATION_QUEUE', 'postgres')
     film = env.get('INKSEQ_FILM_ENABLED', '0')
     release.require(queue in {'postgres','dbos'} and film in {'0','1'}
