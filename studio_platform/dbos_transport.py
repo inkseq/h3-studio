@@ -162,6 +162,41 @@ class GenerationTransport:
     def close(self):
         self.client.destroy()
 
+    def payment_event(self, connection, tenant, event_id):
+        """Wake a verified original event in the existing durable SDK queue."""
+        from .payment_schema import events
+        from .payments_workflows import PAYMENT_WORKFLOW, payment_workflow_id
+        from .workflow_schema import assert_execution_allowed
+
+        assert_execution_allowed(connection)
+        event = connection.execute(
+            select(events.c.status)
+            .where(events.c.tenant == tenant, events.c.event_id == event_id)
+            .with_for_update()
+        ).scalar_one()
+        if event in {"processed", "review"}:
+            return
+        ident = payment_workflow_id(tenant, event_id)
+        self.client.enqueue_in_transaction(
+            connection,
+            {
+                "workflow_name": PAYMENT_WORKFLOW,
+                "queue_name": QUEUE,
+                "workflow_id": ident,
+                "app_version": VERSION,
+                "application_name": APPLICATION,
+            },
+            tenant,
+            event_id,
+        )
+        self.client.send_in_transaction(
+            connection,
+            ident,
+            {"event_id": event_id},
+            topic="ledger",
+            idempotency_key="stripe-event-" + event_id,
+        )
+
     def film_status(self, connection, tenant, owner, project, run_id):
         """Read the latest original Film transport epoch; never wake or retry it."""
         from .film_runs import VERSION as FILM_VERSION
@@ -575,6 +610,9 @@ class DurableExecutor:
                 QUEUE, polling_interval_sec=POLL_SECONDS
             )
             register_generation_workflow(DBOS, self.slots)
+            from .payments_workflows import register_payment_workflows
+
+            register_payment_workflows(DBOS, self.repo, self.settings)
             if self.film_setup is not None:
                 self.film_setup(DBOS)
             DBOS.launch()
