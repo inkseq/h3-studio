@@ -198,6 +198,38 @@ def disk_sample(*, path='/srv/sixnine', statvfs=None):
     return 100 * used / (used + value.f_bavail)
 
 
+def retention_service_failed(*, runner=subprocess.run):
+    """Observe only the fixed oneshot unit's result; never fetch its journal."""
+    fields = {'LoadState', 'ActiveState', 'SubState', 'Result', 'ExecMainCode', 'ExecMainStatus'}
+    try:
+        result = runner(['/usr/bin/systemctl', 'show', 'inkseq-release-retention.service', '--no-pager',
+            '--property=' + ','.join(sorted(fields))], stdin=subprocess.DEVNULL, capture_output=True,
+            timeout=5, env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8'})
+        if result.returncode != 0 or len(result.stdout) > 4096:
+            return None
+        rows = [line.split('=', 1) for line in result.stdout.decode('utf-8').splitlines()]
+        if len(rows) != len(fields) or any(len(row) != 2 for row in rows):
+            return None
+        value = dict(rows)
+        if set(value) != fields or value['LoadState'] != 'loaded':
+            return None
+        if value['ExecMainCode'] not in {'0', '1', '2', '3'} or not re.fullmatch(r'[0-9]{1,3}', value['ExecMainStatus']) \
+                or int(value['ExecMainStatus']) > 255:
+            return None
+        if value['ActiveState'] == 'failed':
+            return True
+        if value['ActiveState'] == 'inactive' and value['SubState'] == 'dead':
+            if value['Result'] == 'success' and value['ExecMainCode'] == '1' and value['ExecMainStatus'] == '0':
+                return False
+            if value['Result'] in {'exit-code', 'signal', 'core-dump', 'timeout', 'watchdog',
+                    'start-limit-hit', 'resources', 'protocol', 'oom-kill'}:
+                return True
+    except (OSError, subprocess.SubprocessError, UnicodeError, ValueError):
+        pass
+    # A running attempt or unavailable observation cannot resolve an incident.
+    return None
+
+
 def observe(previous_cpu, *, runner=subprocess.run, proc=Path('/proc')):
     sample = proc_sample(proc=proc)
     cpu = None
@@ -206,7 +238,8 @@ def observe(previous_cpu, *, runner=subprocess.run, proc=Path('/proc')):
         if total > 0 and 0 <= idle <= total:
             cpu = 100 * (1 - idle / total)
     host = {'cpu_percent': cpu, 'memory_percent': sample['memory_percent'], 'health_ok': None,
-            'http_requests': None, 'http_5xx': None, 'processes_ok': None, 'disk_used_percent': None}
+            'http_requests': None, 'http_5xx': None, 'processes_ok': None, 'disk_used_percent': None,
+            'retention_service_failed': retention_service_failed(runner=runner)}
     try:
         host['disk_used_percent'] = disk_sample()
     except (OSError, ValueError, AttributeError):
@@ -239,7 +272,7 @@ def notification(value, environment):
     # The core evaluator owns this finite code list. Keep a second boundary at SNS.
     require(value['code'] in {'gpu_runtime_exceeded', 'gpu_idle_stop_overdue', 'test_spend_80', 'test_spend_100',
             'job_stuck', 'job_repeated_wake', 'host_cpu_sustained', 'host_memory_sustained', 'host_disk_80', 'host_disk_90',
-            'host_process_unhealthy', 'health_down', 'http_5xx_rate', 'generation_failure', 'terminal_reservation_stale'}
+            'host_process_unhealthy', 'retention_service_failed', 'health_down', 'http_5xx_rate', 'generation_failure', 'terminal_reservation_stale'}
             and value['environment'] == environment and value['transition'] in {'firing', 'resolved'}
             and (value['resource_id'] is None or type(value['resource_id']) is str
                 and re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', value['resource_id']))

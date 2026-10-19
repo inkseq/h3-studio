@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import ExitStack, contextmanager
+import errno
 import hashlib
 import json
 import math
@@ -16,6 +17,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import subprocess
 import sys
 import tarfile
 import time
@@ -30,6 +32,71 @@ MAX_ENTRIES = 8192
 MAX_OBJECTS = 4096
 EXTRA_RELEASES = 3
 NONCE = re.compile(r'[0-9a-f]{32}\Z')
+# Only fixed source literals may cross the stderr boundary. In particular,
+# exception messages from SDKs, the OS and child processes can contain secrets.
+FAILURE_CODES = frozenset('''
+retention_bundle_shape_unknown retention_commit_invalid retention_container_inventory_invalid
+retention_delete_entries_changed retention_delete_entry_changed retention_delete_file_changed
+retention_delete_file_scope_invalid retention_delete_parent_changed retention_delete_path_invalid
+retention_delete_tree_changed retention_derived_overlay_changed retention_directory_identity_invalid
+retention_directory_not_protected retention_docker_inventory_incomplete retention_duplicate_pointer_field
+retention_execution_marker_unknown retention_explicit_pins_unknown retention_file_changed
+retention_frontend_extra_files retention_frontend_index_changed retention_image_became_in_use
+retention_image_identity_invalid retention_image_inventory_invalid retention_image_tag_changed
+retention_image_tags_invalid retention_independent_approval_missing retention_kept_bundle_not_installed
+retention_kept_staging_differs retention_migration_extra_files retention_migration_requires_reconciliation
+retention_path_outside_release_root retention_plan_stale retention_plan_tree_changed
+retention_platform_extra_files retention_pointer_changed retention_pointer_invalid
+retention_policy_requires_review retention_posix_required retention_promotion_intent_unknown
+retention_publication_authority_unknown retention_publication_count_limit retention_publication_downloads_unknown
+retention_publication_lock_changed retention_publication_lock_unprotected retention_publication_namespace_invalid
+retention_publication_nonce_invalid retention_publication_not_terminal retention_publication_transport_changed
+retention_publication_transport_incomplete retention_publication_transport_trailing retention_publication_transport_unknown
+retention_publication_transport_unsafe retention_release_count_limit retention_release_requires_reconciliation
+retention_remote_proof_limit retention_root_host_required retention_s3_restore_proof_missing retention_release_lock_busy
+retention_tree_limit retention_tree_linked
+container_operation_failed_no_details_logged
+'''.split())
+
+
+def failure_code(error):
+    """Classify a failed run without rendering exception text or remote fields."""
+    if isinstance(error, release.ReleaseError):
+        code = error.args[0] if len(error.args) == 1 else None
+        return code if type(code) is str and code in FAILURE_CODES else 'retention_safety_check_failed'
+    if isinstance(error, BlockingIOError):
+        return 'retention_resource_busy'
+    if isinstance(error, PermissionError):
+        return 'retention_permission_denied'
+    if isinstance(error, FileNotFoundError):
+        return 'retention_required_file_missing'
+    if isinstance(error, ImportError):
+        return 'retention_dependency_unavailable'
+    if isinstance(error, json.JSONDecodeError):
+        return 'retention_json_invalid'
+    if isinstance(error, subprocess.TimeoutExpired):
+        return 'retention_container_operation_timed_out'
+    if isinstance(error, OSError):
+        return {errno.ENOSPC: 'retention_disk_full', errno.EROFS: 'retention_filesystem_read_only'}.get(
+            error.errno, 'retention_io_failed')
+    # Lazy imports preserve a useful failure code when the SDK itself is missing.
+    try:
+        from botocore.exceptions import (BotoCoreError, ClientError, ConnectionError,
+            HTTPClientError, NoCredentialsError, PartialCredentialsError)
+    except ImportError:
+        return 'retention_unexpected_failure'
+    if isinstance(error, (NoCredentialsError, PartialCredentialsError)):
+        return 'retention_aws_credentials_unavailable'
+    if isinstance(error, ClientError):
+        detail = error.response.get('Error') if type(error.response) is dict else None
+        code = detail.get('Code') if type(detail) is dict else None
+        return ('retention_s3_access_denied' if code in ('AccessDenied', '403') else
+                'retention_s3_read_failed')
+    if isinstance(error, (ConnectionError, HTTPClientError)):
+        return 'retention_aws_transport_failed'
+    if isinstance(error, BotoCoreError):
+        return 'retention_aws_sdk_failed'
+    return 'retention_unexpected_failure'
 
 
 def safe_directory(path, *, incoming=False):
@@ -842,22 +909,30 @@ def main(argv=None):
     try:
         release.require(os.name == 'posix' and os.geteuid() == 0, 'retention_root_host_required')
         safe_directory(release.ROOT)
-        if args.scheduled:
-            policy = read_json(release.ROOT, 'retention-policy.json', {})
-            release.require(args.apply and policy == {'version': 1, 'enabled': True}
-                and type(policy.get('version')) is int and policy.get('enabled') is True,
-                'retention_policy_requires_review')
         import fcntl
         if (release.ROOT / 'release.lock').exists() or (release.ROOT / 'release.lock').is_symlink():
             release.regular(release.ROOT / 'release.lock', root_owned=True, maximum=16384)
         descriptor = os.open(release.ROOT / 'release.lock', os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         with os.fdopen(descriptor, 'a') as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                if not args.scheduled:
+                    raise release.ReleaseError('retention_release_lock_busy') from None
+                # The existing systemd TimeoutStartSec bounds this wait. Never
+                # treat contention as a successful cleanup or run without the lock.
+                print('retention_waiting_for_release_lock', file=sys.stderr, flush=True)
+                fcntl.flock(lock, fcntl.LOCK_EX)
+            if args.scheduled:
+                policy = read_json(release.ROOT, 'retention-policy.json', {})
+                release.require(args.apply and policy == {'version': 1, 'enabled': True}
+                    and type(policy.get('version')) is int and policy.get('enabled') is True,
+                    'retention_policy_requires_review')
             result = maintain_locked(apply=args.apply)
             print(json.dumps(result if args.apply else compact_plan(result), sort_keys=True))
         return 0
     except Exception as error:
-        print(str(error) if isinstance(error, release.ReleaseError) else 'retention_failed_details_suppressed', file=sys.stderr)
+        print(failure_code(error), file=sys.stderr)
         return 1
 
 

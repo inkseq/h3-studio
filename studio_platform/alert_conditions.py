@@ -16,7 +16,7 @@ DEFAULTS = {
 }
 CODES = frozenset({"gpu_runtime_exceeded", "gpu_idle_stop_overdue", "test_spend_80",
     "test_spend_100", "job_stuck", "job_repeated_wake", "host_cpu_sustained",
-    "host_memory_sustained", "host_disk_80", "host_disk_90", "host_process_unhealthy", "health_down", "http_5xx_rate", "generation_failure", "terminal_reservation_stale"})
+    "host_memory_sustained", "host_disk_80", "host_disk_90", "host_process_unhealthy", "retention_service_failed", "health_down", "http_5xx_rate", "generation_failure", "terminal_reservation_stale"})
 STATES = frozenset({"waiting_capacity", "queued", "claimed", "submitting", "running",
     "submission_unknown", "cancel_requested", "collecting", "recovery_hold", "starting", "upstream_status_unknown"})
 
@@ -186,6 +186,8 @@ def evaluate(snapshot, previous_state, *, environment, now, host=None, threshold
     else:
         state["database_gap"] = True
     host = host if isinstance(host, dict) else {}
+    retention_failed = host.get("retention_service_failed")
+    condition("retention_service_failed", None, retention_failed if type(retention_failed) is bool else None)
     disk = host.get("disk_used_percent")
     for percent in (80, 90):
         condition("host_disk_" + str(percent), None,

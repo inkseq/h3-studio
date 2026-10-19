@@ -1,6 +1,7 @@
 """Isolated artifact/identity retention proof, no AWS/GPU/service calls."""
 
 from contextlib import ExitStack
+import errno
 import gzip
 import hashlib
 import importlib
@@ -14,11 +15,71 @@ import tempfile
 import types
 import unittest
 import shutil
+import subprocess
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'deploy/platform'))
 retention = importlib.import_module('release_retention')
 release = retention.release
+
+
+class RetentionFailureTests(unittest.TestCase):
+    def test_errors_have_finite_codes_without_private_exception_details(self):
+        errors = (
+            (release.ReleaseError('retention_plan_stale'), 'retention_plan_stale'),
+            (release.ReleaseError('PRIVATE_TOKEN'), 'retention_safety_check_failed'),
+            (BlockingIOError('PRIVATE_PATH'), 'retention_resource_busy'),
+            (PermissionError('PRIVATE_PATH'), 'retention_permission_denied'),
+            (FileNotFoundError('PRIVATE_PATH'), 'retention_required_file_missing'),
+            (ModuleNotFoundError('PRIVATE_MODULE'), 'retention_dependency_unavailable'),
+            (
+                json.JSONDecodeError('PRIVATE_DOC', 'PRIVATE_DOC', 0),
+                'retention_json_invalid',
+            ),
+            (
+                subprocess.TimeoutExpired(
+                    ['PRIVATE_COMMAND'], 3, output=b'PRIVATE_BODY'
+                ),
+                'retention_container_operation_timed_out',
+            ),
+            (OSError(errno.ENOSPC, 'PRIVATE_PATH'), 'retention_disk_full'),
+            (OSError(errno.EROFS, 'PRIVATE_PATH'), 'retention_filesystem_read_only'),
+            (RuntimeError('PRIVATE_RESPONSE'), 'retention_unexpected_failure'),
+        )
+        for error, expected in errors:
+            with self.subTest(kind=type(error).__name__):
+                self.assertEqual(retention.failure_code(error), expected)
+
+    def test_aws_errors_do_not_render_credentials_endpoint_or_response(self):
+        from botocore.exceptions import (
+            ClientError,
+            EndpointConnectionError,
+            NoCredentialsError,
+        )
+
+        for error, expected in (
+            (NoCredentialsError(), 'retention_aws_credentials_unavailable'),
+            (
+                EndpointConnectionError(endpoint_url='https://PRIVATE_ENDPOINT'),
+                'retention_aws_transport_failed',
+            ),
+            (
+                ClientError(
+                    {'Error': {'Code': 'AccessDenied', 'Message': 'PRIVATE_RESPONSE'}},
+                    'HeadObject',
+                ),
+                'retention_s3_access_denied',
+            ),
+            (
+                ClientError(
+                    {'Error': {'Code': 'PRIVATE_CODE', 'Message': 'PRIVATE_RESPONSE'}},
+                    'HeadObject',
+                ),
+                'retention_s3_read_failed',
+            ),
+        ):
+            with self.subTest(kind=type(error).__name__):
+                self.assertEqual(retention.failure_code(error), expected)
 
 
 class RetentionTests(unittest.TestCase):
@@ -790,6 +851,122 @@ class RetentionTests(unittest.TestCase):
             policy.unlink()
             self.assertEqual(retention.main(['--apply']), 0)
             maintain.assert_called_once_with(apply=True)
+
+    @unittest.skipUnless(os.name == 'posix', 'Linux fixed host CLI failure boundary')
+    def test_cli_failure_emits_only_safe_code_and_never_claims_success(self):
+        output, error = io.StringIO(), io.StringIO()
+        with (
+            patch.object(release, 'ROOT', self.root),
+            patch.object(os, 'geteuid', return_value=0),
+            patch.object(
+                retention,
+                'maintain_locked',
+                side_effect=OSError(errno.ENOSPC, 'PRIVATE_PATH'),
+            ),
+            patch('sys.stdout', output),
+            patch('sys.stderr', error),
+        ):
+            self.assertEqual(retention.main(['--apply']), 1)
+        self.assertEqual(output.getvalue(), '')
+        self.assertEqual(error.getvalue(), 'retention_disk_full\n')
+
+    @unittest.skipUnless(os.name == 'posix', 'Linux advisory release lock')
+    def test_busy_release_lock_is_explicit_and_never_runs_cleanup(self):
+        import fcntl
+
+        error = io.StringIO()
+        with (
+            (self.root / 'release.lock').open('a') as held,
+            patch.object(release, 'ROOT', self.root),
+            patch.object(os, 'geteuid', return_value=0),
+            patch.object(retention, 'maintain_locked') as maintain,
+            patch('sys.stderr', error),
+        ):
+            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.assertEqual(retention.main(['--apply']), 1)
+            maintain.assert_not_called()
+        self.assertEqual(error.getvalue(), 'retention_release_lock_busy\n')
+
+    @unittest.skipUnless(
+        os.name == 'posix', 'Linux cross-process scheduled release lock'
+    )
+    def test_scheduled_waits_for_release_lock_then_rechecks_policy_and_current_state(
+        self,
+    ):
+        import fcntl
+        import select
+
+        program = '''
+import json,os,sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import release_retention as retention
+root=Path(sys.argv[2]); marker=root/'cleanup-entered'
+retention.release.ROOT=root
+os.geteuid=lambda:0
+# This subprocess exercises the real OS lock; fixture ownership is covered by
+# the separate path/integrity tests rather than requiring root in CI.
+retention.safe_directory=lambda path,**kwargs:None
+retention.release.regular=lambda path,**kwargs:None
+def maintain(**kwargs):
+ marker.write_text('entered')
+ return {'state':'synthetic','observed_current':json.loads((root/'release-state.json').read_text())['current']}
+retention.maintain_locked=maintain
+raise SystemExit(retention.main(['--apply','--scheduled']))
+'''
+        for enabled in (True, False):
+            with self.subTest(policy_enabled_after_wait=enabled):
+                marker = self.root / 'cleanup-entered'
+                marker.unlink(missing_ok=True)
+                policy = self.root / 'retention-policy.json'
+                policy.write_text('{"version":1,"enabled":true}')
+                with (self.root / 'release.lock').open('a') as held:
+                    fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    child = subprocess.Popen(
+                        [
+                            sys.executable,
+                            '-B',
+                            '-c',
+                            program,
+                            str(Path(retention.__file__).parent),
+                            str(self.root),
+                        ],
+                        stdin=subprocess.DEVNULL,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                    )
+                    try:
+                        ready, _, _ = select.select([child.stderr], [], [], 5)
+                        self.assertTrue(ready, 'child did not report bounded lock wait')
+                        self.assertEqual(
+                            child.stderr.readline(),
+                            'retention_waiting_for_release_lock\n',
+                        )
+                        self.assertIsNone(child.poll())
+                        self.assertFalse(marker.exists())
+                        self.state({'current': self.front})
+                        policy.write_text(
+                            json.dumps({'version': 1, 'enabled': enabled})
+                        )
+                        fcntl.flock(held, fcntl.LOCK_UN)
+                        output, error = child.communicate(timeout=5)
+                        if enabled:
+                            self.assertEqual((child.returncode, error), (0, ''))
+                            self.assertEqual(
+                                json.loads(output)['observed_current'], self.front
+                            )
+                            self.assertTrue(marker.exists())
+                        else:
+                            self.assertEqual((child.returncode, output), (1, ''))
+                            self.assertEqual(
+                                error, 'retention_policy_requires_review\n'
+                            )
+                            self.assertFalse(marker.exists())
+                    finally:
+                        if child.poll() is None:
+                            child.kill()
+                        child.communicate(timeout=5)
 
     def test_post_hook_requires_exact_boolean_enabled_and_integer_version(self):
         policy = self.root / 'retention-policy.json'
