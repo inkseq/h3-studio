@@ -51,7 +51,12 @@ def frame_sample(frame):
 
 def configuration_for(compiled):
     version = compiled.get("request", {}).get("render", {}).get("version")
-    if type(version) is not int or version not in CONFIGURATIONS:
+    if (
+        type(version) is not int
+        or version not in CONFIGURATIONS
+        or version == 4
+        and compiled.get("client_ref", {}).get("chapter_id") != "film-export"
+    ):
         raise ValueError("粗剪执行契约版本不受支持")
     return CONFIGURATIONS[version]
 
