@@ -25,7 +25,7 @@ export default function HostedSignIn({ auth }) {
         {t('signIn.comma')}
         <a href="/privacy">{t('signIn.privacy')}</a>
         {t('signIn.and')}
-        <a href="/content-policy">{t('signIn.contentPolicy')}</a>
+        <a href="/content">{t('signIn.contentPolicy')}</a>
         {t('signIn.consentAfter')}
       </small>
       <div className="hosted-sign-in-or" role="separator">

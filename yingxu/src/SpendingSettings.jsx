@@ -11,6 +11,7 @@ import { readBrowserLocale } from './i18n/locale.js';
 import StudioHeader from './StudioHeader.jsx';
 import AccountPassword from './AccountPassword.jsx';
 import { CreditsPanel, useCredits } from './CreditsUI.jsx';
+import AdminConsole from './AdminConsole.jsx';
 import {
   UserRound,
   SlidersHorizontal,
@@ -397,39 +398,53 @@ export default function SpendingSettings({ account }) {
           {user && draft && section === 'budget' && pageActive && (
             <OperatorBudgetPanel account={account} />
           )}
-          {admin && adminDraft && (
-            <form
-              className="ops-tab-panel"
-              hidden={section !== 'admin'}
-              onSubmit={(event) => {
-                event.preventDefault();
-                void save(true);
-              }}
-            >
-              <section id="my-admin" className="card-box limits" aria-label={t('settings.admin')}>
-                {[
-                  ['settings.testTask', 'testTask'],
-                  ['settings.hourly', 'hourly'],
-                  ['settings.fleetHourly', 'fleetHourly'],
-                  ['settings.idle', 'idle'],
-                  ['settings.runtime', 'runtime'],
-                ].map(([label, key]) => (
-                  <React.Fragment key={key}>
-                    {field(label, adminDraft[key], (value) =>
-                      setAdminDraft((previous) => ({ ...previous, [key]: value })),
-                    )}
-                  </React.Fragment>
-                ))}
-              </section>
-              <p className="muted">{t('settings.adminHelp')}</p>
-              <div className="row tight" style={{ justifyContent: 'flex-end' }}>
-                <button className="primary" disabled={busy}>
-                  {t(busy ? 'settings.saving' : 'settings.save')}
-                </button>
-              </div>
-            </form>
+          {admin && section === 'admin' && (
+            <AdminConsole
+              account={account}
+              active={pageActive}
+              testMachines={
+                <>
+                  {adminDraft && (
+                    <form
+                      className="ops-tab-panel"
+                      hidden={section !== 'admin'}
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void save(true);
+                      }}
+                    >
+                      <section
+                        id="my-admin"
+                        className="card-box limits"
+                        aria-label={t('settings.admin')}
+                      >
+                        {[
+                          ['settings.testTask', 'testTask'],
+                          ['settings.hourly', 'hourly'],
+                          ['settings.fleetHourly', 'fleetHourly'],
+                          ['settings.idle', 'idle'],
+                          ['settings.runtime', 'runtime'],
+                        ].map(([label, key]) => (
+                          <React.Fragment key={key}>
+                            {field(label, adminDraft[key], (value) =>
+                              setAdminDraft((previous) => ({ ...previous, [key]: value })),
+                            )}
+                          </React.Fragment>
+                        ))}
+                      </section>
+                      <p className="muted">{t('settings.adminHelp')}</p>
+                      <div className="row tight" style={{ justifyContent: 'flex-end' }}>
+                        <button className="primary" disabled={busy}>
+                          {t(busy ? 'settings.saving' : 'settings.save')}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                  {pageActive && <BudgetAdministration account={account} />}
+                </>
+              }
+            />
           )}
-          {admin && section === 'admin' && pageActive && <BudgetAdministration account={account} />}
           {section === 'credits' && <CreditsPanel account={account} active={pageActive} />}
           <div id="my-assistants" hidden={section !== 'assistants'}>
             <AssistantConnections
