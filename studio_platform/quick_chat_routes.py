@@ -178,6 +178,28 @@ def agent_contract():
             "history": "Only events emitted after activation are available. Earlier job history remains in GET /v1/jobs and submission/execution reads; no historical times are invented. Event status/advice is a historical snapshot; refresh the original job and submission before any retry.",
             "fields": ["cancelled_by", "reason_code", "message", "retry_advice"],
             "retry_advice": "safe_to_retry is explicit; charged and upstream_still_running are bool or null when unknown. A terminal status, accepted cancellation, empty provider list or absent worker alone does not prove safe/free retry. Safe retry still requires current preflight, permission, user generation authorization, budget and explicit confirmation.",
+            "resume_admission": {
+                "observe": PREFIX + "/{session_id}/submissions/{submission_id}",
+                "revision": PREFIX + "/{session_id}/revisions/{revision_id}",
+                "preflight": PREFIX
+                + "/{session_id}/revisions/{revision_id}/preflights",
+                "preflight_body": {
+                    "revision_hash": "{original_revision.input_hash}",
+                    "capabilities_version": "{current_capabilities_version}",
+                    "item_ids": ["{original_resumable_item_id}"],
+                },
+                "observe_preflight": PREFIX + "/{session_id}/preflights/{preflight_id}",
+                "method": "POST",
+                "path": PREFIX
+                + "/{session_id}/submissions/{submission_id}/resume-admission",
+                "body": {
+                    "item_ids": ["{original_resumable_item_id}"],
+                    "fresh_preflight_id": "{ready_selected_item_preflight_id}",
+                    "confirmed": True,
+                },
+                "require": "GET the original submission first; select only its items with resume_admission_available=true. Read submission.revision_id and that immutable revision's input_hash; refresh capabilities and preflight the exact selected item IDs on that same revision, without retry_of_execution_id for never-admitted items. Inspect the ready preflight and current spending/permission requirements. After the owner resolves the blocker and within explicit generation authorization, confirm the selected original items. Never raise caps or approve spending as the Agent. This resumes admission of original planned/blocked work; it is not a new submission, new take or execution retry. Existing job/execution/attempt identities and accounting remain authoritative; missing jobs are not proof of a free retry.",
+                "recovery": "Persist the exact preflight body/key and the separate resume body/Idempotency-Key before each write. GET the original preflight/submission after response loss; only explicitly replay the original identical POST/body/key when reconciliation is needed. Replaying initial submission confirmation only recovers its receipt, not a fresh admission attempt. Do not create another card, submission or retry to escape a cap, unknown outcome or stale plan; unknown/recovery_hold stays blocked.",
+            },
             "retry": {
                 "preflight": PREFIX
                 + "/{session_id}/revisions/{revision_id}/preflights",

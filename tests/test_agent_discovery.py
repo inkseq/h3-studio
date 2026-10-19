@@ -139,6 +139,48 @@ class AgentDiscoveryTests(unittest.TestCase):
         for path in paths:
             self.assertEqual(self.client.get(path).content, anonymous[path])
 
+    def test_resume_contract_and_burn_limits_match_existing_authenticated_routes(self):
+        from studio_platform.caption_server import validate_caption_text
+
+        public = self.client.get("/for-agents/guide.json").json()
+        resume = public["quick_chat"]["job_changes"]["resume_admission"]
+        routes = {
+            (method, route.path)
+            for route in self.app.routes
+            for method in getattr(route, "methods", ())
+        }
+        for method, path in (
+            (resume["method"], resume["path"]),
+            ("POST", resume["preflight"]),
+            ("GET", resume["observe"]),
+            ("GET", resume["revision"]),
+            ("GET", resume["observe_preflight"]),
+        ):
+            self.assertIn((method, path), routes)
+        self.assertEqual(
+            set(resume["preflight_body"]),
+            {"revision_hash", "capabilities_version", "item_ids"},
+        )
+        self.assertEqual(
+            set(resume["body"]), {"item_ids", "fresh_preflight_id", "confirmed"}
+        )
+        self.assertIs(resume["body"]["confirmed"], True)
+        self.assertEqual(
+            resume["preflight_body"]["item_ids"], resume["body"]["item_ids"]
+        )
+        burn = public["story_film"]["subtitle_burn"]
+        line = "x" * burn["max_characters_per_line"]
+        valid = "\n".join([line] * burn["max_lines_per_cue"])
+        self.assertEqual(validate_caption_text(valid), valid)
+        for invalid in (valid + "x", valid + "\nx"):
+            with self.assertRaises(ValueError):
+                validate_caption_text(invalid)
+        self.login()
+        authenticated = self.client.get("/v1/agent-guide").json()
+        schema = self.client.get("/v1/quick-chat/schema").json()
+        self.assertEqual(authenticated["examples_url"], "/for-agents/guide.json")
+        self.assertEqual(schema["agent_contract"], public["quick_chat"])
+
     def test_zip_contains_only_reviewed_files_and_matches_public_skill(self):
         response = self.client.get("/for-agents/skill.zip")
         self.assertEqual(response.headers["content-type"], "application/zip")

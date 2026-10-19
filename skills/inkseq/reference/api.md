@@ -26,6 +26,8 @@ Let B = `/v1/quick-chat/sessions/SESSION`.
 | Read revision | GET B`/revisions/REVISION` | Immutable `input_hash`, settings, per-item seeds. |
 | Preflight | POST B`/revisions/REVISION/preflights` | `{revision_hash:input_hash,capabilities_version:CURRENT_VERSION}`. |
 | Submit | POST B`/revisions/REVISION/submissions` | `{revision_hash:input_hash,preflight_id:READY_ID,confirmed:true}`; only after readiness/user authority and required human spending approval. |
+| Read original submission | GET B`/submissions/SUBMISSION` | Original `revision_id`, `items[].id`, job/execution IDs and `resume_admission_available`. |
+| Resume original admission | POST B`/submissions/SUBMISSION/resume-admission` | `{item_ids:[ORIGINAL_ITEM],fresh_preflight_id:READY_SELECTED_PREFLIGHT,confirmed:true}`; separate saved key, original resumable items only. See below; this is not execution retry. |
 | Group takes | GET B`/cards/CARD/takes?limit=20&before_cursor=CURSOR` | Follow returned cursor; original item/submission/job/execution IDs, `group_number`, `recipe`, annotation. |
 | All session takes | GET B`/takes?limit=40&before_cursor=CURSOR` | Read-only original summaries across all cards; follow `before_cursor`, retain `card_id/revision_id/submission_id`, filter explicit `trash_state`. No story export or generation. |
 | Star | PATCH B`/takes/ITEM` | `{expected_version:ANNOTATION_VERSION,starred:true}`. |
@@ -36,6 +38,49 @@ Let B = `/v1/quick-chat/sessions/SESSION`.
 Direct card/revision omitted profile does NOT inherit session preferences: copy the intended full profile/settings. Turn-to-card is an alternative using current `expected_version`, returned `model_id`, `assistant_mode:"none"`, `create_card:true`, and full `text`; it inherits session materials/next_settings. None disables conversation assistance, not independently configured automatic naming. Never address hidden Quick Chat project projections.
 
 GET/PATCH `/v1/quick-chat/preferences` uses owner CAS `{expected_version, copies_max, takes_fold_count}` as defined by the live schema. Both are editable positive integers (defaults4/8), subject to existing document/model bounds. Lowering a preference does not rewrite historical reads or accepted submissions. Fixed seed belongs only to the first new take; other new takes draw distinct random seeds. Preserve seeds as their returned decimal strings.
+
+### Resume never-admitted original items
+
+Use `/for-agents/guide.json` → `quick_chat.job_changes.resume_admission`.
+After the owner resolves an admission blocker, GET the **original submission**.
+Select only its current `items[].id` with `resume_admission_available:true`;
+retain their original job/execution IDs. Read `submission.revision_id`, then GET
+that immutable revision and current `/v1/capabilities`. Do not substitute the
+card's newer revision, create a new card, or reuse initial submission confirmation
+expecting it to attempt admission again.
+
+Save a new selected-item preflight body and its stable key:
+
+```json
+{"revision_hash":"ORIGINAL_REVISION_INPUT_HASH","capabilities_version":"CURRENT_CAPABILITIES_VERSION","item_ids":["ORIGINAL_RESUMABLE_ITEM"]}
+```
+
+POST it to B`/revisions/ORIGINAL_REVISION/preflights`. **Omit
+`retry_of_execution_id` for never-admitted items**; linked execution retry is a
+different operation for eligible failed/cancelled executions. Inspect the fresh
+preflight's exact items, readiness, quote and required human spending approval.
+GET B`/preflights/PREFLIGHT` observes this original preparation. Only within the
+user's generation authorization, save a separate resume body/key:
+
+```json
+{"item_ids":["ORIGINAL_RESUMABLE_ITEM"],"fresh_preflight_id":"READY_SELECTED_PREFLIGHT","confirmed":true}
+```
+
+```sh
+python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID request GET /v1/quick-chat/sessions/SESSION/submissions/SUBMISSION --output original-submission.json
+python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID request GET /v1/quick-chat/sessions/SESSION/revisions/ORIGINAL_REVISION --output original-revision.json
+python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID request POST /v1/quick-chat/sessions/SESSION/revisions/ORIGINAL_REVISION/preflights --json-file selected-preflight.json --idempotency-key saved-selected-preflight-key --output selected-preflight-receipt.json
+# Inspect the returned preflight; do not automatically chain a paid write.
+python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID request POST /v1/quick-chat/sessions/SESSION/submissions/SUBMISSION/resume-admission --json-file resume-admission.json --idempotency-key saved-resume-admission-key --output resumed-original.json
+python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID request GET /v1/quick-chat/sessions/SESSION/submissions/SUBMISSION --output original-submission-after.json
+```
+
+Resume admits original planned/blocked work without replacing its jobs,
+executions, attempts or accounting. It does not make an unknown execution safe
+or failed work free. Caps and approval remain owner-only; the Agent must not
+change either, automatically loop this sequence, or switch connections to evade
+a refusal. Read [resume recovery](recovery.md#original-admission-recovery) before
+repeating a write.
 
 ### Explicit helper sequence
 
@@ -143,6 +188,15 @@ already confirmed captions when requested, then concatenates the film and saves
 its original video/separate audio artifacts. It does not generate caption text,
 images or replacement look photos. Unsupported duration/output/input combinations
 are explicit blockers; never trim parameters or references to force admission.
+
+For `burn_subtitles:true`, **each cue has at most two nonempty lines, each
+1–18 characters**, plus the existing plain-text and frame/timing bounds. SRT
+export or explicit confirmation does not waive burn validation. A confirmed
+draft with invalid text/timing returns `film_captions_invalid`; absent/stale
+confirmation returns `film_captions_require_confirmation`. Never silently trim
+or rewrap text. If the user intends different text, line breaks or timing,
+save that change explicitly and confirm the exact changed draft before a fresh
+film preflight. An accepted film retains its original confirmed snapshot.
 
 Read the original run at bounded intervals, respecting Retry-After if present.
 Phases include `generating`, `chapters`, `exporting`, `admission_blocked`, `blocked`,
