@@ -120,7 +120,8 @@ class DeploymentPolicyTests(unittest.TestCase):
     def test_staging_has_its_own_exact_origin_and_proxy_profile(self):
         candidate = copy.deepcopy(self.rendered)
         candidate['services']['app']['environment'].update(
-            PUBLIC_ORIGIN='https://staging.inkseq.com', PUBLIC_ORIGIN_ALIASES='',
+            PUBLIC_ORIGIN='https://staging.inkseq.com',
+            PUBLIC_ORIGIN_ALIASES='',
             INKSEQ_DEPLOYMENT_TARGET='staging',
         )
         candidate['services']['caddy']['environment'] = {'INKSEQ_LEGACY_REDIRECT': '0'}
