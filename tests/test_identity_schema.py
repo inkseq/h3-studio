@@ -315,12 +315,14 @@ class IdentityReaderTests(unittest.TestCase):
     ):
         from studio_platform.backup import dump_postgres
         from studio_platform.credit_schema import TABLE_NAMES as credit_tables
-        from studio_platform.schema_version import CREDIT_REVISION
+        from studio_platform.payment_schema import TABLE_NAMES as payment_tables
+        from studio_platform.schema_version import CREDIT_REVISION, PAYMENT_REVISION
 
-        for present, credits_present, revision in (
-            (False, False, None),
-            (True, False, IDENTITY_REVISION),
-            (True, True, CREDIT_REVISION),
+        for present, credits_present, payments_present, revision in (
+            (False, False, False, None),
+            (True, False, False, IDENTITY_REVISION),
+            (True, True, False, CREDIT_REVISION),
+            (True, True, True, PAYMENT_REVISION),
         ):
             with (
                 self.subTest(present=present),
@@ -372,6 +374,10 @@ class IdentityReaderTests(unittest.TestCase):
                         return_value=credits_present,
                     ),
                     patch(
+                        "studio_platform.payment_schema.validate_connection",
+                        return_value=payments_present,
+                    ),
+                    patch(
                         "studio_platform.workflow_schema.schema_exists",
                         return_value=present,
                     ),
@@ -393,6 +399,10 @@ class IdentityReaderTests(unittest.TestCase):
                 for name in credit_tables:
                     self.assertEqual(
                         "--table=public." + name in commands[0], credits_present
+                    )
+                for name in payment_tables:
+                    self.assertEqual(
+                        "--table=public." + name in commands[0], payments_present
                     )
                 if present:
                     export.assert_called_once_with(connection, output)
