@@ -77,12 +77,15 @@ export function LibraryMedia({ row, api, detail = false }) {
   const id = row.artifact_id || row.asset_id,
     kind = row.artifact_id ? 'artifacts' : 'assets';
   const imageRead = row.type === 'image' || (!detail && row.type === 'video');
+  const original = id ? `/v1/${kind}/${encodeURIComponent(id)}/content` : null;
+  // Older uploads have no thumbnail rendition (rendition_status "missing"); an image can
+  // still show its original, lazily loaded. Videos without a thumbnail keep the notice.
   const path = imageRead
     ? detail
-      ? row.preview_url
-      : row.thumbnail_url
-    : detail && id
-      ? `/v1/${kind}/${encodeURIComponent(id)}/content`
+      ? row.preview_url || (row.type === 'image' ? original : null)
+      : row.thumbnail_url || (row.type === 'image' ? original : null)
+    : detail
+      ? original
       : null;
   let url = '';
   try {
