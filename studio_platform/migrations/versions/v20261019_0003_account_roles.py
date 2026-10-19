@@ -1,4 +1,4 @@
-"""Frozen account-role schema for the reader bridge; adoption is not enabled."""
+"""Frozen account-role DDL; only the verified adoption caller may execute it."""
 
 import sqlalchemy as sa
 
@@ -54,7 +54,16 @@ def build(operations):
 
 
 def upgrade():
-    raise RuntimeError("identity_reader_bridge_cannot_adopt_schema")
+    from alembic import context, op
+
+    if (
+        context.is_offline_mode()
+        or context.config.attributes.get("verified_identity_mode") is not True
+        or op.get_bind().dialect.name != "postgresql"
+        or not op.get_bind().in_transaction()
+    ):
+        raise RuntimeError("identity_verified_adoption_required")
+    build(op)
 
 
 def downgrade():
