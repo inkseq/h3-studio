@@ -1969,7 +1969,9 @@ class Repository:
                 return
         raise Conflict("capacity_drain_repreflight")
 
-    def _check_generation_policy(self, connection, scope, plan, *, admitting=True):
+    def _check_generation_policy(
+        self, connection, scope, plan, *, admitting=True, idempotency_key=None
+    ):
         """Check new work only, under the caller's original account gate."""
         from .content_policy import (
             ContentPolicyError,
@@ -1978,6 +1980,13 @@ class Repository:
         )
 
         compiled, execution = plan["request"], plan["execution_plan"]
+        if idempotency_key is not None and "film_source_ref" in compiled:
+            from .film_runs import accepted_policy_admission
+
+            if accepted_policy_admission(
+                connection, self, scope, plan, idempotency_key
+            ):
+                return  # Only the exact child of an already accepted Film run.
         verify_input(
             connection,
             scope.tenant_id,
@@ -2062,6 +2071,7 @@ class Repository:
                     scope,
                     plan,
                     admitting=initial_status in {"queued", "waiting_capacity"},
+                    idempotency_key=idempotency_key,
                 )
                 from .storyboard_versions import check_admission_source
 
@@ -2184,7 +2194,9 @@ class Repository:
                 .one()
             )
             self._content_write_guard(connection, scope, plan["request"])
-            self._check_generation_policy(connection, scope, plan)
+            self._check_generation_policy(
+                connection, scope, plan, idempotency_key=job["idempotency_key"]
+            )
             from .storyboard_versions import check_admission_source
 
             check_admission_source(connection, self, scope, plan["request"])
