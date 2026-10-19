@@ -42,6 +42,12 @@ one existing generation batch,32 audio tracks in final export, and the original
 per-source/total-input/work-cache quotas. Unsupported recipes fail rather than
 trimming inputs. Subtitle burn requires existing explicitly confirmed chapter
 caption tracks; no AI image/voice/caption generation or tier mapping is implied.
+Burn limits still apply after confirmation: invalid text/timing returns
+`film_captions_invalid`; absent or stale confirmation returns
+`film_captions_require_confirmation`. Chapter compilation revalidates captions
+against the accepted authoring snapshot before attaching their normalized cues
+to this run's generated media. It never writes a new `confirmedSnapshot` or
+changes the editable Story; later caption edits do not alter an accepted film.
 
 ## Frozen source and grant authority
 

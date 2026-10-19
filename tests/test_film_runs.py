@@ -485,6 +485,332 @@ class FilmTests(unittest.TestCase):
         self.assertEqual(plan['request']['request']['seed'], 123)
         self.assertEqual(plan['request']['sources'], {'original': {'sha256': 'a' * 64}})
 
+    def confirmed_captions(self, project, text='Boat begins\nits quiet journey.'):
+        from studio_platform.guided import Guided
+
+        guided = Guided(self.app)
+        guided.apply(
+            project,
+            {
+                'op': 'captions.set',
+                'chapter_id': 'chapter-one',
+                'cues': [{'id': 'cue', 'start': 0, 'end': 1.9, 'text': text}],
+            },
+        )
+        guided.apply(
+            project,
+            {
+                'op': 'captions.confirm',
+                'chapter_id': 'chapter-one',
+                'reviewed': True,
+            },
+        )
+        return project
+
+    def test_caption_preflight_preserves_confirmation_and_reports_invalid_burn_content(
+        self,
+    ):
+        from studio_platform.guided import Guided
+
+        original = self.confirmed_captions(copy.deepcopy(self.project))
+        version = 1
+        for index, (change, reason) in enumerate(
+            [
+                (lambda p: None, None),
+                (
+                    lambda p: p['journey']['captionTracks']['chapter-one']['cues'][
+                        0
+                    ].update(text='Edited words'),
+                    'film_captions_require_confirmation',
+                ),
+                (
+                    lambda p: p['entities'][2]['data'].update(seconds=3),
+                    'film_captions_require_confirmation',
+                ),
+                (
+                    lambda p: p['journey']['sound'].update(mode='music'),
+                    'film_captions_require_confirmation',
+                ),
+                (
+                    lambda p: self.confirmed_captions(
+                        p, 'A small boat begins its journey.'
+                    ),
+                    'film_captions_invalid',
+                ),
+            ]
+        ):
+            with self.subTest(reason=reason, index=index):
+                project = copy.deepcopy(original)
+                change(project)
+                version += 1
+                self.repo.put_document(
+                    Scope('tenant', 'owner', '__projects'),
+                    'project',
+                    'story-one',
+                    project,
+                    expected_version=version - 1,
+                )
+                arguments = (
+                    self.principal,
+                    'story-one',
+                    {
+                        'expected_version': version,
+                        'resolution': '480P',
+                        'burn_subtitles': True,
+                    },
+                    'captions-' + str(index),
+                )
+                if reason:
+                    with self.assertRaisesRegex(Conflict, reason):
+                        self.service.preflight(*arguments)
+                else:
+                    preview = self.service.preflight(*arguments)
+                    self.assertEqual(self.raw(preview['id'])['project'], original)
+        # A millisecond-valid/SRT-confirmable cue can still contain less than
+        # one whole24fps frame. Human confirmation does not waive burn bounds.
+        project = copy.deepcopy(original)
+        project['journey']['captionTracks']['chapter-one']['cues'][0].update(
+            start=0.001, end=0.002
+        )
+        Guided(self.app).apply(
+            project,
+            {'op': 'captions.confirm', 'chapter_id': 'chapter-one', 'reviewed': True},
+        )
+        self.repo.put_document(
+            Scope('tenant', 'owner', '__projects'),
+            'project',
+            'story-one',
+            project,
+            expected_version=version,
+        )
+        with self.assertRaisesRegex(Conflict, 'film_captions_invalid'):
+            self.service.preflight(
+                self.principal,
+                'story-one',
+                {
+                    'expected_version': version + 1,
+                    'resolution': '480P',
+                    'burn_subtitles': True,
+                },
+                'subframe',
+            )
+
+    def test_caption_preflight_uses_same_half_frame_rounding_as_confirm_and_render(
+        self,
+    ):
+        from studio_platform.guided import Guided
+
+        project = copy.deepcopy(self.project)
+        project['entities'][2]['data']['seconds'] = 12.5 / 24
+        guided = Guided(self.app)
+        guided.apply(
+            project,
+            {
+                'op': 'captions.set',
+                'chapter_id': 'chapter-one',
+                'cues': [{'id': 'cue', 'start': 0, 'end': 13 / 24, 'text': 'Boat'}],
+            },
+        )
+        guided.apply(
+            project,
+            {'op': 'captions.confirm', 'chapter_id': 'chapter-one', 'reviewed': True},
+        )
+        self.repo.put_document(
+            Scope('tenant', 'owner', '__projects'),
+            'project',
+            'story-one',
+            project,
+            expected_version=1,
+        )
+        preview = self.service.preflight(
+            self.principal,
+            'story-one',
+            {'expected_version': 2, 'resolution': '480P', 'burn_subtitles': True},
+            'half-frame',
+        )
+        self.assertEqual(preview['counts']['reused'], 1)
+
+    def test_confirmed_frozen_captions_follow_original_generated_artifact_through_export(
+        self,
+    ):
+        """Original queue/artifact receipts; synthetic media, no decode/inference."""
+        from studio_platform.artifact_writer import ArtifactWriter
+        from studio_platform.caption_server import caption_signature
+        from studio_platform.queue import TaskQueue
+        from studio_platform.render_plans import ordered_chapter
+
+        project = copy.deepcopy(self.project)
+        project['entities'][2]['data'].pop('selectedAssetId')
+        self.confirmed_captions(project)
+        confirmed = copy.deepcopy(project['journey']['captionTracks'])
+        self.repo.put_document(
+            Scope('tenant', 'owner', '__projects'),
+            'project',
+            'story-one',
+            project,
+            expected_version=1,
+        )
+        execution = {'pool': 'film-test', 'backend': 'mock', 'quote_known': True}
+
+        def preflight(principal, project_id, body, key):
+            plan = self.repo.create_plan(
+                self.scope,
+                {
+                    'recipe_id': 'test-shot',
+                    'client_ref': {'project_id': project_id, 'shot_id': 'shot-one'},
+                    'request': {'seed': 123},
+                },
+                execution,
+                expires_at=self.repo.clock() + 60,
+                estimated_cost_microusd=10,
+            )
+            self.repo.put_document(
+                self.scope,
+                'storyboard_preflight',
+                'original-preview',
+                {
+                    'items': [
+                        {'plan_id': plan['id'], 'shot_id': 'shot-one', 'seed': '123'}
+                    ]
+                },
+            )
+            return {'id': 'original-preview'}
+
+        self.app.state.storyboard_versions = SimpleNamespace(preflight=preflight)
+        preview = self.service.preflight(
+            self.principal,
+            'story-one',
+            {'expected_version': 2, 'resolution': '480P', 'burn_subtitles': True},
+            'captions-missing',
+        )
+        edited = copy.deepcopy(project)
+        edited['journey']['captionTracks']['chapter-one']['cues'][0]['text'] = (
+            'Later editable text'
+        )
+        self.repo.put_document(
+            Scope('tenant', 'owner', '__projects'),
+            'project',
+            'story-one',
+            edited,
+            expected_version=2,
+        )
+        with patch(
+            'studio_platform.spending_limits.check_submission_confirmation',
+            return_value=SimpleNamespace(version=1),
+        ):
+            self.service.submit(
+                self.principal,
+                'story-one',
+                {'preflight_id': preview['id'], 'confirm': True},
+                'submit',
+            )
+        admitted = []
+        self.repo.configure_budget(
+            'film-caption-test',
+            tenant_id='tenant',
+            owner_id='owner',
+            limit_microusd=1_000_000,
+        )
+
+        def submit(principal, body, key):
+            admitted.append(key)
+            return {
+                'items': [
+                    {
+                        'plan_id': ident,
+                        'job_id': self.repo.create_job(
+                            self.service.access.scope(principal, 'story-one'),
+                            ident,
+                            key + ':' + ident,
+                            budget_account_ids=('film-caption-test',),
+                        )['id'],
+                    }
+                    for ident in body['plan_ids']
+                ]
+            }
+
+        self.app.state.submit_generation_batch = submit
+        self.app.state.generation_planning = SimpleNamespace(
+            policies=SimpleNamespace(
+                evaluate=lambda *args: SimpleNamespace(
+                    execution=execution, expires_at=self.repo.clock() + 60
+                )
+            )
+        )
+        queue = TaskQueue(self.repo)
+
+        def finish(job_id):
+            claim = queue.claim('synthetic-worker', 'film-test', job_ids=[job_id])
+            self.assertEqual(claim.job['id'], job_id)
+            queue.begin_submission(claim.lease)
+            queue.record_submitted(claim.lease, 'synthetic-' + job_id)
+            queue.begin_collection(claim.lease)
+            specs = ArtifactWriter._specs(
+                {
+                    'roles': {
+                        'video': {
+                            'key': 'owners/owner/artifacts/' + job_id + '/video.mp4',
+                            'size_bytes': 100,
+                            'sha256': 'a' * 64,
+                            'content_type': 'video/mp4',
+                            'evidence': {},
+                        }
+                    }
+                }
+            )
+            queue.complete(claim.lease, specs, actual_cost_microusd=None)
+
+        self.assertEqual(
+            self.service.turn(self.principal, 'story-one', preview['id'])['phase'],
+            'generating',
+        )
+        generated = self.raw(preview['id'])['generation'][0]['job_id']
+        finish(generated)
+        self.assertEqual(
+            self.service.turn(self.principal, 'story-one', preview['id'])['phase'],
+            'chapters',
+        )
+        value = self.raw(preview['id'])
+        chapter = self.repo.get_plan(self.scope, value['chapters'][0]['plan_id'])
+        self.assertEqual(
+            chapter['request']['request']['render']['subtitles']['cues'][0]['text'],
+            'Boat begins\nits quiet journey.',
+        )
+        self.assertEqual(value['project']['journey']['captionTracks'], confirmed)
+        rendered = frozen_story(value['project'], value['results'])
+        self.assertEqual(rendered['journey']['captionTracks'], confirmed)
+        self.assertNotEqual(
+            caption_signature(
+                rendered, 'chapter-one', ordered_chapter(rendered, 'chapter-one')[2]
+            ),
+            confirmed['chapter-one']['confirmedSnapshot'],
+        )
+        self.assertEqual(value['snapshot_hash'], request_hash(value['project']))
+        finish(value['chapters'][0]['job_id'])
+        self.assertEqual(
+            self.service.turn(self.principal, 'story-one', preview['id'])['phase'],
+            'exporting',
+        )
+        value = self.raw(preview['id'])
+        export = self.repo.get_plan(self.scope, value['export']['plan_id'])
+        self.assertEqual(
+            next(iter(export['request']['sources'].values()))['object']['content_type'],
+            'video/mp4',
+        )
+        finish(value['export']['job_id'])
+        self.assertEqual(
+            self.service.turn(self.principal, 'story-one', preview['id']),
+            {'terminal': True, 'phase': 'completed'},
+        )
+        self.service.turn(self.principal, 'story-one', preview['id'])
+        self.assertEqual(len(admitted), 3)
+        self.assertEqual(
+            self.repo.get_document(
+                Scope('tenant', 'owner', '__projects'), 'project', 'story-one'
+            )['payload'],
+            edited,
+        )
+
     def test_replayed_film_reuses_chapter_and_export_original_ids(self):
         preview = self.preview()
         with patch(
