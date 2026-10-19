@@ -104,6 +104,38 @@ class BatchCrashTests(unittest.TestCase):
         self.assertIsNone(response.json()["items"][0]["error_code"])
         self.assertEqual(len(self.rows()), 1)
 
+    def test_known_spending_refusals_keep_diagnostics_and_original_task(self):
+        self.ready()
+        original_job_id = None
+        for code in (
+            "connection_daily_limit_reached",
+            "user_daily_limit_reached",
+            "spending_usage_unconfirmed",
+        ):
+            with (
+                self.subTest(code=code),
+                patch.object(
+                    self.app.state, "enqueue_planned", side_effect=BudgetExceeded(code)
+                ),
+            ):
+                response = self.client.post(
+                    "/v1/batches", json=self.body, headers=self.headers
+                )
+                self.assertEqual(response.status_code, 202, response.text)
+                item = response.json()["items"][0]
+                self.assertEqual(item["status"], "admission_blocked")
+                self.assertEqual(item["error_code"], code)
+                original_job_id = original_job_id or item["job_id"]
+                self.assertEqual(item["job_id"], original_job_id)
+                self.assertEqual(len(self.rows()), 1)
+                self.assertEqual(self.rows()[0]["status"], "planned")
+        recovered = self.client.post(
+            "/v1/batches", json=self.body, headers=self.headers
+        ).json()
+        self.assertEqual(recovered["counts"], {"queued": 1})
+        self.assertEqual(recovered["items"][0]["job_id"], original_job_id)
+        self.assertEqual(len(self.rows()), 1)
+
     def test_cancel_after_link_prevents_late_activation(self):
         self.ready()
         with patch.object(
