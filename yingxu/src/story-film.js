@@ -198,7 +198,22 @@ export function createFilmController({ api, storage, getContext, keyFactory }) {
     const expected = state.run;
     let run;
     if (op.kind === 'film-preflight') {
-      run = await api.preflight(scope.projectId, op.body, op.key);
+      try {
+        run = await api.preflight(scope.projectId, op.body, op.key);
+      } catch (error) {
+        guard(scope);
+        const code = error?.detail?.code || error?.detail?.detail;
+        // A typed preflight rejection never accepts a film or paid jobs. Keep
+        // unknown transport/server outcomes bound to their original request.
+        if (
+          [409, 422].includes(error?.status) &&
+          (/^film_/.test(code || '') || code === 'document_version_conflict')
+        ) {
+          commands.clear(op);
+          publish({ pending: null });
+        }
+        throw error;
+      }
       if (run?.project_version !== op.body.expected_version) throw Error('film.receiptChanged');
       keep(run, scope);
     } else if (op.kind === 'film-submit') {

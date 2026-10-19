@@ -108,6 +108,58 @@ function harness() {
 }
 const options = { resolution: '720P', burn_subtitles: false };
 
+test('typed preflight refusals allow correcting options; unknown outcomes retain the original request', async () => {
+  for (const status of [409, 422]) {
+    const h = harness();
+    h.api.preflight = async () => {
+      throw Object.assign(Error('caption confirmation'), {
+        status,
+        detail: { detail: 'film_captions_require_confirmation' },
+      });
+    };
+    await assert.rejects(h.controller.preflight(options), /caption confirmation/);
+    assert.equal(h.controller.getState().pending, null);
+    assert.equal(h.controller.getState().error, 'film_captions_require_confirmation');
+    h.api.preflight = async () => filmFixture();
+    await h.controller.preflight({ ...options, burn_subtitles: true });
+    assert.equal(h.controller.getState().run.id, 'film-original');
+    assert.equal(
+      h.calls.some((call) => call.kind === 'submit'),
+      false,
+    );
+  }
+  for (const status of [0, 408, 429, 503]) {
+    const h = harness();
+    h.api.preflight = async () => {
+      throw Object.assign(Error('unknown outcome'), {
+        status,
+        detail: { code: 'film_captions_require_confirmation' },
+      });
+    };
+    await assert.rejects(h.controller.preflight(options));
+    assert.equal(h.controller.getState().pending.kind, 'film-preflight');
+  }
+  const stale = harness();
+  stale.api.preflight = async () => {
+    throw Object.assign(Error('stale project'), {
+      status: 409,
+      detail: { detail: 'document_version_conflict' },
+    });
+  };
+  await assert.rejects(stale.controller.preflight(options));
+  assert.equal(stale.controller.getState().pending, null);
+  const h = harness();
+  await h.controller.preflight(options);
+  h.api.submit = async () => {
+    throw Object.assign(Error('submit refused'), {
+      status: 409,
+      detail: { code: 'film_confirmation_required' },
+    });
+  };
+  await assert.rejects(h.controller.confirm(true));
+  assert.equal(h.controller.getState().pending.kind, 'film-submit');
+});
+
 test('preflight is not paid submission; dirty or stale revisions cannot be confirmed', async () => {
   const h = harness();
   h.change({ dirty: true });
