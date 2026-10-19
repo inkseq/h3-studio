@@ -1,5 +1,7 @@
 # Inkseq / H3 session entry
 
+Working agreement: [#328](https://github.com/inkseq/h3-studio/issues/328) governs the Codex backend / Claude frontend lanes, risk tiers and release cadence; it supersedes conflicting older process notes below.
+
 Read this file, the assigned issue's latest owner comments and current claims before editing. This is the only mandatory repository start-up document; expand linked contracts only for the affected task. Check current remote main without resetting another checkout.
 
 ## Authority and coordination

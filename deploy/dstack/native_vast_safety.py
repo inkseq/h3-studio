@@ -80,7 +80,7 @@ def _rejection_code(status, data, ask_id):
 
 
 def _invalid_args_diagnostic(message):
-    """Extract closed diagnostics, never provider text, from documented errors.
+    """Extract closed argument diagnostics, never arbitrary provider text.
 
     These values explain an already-proven rejection; they cannot authorize
     fallback or change the five-field non-allocation proof.
@@ -92,13 +92,23 @@ def _invalid_args_diagnostic(message):
     if match is None:
         return unspecified
     subcode, detail = int(match[1]) if match[1] else None, match[2]
-    if not detail.startswith("Invalid args: "):
-        return subcode, "unknown", "unspecified"
-    detail = detail[len("Invalid args: "):]
+    if detail.startswith("Invalid args: "):
+        detail = detail[len("Invalid args: "):]
     if re.fullmatch(r"len\(args\) > [1-9][0-9]{0,8}", detail):
         return subcode, "args", "length_limit"
     if detail == "'id' is required and must be a valid offer ID":
         return subcode, "id", "required_or_invalid"
+    fields = r"(disk|image|template_id|template_hash_id|env|ports?|price|args|onstart|runtype|image_login|user)"
+    for pattern, reason in (
+            (rf"Invalid ['\"]?{fields}['\"]?(?: size)?(?:[.: ].*)?", "invalid"),
+            (rf"Missing ['\"]?{fields}['\"]?(?:[.: ].*)?", "required"),
+            (rf"Unsupported ['\"]?{fields}['\"]?(?:[.: ].*)?", "unsupported"),
+            (rf"['\"]?{fields}['\"]?(?: size)? (?:is required|must be provided)(?:[.: ].*)?", "required"),
+            (rf"['\"]?{fields}['\"]?(?: size)? (?:is not supported|is unsupported)(?:[.: ].*)?", "unsupported"),
+            (rf"['\"]?{fields}['\"]?(?: size)? (?:is too (?:large|small)|must be (?:greater|less) than|exceeds)(?:[.: ].*)?", "out_of_range")):
+        field = re.fullmatch(pattern, detail)
+        if field is not None:
+            return subcode, field[1], reason
     return subcode, "unknown", "unspecified"
 
 
@@ -130,16 +140,20 @@ def _log_invalid_args(ask_id, data, payload):
                                      next((value for value in diagnostics if value[0] is not None), diagnostics[0]))
         count, total, maximum = _argument_sizes(payload)
         args_type, _ = _field_shape(payload if type(payload) is dict else {}, "args")
+        disk = payload.get("disk") if type(payload) is dict else None
+        disk_gb = disk if type(disk) in (int, float) and 0 < disk <= 1000000 and math.isfinite(disk) else None
         _logger.warning(
             "sixnine_vast_create_rejected ask_id=%s http_status=400 "
             "error_code=invalid_args provider_subcode=%s field=%s reason=%s "
             "args_type=%s args_count=%s args_total_bytes=%s args_max_bytes=%s "
             "msg_type=%s msg_length=%s message_type=%s message_length=%s "
-            "detail_type=%s detail_length=%s error_type=%s error_length=%s",
+            "detail_type=%s detail_length=%s error_type=%s error_length=%s "
+            "disk_gb=%s",
             ask_id, subcode, field, reason,
             args_type, count, total, maximum,
             *_field_shape(data, "msg"), *_field_shape(data, "message"),
             *_field_shape(data, "detail"), *_field_shape(data, "error"),
+            disk_gb,
         )
     except Exception:
         pass  # Logging cannot turn a proven rejection into an unknown mutation.
