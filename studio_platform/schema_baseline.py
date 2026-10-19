@@ -33,7 +33,9 @@ from sqlalchemy import (
 from .migrations.versions import v20261019_0001_platform_baseline as baseline
 from .schema_version import (
     BASELINE_REVISION,
+    CREDIT_REVISION,
     IDENTITY_REVISION,
+    IDENTITY_REVISIONS,
     WORKFLOW_REVISIONS,
     SchemaVersionError,
     read_schema_version,
@@ -105,6 +107,12 @@ def _check(value):
     try:
         return normalize_check(value)
     except IdentitySchemaError:
+        pass
+    from .credit_schema import CreditSchemaError, normalize_check as credit_check
+
+    try:
+        return credit_check(value)
+    except CreditSchemaError:
         pass
     if re.search(r"[^a-zA-Z_0-9\s()><=]", value):
         raise BaselineError("schema_check_expression_requires_review")
@@ -388,8 +396,20 @@ def compare_schema(connection, *, schema=None):
         present = present_tables(actual)
     except IdentitySchemaError as error:
         raise BaselineError(str(error)) from None
-    if present or version == IDENTITY_REVISION:
+    from .credit_schema import (
+        CreditSchemaError,
+        frozen_metadata as credit_metadata,
+        present_tables as credit_present_tables,
+    )
+
+    try:
+        credits_present = credit_present_tables(actual)
+    except CreditSchemaError as error:
+        raise BaselineError(str(error)) from None
+    if present or version in IDENTITY_REVISIONS or credits_present:
         expected.update(metadata_signature(identity_metadata(), connection.dialect))
+    if credits_present or version == CREDIT_REVISION:
+        expected.update(metadata_signature(credit_metadata(), connection.dialect))
     differences = []
     for name in sorted(expected.keys() | actual.keys()):
         if name not in actual:
@@ -427,9 +447,12 @@ def compare_schema(connection, *, schema=None):
 def _reader_metadata():
     """Frozen baseline plus recognized optional family, without initializing it."""
     from .identity_schema import frozen_metadata as identity_metadata
+    from .credit_schema import frozen_metadata as credit_metadata
 
     result = frozen_metadata()
     for table in identity_metadata().tables.values():
+        table.to_metadata(result)
+    for table in credit_metadata().tables.values():
         table.to_metadata(result)
     return result
 
@@ -600,10 +623,10 @@ def adopt_identity(
         raise BaselineError('schema_snapshot_changed')
     if not before['matches'] or before['recorded_revision'] not in {
         WORKFLOW_REVISION,
-        IDENTITY_REVISION,
+        *IDENTITY_REVISIONS,
     }:
         raise BaselineError('identity_adoption_requires_adopted_workflows')
-    if before['recorded_revision'] == IDENTITY_REVISION:
+    if before['recorded_revision'] in IDENTITY_REVISIONS:
         return dict(
             state='already_adopted', before=before, after=before, backfilled_users=0
         )
@@ -687,6 +710,57 @@ def adopt_identity(
     )
 
 
+def adopt_credits(connection, *, expected_fingerprint):
+    """Add customer tables under the existing locks, without minting money.
+
+    As for identity adoption, both current and previous approved images must
+    first contain this reader bridge, verified under the host release.lock.
+    Repeating adoption never creates accounts, grants, prices or policy rows.
+    """
+    from .identity import lock_account_gate
+    from .credit_schema import CreditSchemaError, TABLE_NAMES, validate_connection
+
+    if (
+        not connection.in_transaction()
+        or connection.dialect.name != 'postgresql'
+        or not re.fullmatch(r'[a-f0-9]{64}', expected_fingerprint or '')
+    ):
+        raise BaselineError('credit_adoption_requires_verified_transaction')
+    connection.exec_driver_sql("SET LOCAL lock_timeout = '5s'")
+    connection.exec_driver_sql("SET LOCAL statement_timeout = '30s'")
+    lock_account_gate(connection, exclusive=True)
+    connection.exec_driver_sql('SELECT pg_advisory_xact_lock(685939796868749721)')
+    before = compare_schema(connection)
+    if before['schema_fingerprint'] != expected_fingerprint:
+        raise BaselineError('schema_snapshot_changed')
+    if not before['matches'] or before['recorded_revision'] not in {
+        IDENTITY_REVISION,
+        CREDIT_REVISION,
+    }:
+        raise BaselineError('credit_adoption_requires_adopted_identity')
+    if before['recorded_revision'] == CREDIT_REVISION:
+        return dict(state='already_adopted', before=before, after=before)
+    if TABLE_NAMES & set(inspect(connection).get_table_names()):
+        raise BaselineError('credit_unrecorded_family_requires_review')
+    from alembic import command
+
+    config = alembic_config()
+    config.attributes.update(
+        verified_baseline_connection=connection,
+        verified_baseline_mode='upgrade',
+        verified_credit_mode=True,
+    )
+    command.upgrade(config, CREDIT_REVISION)
+    try:
+        validate_connection(connection)
+    except CreditSchemaError as error:
+        raise BaselineError(str(error)) from None
+    after = compare_schema(connection)
+    if not after['matches'] or after['recorded_revision'] != CREDIT_REVISION:
+        raise BaselineError('credit_adoption_verification_failed')
+    return dict(state='adopted_credits', before=before, after=after)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Schema-only baseline verification and guarded adoption"
@@ -715,6 +789,11 @@ def main(argv=None):
         help='Adopt users after current and previous approved reader images are verified under release.lock',
     )
     identity.add_argument('--expected-fingerprint', required=True)
+    credits = commands.add_parser(
+        'adopt-credits',
+        help='Add customer-credit tables after both approved reader images are verified under release.lock',
+    )
+    credits.add_argument('--expected-fingerprint', required=True)
     args = parser.parse_args(argv)
     engine = None
     try:
@@ -753,6 +832,10 @@ def main(argv=None):
                         )
                     ),
                 )
+            elif args.command == 'adopt-credits':
+                result = adopt_credits(
+                    connection, expected_fingerprint=args.expected_fingerprint
+                )
             else:
                 result = adopt_baseline(
                     connection, expected_fingerprint=args.expected_fingerprint
@@ -760,7 +843,8 @@ def main(argv=None):
         print(json.dumps(result, sort_keys=True))
         return (
             0
-            if args.command in {"adopt", 'adopt-workflows', 'adopt-identity'}
+            if args.command
+            in {"adopt", 'adopt-workflows', 'adopt-identity', 'adopt-credits'}
             or result["matches"]
             else 1
         )

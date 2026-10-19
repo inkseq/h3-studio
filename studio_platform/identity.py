@@ -18,7 +18,7 @@ def _schema_state(connection):
     if any(present):
         return "canonical" if all(present) else "partial"
     from .schema_version import (
-        IDENTITY_REVISION,
+        IDENTITY_REVISIONS,
         SchemaVersionError,
         read_schema_version,
     )
@@ -27,7 +27,7 @@ def _schema_state(connection):
         revision = read_schema_version(connection)
     except SchemaVersionError:
         return "partial"
-    return "partial" if revision == IDENTITY_REVISION else "legacy"
+    return "partial" if revision in IDENTITY_REVISIONS else "legacy"
 
 
 def lock_account_gate(connection, tenant=None, *, exclusive=False):

@@ -717,6 +717,10 @@ class BackupTests(unittest.TestCase):
                 "studio_platform.identity_schema.validate_connection",
                 return_value=False,
             ),
+            mock.patch(
+                "studio_platform.credit_schema.validate_connection",
+                return_value=False,
+            ),
         ):
             result = dump_postgres(
                 url_file, self.root / "pg-backup", pg_dump="fake-pg-dump"

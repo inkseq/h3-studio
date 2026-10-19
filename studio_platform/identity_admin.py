@@ -30,7 +30,7 @@ from .repository import (
     outbox,
     request_hash,
 )
-from .schema_version import IDENTITY_REVISION, SchemaVersionError, read_schema_version
+from .schema_version import IDENTITY_REVISIONS, SchemaVersionError, read_schema_version
 
 PROJECT = "__account_admin"
 KEY_KIND = "admin_user_change"
@@ -110,7 +110,7 @@ class IdentityAdmin:
         try:
             if read_schema_version(
                 connection
-            ) != IDENTITY_REVISION or not validate_connection(connection):
+            ) not in IDENTITY_REVISIONS or not validate_connection(connection):
                 raise AdminError("Account administration is not ready", 503)
         except (SchemaVersionError, IdentitySchemaError):
             raise AdminError("Account administration is not ready", 503) from None

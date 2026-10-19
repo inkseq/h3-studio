@@ -314,8 +314,14 @@ class IdentityReaderTests(unittest.TestCase):
         self,
     ):
         from studio_platform.backup import dump_postgres
+        from studio_platform.credit_schema import TABLE_NAMES as credit_tables
+        from studio_platform.schema_version import CREDIT_REVISION
 
-        for present, revision in ((False, None), (True, IDENTITY_REVISION)):
+        for present, credits_present, revision in (
+            (False, False, None),
+            (True, False, IDENTITY_REVISION),
+            (True, True, CREDIT_REVISION),
+        ):
             with (
                 self.subTest(present=present),
                 tempfile.TemporaryDirectory() as directory,
@@ -362,6 +368,10 @@ class IdentityReaderTests(unittest.TestCase):
                         return_value=present,
                     ),
                     patch(
+                        "studio_platform.credit_schema.validate_connection",
+                        return_value=credits_present,
+                    ),
+                    patch(
                         "studio_platform.workflow_schema.schema_exists",
                         return_value=present,
                     ),
@@ -380,6 +390,10 @@ class IdentityReaderTests(unittest.TestCase):
                 self.assertIn("--snapshot=000001-1", commands[0])
                 for name in identity.TABLE_NAMES:
                     self.assertEqual("--table=public." + name in commands[0], present)
+                for name in credit_tables:
+                    self.assertEqual(
+                        "--table=public." + name in commands[0], credits_present
+                    )
                 if present:
                     export.assert_called_once_with(connection, output)
                 else:

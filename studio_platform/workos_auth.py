@@ -15,7 +15,7 @@ from .auth import AuthenticationError, Principal, accounts, digest, sessions
 from .identity import lock_account_gate
 from .identity_schema import IdentitySchemaError, users, validate_connection
 from .repository import documents
-from .schema_version import IDENTITY_REVISION, SchemaVersionError, read_schema_version
+from .schema_version import IDENTITY_REVISIONS, SchemaVersionError, read_schema_version
 from .workos_config import load_credentials
 
 STATE_COOKIE = "__Host-inkseq-workos"
@@ -135,7 +135,7 @@ class WorkOSAuth:
         try:
             if read_schema_version(
                 connection
-            ) != IDENTITY_REVISION or not validate_connection(connection):
+            ) not in IDENTITY_REVISIONS or not validate_connection(connection):
                 raise WorkOSError("workos_schema_not_ready", 503)
         except (IdentitySchemaError, SchemaVersionError):
             raise WorkOSError("workos_schema_not_ready", 503) from None
