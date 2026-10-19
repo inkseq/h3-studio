@@ -21,6 +21,7 @@ import { operatorCatalogs } from './operatorCatalogs.js';
 import { accountCatalogs } from './accountCatalogs.js';
 import { workspaceCatalogs } from './workspaceCatalogs.js';
 import { settingsCatalogs } from './settingsCatalogs.js';
+import { creditsCatalogs } from './creditsCatalogs.js';
 import { clientCatalogs } from './clientCatalogs.js';
 import { storyboardCatalogs } from './storyboardCatalogs.js';
 import { legacyCatalogs } from './legacyCatalogs.js';
@@ -50,6 +51,7 @@ export const catalogs = {
     ...accountCatalogs.en,
     ...workspaceCatalogs.en,
     ...settingsCatalogs.en,
+    ...creditsCatalogs.en,
     ...clientCatalogs.en,
     ...storyboardCatalogs.en,
     ...legacyCatalogs.en,
@@ -99,6 +101,7 @@ export const catalogs = {
     ...accountCatalogs.zh,
     ...workspaceCatalogs.zh,
     ...settingsCatalogs.zh,
+    ...creditsCatalogs.zh,
     ...clientCatalogs.zh,
     ...storyboardCatalogs.zh,
     ...legacyCatalogs.zh,

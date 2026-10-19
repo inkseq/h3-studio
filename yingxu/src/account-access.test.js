@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { accessFrom, readAccess, resetAccess } from './account-access.js';
+import {
+  accessFrom,
+  hostedSignInEnabled,
+  hostedSignInUrl,
+  readAccess,
+  resetAccess,
+} from './account-access.js';
 
 test('anonymous or failed reads expose nothing privileged', () => {
   assert.deepEqual(accessFrom(null), { signedIn: false, gpus: false, admin: false });
@@ -56,4 +62,15 @@ test('one cached read per page load; errors fall back to no access', async () =>
     });
   assert.equal((await readAccess(ok)).gpus, true);
   resetAccess();
+});
+
+test('hosted sign-in needs an explicit flag and only returns to same-origin paths', () => {
+  assert.equal(hostedSignInEnabled({}), false);
+  assert.equal(hostedSignInEnabled({ hosted_sign_in: { enabled: true } }), true);
+  assert.equal(
+    hostedSignInUrl('/settings?tab=credits'),
+    '/api/auth/workos/start?return_to=%2Fsettings%3Ftab%3Dcredits',
+  );
+  for (const bad of ['//evil.example', 'https://evil.example', 'javascript:x', null])
+    assert.equal(hostedSignInUrl(bad), '/api/auth/workos/start?return_to=%2F');
 });

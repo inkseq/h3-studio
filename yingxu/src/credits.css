@@ -1,0 +1,251 @@
+/* Credits chip, Settings → Credits and the low-credits prompt. Ported from the prototype styles.css. */
+
+.credits-chip {
+  background: var(--surface);
+  border-color: var(--line);
+  padding: 5px 10px;
+  gap: 6px;
+  height: 32px;
+}
+.credits-chip svg {
+  color: var(--accent);
+}
+.credits-chip b {
+  font-variant-numeric: tabular-nums;
+}
+.credits-chip .credits-word {
+  color: var(--muted);
+  font-size: 12px;
+}
+.credits-chip.low {
+  border-color: rgba(243, 182, 90, 0.5);
+}
+.credits-chip.low svg {
+  color: var(--warn);
+}
+.credits-hero {
+  flex-direction: row;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+.credits-hero > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.credits-big {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 34px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.credits-big svg {
+  color: var(--accent);
+}
+.credits-big span {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.credits-today {
+  min-width: 200px;
+}
+.credits-today .bar {
+  display: block;
+  height: 6px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.credits-today .bar b {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.packs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.pack {
+  position: relative;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 14px;
+  border-radius: var(--r);
+  background: var(--surface-2);
+}
+.pack b {
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+}
+.pack b small {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 500;
+}
+.pack .pack-name {
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.pack .pack-price {
+  margin-top: 6px;
+  font-weight: 600;
+}
+.pack.best {
+  border-color: var(--accent);
+}
+.pack-tag {
+  position: absolute;
+  top: -9px;
+  right: 10px;
+  font-style: normal;
+  font-size: 11px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-weight: 600;
+}
+.good {
+  color: var(--good);
+}
+.bad {
+  color: var(--bad);
+}
+.price-table {
+  display: grid;
+  gap: 8px;
+}
+.price-table > div {
+  display: grid;
+  grid-template-columns: 110px 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border-radius: var(--r-sm);
+}
+.price-table > div span {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.credit-log {
+  display: flex;
+  flex-direction: column;
+}
+.credit-log > div {
+  display: grid;
+  grid-template-columns: 18px 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--line);
+}
+.credit-log > div:last-child {
+  border-bottom: 0;
+}
+.credit-log b {
+  font-variant-numeric: tabular-nums;
+  min-width: 64px;
+  text-align: right;
+}
+.checkout {
+  width: min(460px, 94vw);
+}
+.checkout-sum {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px;
+  background: var(--surface-2);
+  border-radius: var(--r);
+  font-size: 15px;
+}
+.credits-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+.credits-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.pack {
+  display: flex;
+  border: 1px solid var(--line);
+  text-align: left;
+}
+.pack b small {
+  display: block;
+  margin-top: 1px;
+}
+.credit-log .clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.choose.low-credits {
+  width: min(440px, 92vw);
+}
+.low-credits-actions {
+  justify-content: flex-end;
+}
+
+@media (max-width: 760px) {
+  .credits-chip .credits-word {
+    display: none;
+  }
+  .packs {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .price-table > div {
+    grid-template-columns: 1fr auto;
+  }
+  .price-table > div small {
+    grid-column: 1 / -1;
+    order: 3;
+  }
+}
+@media (min-width: 761px) and (max-width: 1180px) {
+  .credits-chip .credits-word {
+    display: none;
+  }
+}
+
+/* Hosted sign-in (#305) above the username form. */
+.hosted-sign-in {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.hosted-sign-in > button {
+  justify-content: center;
+  height: auto;
+  min-height: 40px;
+}
+.hosted-sign-in a {
+  color: var(--accent);
+}
+.hosted-sign-in-or {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 4px;
+}
+.hosted-sign-in-or::before,
+.hosted-sign-in-or::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}

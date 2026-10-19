@@ -1,4 +1,5 @@
 import { usePageActive, useAppLocation } from './AppRouteCache.jsx';
+import HostedSignIn from './HostedSignIn.jsx';
 import { navigateApp } from './app-navigation.js';
 import StudioHeader from './StudioHeader.jsx';
 import QuickChatPreferences from './QuickChatPreferences.jsx';
@@ -168,6 +169,7 @@ function Login({ onClose, onDone }) {
           }}
         >
           <p>{t('workspace.copy119')}</p>
+          <HostedSignIn auth={c.auth} />
           <label className="qc-field">
             {t('workspace.copy3')}
             <input

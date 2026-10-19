@@ -3,6 +3,7 @@ import { Cpu, Images, LayoutGrid, MessageSquare, Settings2, Trash2, UserRound } 
 import { LanguageSwitcher, useI18n } from './i18n/I18nProvider.jsx';
 import { navigateApp } from './app-navigation.js';
 import { readAccess } from './account-access.js';
+import { CreditsChip } from './CreditsUI.jsx';
 
 export default function StudioHeader({ account, active = 'works', accountMenu }) {
   const { t } = useI18n();
@@ -43,6 +44,7 @@ export default function StudioHeader({ account, active = 'works', accountMenu })
         ))}
       </nav>
       <div className="spacer" />
+      <CreditsChip account={account} />
       <LanguageSwitcher />
       <button
         type="button"

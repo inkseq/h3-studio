@@ -3,6 +3,7 @@ import { cloudSystemMessage } from './cloud-model.js';
 import { exportSrt } from './caption-model.js';
 import { chapterHandover, shotListCsv } from './handover-model.js';
 import StudioHeader from './StudioHeader.jsx';
+import { LowCreditsDialog } from './CreditsUI.jsx';
 import Library from './Library.jsx';
 import UniversalTrash, {
   TrashProvider,
@@ -1364,6 +1365,7 @@ function AppContent() {
       <TrashProvider account={account}>
         <PersistenceWarning key={'persistence:' + workspaceKey} />
         <AppRouteCache location={location} routes={routes} />
+        <LowCreditsDialog />
       </TrashProvider>
     </div>
   );
