@@ -206,7 +206,6 @@ jobs:
         run: python tools/ci_media_tools.py install "${{ runner.temp }}/sixnine-ci-apt"
       - run: python -m pip install --require-hashes -r requirements.dispatch.lock.txt
       - name: Bind native backup client to the existing PostgreSQL 17 service
-        if: matrix.shard == 4
         env:
           POSTGRES_TEST_CONTAINER: ${{ job.services.postgres.id }}
         run: |
