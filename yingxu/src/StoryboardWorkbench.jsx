@@ -1,4 +1,5 @@
 import { Columns2, Maximize2, Minimize2, RefreshCw, Star } from 'lucide-react';
+import { profileLabel } from './model-visibility.js';
 import { isActiveTrashItem } from './trash-commands.js';
 import { TrashMenu, RenameDialog } from './UniversalTrash.jsx';
 import TakeRecipe from './QuickChatTakeRecipe.jsx';
@@ -432,7 +433,7 @@ export function WorkbenchTakes({ shot, wide = false, onWide, onPreview, previewI
   );
 }
 export function WorkbenchBulk({ ids, onClear, onSelectAll }) {
-  const { t } = useI18n(),
+  const { t, locale } = useI18n(),
     { state, dispatch } = useStoryboardUI(),
     [copies, setCopies] = useState('1'),
     [scene, setScene] = useState(''),
@@ -472,7 +473,7 @@ export function WorkbenchBulk({ ids, onClear, onSelectAll }) {
         <option value="">{t('workbench.keepProfile')}</option>
         {state.capabilities?.deployment_profiles?.map((p) => (
           <option key={p.id} value={p.id}>
-            {p.label || p.model_id}
+            {profileLabel(p, locale)}
           </option>
         ))}
       </select>
@@ -525,7 +526,7 @@ export function WorkbenchBulk({ ids, onClear, onSelectAll }) {
 }
 
 export function WorkbenchDefaults({ shotId, initialTarget = 'shot' }) {
-  const { t } = useI18n(),
+  const { t, locale } = useI18n(),
     { state, adapter, dispatch } = useStoryboardUI();
   const [data, setData] = useState(null),
     [target, setTarget] = useState('shot'),
@@ -670,7 +671,7 @@ export function WorkbenchDefaults({ shotId, initialTarget = 'shot' }) {
             <option value="">{t('workbench.followDefaults')}</option>
             {profiles.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.label || p.model_id}
+                {profileLabel(p, locale)}
               </option>
             ))}
           </select>

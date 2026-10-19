@@ -145,7 +145,7 @@ export const accountCatalogs = {
       'Generation is currently unavailable. You can keep saving drafts; preflight checks availability again.',
     'account.copy124': 'Refresh service status',
     'account.copy125':
-      'This is a simulated execution service for workflow acceptance, not real H3 generation.',
+      'This is a simulated execution service for workflow acceptance, not real video generation.',
     'account.copy126': '① Sync inputs and preflight',
     'account.copy127':
       'Preflight allows submission to the waiting queue. Execution waits for qualified capacity. The same job is preserved and waiting can be cancelled; waiting does not create a second job.',
@@ -480,7 +480,7 @@ export const accountCatalogs = {
     'account.copy122': '重新检查',
     'account.copy123': '当前服务暂未开放生成，草稿可继续保存。预检时会重新检查。',
     'account.copy124': '刷新服务状态',
-    'account.copy125': '当前连接的是模拟执行服务，用于流程验收，不代表 H3 真实生成。',
+    'account.copy125': '当前连接的是模拟执行服务，用于流程验收，不代表真实生成。',
     'account.copy126': '① 同步输入并预检',
     'account.copy127':
       '预检允许提交到等待队列；尚无合格的计算容量，需完成启动和验收后才会执行。提交后保留同一任务，可取消等待，不会因为等待自动创建第二个任务。',
