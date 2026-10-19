@@ -35,6 +35,8 @@ DIAGNOSTICS = (
         "dstack_stop_pending",
         "dstack_run_terminal_billing_pending",
         "dstack_no_capacity_billing_pending",
+        "dstack_never_allocated",
+        "dstack_allocation_requires_reconciliation",
         "dstack_business_obligations_pending",
         "dstack_stop_requires_reconciliation",
         "dstack_runtime_busy",
@@ -57,6 +59,8 @@ DIAGNOSTICS = (
 )
 REASONS = {
     "dstack_no_capacity_billing_pending": "没有满足当前条件的可用机器；未分配实例，账单待核对",
+    "dstack_never_allocated": "启动失败，已核实未分配机器",
+    "dstack_allocation_requires_reconciliation": "启动分配结果尚未确认，保留原记录等待核对",
     "model_download_timeout": "权重下载超时",
     "model_download_failed": "权重下载失败",
     "ModelDownloadFailed": "权重下载失败",
@@ -73,6 +77,22 @@ REASONS = {
     "dstack_runtime_observation_busy": "另一轮启动观测正在执行，等待其完成",
     "dstack_runtime_source_changed": "运行源码与该机器绑定的版本不符",
     "dstack_runtime_configuration_mismatch": "运行配置与原启动请求不符",
+    "dstack_runtime_configuration_missing": "控制服务尚未配置模型运行环境",
+    "dstack_runtime_configuration_unavailable": "无法读取模型运行环境配置",
+    "dstack_runtime_config_invalid": "模型运行环境配置无效",
+    "dstack_runtime_port_range_invalid": "模型连接端口范围配置无效",
+    "dstack_runtime_retained_port_invalid": "原机器记录中的连接端口无效，需要管理员核对",
+    "dstack_runtime_port_conflict": "模型连接端口与另一台机器冲突，需要管理员核对",
+    "dstack_runtime_port_changed": "模型连接端口与原机器记录不符，需要管理员核对",
+    "dstack_runtime_stopped_port_unallocated": "已停止的机器没有保留模型连接端口",
+    "dstack_runtime_ports_exhausted": "控制服务的模型连接端口已用完，暂时无法准备机器",
+    "dstack_runtime_known_hosts_invalid": "SSH 主机密钥记录配置无效",
+    "dstack_runtime_source_index_invalid": "模型运行源码索引无效",
+    "dstack_runtime_source_entry_invalid": "模型运行源码条目无效",
+    "dstack_runtime_source_profile_invalid": "模型运行源码对应的部署配置无效",
+    "dstack_runtime_source_binding_invalid": "模型运行源码与部署配置不符",
+    "dstack_runtime_source_set_invalid": "模型运行源码文件不完整",
+    "dstack_runtime_source_selection_missing": "尚未配置所选模型和运行模式的源码",
     "dstack_native_observation_failed": "未能读取本轮推理服务观测",
     "dstack_response_invalid": "dstack 返回了无法校验的观测",
     "dstack_api_unavailable": "dstack 控制服务暂时无法连接，等待下一轮观测",
@@ -282,9 +302,17 @@ def preparation_view(node, intent, public, now, *, fresh_seconds=30):
         "verifying_runtime",
         "loading_model",
     } and (source_updated is not None and now - source_updated > 120)
-    reason = raw.get("reason_code") or public.get("reason_code")
+    # An old startup error remains historical telemetry after the run ends.
+    # The current lifecycle owns its terminal reason; this projection never
+    # infers allocation, billing or a refund from a stale preparation receipt.
+    reason = (
+        public.get("reason_code")
+        if lifecycle == "stopped"
+        else raw.get("reason_code") or public.get("reason_code")
+    )
     if (
-        public.get("native_ready")
+        lifecycle != "stopped"
+        and public.get("native_ready")
         and not public.get("ready")
         and not public.get("current_job")
     ):

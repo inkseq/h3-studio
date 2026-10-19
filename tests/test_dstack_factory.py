@@ -4,13 +4,15 @@ import copy
 import hashlib
 import json
 import os
+import socket
 from pathlib import Path
 import tarfile
 import unittest
+import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from sqlalchemy import select, update
+from sqlalchemy import insert, select, update
 
 from deploy.wangp.package_tool import PRIVATE_FILES
 from studio_platform.auth import Principal
@@ -24,6 +26,7 @@ from studio_platform.dstack_operator import DstackOperator, LedgerDstackStore
 from studio_platform.dstack_runtime import DstackNativeRuntime
 from studio_platform.inference.wangp_contract import HostReadiness
 from studio_platform.operator_capacity import operator_nodes
+from studio_platform.repository import attempts, jobs, registered_workers
 from studio_platform.runtime_catalog import engine_manifest, PROFILE_IDS
 from test_dstack_operator import Client, PROFILE, PUB
 from test_platform_repository import LedgerCase
@@ -419,6 +422,138 @@ class FactoryTests(LedgerCase):
         self.assertEqual(
             self.store.load(first["intent_id"])["billing_state"], "unsettled"
         )
+
+    def ended_transport(self, binding):
+        with self.repo.transaction() as connection:
+            row = (
+                connection.execute(
+                    select(operator_nodes).where(
+                        operator_nodes.c.intent_id == binding["intent_id"]
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            payload = copy.deepcopy(row["payload"])
+            payload["dstack"].update(state="stopped", dstack_status="terminated")
+            connection.execute(
+                update(operator_nodes)
+                .where(operator_nodes.c.intent_id == binding["intent_id"])
+                .values(
+                    runtime_state="stopped", desired_state="stopped", payload=payload
+                )
+            )
+        return payload
+
+    def test_ended_transport_reuses_port_without_rewriting_history_or_unknown_bill(
+        self,
+    ):
+        self.config["last_local_port"] = 19100
+        self.save_config()
+        first, _ = self.allocation()
+        factory = self.factory()
+        factory.config_for_binding(first)
+        history = self.ended_transport(first)
+        second, _ = self.allocation("ref", "two")
+        self.assertEqual(factory.config_for_binding(second).local_port, 19100)
+        self.assertEqual(
+            self.factory()
+            .config_for_binding(self.store.load(second["intent_id"]))
+            .local_port,
+            19100,
+        )
+        with self.repo.engine.connect() as connection:
+            retained = connection.execute(
+                select(operator_nodes.c.payload).where(
+                    operator_nodes.c.intent_id == first["intent_id"]
+                )
+            ).scalar_one()
+        self.assertEqual(retained, history)
+        self.assertEqual(retained["dstack"]["billing_state"], "unsettled")
+
+    def test_ended_transport_keeps_port_for_original_leases_and_unknown_attempts(self):
+        self.config["last_local_port"] = 19100
+        self.save_config()
+        first, _ = self.allocation()
+        factory = self.factory()
+        factory.config_for_binding(first)
+        self.ended_transport(first)
+        second, _ = self.allocation("ref", "two")
+        worker_id = "dstack-" + first["intent_id"].replace("-", "")
+        job = self.job("old-transport")
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(jobs)
+                .where(jobs.c.id == job["id"])
+                .values(lease_worker_id=worker_id)
+            )
+        with self.assertRaisesRegex(DstackError, "ports_exhausted"):
+            factory.config_for_binding(second)
+        attempt_id = str(uuid.uuid4())
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(jobs)
+                .where(jobs.c.id == job["id"])
+                .values(status="failed", lease_worker_id=None)
+            )
+            connection.execute(
+                insert(attempts).values(
+                    id=attempt_id,
+                    job_id=job["id"],
+                    number=1,
+                    status="submission_unknown",
+                    fence=1,
+                    worker_id=worker_id,
+                    created_at=self.now,
+                    updated_at=self.now,
+                    submission_started_at=self.now,
+                )
+            )
+        with self.assertRaisesRegex(DstackError, "ports_exhausted"):
+            factory.config_for_binding(second)
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(attempts)
+                .where(attempts.c.id == attempt_id)
+                .values(upstream_stopped=1)
+            )
+            connection.execute(
+                insert(registered_workers).values(
+                    id="other-linked-worker",
+                    pool="dstack-test",
+                    provider="vast",
+                    instance_id="gpu-one",
+                    spec={},
+                    spec_hash="a" * 64,
+                    state="ready",
+                    fence=1,
+                    expires_at=self.now + 60,
+                    updated_at=self.now,
+                )
+            )
+        with self.assertRaisesRegex(DstackError, "ports_exhausted"):
+            factory.config_for_binding(second)
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(registered_workers)
+                .where(registered_workers.c.id == "other-linked-worker")
+                .values(state="retired")
+            )
+        self.assertEqual(factory.config_for_binding(second).local_port, 19100)
+
+    def test_port_probe_preserves_an_existing_local_listener(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+            listener.bind(("127.0.0.1", 0))
+            listener.listen(1)
+            port = listener.getsockname()[1]
+            self.config.update(first_local_port=port, last_local_port=port)
+            self.save_config()
+            binding, _ = self.allocation()
+            factory = self.factory()
+            with self.assertRaisesRegex(DstackError, "ports_exhausted"):
+                factory.config_for_binding(binding)
+            self.assertNotIn("local_port", self.store.load(binding["intent_id"]))
+        self.assertEqual(factory.config_for_binding(binding).local_port, port)
 
     def test_binding_changes_and_foreign_tenant_fail_before_port_assignment(self):
         binding, _ = self.allocation()

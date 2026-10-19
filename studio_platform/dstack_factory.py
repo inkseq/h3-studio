@@ -2,7 +2,7 @@
 
 Construction reads reviewed CPU configuration/source inputs only. Tunnel ports
 are allocated lazily in the original operator node, under the original global
-capacity lock, and are not reused while any retained node reserves them.
+capacity lock. Ended, execution-free transports release sockets, not history or bills.
 """
 
 from __future__ import annotations
@@ -14,16 +14,18 @@ import json
 import os
 from pathlib import Path
 import re
+import socket
 import stat
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 
 from .dstack_capacity import DstackError
 from .dstack_operator import BACKEND_MARKER, PROVIDERS
 from .dstack_runtime import DstackNativeRuntime, DstackRuntimeConfig, IDENTITY_FIELDS
 from .native_runtime_document import prepared_runtime_document
 from .operator_capacity import operator_nodes
+from .repository import attempts, jobs, registered_workers
 from .runtime_catalog import engine_manifest, get_profile
 from .wangp_bootstrap import SOURCE_NAMES, read_sources
 
@@ -324,6 +326,83 @@ class RuntimeFactory:
                 ports.extend(RuntimeFactory._ports(value))
         return ports
 
+    def _transport_ended(self, connection, node):
+        """Only retire a CPU socket; unknown execution and legacy rows keep it."""
+        payload = node["payload"]
+        binding = payload.get("dstack", {})
+        if not (
+            isinstance(binding, dict)
+            and payload.get("capacity_backend") == BACKEND_MARKER
+            and payload.get("tenant_id") == self.store.tenant_id
+            and node["desired_state"] == node["runtime_state"] == "stopped"
+            and binding.get("state") == "stopped"
+            and binding.get("dstack_status")
+            in {"done", "failed", "terminated", "aborted"}
+        ):
+            return False
+        worker_id = "dstack-" + node["intent_id"].replace("-", "")
+        selectors = [registered_workers.c.id == worker_id]
+        if binding.get("provider_instance_id"):
+            selectors.append(
+                (registered_workers.c.provider == PROVIDERS.get(binding.get("backend")))
+                & (registered_workers.c.instance_id == binding["provider_instance_id"])
+            )
+        workers = list(
+            connection.execute(
+                select(registered_workers).where(or_(*selectors))
+            ).mappings()
+        )
+        if any(
+            worker["current_job_id"]
+            or worker["state"] != "retired"
+            and worker["expires_at"] > self.repo.clock()
+            for worker in workers
+        ):
+            return False
+        worker_ids = {worker_id, *[worker["id"] for worker in workers]}
+        related = list(
+            connection.execute(
+                select(attempts).where(attempts.c.worker_id.in_(worker_ids))
+            ).mappings()
+        )
+        if any(
+            (
+                attempt["submission_started_at"] is not None
+                or attempt["upstream_task_id"] is not None
+            )
+            and attempt["upstream_stopped"] != 1
+            for attempt in related
+        ):
+            return False
+        from .control import WorkerControl
+
+        return not any(
+            job["status"] not in {"succeeded", "failed", "cancelled"}
+            and not WorkerControl._proven_unsubmitted_queue(
+                connection, job, expired_lease_only=True
+            )
+            for job in connection.execute(
+                select(jobs).where(
+                    or_(
+                        jobs.c.lease_worker_id.in_(worker_ids),
+                        jobs.c.id.in_([attempt["job_id"] for attempt in related]),
+                    )
+                )
+            ).mappings()
+        )
+
+    @staticmethod
+    def _port_available(port):
+        # A late old tunnel or another local service still owns its socket.
+        # The real SSH listener must bind again; this does not authorize reuse
+        # of that service, credentials, worker identity or remote process.
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+                probe.bind(("127.0.0.1", port))
+            return True
+        except OSError:
+            return False
+
     def config_for_binding(self, binding):
         _require(type(binding) is dict, "dstack_runtime_binding_invalid")
         try:
@@ -356,9 +435,11 @@ class RuntimeFactory:
                 "dstack_runtime_binding_changed",
             )
             retained = []
-            for other in connection.execute(
-                select(operator_nodes.c.intent_id, operator_nodes.c.payload)
-            ).mappings():
+            for other in connection.execute(select(operator_nodes)).mappings():
+                if other["intent_id"] != intent["id"] and self._transport_ended(
+                    connection, other
+                ):
+                    continue
                 retained.extend(
                     (other["intent_id"], port) for port in self._ports(other["payload"])
                 )
@@ -387,7 +468,7 @@ class RuntimeFactory:
                     (
                         value
                         for value in range(self.first_port, self.last_port + 1)
-                        if value not in taken
+                        if value not in taken and self._port_available(value)
                     ),
                     None,
                 )
