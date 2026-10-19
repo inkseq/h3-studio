@@ -217,6 +217,13 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, targe
         for name in ("hatchet-config", "hatchet-postgres"):
             require(document.get("volumes", {}).get(name, {}).get("external") is True, "migration_blank_broker_volume")
     app_env = services["app"]["environment"]
+    queue = app_env.get('INKSEQ_GENERATION_QUEUE', 'postgres')
+    film = app_env.get('SIXNINE_RENDER_ENABLED', '0')
+    require(queue in {'postgres','dbos'} and film in {'0','1'} and (film == '0' or queue == 'dbos'),
+        'migration_workflow_settings_invalid')
+    require(controller['environment'].get('INKSEQ_GENERATION_QUEUE', 'postgres') == queue
+        and controller['environment'].get('SIXNINE_RENDER_ENABLED', '0') == film,
+        'migration_workflow_settings_split')
     storyboard = app_env.get("SIXNINE_STORYBOARD_OWNERS", "")
     require(type(storyboard) is str and (not storyboard or
         len(storyboard.split(",")) == len(set(storyboard.split(",")))

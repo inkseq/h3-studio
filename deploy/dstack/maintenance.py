@@ -69,7 +69,8 @@ OPTIONAL_PATH_FIELDS = frozenset({"SIXNINE_STAGE_QUERY_CONFIG_FILE", "SIXNINE_ST
 STORAGE_FIELDS = frozenset({"SIXNINE_STORAGE_PROVIDER", "SIXNINE_STORAGE_ENDPOINT", "SIXNINE_STORAGE_REGION",
     "SIXNINE_STORAGE_BUCKET", "SIXNINE_STORAGE_PROFILE", "SIXNINE_STORAGE_CREDENTIAL_FILE"})
 OPTIONAL_FIELDS = frozenset({"SIXNINE_OPERATOR_ADMIN_OWNERS", "SIXNINE_STORYBOARD_OWNERS", 'INKSEQ_DEPLOYMENT_TARGET',
-    'INKSEQ_RESOURCE_PROFILE', 'INKSEQ_CPU_CGROUP_PARENT'}) | OPTIONAL_PATH_FIELDS | STORAGE_FIELDS
+    'INKSEQ_RESOURCE_PROFILE', 'INKSEQ_CPU_CGROUP_PARENT', 'INKSEQ_GENERATION_QUEUE',
+    'INKSEQ_FILM_ENABLED'}) | OPTIONAL_PATH_FIELDS | STORAGE_FIELDS
 LEGACY_MARKERS = ("operator-capacity/active.json", "gpu-acceptance/active.json", "gpu-scaler/active.json")
 STORYBOARD_FLAG = "SIXNINE_STORYBOARD_OWNERS"
 STORYBOARD_RECEIPT = "storyboard-maintenance.json"
@@ -395,6 +396,10 @@ def settings_document(value):
         elif key.endswith("_VOLUME"):
             release.require(re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", text), "migration_volume_reference_invalid")
     env = value["environment"]
+    queue = env.get('INKSEQ_GENERATION_QUEUE', 'postgres')
+    film = env.get('INKSEQ_FILM_ENABLED', '0')
+    release.require(queue in {'postgres','dbos'} and film in {'0','1'}
+        and (film == '0' or queue == 'dbos'), 'migration_workflow_settings_invalid')
     deployment_target.resources(env)
     storage_settings(env)
     release.require((env["SIXNINE_MIGRATION_GENERATION_ENABLED"], env["SIXNINE_MIGRATION_EXECUTION_BACKEND"])

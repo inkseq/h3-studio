@@ -94,6 +94,10 @@ def create_app(
 ):
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     repo = repository or Repository(settings.database_url)
+    if settings.generation_queue == "dbos":
+        from .dbos_transport import configure_producer
+
+        configure_producer(repo)
     repo.create_schema()
     if storage is None:
         if settings.storage_provider == "local":

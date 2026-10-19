@@ -347,9 +347,12 @@ def register_routes(app):
         body: dict,
         idempotency_key: str = Header(..., alias="Idempotency-Key"),
     ):
+        return submit_generation_batch(request.state.principal, body, idempotency_key)
+
+    def submit_generation_batch(principal, body, idempotency_key):
         if set(body) != {"client_project_id", "plan_ids"}:
             raise HTTPException(422, "批次仅接受项目与已预检计划列表")
-        principal, project_id = request.state.principal, body["client_project_id"]
+        project_id = body["client_project_id"]
         from .generation_admission import reject_managed
 
         reject_managed(
@@ -445,6 +448,8 @@ def register_routes(app):
                     principal, record["id"], index, {"error_code": code}
                 )
         return visible(principal, service.get(principal, record["id"]))
+
+    app.state.submit_generation_batch = submit_generation_batch
 
     @app.get("/v1/batches")
     def list_batches(

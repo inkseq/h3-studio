@@ -198,6 +198,7 @@ class WorkerRunner:
         stop_requested=None,
         telemetry=None,
         telemetry_context=None,
+        selected_job_id=None,
     ):
         self.repo, self.store = repository, store
         self.queue = TaskQueue(repository)
@@ -207,6 +208,9 @@ class WorkerRunner:
         self.control = control
         self.submission_guard = submission_guard
         self.stop_requested = stop_requested
+        # Durable transport selects an original ledger identity, never a recipe
+        # or a second submission. Fairness and physical slot claims remain below.
+        self.selected_job_id = selected_job_id
         self.telemetry = telemetry if telemetry is not None else NullTelemetry()
         self.telemetry_context = (
             dict(telemetry_context) if type(telemetry_context) is dict else {}
@@ -502,8 +506,11 @@ class WorkerRunner:
             return result
 
     def _claim(self, worker_id, pool, *, purpose):
+        options = (
+            {"selected_job_id": self.selected_job_id} if self.selected_job_id else {}
+        )
         return (self.control or self.queue).claim(
-            worker_id, pool, lease_seconds=900, purpose=purpose
+            worker_id, pool, lease_seconds=900, purpose=purpose, **options
         )
 
     def _run_once(self, worker_id, pool):
@@ -660,6 +667,32 @@ class WorkerRunner:
             ):
                 return self._collect(job, lease, tag, task_id, heartbeat)
             outcome = self.backend.poll(tag, task_id)
+            if (
+                outcome.state == "unknown"
+                and self.backend.kind == "cpu-render"
+                and job["status"] != "cancel_requested"
+                and callable(getattr(self.backend, "resume", None))
+            ):
+                # Only the local renderer supports checkpoint recovery. Its
+                # original process fence, payload identity and output hashes
+                # must positively authorize continuation of this SAME attempt.
+                try:
+                    resumed = self.backend.resume(job, tag, task_id, heartbeat)
+                    if resumed != task_id:
+                        raise BackendError("render_resume_task_identity_changed")
+                    outcome = self.backend.poll(tag, task_id)
+                except SubmissionUncertain:
+                    pass  # Original process is still fenced; observe it later.
+                except BackendError as error:
+                    if error.args != ("render_resume_identity_unconfirmed",):
+                        raise
+                    return self._summary(
+                        self.queue.release(
+                            lease,
+                            retry_after_s=30,
+                            error_code="render_resume_identity_unconfirmed",
+                        )
+                    )
             if outcome.state == "succeeded":
                 self._generation_finish(lease, "success")
                 job = self.queue.begin_collection(lease)

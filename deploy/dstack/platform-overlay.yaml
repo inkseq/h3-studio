@@ -11,6 +11,8 @@ x-business-environment: &business-environment
   SIXNINE_DATA: /data
   SIXNINE_DATABASE_URL_FILE: /run/secrets/app_database_url
   SIXNINE_AUTH_MODE: password
+  INKSEQ_GENERATION_QUEUE: ${INKSEQ_GENERATION_QUEUE:-postgres}
+  SIXNINE_RENDER_ENABLED: ${INKSEQ_FILM_ENABLED:-0}
   SIXNINE_EXECUTION_PROFILES_FILE: /run/secrets/execution_profiles
   SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID: ${SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID:?Explicit default deployment profile required}
   SIXNINE_OPERATOR_CAPACITY_OWNERS: ${SIXNINE_OPERATOR_CAPACITY_OWNERS:?Existing authorized operator owners required}
@@ -57,7 +59,7 @@ services:
       SIXNINE_STORAGE_CREDENTIAL_FILE: ${SIXNINE_STORAGE_CREDENTIAL_FILE:+/run/secrets/r2_storage}
     secrets: [execution_profiles, grafana_cloud, stage_query, r2_storage, dstack_operator_config, dstack_api_token, dstack_ssh_public_key]
     healthcheck:
-      test: [CMD, python, -c, "import json,urllib.request; h=json.load(urllib.request.urlopen('http://127.0.0.1:8845/healthz',timeout=5)); assert h['auth_ready'] and not h['render_enabled'] and not h['cloud_creation_enabled']"]
+      test: [CMD, python, -c, "import json,urllib.request; h=json.load(urllib.request.urlopen('http://127.0.0.1:8845/healthz',timeout=5)); assert h['auth_ready'] and h['render_enabled']==('${INKSEQ_FILM_ENABLED:-0}'=='1') and not h['cloud_creation_enabled']"]
 
   dstack:
     cgroup_parent: ${INKSEQ_CPU_CGROUP_PARENT:-}

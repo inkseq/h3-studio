@@ -121,11 +121,18 @@ class Settings:
     stage_query_config_file: Path | None = None
     render_enabled: bool = False
     recovery_backends: tuple[str, ...] = ()
+    generation_queue: str = "postgres"
     title_config_file: Path | None = None
     title_use_central: bool = False
     public_origin_aliases: tuple[str, ...] = ()
 
     def __post_init__(self):
+        if self.generation_queue not in {"postgres", "dbos"}:
+            raise ValueError("Unsupported generation queue")
+        if self.generation_queue == "dbos" and not self.database_url.startswith(
+            "postgresql+psycopg:"
+        ):
+            raise ValueError("DBOS requires the original PostgreSQL database")
         object.__setattr__(self, "data_dir", Path(self.data_dir).resolve())
         if self.frontend_dir is not None:
             object.__setattr__(self, "frontend_dir", Path(self.frontend_dir).resolve())
@@ -334,6 +341,7 @@ class Settings:
             session_seconds=int(duration) if duration is not None else 7 * 86400,
             generation_enabled=os.environ.get("SIXNINE_GENERATION_ENABLED", "0") == "1",
             execution_backend=os.environ.get("SIXNINE_EXECUTION_BACKEND", "disabled"),
+            generation_queue=os.environ.get("INKSEQ_GENERATION_QUEUE", "postgres"),
             storage_provider=os.environ.get("SIXNINE_STORAGE_PROVIDER", "local"),
             storage_bucket=os.environ.get("SIXNINE_STORAGE_BUCKET", ""),
             storage_profile=os.environ.get("SIXNINE_STORAGE_PROFILE", ""),

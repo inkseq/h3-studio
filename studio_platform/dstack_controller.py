@@ -370,6 +370,9 @@ class DstackController:
 
     def safety_sweep(self):
         """Rare complete-account observation; never stops or settles a resource."""
+        heartbeat_cpu = getattr(self.worker_process, "heartbeat_cpu", None)
+        if callable(heartbeat_cpu):
+            heartbeat_cpu()
         invoice_check = self._invoice_check()
         try:
             client = self.capacity.client
@@ -891,6 +894,9 @@ class DstackController:
         return {"node_id": intent_id, "state": observation["state"]}
 
     def tick(self):
+        heartbeat_cpu = getattr(self.worker_process, "heartbeat_cpu", None)
+        if callable(heartbeat_cpu):
+            heartbeat_cpu()
         results = []
         with self.repo.engine.connect() as connection:
             busy = self._business_demand(connection)
@@ -1062,12 +1068,20 @@ def main(argv=None):
     runtime = None
     processes = None
     telemetry = None
+    durable_executor = None
     try:
         service = from_environment(repo, settings)
         if service.capacity is None:
             raise ValueError("dstack_capacity_disabled")
         runtime, work_dir = create_runtime(repo, service.capacity.store)
-        processes = SlotProcesses(work_dir).__enter__()
+        if settings.generation_queue == "dbos":
+            from .dbos_transport import DurableExecutor
+
+            durable_executor = DurableExecutor(repo, settings, work_dir).__enter__()
+            processes = durable_executor.slots
+            durable_executor.import_pending()
+        else:
+            processes = SlotProcesses(work_dir).__enter__()
         telemetry = configured_telemetry()
         controller = DstackController(
             service, runtime, worker_process=processes, telemetry=telemetry
@@ -1103,7 +1117,9 @@ def main(argv=None):
         # Closing local tunnels is safe; durable original attempts remain
         # recoverable. Do not translate process shutdown into paid-host stop.
         try:
-            if processes:
+            if durable_executor:
+                durable_executor.close()
+            elif processes:
                 processes.close()
         finally:
             try:

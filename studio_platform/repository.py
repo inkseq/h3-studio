@@ -623,6 +623,7 @@ capacity_member_generations = Table(
 class Repository:
     def __init__(self, database_url, *, clock=time.time):
         self.clock = clock
+        self.generation_transport = None
         self._memory_lock = threading.RLock()
         self._is_memory = database_url in ("sqlite://", "sqlite:///:memory:")
         kwargs = {"echo": False, "hide_parameters": True, "pool_pre_ping": True}
@@ -962,6 +963,10 @@ class Repository:
                 created_at=self.clock(),
             )
         )
+        if public_event and self.generation_transport is not None:
+            self.generation_transport.job_event(
+                connection, aggregate_id, event_id, event_type=event_type
+            )
         if (
             event_type.startswith(("job.", "dstack."))
             or event_type == "instance.reserved"

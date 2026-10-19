@@ -8,6 +8,7 @@ historical/unrelated processes. The default configuration is disabled.
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 import json
 import math
@@ -517,7 +518,8 @@ def request_drain(config):
     return {"state": "drain_requested"}
 
 
-def run_slot(
+@contextmanager
+def slot_runner(
     config,
     worker_id,
     settings,
@@ -526,12 +528,13 @@ def run_slot(
     store_factory=create_store,
     backend_factory=None,
     runner_factory=WorkerRunner,
-    once=False,
+    selected_job_id=None,
 ):
     """Explicit CPU worker child; injectable factories permit fully offline tests."""
     slot = config.slot(worker_id)
     if not config.enabled or not slot.enabled:
-        return {"state": "disabled", "simulation": False}
+        yield None
+        return
     if slot.recovery_only:
         if slot.spec.backend not in settings.recovery_backends:
             raise ValueError("fleet_recovery_backend_not_explicitly_allowed")
@@ -656,13 +659,10 @@ def run_slot(
                 control=control,
                 submission_guard=ExecutionPolicies(settings, repo).submission_allowed,
                 stop_requested=lambda: (directory / "drain.flag").exists(),
+                selected_job_id=selected_job_id,
                 **recovery_kwargs,
             )
-            return (
-                runner.run_once(worker_id, slot.spec.pool)
-                if once
-                else runner.run_forever(worker_id, slot.spec.pool)
-            )
+            yield runner
         finally:
             if telemetry is not None:
                 telemetry.close()
@@ -671,6 +671,19 @@ def run_slot(
             backend.close()
         if own_repo:
             repo.close()
+
+
+def run_slot(config, worker_id, settings, *, once=False, **kwargs):
+    """CLI compatibility; the DBOS executor uses the same bounded domain runner."""
+    with slot_runner(config, worker_id, settings, **kwargs) as runner:
+        if runner is None:
+            return {"state": "disabled", "simulation": False}
+        pool = config.slot(worker_id).spec.pool
+        return (
+            runner.run_once(worker_id, pool)
+            if once
+            else runner.run_forever(worker_id, pool)
+        )
 
 
 def main(argv=None):

@@ -174,6 +174,11 @@ Only new server-snapshotted plans opt in. Original accepted job replay occurs
 before this check; neither old plans nor accepted jobs are rewritten.
 """
     # fmt: on
+    if "film_source_ref" in compiled:
+        from .film_runs import validate_film_source
+
+        validate_film_source(conn, repo, scope, compiled)
+        return
     if "authoring_defaults_version" not in compiled:
         return
     if (
