@@ -447,6 +447,16 @@ class FilmRuns:
         if record["version"] != body["expected_version"]:
             raise Conflict("document_version_conflict")
         project = copy.deepcopy(record["payload"])
+        journey = project.get("journey", {})
+        sound = journey.get("sound") if isinstance(journey, dict) else None
+        mode = sound.get("mode") if isinstance(sound, dict) else None
+        if not isinstance(mode, str) or mode not in {
+            "silent",
+            "dialogue",
+            "music",
+            "mixed",
+        }:
+            raise Conflict("film_sound_plan_required")
         chapters = sorted(
             (item for item in project["entities"] if item["type"] == "chapter"),
             key=lambda item: item["order"],

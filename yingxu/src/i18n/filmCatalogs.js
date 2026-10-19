@@ -69,6 +69,8 @@ export const filmCatalogs = {
       'Confirm the required chapter caption tracks, then check a new film estimate.',
     'film.captionInvalid':
       'Check caption timing and text (up to 2 lines, 18 characters per line), then review and confirm the chapter captions again.',
+    'film.soundRequired':
+      'Choose a sound plan in the story before checking a film estimate. You can explicitly choose silence.',
     'film.selectedUnknown':
       'A selected take has no confirmed original recipe. Review that shot’s selected version first.',
     'film.selectedOutdated':
@@ -146,6 +148,7 @@ export const filmCatalogs = {
     'film.originalFailed': '原任务失败或已取消，请先处理该原任务；继续成片不会重新购买替代镜头。',
     'film.captionRequired': '请先确认所需章节的字幕轨道，再重新预检成片。',
     'film.captionInvalid': '请检查字幕时间和文字（最多两行，每行 18 字），核对并重新确认章节字幕。',
+    'film.soundRequired': '请先在故事中选择声音方案，再预检成片；也可以明确选择静音。',
     'film.selectedUnknown': '所选版本缺少已确认的原始配方，请先检查该镜头选用的版本。',
     'film.selectedOutdated': '所选版本与当前镜头设置不一致，请检查镜头或重新预检。',
     'film.inputsBlocked': '部分镜头、素材或参数未通过预检，请先在故事中检查。',

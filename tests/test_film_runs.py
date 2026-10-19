@@ -10,7 +10,7 @@ import tempfile
 import unittest
 import uuid
 from unittest.mock import Mock, patch
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from studio_platform.auth import AuthenticationError, Principal
 from studio_platform.film_runs import (
@@ -30,6 +30,9 @@ from studio_platform.repository import (
     NotFound,
     request_hash,
     jobs,
+    plans,
+    documents,
+    budget_reservations,
 )
 from test_platform_render_plans import story, source
 
@@ -83,6 +86,80 @@ class FilmTests(unittest.TestCase):
 
     def raw(self, run_id):
         return self.repo.get_document(self.scope, KIND, run_id)['payload']
+
+    def test_missing_sound_plan_refuses_before_generation_or_receipt_writes(self):
+        planning = Mock(side_effect=AssertionError('No generation planning allowed'))
+        self.app.state.storyboard_versions = SimpleNamespace(preflight=planning)
+        for index, sound in enumerate(
+            (None, {}, {'mode': None}, {'mode': 'unknown'}, {'mode': []})
+        ):
+            with self.subTest(sound=sound):
+                project = copy.deepcopy(self.project)
+                project['entities'][2]['data'].pop('selectedAssetId')
+                if sound is None:
+                    project['journey'].pop('sound')
+                else:
+                    project['journey']['sound'] = sound
+                self.repo.put_document(
+                    Scope('tenant', 'owner', '__projects'),
+                    'project',
+                    'story-one',
+                    project,
+                    expected_version=index + 1,
+                )
+                tables = (jobs, plans, documents, budget_reservations)
+                with self.repo.engine.connect() as conn:
+                    before = [
+                        list(conn.execute(select(table)).mappings()) for table in tables
+                    ]
+                with (
+                    patch.object(
+                        self.repo, 'create_plan', wraps=self.repo.create_plan
+                    ) as create_plan,
+                    patch.object(
+                        self.repo, 'put_document', wraps=self.repo.put_document
+                    ) as put_document,
+                ):
+                    with self.assertRaisesRegex(Conflict, '^film_sound_plan_required$'):
+                        self.service.preflight(
+                            self.principal,
+                            'story-one',
+                            {'expected_version': index + 2, 'resolution': '480P'},
+                            'missing-sound-' + str(index),
+                        )
+                    create_plan.assert_not_called()
+                    put_document.assert_not_called()
+                with self.repo.engine.connect() as conn:
+                    self.assertEqual(
+                        [
+                            list(conn.execute(select(table)).mappings())
+                            for table in tables
+                        ],
+                        before,
+                    )
+        planning.assert_not_called()
+        self.enqueue.assert_not_called()
+
+    def test_existing_sound_modes_remain_explicit_and_unchanged(self):
+        for index, mode in enumerate(('silent', 'dialogue', 'music', 'mixed')):
+            with self.subTest(mode=mode):
+                project = copy.deepcopy(self.project)
+                project['journey']['sound']['mode'] = mode
+                self.repo.put_document(
+                    Scope('tenant', 'owner', '__projects'),
+                    'project',
+                    'story-one',
+                    project,
+                    expected_version=index + 1,
+                )
+                preview = self.service.preflight(
+                    self.principal,
+                    'story-one',
+                    {'expected_version': index + 2, 'resolution': '480P'},
+                    'explicit-mode-' + mode,
+                )
+                self.assertEqual(self.raw(preview['id'])['project'], project)
+                self.assertEqual(preview['counts']['generate'], 0)
 
     def test_failed_transport_is_visible_without_writing_or_restarting_work(self):
         preview = self.preview()
@@ -181,6 +258,7 @@ class FilmTests(unittest.TestCase):
         )
         changed = copy.deepcopy(self.project)
         changed['title'] = 'Editable next version'
+        changed['journey'].pop('sound')
         self.repo.put_document(
             Scope('tenant', 'owner', '__projects'),
             'project',

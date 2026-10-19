@@ -29,6 +29,17 @@ class FilmStoryboardIntegrationTests(unittest.TestCase):
 
     def test_missing_shot_uses_valid_original_storyboard_key_and_retains_seed(self):
         self.prepare()
+        self.edit(
+            [
+                {
+                    'op': 'sound.set',
+                    'chapter_id': 'chapter-one',
+                    'tracks': [],
+                    'mode': 'silent',
+                }
+            ],
+            version=self.current()['version'],
+        ).raise_for_status()
         app = create_app(
             replace(self.settings, generation_enabled=True, execution_backend='mock'),
             repository=self.app.state.repository,
