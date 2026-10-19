@@ -142,6 +142,44 @@ class AlertConditionsTests(unittest.TestCase):
             self.assertEqual(result["notifications"], [])
             self.assertTrue(result["state"]["conditions"]["job_stuck:" + JOB]["active"])
 
+    def test_failed_retention_service_fires_without_database_and_unknown_preserves_incident(
+        self,
+    ):
+        first = evaluate(
+            None,
+            None,
+            environment='production',
+            now=1000,
+            host={'retention_service_failed': True},
+        )
+        self.assertEqual(
+            [(row['code'], row['transition']) for row in first['notifications']],
+            [('retention_service_failed', 'firing')],
+        )
+        for host in (
+            {},
+            {'retention_service_failed': None},
+            {'retention_service_failed': 'PRIVATE'},
+        ):
+            result = evaluate(
+                None, first['state'], environment='production', now=1060, host=host
+            )
+            self.assertEqual(result['notifications'], [])
+            self.assertTrue(
+                result['state']['conditions']['retention_service_failed:host']['active']
+            )
+        clear = evaluate(
+            None,
+            first['state'],
+            environment='production',
+            now=1120,
+            host={'retention_service_failed': False},
+        )
+        self.assertEqual(
+            [(row['code'], row['transition']) for row in clear['notifications']],
+            [('retention_service_failed', 'resolved')],
+        )
+
     def test_sampling_gap_does_not_invent_continuous_host_high_time(self):
         first = self.run_check(0, host={"cpu_percent": 80})
         result = self.run_check(901, state=first["state"], host={"cpu_percent": 80})

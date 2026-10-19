@@ -416,10 +416,13 @@ class MonitorTests(unittest.TestCase):
             proc = Path(temporary)
             (proc / 'stat').write_text('cpu 100 0 100 800 0 0 0 0 0 0\n')
             (proc / 'meminfo').write_text('MemTotal: 1000 kB\nMemAvailable: 400 kB\n')
-            with patch.object(
-                monitor,
-                'containers',
-                return_value={key: None for key in monitor.SERVICES},
+            with (
+                patch.object(
+                    monitor,
+                    'containers',
+                    return_value={key: None for key in monitor.SERVICES},
+                ),
+                patch.object(monitor, 'retention_service_failed', return_value=None),
             ):
                 _, host, cpu = monitor.observe({'total': 500, 'idle': 400}, proc=proc)
                 self.assertAlmostEqual(host['cpu_percent'], 20)
@@ -459,6 +462,11 @@ class MonitorTests(unittest.TestCase):
         }
 
         def runner(args, **kwargs):
+            if args[0] == '/usr/bin/systemctl':
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout=b'LoadState=loaded\nActiveState=inactive\nSubState=dead\nResult=success\nExecMainCode=1\nExecMainStatus=0\n',
+                )
             if args[1] == 'ps':
                 service = next(
                     part.removeprefix('label=com.docker.compose.service=')
@@ -515,6 +523,81 @@ class MonitorTests(unittest.TestCase):
             self.assertFalse(
                 monitor.observe(None, runner=runner, proc=proc)[1]['processes_ok']
             )
+
+    def test_fixed_retention_unit_observation_does_not_read_logs_or_treat_unknown_as_recovery(
+        self,
+    ):
+        success = {
+            'LoadState': 'loaded',
+            'ActiveState': 'inactive',
+            'SubState': 'dead',
+            'Result': 'success',
+            'ExecMainCode': '1',
+            'ExecMainStatus': '0',
+        }
+
+        def observe(values, returncode=0):
+            runner = Mock(
+                return_value=SimpleNamespace(
+                    returncode=returncode,
+                    stdout=''.join(
+                        f'{key}={value}\n' for key, value in values.items()
+                    ).encode(),
+                )
+            )
+            result = monitor.retention_service_failed(runner=runner)
+            args = runner.call_args.args[0]
+            self.assertEqual(
+                args[:3],
+                ['/usr/bin/systemctl', 'show', 'inkseq-release-retention.service'],
+            )
+            self.assertNotIn('journal', ' '.join(args))
+            self.assertLessEqual(runner.call_args.kwargs['timeout'], 5)
+            return result
+
+        self.assertFalse(observe(success))
+        self.assertIsNone(observe({**success, 'ExecMainCode': '0'}))
+        self.assertTrue(
+            observe(
+                {
+                    **success,
+                    'ActiveState': 'failed',
+                    'SubState': 'failed',
+                    'Result': 'exit-code',
+                    'ExecMainStatus': '1',
+                }
+            )
+        )
+        self.assertIsNone(
+            observe({**success, 'ActiveState': 'activating', 'SubState': 'start'})
+        )
+        self.assertIsNone(observe({**success, 'LoadState': 'not-found'}))
+        self.assertIsNone(observe(success, returncode=1))
+        self.assertIsNone(observe({**success, 'PrivateUnexpected': 'PRIVATE_VALUE'}))
+        self.assertIsNone(observe({**success, 'Result': 'PRIVATE_VALUE'}))
+        self.assertIsNone(observe({**success, 'ExecMainStatus': 'PRIVATE_VALUE'}))
+
+    def test_retention_failed_notifies_once_and_only_successful_observation_resolves(
+        self,
+    ):
+        self.tick(1000, retention_service_failed=True)
+        self.assertEqual(self.sns.publish.call_count, 1)
+        first = json.loads(self.sns.publish.call_args.kwargs['Message'])
+        self.assertEqual(
+            (first['code'], first['transition']), ('retention_service_failed', 'firing')
+        )
+        self.tick(1060, retention_service_failed=True)
+        self.tick(1120, retention_service_failed=None)
+        self.assertEqual(self.sns.publish.call_count, 1)
+        self.state = json.loads(monitor.encode(self.state))
+        self.tick(1180, retention_service_failed=False)
+        self.assertEqual(self.sns.publish.call_count, 2)
+        self.assertEqual(
+            json.loads(self.sns.publish.call_args.kwargs['Message'])['transition'],
+            'resolved',
+        )
+        self.tick(1240, retention_service_failed=False)
+        self.assertEqual(self.sns.publish.call_count, 2)
 
     def test_disk_80_90_use_actual_filesystem_sample_metric_and_sns_dedup(self):
         statvfs = Mock(
