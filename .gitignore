@@ -324,6 +324,7 @@ inventory.json
 !.github/ISSUE_TEMPLATE/
 !.github/ISSUE_TEMPLATE/work-item.yml
 !.github/ISSUE_TEMPLATE/config.yml
+!.github/ISSUE_TEMPLATE/user-report.yml
 !.github/PULL_REQUEST_TEMPLATE.md
 
 # Reviewed audit-remediation guidance; runtime data remains excluded.
