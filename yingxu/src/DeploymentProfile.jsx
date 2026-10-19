@@ -1,15 +1,20 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { modelsVisible, profileLabel } from './model-visibility.js';
 import { translate } from './i18n/locale.js';
 import React from 'react';
 import { duration } from './operator-model.js';
 
 export function deploymentLabel(capabilities, id, locale = 'zh') {
-  return id
-    ? (capabilities?.deployment_profiles || []).find((p) => p.id === id)?.label || id
-    : translate(locale, 'deployment.default');
+  if (!id) return translate(locale, 'deployment.default');
+  const profile = (capabilities?.deployment_profiles || []).find((p) => p.id === id);
+  return profile
+    ? profileLabel(profile, locale)
+    : modelsVisible()
+      ? id
+      : translate(locale, 'deployment.private');
 }
 export function DeploymentProfileSelect({ capabilities, value, onChange, disabled = false, mode }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const profiles = capabilities?.deployment_profiles || [],
     known = profiles.some((p) => p.id === value),
     profile = profiles.find((p) => p.id === value),
@@ -28,7 +33,7 @@ export function DeploymentProfileSelect({ capabilities, value, onChange, disable
         {value && !known && <option value={value}>{t('deployment.private')}</option>}
         {profiles.map((p) => (
           <option key={p.id} value={p.id}>
-            {p.label}
+            {profileLabel(p, locale)}
           </option>
         ))}
       </select>

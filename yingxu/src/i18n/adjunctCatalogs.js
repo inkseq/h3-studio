@@ -291,7 +291,7 @@ export const adjunctCatalogs = {
     'adjunct.quickChatWorkspace.copy214': 'video',
     'adjunct.quickChatWorkspace.copy215': 'audio',
     'adjunct.quickChatWorkspace.copy216':
-      ' understanding. These files can still be H3 references; uploading does not mean the assistant has read them.',
+      ' understanding. These files can still be used as references for generation; uploading does not mean the assistant has read them.',
     'adjunct.quickChatMaterials.copy217': 'Audio media',
     'adjunct.quickChatMaterials.copy218': 'Video media',
     'adjunct.quickChatMaterials.copy219': 'Reading private media',
@@ -413,7 +413,7 @@ export const adjunctCatalogs = {
       'Projects, media and preflight remain available; no model generation tasks will be created for you.',
     'adjunct.executionStatus.copy4': 'CPU simulation is active',
     'adjunct.executionStatus.copy5':
-      'This only validates upload, queuing and result handling. Artifacts carry a SIMULATION watermark and do not represent H3 quality or speed.',
+      'This only validates upload, queuing and result handling. Artifacts carry a SIMULATION watermark and do not represent real quality or speed.',
     'adjunct.executionStatus.copy6': 'Real generation task channel is enabled',
     'adjunct.executionStatus.copy7':
       'GPU capacity, wait time and cost depend on this preflight and task status. Enabled does not mean every configuration has been verified.',
@@ -874,7 +874,7 @@ export const adjunctCatalogs = {
     'adjunct.quickChatWorkspace.copy213': '图片',
     'adjunct.quickChatWorkspace.copy214': '视频',
     'adjunct.quickChatWorkspace.copy215': '音频',
-    'adjunct.quickChatWorkspace.copy216': '理解。这些素材仍可供 H3 参考；上传不等于助手已读过。',
+    'adjunct.quickChatWorkspace.copy216': '理解。这些素材仍可作为生成参考；上传不等于助手已读过。',
     'adjunct.quickChatMaterials.copy217': '音频素材',
     'adjunct.quickChatMaterials.copy218': '视频素材',
     'adjunct.quickChatMaterials.copy219': '正在读取私有素材',
@@ -983,7 +983,7 @@ export const adjunctCatalogs = {
     'adjunct.executionStatus.copy3': '项目、素材与预检可继续使用；不会为你创建模型生成任务。',
     'adjunct.executionStatus.copy4': '当前为 CPU 模拟生成',
     'adjunct.executionStatus.copy5':
-      '只验证上传、排队与回填流程，产物带 SIMULATION 水印，不代表 H3 画质或速度。',
+      '只验证上传、排队与回填流程，产物带 SIMULATION 水印，不代表真实画质或速度。',
     'adjunct.executionStatus.copy6': '真实生成任务通道已启用',
     'adjunct.executionStatus.copy7':
       '具体GPU容量、等待时间与费用以本次服务预检和任务状态为准；启用不等于已验证所有配置。',

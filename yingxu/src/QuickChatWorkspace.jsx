@@ -1,4 +1,5 @@
 import { usePageActive, useAppLocation } from './AppRouteCache.jsx';
+import { assistantLabel, modelsVisible } from './model-visibility.js';
 import HostedSignIn from './HostedSignIn.jsx';
 import { navigateApp } from './app-navigation.js';
 import StudioHeader from './StudioHeader.jsx';
@@ -1396,8 +1397,7 @@ export default function QuickChatWorkspace() {
               {turn.assistant_mode !== 'none' && (
                 <div className="qc-turn-label">
                   <Sparkles size={12} aria-hidden="true" />{' '}
-                  {CHAT_MODELS.find((item) => item.id === turn.model_id)?.label || turn.model_id} ·{' '}
-                  {date(turn.created_at)}
+                  {assistantLabel(CHAT_MODELS, turn.model_id, locale)} · {date(turn.created_at)}
                   {turn.assistant_mode === 'discuss' ? t('workspace.status36') : ''}
                 </div>
               )}
@@ -2065,7 +2065,7 @@ export default function QuickChatWorkspace() {
       )}
       {dialog === 'assistant' && (
         <ChatDialog title={t('quickView.assistantOptions')} onClose={() => setDialog(null)}>
-          <label className="qc-field">
+          <label className="qc-field" hidden={!modelsVisible()}>
             {t('workspace.accessible9')}
             <select
               value={model}

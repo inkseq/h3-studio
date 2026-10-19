@@ -122,7 +122,7 @@ Object.assign(settingsCatalogs.zh, {
 });
 
 Object.assign(settingsCatalogs.en, {
-  'settings.h3Defaults': 'H3 generation defaults',
+  'settings.h3Defaults': 'Video generation defaults',
   'settings.storyDefaultsScope':
     'These account defaults are used by story shots that inherit them. Quick Create keeps its own next-generation settings.',
   'settings.defaultsRecommended': 'Using recommended values',
@@ -138,7 +138,7 @@ Object.assign(settingsCatalogs.en, {
   'settings.disabled': 'Off',
 });
 Object.assign(settingsCatalogs.zh, {
-  'settings.h3Defaults': 'H3 生成默认值',
+  'settings.h3Defaults': '视频生成默认值',
   'settings.storyDefaultsScope':
     '账户默认值用于继承它们的故事镜头；快速创作保留自己的下一次生成设置。',
   'settings.defaultsRecommended': '全部使用推荐值',

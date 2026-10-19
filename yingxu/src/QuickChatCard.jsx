@@ -1,4 +1,5 @@
 import { formatMoneyMicros } from './money.js';
+import { modelsVisible } from './model-visibility.js';
 import QuickPrompt from './QuickPrompt.jsx';
 import { usePageActive } from './AppRouteCache.jsx';
 import { AssistantBadge } from './AssistantConnections.jsx';
@@ -339,7 +340,7 @@ export default function QuickChatCard({
             {t('workspace.detail60', { value: revision.version })}
             {versions.length > 1 ? t('workspace.detail18') : t('workspace.detail19')}
           </summary>
-          <p>{recipe?.model_id || t('workspace.detail20')}</p>
+          {modelsVisible() && <p>{recipe?.model_id || t('workspace.detail20')}</p>}
           <p>{deploymentLabel(state.capabilities, revision.deployment_profile_id, locale)}</p>
           {versions.length > 1 && (
             <label>
