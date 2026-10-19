@@ -16,6 +16,7 @@ from studio_platform.film_runs import (
     KIND,
     film_scope,
     frozen_story,
+    selected_recipe_current,
     validate_film_source,
 )
 from studio_platform.generation_services import GenerationAccess
@@ -49,10 +50,25 @@ class FilmTests(unittest.TestCase):
                 settings=SimpleNamespace(tenant_id='tenant', max_project_bytes=2**20),
                 generation_access=GenerationAccess(self.repo, 'tenant'),
                 resolve_render_source=lambda *args: source(args[-2], args[-1]),
+                generation_admission=SimpleNamespace(
+                    capabilities_provider=self.capabilities
+                ),
             )
         )
         self.enqueue = Mock()
         self.service = FilmRuns(self.app, enqueue=self.enqueue)
+
+    @staticmethod
+    def capabilities():
+        from studio_platform.capabilities import control_schema, RECIPES
+
+        return {
+            'capabilities_version': 'original-test-capabilities',
+            'recipes': [
+                {'id': ident, 'mode': mode, 'controls': control_schema()}
+                for ident, mode in RECIPES.items()
+            ],
+        }
 
     def preview(self):
         return self.service.preflight(
@@ -79,7 +95,17 @@ class FilmTests(unittest.TestCase):
         )
         body = {'expected_version': 2, 'resolution': '480P'}
         preview = self.service.preflight(self.principal, 'story-one', body, 'exact')
-        self.assertEqual(preview['counts'], {'shots': 1, 'reused': 1, 'generate': 0})
+        self.assertEqual(
+            preview['counts'],
+            {
+                'shots': 1,
+                'reused': 1,
+                'generate': 0,
+                'generated_completed': 0,
+                'chapters_completed': 0,
+                'export_completed': 0,
+            },
+        )
         original = self.raw(preview['id'])
         self.assertEqual(
             frozen_story(original['project'], original['results']), self.project
@@ -98,6 +124,157 @@ class FilmTests(unittest.TestCase):
         )
         self.assertEqual(self.raw(preview['id'])['project'], self.project)
         self.assertNotIn('owners/', json.dumps(preview))
+
+    def test_selected_recipe_survives_real_adoption_but_not_changed_generation_inputs(
+        self,
+    ):
+        from studio_platform.generation_draft import plan_body, read_draft
+        from studio_platform.source_snapshot import source_snapshot
+
+        project = copy.deepcopy(self.project)
+        shot = project['entities'][2]
+        shot['data']['seconds'] = 5
+        shot['data']['h3'] = {
+            'recipeId': 'h3-base-fl2va-v1',
+            'controls': {'resolution': '480P'},
+        }
+        frame = {
+            **copy.deepcopy(project['entities'][3]),
+            'id': 'frame',
+            'type': 'image',
+            'data': {'fileId': 'local-frame', 'cloudAssetId': 'original-frame'},
+        }
+        project['entities'].append(frame)
+        project['links'].append(
+            {
+                'id': 'first',
+                'source': 'frame',
+                'target': 'shot-one',
+                'role': 'firstFrame',
+            }
+        )
+        caps = self.capabilities()
+        draft, issues = read_draft(project, 'shot-one', capabilities=caps)
+        self.assertEqual(issues, [])
+        planned = plan_body(
+            project, 'shot-one', caps, lambda *args: self.fail('no derivation')
+        )
+        recipe = {
+            key: copy.deepcopy(planned[key])
+            for key in ('recipe_id', 'prompt', 'controls')
+        }
+        recipe['inputs'] = draft['inputs']
+        recipe['controls']['seed'] = '8235'
+        original = {
+            'authoring_recipe': recipe,
+            'server_source_hash': source_snapshot(project, 'shot-one'),
+        }
+        shot['version'] += 1
+        shot['data']['selectedAssetId'] = 'clip'
+        self.assertNotEqual(
+            original['server_source_hash'], source_snapshot(project, 'shot-one')
+        )
+        self.assertTrue(
+            selected_recipe_current(project, 'shot-one', original, {}, caps)
+        )
+        for mutate in (
+            lambda p: p['entities'][2]['data'].update(prompt='A changed prompt'),
+            lambda p: p['entities'][2]['data']['h3'].update(
+                recipeId='h3-base-ref2va-v1'
+            ),
+            lambda p: p['entities'][4]['data'].update(cloudAssetId='replacement-frame'),
+            lambda p: p['entities'][2]['data']['h3']['controls'].update(seed='8236'),
+        ):
+            changed = copy.deepcopy(project)
+            mutate(changed)
+            self.assertFalse(
+                selected_recipe_current(changed, 'shot-one', original, {}, caps)
+            )
+        self.repo.put_document(
+            Scope('tenant', 'owner', '__projects'),
+            'project',
+            'story-one',
+            project,
+            expected_version=1,
+        )
+        self.app.state.resolve_render_source = lambda *args: {
+            **source(args[-2], args[-1]),
+            'source_job_id': 'original-job',
+        }
+        with patch.object(
+            self.service.access, 'job', return_value={'request': original}
+        ):
+            preview = self.service.preflight(
+                self.principal,
+                'story-one',
+                {'expected_version': 2, 'resolution': '480P'},
+                'adopted',
+            )
+        self.assertEqual(preview['counts']['reused'], 1)
+        self.assertEqual(preview['counts']['generate'], 0)
+        self.assertEqual(preview['warnings'], [])
+
+    def test_historical_authorized_selected_take_is_reused_with_unknown_recipe_warning(
+        self,
+    ):
+        self.app.state.resolve_render_source = lambda *args: {
+            **source(args[-2], args[-1]),
+            'source_job_id': 'historical-job',
+        }
+        with patch.object(
+            self.service.access,
+            'job',
+            return_value={'request': {'server_source_hash': 'historical'}},
+        ):
+            preview = self.preview()
+        self.assertEqual(preview['counts']['generate'], 0)
+        self.assertEqual(preview['warnings'], ['film_selected_recipe_unknown'])
+
+    def test_blocked_original_batch_is_rechecked_without_changing_job_identity(self):
+        preview = self.preview()
+        value = self._with_generation(preview['id'], 'original-job')
+        submit = Mock(
+            return_value={
+                'items': [{'plan_id': 'original-plan', 'job_id': 'original-job'}]
+            }
+        )
+        self.app.state.submit_generation_batch = submit
+        original_version = self.repo.get_document(self.scope, KIND, preview['id'])[
+            'version'
+        ]
+        for status in ('planned', 'blocked', 'running', 'failed'):
+            with patch.object(
+                self.service.access, 'job', return_value={'status': status}
+            ):
+                value = self.service._admit(
+                    self.principal, value, value['generation'], 'shots'
+                )
+        self.assertEqual(submit.call_count, 2)
+        self.assertTrue(
+            all(
+                call.args[2] == preview['id'] + ':shots'
+                for call in submit.call_args_list
+            )
+        )
+        self.assertEqual(value['generation'][0]['job_id'], 'original-job')
+        self.assertEqual(
+            self.repo.get_document(self.scope, KIND, preview['id'])['version'],
+            original_version,
+        )
+
+    def _with_generation(self, run_id, job_id):
+        return self.service._mutate(
+            self.principal,
+            'story-one',
+            run_id,
+            lambda value: value['generation'].append(
+                {
+                    'shot_id': 'shot-one',
+                    'plan_id': 'original-plan',
+                    'job_id': job_id,
+                }
+            ),
+        )
 
     def test_owner_project_actor_and_revision_fences(self):
         preview = self.preview()
@@ -327,7 +504,7 @@ class FilmTests(unittest.TestCase):
                 job_id = str(uuid.uuid5(uuid.NAMESPACE_URL, key + plan_id))
                 jobs[job_id] = {
                     'id': job_id,
-                    'status': 'succeeded',
+                    'status': 'running',
                     'request': plan['request'],
                 }
                 artifact_map[job_id] = [
@@ -378,6 +555,30 @@ class FilmTests(unittest.TestCase):
                 side_effect=lambda scope, ident: artifact_map[ident],
             ),
         ):
+            first = self.service.turn(self.principal, 'story-one', preview['id'])
+            self.assertEqual(first['phase'], 'chapters')
+            version = self.repo.get_document(self.scope, KIND, preview['id'])['version']
+            self.service.turn(self.principal, 'story-one', preview['id'])
+            self.assertEqual(
+                self.repo.get_document(self.scope, KIND, preview['id'])['version'],
+                version,
+            )
+            jobs[next(iter(jobs))]['status'] = 'succeeded'
+            self.assertEqual(
+                self.service.turn(self.principal, 'story-one', preview['id'])['phase'],
+                'exporting',
+            )
+            waiting = self.service.get(self.principal, 'story-one', preview['id'])
+            self.assertEqual(waiting['counts']['chapters_completed'], 1)
+            self.assertIsNotNone(waiting['chapters'][0]['artifact_id'])
+            version = self.repo.get_document(self.scope, KIND, preview['id'])['version']
+            self.service.turn(self.principal, 'story-one', preview['id'])
+            self.assertEqual(
+                self.repo.get_document(self.scope, KIND, preview['id'])['version'],
+                version,
+            )
+            for job in jobs.values():
+                job['status'] = 'succeeded'
             first = self.service.turn(self.principal, 'story-one', preview['id'])
             self.assertEqual(first, {'terminal': True, 'phase': 'completed'})
             final = self.raw(preview['id'])

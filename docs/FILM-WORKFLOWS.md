@@ -19,7 +19,7 @@ lifecycle gates. Browser and Agent use identical routes.
   replace the existing spending-confirmation API/grants. Header acceptance and
   deterministic DBOS enqueue share one original SQL transaction.
 * `GET /v1/projects/{project_id}/films/{run_id}` returns phase, safe original
-  plan/job/artifact links, counts and finite error code, without object keys,
+  plan/job/artifact links, counts, warnings and finite error code, without object keys,
   frozen prompts, credential material or grant identity.
 * `POST .../{run_id}/cancel` requests cancellation of existing original jobs and
   stops future admission. A run is cancelled only when its original jobs are
@@ -42,6 +42,16 @@ The header keeps an immutable copy of the requested project revision and exact
 selected take/range. Missing/outdated shots reuse storyboard preflight and
 accepted immutable model/material/seed plans. New results are applied to a
 private copy for render compilation; the editable Story is never overwritten.
+Selected generated takes are compared against their immutable effective
+authoring recipe, not the editable shot version or selected-asset field. Normal
+adoption does not purchase a replacement. An authorized historical selection
+without recipe evidence is reused with `film_selected_recipe_unknown`; changing
+known generation parameters or materials makes a take outdated. Public counts
+include `generated_completed`, `chapters_completed` and `export_completed`, and
+successful chapter artifact IDs are retained while later chapters/export wait.
+An unadmitted original planned/blocked batch is rechecked using its same original
+key/job IDs; failed originals are not regenerated. Unchanged waiting turns do not
+rewrite the header or toggle a later export phase back to chapter preparation.
 
 The existing admission gates call
 `validate_film_source(connection, repo, scope, compiled)` for the server-created

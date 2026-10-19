@@ -97,6 +97,52 @@ def frozen_story(project, results):
     return value
 
 
+def selected_recipe_current(project, shot_id, original, defaults, capabilities):
+    """Compare effective authoring inputs, excluding selection-only mutations.
+
+    Historical receipts without an immutable recipe are unknown, not authority
+    to purchase a replacement for an explicitly selected, authorized take.
+    """
+    recipe = original.get("authoring_recipe")
+    if not isinstance(recipe, dict):
+        return None
+    from .generation_draft import plan_body, read_draft
+    from .storyboard_versions import effective_project
+
+    try:
+        rendered, _ = effective_project(project, shot_id, defaults)
+        draft, issues = read_draft(
+            rendered,
+            shot_id,
+            recipes=capabilities["recipes"],
+            capabilities=capabilities,
+        )
+        if issues:
+            return False
+        # Only derive a comparison: retain original receipt/range intent below.
+        # Actual preflight and admission still perform all normal validation.
+        body = plan_body(
+            rendered,
+            shot_id,
+            capabilities,
+            lambda asset_id, start, end: asset_id,
+            validate_frame=lambda *args: None,
+        )
+        current = {
+            key: copy.deepcopy(body[key]) for key in ("recipe_id", "prompt", "controls")
+        }
+        current["inputs"] = copy.deepcopy(draft["inputs"])
+        if body.get("deployment_profile_id"):
+            current["deployment_profile_id"] = body["deployment_profile_id"]
+        if draft["controls"].get("seed") in (None, ""):
+            current["controls"]["seed"] = recipe.get("controls", {}).get("seed")
+        elif current["controls"].get("seed") is not None:
+            current["controls"]["seed"] = str(current["controls"]["seed"])
+        return request_hash(current) == request_hash(recipe)
+    except (ValueError, KeyError, NotFound, Conflict):
+        return False
+
+
 class FilmRuns:
     def __init__(self, app, *, enqueue=None):
         self.app = app
@@ -183,7 +229,8 @@ class FilmRuns:
             row = self._row(conn, principal, project_id, run_id, lock=True)
             value = copy.deepcopy(row["payload"])
             change(value)
-            self._write(conn, principal, project_id, run_id, value, row)
+            if value != row["payload"]:
+                self._write(conn, principal, project_id, run_id, value, row)
         return value
 
     def get(self, principal, project_id, run_id):
@@ -195,7 +242,7 @@ class FilmRuns:
     @staticmethod
     def public(value):
         # Do not return frozen object keys, runtime configuration or private inputs.
-        return {
+        result = {
             key: copy.deepcopy(value.get(key))
             for key in (
                 "id",
@@ -214,8 +261,19 @@ class FilmRuns:
                 "estimate",
                 "options",
                 "counts",
+                "warnings",
             )
         }
+        result["counts"].update(
+            generated_completed=sum(
+                item["shot_id"] in value["results"] for item in value["generation"]
+            ),
+            chapters_completed=sum(
+                bool(item["artifact_id"]) for item in value["chapters"]
+            ),
+            export_completed=int(bool(value["export"]["artifact_id"])),
+        )
+        return result
 
     def preflight(self, principal, project_id, body, key):
         identifier(key)
@@ -275,7 +333,7 @@ class FilmRuns:
         )
         if not 1 <= len(chapters) <= 50:
             raise ValueError("film_chapter_count_limit")
-        missing, results, chapter_rows = [], {}, []
+        missing, results, chapter_rows, warnings = [], {}, [], []
         total_seconds = 0
         for chapter in chapters:
             _, _, shots = ordered_chapter(project, chapter["id"])
@@ -325,13 +383,22 @@ class FilmRuns:
                         principal, project_id, selected, "video"
                     )
                     if source.get("source_job_id"):
-                        from .source_snapshot import source_snapshot
+                        from .storyboard_versions import preferences
 
                         original = self.access.job(principal, source["source_job_id"])
-                        if original["request"].get(
-                            "server_source_hash"
-                        ) != source_snapshot(project, shot["id"]):
+                        freshness = selected_recipe_current(
+                            project,
+                            shot["id"],
+                            original["request"],
+                            preferences(self.repo, self.tenant, principal.owner)[
+                                "defaults"
+                            ],
+                            self.app.state.generation_admission.capabilities_provider(),
+                        )
+                        if freshness is False:
                             raise Conflict("film_selected_take_outdated")
+                        if freshness is None:
+                            warnings.append("film_selected_recipe_unknown")
                     results[shot["id"]] = {
                         "entity": selected,
                         "reused": True,
@@ -419,6 +486,7 @@ class FilmRuns:
             "cancel_requested": False,
             "error_code": None,
             "options": options,
+            "warnings": sorted(set(warnings)),
             "generation": generation,
             "results": results,
             "chapters": chapter_rows,
@@ -544,7 +612,13 @@ class FilmRuns:
         return self.public(value)
 
     def _admit(self, principal, value, items, suffix):
-        pending = [item for item in items if not item.get("job_id")]
+        pending = [
+            item
+            for item in items
+            if not item.get("job_id")
+            or self.access.job(principal, item["job_id"])["status"]
+            in {"planned", "blocked"}
+        ]
         if not pending:
             return value
         result = self.app.state.submit_generation_batch(
@@ -696,12 +770,13 @@ class FilmRuns:
             if status != "succeeded":
                 return self._waiting(principal, value, "generating")
             results[item["shot_id"]] = result
-        value = self._mutate(
-            principal,
-            project_id,
-            run_id,
-            lambda current: current.update(results=results, phase="chapters"),
-        )
+        if results != value["results"] or value["phase"] == "generating":
+            value = self._mutate(
+                principal,
+                project_id,
+                run_id,
+                lambda current: current.update(results=results, phase="chapters"),
+            )
         project = frozen_story(value["project"], results)
         for chapter in value["chapters"]:
             if not chapter["plan_id"]:
@@ -739,6 +814,21 @@ class FilmRuns:
                     "chapters" if status not in JOB_TERMINAL else "blocked",
                     "film_original_job_failed" if status in JOB_TERMINAL else None,
                 )
+            if chapter["artifact_id"] != result["artifact_id"]:
+                if chapter["artifact_id"] is not None:
+                    raise Conflict("film_result_identity_conflict")
+
+                def record_chapter(current):
+                    target = next(
+                        item
+                        for item in current["chapters"]
+                        if item["chapter_id"] == chapter["chapter_id"]
+                    )
+                    if target["artifact_id"] not in {None, result["artifact_id"]}:
+                        raise Conflict("film_result_identity_conflict")
+                    target["artifact_id"] = result["artifact_id"]
+
+                value = self._mutate(principal, project_id, run_id, record_chapter)
             job = self.access.job(principal, chapter["job_id"])
             records = self.repo.list_artifacts(
                 self.access.scope(principal, project_id), job["id"]
