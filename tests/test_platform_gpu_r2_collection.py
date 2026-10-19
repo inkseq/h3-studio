@@ -748,7 +748,9 @@ class GPUCollectionTests(LedgerCase):
             )
 
         with mock.patch.object(runner.queue, "complete", side_effect=fail):
-            with self.assertRaisesRegex(RuntimeError, "^synthetic transaction rollback$"):
+            with self.assertRaisesRegex(
+                RuntimeError, "^synthetic transaction rollback$"
+            ):
                 self.collect(values)
         writer = ArtifactWriter(
             self.repo.engine, self.store, self.work, tenant=self.scope.tenant_id
