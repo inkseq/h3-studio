@@ -1,0 +1,83 @@
+name: Problem using inkseq.com
+description: Something went wrong or looks wrong while using inkseq.com (Chinese or English is fine).
+title: "[User report] "
+labels: ["user-report"]
+projects: ["inkseq/1"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! 中文或英文都可以。
+        **This repository is public.** Do not include passwords, API keys, connection codes, private prompts, your own images/videos, or signed media links. Machine IDs, job IDs, error codes and screenshots of the page are fine.
+        本仓库是公开的：不要放密码、密钥、连接码、你的私人提示词或素材。机器编号、任务编号、报错和页面截图都可以。
+  - type: input
+    id: account
+    attributes:
+      label: Account / 账号
+      placeholder: supervan
+    validations:
+      required: true
+  - type: input
+    id: when
+    attributes:
+      label: When / 时间（含时区）
+      placeholder: 2026-10-19 17:46 Melbourne
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where / 在哪里
+      options:
+        - Quick Create / 快速创作
+        - Story / 故事
+        - Library / 素材库
+        - GPU machines / 算力
+        - Settings, credits, sign-in / 设置、积分、登录
+        - AI assistant (agent) / AI 助手
+        - Other / 其他
+    validations:
+      required: true
+  - type: textarea
+    id: did
+    attributes:
+      label: What you did / 你做了什么
+      description: Steps in order. 按顺序写步骤。
+      placeholder: |
+        1. 打开算力页，启动 Vast RTX 5090（首尾帧）
+        2. 打开机器详情
+    validations:
+      required: true
+  - type: textarea
+    id: saw
+    attributes:
+      label: What you saw / 看到了什么
+      description: Copy the exact message or error code. 原样复制提示或报错。
+      placeholder: 等待准备观测 · dstack_native_observation_failed，等了 29 分钟
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected / 你本来期望怎样
+  - type: input
+    id: ids
+    attributes:
+      label: IDs shown on the page / 页面上的编号
+      description: Machine, job, story or take IDs if visible. 机器、任务、故事或版本编号（有就填）。
+      placeholder: machine c7ac4305 · job 0dd255b1
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots / 截图
+      description: Drag images here. Crop out anything private. 直接拖图进来，先把私人内容裁掉。
+  - type: dropdown
+    id: impact
+    attributes:
+      label: How bad is it / 影响
+      options:
+        - Blocks my work / 卡住了没法继续
+        - Annoying, has a workaround / 麻烦但能绕过
+        - Small / cosmetic / 小问题、显示问题
+    validations:
+      required: true
