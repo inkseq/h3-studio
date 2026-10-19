@@ -734,7 +734,7 @@ class GPUCollectionTests(LedgerCase):
         _, job, lease, tag, _, _, _, runner = values
         original = runner.queue.complete
 
-        def fail(lease, specs, *, actual_cost_microusd, settlement):
+        def fail(lease, specs, *, actual_cost_microusd, settlement, moderation=None):
             def rollback(conn, checked):
                 settlement(conn, checked)
                 raise RuntimeError("synthetic transaction rollback")
@@ -744,10 +744,11 @@ class GPUCollectionTests(LedgerCase):
                 specs,
                 actual_cost_microusd=actual_cost_microusd,
                 settlement=rollback,
+                moderation=moderation,
             )
 
         with mock.patch.object(runner.queue, "complete", side_effect=fail):
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, "^synthetic transaction rollback$"):
                 self.collect(values)
         writer = ArtifactWriter(
             self.repo.engine, self.store, self.work, tenant=self.scope.tenant_id
