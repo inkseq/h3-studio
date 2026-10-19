@@ -389,17 +389,21 @@ class WorkerRunner:
             timing_basis="durable_cpu_interval",
         )
 
-    def _commit_result(self, job, lease, specs, cost, settlement):
+    def _commit_result(self, job, lease, specs, cost, settlement, moderation=None):
         with self._stage("commit_result", job, lease):
             result = self.queue.complete(
-                lease, specs, actual_cost_microusd=cost, settlement=settlement
+                lease,
+                specs,
+                actual_cost_microusd=cost,
+                settlement=settlement,
+                moderation=moderation,
             )
         # Complete only after validation, object publication and the original
         # result transaction. This observation never authorizes a replay.
         self._observe_interval("end_to_end", result, lease, job.get("created_at"))
         return self._summary(result)
 
-    def _cleanup_collection(self, writer, job, lease, tag):
+    def _cleanup_collection(self, writer, job, lease, tag, *, publish_renditions=True):
         try:
             writer.cleanup_settled(job, lease.attempt_id, tag)
         except Exception:
@@ -407,6 +411,8 @@ class WorkerRunner:
             # obligation, never a reason to resubmit or fail the original job.
             logging.getLogger(__name__).warning("r2_artifact_scratch_cleanup_pending")
             return  # The original manifest must complete before display scratch is introduced.
+        if not publish_renditions:
+            return
         try:
             from .artifact_renditions import ensure
 
@@ -418,10 +424,26 @@ class WorkerRunner:
             )
 
     def _complete_collection(self, writer, job, lease, tag, specs, cost, receipt):
-        result = self._commit_result(
-            job, lease, specs, cost, writer.settlement(receipt)
+        from .content_policy import ContentPolicyError, check_output
+
+        try:
+            # The classifier may use IO; only its immutable receipt crosses the
+            # original money/storage transaction in queue.complete.
+            moderation = check_output(self.repo, job, lease.attempt_id, specs)
+            result = self._commit_result(
+                job, lease, specs, cost, writer.settlement(receipt), moderation
+            )
+        except ContentPolicyError as error:
+            return self._summary(
+                self.queue.collection_failed(lease, error_code=error.code)
+            )
+        self._cleanup_collection(
+            writer,
+            job,
+            lease,
+            tag,
+            publish_renditions=result["state"] == "succeeded",
         )
-        self._cleanup_collection(writer, job, lease, tag)
         return result
 
     def drain(self):
@@ -792,9 +814,17 @@ class WorkerRunner:
         receipt = writer.get(job, lease.attempt_id, tag)
         if receipt is not None and receipt["phase"] == "settled":
             current = self.repo.get_job(self._scope(job), job["id"])
-            if current["status"] != "succeeded":
+            refused = (
+                current["status"] == "failed"
+                and current.get("error_code") == "content_moderation_refused"
+                and (current.get("result") or {}).get("moderation", {}).get("status")
+                == "refused"
+            )
+            if current["status"] != "succeeded" and not refused:
                 raise BackendError("artifact_settlement_job_mismatch")
-            self._cleanup_collection(writer, current, lease, tag)
+            self._cleanup_collection(
+                writer, current, lease, tag, publish_renditions=not refused
+            )
             return self._summary(current)
         if gpu_delivery(job):
             return self._collect_remote(
