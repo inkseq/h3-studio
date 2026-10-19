@@ -60,7 +60,10 @@ export const assistantCatalogs = {
     'assistants.lost':
       'The original issue was reconciled. Its secret code is not shown again; check the original connection or revoke it before issuing another.',
     'assistants.paragraph':
-      'Help with my Inkseq work at {origin}. Read {skill}. Use this one-time code: {code}. Scope: {scope}. Permission: {permission}. Daily cap: {cap} USD. It expires {date}. Do not start paid work without the required preflight and approval. Use the exact exchange metadata below.',
+      'Help with my Inkseq work at {origin}. Read {skill}. Use this one-time code: {code}. Scope: {scope}. Permission: {permission}. {capSentence} It expires {date}. Do not start paid work without the required preflight and approval. Use the exact exchange metadata below.',
+    'assistants.capSentence.organise': 'It may not start paid work.',
+    'assistants.capSentence.none': 'No daily cap of its own; my account limits still apply.',
+    'assistants.capSentence.cap': 'Daily cap: {cap} USD.',
     'assistants.technical': 'Connection metadata for the assistant',
     'assistants.list': 'Connected and pending assistants',
     'assistants.refresh': 'Refresh',
@@ -163,7 +166,10 @@ export const assistantCatalogs = {
     'assistants.single': '只能使用一次，{date} 到期。连接码仅保存在当前页面内存。',
     'assistants.lost': '原发码操作已核对，秘密连接码不会再次显示。请核对或撤销原连接后再发新码。',
     'assistants.paragraph':
-      '请在 {origin} 帮我处理映序作品，先阅读 {skill}。一次性连接码：{code}。范围：{scope}。权限：{permission}。每日上限：{cap} 美元。到期时间：{date}。付费操作必须先完成原预检和授权，请使用下方完整交换元数据。',
+      '请在 {origin} 帮我处理映序作品，先阅读 {skill}。一次性连接码：{code}。范围：{scope}。权限：{permission}。{capSentence}到期时间：{date}。付费操作必须先完成原预检和授权，请使用下方完整交换元数据。',
+    'assistants.capSentence.organise': '不能做付费工作。',
+    'assistants.capSentence.none': '不单独设每日上限，账户的上限仍然有效。',
+    'assistants.capSentence.cap': '每日上限：{cap} 美元。',
     'assistants.technical': '供助手使用的连接元数据',
     'assistants.list': '已连接及等待中的助手',
     'assistants.refresh': '刷新',
