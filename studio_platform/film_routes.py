@@ -3,11 +3,19 @@
 from fastapi import Header, Request
 
 from .film_runs import FilmRuns
+from .repository import Conflict
 
 
 def register_film_routes(app, *, enqueue=None):
     service = FilmRuns(app, enqueue=enqueue)
     app.state.film_runs = service
+
+    def require_enabled():
+        if (
+            app.state.settings.generation_queue != 'dbos'
+            or not app.state.settings.render_enabled
+        ):
+            raise Conflict('film_not_enabled')
 
     @app.post('/v1/projects/{project_id}/films/preflights', status_code=201)
     def preflight(
@@ -16,6 +24,7 @@ def register_film_routes(app, *, enqueue=None):
         body: dict,
         idempotency_key: str = Header(..., alias='Idempotency-Key'),
     ):
+        require_enabled()
         return service.preflight(
             request.state.principal, project_id, body, idempotency_key
         )
@@ -27,6 +36,7 @@ def register_film_routes(app, *, enqueue=None):
         body: dict,
         idempotency_key: str = Header(..., alias='Idempotency-Key'),
     ):
+        require_enabled()
         return service.submit(
             request.state.principal, project_id, body, idempotency_key
         )

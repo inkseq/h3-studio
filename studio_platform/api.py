@@ -1380,6 +1380,14 @@ def create_app(
     from .storyboard_versions import register_routes as register_storyboard_routes
 
     register_storyboard_routes(app)
+    from .film_routes import register_film_routes
+
+    register_film_routes(
+        app,
+        enqueue=repo.generation_transport.enqueue_film
+        if repo.generation_transport is not None
+        else None,
+    )
     from .agent_discovery import register_routes as register_agent_discovery_routes
 
     register_agent_discovery_routes(app)

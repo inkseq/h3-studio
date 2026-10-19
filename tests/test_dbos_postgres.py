@@ -250,6 +250,44 @@ class ClientTransactionTests(unittest.TestCase):
             self.assertEqual(connection.execute(jobs.select()).all(), [])
             self.assertEqual(connection.execute(budget_reservations.select()).all(), [])
 
+    def test_film_enqueue_uses_original_transaction_and_resume_identity(self):
+        from studio_platform.film_runs import VERSION as FILM_VERSION
+
+        client = self.transport.client
+        client.register_queue(FILM_VERSION, polling_interval_sec=10)
+        args = ("test", "superdan", "project", "original-film")
+        with self.repo.transaction() as connection:
+            self.transport.enqueue_film(connection, *args)
+        original = self.workflows()[0]["workflow_uuid"]
+        with self.repo.transaction() as connection:
+            self.transport.enqueue_film(connection, *args)
+        self.assertEqual(len(self.workflows()), 1)
+        self.assertEqual(self.workflows()[0]["name"], FILM_VERSION)
+        with self.repo.transaction() as connection:
+            connection.execute(
+                text(
+                    "UPDATE inkseq_workflows.workflow_status SET status='ERROR' WHERE workflow_uuid=:id"
+                ),
+                {"id": original},
+            )
+        with self.assertRaises(RuntimeError):
+            with self.repo.transaction() as connection:
+                self.transport.enqueue_film(connection, *args)
+                raise RuntimeError("test_confirmed_original_transaction_rollback")
+        self.assertEqual(len(self.workflows()), 1)
+        with self.repo.transaction() as connection:
+            self.transport.enqueue_film(connection, *args)
+        rows = self.workflows()
+        self.assertEqual(len(rows), 2)
+        current = next(row for row in rows if row["status"] == "ENQUEUED")
+        self.assertTrue(current["workflow_uuid"].startswith(original + "/"))
+        with self.repo.transaction() as connection:
+            self.transport.enqueue_film(connection, *args)
+        self.assertEqual(len(self.workflows()), 2)
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(connection.execute(jobs.select()).all(), [])
+            self.assertEqual(connection.execute(budget_reservations.select()).all(), [])
+
     def test_terminal_sdk_error_needs_original_admission_not_a_timer_epoch(self):
         job = self.job()
         first = self.workflows()[0]["workflow_uuid"]

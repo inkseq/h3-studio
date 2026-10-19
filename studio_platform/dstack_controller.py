@@ -1076,8 +1076,29 @@ def main(argv=None):
         runtime, work_dir = create_runtime(repo, service.capacity.store)
         if settings.generation_queue == "dbos":
             from .dbos_transport import DurableExecutor
+            from .api import create_app
+            from .film_workflows import register_film_workflows
+            from .film_runs import VERSION as FILM_VERSION
 
-            durable_executor = DurableExecutor(repo, settings, work_dir).__enter__()
+            film_app = create_app(settings, repository=repo, dstack_operator=service)
+            film_service = film_app.state.film_runs
+
+            def film_setup(DBOS):
+                repo.generation_transport.client.register_queue(
+                    FILM_VERSION, polling_interval_sec=10
+                )
+
+                def principal_for(tenant, owner, project_id, run_id):
+                    grant = film_service.execution_context(
+                        tenant, owner, project_id, run_id
+                    )
+                    return film_app.state.auth.workflow_principal(owner, grant)
+
+                register_film_workflows(DBOS, film_service, principal_for)
+
+            durable_executor = DurableExecutor(
+                repo, settings, work_dir, film_setup=film_setup
+            ).__enter__()
             processes = durable_executor.slots
             durable_executor.import_pending()
         else:

@@ -336,6 +336,15 @@ def capabilities(settings):
     profiles = public_profiles(settings)
     return {
         "capabilities_version": VERSION,
+        "story_film": {
+            "enabled": settings.generation_queue == "dbos" and settings.render_enabled,
+            "workflow_version": "inkseq-film-v1",
+            "preflight": "/v1/projects/{project_id}/films/preflights",
+            "submit": "/v1/projects/{project_id}/films",
+            "read": "/v1/projects/{project_id}/films/{run_id}",
+            "cancel": "/v1/projects/{project_id}/films/{run_id}/cancel",
+            "resume": "/v1/projects/{project_id}/films/{run_id}/resume",
+        },
         "recipes": recipes,
         "deployment_profiles": profiles,
         "library": __import__(

@@ -159,6 +159,68 @@ class GenerationTransport:
     def close(self):
         self.client.destroy()
 
+    def enqueue_film(self, connection, tenant, owner, project, run_id):
+        from .film_runs import VERSION as FILM_VERSION
+        from .workflow_schema import assert_execution_allowed
+
+        assert_execution_allowed(connection)
+        base = "inkseq-film-" + workflow_id(tenant, owner, project, run_id)[11:]
+        params = {
+            "id": base,
+            "prefix": base + "/%",
+            "application": APPLICATION,
+            "name": FILM_VERSION,
+        }
+        rows = (
+            connection.execute(
+                text(
+                    "SELECT workflow_uuid FROM inkseq_workflows.workflow_status "
+                    "WHERE (workflow_uuid=:id OR workflow_uuid LIKE :prefix) AND application_name=:application "
+                    "AND name=:name AND status IN ('ENQUEUED','PENDING','DELAYED') LIMIT 2"
+                ),
+                params,
+            )
+            .scalars()
+            .all()
+        )
+        if len(rows) > 1:
+            raise Conflict("workflow_film_binding_ambiguous")
+        if rows:
+            ident = rows[0]
+        else:
+            previous = connection.execute(
+                text(
+                    "SELECT workflow_uuid FROM inkseq_workflows.workflow_status "
+                    "WHERE (workflow_uuid=:id OR workflow_uuid LIKE :prefix) AND application_name=:application "
+                    "AND name=:name ORDER BY created_at DESC,workflow_uuid DESC LIMIT 1"
+                ),
+                params,
+            ).scalar()
+            # Called only by original confirmed submit/explicit resume, never a
+            # timer. A transport epoch retains the same frozen run/jobs/holds.
+            ident = (
+                base
+                if previous is None
+                else base + "/" + hashlib.sha256(previous.encode()).hexdigest()
+            )
+            self.client.enqueue_in_transaction(
+                connection,
+                {
+                    "workflow_name": FILM_VERSION,
+                    "queue_name": FILM_VERSION,
+                    "workflow_id": ident,
+                    "app_version": VERSION,
+                    "application_name": APPLICATION,
+                },
+                tenant,
+                owner,
+                project,
+                run_id,
+            )
+        self.client.send_in_transaction(
+            connection, ident, {"run_id": run_id}, topic="film_changed"
+        )
+
 
 def configure_producer(repo, *, client=None):
     if repo.generation_transport is None:
