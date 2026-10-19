@@ -86,7 +86,9 @@ class MarketTests(LedgerCase):
         self.actor = Principal("superdan", "browser", auth_mode="password")
         self.service = OperatorCapacity(
             self.repo,
-            SimpleNamespace(operator_capacity_owners=("superdan",)),
+            SimpleNamespace(
+                tenant_id=self.scope.tenant_id, operator_capacity_owners=("superdan",)
+            ),
             self.registry,
         )
 

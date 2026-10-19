@@ -43,7 +43,9 @@ class OperatorCase(LedgerCase):
     def setUp(self):
         super().setUp()
         self.actor = Principal("superdan", "browser", auth_mode="password")
-        self.settings = SimpleNamespace(operator_capacity_owners=("superdan",))
+        self.settings = SimpleNamespace(
+            tenant_id=self.scope.tenant_id, operator_capacity_owners=("superdan",)
+        )
         self.binding = DeploymentBinding(
             binding_id="test-bf16",
             runtime_profile_id="h3-test-bf16",
