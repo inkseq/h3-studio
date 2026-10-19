@@ -1,6 +1,7 @@
 """Original-ledger lifecycle and admission; no provider, media or GPU calls."""
 
 from dataclasses import replace
+from contextlib import contextmanager
 from unittest.mock import patch
 from types import SimpleNamespace
 from sqlalchemy import select, update
@@ -176,6 +177,89 @@ class DstackControllerTests(fixture.DstackOperatorTests):
                     connection, worker, self.now, deployment_profile_id=fixture.PROFILE
                 )
             )
+
+    def test_fresh_native_idle_proof_recovers_expired_ready_registration(self):
+        node, controller = self.ready()
+        worker_id = controller.runtime.slot(node).spec.worker_id
+        before = controller.control.get(worker_id)
+        self.now += 121
+        self.assertEqual(controller.control.get(worker_id)["state"], "ready")
+        # An expired row alone is not fresh proof. The ordinary controller
+        # observation rechecks exact native identity and explicit idle state.
+        self.assertEqual(controller.tick()["nodes"][0]["state"], "ready")
+        recovered = controller.control.get(worker_id)
+        self.assertEqual(recovered["expires_at"], self.now + 120)
+        self.assertEqual(recovered["fence"], before["fence"] + 1)
+        self.assertIsNone(recovered["current_job_id"])
+        self.assertEqual(len(self.client.applied), 1)
+
+    def test_dbos_native_idle_observations_keep_original_worker_and_consumer_live(self):
+        from studio_platform.dbos_transport import DurableSlots
+
+        node, controller = self.ready()
+        worker_id = controller.runtime.slot(node).spec.worker_id
+        before = controller.control.get(worker_id)
+
+        @contextmanager
+        def context(*_, **__):
+            yield SimpleNamespace(
+                control=controller.control,
+                backend=SimpleNamespace(
+                    kind="wangp-worker", slot_key=node, expected_incarnation="c" * 32
+                ),
+            )
+
+        with DurableSlots(
+            self.repo,
+            self.settings,
+            Path(self.temp.name) / "dbos",
+            runner_context=context,
+        ) as slots:
+            controller.worker_process = slots
+            for _ in range(4):
+                self.now += 45
+                self.assertEqual(controller.tick()["nodes"][0]["state"], "ready")
+                live = controller.control.get(worker_id)
+                self.assertEqual(live["expires_at"], self.now + 120)
+                self.assertEqual(live["fence"], before["fence"])
+                with self.repo.engine.connect() as connection:
+                    self.assertIsNone(
+                        worker_window_reason(
+                            connection,
+                            live,
+                            self.now,
+                            deployment_profile_id=fixture.PROFILE,
+                        )
+                    )
+        self.assertGreater(self.now, before["expires_at"])
+        self.assertEqual(len(self.client.applied), 1)
+
+    def test_expired_worker_needs_fresh_native_idle_not_cached_or_busy_proof(self):
+        from studio_platform.inference.wangp_contract import HostReadiness
+
+        node, controller = self.ready()
+        worker_id = controller.runtime.slot(node).spec.worker_id
+        self.now += 121
+        expired = controller.control.get(worker_id)
+        with patch.object(self.capacity, "observe", return_value={"state": "ready"}):
+            controller.tick()
+        self.assertEqual(controller.control.get(worker_id), expired)
+        controller.control.recover_expired()
+        unknown = controller.control.get(worker_id)
+        self.assertEqual(unknown["state"], "unknown")
+        self.capacity.readiness = lambda binding, run: HostReadiness(
+            binding["manifest_digest"], binding["intent_id"], "c" * 32, False
+        )
+        self.assertEqual(controller.tick()["nodes"][0]["state"], "busy")
+        self.assertEqual(controller.control.get(worker_id), unknown)
+        self.capacity.readiness = lambda binding, run: HostReadiness(
+            binding["manifest_digest"], binding["intent_id"], "c" * 32, True
+        )
+        self.assertEqual(controller.tick()["nodes"][0]["state"], "ready")
+        ready = controller.control.get(worker_id)
+        self.assertEqual(ready["state"], "ready")
+        self.assertEqual(ready["fence"], unknown["fence"] + 1)
+        self.assertEqual(ready["expires_at"], self.now + 120)
 
     def test_consumer_fence_instance_and_incarnation_fail_closed(self):
         node, controller = self.ready()

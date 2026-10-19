@@ -876,7 +876,10 @@ class DstackController:
                 raise
             self.capacity.store.record_registration(intent_id, slot.spec.worker_id)
             if (
-                registered["state"] != "ready"
+                (
+                    registered["state"] != "ready"
+                    or registered["expires_at"] <= self.repo.clock()
+                )
                 and not registered["current_job_id"]
                 and not registered["drain_requested"]
             ):

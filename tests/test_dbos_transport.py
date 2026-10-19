@@ -1,6 +1,7 @@
 """Transport wakeups cannot authorize another job, submission or budget."""
 
 from pathlib import Path
+from contextlib import contextmanager
 import os
 import subprocess
 import sys
@@ -10,6 +11,7 @@ from unittest.mock import Mock
 
 from studio_platform.dbos_transport import DurableSlots, _Slot, workflow_id
 from studio_platform.control import WorkerControl
+from studio_platform.fleet import SlotConfig
 from studio_platform.storage import LocalObjectStore
 from test_platform_repository import LedgerCase
 import test_postgres_dispatch as dispatch_cases
@@ -145,6 +147,66 @@ class DurableDomainTests(LedgerCase):
         self.assertEqual(first, workflow_id("t", "superdan", "p", "job"))
         self.assertNotEqual(first, workflow_id("t", "supervan", "p", "job"))
         self.assertNotIn("superdan", first)
+
+    @contextmanager
+    def ensured_slots(self, spec, backend):
+        @contextmanager
+        def context(*_, **__):
+            yield self.runner(backend)
+
+        with DurableSlots(
+            self.repo, Mock(), self.directory / "executor", runner_context=context
+        ) as slots:
+            slots.ensure("original-node", SlotConfig(spec, enabled=True))
+            yield slots
+
+    def test_fresh_native_ensure_keeps_idle_registration_live_past_first_lease(self):
+        spec = self.ready()
+        before = self.control.get(spec.worker_id)
+        with self.ensured_slots(spec, MemoryBackend()) as slots:
+            for _ in range(4):
+                self.now += 45
+                slots.ensure("original-node", SlotConfig(spec, enabled=True))
+                live = self.control.get(spec.worker_id)
+                self.assertEqual(live["state"], "ready")
+                self.assertEqual(live["fence"], before["fence"])
+                self.assertIsNone(live["current_job_id"])
+                self.assertEqual(live["expires_at"], self.now + 120)
+        self.assertGreater(self.now, before["expires_at"])
+
+    def test_ensure_alone_cannot_revive_expired_or_unknown_registration(self):
+        spec = self.ready()
+        with self.ensured_slots(spec, MemoryBackend()) as slots:
+            self.now += 121
+            expired = self.control.get(spec.worker_id)
+            slots.ensure("original-node", SlotConfig(spec, enabled=True))
+            self.assertEqual(self.control.get(spec.worker_id), expired)
+            self.control.recover_expired()
+            unknown = self.control.get(spec.worker_id)
+            self.assertEqual(unknown["state"], "unknown")
+            slots.ensure("original-node", SlotConfig(spec, enabled=True))
+            self.assertEqual(self.control.get(spec.worker_id), unknown)
+
+    def test_ensure_heartbeat_never_resets_running_job_or_drain(self):
+        job = self.make_job()
+        spec = self.ready()
+        with self.ensured_slots(spec, MemoryBackend()) as slots:
+            slots.turn(
+                self.scope.tenant_id,
+                self.scope.owner_id,
+                self.scope.project_id,
+                job["id"],
+            )
+            for draining in (False, True):
+                if draining:
+                    self.control.drain(spec.worker_id)
+                before = self.control.get(spec.worker_id)
+                self.assertEqual(before["current_job_id"], job["id"])
+                self.now += 10
+                slots.ensure("original-node", SlotConfig(spec, enabled=True))
+                after = self.control.get(spec.worker_id)
+                for field in ("state", "current_job_id", "fence", "drain_requested"):
+                    self.assertEqual(after[field], before[field])
 
     def test_local_render_capabilities_do_not_keep_provider_polling_active(self):
         from studio_platform.settings import Settings

@@ -1013,6 +1013,59 @@ class QuickChatTests(unittest.TestCase):
         with self.repo.engine.connect() as conn:
             self.assertEqual(len(conn.execute(select(jobs)).all()), 2)
 
+    def test_admission_refresh_preserves_only_finite_diagnostic_and_original_job(self):
+        revision = self.card()["revision"]
+        initial = self.preflight(revision)
+        with mock.patch.object(
+            self.service.hooks,
+            "enqueue",
+            side_effect=Conflict("test_admission_blocked"),
+        ):
+            submission = self.submit(revision, initial)
+        target = submission["items"][0]
+        before = self.repo.get_job_for_owner("sixnine", "superdan", target["job_id"])
+        for index, (error, expected) in enumerate(
+            (
+                (
+                    Conflict("execution_policy_changed_or_unavailable"),
+                    "execution_policy_changed_or_unavailable",
+                ),
+                (
+                    QuickChatError("shot_version_conflict", "PRIVATE TEXT"),
+                    "shot_version_conflict",
+                ),
+                (ValueError("PRIVATE PATH OR PROMPT"), "admission_refresh_blocked"),
+            )
+        ):
+            fresh = self.preflight(
+                revision, key="refresh-pf-" + str(index), item_ids=[target["id"]]
+            )
+            with mock.patch.object(
+                self.service.hooks, "refresh_planned", side_effect=error
+            ):
+                result = self.service.resume_admission(
+                    self.principal,
+                    self.sid,
+                    submission["id"],
+                    {
+                        "item_ids": [target["id"]],
+                        "fresh_preflight_id": fresh["id"],
+                        "confirmed": True,
+                    },
+                    "refresh-" + str(index),
+                )
+            item = result["items"][0]
+            self.assertEqual(item["error_code"], expected)
+            self.assertEqual(item["job_id"], target["job_id"])
+            self.assertEqual(
+                item["current_execution_id"], target["current_execution_id"]
+            )
+            self.assertNotIn("PRIVATE", json.dumps(result))
+            self.assertEqual(
+                self.repo.get_job_for_owner("sixnine", "superdan", target["job_id"]),
+                before,
+            )
+
     def test_retry_is_single_item_unique_across_actor_and_seed_fixed(self):
         revision = self.card(copies=2)["revision"]
         original = self.submit(revision)
