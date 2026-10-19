@@ -1,0 +1,75 @@
+/* Settings → Admin (#304). Ported from the prototype styles.css. */
+.admin-console {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.admin-tabs {
+  align-self: flex-start;
+}
+.user-table {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+}
+.user-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px 72px 80px 96px;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 4px;
+  border-bottom: 1px solid var(--line);
+}
+.user-row > span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.user-row .clip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.user-row.head {
+  color: var(--muted);
+  font-size: 11px;
+}
+.user-row.off {
+  opacity: 0.55;
+}
+.user-row .num {
+  font-variant-numeric: tabular-nums;
+}
+.user-adjust {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  padding: 10px;
+  background: var(--surface-2);
+  border-radius: var(--r-sm);
+  margin: 4px 0 8px;
+}
+.user-adjust .field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 2;
+  min-width: 180px;
+}
+.user-adjust .field.small {
+  flex: 0 0 110px;
+  min-width: 0;
+}
+
+@media (max-width: 760px) {
+  .user-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .user-row > span:nth-child(2),
+  .user-row > span:nth-child(3),
+  .user-row > span:nth-child(4),
+  .user-row.head {
+    display: none;
+  }
+}
