@@ -23,6 +23,19 @@ from .repository import (
 from .render_plans import compile_render, compile_film_export, ordered_chapter
 
 KIND = "film_run"
+EXECUTION_BLOCKS = frozenset(
+    {
+        "film_render_input_blocked",
+        "spending_confirmation_required",
+        "spending_settings_changed",
+        "spending_usage_unconfirmed",
+        "user_daily_limit_reached",
+        "connection_daily_limit_reached",
+        "budget_exceeded",
+        "execution_policy_changed_or_unavailable",
+        "capacity_approval_unavailable",
+    }
+)
 VERSION = "inkseq-film-v1"
 TERMINAL = frozenset({"completed", "cancelled"})
 JOB_TERMINAL = frozenset({"succeeded", "failed", "cancelled"})
@@ -687,7 +700,7 @@ class FilmRuns:
             # manufacture owner-wide grants for a paused/revoked Agent key.
             value["actor_grant"] = actor_grant(principal)
             value["error_code"] = None
-            if value["phase"] == "authorization_required":
+            if value["phase"] in {"authorization_required", "blocked"}:
                 value["phase"] = "generating"
 
         value = self._mutate(principal, project_id, run_id, resume)
@@ -814,6 +827,21 @@ class FilmRuns:
             "wait_seconds": 10,
         }
 
+    def record_business_block(self, principal, project_id, run_id, code):
+        """Known refusals wait visibly for same-run resume, never auto-retry work."""
+        if code not in EXECUTION_BLOCKS:
+            raise ValueError("film_execution_block_invalid")
+        self.access.project(principal, project_id, "jobs:write")
+        with self.repo.engine.connect() as conn:
+            value = copy.deepcopy(
+                self._row(conn, principal, project_id, run_id)["payload"]
+            )
+        if value["phase"] in TERMINAL:
+            return {"terminal": True, "phase": value["phase"]}
+        if value.get("accepted_at") is None:
+            raise Conflict("film_confirmation_required")
+        return self._waiting(principal, value, "blocked", code)
+
     def turn(self, principal, project_id, run_id):
         """One bounded domain turn. The workflow supplies durable waiting."""
         self.access.project(principal, project_id, "jobs:write")
@@ -844,6 +872,8 @@ class FilmRuns:
             return {"terminal": False, "phase": "cancel_requested", "wait_seconds": 10}
         if value.get("accepted_at") is None:
             raise Conflict("film_confirmation_required")
+        if value["phase"] == "blocked" and value.get("error_code") in EXECUTION_BLOCKS:
+            return self._waiting(principal, value, "blocked", value["error_code"])
         value = self._admit(principal, value, value["generation"], "shots")
         results = copy.deepcopy(value["results"])
         for item in value["generation"]:

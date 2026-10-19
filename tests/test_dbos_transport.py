@@ -1,6 +1,9 @@
 """Transport wakeups cannot authorize another job, submission or budget."""
 
 from pathlib import Path
+import os
+import subprocess
+import sys
 import threading
 import unittest
 from unittest.mock import Mock
@@ -156,6 +159,30 @@ class DurableDomainTests(LedgerCase):
                 worker = self.control.get(slot.spec.worker_id)
                 self.assertEqual(worker["state"], "ready")
                 self.assertEqual(worker["expires_at"], self.now + 3600)
+
+    @unittest.skipUnless(
+        os.name == "posix", "Inherited POSIX shared CPU operation fence"
+    )
+    def test_cpu_fence_survives_parent_close_across_configurations(self):
+        slots = DurableSlots(self.repo, Mock(), self.directory)
+        with slots._cpu_fence() as (acquired, descriptor):
+            self.assertTrue(acquired)
+            child = subprocess.Popen(
+                [sys.executable, "-c", "import sys;sys.stdin.read()"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                pass_fds=(descriptor,),
+            )
+        try:
+            other = DurableSlots(self.repo, Mock(), self.directory)
+            with other._cpu_fence() as (acquired, descriptor):
+                self.assertFalse(acquired)
+                self.assertIsNone(descriptor)
+        finally:
+            child.communicate(timeout=5)
+        with slots._cpu_fence() as (acquired, descriptor):
+            self.assertTrue(acquired)
 
 
 if __name__ == "__main__":

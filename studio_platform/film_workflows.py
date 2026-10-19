@@ -6,9 +6,9 @@ database initialization or process is started when the API imports this module.
 
 import asyncio
 
-from .film_runs import VERSION
+from .film_runs import VERSION, EXECUTION_BLOCKS
 from .auth import AuthenticationError
-from .repository import identifier
+from .repository import identifier, Conflict, BudgetExceeded
 
 
 def register_film_workflows(DBOS, service, principal_for):
@@ -28,6 +28,13 @@ def register_film_workflows(DBOS, service, principal_for):
             except AuthenticationError:
                 return service.record_execution_block(
                     tenant, owner, project_id, run_id, 'film_actor_grant_unavailable'
+                )
+            except (Conflict, BudgetExceeded) as error:
+                code = str(error)
+                if code not in EXECUTION_BLOCKS:
+                    raise
+                return service.record_business_block(
+                    principal, project_id, run_id, code
                 )
 
         return await asyncio.to_thread(invoke)

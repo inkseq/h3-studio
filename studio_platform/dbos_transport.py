@@ -7,10 +7,13 @@ tables. Producers enqueue IDs in the SAME transaction as original admission.
 from __future__ import annotations
 
 import asyncio
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 import hashlib
 import json
+import os
 from pathlib import Path
+import stat
 import threading
 
 from sqlalchemy import select, text
@@ -305,6 +308,38 @@ class DurableSlots:
             self.ensure(worker, SlotConfig(spec, enabled=True))
         self.heartbeat_cpu()
 
+    @contextmanager
+    def _cpu_fence(self):
+        """Fence all CPU configurations, including a surviving encoder child."""
+        if os.name != "posix":
+            yield True, None
+            return
+        import fcntl
+
+        descriptor = os.open(
+            self.work_dir / "cpu-render-operation.lock",
+            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
+            0o600,
+        )
+        try:
+            info = os.fstat(descriptor)
+            if not (
+                stat.S_ISREG(info.st_mode)
+                and info.st_nlink == 1
+                and info.st_uid == os.geteuid()
+                and not info.st_mode & 0o077
+            ):
+                raise Conflict("dbos_cpu_operation_fence_invalid")
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                yield False, None
+                return
+            yield True, descriptor
+        finally:
+            # Child OFD ownership survives closing this parent FD after a crash.
+            os.close(descriptor)
+
     def __enter__(self):
         from .worker import _slot_lock
 
@@ -371,8 +406,24 @@ class DurableSlots:
                     acquired_cpu = self._cpu_operation.acquire(blocking=False)
                     if not acquired_cpu:
                         continue
-                slot.runner.selected_job_id = job_id
-                result = slot.runner.run_once(slot.spec.worker_id, slot.spec.pool)
+                with (
+                    self._cpu_fence() if cpu else nullcontext((True, None)) as (
+                        physical,
+                        descriptor,
+                    )
+                ):
+                    if not physical:
+                        continue  # Acquire no original job lease while CPU is busy.
+                    slot.runner.selected_job_id = job_id
+                    if cpu:
+                        slot.runner.backend._operation_fence_fd = descriptor
+                    try:
+                        result = slot.runner.run_once(
+                            slot.spec.worker_id, slot.spec.pool
+                        )
+                    finally:
+                        if cpu:
+                            slot.runner.backend._operation_fence_fd = None
                 if cpu:
                     worker = slot.runner.control.get(slot.spec.worker_id)
                     if worker["expires_at"] > self.repo.clock() and worker[

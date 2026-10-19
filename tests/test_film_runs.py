@@ -803,6 +803,55 @@ class FilmTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'original failure'):
             asyncio.run(workflow('tenant', 'owner', 'story-one', 'original-run'))
 
+    def test_known_business_refusal_is_visible_and_requires_same_run_resume(self):
+        from studio_platform.film_workflows import register_film_workflows
+
+        preview = self.preview()
+        self.service._mutate(
+            self.principal,
+            'story-one',
+            preview['id'],
+            lambda value: value.update(accepted_at=self.repo.clock(), phase='chapters'),
+        )
+        original = self.raw(preview['id'])
+        waits = []
+
+        class Runtime:
+            step = staticmethod(lambda **kwargs: lambda function: function)
+            workflow = staticmethod(lambda **kwargs: lambda function: function)
+
+            @staticmethod
+            async def recv_async(**kwargs):
+                waits.append(kwargs)
+                blocked = self.service.get(self.principal, 'story-one', preview['id'])
+                self.assertEqual(blocked['phase'], 'blocked')
+                self.assertEqual(blocked['error_code'], 'film_render_input_blocked')
+                self.assertEqual(
+                    self.raw(preview['id'])['generation'], original['generation']
+                )
+                self.service.resume(self.principal, 'story-one', preview['id'])
+
+        with patch.object(
+            self.service,
+            'turn',
+            side_effect=[
+                Conflict('film_render_input_blocked'),
+                {'terminal': True, 'phase': 'completed'},
+            ],
+        ):
+            workflow = register_film_workflows(
+                Runtime, self.service, lambda *args: self.principal
+            )
+            asyncio.run(workflow('tenant', 'owner', 'story-one', preview['id']))
+        self.assertEqual(waits, [{'topic': 'film_changed', 'timeout_seconds': 10}])
+        self.assertEqual(self.raw(preview['id'])['phase'], 'generating')
+        self.assertIsNone(self.raw(preview['id'])['error_code'])
+        self.enqueue.assert_called_once()
+        with self.assertRaisesRegex(ValueError, 'film_execution_block_invalid'):
+            self.service.record_business_block(
+                self.principal, 'story-one', preview['id'], 'private driver text'
+            )
+
 
 if __name__ == '__main__':
     unittest.main()

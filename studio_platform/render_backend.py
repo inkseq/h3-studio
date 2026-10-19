@@ -836,7 +836,16 @@ class CPURenderBackend:
             creationflags=flags,
             cwd=directory,
             **(
-                {"pass_fds": (self._active[tag]["process_fence"],)}
+                {
+                    "pass_fds": tuple(
+                        fd
+                        for fd in (
+                            self._active[tag]["process_fence"],
+                            getattr(self, "_operation_fence_fd", None),
+                        )
+                        if fd is not None
+                    )
+                }
                 if os.name == "posix"
                 and self._active[tag].get("process_fence") is not None
                 else {}
