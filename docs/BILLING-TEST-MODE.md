@@ -23,8 +23,9 @@ Revision005 must be adopted under the reader/backup procedure in
 - Human `GET /v1/billing/payments?cursor=...&limit=50` returns only owned history.
   Machine credentials cannot buy credits, edit packs or accept terms.
 
-Config uses the explicit protected `/run/sixnine-secrets/stripe` file, never
-ambient keys: version1, account_id, publishable_key, secret_key, webhook_secret.
+Config uses the protected host `/run/sixnine-secrets/stripe` file, mounted only
+into API/controller at `/run/secrets/stripe`, never ambient keys: version1,
+account_id, publishable_key, secret_key, webhook_secret.
 Only `sk_test`/`pk_test` keys and the exact staging target/origin are accepted.
 `INKSEQ_STRIPE_MODE=off` blocks new Checkout requests but preserves signed-event
 processing for existing obligations when the explicit config remains mounted.
