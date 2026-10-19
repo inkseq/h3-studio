@@ -1,7 +1,9 @@
 """Fresh worker rows cannot override managed provider or execution windows."""
 
 from dataclasses import replace
-from sqlalchemy import delete, select, update
+import uuid
+
+from sqlalchemy import delete, insert, select, update
 
 from studio_platform.control import WorkerControl
 from studio_platform.generation_availability import _mode_result
@@ -367,6 +369,42 @@ class ManagedAdmissionTests(OperatorCase):
                 )
             )
 
+    def prepare_shared_dstack_job(self):
+        self.prepare_dstack_lifetime()
+        original = self.job
+        self.repo.request_cancel(self.scope, original["id"])
+        self.shared_scope = replace(
+            self.scope, owner_id="qa-user", project_id="qa-project"
+        )
+        from studio_platform.identity_schema import metadata, users
+
+        with self.repo.transaction() as conn:
+            metadata.create_all(conn)
+            for owner in (self.scope.owner_id, self.shared_scope.owner_id):
+                conn.execute(
+                    insert(users).values(
+                        id=str(uuid.uuid4()),
+                        tenant=self.scope.tenant_id,
+                        owner=owner,
+                        role="admin" if owner == self.scope.owner_id else "user",
+                        status="active",
+                        display_name=owner,
+                        email_verified=0,
+                        created_at=self.now,
+                        updated_at=self.now,
+                    )
+                )
+        plan = self.repo.create_plan(
+            self.shared_scope,
+            original["request"],
+            original["execution_plan"],
+            expires_at=self.now + 9000,
+            estimated_cost_microusd=0,
+        )
+        self.job = self.repo.create_job(
+            self.shared_scope, plan["id"], "shared-original-job"
+        )
+
     def test_idle_policy_allows_long_job_and_late_guard_while_original_claim_is_active(
         self,
     ):
@@ -447,8 +485,106 @@ class ManagedAdmissionTests(OperatorCase):
             )
         self.assertIsNotNone(self.control.claim(self.worker["id"], self.binding.pool))
 
-    def test_unrelated_or_unaccepted_queue_does_not_keep_owned_run_on(self):
-        self.prepare_dstack_lifetime()
+    def test_shared_active_owner_and_project_pause_idle_and_claim_original_job(self):
+        from studio_platform.worker_admission import matching_dstack_queued_jobs
+
+        self.prepare_shared_dstack_job()
+        self.now += 650
+        self.refresh_dstack()
+        budget = self.repo.get_budget("owner-budget")
+        with self.repo.engine.connect() as conn:
+            intent = dict(conn.execute(select(instance_intents)).mappings().one())
+            node = dict(conn.execute(select(operator_nodes)).mappings().one())
+            self.assertEqual(
+                [job["id"] for job in matching_dstack_queued_jobs(conn, intent, node)],
+                [self.job["id"]],
+            )
+        self.assertEqual(self.counts()["ready"], 1)
+        self.assertTrue(self.availability()["available"])
+        self.assertEqual(self.repo.get_budget("owner-budget"), budget)
+        claim = self.control.claim(self.worker["id"], self.binding.pool)
+        self.assertEqual(claim.job["id"], self.job["id"])
+        self.assertEqual(claim.job["owner_id"], self.shared_scope.owner_id)
+        self.assertEqual(claim.job["project_id"], self.shared_scope.project_id)
+        self.assertEqual(claim.job["attempt_no"], 1)
+        with self.repo.engine.connect() as conn:
+            self.assertEqual(
+                dict(conn.execute(select(instance_intents)).mappings().one()), intent
+            )
+        self.assertEqual(self.repo.get_budget("owner-budget"), budget)
+
+    def test_suspended_shared_owner_does_not_pause_idle_or_claim(self):
+        from studio_platform.identity_schema import users
+        from studio_platform.worker_admission import (
+            _dstack_idle_reason,
+            matching_dstack_queued_jobs,
+        )
+
+        self.prepare_shared_dstack_job()
+        self.now += 650
+        self.refresh_dstack()
+        with self.repo.transaction() as conn:
+            conn.execute(
+                update(users)
+                .where(users.c.owner == self.shared_scope.owner_id)
+                .values(status="suspended")
+            )
+            intent = dict(conn.execute(select(instance_intents)).mappings().one())
+            node = dict(conn.execute(select(operator_nodes)).mappings().one())
+            self.assertEqual(matching_dstack_queued_jobs(conn, intent, node), ())
+            self.assertEqual(
+                _dstack_idle_reason(conn, intent, node, self.now), "worker_idle_expired"
+            )
+            self.assertEqual(
+                self.control.claim_reason(
+                    conn, self.control.get(self.worker["id"]), self.job
+                ),
+                "account_suspended",
+            )
+        self.assertIsNone(self.control.claim(self.worker["id"], self.binding.pool))
+        self.assertEqual(
+            self.repo.get_job(self.shared_scope, self.job["id"])["attempt_no"], 0
+        )
+
+    def test_private_member_job_cannot_pause_or_claim_native_no_deadline_run(self):
+        from studio_platform.capacity import capacity_member_claim_allowed
+        from studio_platform.worker_admission import matching_dstack_queued_jobs
+
+        self.prepare_shared_dstack_job()
+        self.now += 650
+        self.refresh_dstack()
+        with self.repo.transaction() as conn:
+            conn.execute(
+                update(jobs)
+                .where(jobs.c.id == self.job["id"])
+                .values(
+                    execution_plan={
+                        **self.job["execution_plan"],
+                        "capacity_binding": "pool-members-v1",
+                        "capacity_approval_id": "private-original-approval",
+                    }
+                )
+            )
+            job = self.repo._job(conn, self.job["id"])
+            intent = dict(conn.execute(select(instance_intents)).mappings().one())
+            node = dict(conn.execute(select(operator_nodes)).mappings().one())
+            worker = self.control.get(self.worker["id"])
+            self.assertIsNone(intent["hard_deadline"])
+            self.assertFalse(
+                capacity_member_claim_allowed(self.repo, conn, job, worker)
+            )
+            self.assertEqual(matching_dstack_queued_jobs(conn, intent, node), ())
+            self.assertEqual(
+                self.control.claim_reason(conn, worker, job),
+                "capacity_member_binding_unavailable",
+            )
+        self.assertIsNone(self.control.claim(self.worker["id"], self.binding.pool))
+        self.assertEqual(
+            self.repo.get_job(self.shared_scope, self.job["id"])["attempt_no"], 0
+        )
+
+    def test_incompatible_or_unaccepted_shared_queue_does_not_pause_idle(self):
+        self.prepare_shared_dstack_job()
         self.now += 650
         self.refresh_dstack()
         from studio_platform.worker_admission import (
@@ -459,8 +595,6 @@ class ManagedAdmissionTests(OperatorCase):
         original = self.job
         changes = (
             {"tenant_id": "another-tenant"},
-            {"owner_id": "another-owner"},
-            {"project_id": "another-project"},
             {"pool": "another-pool"},
             {"status": "planned"},
             {"attempt_no": 1},
@@ -490,6 +624,8 @@ class ManagedAdmissionTests(OperatorCase):
             *(
                 {"execution_plan": {**original["execution_plan"], field: value}}
                 for field, value in (
+                    ("pool", "another-pool"),
+                    ("backend", "mock"),
                     ("configuration_id", "another-config"),
                     ("engine_manifest_digest", "f" * 64),
                     ("dispatch_backend", "legacy"),
