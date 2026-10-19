@@ -98,12 +98,8 @@ Example response projection: `{"preview_id":"PREVIEW","expires_at":1790000000}`;
 ## Before paying, and when refused
 
 1. Refresh exact-profile availability and preflight. Read current limits; model constraints remain. Machine allowance is not an ETA; unknown price stays unknown.
-2. Check the whole requested batch. Use returned credit quotes when `credits.enabled` is true; never convert provider USD caps into credits. Human-only spending confirmations bind exact quoted plans/settings; an Agent cannot approve itself or raise caps.
+2. Check the whole batch using server credit quotes when enabled; never convert USD caps. Human approval binds exact plans/settings; Agents cannot approve themselves or raise caps.
 3. After admission, `/v1/generations/queue-position?job_id=JOB` gives advisory shared-queue information, no other owner's identity or ETA. Never rent a GPU to bypass unavailable capacity.
 4. Stop new paid work on cap/unknown-charge refusal. Return the same editable draft, stable error code and readable explanation; no replacement job/key or automatic retry. Zero connection cap adds no extra connection limit; owner credit and other safeguards remain. Sydney-day exposure includes unresolved prior obligations, not only invoices.
 
-```json
-{"code":"connection_daily_limit_reached","explanation":"This assistant's daily cap was reached / 已达到此助手的每日上限"}
-```
-
-This is a user-facing summary example, not a fabricated API receipt. See recovery for stale settings, owner cap, human confirmation and unknown charges.
+See [recovery](reference/recovery.md) for stale settings, owner caps, confirmation and unknown charges.
