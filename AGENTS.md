@@ -6,9 +6,10 @@ Read this entry and the assigned issue's latest owner comments/claims. Read affe
 ## Ownership and coordination
 - Backend/API/schema/infra/GPU/money/Agent docs: Codex, `inkseq/h3-studio`.
 - UI: Claude, canonical `inkseq/inkseq-design/studio-app` AND its `h3-studio/yingxu` sync. Codex does not edit UI; API-client types only when requested by the frontend lane.
-- Shared work starts from an issue API contract (routes, JSON, errors). Post contract changes there. Board: https://github.com/orgs/inkseq/projects/1; routing: `workflow/project.json`.
+- Shared work starts from an issue API contract (routes, JSON, errors). Post contract changes there. Board: github.com/orgs/inkseq/projects/1; routing: `workflow/project.json`.
 - Claim bounded scope, integration owner, branch/worktree and base before editing. Preserve parallel changes. Per lane: one issue in progress plus one in review. Use GitHub, not a second task database or owner relay.
 - Latest owner decisions win; record material changes in `workflow/owner-changes.md` and replace conflicting current instructions.
+- Acceptance: label staged, ready slices `needs-claude-acceptance`; Claude checks every 2h, comments, sets `accepted`/`changes-requested`. Before each task read new Claude/owner comments on claimed issues.
 
 ## Risk and delivery
 | Tier | Changes | Gate and write-up |
@@ -26,5 +27,5 @@ Current order (CR39): #324 -> one-day #328 simplification -> M1 #304 -> #305 Wor
 - Test GPUs: USD20 per change/acceptance task, counting its confirmed spend plus running committed price. Other tasks' unresolved projections do not consume it. Preserve editable admin limits, original accounting and task tags. Every rental has max_price, idle stop (normally10min), maximum runtime (normally2h); stop near the limit and after testing. Staging only; never operate owner production machines/jobs.
 - Ask only before budget overrun, permanent user-data deletion, credential or provider-account changes. Live payments/legal/provider decisions stay with owner. After2h without direction, post five lines of evidence/options and choose another bounded approach.
 - Use central AI Registry loaders and exact profiles; read its instructions before credentials/cleanup. Never copy secrets into project env files, logs or GitHub.
-- Browser: authenticated Chrome via cua_repl extension, preferably superdan/Monash. One account normally suffices. No repeated login, DevTools MCP or autoConnect.
+- Browser: Chrome via cua_repl; staging acceptance uses qa-admin/qa-user. No repeated login, DevTools MCP or autoConnect.
 - Chinese owner handoffs: about10lines, exact staging/production SHA and usable state, passed/unfinished items. Technical GitHub content: English. Release claims with Session: Unclaimed. Details: [WORKFLOW.md](WORKFLOW.md).
