@@ -198,6 +198,22 @@ Primary pinned references: [DBOS configuration](https://docs.dbos.dev/python/ref
 [transactional client](https://docs.dbos.dev/python/reference/client),
 [DBOS3.3.0 migrations](https://github.com/dbos-inc/dbos-transact-py/blob/3.3.0/dbos/_migration.py).
 
+## Test-payment adoption (#307)
+
+`20261020_0005` adds only the empty `platform_payments` and
+`platform_stripe_events` business-history tables after credit revision0004.
+Both tables accept test-mode rows only. Imports/startup never create them;
+adoption creates no purchases, credit entries, pack settings or credentials.
+Use the existing verified backup and host `release.lock`, first confirming that
+current AND previous approved images recognize005 and its optional backup
+family, with payments OFF. Then run the normal schema `check` followed by
+`python -m studio_platform.schema_baseline adopt-payments
+--expected-fingerprint <exact-check-fingerprint>`. The CLI checks trusted
+`Settings.stripe_mode` is OFF; adoption retains the original PostgreSQL
+transaction, exclusive account gate, advisory lock and exact fingerprint.
+Unknown/partial families or drift refuse and roll back. Reader/DDL release is
+not test-payment activation, live-payment approval or production promotion.
+
 ## Verification and package decisions
 
 `test_schema_baseline` runs against temporary SQLite by default. In the existing

@@ -226,7 +226,7 @@ def ready(connection, *, schema=None):
     Merely recognizing complete but unrecorded DDL does not enable credit writes.
     """
     from .identity_schema import TABLE_NAMES as identity_tables
-    from .schema_version import KNOWN_REVISIONS
+    from .schema_version import CREDIT_REVISIONS, KNOWN_REVISIONS
 
     names = set(inspect(connection).get_table_names(schema=schema))
     present = present_tables(names)
@@ -243,7 +243,7 @@ def ready(connection, *, schema=None):
         raise CreditSchemaError("credit_schema_revision_requires_review") from None
     if len(revisions) != 1 or revisions[0] not in KNOWN_REVISIONS:
         raise CreditSchemaError("credit_schema_revision_requires_review")
-    if revisions[0] != CREDIT_REVISION:
+    if revisions[0] not in CREDIT_REVISIONS:
         return False
     if not present or not identity_tables <= names:
         raise CreditSchemaError("credit_schema_partial_family_requires_review")
