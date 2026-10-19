@@ -30,3 +30,14 @@ export function accessFrom(me) {
 export function resetAccess() {
   pending = null;
 }
+
+// WorkOS AuthKit sign-in (#305), enabled by /api/auth/config.
+export function hostedSignInEnabled(auth) {
+  return auth?.hosted_sign_in?.enabled === true;
+}
+
+// Same-origin relative path only; the backend checks it again.
+export function hostedSignInUrl(returnTo = '/') {
+  const path = typeof returnTo === 'string' && /^\/(?!\/)/.test(returnTo) ? returnTo : '/';
+  return '/api/auth/workos/start?return_to=' + encodeURIComponent(path);
+}
