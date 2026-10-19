@@ -11,6 +11,7 @@ import json
 import math
 import re
 import uuid
+from decimal import Decimal
 
 from sqlalchemy import and_, exists, func, insert, or_, select, update
 
@@ -46,6 +47,21 @@ def _integer(value, *, signed=False, positive=False):
         raise CreditError("credit_amount_invalid", 422)
     if positive and value <= 0:
         raise CreditError("credit_amount_invalid", 422)
+    return value
+
+
+def _aggregate_integer(value):
+    """PostgreSQL SUM(bigint) returns numeric; normalize only exact DB totals."""
+    if type(value) is Decimal:
+        if (
+            not value.is_finite()
+            or not 0 <= value <= MAX_CREDITS
+            or value != value.to_integral_value()
+        ):
+            raise CreditError('credit_aggregate_invalid', 503)
+        return int(value)
+    if type(value) is not int or not 0 <= value <= MAX_CREDITS:
+        raise CreditError('credit_aggregate_invalid', 503)
     return value
 
 
@@ -193,6 +209,7 @@ def account(connection, tenant, owner, *, now):
             credit_entries.c.created_at < end,
         )
     ).scalar_one()
+    used = _aggregate_integer(used)
     from .spending_limits import credit_settings
 
     limit = credit_settings(connection, tenant, owner)["value"]["daily_limit_credits"]
@@ -228,6 +245,7 @@ def daily_projection(connection, tenant, owner, now, actor_id=None):
             credit_entries.c.created_at < end,
         )
     ).scalar_one()
+    captured = _aggregate_integer(captured)
     held = connection.execute(
         select(func.coalesce(func.sum(credit_entries.c.held_delta), 0)).where(
             *where,
@@ -235,7 +253,8 @@ def daily_projection(connection, tenant, owner, now, actor_id=None):
             ~resolved,
         )
     ).scalar_one()
-    return captured + held
+    held = _aggregate_integer(held)
+    return _aggregate_integer(captured + held)
 
 
 def _change(
@@ -635,6 +654,7 @@ def refund_job(connection, repo, job, *, actor, reason, idempotency_key):
             credit_entries.c.kind.in_(("refund", "waive")),
         )
     ).scalar_one()
+    refunded = _aggregate_integer(refunded)
     remaining = ceiling - refunded
     if remaining < 0:
         raise CreditError("credit_refund_conflict")

@@ -235,3 +235,18 @@ def user_estimate(value, *, hide_dollars):
         for key, item in value.items()
         if "usd" not in key.lower() and "cost" not in key.lower()
     }
+
+
+def user_result(value, *, hide_dollars):
+    """Remove provider currency fields from display only, preserving stored facts."""
+    if not hide_dollars:
+        return value
+    if isinstance(value, dict):
+        return {
+            key: user_result(item, hide_dollars=True)
+            for key, item in value.items()
+            if 'usd' not in key.lower()
+        }
+    if isinstance(value, list):
+        return [user_result(item, hide_dollars=True) for item in value]
+    return value

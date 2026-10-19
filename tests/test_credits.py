@@ -1,7 +1,10 @@
 """Customer-credit invariants on disposable SQLite or isolated explicit test PG."""
 
 from concurrent.futures import ThreadPoolExecutor
+from decimal import Decimal
 import json
+from types import SimpleNamespace
+from unittest.mock import patch
 import uuid
 
 from sqlalchemy import Column, MetaData, String, Table, func, insert, select, update
@@ -467,6 +470,83 @@ class CreditTests(LedgerCase):
                 20,
             )
         self.assertEqual(self.balance()["today_used"], 20)
+
+    def test_postgres_numeric_sums_are_normalized_before_json_or_refund_writes(self):
+        self.seed()
+        job = self.credit_job()
+        self.hold(job)
+        result = self.complete(job)
+        aggregate_calls = []
+        with self.repo.transaction() as connection:
+            original_execute = connection.execute
+
+            def postgres_sum(statement, *args, **kwargs):
+                response = original_execute(statement, *args, **kwargs)
+                if 'sum(' in str(statement).lower():
+                    # Match psycopg's numeric result for SUM(BIGINT), while
+                    # keeping actual account/entry queries and writes intact.
+                    value = Decimal(response.scalar_one())
+                    aggregate_calls.append(value)
+                    return SimpleNamespace(scalar_one=lambda: value)
+                return response
+
+            with patch.object(connection, 'execute', side_effect=postgres_sum):
+                balance = credits.account(
+                    connection, self.scope.tenant_id, 'superdan', now=self.now
+                )
+                projected = credits.daily_projection(
+                    connection, self.scope.tenant_id, 'superdan', self.now
+                )
+                self.assertIs(type(balance['today_used']), int)
+                self.assertIs(type(projected), int)
+                self.assertEqual((balance['today_used'], projected), (20, 20))
+                json.dumps({'account': balance, 'projected': projected})
+                waived = credits.refund_job(
+                    connection,
+                    self.repo,
+                    result,
+                    actor='browser:admin',
+                    reason='Reviewed waiver',
+                    idempotency_key='decimal-refund',
+                )
+                self.assertIs(type(waived['entry']['amount']), int)
+                self.assertEqual(waived['entry']['amount'], 20)
+        self.assertEqual(len(aggregate_calls), 4)
+        self.assertEqual(self.balance()['balance'], 100)
+        self.assert_invariants()
+
+    def test_database_aggregate_conversion_rejects_fractional_unknown_or_overflow_values(
+        self,
+    ):
+        for value in (
+            Decimal('0'),
+            Decimal('20.000'),
+            Decimal(credits.MAX_CREDITS),
+            0,
+            credits.MAX_CREDITS,
+        ):
+            with self.subTest(value=value):
+                normalized = credits._aggregate_integer(value)
+                self.assertIs(type(normalized), int)
+                self.assertEqual(normalized, value)
+        for value in (
+            True,
+            None,
+            20.0,
+            '20',
+            -1,
+            Decimal('-1'),
+            Decimal('1.5'),
+            Decimal('NaN'),
+            Decimal('Infinity'),
+            Decimal('1E99999'),
+            credits.MAX_CREDITS + 1,
+        ):
+            with (
+                self.subTest(value=value),
+                self.assertRaisesRegex(credits.CreditError, 'credit_aggregate_invalid'),
+            ):
+                credits._aggregate_integer(value)
 
     def test_history_is_bounded_iso_and_cursor_is_owner_bound(self):
         for index in range(5):

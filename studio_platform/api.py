@@ -223,6 +223,10 @@ def create_app(
                 "en": "This connection can organise drafts but cannot perform paid work. Ask the owner for a generation grant.",
                 "zh": "此连接可整理草稿，但不能执行付费操作；如需生成，请让所有者授予生成权限。",
             },
+            "credit_limits_review_required": {
+                "en": "The owner must review and save credit limits before this previously limited connection or account can generate. Existing safeguards have not been removed.",
+                "zh": "此账户或连接原有消费限制，请让所有者先核对并保存积分限额，再继续生成；原有保障不会自动移除。",
+            },
         }
         if code in guidance:
             return JSONResponse(

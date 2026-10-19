@@ -171,8 +171,10 @@ class GenerationRead:
             **public_artifact_renditions(record),
         }
 
-    def public_job(self, job, *, artifact_records=None, cancellation=None):
-        from .credits_pricing import public_quote
+    def public_job(
+        self, job, *, artifact_records=None, cancellation=None, principal=None
+    ):
+        from .credits_pricing import public_quote, hide_dollar_estimate, user_result
 
         stored_request = job["request"]
         visible = {
@@ -188,6 +190,10 @@ class GenerationRead:
                 "created",
             )
         }
+        visible['result'] = user_result(
+            visible.get('result'),
+            hide_dollars=hide_dollar_estimate(job['execution_plan'], principal),
+        )
         visible.update(
             **public_quote(job["execution_plan"]),
             client_ref=stored_request.get("client_ref", {}),
@@ -249,7 +255,7 @@ class GenerationRead:
 
     def job(self, principal, job_id):
         job = self.access.job(principal, job_id)
-        value = self.public_job(job)
+        value = self.public_job(job, principal=principal)
         if job["status"] == "queued":
             from .control import WorkerControl
 
@@ -298,6 +304,7 @@ class GenerationRead:
                     v,
                     artifact_records=media.get(v["id"], []),
                     cancellation=cancellation[v["id"]],
+                    principal=principal,
                 )
                 for v in visible
             ]

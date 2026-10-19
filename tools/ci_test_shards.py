@@ -70,6 +70,7 @@ test_identity_schema test_identity_queue test_identity_adoption test_identity_ad
 test_workos_auth test_workos_grants
 test_credit_schema test_credits test_credits_routes test_credit_spending
 test_credit_admission test_credit_identity_billing test_agent_credit_caps
+test_credit_limit_migration
 """.split())
 
 # CPU ffmpeg/font fixtures have additional process/codec costs. These multipliers

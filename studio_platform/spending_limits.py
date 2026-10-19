@@ -102,6 +102,22 @@ def lock_owner(connection, tenant, owner):
         connection.exec_driver_sql("SELECT pg_advisory_xact_lock(%s)", (key,))
 
 
+def require_credit_limits_reviewed(value, actor_id):
+    """Changing units must not silently remove an existing owner's safeguard."""
+    owner_pending = any(
+        value.get(legacy, 0) and replacement not in value
+        for legacy, replacement in (
+            ('daily_limit_microusd', 'daily_limit_credits'),
+            ('ask_above_microusd', 'ask_above_credits'),
+        )
+    )
+    actor_pending = value.get('connection_limits', {}).get(actor_id, 0) and (
+        actor_id not in value.get('connection_credit_limits', {})
+    )
+    if owner_pending or actor_pending:
+        raise Conflict('credit_limits_review_required')
+
+
 def read_settings(connection, tenant, owner, *, admin_defaults=None):
     row = (
         connection.execute(
@@ -393,15 +409,17 @@ def admit_spending(
         candidate = (
             connection.execute(select(jobs).where(jobs.c.id == reference_id))
             .mappings()
-            .one()
+            .first()
         )
-        quoted = candidate["execution_plan"].get("credit_quote")
+        quoted = candidate["execution_plan"].get("credit_quote") if candidate else None
         if isinstance(quoted, dict) and quoted.get("enforced") is True:
             from .credits import credit_policy
 
             if not credit_policy(connection, scope.tenant_id)["enabled"]:
                 raise Conflict("credit_policy_changed_repreflight")
             credit_job = candidate
+            if not origin or increment:
+                require_credit_limits_reviewed(value, actor_id)
     if (
         increment
         and credit_job is None
@@ -738,7 +756,10 @@ def check_submission_confirmation(repo, tenant, principal, plan_ids):
         settings = read_settings(connection, tenant, principal.owner)
         threshold = settings["value"]["ask_above_microusd"]
         credit_threshold = settings["value"].get("ask_above_credits", 0)
-        if not (threshold or credit_threshold) or not plan_ids:
+        legacy_limit = settings['value']['daily_limit_microusd'] or settings['value'][
+            'connection_limits'
+        ].get(principal.actor_id, 0)
+        if not (threshold or credit_threshold or legacy_limit) or not plan_ids:
             return SubmissionSpendingCheck(False, settings["version"])
         selected = []
         for plan_id in plan_ids:
@@ -762,6 +783,8 @@ def check_submission_confirmation(repo, tenant, principal, plan_ids):
         )
         if any(quoted) and not credit_mode:
             raise Conflict("credit_quote_required")
+        if credit_mode:
+            require_credit_limits_reviewed(settings['value'], principal.actor_id)
         threshold = credit_threshold if credit_mode else threshold
         total = (
             sum(money(item["credits"]) for item in quoted)

@@ -252,6 +252,55 @@ class CreditsRouteTests(LedgerCase):
         self.assertIsNone(value["basis"]["standard"]["hourly_usd"])
         self.assertIsNone(value["report_30d"]["provider_cost_usd"])
 
+    def test_credited_job_result_hides_provider_currency_without_changing_history(self):
+        from studio_platform.generation_services import GenerationRead
+
+        self.enable()
+        frozen = self.get_quote()
+        result = {
+            'actual_cost_microusd': 500,
+            'rental_allocation': {
+                'hourly_cost_microusd': 2000,
+                'machine_id': 'test-host',
+            },
+            'generation_seconds': 12,
+        }
+        job = {
+            'id': 'owned-job',
+            'status': 'succeeded',
+            'owner_id': self.user.owner,
+            'project_id': 'story',
+            'plan_id': 'original-plan',
+            'request': {},
+            'execution_plan': {'credit_quote': frozen},
+            'result': result,
+        }
+        read = GenerationRead(
+            self.repo, SimpleNamespace(tenant_id=self.settings.tenant_id)
+        )
+        with patch.object(
+            self.repo.engine, 'connect', side_effect=AssertionError('No DTO SQL')
+        ):
+            ordinary = read.public_job(
+                job, artifact_records=[], cancellation={}, principal=self.user
+            )
+            admin = read.public_job(
+                job, artifact_records=[], cancellation={}, principal=self.admin
+            )
+            legacy = read.public_job(
+                {**job, 'execution_plan': {}}, artifact_records=[], cancellation={}
+            )
+        self.assertEqual(
+            ordinary['result'],
+            {
+                'rental_allocation': {'machine_id': 'test-host'},
+                'generation_seconds': 12,
+            },
+        )
+        self.assertEqual(admin['result'], result)
+        self.assertEqual(legacy['result'], result)
+        self.assertEqual(job['result']['actual_cost_microusd'], 500)
+
     def test_storyboard_and_film_sum_actual_quotes_without_dollar_or_database_reads(
         self,
     ):
