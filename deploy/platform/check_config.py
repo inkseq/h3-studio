@@ -36,7 +36,7 @@ def validate(config, *, deployment_directory=None, compose_version=None, target=
     services = config.get("services", {})
     require(set(services) == {"app", "db", "db-init", "caddy"}, "Unexpected service set")
     allowed_env = {
-        "app": {"SIXNINE_DATA", "SIXNINE_DATABASE_URL_FILE", "SIXNINE_PUBLIC_ORIGIN", "PUBLIC_ORIGIN", "PUBLIC_ORIGIN_ALIASES", "SIXNINE_AUTH_MODE", "INKSEQ_BROWSER_SESSION_SECONDS",
+        "app": {"SIXNINE_DATA", "SIXNINE_DATABASE_URL_FILE", "SIXNINE_PUBLIC_ORIGIN", "PUBLIC_ORIGIN", "PUBLIC_ORIGIN_ALIASES", "SIXNINE_AUTH_MODE", "INKSEQ_BROWSER_SESSION_SECONDS", "INKSEQ_DEPLOYMENT_TARGET",
                 "SIXNINE_GENERATION_ENABLED", "SIXNINE_RENDER_ENABLED", "SIXNINE_EXECUTION_BACKEND", "SIXNINE_CLOUD_CREATION_ENABLED",
                 "SIXNINE_STORAGE_PROVIDER", "SIXNINE_FRONTEND_DIR", "SIXNINE_FRONTEND_RELEASE_DIR", "SIXNINE_TITLE_CONFIG_FILE"},
         "db": {"POSTGRES_USER", "POSTGRES_DB", "POSTGRES_PASSWORD_FILE", "POSTGRES_INITDB_ARGS",
@@ -115,6 +115,8 @@ def validate(config, *, deployment_directory=None, compose_version=None, target=
         require(isinstance(duration, str) and re.fullmatch(r"[0-9]{1,8}", duration)
                 and 1 <= int(duration) <= 365*86400, "Invalid browser session duration")
         required["INKSEQ_BROWSER_SESSION_SECONDS"] = duration
+    if "INKSEQ_DEPLOYMENT_TARGET" in app.get("environment", {}):
+        required["INKSEQ_DEPLOYMENT_TARGET"] = target
     require(app.get("environment") == required, "App production safety settings differ")
     networks = config.get("networks", {})
     require(set(networks) == {"web", "database", "edge"}, "Unexpected network definition")

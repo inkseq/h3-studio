@@ -128,7 +128,37 @@ class IdentityAdmin:
             raise AdminError("admin_required", 403)
         return dict(actor)
 
-    def _public(self, connection, row):
+    def _credit_summary(self, connection, user_ids):
+        from .credit_schema import ready, accounts as credit_accounts, entries
+
+        if not user_ids or not ready(connection):
+            return {}
+        from .credits import _aggregate_integer
+
+        result = {ident: {'balance': 0, 'used_30d': 0} for ident in user_ids}
+        for row in connection.execute(
+            select(credit_accounts.c.user_id, credit_accounts.c.balance).where(
+                credit_accounts.c.tenant == self.settings.tenant_id,
+                credit_accounts.c.user_id.in_(user_ids),
+            )
+        ):
+            result[row.user_id]['balance'] = _aggregate_integer(row.balance)
+        for row in connection.execute(
+            select(entries.c.user_id, func.sum(-entries.c.amount).label('used'))
+            .where(
+                entries.c.tenant == self.settings.tenant_id,
+                entries.c.user_id.in_(user_ids),
+                entries.c.kind == 'capture',
+                entries.c.created_at >= self.repo.clock() - 30 * 86400,
+            )
+            .group_by(entries.c.user_id)
+        ):
+            result[row.user_id]['used_30d'] = _aggregate_integer(row.used)
+        return result
+
+    def _public(self, connection, row, *, credit_summary=None):
+        if credit_summary is None:
+            credit_summary = self._credit_summary(connection, [row['id']])
         providers = ["workos"] if row["workos_user_id"] else []
         if connection.execute(
             select(accounts.c.username).where(
@@ -137,10 +167,21 @@ class IdentityAdmin:
             )
         ).first():
             providers.append("password")
-        return {
-            key: row[key]
-            for key in ("id", "display_name", "email", "role", "status", "created_at")
-        } | {"providers": providers, "balance": None, "used_30d": None}
+        return (
+            {
+                key: row[key]
+                for key in (
+                    "id",
+                    "display_name",
+                    "email",
+                    "role",
+                    "status",
+                    "created_at",
+                )
+            }
+            | {"providers": providers, "balance": None, "used_30d": None}
+            | credit_summary.get(row['id'], {})
+        )
 
     def list_users(self, principal, *, q="", cursor=None, limit=50):
         with self.repo.engine.connect() as connection:
@@ -173,8 +214,14 @@ class IdentityAdmin:
                     statement.order_by(users.c.id).limit(limit + 1)
                 ).mappings()
             )
+            credit_summary = self._credit_summary(
+                connection, [row['id'] for row in rows[:limit]]
+            )
             return {
-                "items": [self._public(connection, row) for row in rows[:limit]],
+                "items": [
+                    self._public(connection, row, credit_summary=credit_summary)
+                    for row in rows[:limit]
+                ],
                 "next_cursor": _encode("users", binding, rows[limit - 1]["id"])
                 if len(rows) > limit
                 else None,

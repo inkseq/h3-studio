@@ -125,11 +125,14 @@ def create_app(
             raise ValueError(
                 "此远端存储需要显式注入已审阅的store与凭据入口；不使用默认AWS账户"
             )
+    from .staging_qa import enabled as staging_qa_enabled
+
     auth = Auth(
         repo.engine,
         tenant=settings.tenant_id,
         mode=settings.auth_mode,
         session_seconds=settings.session_seconds,
+        staging_qa=staging_qa_enabled(settings),
     )
     asset_service = AssetService(
         repo.engine,
@@ -1474,6 +1477,9 @@ def create_app(
     from .identity_admin_routes import register_routes as register_identity_admin_routes
 
     register_identity_admin_routes(app)
+    from .staging_qa import register_routes as register_staging_qa_routes
+
+    register_staging_qa_routes(app)
     from .workos_routes import register_routes as register_workos_routes
 
     register_workos_routes(app)
