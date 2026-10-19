@@ -1991,6 +1991,16 @@ class Repository:
         )
         try:
             with self.transaction() as connection:
+                from .identity import account_status, lock_account_gate
+
+                lock_account_gate(connection)
+                account = account_status(connection, scope.tenant_id, scope.owner_id)
+                if account != "active":
+                    raise Conflict(
+                        "account_suspended"
+                        if account == "suspended"
+                        else "account_unavailable"
+                    )
                 self._content_write_guard(connection, scope)
                 # Same lock as approvals/registration and idle shutdown. Even
                 # planned jobs preserve a frozen configuration identity that

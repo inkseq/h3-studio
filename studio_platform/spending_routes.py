@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 
 from .auth import Principal, personal_keys
 from .operator_capacity import OperatorError
+from .identity import is_admin
 from .repository import (
     Conflict,
     NotFound,
@@ -30,10 +31,17 @@ def register_routes(app):
 
     def human(request, *, admin=False):
         principal = getattr(request.state, "principal", None)
+        if admin:
+            from .identity import require_admin
+
+            require_admin(
+                principal,
+                repo,
+                settings,
+                machine_code="spending_settings_browser_required",
+            )
         if not isinstance(principal, Principal) or principal.machine:
             raise OperatorError("spending_settings_browser_required", 403)
-        if admin and principal.owner not in settings.operator_admin_owners:
-            raise OperatorError("operator_admin_required", 403)
         return principal
 
     def response(value):
@@ -177,7 +185,7 @@ def register_routes(app):
                         }
                         for key in keys
                     ],
-                    "admin": principal.owner in settings.operator_admin_owners,
+                    "admin": is_admin(principal, repo, settings),
                 }
             )
 

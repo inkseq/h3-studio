@@ -44,10 +44,14 @@ class OperatorJobs:
         self.repo, self.settings = repo, settings
 
     def _admin(self, principal):
-        if not isinstance(principal, Principal) or principal.machine is not False:
-            raise OperatorError("operator_jobs_human_required", 403)
-        if principal.owner not in self.settings.operator_admin_owners:
-            raise OperatorError("operator_admin_required", 403)
+        from .identity import require_admin
+
+        require_admin(
+            principal,
+            self.repo,
+            self.settings,
+            machine_code="operator_jobs_human_required",
+        )
 
     def list(self, principal, *, limit=100, after_id=None):
         self._admin(principal)

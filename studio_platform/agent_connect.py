@@ -158,6 +158,11 @@ class AgentConnect(AgentManagementMixin):
         )
 
     def _account(self, conn, owner, password_version, *, lock=False):
+        from .identity import account_identity
+
+        identity = account_identity(conn, self.tenant, owner)
+        if identity is not None and identity["status"] != "active":
+            raise ConnectError("connection_authority_changed", 410)
         statement = select(accounts).where(
             accounts.c.tenant == self.tenant, accounts.c.username == owner
         )

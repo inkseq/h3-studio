@@ -30,6 +30,7 @@ from .assets import AssetService, AssetNotFound
 from .media_renditions import public_renditions, RENDITIONS
 from .upload_route import AssetUploadRoute
 from .auth import Auth, AuthenticationError, LoginLimited
+from .identity import is_admin, public_identity, require_admin
 from .capabilities import VERSION, capabilities
 from .media import MediaError, MediaBusy
 from .project_validation import validate_project
@@ -452,6 +453,21 @@ def create_app(
         ):
             return JSONResponse({"detail": "请先登录"}, status_code=401)
         request.state.principal = principal
+        if (
+            principal is not None
+            and principal.identity_source == "canonical"
+            and request.url.path.startswith("/v1/operator/")
+        ):
+            from .operator_capacity import OperatorError
+
+            try:
+                require_admin(principal, repo, settings)
+            except OperatorError as error:
+                return JSONResponse(
+                    {"code": error.code, "message": error.code},
+                    status_code=error.status,
+                    headers={"Cache-Control": "no-store"},
+                )
         if principal and not lease.acquire("owner", principal.owner):
             return admission_rejected()
         downloading = (
@@ -588,25 +604,24 @@ def create_app(
     @app.get("/api/auth/me")
     def whoami(request: Request):
         principal = request.state.principal
+        operator = is_admin(principal, repo, settings, legacy_capacity=True)
         return {
             "username": principal.owner,
             "actor_id": principal.actor_id,
             "machine": principal.machine,
             "authentication": settings.auth_mode,
+            **public_identity(principal, repo, settings),
+            "credits": {"available": False, "balance": None, "held": None},
             "scopes": list(principal.scopes),
             "features": {
                 "storyboard_workspace": not principal.machine
                 and principal.owner in settings.storyboard_owners
             },
             "operator_capacity": {
-                name: not principal.machine
-                and principal.owner in settings.operator_capacity_owners
+                name: operator
                 for name in ("view", "start", "drain", "stop", "update_policy")
             }
-            | {
-                "admin": not principal.machine
-                and principal.owner in settings.operator_admin_owners
-            },
+            | {"admin": is_admin(principal, repo, settings)},
             "all_projects": principal.all_projects,
             "project_ids": list(principal.project_ids),
         }

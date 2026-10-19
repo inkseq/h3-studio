@@ -11,12 +11,14 @@ OPERATOR_REASONS = {
     "operator_queue_cleared",
     "operator_request_cancelled",
     "capacity_unavailable",
+    "account_suspended",
 }
 MESSAGES = {
     "owner_request_cancelled": "任务所属账户请求取消。",
     "operator_queue_cleared": "管理员清理了等待队列。",
     "operator_request_cancelled": "管理员取消了此等待任务。",
     "capacity_unavailable": "所需执行容量不可用，此任务已停止等待。",
+    "account_suspended": "账户已停用，此任务已停止等待。",
     "machine_failed": "执行机器失败，此任务已结束。",
     "generation_failed": "执行未能完成，请核对原任务的停止和费用状态。",
 }

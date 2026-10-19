@@ -128,6 +128,10 @@ class Principal:
     auth_mode: str | None = None
     password_version: float | None = None
     session_hash: str | None = field(default=None, repr=False)
+    user_id: str | None = None
+    role: str = "user"
+    status: str = "active"
+    identity_source: str = "legacy"
 
     def allows(self, project_id: str, scope: str) -> bool:
         return not self.machine or (
@@ -355,6 +359,15 @@ class Auth:
         token = secrets.token_urlsafe(32)
         now = self.clock()
         with self.engine.begin() as conn:
+            from .identity import account_identity
+
+            identity = account_identity(conn, self.tenant, username)
+            if identity is not None and identity["status"] != "active":
+                raise AuthenticationError(
+                    "账户已暂停，请联系管理员"
+                    if identity["status"] == "suspended"
+                    else "账户身份不可用，请联系管理员"
+                )
             if self.mode == "password":
                 current = conn.execute(
                     select(accounts.c.updated, accounts.c.disabled)
@@ -419,6 +432,21 @@ class Auth:
                     or not self.ready(conn)
                 ):
                     return None
+            from .identity import hydrate
+
+            principal = hydrate(
+                Principal(
+                    row["username"],
+                    "browser:" + row["username"],
+                    auth_mode=row["auth_mode"],
+                    password_version=row["password_version"],
+                    session_hash=row["token_hash"],
+                ),
+                conn,
+                self.tenant,
+            )
+            if principal is None:
+                return None
             # Slide at most hourly (half the TTL for short explicit test/config
             # durations). Polling and media reads do not write on every request.
             interval = min(3600, self.session_seconds / 2)
@@ -448,13 +476,7 @@ class Auth:
                         sessions.c.expires < now + self.session_seconds
                     ).values(expires=now + self.session_seconds)
                 )
-        return Principal(
-            row["username"],
-            "browser:" + row["username"],
-            auth_mode=row["auth_mode"],
-            password_version=row["password_version"],
-            session_hash=row["token_hash"],
-        )
+        return principal
 
     def logout(self, token):
         if isinstance(token, str) and TOKEN.fullmatch(token):
@@ -621,6 +643,11 @@ class Auth:
                 .mappings()
                 .first()
             )
+            from .identity import account_identity
+
+            identity = account_identity(conn, self.tenant, owner)
+            if identity is not None and identity["status"] != "active":
+                raise AuthenticationError("账户状态已改变，请重新登录")
             session = conn.execute(
                 select(sessions.c.token_hash)
                 .where(
@@ -758,6 +785,22 @@ class Auth:
                     or not self.ready(conn)
                 ):
                     return None
+            from .identity import hydrate
+
+            principal = hydrate(
+                Principal(
+                    row["owner"],
+                    "key:" + row["id"],
+                    True,
+                    tuple(json.loads(row["projects"])),
+                    tuple(json.loads(row["scopes"])),
+                    bool(row["all_projects"]),
+                ),
+                conn,
+                self.tenant,
+            )
+            if principal is None:
+                return None
             from .agent_management import paused, doc_where
             from .repository import documents
 
@@ -787,14 +830,7 @@ class Auth:
             )
             if changed.rowcount != 1:
                 return None
-            return Principal(
-                row["owner"],
-                "key:" + row["id"],
-                True,
-                tuple(json.loads(row["projects"])),
-                tuple(json.loads(row["scopes"])),
-                bool(row["all_projects"]),
-            )
+            return principal
 
     def static_bearer(self, token):
         if not isinstance(token, str) or not TOKEN.fullmatch(token):
@@ -877,14 +913,18 @@ class Auth:
                 ).first()
                 if not active or not self.ready(conn):
                     return None
-        return (
-            Principal(
-                row["owner"],
-                "client:" + row["id"],
-                True,
-                tuple(json.loads(row["projects"])),
-                tuple(json.loads(row["scopes"])),
+            if not row:
+                return None
+            from .identity import hydrate
+
+            return hydrate(
+                Principal(
+                    row["owner"],
+                    "client:" + row["id"],
+                    True,
+                    tuple(json.loads(row["projects"])),
+                    tuple(json.loads(row["scopes"])),
+                ),
+                conn,
+                self.tenant,
             )
-            if row
-            else None
-        )
