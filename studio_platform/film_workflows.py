@@ -17,10 +17,14 @@ def register_film_workflows(DBOS, service, principal_for):
             identifier(value)
         if tenant != service.tenant:
             raise ValueError('film_tenant_mismatch')
-        principal = principal_for(tenant, owner, project_id, run_id)
-        if principal.owner != owner:
-            raise ValueError('film_owner_mismatch')
-        return await asyncio.to_thread(service.turn, principal, project_id, run_id)
+
+        def invoke():
+            principal = principal_for(tenant, owner, project_id, run_id)
+            if principal.owner != owner:
+                raise ValueError('film_owner_mismatch')
+            return service.turn(principal, project_id, run_id)
+
+        return await asyncio.to_thread(invoke)
 
     @DBOS.workflow(name=VERSION)
     async def film(tenant, owner, project_id, run_id):
