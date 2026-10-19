@@ -227,6 +227,7 @@ class CreditAPI:
             return value
 
     def admin_prices(self, principal):
+        from .credits import _aggregate_integer
         from .payments_routes import current_packs
 
         with self.repo.engine.connect() as connection:
@@ -246,7 +247,10 @@ class CreditAPI:
                 "margin_estimate": admin_margin_estimate(
                     value, current_packs(connection, self.settings.tenant_id)
                 ),
-                "report_30d": {"captured_credits": captured, "provider_cost_usd": None},
+                "report_30d": {
+                    "captured_credits": _aggregate_integer(captured),
+                    "provider_cost_usd": None,
+                },
             }
 
     def _policy(self, connection, value):

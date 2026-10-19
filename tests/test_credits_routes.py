@@ -1,12 +1,14 @@
 """Public quote, owner isolation and audited pricing/credit APIs; offline SQL."""
 
 from concurrent.futures import ThreadPoolExecutor
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 import uuid
 
 from sqlalchemy import Column, MetaData, String, Table, func, insert, select, update
+from sqlalchemy.engine import Connection
 
 from studio_platform.auth import Auth, Principal
 from studio_platform.credit_schema import metadata as credit_metadata, prices
@@ -252,6 +254,78 @@ class CreditsRouteTests(LedgerCase):
         self.assertEqual(value["basis"]["standard"]["seconds_per_5s_clip"], 87)
         self.assertIsNone(value["basis"]["standard"]["hourly_usd"])
         self.assertIsNone(value["report_30d"]["provider_cost_usd"])
+
+    def test_admin_prices_http_renders_exact_postgres_numeric_capture_totals(self):
+        from fastapi.testclient import TestClient
+        from studio_platform.api import create_app
+        from studio_platform.credit_schema import entries
+        from studio_platform.settings import Settings
+
+        self.publish()
+        app = create_app(
+            Settings(
+                Path(self.temp.name) / "numeric-api",
+                auth_mode="local-test",
+                database_url=self.url,
+            ),
+            repository=self.repo,
+        )
+        original_execute = Connection.execute
+        aggregates = []
+
+        def postgres_sum(connection, statement, *args, **kwargs):
+            result = original_execute(connection, statement, *args, **kwargs)
+            if "sum(" in str(statement).lower():
+                # Keep the real aggregate query on SQLite or the isolated PG
+                # harness; expose psycopg's SUM(BIGINT) numeric result on both.
+                value = Decimal(result.scalar_one())
+                aggregates.append(value)
+                return SimpleNamespace(scalar_one=lambda: value)
+            return result
+
+        with TestClient(app) as client:
+            client.post(
+                "/api/auth/login", json={"username": self.admin.owner}
+            ).raise_for_status()
+            for captured in (0, (1 << 53) + 1):
+                with self.subTest(captured=captured):
+                    if captured:
+                        with self.repo.transaction() as connection:
+                            connection.execute(
+                                insert(entries).values(
+                                    id=str(uuid.uuid4()),
+                                    tenant=self.settings.tenant_id,
+                                    user_id=self.ids[self.user.owner],
+                                    kind="capture",
+                                    amount=-captured,
+                                    held_delta=-captured,
+                                    balance_after=0,
+                                    held_after=0,
+                                    reference_type="job",
+                                    reference_id="numeric-report-fixture",
+                                    reason="Synthetic captured-credit report fixture",
+                                    actor=self.user.actor_id,
+                                    idempotency_key="numeric-report-fixture",
+                                    fingerprint="a" * 64,
+                                    created_at=self.now,
+                                )
+                            )
+                    before = [
+                        self.count(table) for table in (entries, prices, admin_audit)
+                    ]
+                    with patch.object(Connection, "execute", new=postgres_sum):
+                        response = client.get("/v1/admin/credits/prices")
+                    self.assertEqual(response.status_code, 200)
+                    self.assertEqual(response.headers["cache-control"], "no-store")
+                    report = response.json()["report_30d"]
+                    self.assertIs(type(report["captured_credits"]), int)
+                    self.assertEqual(report["captured_credits"], captured)
+                    self.assertIsNone(report["provider_cost_usd"])
+                    self.assertEqual(
+                        [self.count(table) for table in (entries, prices, admin_audit)],
+                        before,
+                    )
+        self.assertEqual(aggregates, [Decimal(0), Decimal((1 << 53) + 1)])
 
     def test_margin_uses_actual_catalog_tax_inside_price_and_bonus_only_once(self):
         from studio_platform.payments_routes import PACK_SCOPE
