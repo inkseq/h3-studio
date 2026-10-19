@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  apiDate,
   creditSummary,
   entryList,
   formatPrice,
@@ -73,4 +74,13 @@ test('purchase polling stops when the balance grows, or gives up', async () => {
     await waitForPurchase(async () => ({ balance: 1 }), 1, { tries: 2, sleep: async () => {} }),
     null,
   );
+});
+
+test('API dates accept Unix seconds, milliseconds and ISO strings', () => {
+  const iso = '2026-10-19T12:00:00.000Z';
+  assert.equal(apiDate(1792411200).toISOString(), iso);
+  assert.equal(apiDate(1792411200000).toISOString(), iso);
+  assert.equal(apiDate(iso).toISOString(), iso);
+  assert.equal(apiDate('nope'), null);
+  assert.equal(apiDate(null), null);
 });
