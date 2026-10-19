@@ -686,3 +686,14 @@ inventory.json
 !studio_platform/payment_schema.py
 !studio_platform/migrations/versions/v20261020_0005_stripe_payments.py
 !tests/test_payment_schema.py
+
+# M1 Stripe test-mode billing; no runtime credentials or webhook payload files.
+!studio_platform/payments.py
+!studio_platform/payments_workflows.py
+!studio_platform/stripe_client.py
+!studio_platform/stripe_config.py
+!studio_platform/payments_routes.py
+!tests/test_payments.py
+!tests/test_payments_routes.py
+!tests/test_stripe_client.py
+!tests/test_payments_app.py
