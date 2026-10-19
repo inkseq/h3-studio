@@ -88,8 +88,8 @@ class CapacityApiTests(capacity_tests.CapacityTests):
         self.assertEqual(result.status_code, 200, result.text)
         self.assertEqual(result.json()["status"], "cancelled")
         self.assertEqual(self.repo.get_budget("owner:superdan")["reserved_microusd"], 0)
-        self.assertEqual(self.tick()["state"], "no_waiters")
-        self.assertEqual(self.provider.creates, [])
+        self.assertEqual(self.tick()["activated"], 0)
+        self.assertEqual(self.seeded_instances, [])
 
     def test_http_edit_source_while_waiting_requires_new_precheck_and_keeps_instance_accounting(
         self,
@@ -126,13 +126,11 @@ class CapacityApiTests(capacity_tests.CapacityTests):
         self.assertEqual(
             self.repo.get_budget("capacity-budget")["reserved_microusd"], 200_000
         )
-        self.assertEqual(len(self.provider.creates), 1)
+        self.assertEqual(len(self.seeded_instances), 1)
 
     def test_http_source_change_during_unknown_creation_releases_task_not_unknown_instance(
         self,
     ):
-        from studio_platform.scaler import ProviderFact
-
         self.approve()
         plan = self.client.post(
             "/v1/generation-plans", json=generation_request()
@@ -142,9 +140,8 @@ class CapacityApiTests(capacity_tests.CapacityTests):
             json={"plan_id": plan["plan_id"]},
             headers={"Idempotency-Key": "http-stale-unknown"},
         ).json()
-        self.provider.create_uncertain = True
+        self.seed_state = "creation_unknown"
         instance = self.start()
-        self.provider.facts[instance["id"]] = ProviderFact("unknown")
         record = self.client.get("/v1/projects/story-one").json()
         record["project"]["entities"][1]["description"] = (
             "Changed while provider creation was uncertain"
@@ -171,7 +168,7 @@ class CapacityApiTests(capacity_tests.CapacityTests):
         self.assertEqual(
             self.repo.list_instance_intents()[0]["state"], "creation_unknown"
         )
-        self.assertEqual(len(self.provider.creates), 1)
+        self.assertEqual(len(self.seeded_instances), 1)
 
 
 # Do not duplicate inherited unit tests: this module runs only the HTTP cases.

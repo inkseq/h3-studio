@@ -23,7 +23,7 @@ from studio_platform.operator_capacity import (
 )
 from studio_platform.operator_routes import register_routes
 from studio_platform.runtime_catalog import PROFILE_IDS, get_profile, public_catalog
-from studio_platform.scaler import LaunchSpec
+from studio_platform.capacity_types import LaunchSpec
 from test_platform_repository import LedgerCase
 
 
@@ -682,61 +682,3 @@ class CandidateTests(LedgerCase):
             OperatorError, "operator_offer_observation_unavailable"
         ):
             self.resolve(choice)
-
-    def test_http_is_authenticated_bounded_no_store_and_read_only(self):
-        self.publish("lium", [offer()])
-        service = OperatorCapacity(
-            self.repo,
-            SimpleNamespace(operator_capacity_owners=("superdan",)),
-            self.registry,
-        )
-        app, actors = (
-            FastAPI(),
-            [Principal("superdan", "browser", auth_mode="password")],
-        )
-
-        @app.middleware("http")
-        async def principal(request: Request, call_next):
-            request.state.principal = actors[0]
-            return await call_next(request)
-
-        register_routes(app, service=service)
-        budget = copy.deepcopy(self.repo.get_budget("owner-budget"))
-        query = {"model_id": PRUNED, "mode": "ref", "ttl_seconds": 7200}
-        with (
-            patch(
-                "studio_platform.lium_provider._central_loader",
-                side_effect=AssertionError("credential load"),
-            ),
-            patch(
-                "httpx.HTTPTransport.handle_request",
-                side_effect=AssertionError("network"),
-            ),
-            TestClient(app) as client,
-        ):
-            response = client.get("/v1/operator/capacity/candidates", params=query)
-            self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.headers["cache-control"], "no-store")
-            self.assertEqual(
-                response.json()["candidates"][0]["selection"]["offer_id"], "executor-1"
-            )
-            for invalid in (
-                {"model_id": "unknown"},
-                {"mode": "other"},
-                {"ttl_seconds": 119},
-                {"ttl_seconds": 14401},
-            ):
-                self.assertEqual(
-                    client.get(
-                        "/v1/operator/capacity/candidates", params={**query, **invalid}
-                    ).status_code,
-                    422,
-                )
-            actors[0] = Principal("supervan", "browser", auth_mode="password")
-            self.assertEqual(
-                client.get(
-                    "/v1/operator/capacity/candidates", params=query
-                ).status_code,
-                403,
-            )
-        self.assertEqual(self.repo.get_budget("owner-budget"), budget)

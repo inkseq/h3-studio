@@ -381,32 +381,6 @@ class DstackControllerTests(fixture.DstackOperatorTests):
             )
         self.assertEqual(len(self.client.applied), 1)
 
-    def test_legacy_controller_does_not_rewrite_dstack_commands(self):
-        from studio_platform.operator_controller import OperatorController
-
-        node = self.start()["node_id"]
-        self.service.node_command(self.owner, node, {}, "stop-original")
-        with self.repo.engine.connect() as connection:
-            prior = [
-                dict(row)
-                for row in connection.execute(select(operator_commands)).mappings()
-            ]
-        legacy = object.__new__(OperatorController)
-        legacy.repo = self.repo
-        legacy.shutting_down = False
-        legacy._record_command = lambda *args: self.fail(
-            "legacy changed a dstack command"
-        )
-        legacy._summarize_commands()
-        with self.repo.engine.connect() as connection:
-            self.assertEqual(
-                [
-                    dict(row)
-                    for row in connection.execute(select(operator_commands)).mappings()
-                ],
-                prior,
-            )
-
     def test_manual_stop_retires_idle_worker_then_stops_owned_run(self):
         node, controller = self.ready()
         budget = self.repo.get_budget("owner-budget")

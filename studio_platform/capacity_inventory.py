@@ -361,9 +361,9 @@ def _scan(provider, *, loader=None, transport=None, client=None, clock=time.time
         headers = {"Accept": "application/json", "Accept-Encoding": "identity"}
         if provider == "lium":
             if loader is None:
-                from .lium_provider import _central_loader
+                from .central_registry import load_api
 
-                loader = _central_loader
+                loader = load_api
             try:
                 config = loader(SERVICE, profile=PROFILE)
                 if (

@@ -20,7 +20,7 @@
 | Quick Chat 保全版本的接口与实现 | [集成契约](https://github.com/apedintensor/h3-studio/blob/fd136fbd5a9b9681c17af12131ed22997b8113e7/QUICK-CHAT-INTEGRATION.zh-CN.md)、[后端实现记录](https://github.com/apedintensor/h3-studio/blob/fd136fbd5a9b9681c17af12131ed22997b8113e7/QUICK-CHAT-BACKEND-IMPLEMENTATION.zh-CN.md)、[UI 修正记录](https://github.com/apedintensor/h3-studio/blob/fd136fbd5a9b9681c17af12131ed22997b8113e7/QUICK-CHAT-UI-RESTORE.zh-CN.md) | 固定版本的本地实现/验收；当前合入、验收和发布状态另查 Issue/回执 |
 | 产品数据和完整用户故事 | [Quick Chat 产品系统设计](https://github.com/apedintensor/sixnine-design/blob/2a7d0a5e16c679bbbf82a1f94f9f44fd970d59e0/QUICK-CHAT-PRODUCT-SYSTEM-DESIGN.zh-CN.md) | 产品基线；部分旧段落与最新直接出卡交互不一致，见复用决策第6节，不据旧句子倒退实现 |
 | 当前平台实现和旧 API | [架构基线](ARCHITECTURE.zh-CN.md)、[API 用法](API-USAGE.zh-CN.md)、实际源码/OpenAPI | 带日期的实现说明；不把旧上线状态当今天状态，OpenAPI 中未类型化部分仍需补齐 |
-| 任务/执行/容量合同 | [Queue](QUEUE-CONTRACT.md)、[Worker](WORKER-CONTRACT.md)、[Fleet](FLEET-CONTRACT.md)、[Scaler](SCALER-CONTRACT.md) | 保留已有语义；修改时核对代码与新工作包，不另造竞争的队列规则 |
+| 任务/执行/容量合同 | [Queue](QUEUE-CONTRACT.md)、[Worker](WORKER-CONTRACT.md)、[Fleet](FLEET-CONTRACT.md)、[现行运行入口](RUNTIME-INVENTORY.md) | 保留已有语义；修改时核对代码与新工作包，不另造竞争的队列规则 |
 | 双机目标 | [双 GPU 设计](SYSTEM-DESIGN-DUAL-GPU.zh-CN.md) | 目标2、最低可服务1，非已上线声明；预算/实例/故障隔离须验收 |
 | 发布与兼容 | [开发发布约定](../DEVELOPMENT-RELEASE.zh-CN.md)、`deploy/platform/` | 前端/API/GPU按范围发布；现有兼容指纹不能随意缩小 |
 | 历史生产策略记录 | `.platform-demand-live/NEW-START-STRATEGY-RESULT.zh-CN.md` 及其回执 | 2026-10-05历史证据；窗口到当晚23:45，不证明今天在线或构成续期授权 |

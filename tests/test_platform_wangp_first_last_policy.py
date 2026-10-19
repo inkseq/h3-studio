@@ -12,7 +12,8 @@ from studio_platform.api import create_app
 from studio_platform.control import WorkerControl, WorkerSpec
 from studio_platform.inference.outputs import NATIVE_DELIVERY
 from studio_platform.inference.wangp_compiler import compile_settings
-from studio_platform.production_scaler import MODEL, RECIPE, ScalerError, verify_policy
+from studio_platform.capabilities import MODEL
+from types import SimpleNamespace
 from studio_platform.qualification_profiles import (
     QUEUED_TASK_PROFILE,
     MULTIMODAL_INPUT_LIMITS,
@@ -21,11 +22,11 @@ from studio_platform.repository import Scope, attempts, instance_intents, reques
 from studio_platform.settings import Settings
 from test_platform_api import generation_request, png, project
 from test_platform_execution_policy import policy
-from test_platform_production_scaler import configuration
 from test_platform_repository import LedgerCase
 
 
 DIGEST = "a" * 64
+RECIPE = "h3-base-fl2va-v1"
 
 
 class WanGPFirstLastPolicyTests(LedgerCase):
@@ -34,22 +35,10 @@ class WanGPFirstLastPolicyTests(LedgerCase):
         self.addCleanup(self.repo.engine.dispose)
         root = Path(self.temp.name)
         self.scope = Scope("sixnine", "superdan", "story-one")
-        base = configuration(root, self.now)
-        self.config = replace(
-            base,
-            execution_backend="wangp-worker",
-            engine_manifest_digest=DIGEST,
-            qualification_profile=QUEUED_TASK_PROFILE,
-            output_delivery=NATIVE_DELIVERY,
-            source_sha256={
-                name: "b" * 64
-                for name in (
-                    "wangp-bootstrap.py",
-                    "wangp-manifest.json",
-                    "wangp-runtime.json",
-                    "wangp-package.tar.gz",
-                )
-            },
+        self.config = SimpleNamespace(
+            pool="finite-pool",
+            configuration_id="synthetic-config",
+            qualification_evidence_id="synthetic-test-only",
         )
         self.value = policy(self.now)
         self.value.update(
@@ -137,9 +126,6 @@ class WanGPFirstLastPolicyTests(LedgerCase):
     def write(self):
         self.path.write_text(json.dumps(self.value), encoding="utf-8")
         self.path.chmod(0o600)
-        self.config = replace(
-            self.config, execution_policy_sha256=request_hash(self.value)
-        )
 
     def upload(self, name):
         response = self.client.post(
@@ -156,52 +142,9 @@ class WanGPFirstLastPolicyTests(LedgerCase):
         request["controls"]["seed"] = "424242"
         return self.client.post("/v1/generation-plans", json=request)
 
-    def test_production_gate_allows_only_explicit_bounded_first_last_envelope(self):
-        original = copy.deepcopy(self.value)
-        for enabled, maximum in ((False, 0), (True, 0), (True, 1), (True, 2)):
-            self.value = copy.deepcopy(original)
-            self.value["envelope"].update(
-                allow_first_last=enabled, max_reference_files=maximum
-            )
-            self.write()
-            self.assertEqual(verify_policy(self.config, self.settings), self.value)
-        for patch in (
-            {"allow_first_last": False, "max_reference_files": 1},
-            {"max_reference_files": 3},
-            {"max_guides": 1},
-        ):
-            self.value = copy.deepcopy(original)
-            self.value["envelope"].update(patch)
-            self.write()
-            with (
-                self.subTest(patch=patch),
-                self.assertRaisesRegex(ScalerError, "outside_wangp_recipe"),
-            ):
-                verify_policy(self.config, self.settings)
-        for field, value in (
-            ("max_images", 1),
-            ("max_videos", 1),
-            ("max_audios", 1),
-            ("guide_kinds", ["image"]),
-            ("guide_recipe_ids", ["h3-base-ref2va-v1"]),
-            ("allow_video_audio", True),
-        ):
-            self.value = copy.deepcopy(original)
-            self.value["envelope"]["input_limits"][field] = value
-            self.write()
-            with (
-                self.subTest(field=field),
-                self.assertRaisesRegex(
-                    (ScalerError, ValueError),
-                    "outside_wangp_recipe|Invalid qualified guide scope",
-                ),
-            ):
-                verify_policy(self.config, self.settings)
-
     def test_owned_first_last_uploads_reach_confirmed_native_job_with_same_image_roles(
         self,
     ):
-        self.assertEqual(verify_policy(self.config, self.settings), self.value)
         first, last = self.upload("first"), self.upload("last")
         for inputs, mode in (
             ({"first_frame": first}, "S"),
@@ -261,14 +204,12 @@ class WanGPFirstLastPolicyTests(LedgerCase):
         ):
             self.value["envelope"].update(patch)
             self.write()
-            verify_policy(self.config, self.settings)
             response = self.plan(inputs)
             self.assertEqual(response.status_code, 201, response.text)
             self.assertEqual(response.json()["status"], "blocked", response.text)
         self.value["envelope"].update(max_reference_files=2, allow_first_last=True)
         self.value["envelope"]["input_limits"]["max_image_pixels"] = 256 * 256
         self.write()
-        verify_policy(self.config, self.settings)
         response = self.plan({"first_frame": first})
         self.assertEqual(response.json()["status"], "blocked", response.text)
         self.assertEqual(self.repo.list_jobs(self.scope), [])

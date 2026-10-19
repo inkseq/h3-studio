@@ -19,9 +19,6 @@ from studio_platform.inference.outputs import NATIVE_DELIVERY, delivery_spec
 from studio_platform.inference.wangp import WanGPBackend
 from studio_platform.inference.wangp_contract import RuntimeObservation, RuntimeOutput
 from studio_platform.inference.wangp_ref_compiler import H3Ref2VACompiler, RECIPE_ID
-from studio_platform.lium_bootstrap import BootConfig, BootError
-from studio_platform.on_demand_scaler import json_config
-from studio_platform.production_scaler import verify_policy, verify_sources
 from studio_platform.qualification_profiles import (
     MULTIMODAL_INPUT_LIMITS,
     QUEUED_TASK_PROFILE,
@@ -35,7 +32,6 @@ from studio_platform.settings import Settings
 from studio_platform.worker import WorkerRunner
 from test_platform_api import generation_request, png, project
 from test_platform_execution_policy import policy
-from test_platform_production_scaler import configuration
 from test_platform_repository import LedgerCase
 from test_platform_wangp_host import FakeSession
 import test_platform_wangp_ref as ref_fixture
@@ -360,7 +356,7 @@ class RefAPITests(LedgerCase):
         self,
     ):
         from studio_platform.autoscale import ScalePolicy
-        from studio_platform.scaler import LaunchSpec
+        from studio_platform.capacity_types import LaunchSpec
 
         self.value.update(pool="ref-cold", configuration_id="ref-cold-config")
         self.write()
@@ -485,58 +481,3 @@ class RefAPITests(LedgerCase):
             ref["execution_support"]["available_recipe_ids"], ["h3-base-fl2va-v1"]
         )
         self.assertEqual(self.repo.list_jobs(self.scope), [])
-
-    def test_explicit_controller_recipe_hash_boot_manifest_and_policy_bind_together(
-        self,
-    ):
-        base = configuration(self.root, self.now)
-        legacy = json_config(base)
-        self.assertNotIn("execution_recipe_id", legacy)
-        self.assertEqual(request_hash(legacy), base.fingerprint())
-        documents = {
-            "wangp-manifest.json": self.engine.document_json.encode(),
-            "wangp-bootstrap.py": b"# test",
-            "wangp-runtime.json": b"{}",
-            "wangp-package.tar.gz": b"test-only",
-        }
-        for name, content in documents.items():
-            (base.source_dir / name).write_bytes(content)
-        config = replace(
-            base,
-            execution_backend="wangp-worker",
-            engine_manifest_digest=self.engine.digest,
-            execution_recipe_id=RECIPE_ID,
-            output_delivery=NATIVE_DELIVERY,
-            qualification_profile=QUEUED_TASK_PROFILE,
-            source_sha256={
-                k: hashlib.sha256(v).hexdigest() for k, v in documents.items()
-            },
-        )
-        self.value.update(pool=config.pool, configuration_id=config.configuration_id)
-        self.value["qualification"]["evidence_id"] = config.qualification_evidence_id
-        self.write()
-        config = replace(config, execution_policy_sha256=request_hash(self.value))
-        self.assertEqual(config.recipe_ids, (RECIPE_ID,))
-        self.assertEqual(json_config(config)["execution_recipe_id"], RECIPE_ID)
-        self.assertNotEqual(
-            replace(config, execution_recipe_id="").fingerprint(), config.fingerprint()
-        )
-        verify_policy(config, self.settings)
-        verify_sources(config)
-        BootConfig(
-            config.work_dir,
-            config.source_dir,
-            config.ssh_key_file,
-            config.known_hosts_file,
-            18901,
-            config.configuration_id,
-            qualification_profile=QUEUED_TASK_PROFILE,
-            execution_backend="wangp-worker",
-            engine_manifest_digest=self.engine.digest,
-            recipe_ids=(RECIPE_ID,),
-            output_delivery=NATIVE_DELIVERY,
-        )
-        with self.assertRaisesRegex(BootError, "recipe_manifest"):
-            verify_sources(replace(config, execution_recipe_id=""))
-        with self.assertRaises(ValueError):
-            replace(config, output_delivery="")

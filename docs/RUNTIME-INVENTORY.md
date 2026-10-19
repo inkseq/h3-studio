@@ -14,15 +14,15 @@ Observed read-only on staging and production on 2026-10-18, 17:33–17:49 UTC fo
 
 Both hosts had 59 public business tables / 444 columns; the sampled job states were terminal and workers retired/stopped. These aggregate observations do not settle invoices, release reservations, remove records, or prove provider absence. The retained history includes a staging `creation_unknown` row. Nothing in this source cleanup changes any row or starts/stops a provider instance.
 
-## Why the other old-looking modules stay
+## Shared contracts and retired paths (#328)
 
-An import or a historical name is not proof of an active rental path, and a process-name inventory is not proof that a library is dead:
+The 2026-10-19 source inventory confirms the deployed overlay uses dstack and does not configure `H3_OPERATOR_RUNTIME_CONFIG`. Custom Lium/Targon providers, their old bootstrap/scaler/controller chains and exclusive tests/guides are retired. New custom-runtime configuration and legacy market/start endpoints refuse with authenticated `410 legacy_capacity_runtime_retired`; Vast/RunPod through dstack remain the launch path. Targon is a later dstack integration, not a custom-provider fallback.
 
-- `dstack_capacity` and `dstack_preparation` import `lium_bootstrap` diagnostic code/phase sets. `dstack_runtime` still uses `fleet.SlotConfig`; native bootstrap/adoption modules share the existing SSH and receipt contracts.
-- `api`, `control`, availability, host policy, settlement/invoice diagnostics and dstack workspace still use `operator_capacity` tables/types. Those rows are the original machine/accounting authority, not a second queue to discard.
-- `capacity_inventory`, old-provider APIs and original-job recovery retain Lium/Targon identity and observation helpers. The pinned dstack configuration covers Vast/RunPod; this slice does not assert that upstream Targon support exists.
-- `capacity`, scaler types and pool helpers remain transitively referenced. Decoupling their live value types/diagnostics from retired launch paths is later #257 work, with actual call-path and recovery acceptance before deletion.
-- Historical `hatchet-v1` values in immutable execution plans are identity/compatibility data. They are not evidence of a running Hatchet broker and are not renamed or rewritten.
+Live shared code moves intact into `native_bootstrap` (SSH and sanitized diagnostics), `capacity_types` (ledger value objects), `provider_lifetime` (read-only old-machine eligibility) and `central_registry` (lazy access to the existing Registry). These modules do not rent resources or create another controller.
+
+Keep the original `operator_capacity`, `capacity` and market tables/types used by API/control/admission/history/manual review/settlement. Original provider names, ports, execution plans, `hatchet-v1` identities and unknown invoices remain history. No schema or business row is deleted or rewritten. Native Targon preparation is still part of the pinned GPU package; its name is not evidence of a custom provider client.
+
+Protected host release/rollback inspection helpers and historical cleanup/read-only credential adapters remain where the installed release path still imports them. They do not restore the retired application runtime. Their guard/restore/accounting tests stay; live native REF/FL, failure classification, ownership, queue and money checks are retained when old setup fixtures are removed.
 
 ## Removed surface and retained evidence
 
@@ -30,7 +30,7 @@ The removed standalone website had its own `server.py`, `password_auth.py`, `web
 
 Only the corresponding obsolete CI image/browser/deploy checks are removed. Unknown/security/budget/provider changes still require every current platform gate, including the unified image, dispatch/dstack derivatives, PostgreSQL suite and native helper checks. No protected host release helper is replaced, and original rollback images/artifacts remain available independently of this source removal. Historical standalone documentation is explicitly dated and remains in Git; it does not authorize redeploying the retired path.
 
-Host-path renaming, local media migration/deletion, wholesale provider/scaler removal and DBOS production activation are outside this slice. DBOS remains staging only under CR-20261019-37.
+Host-path renaming and local-media deletion remain outside this source cleanup. DBOS production activation stays held for Claude's post-M1 staging GPU acceptance under #328 / CR39.
 
 ## Reader-before-writer schema compatibility
 

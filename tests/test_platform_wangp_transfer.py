@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from studio_platform.lium_bootstrap import BootError
+from studio_platform.native_bootstrap import BootError
 from studio_platform import wangp_bootstrap
 from studio_platform.wangp_bootstrap import (
     DEPENDENCY_NAME,

@@ -214,7 +214,7 @@ def managed_window_reason(
     deployment_profile_id=None,
     binding=None,
 ):
-    from .operator_controller import provider_lifetime_current
+    from .provider_lifetime import provider_lifetime_current
 
     payload = node.get("payload", {})
     lifecycle = payload.get("lifecycle")

@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 import threading
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from sqlalchemy import event
 
@@ -69,7 +69,7 @@ class CapacityCliTests(capacity_tests.CapacityTests):
             self.repo.get_job(self.scope, job["id"])["status"], "waiting_capacity"
         )
         self.assertEqual(self.repo.list_instance_intents(), [])
-        self.assertEqual(self.provider.creates, [])
+        self.assertEqual(self.seeded_instances, [])
         self.assertNotIn("payload", result)
 
     def test_advance_consumes_ready_fleet_registration_without_scaler_or_provider(self):
@@ -77,19 +77,9 @@ class CapacityCliTests(capacity_tests.CapacityTests):
         job = self.waiting()
         intent = self.start()
         self.worker(intent)
-        with (
-            patch.object(
-                self.scaler,
-                "tick",
-                side_effect=AssertionError("advance invoked scaler"),
-            ),
-            patch.object(
-                self.provider,
-                "reconcile",
-                side_effect=AssertionError("advance provider"),
-            ),
-        ):
-            result = self.controller.advance_once("cold-approval")
+        # Deliberately inert injected adapter: any attribute access fails.
+        self.controller.scaler = Mock(spec=())
+        result = self.controller.advance_once("cold-approval")
         self.assertEqual(result["activated"], 1)
         self.assertFalse(result["provider_calls_enabled"])
         self.assertEqual(self.repo.get_job(self.scope, job["id"])["status"], "queued")
@@ -118,10 +108,6 @@ class CapacityCliTests(capacity_tests.CapacityTests):
             patch.object(Repository, "__init__", init),
             patch.object(
                 Repository, "create_schema", side_effect=AssertionError("CLI did DDL")
-            ),
-            patch(
-                "studio_platform.scaler.ScaleCoordinator",
-                side_effect=AssertionError("CLI built scaler"),
             ),
             redirect_stdout(output),
         ):
@@ -179,7 +165,7 @@ class CapacityCliTests(capacity_tests.CapacityTests):
             0,
         )
         self.assertEqual(len(output), 1)
-        self.assertEqual(self.provider.creates, [])
+        self.assertEqual(self.seeded_instances, [])
 
 
 for _name in dir(capacity_tests.CapacityTests):

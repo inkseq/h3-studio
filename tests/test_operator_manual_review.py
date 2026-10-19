@@ -37,16 +37,16 @@ from tools.targon_cleanup_guard import (
     ProtectedManualReviewReader,
 )
 from tools import targon_cleanup_guard as review_guard
-from studio_platform.scaler import LaunchSpec, ProviderFact
+from studio_platform.capacity_types import LaunchSpec
 from studio_platform.control import WorkerControl, WorkerSpec
 from studio_platform.targon_cleanup import _hash
 
 
-class ManualReviewTests(operator_fixtures.OperatorTests):
+class ManualReviewTests(operator_fixtures.OperatorCase):
     def setUp(self):
-        operator_fixtures.OperatorTests.setUp(self)
-        self.controller.leader_id = MANUAL_REVIEW_CONTROLLER_PREFIX + 'offline'
-        created = operator_fixtures.OperatorTests.create(self)
+        operator_fixtures.OperatorCase.setUp(self)
+        self.history_controller_id = MANUAL_REVIEW_CONTROLLER_PREFIX + 'offline'
+        created = operator_fixtures.OperatorCase.create(self)
         with self.repo.engine.connect() as connection:
             command = (
                 connection.execute(
@@ -57,7 +57,7 @@ class ManualReviewTests(operator_fixtures.OperatorTests):
                 .mappings()
                 .one()
             )
-        self.controller._start(command)
+        self.seed_running(command_id=command['id'], ready=False)
         node = self.service.state(self.actor)['nodes'][0]
         self.service.node_command(
             self.actor,
@@ -70,9 +70,8 @@ class ManualReviewTests(operator_fixtures.OperatorTests):
         self.node_id = node['id']
         with self.repo.transaction() as connection:
             connection.execute(
-                insert(operator_heartbeats).values(
-                    id='global',
-                    controller_id=self.controller.leader_id,
+                update(operator_heartbeats).values(
+                    controller_id=self.history_controller_id,
                     observed_at=self.now,
                     state='running',
                 )
@@ -189,11 +188,6 @@ class ManualReviewTests(operator_fixtures.OperatorTests):
                 1,
             )
         # No constructor, provider query, invoice poll or bootstrap after closure.
-        self.controller.provider_factory = Mock(
-            side_effect=AssertionError('provider accessed')
-        )
-        self.controller.tick()
-        self.controller.provider_factory.assert_not_called()
         self.assertEqual(
             self.repo.list_instance_intents()[0]['billing_status'], 'pending'
         )
@@ -498,11 +492,6 @@ class ManualReviewTests(operator_fixtures.OperatorTests):
         self.assertIsNone(node['removal_confirmation']['next_check_at'])
         self.assertEqual(self.service.state(self.actor)['summary']['nodes_active'], 0)
         self.assertFalse(node['actions']['manual_review']['allowed'])
-        self.controller.provider_factory = Mock(
-            side_effect=AssertionError('provider accessed')
-        )
-        self.controller.tick()
-        self.controller.provider_factory.assert_not_called()
 
     def test_lium_dashboard_stop_without_platform_stop_or_controller(self):
         self.assert_dashboard_review('lium', 'ready')
@@ -828,7 +817,7 @@ class ManualReviewTests(operator_fixtures.OperatorTests):
             ['terminal-but-unknown'],
         )
 
-    def test_unsafe_attempt_blocks_and_late_provider_cost_cannot_settle_manual_review(
+    def test_unsafe_attempt_blocks_and_safe_review_keeps_invoice_pending(
         self,
     ):
         job = self.job(status='queued')
@@ -874,16 +863,6 @@ class ManualReviewTests(operator_fixtures.OperatorTests):
         with self.repo.transaction() as connection:
             connection.execute(update(attempts).values(upstream_stopped=1))
         self.service.manual_review(self.actor, self.node_id, self.body, 'safe-reviewed')
-        coordinator = self.controller._coordinator(self.binding)
-        lease = coordinator.acquire(self.binding.pool, self.controller.leader_id)
-        coordinator._apply(
-            lease,
-            self.node_id,
-            ProviderFact(
-                'destroyed', instance_id=self.uid, actual_cost_microusd=540000
-            ),
-            self.now,
-        )
         instance = self.repo.list_instance_intents()[0]
         self.assertEqual(instance['state'], 'destroying')
         self.assertIsNone(instance['actual_cost_microusd'])

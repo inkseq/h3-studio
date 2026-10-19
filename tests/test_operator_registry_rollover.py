@@ -10,7 +10,7 @@ from studio_platform.operator_capacity import (
     selection,
 )
 from studio_platform.repository import Scope, request_hash
-from studio_platform.scaler import LaunchSpec
+from studio_platform.capacity_types import LaunchSpec
 
 
 class RegistryRolloverTests(unittest.TestCase):

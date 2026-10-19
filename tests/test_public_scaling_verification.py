@@ -277,7 +277,7 @@ class PublicScalingTests(unittest.TestCase):
         from sqlalchemy import select
         from studio_platform.autoscale import ScalePolicy
         from studio_platform.repository import Scope, capacity_waiters, request_hash
-        from studio_platform.scaler import LaunchSpec
+        from studio_platform.capacity_types import LaunchSpec
 
         policy = json.loads((self.root / 'policy.json').read_text())
         self.control.drain('synthetic-worker')

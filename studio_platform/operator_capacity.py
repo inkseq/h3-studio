@@ -46,7 +46,7 @@ from .repository import (
     paused_capacity_pools,
     manually_reviewed_inactive,
 )
-from .scaler import LaunchSpec, REMOVAL_CHECK_INTERVAL_SECONDS
+from .capacity_types import LaunchSpec, REMOVAL_CHECK_INTERVAL_SECONDS
 from .operator_extensions import OperatorExtensions
 
 operator_policy = Table(
@@ -664,9 +664,7 @@ class OperatorRegistry:
             not (runtime and source), "operator_registry_configuration_conflict", 422
         )
         if runtime:
-            from .operator_runtime import create_registry
-
-            return create_registry(runtime, repository=repository)
+            raise OperatorError("legacy_capacity_runtime_retired", 410)
         return (
             cls.from_file(source, catalog=catalog, offers=offers)
             if source
@@ -714,7 +712,7 @@ def public_bootstrap(value):
     """Small, static projection; never expose remote logs, paths or messages."""
     if not isinstance(value, dict):
         return None
-    from .lium_bootstrap import _static, safe_bootstrap_diagnosis
+    from .native_bootstrap import _static, safe_bootstrap_diagnosis
 
     states = {
         "ready",

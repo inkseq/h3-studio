@@ -1,4 +1,4 @@
-"""Exact allocation consent through the real ledger/controller; fake cloud only."""
+"""Historical selected-offer consent through the real ledger; no rental controller."""
 
 from types import SimpleNamespace
 from sqlalchemy import insert, select, update
@@ -15,29 +15,16 @@ from studio_platform.operator_capacity import (
     operator_nodes,
     command_binding_fingerprint,
 )
-from studio_platform.operator_controller import OperatorController
 from studio_platform.runtime_catalog import PROFILE_IDS, get_profile, public_catalog
-from studio_platform.scaler import LaunchSpec
+from studio_platform.capacity_types import LaunchSpec
 from test_platform_repository import LedgerCase
-from test_operator_capacity import OperatorProvider, FakeBoot
+from test_operator_capacity import OperatorCase
 from test_capacity_candidates import offer
 
 
-class SelectedProvider(OperatorProvider):
-    def __init__(self):
-        super().__init__()
-        self.selected = []
-
-    def create_selected_for_intent(
-        self, tag, launch, *, selected_offer, hard_deadline, intent_created_at
-    ):
-        self.selected.append(dict(selected_offer))
-        return self.create(tag, launch, hard_deadline=hard_deadline)
-
-
-class SelectedOfferTests(LedgerCase):
+class SelectedOfferTests(OperatorCase):
     def setUp(self):
-        super().setUp()
+        LedgerCase.setUp(self)
         self.actor = Principal("superdan", "browser", auth_mode="password")
         self.row = offer()
         profile = get_profile(PROFILE_IDS[0])
@@ -82,13 +69,7 @@ class SelectedOfferTests(LedgerCase):
                 "max_ttl_seconds": 7200,
             },
         )
-        self.provider = SelectedProvider()
-        self.controller = OperatorController(
-            self.service,
-            provider_factory=lambda binding: self.provider,
-            boot_factory=lambda *args: FakeBoot(self, *args),
-            enabled=True,
-        )
+        self.seeded_instances = []
         self.chosen = {
             "runtime_profile_id": PROFILE_IDS[0],
             "mode": "ref",
@@ -123,9 +104,8 @@ class SelectedOfferTests(LedgerCase):
         result = self.service.start(
             self.actor, {"preview_id": preview["preview_id"]}, "selected-once"
         )
-        self.controller.tick()
-        self.assertEqual(len(self.provider.creates), 1)
-        self.assertEqual(self.provider.selected, [self.row])
+        self.seed_running()
+        self.assertEqual(len(self.seeded_instances), 1)
         with self.repo.engine.connect() as connection:
             node = connection.execute(select(operator_nodes)).mappings().one()
             command = connection.execute(select(operator_commands)).mappings().one()
@@ -141,7 +121,7 @@ class SelectedOfferTests(LedgerCase):
             self.actor, {"preview_id": preview["preview_id"]}, "selected-once"
         )
         self.assertEqual(replay["operation"]["id"], result["operation"]["id"])
-        self.assertEqual(len(self.provider.creates), 1)
+        self.assertEqual(len(self.seeded_instances), 1)
 
     def test_pending_command_is_fenced_against_old_controller_even_after_lease_change(
         self,
@@ -157,15 +137,15 @@ class SelectedOfferTests(LedgerCase):
             self.binding.fingerprint, command["payload"]["binding_hash"]
         )
         self.assertFalse(self.repo.list_instance_intents())
-        self.assertFalse(self.provider.creates)
+        self.assertFalse(self.seeded_instances)
         self.assertEqual(
             command_binding_fingerprint(
                 self.binding, {k: v for k, v in self.chosen.items() if k != "offer_id"}
             ),
             self.binding.fingerprint,
         )
-        self.controller.tick()
-        self.assertEqual(len(self.provider.creates), 1)
+        self.seed_running()
+        self.assertEqual(len(self.seeded_instances), 1)
 
     def test_changed_quote_requires_new_consent_before_reservation(self):
         preview = self.preview()
@@ -180,18 +160,7 @@ class SelectedOfferTests(LedgerCase):
                 self.actor, {"preview_id": preview["preview_id"]}, "changed"
             )
         self.assertFalse(self.repo.list_instance_intents())
-        self.assertFalse(self.provider.creates)
-
-    def test_accepted_missing_offer_blocks_without_falling_back_to_another(self):
-        preview = self.preview()
-        self.service.start(self.actor, {"preview_id": preview["preview_id"]}, "missing")
-        self.publish([offer("other-executor")])
-        self.controller.tick()
-        self.assertFalse(self.provider.creates)
-        self.assertFalse(self.repo.list_instance_intents())
-        with self.repo.engine.connect() as connection:
-            command = connection.execute(select(operator_commands)).mappings().one()
-        self.assertEqual(command["reason_code"], "operator_offer_unavailable")
+        self.assertFalse(self.seeded_instances)
 
     def test_old_controller_cannot_admit_exact_offer_command(self):
         self.registry.inventory_required = True
@@ -211,7 +180,7 @@ class SelectedOfferTests(LedgerCase):
         with self.repo.transaction() as connection:
             connection.execute(
                 update(operator_heartbeats).values(
-                    controller_id=self.controller.leader_id
+                    controller_id="operator-offers-v1-review-v1-test"
                 )
             )
         self.preview()
@@ -233,4 +202,4 @@ class SelectedOfferTests(LedgerCase):
             self.service.start(
                 self.actor, {"preview_id": preview["preview_id"]}, "stale"
             )
-        self.assertFalse(self.provider.creates)
+        self.assertFalse(self.seeded_instances)

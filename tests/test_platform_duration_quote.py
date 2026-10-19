@@ -9,7 +9,7 @@ from studio_platform.autoscale import ScalePolicy
 from studio_platform.capabilities import capabilities, compile_request
 from studio_platform.execution_policy import validate_policy
 from studio_platform.repository import request_hash
-from studio_platform.scaler import LaunchSpec
+from studio_platform.capacity_types import LaunchSpec
 from test_platform_api import generation_request
 import test_platform_execution_policy as policy_fixtures
 

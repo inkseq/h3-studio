@@ -12,8 +12,7 @@ from types import SimpleNamespace as NS
 import unittest
 from unittest.mock import Mock, patch
 
-from studio_platform import lium_bootstrap as boot
-from studio_platform.lium_provider import LiumError
+from studio_platform import native_bootstrap as boot
 from studio_platform import wangp_bootstrap
 from studio_platform.inference.wangp_contract import EngineManifest
 from studio_platform.inference.wangp_profile_compiler import compile_settings
@@ -505,16 +504,6 @@ class TargonTransportTests(unittest.TestCase):
             )
             self.assertEqual((remote / 'targon-prepare.py').read_bytes(), content)
             self.assertFalse((remote / 'unrelated.py').exists())
-
-    def test_provider_uid_is_safe_but_does_not_change_lium_uuid_validation(self):
-        self.assertEqual(
-            boot.provider_instance_id('targon', 'workload_abc-123'), 'workload_abc-123'
-        )
-        for value in ('../escape', 'x/y', 'x y', 'x' * 129):
-            with self.assertRaises(boot.BootError):
-                boot.provider_instance_id('targon', value)
-        with self.assertRaises(LiumError):
-            boot.provider_instance_id('lium', 'workload_abc-123')
 
     def test_username_is_fixed_by_explicit_provider_and_nondefault_port_is_retained(
         self,

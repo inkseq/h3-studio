@@ -106,7 +106,7 @@ def native_preparation(value):
     if not isinstance(value, dict):
         return None
     from .wangp_bootstrap import safe_preparation_report
-    from .lium_bootstrap import BOOT_FAILURE_CODES
+    from .native_bootstrap import BOOT_FAILURE_CODES
 
     source = {
         "phase": value.get("phase"),

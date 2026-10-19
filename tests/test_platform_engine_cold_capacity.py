@@ -15,7 +15,6 @@ from sqlalchemy import select, update
 from studio_platform.capacity import transfer_unsubmitted_capacity
 from studio_platform.control import WorkerControl, WorkerSpec
 from studio_platform.execution_policy import ExecutionPolicies
-from studio_platform.queued_task_runner import _identity
 from studio_platform.repository import (
     Conflict,
     Scope,
@@ -25,7 +24,6 @@ from studio_platform.repository import (
     request_hash,
 )
 import test_platform_capacity as capacity_fixture
-import test_platform_queued_task_runner as queued_fixture
 from test_platform_repository import LedgerCase
 
 
@@ -165,7 +163,7 @@ class EngineCapacityTests(capacity_fixture.CapacityTests):
             self.repo.get_job(self.scope, job["id"])["execution_plan"],
             job["execution_plan"],
         )
-        self.assertEqual(self.provider.creates, [])
+        self.assertEqual(self.seeded_instances, [])
 
     def test_accepted_job_without_worker_or_approval_binds_delivery_identity(self):
         from studio_platform.inference.outputs import NATIVE_DELIVERY
@@ -331,7 +329,7 @@ class EngineCapacityTests(capacity_fixture.CapacityTests):
             (current["status"], current["attempt_no"], current["request_hash"]),
             ("queued", 0, job["request_hash"]),
         )
-        self.assertEqual(self.provider.creates, [])
+        self.assertEqual(self.seeded_instances, [])
 
     def test_rollover_explicit_generic_owner_and_tenant_preserves_job_deadline_and_cost(
         self,
@@ -426,142 +424,11 @@ class EngineCapacityTests(capacity_fixture.CapacityTests):
             self.assertEqual(self.repo.get_job(self.scope, job["id"]), before)
 
 
-class WanGPQueuedEvidenceTests(LedgerCase):
-    runner = queued_fixture.QueuedTaskRunnerTests.runner
-
-    def setUp(self):
-        super().setUp()
-        self.work = Path(self.temp.name) / "worker"
-        self.evidence_file = Path(self.temp.name) / "boot" / "queued-task-evidence.json"
-        self.identity = {
-            "intent_id": "synthetic-intent",
-            "instance_id": "synthetic-instance",
-            "configuration_id": "synthetic-config",
-            "qualification_profile": queued_fixture.QUEUED_TASK_PROFILE,
-            "sources": {"model_manifest.json": "b" * 64},
-            "backend": "wangp-worker",
-            "engine_manifest_digest": DIGEST,
-        }
-        self.backend = queued_fixture.Backend()
-        self.backend.kind = "wangp-worker"
-        self.backend.manifest = SimpleNamespace(digest=DIGEST)
-        self.control = WorkerControl(self.repo)
-        self.control.register(
-            WorkerSpec(
-                "worker",
-                "finite-pool",
-                "synthetic-provider",
-                "synthetic-instance",
-                ("synthetic-device",),
-                ("synthetic-fl", "synthetic-ref"),
-                "synthetic-model",
-                "synthetic-config",
-                backend="wangp-worker",
-                engine_manifest_digest=DIGEST,
-            )
-        )
-        self.control.mark_ready("worker", upstream_idle_confirmed=True)
-
-    def job_for(self, *, recipe="synthetic-fl", steps=4):
-        request = {
-            "recipe_id": recipe,
-            "request": {
-                "model": "synthetic-model",
-                "prompt": "PRIVATE-PROMPT",
-                "mode": "fl",
-                "duration": 5,
-                "resolution": "480P",
-                "steps": steps,
-                "generate_audio": False,
-            },
-            "assets": {"private-asset": {"metadata": {"kind": "image"}}},
-        }
-        plan = self.repo.create_plan(
-            self.scope,
-            request,
-            {
-                "pool": "finite-pool",
-                "backend": "wangp-worker",
-                "engine_manifest_digest": DIGEST,
-                "enabled": True,
-                "configuration_id": "synthetic-config",
-                "expected_runtime_s": 10,
-            },
-            expires_at=self.now + 3600,
-            estimated_cost_microusd=100_000,
-        )
-        job = self.repo.create_job(
-            self.scope,
-            plan["id"],
-            uuid.uuid4().hex,
-            budget_account_ids=("owner-budget",),
-        )
-        self.now += 0.1
-        return job
-
-    def test_first_real_job_delivers_and_verifies_without_extra_smoke_job(self):
-        queued_fixture.QueuedTaskRunnerTests.test_first_real_job_is_result_and_exact_scope_proof_one_submission(
-            self
-        )
-        value = json.loads(self.evidence_file.read_text())
-        self.assertEqual(value["identity"], self.identity)
-
-    def test_unknown_retains_attempt_and_no_duplicate_on_recovery(self):
-        queued_fixture.QueuedTaskRunnerTests.test_unknown_post_only_reconciles_original_attempt_and_can_return_success(
-            self
-        )
-
-    def test_collection_retry_never_regenerates(self):
-        queued_fixture.QueuedTaskRunnerTests.test_collection_failure_keeps_same_attempt_and_recovers_output_without_resubmit(
-            self
-        )
-
-    def test_identity_rejects_missing_digest_wrong_backend_and_runtime(self):
-        for overrides in (
-            {"engine_manifest_digest": ""},
-            {"backend": "comfy-worker"},
-            {"backend": "mock"},
-        ):
-            with self.assertRaises(ValueError):
-                _identity({**self.identity, **overrides})
-        self.backend.manifest = SimpleNamespace(digest="c" * 64)
-        with self.assertRaisesRegex(ValueError, "backend_manifest_conflict"):
-            self.runner()
-
-    def test_registered_spec_must_match_evidence_manifest_before_claim(self):
-        self.identity["engine_manifest_digest"] = "c" * 64
-        self.backend.manifest = SimpleNamespace(digest="c" * 64)
-        job = self.job_for()
-        with self.assertRaisesRegex(ValueError, "worker_identity_conflict"):
-            self.runner().run_once("worker", "finite-pool")
-        self.assertEqual(self.repo.get_job(self.scope, job["id"])["attempt_no"], 0)
-        self.assertEqual(self.backend.submits, 0)
-
-    def test_wrong_job_manifest_is_never_claimed_or_qualified(self):
-        job = self.job_for()
-        with self.repo.transaction() as conn:
-            conn.execute(
-                update(jobs)
-                .where(jobs.c.id == job["id"])
-                .values(
-                    execution_plan={
-                        **job["execution_plan"],
-                        "engine_manifest_digest": "c" * 64,
-                    }
-                )
-            )
-        self.assertEqual(
-            self.runner().run_once("worker", "finite-pool")["state"], "idle"
-        )
-        self.assertFalse(self.evidence_file.exists())
-        self.assertEqual(self.backend.submits, 0)
-
-
 def load_tests(loader, tests, pattern):
     # Reuse fixture helpers without rerunning their inherited legacy test cases.
     return unittest.TestSuite(
         cls(name)
-        for cls in (EngineCapacityTests, WanGPQueuedEvidenceTests)
+        for cls in (EngineCapacityTests,)
         for name in cls.__dict__
         if name.startswith("test_")
     )

@@ -1,4 +1,4 @@
-"""Cold start contracts: temporary SQLite / isolated local PG and fake provider only."""
+"""Historical cold approval/admission with direct ledger fixtures; no rental calls."""
 
 from dataclasses import replace
 import json
@@ -24,12 +24,11 @@ from studio_platform.repository import (
     jobs,
     request_hash,
 )
-from studio_platform.scaler import LaunchSpec, ProviderFact, ScaleCoordinator
+from studio_platform.capacity_types import LaunchSpec
 from studio_platform.settings import Settings
 from test_platform_api import generation_request
 from test_platform_execution_policy import policy
 from test_platform_repository import LedgerCase
-from test_platform_scaler import FakeProvider
 
 
 class CapacityTests(LedgerCase):
@@ -83,11 +82,10 @@ class CapacityTests(LedgerCase):
             instance_reservation_microusd=200_000,
             hard_deadline=self.now + 3600,
         )
-        self.provider = FakeProvider()
-        self.scaler = ScaleCoordinator(self.repo, provider=self.provider, enabled=True)
+        self.seeded_instances = []
+        self.seed_state = "starting"
         self.controller = ColdStartCoordinator(
             self.repo,
-            scaler=self.scaler,
             enabled=True,
             approval_guard=self.policies.capacity_approval_current,
             activation_guard=self.policies.activation_allowed,
@@ -139,14 +137,37 @@ class CapacityTests(LedgerCase):
         )
 
     def tick(self, leader="leader", approval="cold-approval"):
-        return self.controller.tick(leader, approval)
+        return self.controller.advance_once(approval)
 
     def start(self):
-        self.assertEqual(self.tick()["reason"], "observe_again")
+        """Seed an already accepted historical allocation; never run rental logic."""
+        approval = self.controller._approval("cold-approval")
+        payload = approval["payload"]
+        intent = self.repo.reserve_instance_intent(
+            self.billing_scope,
+            "cold-pool",
+            "historical-cold-approval",
+            physical_gpus=self.scale_policy.new_instance_physical_gpus,
+            slots=self.scale_policy.new_instance_slots,
+            reserved_cost_microusd=self.scale_policy.instance_reservation_microusd,
+            hard_deadline=self.scale_policy.hard_deadline,
+            budget_account_ids=payload["budget_account_ids"],
+            dry_run=False,
+            provider=self.launch.provider,
+        )
+        self.repo.update_instance(intent["id"], "creating")
+        with self.repo.transaction() as connection:
+            self.controller._attach(connection, intent, "cold-approval")
+        intent = self.repo.update_instance(
+            intent["id"],
+            self.seed_state,
+            provider_instance_id="historical-" + intent["id"]
+            if self.seed_state != "creation_unknown"
+            else None,
+        )
+        self.seeded_instances.append(intent["id"])
         self.now += 16
-        result = self.tick()
-        self.assertEqual(result["state"], "creation_observed", result)
-        return self.repo.list_instance_intents(pool="cold-pool")[0]
+        return intent
 
     def worker(
         self,
@@ -190,7 +211,7 @@ class CapacityTests(LedgerCase):
                 ColdStartCoordinator(self.repo).tick("leader", "nonexistent"),
                 {"state": "disabled"},
             )
-        self.assertEqual(self.provider.creates, [])
+        self.assertEqual(self.seeded_instances, [])
 
     def test_cold_plan_expires_before_boot_plus_runtime_cannot_fit_and_confirmation_rechecks(
         self,
@@ -220,7 +241,7 @@ class CapacityTests(LedgerCase):
         )
         with self.assertRaises(Conflict):
             self.policies.ensure_current(plan, self.scope)
-        self.assertEqual(self.provider.creates, [])
+        self.assertEqual(self.seeded_instances, [])
         self.assertEqual(self.repo.get_budget("owner:superdan")["reserved_microusd"], 0)
 
     def test_quote_or_qualification_expiry_limits_cold_admission_but_ready_worker_needs_no_boot(
@@ -299,7 +320,7 @@ class CapacityTests(LedgerCase):
         self.assertEqual(
             self.repo.get_job(self.scope, job["id"])["status"], "waiting_capacity"
         )
-        self.assertEqual(len(self.provider.creates), 1)
+        self.assertEqual(len(self.seeded_instances), 1)
 
     def test_approval_immutable_revocation_cannot_be_silently_reenabled_by_retry(self):
         approved = self.approve()
@@ -338,42 +359,6 @@ class CapacityTests(LedgerCase):
         )
         self.assertEqual(self.tick()["failed"], 1)
         self.assertEqual(self.repo.get_budget("owner:superdan")["reserved_microusd"], 0)
-
-    def test_two_owner_waiters_share_committed_intent_before_single_post(self):
-        self.approve()
-        one, two = self.waiting(), self.waiting("two", self.other)
-
-        def before_post(tag):
-            with self.repo.engine.connect() as connection:
-                cycle = connection.execute(select(capacity_cycles)).mappings().one()
-                waiters = list(connection.execute(select(capacity_waiters)).mappings())
-            self.assertEqual(cycle["intent_id"], tag)
-            self.assertEqual({w["intent_id"] for w in waiters}, {tag})
-            self.assertEqual({w["job_id"] for w in waiters}, {one["id"], two["id"]})
-            self.assertEqual(
-                self.repo.get_budget("capacity-budget")["reserved_microusd"], 200_000
-            )
-
-        self.provider.on_create = before_post
-        instance = self.start()
-        self.assertEqual(instance["physical_gpus"], 2)
-        self.assertEqual(instance["slots"], 1)
-        self.assertEqual(len(self.provider.creates), 1)
-        self.assertEqual(
-            self.repo.get_job(self.scope, one["id"])["status"], "waiting_capacity"
-        )
-
-    def test_two_controllers_only_one_intent_and_creation(self):
-        self.approve()
-        self.waiting()
-        self.tick()
-        self.now += 16
-        results = self.parallel(
-            lambda i: self.tick("leader" if i % 2 == 0 else "other-leader")
-        )
-        self.assertEqual(sum(r["state"] == "creation_observed" for r in results), 1)
-        self.assertEqual(len(self.provider.creates), 1)
-        self.assertEqual(len(self.repo.list_instance_intents()), 1)
 
     def test_vm_running_registered_wrong_model_config_recipe_instance_never_activate(
         self,
@@ -474,7 +459,14 @@ class CapacityTests(LedgerCase):
             self.repo.get_job(self.scope, dan["id"])["status"], "cancelled"
         )
         self.assertEqual(self.repo.get_job(self.other, van["id"])["status"], "queued")
-        self.assertEqual(self.provider.destroys, [])
+        self.assertEqual(
+            [
+                row
+                for row in self.repo.list_instance_intents()
+                if row["state"] in {"destroying", "destroyed"}
+            ],
+            [],
+        )
 
     def test_expired_or_changed_operator_policy_fails_wait_without_releasing_instance(
         self,
@@ -490,75 +482,15 @@ class CapacityTests(LedgerCase):
         self.assertEqual(
             self.repo.get_budget("capacity-budget")["reserved_microusd"], 200_000
         )
-        self.assertEqual(len(self.provider.creates), 1)
-
-    def test_wait_deadline_and_ttl_do_not_recycle_finished_cycle(self):
-        self.approve()
-        job = self.waiting()
-        instance = self.start()
-        self.now = 1801
-        self.assertEqual(self.tick()["failed"], 1)
-        self.assertEqual(self.repo.get_job(self.scope, job["id"])["status"], "failed")
-        self.provider.facts[instance["id"]] = ProviderFact(
-            "destroyed", instance["provider_instance_id"]
-        )
-        self.now += 16
-        self.tick()
-        self.assertEqual(self.repo.list_instance_intents()[0]["state"], "destroyed")
-        self.assertEqual(
-            self.repo.get_budget("capacity-budget")["reserved_microusd"], 200_000
-        )
-        self.now += 16
-        self.tick()
-        self.assertEqual(len(self.provider.creates), 1)
-
-    def test_unknown_create_and_empty_reconcile_never_second_rent_or_release(self):
-        self.approve()
-        self.waiting()
-        self.provider.create_uncertain = True
-        instance = self.start()
-        self.provider.facts[instance["id"]] = ProviderFact("unknown")
-        for _ in range(3):
-            self.now += 16
-            self.tick()
-        self.assertEqual(
-            self.repo.list_instance_intents()[0]["state"], "creation_unknown"
-        )
-        self.assertEqual(len(self.provider.creates), 1)
-        self.assertEqual(
-            self.repo.get_budget("capacity-budget")["reserved_microusd"], 200_000
-        )
+        self.assertEqual(len(self.seeded_instances), 1)
 
     def test_cancel_all_before_create_proves_no_rent_and_no_reserved_instance(self):
         self.approve()
         job = self.waiting()
         self.repo.request_cancel(self.scope, job["id"])
-        self.assertEqual(self.tick()["state"], "no_waiters")
-        self.assertEqual(self.provider.creates, [])
+        self.assertEqual(self.tick()["activated"], 0)
+        self.assertEqual(self.seeded_instances, [])
         self.assertEqual(self.repo.list_instance_intents(), [])
-
-    def test_revocation_between_commit_and_create_prevents_post_and_releases_only_instance_zero(
-        self,
-    ):
-        self.approve()
-        self.waiting()
-        self.tick()
-        self.now += 16
-        real_call = self.scaler._call
-
-        def revoke_then_call(intent, operation, **kwargs):
-            if operation == "create":
-                self.repo.set_capacity_approval_enabled("cold-approval", enabled=False)
-            return real_call(intent, operation, **kwargs)
-
-        with patch.object(self.scaler, "_call", side_effect=revoke_then_call):
-            result = self.tick()
-        self.assertEqual(result["provider_state"], "not_created")
-        self.assertEqual(self.provider.creates, [])
-        self.assertEqual(
-            self.repo.get_budget("capacity-budget")["reserved_microusd"], 0
-        )
-        self.assertEqual(self.repo.get_budget("owner:superdan")["reserved_microusd"], 0)
 
     def test_gate_zero_missing_instance_budget_ambiguous_approval_or_wrong_tenant_blocks(
         self,
@@ -639,7 +571,7 @@ class CapacityTests(LedgerCase):
             self.repo.get_job(self.scope, job["id"])["status"], "recovery_hold"
         )
         self.assertIsNone(TaskQueue(self.repo).claim("worker", "cold-pool"))
-        self.assertEqual(len(self.provider.creates), 1)
+        self.assertEqual(len(self.seeded_instances), 1)
         self.assertEqual(
             self.repo.get_budget("owner:superdan")["reserved_microusd"], 500_000
         )
@@ -658,7 +590,14 @@ class CapacityTests(LedgerCase):
         self.value["qualification"]["expires_at"] = self.now - 1
         self.write()
         self.assertEqual(self.tick()["failed"], 1)
-        self.assertEqual(self.provider.destroys, [])
+        self.assertEqual(
+            [
+                row
+                for row in self.repo.list_instance_intents()
+                if row["state"] in {"destroying", "destroyed"}
+            ],
+            [],
+        )
 
     def test_waiter_joining_existing_cycle_uses_same_intent_not_new_budget(self):
         self.approve()
@@ -677,7 +616,7 @@ class CapacityTests(LedgerCase):
         )
         self.now += 16
         self.tick()
-        self.assertEqual(len(self.provider.creates), 1)
+        self.assertEqual(len(self.seeded_instances), 1)
 
     def test_revocation_after_activation_blocks_new_submission_but_not_existing_attempt_reconcile(
         self,
@@ -717,7 +656,7 @@ class CapacityTests(LedgerCase):
             self.repo.get_job(self.scope, job["id"])["error_code"],
             "capacity_instance_deadline_unsafe",
         )
-        self.assertEqual(len(self.provider.creates), 1)
+        self.assertEqual(len(self.seeded_instances), 1)
         self.assertEqual(
             self.repo.get_budget("capacity-budget")["reserved_microusd"], 200_000
         )
@@ -732,30 +671,12 @@ class CapacityTests(LedgerCase):
         )
         self.assertEqual(self.repo.list_instance_intents(), [])
 
-    def test_idle_proof_cannot_drain_instance_with_unclaimed_waiting_capacity(self):
-        self.approve()
-        job = self.waiting()
-        instance = self.start()
-        self.provider.facts[instance["id"]] = ProviderFact(
-            "running",
-            instance["provider_instance_id"],
-            idle_confirmed=True,
-            idle_since=0,
-        )
-        self.now += 16
-        self.tick()
-        self.assertEqual(self.provider.destroys, [])
-        self.assertEqual(
-            self.repo.get_job(self.scope, job["id"])["status"], "waiting_capacity"
-        )
-
     def test_failure_and_cancel_with_shared_task_instance_account_do_not_deadlock(self):
         self.value["budget_accounts"] = ["capacity-budget"]
         self.write()
         self.approve()
         one, two = self.waiting(), self.waiting("other", self.other)
-        self.tick()
-        self.now += 16
+        self.start()
         outcomes = self.parallel(
             lambda i: (
                 self.repo.request_cancel(self.scope, one["id"])
@@ -770,7 +691,7 @@ class CapacityTests(LedgerCase):
         self.assertEqual(
             self.repo.get_job(self.other, two["id"])["status"], "waiting_capacity"
         )
-        self.assertEqual(len(self.provider.creates), 1)
+        self.assertEqual(len(self.seeded_instances), 1)
         self.assertEqual(
             self.repo.get_budget("capacity-budget")["reserved_microusd"], 700_000
         )
