@@ -207,6 +207,7 @@ def public_guide():
     """Relative URLs deliberately keep discovery and credentials on one origin."""
     from .quick_chat_routes import agent_contract
     from .storyboard_versions import contract as storyboard_versions_contract
+    from .caption_server import MAX_LINE_CHARACTERS
 
     return {
         "name": "Inkseq / 映序",
@@ -223,6 +224,15 @@ def public_guide():
             "read": "GET /v1/projects/{project_id}/films/{run_id}",
             "cancel": "POST /v1/projects/{project_id}/films/{run_id}/cancel",
             "resume": "POST /v1/projects/{project_id}/films/{run_id}/resume",
+            "subtitle_burn": {
+                "max_lines_per_cue": 2,
+                "max_characters_per_line": MAX_LINE_CHARACTERS,
+                "require": "Existing explicit caption confirmation and valid text/timing are both required. SRT export or confirmation does not waive burn bounds. No blank lines, markup or control characters; never silently trim or rewrap text. For an intended text, line-break or timing change, save it explicitly and reconfirm that exact draft before a fresh film preflight.",
+                "errors": {
+                    "film_captions_invalid": "Confirmed captions violate burn text/timing bounds.",
+                    "film_captions_require_confirmation": "Caption confirmation is missing or stale.",
+                },
+            },
             "authority": "Frozen accepted Story revision, existing per-shot plans/jobs/reservations, original scoped actor grant. The workflow cannot grant permissions, rent machines or replace recipes. Read model/REF limits from capabilities, not past examples.",
             "recovery": "Keep the same original write body/key and run ID on unknown results. Resume the frozen run; completed original shots/chapters are reused. A failed original generation remains blocked for explicit diagnosis, never silently regenerated. Download export.artifact_id through the authenticated original artifact endpoint.",
         },
@@ -562,6 +572,10 @@ Alternatively POST the session's cards with explicit deployment_profile_id, reci
 To revise the same card, GET /v1/quick-chat/sessions/{session_id}/cards/{card_id}, then GET its current_revision_id at /v1/quick-chat/sessions/{session_id}/revisions/{revision_id}. POST /v1/quick-chat/sessions/{session_id}/cards/{card_id}/revisions with required integer expected_card_version from the card's version, the new prompt and an explicit copy of deployment_profile_id, recipe_id, controls, inputs and copies from that revision. Session expected_version is not the card version field. Optional source_revision_id records same-session lineage only; it neither selects a revision nor replaces expected_card_version. Optional title defaults to 我的视频 when omitted; include the prior title to preserve it. The downloadable Markdown guide and Skill contain the complete example. Revising saves an immutable draft and preserves prior revisions/submissions; it does not preflight or generate. A genuine 409 version_conflict requires fresh card/revision reads and reconciliation, not guessing the next version. Repair known 422 field errors with a new body/key; an uncertain write keeps its exact original body/key.
 
 Upload media through same-origin multipart POST /v1/quick-chat/sessions/{session_id}/assets with file and a stable client_asset_id; use ready asset_id values in explicit card inputs or selected session materials. Upload alone does not select a reference. The helper's upload/resume-upload commands accept --session SESSION_ID (or legacy --project, never both); never address the session's hidden project. Read the current revision and preflight it; only confirm a ready preflight within the user's authorization. The submission exposes items[].job_id for the existing shared job and its authenticated artifacts. Preserve write bodies and Idempotency-Key values when recovering uncertain responses.
+
+For original never-admitted planned/blocked items, read quick_chat.job_changes.resume_admission in the JSON guide. GET the original submission and its immutable revision; select only items with resume_admission_available=true. After the owner resolves the blocker, preflight those exact item IDs on the same revision without retry_of_execution_id, then explicitly POST the original submission's /resume-admission with item_ids, fresh_preflight_id and confirmed:true. Preserve separate original preflight/resume bodies and keys. GET original receipts after uncertainty; do not submit a replacement card, take or retry, auto-repeat admission, raise caps or approve spending as the Agent. This keeps original job/execution/accounting identities.
+
+One-click film subtitle burn requires both explicit confirmation of the exact caption draft and valid burn text/timing: each cue has at most two nonempty lines, each at most18 characters. SRT export or confirmation does not waive those bounds. Do not silently trim or rewrap; an intended text/line-break/timing edit must be saved and explicitly reconfirmed. See story_film.subtitle_burn and the Skill API reference for the distinct invalid-caption versus stale-confirmation errors.
 
 Creation history uses the same owner-scoped API: list sessions with view=active|trash and optional hide_tests=true. Read quick_chat.creation_history in the JSON guide before sending a history/preview request for trash, restore, purge or empty_trash. Confirm only the returned fresh preview_id with confirmed=true and one durable Idempotency-Key; poll the original history/actions/{action_id} when pending. Trash retains content without automatic expiry; a purge intent cannot be restored. Shared saved references and storyboard-chosen versions stay, and job/billing identities and receipts remain. Active or uncertain work blocks deletion. References in unsaved browser drafts are not visible to the server. Review-held older acceptance records require an explicit fresh purge confirmation; limited-scope trash never acquires automatic R2 deletion permission. For new acceptance sessions use is_test=true, and request test_accepted=true only after results are verified; this requests safe archival without bypassing guards. Hiding test records is a view filter, not deletion.
 

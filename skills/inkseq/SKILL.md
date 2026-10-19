@@ -42,6 +42,8 @@ Idempotency-Key: saved-again-key
 
 Example response projection: `{"card":{"id":"CARD"},"revision":{"id":"NEW_REVISION","input_hash":"HASH"}}`. Read that ID/hash; never auto-chain generation. Exact preflight, star and transfer bodies are in the API reference.
 
+For `resume_admission_available`, use [admission recovery](reference/recovery.md#original-admission-recovery), never a new take/retry or cap increase.
+
 ## Build or edit a story
 
 1. Read the owned project/version and guided schema. Preserve unrelated content; use project actions instead of replacing the document.
@@ -62,6 +64,8 @@ Example response projection: `{"batch_id":"BATCH","status":"active"}`; inspect i
 Read a shot's `/versions` for immutable recipes; old missing recipes stay unknown. `storyboard.restore` restores known effective settings without generating. `storyboard.star`, atomic bulk draft/final/move, account→story→shot defaults and project-local profile forks use the [story contract](reference/api.md#storyboard-versions-and-bulk-work). Duration/seed stay per shot; no automatic deletion or global usage search.
 
 For an authorized whole-film request, check `capabilities.story_film.enabled`, then follow [one-click film](reference/api.md#one-click-film). Preflight freezes the story; inspect reuse, missing shots and cost before confirming. Observe/resume that original run, retaining per-shot budgets and grants. Read [film recovery](reference/recovery.md#one-click-film-recovery) after an uncertain response.
+
+Caption burn:2 nonempty lines ×18 characters/cue maximum. Confirmation/SRT cannot waive bounds; no silent trim/rewrap.
 
 ## Upload and organise references
 

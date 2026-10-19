@@ -7,6 +7,7 @@ generation admission services; a document only records their original IDs.
 from __future__ import annotations
 
 import copy
+import math
 import uuid
 
 from sqlalchemy import insert, select, update
@@ -438,15 +439,31 @@ class FilmRuns:
             if not 1 <= len(shots) <= 50:
                 raise ValueError("film_chapter_shot_count_limit")
             if options["burn_subtitles"]:
-                from .caption_server import compile_subtitles
+                from .caption_server import caption_signature, compile_subtitles
 
                 frames = sum(
-                    round(shot.get("data", {}).get("seconds", 5) * 24) for shot in shots
+                    max(
+                        1, math.floor(shot.get("data", {}).get("seconds", 5) * 24 + 0.5)
+                    )
+                    for shot in shots
                 )
                 _, _, caption_blockers, _ = compile_subtitles(
                     project, chapter["id"], shots, frames
                 )
                 if caption_blockers:
+                    track = (
+                        project.get("journey", {})
+                        .get("captionTracks", {})
+                        .get(chapter["id"], {})
+                    )
+                    try:
+                        confirmed = isinstance(track, dict) and track.get(
+                            "confirmedSnapshot"
+                        ) == caption_signature(project, chapter["id"], shots)
+                    except (KeyError, TypeError, ValueError):
+                        confirmed = False
+                    if confirmed:
+                        raise Conflict("film_captions_invalid")
                     raise Conflict("film_captions_require_confirmation")
             chapter_rows.append(
                 {
@@ -902,6 +919,7 @@ class FilmRuns:
                     for key, item in value["options"].items()
                     if item is not None
                 }
+                burn_subtitles = options.pop("burn_subtitles", False)
                 compiled, _, blockers, _ = compile_render(
                     {
                         "client_ref": {
@@ -915,6 +933,27 @@ class FilmRuns:
                         principal, project_id, entity, kind
                     ),
                 )
+                if burn_subtitles:
+                    from .caption_server import compile_subtitles
+                    from .render_plans import render_source_hash
+
+                    # Consent belongs to the accepted authoring snapshot. Only
+                    # this run's selected media changes in the render copy;
+                    # never manufacture a new confirmation for those results.
+                    original_shots = ordered_chapter(
+                        value["project"], chapter["chapter_id"]
+                    )[2]
+                    subtitles, _, caption_blockers, _ = compile_subtitles(
+                        value["project"],
+                        chapter["chapter_id"],
+                        original_shots,
+                        compiled["output_spec"]["frame_count"],
+                    )
+                    blockers.extend(caption_blockers)
+                    compiled["request"]["render"]["subtitles"] = subtitles
+                    compiled["server_source_hash"] = render_source_hash(
+                        project, chapter["chapter_id"], burn_subtitles=True
+                    )
                 value = self._render_plan(
                     principal, value, chapter["chapter_id"], compiled, blockers
                 )
@@ -961,7 +1000,7 @@ class FilmRuns:
                         "key": meta["object_key"],
                         "size_bytes": meta["size_bytes"],
                         "sha256": meta["sha256"],
-                        "content_type": meta["mime"],
+                        "content_type": meta.get("content_type", meta.get("mime")),
                     },
                 }
 

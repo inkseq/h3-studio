@@ -23,6 +23,7 @@ export function filmProblem(code) {
     {
       film_original_job_failed: 'film.originalFailed',
       film_captions_require_confirmation: 'film.captionRequired',
+      film_captions_invalid: 'film.captionInvalid',
       film_selected_recipe_unknown: 'film.selectedUnknown',
       film_selected_take_outdated: 'film.selectedOutdated',
       film_generation_preflight_blocked: 'film.inputsBlocked',
