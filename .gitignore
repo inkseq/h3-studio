@@ -681,3 +681,8 @@ inventory.json
 !studio_platform/staging_qa.py
 !tools/provision_staging_qa.py
 !tests/test_staging_qa.py
+
+# M1 test-payment schema reader; credentials and runtime data remain ignored.
+!studio_platform/payment_schema.py
+!studio_platform/migrations/versions/v20261020_0005_stripe_payments.py
+!tests/test_payment_schema.py

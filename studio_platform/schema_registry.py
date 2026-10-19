@@ -5,7 +5,9 @@ remain authoritative until the frozen Alembic baseline is separately adopted.
 """
 
 
-def metadata_families(*, include_identity=False, include_credits=False):
+def metadata_families(
+    *, include_identity=False, include_credits=False, include_payments=False
+):
     # These three modules extend repository.metadata; register them before
     # collecting it, independent of which API/worker happened to import first.
     from . import operator_capacity, capacity_market, dstack_workspace
@@ -42,16 +44,24 @@ def metadata_families(*, include_identity=False, include_credits=False):
         from .credit_schema import metadata as credits
 
         families["credits"] = credits
+    if include_payments:
+        from .payment_schema import metadata as payments
+
+        families["payments"] = payments
     return families
 
 
-def platform_metadata(*, include_identity=False, include_credits=False):
+def platform_metadata(
+    *, include_identity=False, include_credits=False, include_payments=False
+):
     """One metadata view for validation, including auth but not legacy DBs."""
     from sqlalchemy import MetaData
 
     result = MetaData()
     for family in metadata_families(
-        include_identity=include_identity, include_credits=include_credits
+        include_identity=include_identity,
+        include_credits=include_credits,
+        include_payments=include_payments,
     ).values():
         for table in family.tables.values():
             if table.key in result.tables:

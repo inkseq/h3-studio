@@ -34,6 +34,8 @@ from .migrations.versions import v20261019_0001_platform_baseline as baseline
 from .schema_version import (
     BASELINE_REVISION,
     CREDIT_REVISION,
+    CREDIT_REVISIONS,
+    PAYMENT_REVISION,
     IDENTITY_REVISION,
     IDENTITY_REVISIONS,
     WORKFLOW_REVISIONS,
@@ -113,6 +115,12 @@ def _check(value):
     try:
         return credit_check(value)
     except CreditSchemaError:
+        pass
+    from .payment_schema import PaymentSchemaError, normalize_check as payment_check
+
+    try:
+        return payment_check(value)
+    except PaymentSchemaError:
         pass
     if re.search(r"[^a-zA-Z_0-9\s()><=]", value):
         raise BaselineError("schema_check_expression_requires_review")
@@ -406,10 +414,22 @@ def compare_schema(connection, *, schema=None):
         credits_present = credit_present_tables(actual)
     except CreditSchemaError as error:
         raise BaselineError(str(error)) from None
-    if present or version in IDENTITY_REVISIONS or credits_present:
+    from .payment_schema import (
+        PaymentSchemaError,
+        frozen_metadata as payment_metadata,
+        present_tables as payment_present_tables,
+    )
+
+    try:
+        payments_present = payment_present_tables(actual)
+    except PaymentSchemaError as error:
+        raise BaselineError(str(error)) from None
+    if present or version in IDENTITY_REVISIONS or credits_present or payments_present:
         expected.update(metadata_signature(identity_metadata(), connection.dialect))
-    if credits_present or version == CREDIT_REVISION:
+    if credits_present or version in CREDIT_REVISIONS or payments_present:
         expected.update(metadata_signature(credit_metadata(), connection.dialect))
+    if payments_present or version == PAYMENT_REVISION:
+        expected.update(metadata_signature(payment_metadata(), connection.dialect))
     differences = []
     for name in sorted(expected.keys() | actual.keys()):
         if name not in actual:
@@ -448,11 +468,14 @@ def _reader_metadata():
     """Frozen baseline plus recognized optional family, without initializing it."""
     from .identity_schema import frozen_metadata as identity_metadata
     from .credit_schema import frozen_metadata as credit_metadata
+    from .payment_schema import frozen_metadata as payment_metadata
 
     result = frozen_metadata()
     for table in identity_metadata().tables.values():
         table.to_metadata(result)
     for table in credit_metadata().tables.values():
+        table.to_metadata(result)
+    for table in payment_metadata().tables.values():
         table.to_metadata(result)
     return result
 
@@ -735,10 +758,10 @@ def adopt_credits(connection, *, expected_fingerprint):
         raise BaselineError('schema_snapshot_changed')
     if not before['matches'] or before['recorded_revision'] not in {
         IDENTITY_REVISION,
-        CREDIT_REVISION,
+        *CREDIT_REVISIONS,
     }:
         raise BaselineError('credit_adoption_requires_adopted_identity')
-    if before['recorded_revision'] == CREDIT_REVISION:
+    if before['recorded_revision'] in CREDIT_REVISIONS:
         return dict(state='already_adopted', before=before, after=before)
     if TABLE_NAMES & set(inspect(connection).get_table_names()):
         raise BaselineError('credit_unrecorded_family_requires_review')
@@ -759,6 +782,55 @@ def adopt_credits(connection, *, expected_fingerprint):
     if not after['matches'] or after['recorded_revision'] != CREDIT_REVISION:
         raise BaselineError('credit_adoption_verification_failed')
     return dict(state='adopted_credits', before=before, after=after)
+
+
+def adopt_payments(connection, *, expected_fingerprint):
+    """Create only the empty test-payment family in the original transaction.
+
+    Under release.lock the operator first verifies payments are OFF and both
+    current/previous approved images contain this exact reader bridge. The CLI
+    also checks trusted Settings; no self-asserted proof or mode flag is accepted.
+    This function changes no pack configuration, credit balance or event row.
+    """
+    from .identity import lock_account_gate
+    from .payment_schema import PaymentSchemaError, TABLE_NAMES, validate_connection
+
+    if (
+        not connection.in_transaction()
+        or connection.dialect.name != 'postgresql'
+        or not re.fullmatch(r'[a-f0-9]{64}', expected_fingerprint or '')
+    ):
+        raise BaselineError('payment_adoption_requires_verified_transaction')
+    connection.exec_driver_sql("SET LOCAL lock_timeout = '5s'")
+    connection.exec_driver_sql("SET LOCAL statement_timeout = '30s'")
+    lock_account_gate(connection, exclusive=True)
+    connection.exec_driver_sql('SELECT pg_advisory_xact_lock(685939796868749721)')
+    before = compare_schema(connection)
+    if before['schema_fingerprint'] != expected_fingerprint:
+        raise BaselineError('schema_snapshot_changed')
+    if not before['matches'] or before['recorded_revision'] not in CREDIT_REVISIONS:
+        raise BaselineError('payment_adoption_requires_adopted_credits')
+    if before['recorded_revision'] == PAYMENT_REVISION:
+        return dict(state='already_adopted', before=before, after=before)
+    if TABLE_NAMES & set(inspect(connection).get_table_names()):
+        raise BaselineError('payment_unrecorded_family_requires_review')
+    from alembic import command
+
+    config = alembic_config()
+    config.attributes.update(
+        verified_baseline_connection=connection,
+        verified_baseline_mode='upgrade',
+        verified_payment_mode=True,
+    )
+    command.upgrade(config, PAYMENT_REVISION)
+    try:
+        validate_connection(connection)
+    except PaymentSchemaError as error:
+        raise BaselineError(str(error)) from None
+    after = compare_schema(connection)
+    if not after['matches'] or after['recorded_revision'] != PAYMENT_REVISION:
+        raise BaselineError('payment_adoption_verification_failed')
+    return dict(state='adopted_payments', before=before, after=after)
 
 
 def main(argv=None):
@@ -794,12 +866,24 @@ def main(argv=None):
         help='Add customer-credit tables after both approved reader images are verified under release.lock',
     )
     credits.add_argument('--expected-fingerprint', required=True)
+    payments = commands.add_parser(
+        'adopt-payments',
+        help='Add empty test-payment tables with payments OFF after both reader images are verified under release.lock',
+    )
+    payments.add_argument('--expected-fingerprint', required=True)
     args = parser.parse_args(argv)
     engine = None
     try:
         if args.command == "sql":
             print(offline_sql(args.dialect), end="")
             return 0
+        if args.command == 'adopt-payments':
+            from .settings import Settings
+
+            settings = Settings.from_environment()
+            # Reader A has no payment routes or mode setting; absence is OFF.
+            if getattr(settings, 'stripe_mode', 'off') != 'off':
+                raise BaselineError('payment_adoption_requires_payments_off')
         from .settings import database_url_from_environment
 
         url = database_url_from_environment()
@@ -836,6 +920,10 @@ def main(argv=None):
                 result = adopt_credits(
                     connection, expected_fingerprint=args.expected_fingerprint
                 )
+            elif args.command == 'adopt-payments':
+                result = adopt_payments(
+                    connection, expected_fingerprint=args.expected_fingerprint
+                )
             else:
                 result = adopt_baseline(
                     connection, expected_fingerprint=args.expected_fingerprint
@@ -844,7 +932,13 @@ def main(argv=None):
         return (
             0
             if args.command
-            in {"adopt", 'adopt-workflows', 'adopt-identity', 'adopt-credits'}
+            in {
+                "adopt",
+                'adopt-workflows',
+                'adopt-identity',
+                'adopt-credits',
+                'adopt-payments',
+            }
             or result["matches"]
             else 1
         )
