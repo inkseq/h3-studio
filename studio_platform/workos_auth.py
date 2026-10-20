@@ -460,15 +460,20 @@ class WorkOSAuth:
                 "terms_accepted_at": None,
             }
             connection.execute(insert(users).values(**row))
-            from .credits import credit_policy, grant
+            from .credit_schema import ready as credits_ready
 
-            if credit_policy(connection, self.settings.tenant_id)["enabled"]:
+            if credits_ready(connection):
+                from .credits import grant
                 from .credits_pricing import current
+                from .welcome_eligibility import eligible_email
 
-                welcome = current(connection, self.settings.tenant_id)["configuration"][
-                    "welcome_credits"
-                ]
-                if welcome:
+                price = current(connection, self.settings.tenant_id)
+                welcome = price["configuration"]["welcome_credits"]
+                if (
+                    price["revision"] is not None
+                    and welcome
+                    and eligible_email(identity["email"])
+                ):
                     grant(
                         connection,
                         self.settings.tenant_id,
@@ -480,6 +485,7 @@ class WorkOSAuth:
                         now=now,
                         reference_type="signup",
                         reference_id=ident,
+                        price_revision=price["revision"],
                         origin="workos",
                     )
             return row
