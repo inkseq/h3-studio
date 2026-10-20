@@ -548,6 +548,50 @@ def verify_plan(receipt_directory, remote):
 def verify_rendition_sources(
     receipt_directory, remote, asset_receipt, *, logical_root=None, provenance_file=None
 ):
+    return _verify_rendition_sources(
+        receipt_directory,
+        remote,
+        asset_receipt,
+        logical_root=logical_root,
+        provenance_file=provenance_file,
+    )
+
+
+def verify_artifact_rendition_sources(
+    receipt_directory,
+    remote,
+    artifact_receipt,
+    *,
+    logical_root=None,
+    provenance_file=None,
+):
+    """Exact copied video/audio roles; ArtifactWriter uses compact identity JSON."""
+    _need(
+        artifact_receipt.get("phase") == "settled"
+        and type(artifact_receipt.get("roles")) is dict
+        and "video" in artifact_receipt["roles"]
+        and set(artifact_receipt["roles"]) <= {"video", "audio"},
+        "rendition_copy_original_manifest_required",
+    )
+    return _verify_rendition_sources(
+        receipt_directory,
+        remote,
+        artifact_receipt,
+        logical_root=logical_root,
+        provenance_file=provenance_file,
+        artifact=True,
+    )
+
+
+def _verify_rendition_sources(
+    receipt_directory,
+    remote,
+    asset_receipt,
+    *,
+    logical_root,
+    provenance_file,
+    artifact=False,
+):
     """Read only exact copied originals; never adopt a binding or scan Local.
 
     A historical container path needs explicit, protected accepted mount proof.
@@ -601,11 +645,15 @@ def verify_rendition_sources(
         logical.is_absolute() and ".." not in logical.parts,
         "rendition_copy_source_root_invalid",
     )
+    local_identity = {"provider": "local", "root": str(logical)}
     source_binding = _sha(
-        json.dumps({"provider": "local", "root": str(logical)}, sort_keys=True).encode()
+        _canonical(local_identity)
+        if artifact
+        else json.dumps(local_identity, sort_keys=True).encode()
     )
     _need(
-        source_binding == asset_receipt.get("storage_binding"),
+        source_binding
+        == asset_receipt.get("binding" if artifact else "storage_binding"),
         "rendition_copy_source_binding_mismatch",
     )
     provenance_sha = None
@@ -667,15 +715,16 @@ def verify_rendition_sources(
         "rendition_copy_bytes_invalid",
     )
     sources = {}
-    for role in ("original", "model"):
-        spec = asset_receipt["asset"].get(role)
+    original_roles = asset_receipt["roles"] if artifact else asset_receipt["asset"]
+    for role in ("video", "audio") if artifact else ("original", "model"):
+        spec = original_roles.get(role)
         if spec is None:
             continue
-        frozen = asset_receipt.get("objects", {}).get(role, {})
+        frozen = spec if artifact else asset_receipt.get("objects", {}).get(role, {})
         item = objects.get(spec.get("key"), {})
         _need(
             key_belongs_to(spec.get("key"), asset_receipt["owner"])
-            and frozen.get("phase") == "verified"
+            and frozen.get("status" if artifact else "phase") == "verified"
             and all(
                 spec.get(key) == frozen.get(key) == item.get(key)
                 for key in ("key", "size_bytes", "sha256", "content_type")
@@ -684,7 +733,7 @@ def verify_rendition_sources(
         )
         sources[spec["key"]] = item
     _need(
-        "original" in asset_receipt["asset"] and sources,
+        ("video" if artifact else "original") in original_roles and sources,
         "rendition_copy_original_manifest_required",
     )
     for item in sources.values():
@@ -714,7 +763,11 @@ def verify_rendition_sources(
     return dict(
         version=1,
         source_binding=source_binding,
-        target_binding=_sha(json.dumps(identity, sort_keys=True).encode()),
+        target_binding=_sha(
+            _canonical(identity)
+            if artifact
+            else json.dumps(identity, sort_keys=True).encode()
+        ),
         plan_sha256=raw_plan_sha,
         copy_receipt_sha256=copied_sha,
         provenance_sha256=provenance_sha,

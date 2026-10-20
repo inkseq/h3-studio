@@ -96,6 +96,44 @@ def _validate(writer, record):
     if not display:
         return
     if (
+        record.get('binding') != writer.binding
+        or 'copy_proof' in display
+        or 'target_binding' in display
+    ):
+        proof = display.get('copy_proof', {})
+        if (
+            display.get('target_binding') != writer.binding
+            or record.get('binding') == writer.binding
+            or type(proof) is not dict
+            or set(proof)
+            != {
+                'version',
+                'source_binding',
+                'target_binding',
+                'plan_sha256',
+                'copy_receipt_sha256',
+                'provenance_sha256',
+                'sources_sha256',
+            }
+            or type(proof.get('version')) is not int
+            or proof['version'] != 1
+            or proof.get('source_binding') != record['binding']
+            or proof.get('target_binding') != writer.binding
+            or any(
+                re.fullmatch('[a-f0-9]{64}', proof.get(key, '')) is None
+                for key in (
+                    'source_binding',
+                    'target_binding',
+                    'plan_sha256',
+                    'copy_receipt_sha256',
+                    'sources_sha256',
+                )
+            )
+            or proof.get('provenance_sha256') is not None
+            and re.fullmatch('[a-f0-9]{64}', proof['provenance_sha256']) is None
+        ):
+            raise IntegrityError('artifact_poster_copy_proof_invalid')
+    if (
         not isinstance(display, dict)
         or type(display.get('version')) is not int
         or display['version'] != 1
@@ -311,6 +349,9 @@ def ensure(
     interrupted=False,
     heartbeat=lambda: None,
     display_data_dir=None,
+    original_copy_receipts=None,
+    original_local_root=None,
+    original_copy_provenance=None,
 ):
     """Called after accepted collection or explicit exact-version offline apply.
 
@@ -319,7 +360,15 @@ def ensure(
     """
     from .artifact_writer import ArtifactWritePending
 
-    record = writer.get(job, attempt_id, tag)
+    copied_source = None
+    if original_copy_receipts is not None:
+        record = writer._get_display(
+            job, attempt_id, tag, expected_version=expected_version
+        )
+    else:
+        if original_local_root is not None or original_copy_provenance is not None:
+            raise ArtifactWritePending('artifact_poster_copy_proof_required')
+        record = writer.get(job, attempt_id, tag)
     if record is None or record["phase"] != "settled" or "video" not in record["roles"]:
         raise ArtifactWritePending("artifact_poster_original_unconfirmed")
     if expected_version is not None and (
@@ -336,6 +385,29 @@ def ensure(
     existing = record.get("display")
     if existing and existing.get('scratch_data_dir') != requested_root:
         raise ArtifactWritePending('artifact_poster_scratch_root_changed')
+    if (
+        existing
+        and existing.get('phase') not in {'complete', 'missing'}
+        and not interrupted
+    ):
+        raise ArtifactWritePending('artifact_poster_writer_unconfirmed')
+    if original_copy_receipts is not None:
+        from .storage_migration import verify_artifact_rendition_sources
+
+        if existing and not existing.get('copy_proof'):
+            raise ArtifactWritePending('artifact_poster_copy_proof_required')
+        copied_source = verify_artifact_rendition_sources(
+            original_copy_receipts,
+            writer.store,
+            record,
+            logical_root=original_local_root,
+            provenance_file=original_copy_provenance,
+        )
+        if existing and (
+            existing.get('copy_proof') != copied_source
+            or existing.get('target_binding') != writer.binding
+        ):
+            raise ArtifactWritePending('artifact_poster_copy_proof_changed')
     _validate(writer, record)
     if existing and existing.get("phase") == "complete":
         cleanup(writer, record)
@@ -358,6 +430,8 @@ def ensure(
             reserved_bytes=0,
         ),
     )
+    if existing is None and copied_source is not None:
+        display.update(target_binding=writer.binding, copy_proof=copied_source)
     if existing is None and requested_root is not None:
         display['scratch_data_dir'] = requested_root
         directory = _directory(writer, record)

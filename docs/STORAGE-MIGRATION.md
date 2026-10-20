@@ -164,9 +164,34 @@ it does not stat a host-only path, instantiate a Local store or infer an alias
 from matching hashes. Private metadata copies must be available in the CLI's
 container namespace with their original hashes and restrictive permissions.
 
-These proof options require one explicit asset and its current receipt version;
-plan, all-owner and artifact selections reject them. They do not grant authority
+These proof options require one explicit asset or artifact and its current receipt
+version; plan and all-owner selections reject them. They do not grant authority
 to process other historical objects or rewrite an existing unknown target.
+
+For a settled successful generated-video artifact whose original video/audio
+were already copied, use the same proof flags with `--artifact-id`, its exact
+original `--work-dir` and receipt version. Add `--use-data-display-scratch` when
+display scratch must use the current data directory rather than the immutable
+original writer root. The original root identity still must match exactly.
+
+The artifact proof validates **all** frozen video/audio roles against the
+original copy plan and fresh complete R2 GET/hash before any derived PUT. Only
+the existing display CAS may accept that evidence: collection and normal
+ArtifactWriter reads/writes still refuse another binding. Original binding,
+roles, fingerprint, phase, job/attempt and billing remain unchanged. The current
+R2 derived target and closed proof hashes are frozen in `display`; a changed
+plan/copy/provenance, target, source or unknown key cannot be substituted. A
+completed replay requires its current exact version and the same proof, performs
+no new PUT, and retains the normal accounting. Pending writers still require
+the existing explicit stopped-writer assertion and exact current version before
+recovery; a missing/unknown object is not automatic retry permission.
+
+ArtifactWriter's original Local and R2 identity hashes use **compact** sorted
+JSON, while asset receipts retain their existing noncompact sorted JSON. A
+logical-root proof for an artifact must bind that artifact's original compact
+source hash; do not reuse an asset proof with a different source hash or rebind
+either receipt. Protected metadata remains private to the CLI UID, and the
+logical root/inode check is the same existing mount-provenance contract.
 
 ## Integrity and recovery
 

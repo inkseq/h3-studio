@@ -385,7 +385,7 @@ class RenditionTests(OfflineTest):
         loader.assert_not_called()
         factory.assert_not_called()
 
-    def test_copy_proof_flags_require_one_exact_asset_before_any_configuration_read(
+    def test_copy_proof_flags_require_one_exact_receipt_before_any_configuration_read(
         self,
     ):
         selections = [
@@ -397,6 +397,8 @@ class RenditionTests(OfflineTest):
                 "owner",
                 "--artifact-id",
                 "artifact",
+                "--asset-id",
+                "asset",
                 "--work-dir",
                 "original",
                 "--receipt-version",
@@ -442,7 +444,7 @@ class RenditionTests(OfflineTest):
                     self.assertEqual(backfill_main(selection), 1)
                 self.assertEqual(
                     json.loads(output.getvalue())["reason_code"],
-                    "rendition_copy_requires_exact_asset_proof",
+                    "rendition_copy_requires_exact_receipt_proof",
                 )
             settings.assert_not_called()
 
