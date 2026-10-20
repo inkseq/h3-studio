@@ -40,6 +40,13 @@ THEMES = [
 GENERIC = ("小店", ["门头", "主打产品", "制作过程", "店内", "客人", "细节"],
            ["店门打开，开始新的一天", "主打产品特写", "用心制作的过程",
             "客人满意地笑", "店名和地址，欢迎光临"])  # fmt: skip
+# (keywords, opening beat, ending beat) for the occasion of the film
+OCCASIONS = [
+    (("开业", "开张"), "开业大吉，彩带和花篮摆在门口", "新店开业，欢迎第一次来坐坐"),
+    (("新品", "上新", "新款"), "新品第一次亮相，特写慢慢推近", "新品现已上市，到店就能尝到"),
+    (("节日", "促销", "母亲节", "圣诞", "春节", "中秋"), "节日氛围布置好了，暖暖的灯光",
+     "节日限时优惠，到店报暗号有惊喜"),
+]  # fmt: skip
 MOTIONS = ["缓慢推近", "左右平移", "轻微拉远", "跟随移动"]
 MAX_CARDS = 8
 CN_DIGITS = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7,
@@ -108,10 +115,18 @@ class DemoAdapter:
             brief=brief,
             photos=list(photos),
             materials=materials,
-            outline=list(beats),
+            outline=self._occasion(list(beats), brief),
             cards=[],
             aspect="16:9" if "横屏" in brief else "9:16",
         )
+
+    @staticmethod
+    def _occasion(beats, brief):
+        """The occasion (quick pick or words) shapes the opening and the ending."""
+        for keys, opening, ending in OCCASIONS:
+            if any(k in brief for k in keys):
+                return [opening, *beats[1:-1], ending]
+        return beats
 
     def rename_material(self, board, n, name):
         board = self._copy(board)
@@ -179,21 +194,21 @@ class DemoAdapter:
         changes = []
         # Card numbers refer to the board as shown, so replacements apply
         # first and deletions last, highest number first.
-        pattern = rf"第{NUM}张[^张，,。；;]{{0,6}}?(?:换成|用)(?:素材|照片){NUM}"
+        pattern = rf"第{NUM}[张段][^张段，,。；;]{{0,6}}?(?:换成|用)(?:素材|照片){NUM}"
         for match in re.finditer(pattern, text):
             n, p = number(match.group(1)), number(match.group(2))
             if n and p and 1 <= n <= len(board.cards) and 1 <= p <= len(board.photos):
                 board.cards[n - 1].photo = p
-                changes.append(f"第{n}张换成{board.material(p)}")
+                changes.append(f"第{n}段用{board.material(p)}")
         doomed = {
             n
-            for match in re.finditer(rf"(?:删掉|删除|去掉)第?{NUM}张", text)
+            for match in re.finditer(rf"(?:删掉|删除|去掉)第?{NUM}[张段]", text)
             if (n := number(match.group(1))) and 1 <= n <= len(board.cards)
         }
         for n in sorted(doomed, reverse=True):
             if len(board.cards) > 1:
                 board.cards.pop(n - 1)
-                changes.append(f"删掉了第{n}张")
+                changes.append(f"删掉了第{n}段")
         for word, aspect, label in (("横屏", "16:9", "改成横屏"), ("竖屏", "9:16", "改成竖屏")):
             if word in text and board.aspect != aspect:
                 board.aspect = aspect
@@ -207,11 +222,11 @@ class DemoAdapter:
                     card.seconds = float(max(2, min(6, round(card.seconds * factor))))
                 changes.append(label)
         if not changes:
-            match = re.search(rf"第?{NUM}张(.+)", text)
+            match = re.search(rf"第?{NUM}[张段](.+)", text)
             n = number(match.group(1)) if match else None
             if n and 1 <= n <= len(board.cards):
                 board.cards[n - 1].description = match.group(2).strip(" ，,。")[:60]
-                changes.append(f"第{n}张：{board.cards[n - 1].description[:20]}")
+                changes.append(f"第{n}段：{board.cards[n - 1].description[:20]}")
             else:
                 board.style = text[:40]
                 changes.append(f"整体风格：{board.style[:20]}")
@@ -298,6 +313,11 @@ class DemoAdapter:
         progress(1, 1)
         return board, film
 
+    def recut(self, board):
+        board = self._copy(board)
+        board.revision += 1
+        return board, self._cut(board)
+
     def adopt(self, board, n, version):
         board = self._copy(board)
         card = board.cards[n - 1]
@@ -312,18 +332,18 @@ class DemoAdapter:
     # ---- pictures -------------------------------------------------------------
 
     def materials_sheet(self, board):
-        tiles = [(path, f"素材{i}", board.materials[i - 1], "", None)
+        tiles = [(path, f"照片{i}", board.materials[i - 1], "", None)
                  for i, path in enumerate(board.photos, 1)]  # fmt: skip
         return render.sheet(
             tiles,
-            "我认出了这些素材",
+            "我认出了这些照片",
             f"{len(board.photos)} 张 · 名字不对直接说「3 是吧台」",
             str(self._folder(board) / f"materials-r{board.revision}.jpg"),
         )
 
     def grid(self, board):
         tiles = [
-            (board.photos[card.photo - 1], f"#{n}",
+            (board.photos[card.photo - 1], f"第{n}段",
              f"{render.clock(s)}–{render.clock(e)}  {card.title}",
              f"{board.material(card.photo)}{MODES[card.mode]}", card.look)
             for n, card, s, e in board.timeline()

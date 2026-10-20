@@ -72,7 +72,7 @@ class Storyboard:
         return None
 
     def material(self, number):
-        return f"素材{number}「{self.materials[number - 1]}」"
+        return f"照片{number}「{self.materials[number - 1]}」"
 
     def to_dict(self):
         return asdict(self)
@@ -140,6 +140,9 @@ class StudioAdapter(Protocol):
         """New take for one card (prompt=None rerolls the same prompt), adopt it, re-cut."""
         ...
     def adopt(self, board: Storyboard, number: int, version: int) -> tuple[Storyboard, Film]: ...
+    def recut(self, board: Storyboard) -> tuple[Storyboard, Film]:
+        """Re-assemble the adopted takes (after removing a part); no generation."""
+        ...
     # pictures
     def materials_sheet(self, board: Storyboard) -> str: ...
     def grid(self, board: Storyboard) -> str: ...

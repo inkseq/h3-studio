@@ -112,7 +112,7 @@ def card_still(board, number, card, out):
             font=body,
             fill=(230, 230, 230),
         )
-    tag, label = font(int(w * 0.04)), f"#{number} · v{card.version} · DEMO"
+    tag, label = font(int(w * 0.04)), f"第{number}段 · v{card.version} · DEMO"
     pad = int(w * 0.02)
     right = margin + int(draw.textlength(label, font=tag)) + 2 * pad
     draw.rectangle((margin, margin, right, margin + int(w * 0.04) + 2 * pad),
