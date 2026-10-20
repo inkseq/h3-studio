@@ -170,7 +170,9 @@ CardControls = create_model("CardControls", __base__=_ControlsBase, **_control_f
 
 class CreateCardRequest(AuthoringObject):
     prompt: Annotated[StrictStr, Field(min_length=1, max_length=12000)]
-    recipe_id: Literal[tuple(RECIPES)]
+    recipe_id: Literal[tuple(RECIPES) + ("video-fl-v1", "video-ref-v1")] | None = None
+    tier: Literal["fast", "standard", "refine"] | None = None
+    mode: Literal["fl", "ref"] | None = None
     controls: CardControls
     inputs: CardInputs
     copies: Annotated[StrictInt, Field(ge=1, le=2147483647)]
@@ -182,6 +184,12 @@ class CreateCardRequest(AuthoringObject):
         default=None,
         description="Legacy create-only field; ignored when creating a new card. Revisions require an integer card version.",
     )
+
+    @model_validator(mode="after")
+    def generation_selection(self):
+        if self.recipe_id is None and (self.tier is None or self.mode is None):
+            raise PydanticCustomError("invalid_value", "Choose quality and mode.")
+        return self
 
     @field_validator("prompt", "title")
     @classmethod

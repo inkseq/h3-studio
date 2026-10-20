@@ -139,6 +139,50 @@ class AgentDiscoveryTests(unittest.TestCase):
         for path in paths:
             self.assertEqual(self.client.get(path).content, anonymous[path])
 
+    def test_public_video_contract_and_downloads_use_only_quality_identities(self):
+        from studio_platform.quality_tiers import (
+            MODE_RECIPES,
+            MODEL_TIERS,
+            PROFILE_TIERS,
+        )
+        from studio_platform.quick_chat_schema import CreateCardRequest
+
+        guide = self.client.get("/for-agents/guide.json").json()
+        quality = guide["video_quality"]
+        self.assertEqual(set(quality["tiers"]), {"standard", "refine", "fast"})
+        self.assertEqual(quality["modes"], ["fl", "ref"])
+        self.assertIn("Currently unavailable", quality["fast"])
+        self.assertEqual(quality["preferred_input"], {"tier": "standard", "mode": "fl"})
+        card = copy.deepcopy(guide["quick_chat"]["examples"]["card"]["body"])
+        card.update(
+            prompt="A leaf in sunlight.", controls={"duration": 5, "resolution": "480P"}
+        )
+        self.assertEqual(CreateCardRequest.model_validate(card).tier, "standard")
+        aliases = quality["compatibility_aliases"]
+        card.update(
+            deployment_profile_id=aliases["deployment_profile_id"],
+            recipe_id=aliases["recipe_id"]["fl"],
+        )
+        self.assertEqual(
+            CreateCardRequest.model_validate(card).recipe_id, "video-fl-v1"
+        )
+        contents = [
+            self.client.get(path).content
+            for path in (
+                "/for-agents",
+                "/llms.txt",
+                "/for-agents/guide.json",
+                "/for-agents/guide.md",
+            )
+        ]
+        with zipfile.ZipFile(
+            io.BytesIO(self.client.get("/for-agents/skill.zip").content)
+        ) as archive:
+            contents.extend(archive.read(name) for name in archive.namelist())
+        for content in contents:
+            for private in (*MODE_RECIPES.values(), *MODEL_TIERS, *PROFILE_TIERS):
+                self.assertNotIn(private.encode(), content)
+
     def test_resume_contract_and_burn_limits_match_existing_authenticated_routes(self):
         from studio_platform.caption_server import validate_caption_text
 
@@ -472,6 +516,53 @@ class AgentDiscoveryTests(unittest.TestCase):
     def test_quick_examples_save_one_web_draft_preflight_and_never_submit_implicitly(
         self,
     ):
+        from dataclasses import replace
+        import time
+        from fastapi.testclient import TestClient
+        from studio_platform.api import create_app
+        from studio_platform.h3_profile_support import envelope
+        from studio_platform.qualification_profiles import QUEUED_TASK_PROFILE
+        from studio_platform.runtime_catalog import (
+            engine_manifest,
+            get_profile,
+            profile_output_delivery,
+        )
+        from test_platform_execution_policy import policy
+
+        # Standard uses a native compiler profile. Declare that compiler while
+        # keeping execution OFF and traversing real HTTP authoring/preflight.
+        profile = "h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6"
+        recipe = "h3-base-fl2va-v1"
+        binding = policy(time.time())
+        binding.update(
+            deployment_profile_id=profile,
+            model_id=get_profile(profile)["model_id"],
+            backend="wangp-worker",
+            recipe_ids=[recipe],
+            engine_manifest_digest=engine_manifest(profile, "fl").digest,
+            output_delivery=profile_output_delivery(profile),
+            envelope=envelope(profile, "fl"),
+        )
+        binding["qualification"].update(
+            status="runtime_required", profile=QUEUED_TASK_PROFILE
+        )
+        path = Path(self.tmp.name) / "profiles.json"
+        path.write_text(
+            json.dumps({"schema_version": 1, "policies": [binding]}), encoding="utf-8"
+        )
+        self.app = create_app(
+            replace(
+                self.settings,
+                execution_backend="wangp-worker",
+                execution_profiles_file=path,
+                default_deployment_profile_id=profile,
+            ),
+            repository=self.app.state.repository,
+            storage=self.app.state.storage,
+        )
+        self.client = TestClient(self.app)
+        self.client.__enter__()
+        self.addCleanup(self.client.__exit__, None, None, None)
         guide = self.client.get("/for-agents/guide.json").json()
         self.assertEqual(guide["version"], 2)
         self.assertEqual(

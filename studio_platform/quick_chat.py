@@ -841,7 +841,12 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
             if "model_id" in body:
                 p["model_id"] = model_check(body["model_id"])
             if "next_settings" in body:
-                p["next_settings"] = settings_check(body["next_settings"])
+                from .quality_authoring import normalize
+
+                selected, _ = normalize(
+                    self.settings, self.repo, principal, body["next_settings"]
+                )
+                p["next_settings"] = settings_check(selected)
                 self._copies_allowed(principal, p["next_settings"]["copies"], conn)
             if any(
                 name in body for name in ("is_test", "test_accepted", "review_hold")
@@ -1458,7 +1463,26 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
                 "card": self.get_card(principal, session_id, revision["card_id"]),
                 "revision": revision,
             }
-        snapshot, sources = self._card_snapshot(principal, session, body)
+        from .quality_authoring import (
+            inherit_revision_mode,
+            normalize,
+            public_mode_edit,
+        )
+
+        selected = body
+        if card_id and body.get("source_revision_id") and public_mode_edit(body):
+            with self.repo.engine.connect() as conn:
+                source = self._get(
+                    conn, principal, body["source_revision_id"], session_id, "revision"
+                )
+            if (
+                source["parent_id"] != card_id
+                or source["payload"].get("card_id") != card_id
+            ):
+                raise NotFound("quick_chat_resource_not_found")
+            selected = inherit_revision_mode(body, source["payload"])
+        selected, _ = normalize(self.settings, self.repo, principal, selected)
+        snapshot, sources = self._card_snapshot(principal, session, selected)
         with self.repo.transaction() as conn:
             session = self._access(
                 principal,

@@ -67,7 +67,7 @@ def agent_contract():
         "generation_authority": "A card or preflight does not start generation. Confirm only within the user's authorization; an HTTP202 is not inference success.",
         "same_session": "Materials and next_settings are visible authoring state. Revisions freeze their own explicit inputs and seeds. Different sessions are isolated.",
         "history_titles": "Omit title when creating a session to allow optional Gemma 4 short history naming from the first meaningful accepted description. Any explicit title is manual, even the default label. Naming is independent of the conversational assistant and video engine; consult schema.history_titles.enabled. It sends only bounded first text, never media/full history, and failure keeps the original label without automatic retry.",
-        "deployment_profiles": "Read capabilities.deployment_profiles and the session's complete next_settings. Preserve the user's selected deployment_profile_id and use that profile's generation_support[fl|ref] controls, input_support, limits, supported_constraints and execution_policy_constraints. Historical joint_cases are timing examples, never an admission allowlist; supported unmeasured combinations need no extra qualification confirmation. Turn-to-card inherits next_settings. Direct card creation/revision does not inherit an omitted profile: include top-level deployment_profile_id and explicit controls, copied from session next_settings for a new card or from the current revision when revising. Null or omission retains legacy routing; never drop a selected profile to bypass a blocker. Explicit session changes use PATCH with expected_version and complete next_settings. Catalog measurements are historical; preflight checks current matching workers. Ordinary generation keys do not grant operator rental access.",
+        "deployment_profiles": "New video requests use tier standard/refine/fast and mode fl/ref. Fast is currently unavailable. Public deployment_profile_id aliases are quality:standard/refine/fast; recipe aliases are video-fl-v1/video-ref-v1. Read capabilities.deployment_profiles and complete session next_settings, including the selected tier/mode's generation_support controls, input_support, limits, supported_constraints and execution_policy_constraints. Historical joint_cases are timing examples, not an admission allowlist; supported unmeasured combinations need no extra qualification confirmation. Turn-to-card inherits next_settings. Direct cards/revisions require their complete selection and controls; omission/null does not grant legacy routing to Agents. Session changes use PATCH with expected_version and complete next_settings. Preflight checks current matching workers; catalog measurements are historical. Preserve user choice/references; never switch to bypass refusal or rent a GPU. Conversation model selection is separate and unchanged.",
         "take_groups": {
             "preferences_url": "/v1/quick-chat/preferences",
             "preferences": "Owner CAS preferences default copies_max=4 and takes_fold_count=8. Both are editable positive integers; existing document byte and model limits still apply. Lowering the preference affects new revisions only, never historical reads or original submission replay.",
@@ -168,7 +168,7 @@ def agent_contract():
             "cleanup_consent": "Automatic purge is disabled, including for old consented deadlines. Public purge_at is null and auto_purge_enabled is false. Stored old deadlines remain audit metadata. Only explicit authorized purge/empty_trash confirmation creates new deletion intent; original durable intents still reconcile.",
             "visibility": "Reference checks cover saved server records, not unsaved browser drafts. Empty-trash preview captures the complete authorized trash set, including review-held entries, and confirmation rechecks it.",
         },
-        "card_revisions": "Read the current card and its current_revision_id revision before editing that same card. Revisions require expected_card_version from card.version, not session expected_version. Preserve the explicit deployment_profile_id, recipe_id, controls, inputs and copies from that revision. source_revision_id is optional same-session provenance and does not select the card, enforce concurrency or inherit inputs; omit it when no lineage is wanted. title is optional and defaults to 我的视频; include the prior title to preserve it. A new revision preserves old snapshots and submissions and does not generate. Missing/invalid fields return HTTP422 invalid_request with safe field_errors; only a genuinely stale card version returns HTTP409 version_conflict. Reconcile stale edits and use a new key for a changed body. An uncertain response is recovered with the original identical key/body.",
+        "card_revisions": "Read the current card and its current_revision_id revision before editing. Use expected_card_version=card.version, not session expected_version. Copy known tier/mode (or consistent neutral aliases), controls, inputs and copies; unknown historical quality needs explicit new selection. source_revision_id is optional same-session provenance, not card selection, concurrency or input inheritance. Omit it when no lineage is wanted. title is optional and defaults to 我的视频; copy it explicitly to preserve the prior title. Revisions preserve old snapshots/submissions and do not generate. Missing/invalid fields return HTTP422 invalid_request with safe field_errors; only a stale card version returns HTTP409 version_conflict. Reconcile stale edits and use a new key for changed bodies; uncertain writes retain their original identical body/key.",
         "replay": "Persist each write body and Idempotency-Key. Replaying the same revision's initial confirmation across Agents returns its original submission/items/jobs, not new variations.",
         "job_changes": {
             "path": "/v1/job-events",
@@ -252,14 +252,14 @@ def agent_contract():
                 "method": "POST",
                 "path": PREFIX + "/{session_id}/cards",
                 "body": {
-                    "deployment_profile_id": "{selected_deployment_profile_id}",
-                    "recipe_id": "{selected_recipe_id}",
+                    "tier": "standard",
+                    "mode": "fl",
                     "prompt": "{complete_prompt}",
                     "controls": "{selected_controls_object}",
                     "inputs": {},
                     "copies": 1,
                 },
-                "require": "Alternative to turn_to_card when explicit settings/references are needed. Replace controls with the selected JSON object, not a string. Copy profile/recipe/controls from session next_settings for a new card, or the current revision for a revision; preserve copies unless explicitly changed. Direct cards do not inherit an omitted deployment_profile_id. Read selected profile generation_support[fl|ref] for model/adapter limits and actual policy constraints; historical joint_cases do not restrict combinations; inputs can include first_frame:{asset_id:...} or last_frame:{asset_id:...}. Use selected profile input_support: native v2 REF can combine first/last frames and timed image guides with its references; retained legacy profiles keep their documented role restrictions. Null is only for an intentional legacy route. Authoring support does not qualify a recipe for execution.",
+                "require": "Alternative to turn_to_card: supply explicit tier/mode plus controls and inputs as JSON objects, copies as integer. Copy the chosen quality from next_settings or the current revision; do not infer missing historical quality. Read actual selected tier/mode input_support and policy limits before preflight. No generation or capacity authority is granted by authoring.",
             },
             "read_card": {
                 "method": "GET",
@@ -282,8 +282,8 @@ def agent_contract():
                 "path": PREFIX + "/{session_id}/cards/{card_id}/revisions",
                 "body": {
                     "expected_card_version": "{current_card_version}",
-                    "deployment_profile_id": "{current_revision.deployment_profile_id}",
-                    "recipe_id": "{current_revision.recipe_id}",
+                    "tier": "{current_revision.tier}",
+                    "mode": "{current_revision.mode}",
                     "prompt": "{new_complete_prompt}",
                     "controls": "{current_revision.controls}",
                     "inputs": "{current_revision.inputs}",
@@ -297,7 +297,7 @@ def agent_contract():
                     "turn_id",
                     "source_revision_id",
                 ],
-                "require": "Use integer expected_card_version=card.version; preserve the original JSON types of controls/inputs (objects) and copies (integer). This is a complete snapshot, not a PATCH. Include the selected profile rather than accidentally falling back to legacy routing; omit profile only if the prior revision intentionally used legacy. title/source_revision_id may be omitted; title omission uses the default label and source_revision_id is only same-session provenance. Save body/key before POST. No GPU job is submitted. Read the returned card and revision; perform a fresh preflight/confirmation only if generation is authorized.",
+                "require": "Use integer expected_card_version=card.version and preserve controls/inputs JSON objects and copies integer. This is a complete snapshot, not a PATCH. Supply known tier/mode or consistent neutral aliases; unknown historical quality needs explicit user choice. title/source_revision_id are optional; title omission uses the default label, source_revision_id is same-session provenance only. Save body/key before POST. No GPU job is submitted. Read the returned card/revision and preflight/confirm separately only within generation authority; uncertain writes keep the exact original body/key.",
             },
             "preflight": {
                 "method": "POST",
@@ -345,6 +345,8 @@ def register_routes(
 
     @app.exception_handler(QuickChatError)
     async def error(_request, value):
+        from .quality_http import error_response
+
         body = {
             "code": value.code,
             "message": value.message,
@@ -352,7 +354,7 @@ def register_routes(
         }
         if value.field_errors:
             body["field_errors"] = value.field_errors
-        return JSONResponse(body, status_code=value.status)
+        return error_response(_request, app, body, status_code=value.status)
 
     @app.get("/v1/quick-chat/preferences")
     def take_preferences(request: Request):

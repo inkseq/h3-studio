@@ -204,6 +204,8 @@ def create_app(
 
     @app.exception_handler(Conflict)
     async def conflict(_request, error):
+        from .quality_http import error_response
+
         code = str(error)
         guidance = {
             "historical_recipe_unknown": {
@@ -240,7 +242,7 @@ def create_app(
                 },
                 status_code=409,
             )
-        return JSONResponse({"detail": code}, status_code=409)
+        return error_response(_request, app, {"detail": code}, status_code=409)
 
     @app.exception_handler(BudgetExceeded)
     async def quota(_request, error):
@@ -305,14 +307,58 @@ def create_app(
 
     @app.exception_handler(ValueError)
     async def invalid(_request, error):
+        from .quality_http import error_response
+
         if _request.url.path == "/v1/generations/preflight":
             from .generation_diagnostics import preflight_diagnostic
 
             diagnostic = preflight_diagnostic(error)
-            return JSONResponse(
-                {"detail": diagnostic["error_message"], **diagnostic}, status_code=422
+            return error_response(
+                _request,
+                app,
+                {"detail": diagnostic["error_message"], **diagnostic},
+                status_code=422,
             )
+        return error_response(_request, app, {"detail": str(error)}, status_code=422)
+
+    from .guided_schema import ActionShapeError
+
+    @app.exception_handler(ActionShapeError)
+    async def public_action_shape_error(_request, error):
+        # This type contains closed operation/field names only, never a supplied
+        # model/profile or arbitrary exception. Keep actionable edit guidance.
         return JSONResponse({"detail": str(error)}, status_code=422)
+
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.exception_handlers import request_validation_exception_handler
+    from .quality_http import error_response
+
+    @app.exception_handler(HTTPException)
+    async def public_http_error(request, error):
+        return error_response(
+            request,
+            app,
+            {"detail": error.detail},
+            status_code=error.status_code,
+            headers=error.headers,
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def public_validation_error(request, error):
+        original = await request_validation_exception_handler(request, error)
+        return error_response(
+            request, app, json.loads(original.body), status_code=original.status_code
+        )
+
+    from .quality_tiers import QualitySelectionError
+
+    @app.exception_handler(QualitySelectionError)
+    async def quality_selection_error(_request, error):
+        return JSONResponse(
+            {"code": error.code, "detail": error.detail},
+            status_code=error.status,
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.exception_handler(MediaBusy)
     async def media_busy(_request, _error):
@@ -1524,4 +1570,7 @@ def create_app(
     from .library import register_routes as register_library_routes
 
     register_library_routes(app)
+    from .quality_http import install as install_quality_views
+
+    install_quality_views(app)
     return app

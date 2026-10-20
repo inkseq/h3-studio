@@ -45,6 +45,8 @@ class WanGPAPITests(LedgerCase):
                     auth_mode="local-test",
                     database_url=self.url,
                     execution_backend="wangp-worker",
+                    operator_capacity_owners=("superdan",),
+                    operator_admin_owners=("superdan",),
                 ),
                 repository=self.repo,
             )
@@ -113,6 +115,8 @@ class WanGPAPITests(LedgerCase):
                 database_url=self.url,
                 generation_enabled=True,
                 execution_backend="wangp-worker",
+                operator_capacity_owners=("superdan",),
+                operator_admin_owners=("superdan",),
                 execution_policy_file=execution_file,
             )
             app = create_app(settings, repository=self.repo)

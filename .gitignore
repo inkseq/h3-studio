@@ -707,3 +707,9 @@ inventory.json
 !docs/CONTENT-POLICY.md
 !tests/test_content_creators.py
 !tests/test_content_film.py
+
+# Creator quality contract; no runtime configuration or private evidence.
+!studio_platform/quality_tiers.py
+!studio_platform/quality_authoring.py
+!studio_platform/quality_views.py
+!studio_platform/quality_http.py

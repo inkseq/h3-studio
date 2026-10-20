@@ -48,6 +48,8 @@ ACTION_FIELDS = {
         "controls",
         "inputs",
         "deployment_profile_id",
+        "tier",
+        "mode",
     },
     "captions.set": {"chapter_id", "cues"},
     "captions.confirm": {"chapter_id", "reviewed"},
@@ -84,23 +86,27 @@ ACTION_REQUIRED = {
 }
 
 
+class ActionShapeError(ValueError):
+    """Public guidance made only from closed operation and field names."""
+
+
 def validate_action_fields(action):
     if not isinstance(action, dict):
-        raise ValueError(
+        raise ActionShapeError(
             "每个操作必须为对象；查看 /v1/guided-schema 的 operation_schemas"
         )
     op = action.get("op")
     if not isinstance(op, str) or op not in ACTION_FIELDS:
-        raise ValueError(
+        raise ActionShapeError(
             "未知编辑操作或缺少op；GET /v1/guided-schema，选择operation_schemas中的操作名"
         )
     missing = ACTION_REQUIRED[op] - action.keys()
     if missing:
-        raise ValueError(
+        raise ActionShapeError(
             f"{op} 缺少必填字段：{', '.join(sorted(missing))}；查看 /v1/guided-schema 的 operation_schemas.{op}"
         )
     if action.keys() - (ACTION_FIELDS[op] | {"op"}):
-        raise ValueError(
+        raise ActionShapeError(
             f"{op} 包含不支持的字段；允许字段：{', '.join(sorted(ACTION_FIELDS[op]))}；查看 /v1/guided-schema"
         )
 
@@ -172,6 +178,11 @@ ENTITY_PATCH["properties"]["data"] = {
 
 def operation_schemas():
     from .capabilities import RECIPES, control_schema
+    from .quality_tiers import recipe_alias
+
+    recipe_ids = list(RECIPES) + [recipe_alias(mode) for mode in ("fl", "ref")]
+    tier = {"enum": ["fast", "standard", "refine"]}
+    mode = {"enum": ["fl", "ref"]}
 
     source_range = {
         "anyOf": [
@@ -327,8 +338,10 @@ def operation_schemas():
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
-                    "recipe_id": {"enum": list(RECIPES)},
+                    "recipe_id": {"enum": recipe_ids},
                     "deployment_profile_id": {"type": ["string", "null"]},
+                    "tier": tier,
+                    "mode": mode,
                     "controls": {
                         "type": "object",
                         "additionalProperties": False,
@@ -465,10 +478,12 @@ def operation_schemas():
         "shot.trim": {"shot_id": ID_SCHEMA, "start": TIME, "end": TIME},
         "shot.configure_generation": {
             "shot_id": ID_SCHEMA,
-            "recipe_id": {"enum": list(RECIPES)},
+            "recipe_id": {"enum": recipe_ids},
+            "tier": tier,
+            "mode": mode,
             "deployment_profile_id": {
                 "type": ["string", "null"],
-                "description": "Exact ID from capabilities.deployment_profiles; null retains legacy service routing.",
+                "description": "Use the neutral quality alias from capabilities, or tier and mode. Raw deployment IDs require a human administrator.",
             },
             "prompt": {"type": "string", "maxLength": 12000},
             "controls": {

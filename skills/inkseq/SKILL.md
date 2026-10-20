@@ -5,9 +5,9 @@ description: Use an Inkseq / 映序 link to create video takes, organise an auth
 
 # Inkseq / 映序
 
-Use the user's exact HTTPS origin (HTTP only for loopback). A link permits discovery, not editing or spending. Preserve user prompts, model/profile, precision, references and accepted work. Relay outcomes in the user's language; keep API codes and IDs unchanged.
+Use the user's exact HTTPS origin (HTTP only for loopback). A link permits discovery, not editing or spending. Preserve user prompts, video quality/mode, references and accepted work. Relay outcomes in the user's language; keep API codes and IDs unchanged.
 
-Read [API fields/examples](reference/api.md) when constructing requests and [recovery](reference/recovery.md) for uncertain writes or refusals. Both are available under the same origin's `/for-agents/reference/`. Public discovery is not proof of live authentication or available generation. Authenticated `/v1/agent-guide`, `/v1/guided-schema`, `/v1/quick-chat/schema` and `/v1/capabilities` describe the actual release.
+Read [API fields/examples](reference/api.md) for requests and [recovery](reference/recovery.md) for uncertain writes/refusals; both use the same origin's `/for-agents/reference/`. Public discovery proves neither authentication nor capacity. Authenticated `/v1/agent-guide`, `/v1/guided-schema`, `/v1/quick-chat/schema` and `/v1/capabilities` describe the release.
 
 ## Connect an assistant
 
@@ -26,9 +26,11 @@ Replace placeholders with actual returned values. Example safe response projecti
 
 ## Quick Create: plan → takes → choose → story
 
+Video uses `tier: standard|refine|fast`, `mode: fl|ref`; Fast is unavailable. All Agents use public tiers; [aliases/refusals](reference/api.md#video-quality-selection). Conversation selection is unchanged.
+
 1. Open an authorized session or create one. Read complete `next_settings`, schema and copy preferences. Upload references, wait for ready receipts, then explicitly select roles/ranges; upload alone selects nothing.
-2. Save a card with complete profile, recipe, prompt, controls, inputs and copies. Card = group; revisions are immutable. A fixed seed applies only to the first new take, others receive distinct random seeds. The owner copy maximum defaults to 4 and is editable.
-3. Read the revision; refresh exact profile/mode availability and preflight its `input_hash`. Inspect price, readiness and machine allowance. Submit only the unchanged ready preflight within authorized spending and any required human confirmation. Saving or Again alone never generates.
+2. Save a card with complete tier, mode, prompt, controls, inputs and copies. Card = group; revisions are immutable. A fixed seed applies only to the first new take, others receive distinct random seeds. The owner copy maximum defaults to 4 and is editable.
+3. Read the revision; refresh exact tier/mode availability and preflight its `input_hash`. Inspect price, readiness and machine allowance. Submit only the unchanged ready preflight within authorized spending and any required human confirmation. Saving or Again alone never generates.
 4. Observe original submissions/jobs; list all group pages and inspect outputs/full recipes. Star via annotation CAS. Display `group_number`; retain original item/job/execution IDs for actions.
 5. Tweak via a complete new revision, or use Again for a fresh revision in the same group. Separately preflight/confirm it; Again is not retry of an uncertain execution.
 6. Transfer the selected take to an owned story scene at its current project version. This copies the complete recipe/references and seed lock into an editable shot, **without enqueueing**. Return its same-origin work link.
@@ -48,7 +50,7 @@ For `resume_admission_available`, use [admission recovery](reference/recovery.md
 
 1. Read the owned project/version and guided schema. Preserve unrelated content; use project actions instead of replacing the document.
 2. Create/edit chapters, scenes, shots, characters, places and props. Characters support multiple `looks`; shot cast can select `{characterId,lookId}`. Use ready owned assets and preserve user names.
-3. Configure saved shot drafts, then inspect effective inputs/defaults before planning. Preserve omitted fields; never trim references or change profiles to bypass blockers.
+3. Configure saved shot drafts with the chosen tier/mode, then inspect effective inputs/defaults before planning. Preserve omitted fields; never trim references or change quality to bypass blockers.
 4. For authorized multi-shot work, POST the story's `/storyboard/preflights` with `{expected_version,shot_ids,copies}` and one saved key. Inspect aggregate cost and retained per-copy plans before using the explicit-plan batch API. Copies share the owner's editable limit; only the first uses a fixed seed.
 5. Inspect results; adopt with `select:false` to retain the current choice. Use `shot.select` only when choosing that version is intended. Return original receipts and story/shot links.
 
@@ -97,7 +99,7 @@ Example response projection: `{"preview_id":"PREVIEW","expires_at":1790000000}`;
 
 ## Before paying, and when refused
 
-1. Refresh exact-profile availability and preflight. Read current limits; model constraints remain. Machine allowance is not an ETA; unknown price stays unknown.
+1. Refresh exact tier/mode availability and preflight. Read current limits; input constraints remain. Machine allowance is not an ETA; unknown price stays unknown.
 2. Check the whole batch using server credit quotes when enabled; never convert USD caps. Human approval binds exact plans/settings; Agents cannot approve themselves or raise caps.
 3. After admission, `/v1/generations/queue-position?job_id=JOB` gives advisory shared-queue information, no other owner's identity or ETA. Never rent a GPU to bypass unavailable capacity.
 4. Stop new paid work on cap/unknown-charge refusal. Return the same editable draft, stable error code and readable explanation; no replacement job/key or automatic retry. Zero connection cap adds no extra connection limit; owner credit and other safeguards remain. Sydney-day exposure includes unresolved prior obligations, not only invoices.

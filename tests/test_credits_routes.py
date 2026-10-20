@@ -208,14 +208,41 @@ class CreditsRouteTests(LedgerCase):
             }
         )
         self.assertEqual(self.get_quote(low_steps)["tier"], "standard")
-        for compiled in (
-            self.compiled(request={"model": "MiniMax-H3-Base-INT8", "steps": 3}),
-            self.compiled(output_spec={"frames": 124, "width": 1376, "height": 768}),
-        ):
-            self.assertEqual(
-                (self.get_quote(compiled)["tier"], self.get_quote(compiled)["credits"]),
-                ("refine", 62),
+        large = self.compiled(output_spec={"frames": 124, "width": 1280, "height": 720})
+        self.assertEqual(
+            (self.get_quote(large)["tier"], self.get_quote(large)["credits"]),
+            ("standard", 21),
+        )
+        unpruned = self.compiled(request={"model": "MiniMax-H3-Base-INT8", "steps": 3})
+        self.assertEqual(
+            (self.get_quote(unpruned)["tier"], self.get_quote(unpruned)["credits"]),
+            ("refine", 62),
+        )
+
+    def test_quote_checks_server_profile_identity_not_caller_quality_provenance(self):
+        self.enable()
+        from studio_platform.quality_tiers import PROFILE_TIERS
+        from studio_platform.runtime_catalog import get_profile
+
+        for identity, tier in PROFILE_TIERS.items():
+            compiled = self.compiled(
+                deployment_profile_id=identity,
+                request={"model": get_profile(identity)["model_id"], "tier": "fast"},
+                quality_selection={"tier": "fast", "mapping_revision": "caller"},
             )
+            frozen = self.get_quote(compiled)
+            self.assertEqual(frozen["tier"], tier)
+            self.assertEqual(frozen["credits"], 21 if tier == "standard" else 62)
+        for identity, model in (
+            ("unregistered-private-profile", "MiniMax-H3-Pruned-Rank8-INT8"),
+            (next(iter(PROFILE_TIERS)), "MiniMax-H3-Base-INT8"),
+            (None, "unregistered-private-model"),
+        ):
+            compiled = self.compiled(request={"model": model})
+            if identity is not None:
+                compiled["deployment_profile_id"] = identity
+            with self.assertRaisesRegex(PricingError, "credit_quote_invalid"):
+                self.get_quote(compiled)
 
     def render_compiled(self):
         compiled, _, blockers, _ = compile_render(
