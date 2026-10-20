@@ -20,7 +20,7 @@ Read this entry and the assigned issue's latest owner comments/claims. Read affe
 
 Classify behavior, not filenames. Finish a related slice locally and run affected checks once; do not repeat unchanged checks or a full suite for each edit. Merge small PRs continuously; unfinished features stay flagged. CI auto-deploys staging. Production promotes the same accepted artifact bytes, without rebuild, on Tuesday/Friday. Tier2 needs Claude sign-off. Issues close on promotion, not merge. Continue the next independent staged milestone without approval waits.
 
-Current order (CR39): #324 -> one-day #328 simplification -> M1 #304 -> #305 WorkOS -> #306 credits -> #307 Stripe TEST ONLY -> #308 content API. Then one separate USD20 staging GPU window for #295 in-flight recovery/no double charge, real credit lifecycle and remaining #267 scenarios; RunPod if Vast has no capacity. No new epics before M1.
+Current order (CR41): #306 account-spend isolation -> #305 profile fields -> #306 welcome200/disposable guard -> one USD20 staging QA GPU window (#295/#306/#267; RunPod fallback) -> #353 thumbnail backfill -> #304 tier APIs/Agent docs. No new epics before M1.
 
 ## Safety
 - Reuse existing owners/assets/jobs/attempts/ledger/fences. Preserve immutable accepted inputs, configuration identity, original jobs/media and cumulative accounting. Unknown outcomes require reconciliation, never duplicate generation/rental or invented settlement.
