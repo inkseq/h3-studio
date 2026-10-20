@@ -3,7 +3,16 @@ import './v2/story-view.css';
 import { selectShot, emptySelection } from './storyboard-selection.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import React, { useEffect, useRef, useState } from 'react';
-import { Plus, PanelLeftClose, PanelLeftOpen, Trash2, Maximize2, Minimize2, X } from 'lucide-react';
+import {
+  Plus,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Trash2,
+  Maximize2,
+  Minimize2,
+  X,
+  Scissors,
+} from 'lucide-react';
 import { useTrash } from './UniversalTrash.jsx';
 import { usePageActive, useAppLocation } from './AppRouteCache.jsx';
 import { navigateApp } from './app-navigation.js';
@@ -108,6 +117,27 @@ function QueueSummary() {
     </div>
   );
 }
+const FilmEditor = React.lazy(() => import('./FilmEditor.jsx'));
+// Remotion loads only when the editor opens, keeping it out of the storyboard bundle.
+function FilmEditorButton({ chapterId }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  if (!chapterId) return null;
+  return (
+    <>
+      <button onClick={() => setOpen(true)}>
+        <Scissors size={14} />
+        {t('editor.open')}
+      </button>
+      {open && (
+        <React.Suspense fallback={<p role="status">{t('settings.loading')}</p>}>
+          <FilmEditor chapterId={chapterId} onClose={() => setOpen(false)} />
+        </React.Suspense>
+      )}
+    </>
+  );
+}
+
 function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmControl }) {
   const { t, locale } = useI18n();
   const { state, dispatch } = useStoryboardUI(),
@@ -317,6 +347,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
               </small>
             </div>
             <div className="row tight chapter-actions">
+              <FilmEditorButton chapterId={state.project.chapterId} />
               {filmControl}
               <QueueSummary />
               {!groups.length && (

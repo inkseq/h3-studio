@@ -7,7 +7,7 @@ import { navigateApp } from './app-navigation.js';
 import { usePageActive } from './AppRouteCache.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { formatCredits, formatPrice, packList, priceRates } from './credits.js';
-import { LEGAL, LEGAL_STATUS, SUPPORT_EMAIL } from './legal-content.js';
+import { LEGAL, LEGAL_STATUS, OPERATOR, SUPPORT_EMAIL } from './legal-content.js';
 import './public-pages.css';
 
 // Launch prices from #306/#307. Shown only until the public price endpoints answer.
@@ -42,7 +42,9 @@ export function PublicFooter() {
         ))}
         <a href={'mailto:' + SUPPORT_EMAIL}>{SUPPORT_EMAIL}</a>
       </nav>
-      <small className="muted">© {new Date().getFullYear()} Inkseq</small>
+      <small className="muted">
+        © {new Date().getFullYear()} Inkseq · {OPERATOR.name} · ABN {OPERATOR.abn}
+      </small>
     </footer>
   );
 }

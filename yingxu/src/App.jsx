@@ -1,4 +1,5 @@
 import { ChatDialog } from './QuickChatControls.jsx';
+import InkLoader from './InkLoader.jsx';
 import { cloudSystemMessage } from './cloud-model.js';
 import { exportSrt } from './caption-model.js';
 import { chapterHandover, shotListCsv } from './handover-model.js';
@@ -538,13 +539,23 @@ function SeriesApp({ sidebarView, onSidebarView }) {
             </div>
           </details>
           <LanguageSwitcher />
-          <button className="ghost" onClick={() => open({ type: 'agent' })}>
+          <button
+            className="ghost"
+            title={t('story.copy31')}
+            aria-label={t('story.copy31')}
+            onClick={() => open({ type: 'agent' })}
+          >
             <Bot size={15} />
-            {t('story.copy31')}
+            <span className="bar-label">{t('story.copy31')}</span>
           </button>
-          <button className="ghost" onClick={() => open({ type: 'project-settings' })}>
+          <button
+            className="ghost"
+            title={t('settings.title')}
+            aria-label={t('settings.title')}
+            onClick={() => open({ type: 'project-settings' })}
+          >
             <Settings2 size={15} />
-            {t('settings.title')}
+            <span className="bar-label">{t('settings.title')}</span>
           </button>
           {accountMenu}
         </header>
@@ -633,7 +644,7 @@ function SeriesApp({ sidebarView, onSidebarView }) {
           wide={['help', 'agent'].includes(modal.type)}
         >
           {modal.type === 'roughcut' && (
-            <React.Suspense fallback={<p role="status">{t('story.copy41')}</p>}>
+            <React.Suspense fallback={<InkLoader label={t('story.copy41')} />}>
               <ChapterRoughCut
                 project={p}
                 chapterId={chapter?.id || chapterList[0]?.id}
@@ -1341,12 +1352,12 @@ function AppContent() {
       <SpendingSettings key={account || 'signed-out'} account={account} active={active} />
     ),
     '/operator': ({ active }) => (
-      <React.Suspense fallback={<p role="status">{t('loading.operator')}</p>}>
+      <React.Suspense fallback={<InkLoader label={t('loading.operator')} />}>
         <OperatorConsole active={active} />
       </React.Suspense>
     ),
     '/quick-chat': ({ active }) => (
-      <React.Suspense fallback={<p role="status">{t('loading.quickCreate')}</p>}>
+      <React.Suspense fallback={<InkLoader label={t('loading.quickCreate')} />}>
         <QuickChatWorkspace active={active} />
       </React.Suspense>
     ),

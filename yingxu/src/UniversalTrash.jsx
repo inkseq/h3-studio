@@ -449,7 +449,9 @@ export default function UniversalTrash() {
             {t('trash.title')}
             <small>
               {ctx?.account && kind !== 'conversation'
-                ? rows.length + (next !== null ? '+' : '')
+                ? rows.length +
+                  (group === 'all' && quickCount?.account === account ? quickCount.count : 0) +
+                  (next !== null ? '+' : '')
                 : ''}
             </small>
           </h1>
@@ -493,7 +495,9 @@ export default function UniversalTrash() {
                       ? quickCount?.account === account
                         ? quickCount.count + (quickCount.more ? '+' : '')
                         : '—'
-                      : rows.filter((row) => inGroup(row, id)).length + (next !== null ? '+' : '')}
+                      : rows.filter((row) => inGroup(row, id)).length +
+                        (id === 'all' && quickCount?.account === account ? quickCount.count : 0) +
+                        (next !== null || (id === 'all' && quickCount?.more) ? '+' : '')}
                   </span>
                 </button>
               ))}
@@ -653,7 +657,23 @@ export default function UniversalTrash() {
                       <span>
                         <Trash2 size={22} />
                       </span>
-                      <b>{loading ? t('settings.loading') : t('trash.none')}</b>
+                      <b>
+                        {loading
+                          ? t('settings.loading')
+                          : group === 'all' &&
+                              quickCount?.account === account &&
+                              quickCount.count > 0
+                            ? t('trash.noneOutsideQuick')
+                            : t('trash.none')}
+                      </b>
+                      {!loading &&
+                        group === 'all' &&
+                        quickCount?.account === account &&
+                        quickCount.count > 0 && (
+                          <button className="small" onClick={() => changeGroup('session')}>
+                            {t('trash.quickElsewhere', { count: quickCount.count })}
+                          </button>
+                        )}
                     </div>
                   )
                 )}

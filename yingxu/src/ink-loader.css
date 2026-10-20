@@ -1,0 +1,31 @@
+.ink-loader {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 10px;
+  min-height: 160px;
+  padding: 24px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.ink-loader .ink-mark {
+  transform-origin: 50% 90%;
+  animation: ink-loader-bob 1.4s ease-in-out infinite;
+}
+@keyframes ink-loader-bob {
+  0%,
+  100% {
+    transform: translateY(0) scale(1, 1);
+  }
+  45% {
+    transform: translateY(-8px) scale(0.96, 1.04);
+  }
+  60% {
+    transform: translateY(0) scale(1.06, 0.94);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ink-loader .ink-mark {
+    animation: none;
+  }
+}
