@@ -129,12 +129,6 @@ def _claim(service):
         work = eligible_jobs(service, connection, now)
         if not work:
             return _result('idle'), None
-        nodes = _nodes(connection, tenant)
-        stages = [node_stage(n, now) for n in nodes]
-        if 'unknown' in stages:
-            return _result('blocked', 'allocation_uncertain'), None
-        if sum(stage is not None for stage in stages) >= HARD_MAX_MACHINES:
-            return _result('blocked', 'capacity_limit'), None
         journals = list(
             connection.execute(
                 select(operator_commands).where(
@@ -144,7 +138,12 @@ def _claim(service):
             ).mappings()
         )
         if any(
-            row['payload'].get('phase') in {'planning', 'starting'}
+            (
+                row['payload'].get('phase') in {'planning', 'starting'}
+                or row['payload'].get('phase') == 'backoff'
+                and row['payload'].get('reason_code')
+                in {'allocation_uncertain', 'backoff'}
+            )
             and row['payload'].get('next_decision_at', 0) > now
             for row in journals
         ):
@@ -219,6 +218,40 @@ def _claim(service):
             if payload['next_decision_at'] > now:
                 observing = _result('blocked', 'backoff')
                 continue
+            # Original commands and durable backoff are read before any live
+            # provider GET. Only a genuinely new allocation needs capacity.
+            usage = service._live_capacity_usage(connection)
+            counted = {
+                item['intent_id']: item
+                for item in usage['observations']
+                if item['counted']
+            }
+            stages = [
+                node_stage(n, now) or 'unknown'
+                for n in _nodes(connection, tenant)
+                if n['intent_id'] in counted
+            ]
+            if 'unknown' in stages or any(
+                item['reason_code']
+                in {
+                    'dstack_capacity_unconfirmed',
+                    'dstack_terminal_provider_unconfirmed',
+                }
+                for item in counted.values()
+            ):
+                payload.update(
+                    phase='backoff',
+                    next_decision_at=now + _delay(job['id']),
+                    reason_code='allocation_uncertain',
+                )
+                _write(connection, row, payload, now)
+                return _result('blocked', 'allocation_uncertain'), None
+            if usage['instances'] >= min(
+                HARD_MAX_MACHINES, service.policy['max_instances']
+            ) or usage['physical_gpus'] >= min(
+                HARD_MAX_MACHINES, service.policy['max_physical_gpus']
+            ):
+                return _result('blocked', 'capacity_limit'), None
             action = 'start' if payload.get('preview_id') else 'plan'
             payload.update(
                 phase='starting' if action == 'start' else 'planning',

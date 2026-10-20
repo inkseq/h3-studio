@@ -272,8 +272,13 @@ class DemandProjectionTests(LedgerCase):
             "download_file",
             "model_download_waiting_for_shared_cache",
         ):
-            node["payload"]["dstack"]["preparation"] = {"phase": phase}
+            node["payload"]["dstack"]["preparation"] = {"phase": phase, "model": None}
             self.assertEqual(node_stage(node, self.now), "downloading")
+        node["payload"]["dstack"]["preparation"] = {
+            "phase": "provisioning",
+            "model": None,
+        }
+        self.assertEqual(node_stage(node, self.now), "machine_starting")
         for preparation in (
             {"phase": "model_load"},
             {"phase": "runtime_start", "model": {"state": "loading"}},
@@ -318,3 +323,86 @@ class DemandProjectionTests(LedgerCase):
             node["payload"]["dstack"]["configuration_id"] = "wrong-config"
             self.assertEqual(job_wait_stage(None, job, self.now), "queued_no_machine")
         self.assertEqual(job, before)
+
+    def test_admin_counts_exclude_only_canonical_terminal_history_without_mutating_it(
+        self,
+    ):
+        nodes = [
+            {
+                "intent_id": str(uuid.uuid4()),
+                "runtime_state": "creation_unknown",
+                "desired_state": "stopped",
+                "payload": {"dstack": {"billing_state": "unsettled"}},
+            }
+            for _ in range(3)
+        ]
+        before = copy.deepcopy(nodes)
+        witness = {
+            "observations": [
+                {"intent_id": n["intent_id"], "counted": i == 2}
+                for i, n in enumerate(nodes)
+            ]
+        }
+        with (
+            patch("studio_platform.dstack_demand._nodes", return_value=nodes),
+            patch.object(self.service, "_live_capacity_usage", return_value=witness),
+            self.repo.engine.connect() as connection,
+        ):
+            value = summary(self.service, connection, self.now)
+        self.assertEqual(value["uncertain_machines"], 1)
+        self.assertEqual(value["running_machines"], 0)
+        self.assertEqual(value["starting_machines"], 0)
+        self.assertEqual(nodes, before)
+
+    def test_admin_capacity_read_failure_does_not_trust_a_stopped_marker(self):
+        node = {
+            "intent_id": str(uuid.uuid4()),
+            "runtime_state": "stopped",
+            "desired_state": "stopped",
+            "payload": {"dstack": {"billing_state": "unsettled"}},
+        }
+        with (
+            patch("studio_platform.dstack_demand._nodes", return_value=[node]),
+            patch.object(self.service, "_live_capacity_usage", side_effect=OSError),
+            self.repo.engine.connect() as connection,
+        ):
+            value = summary(self.service, connection, self.now)
+        self.assertEqual(value["uncertain_machines"], 1)
+        self.assertEqual(node["runtime_state"], "stopped")
+
+    def test_admin_fresh_ready_hint_cannot_mask_live_uncertainty(self):
+        node = {
+            "intent_id": str(uuid.uuid4()),
+            "runtime_state": "ready",
+            "desired_state": "running",
+            "payload": {"dstack": {"observed_at": self.now}},
+        }
+        before = copy.deepcopy(node)
+        for reason in (
+            "dstack_capacity_unconfirmed",
+            "dstack_terminal_provider_unconfirmed",
+            None,
+        ):
+            with self.subTest(reason=reason):
+                witness = {
+                    "observations": [
+                        {
+                            "intent_id": node["intent_id"],
+                            "counted": True,
+                            "reason_code": reason,
+                        }
+                    ]
+                    if reason is not None
+                    else []
+                }
+                with (
+                    patch("studio_platform.dstack_demand._nodes", return_value=[node]),
+                    patch.object(
+                        self.service, "_live_capacity_usage", return_value=witness
+                    ),
+                    self.repo.engine.connect() as connection,
+                ):
+                    value = summary(self.service, connection, self.now)
+                self.assertEqual(value["uncertain_machines"], 1)
+                self.assertEqual(value["running_machines"], 0)
+                self.assertEqual(node, before)
