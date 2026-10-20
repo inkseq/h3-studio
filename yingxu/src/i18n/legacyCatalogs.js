@@ -1333,7 +1333,7 @@ export const legacyCatalogs = {
       'Trim points must be between 0 and 360,000 seconds, with the out point after the in point.',
     'rough.ui1': 'Chapter rough cut',
     'rough.ui2': 'Join selected videos for this chapter',
-    'rough.ui3': 'CPU rough cut · MP4 / FLAC',
+    'rough.ui3': 'MP4 video',
     'rough.ui4':
       'Take the target duration from each saved in point, in scene and shot order. Without a trim, start at the beginning. Short videos block export; image placeholders are not videos. Output preserves aspect ratio with padding.',
     'rough.ui5':
@@ -2678,7 +2678,7 @@ export const legacyCatalogs = {
     'legacy.reason42': '剪辑选段起止须为0–360000秒，出点晚于入点。',
     'rough.ui1': '章节视频粗剪',
     'rough.ui2': '把本章已采用视频接起来',
-    'rough.ui3': 'CPU 粗剪 · MP4 / FLAC',
+    'rough.ui3': 'MP4 视频',
     'rough.ui4':
       '按场戏与镜头顺序，从已保存的剪辑入点截取目标时长；未设选段时从视频开头取片。视频不够长会阻止导出；图片占位不能当作视频。输出保持比例加边。',
     'rough.ui5': '本机仍可编辑和导出创作方案。实际视频粗剪需要打开云项目并同步已采用素材。',

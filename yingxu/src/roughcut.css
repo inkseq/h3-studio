@@ -1,9 +1,9 @@
 .roughcut {
   margin: 24px 0;
   padding: 20px;
-  border: 1px solid #d1d9ce;
+  border: 1px solid var(--line-2);
   border-radius: 14px;
-  background: #fcfff9;
+  background: var(--surface-2);
   min-width: 0;
 }
 .roughcut h3 {
@@ -28,7 +28,7 @@
   font-size: 12px;
 }
 .roughcut-options small {
-  color: #746f64;
+  color: var(--muted);
 }
 .roughcut-options select {
   width: 100%;
@@ -40,19 +40,19 @@
 }
 .roughcut-plan {
   padding: 16px;
-  background: #f6f2e8;
+  background: var(--surface-3);
   border-radius: 10px;
   margin: 16px 0;
 }
 .roughcut-plan.ready {
-  background: #edf4e7;
+  background: var(--surface-3);
 }
 .roughcut-timeline {
   padding-left: 24px;
 }
 .roughcut-timeline li {
   padding: 10px 0;
-  border-bottom: 1px solid #dce4d6;
+  border-bottom: 1px solid var(--line);
 }
 .roughcut-timeline li > div {
   display: grid;
@@ -75,13 +75,13 @@
 }
 .roughcut-jobs article {
   padding: 14px;
-  border: 1px solid #dce2d6;
+  border: 1px solid var(--line-2);
   border-radius: 10px;
 }
 .roughcut-jobs article > small {
   display: block;
   overflow-wrap: anywhere;
-  color: #746f64;
+  color: var(--muted);
   font-size: 10px;
 }
 .roughcut-result {
@@ -131,19 +131,19 @@
   align-items: center;
   justify-content: center;
   padding: 9px 12px;
-  border: 1px solid #cdd8c6;
+  border: 1px solid var(--line-2);
   border-radius: 7px;
-  color: #314330;
-  background: #fff;
+  color: var(--ink);
+  background: var(--surface-2);
   text-decoration: none;
   font-size: 12px;
   min-height: 36px;
 }
 .artifact-download:hover {
-  background: #eaf2e5;
+  background: var(--surface-3);
 }
 .artifact-download:focus-visible {
-  outline: 3px solid #709666;
+  outline: 3px solid var(--accent);
   outline-offset: 3px;
 }
 @media (max-width: 700px) {
@@ -154,9 +154,9 @@
 .roughcut-subtitle-choice {
   margin: 16px 0;
   padding: 14px;
-  border: 1px solid #d4ddce;
+  border: 1px solid var(--line-2);
   border-radius: 9px;
-  background: #fff;
+  background: var(--surface-2);
 }
 .roughcut-subtitle-choice > label {
   display: flex;
@@ -197,5 +197,5 @@
 }
 .roughcut-subtitle-plan {
   padding: 10px 0;
-  border-top: 1px solid #d4ddce;
+  border-top: 1px solid var(--line-2);
 }

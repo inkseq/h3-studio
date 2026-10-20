@@ -1,6 +1,6 @@
 // One account menu for every page (#358): who you are on top, page actions, then
 // Settings / Trash / Sign out. Pages add their own actions through `items`.
-import React, { useEffect, useRef } from 'react';
+import React, { useRef } from 'react';
 import { LogIn, LogOut, Settings2, Trash2, UserRound } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { navigateApp } from './app-navigation.js';
@@ -29,22 +29,7 @@ export default function AccountMenu({ account, items, onSignIn }) {
     who = useAccountLabel(account),
     access = useAccess(account),
     ref = useRef(null);
-  // A <details> menu stays open on its own; close it on outside click, Escape or after an action.
-  useEffect(() => {
-    const close = () => ref.current?.removeAttribute('open');
-    const outside = (event) => ref.current && !ref.current.contains(event.target) && close();
-    const key = (event) => {
-      if (event.key !== 'Escape' || !ref.current?.open) return;
-      close();
-      ref.current.querySelector('summary')?.focus();
-    };
-    document.addEventListener('pointerdown', outside);
-    document.addEventListener('keydown', key);
-    return () => {
-      document.removeEventListener('pointerdown', outside);
-      document.removeEventListener('keydown', key);
-    };
-  }, []);
+  // Outside clicks and Escape are handled for every floating menu by popover-dismiss.js.
   const closeAfter = (event) => {
     if (event.target.closest('button:not(:disabled), a[href]'))
       ref.current?.removeAttribute('open');

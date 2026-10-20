@@ -1,4 +1,3 @@
-import ItemMenu from './ItemMenu.jsx';
 import './v2/works-adapter.css';
 import { TrashMenu } from './UniversalTrash.jsx';
 import { translate } from './i18n/locale.js';
@@ -24,6 +23,7 @@ import { store } from './store.js';
 import { cloudController as cloud } from './cloud-controller.js';
 import { useThumbnailSource } from './use-thumbnail-source.js';
 import { useCloud } from './CloudStudio.jsx';
+import { useAccountLabel } from './StudioHeader.jsx';
 import {
   createLocalStory,
   openLocalStory,
@@ -646,7 +646,8 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
     [source, setSource] = useState('local'),
     [visibleLimit, setVisibleLimit] = useState(12),
     input = useRef(),
-    reader = useLibraryReader(c.account);
+    reader = useLibraryReader(c.account),
+    who = useAccountLabel(c.account);
   useEffect(() => {
     setQuery('');
     setCreating(false);
@@ -714,24 +715,23 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
               placeholder={t('account.accessible6')}
             />
           </label>
-          <ItemMenu disabled={working}>
-            {(close) => (
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  close();
-                  void act(t('legacy.visible18'), async () => {
-                    library.refreshLocal();
-                    if (c.account) await cloud.list();
-                  });
-                }}
-              >
-                <RefreshCw size={14} />
-                {t('account.accessible7')}
-              </button>
-            )}
-          </ItemMenu>
+          {/* The only library action, so a direct button instead of a one-item "..." menu. */}
+          <span className="item-menu">
+            <button
+              type="button"
+              disabled={working}
+              aria-label={t('account.accessible7')}
+              title={t('account.accessible7')}
+              onClick={() =>
+                void act(t('legacy.visible18'), async () => {
+                  library.refreshLocal();
+                  if (c.account) await cloud.list();
+                })
+              }
+            >
+              <RefreshCw size={15} aria-hidden="true" />
+            </button>
+          </span>
         </div>
         <a
           className="v2-home-quick"
@@ -774,19 +774,26 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
                 disabled={working}
               />
             </label>
-            <label>
-              {t('account.copy4')}
-              <select
-                value={source}
-                onChange={(event) => setSource(event.target.value)}
-                disabled={working}
-              >
-                {c.account && (
-                  <option value="cloud">{t('legacy.cloudAccount', { account: c.account })}</option>
-                )}
-                <option value="local">{t('account.copy21')}</option>
-              </select>
-            </label>
+            {c.account ? (
+              <label>
+                {t('account.copy4')}
+                <select
+                  value={source}
+                  onChange={(event) => setSource(event.target.value)}
+                  disabled={working}
+                >
+                  <option value="cloud">
+                    {t('legacy.cloudAccount', { account: who.label || c.account })}
+                  </option>
+                  <option value="local">{t('account.copy21')}</option>
+                </select>
+              </label>
+            ) : (
+              // Signed out there is only one place to save, so say it instead of a one-item list.
+              <p className="muted">
+                {t('account.copy4')} · {t('account.copy21')}
+              </p>
+            )}
             <button type="submit" className="primary" disabled={working || !title.trim()}>
               {t('account.copy6')}
             </button>

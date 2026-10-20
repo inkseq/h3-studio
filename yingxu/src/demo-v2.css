@@ -5697,7 +5697,9 @@ textarea::placeholder {
     border-width: 1px 0 0;
     padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    /* One equal column per tab (4 for users, 5 with the admin GPU tab), so the bar stays centred. */
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
     background: rgba(20, 22, 21, 0.96);
     backdrop-filter: blur(10px);
   }
@@ -6095,8 +6097,14 @@ textarea::placeholder {
 }
 @media (max-width: 760px) {
   .app
-    button:has(> svg):not(.primary):not(.keep-label):not(
+    button:has(> svg):not(.primary):not(.keep-label):not([role='menuitem']):not(
       :where(
+          dialog,
+          [role='menu'],
+          .account-menu,
+          .v2-export-menu,
+          .story-recent-menu,
+          .item-menu-popover,
           .more-menu,
           .qc-side,
           .hbar nav,
