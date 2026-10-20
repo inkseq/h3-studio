@@ -81,6 +81,33 @@ def positive(value, maximum):
     return type(value) in (int, float) and math.isfinite(value) and 0 < value <= maximum
 
 
+def authority_deadline(policy):
+    """Intersect explicit authority bounds; null means no time expiry.
+
+    This does not extend plan, confirmation, offer, worker or rental leases.
+    The original protected policy, including its nulls, remains unchanged.
+    """
+    deadlines = [
+        value
+        for value in (
+            policy["qualification"]["expires_at"],
+            policy["reservation"]["expires_at"],
+        )
+        if value is not None
+    ]
+    return min(deadlines) if deadlines else None
+
+
+def authority_current(policy, now, runtime_s=0):
+    qualification = policy["qualification"]
+    deadline = authority_deadline(policy)
+    return bool(
+        qualification["status"] in {"accepted", "runtime_required"}
+        and qualification["verified_at"] <= now
+        and (deadline is None or now + runtime_s < deadline)
+    )
+
+
 def validate_policy(value):
     """Reject ambiguous/misspelled operator settings rather than broadening them."""
     if (
@@ -160,8 +187,11 @@ def validate_policy(value):
         or qualification.get("profile") == QUEUED_TASK_PROFILE
         and qualification["status"] != "runtime_required"
         or not positive(qualification["verified_at"], 1e12)
-        or not positive(qualification["expires_at"], 1e12)
-        or qualification["verified_at"] >= qualification["expires_at"]
+        or qualification["expires_at"] is not None
+        and (
+            not positive(qualification["expires_at"], 1e12)
+            or qualification["verified_at"] >= qualification["expires_at"]
+        )
     ):
         raise ValueError("Invalid execution qualification")
     identifier(qualification["evidence_id"])
@@ -363,7 +393,8 @@ def validate_policy(value):
         or type(quote["cost_microusd"]) is not int
         or not 0 < quote["cost_microusd"] <= 1000000000
         or not positive(quote["expected_runtime_s"], 86400)
-        or not positive(quote["expires_at"], 1e12)
+        or quote["expires_at"] is not None
+        and not positive(quote["expires_at"], 1e12)
     ):
         raise ValueError("Invalid execution reservation")
     if "duration_reference_seconds" in quote:
@@ -689,19 +720,21 @@ class ExecutionPolicies:
             blockers.append("操作员已暂停此执行策略")
         if (
             qualification["status"] not in {"accepted", "runtime_required"}
-            or not qualification["verified_at"] <= now < qualification["expires_at"]
+            or qualification["verified_at"] > now
+            or qualification["expires_at"] is not None
+            and now >= qualification["expires_at"]
         ):
             blockers.append("此执行配置尚未验收或验收记录已过期")
-        if quote["expires_at"] <= now:
+        if quote["expires_at"] is not None and quote["expires_at"] <= now:
             blockers.append("费用预留策略已过期，请等待更新")
         # A live heartbeat is not enough if the operator's serving window is
         # about to close. Do not accept a NEW task that cannot fit its own
         # conservative runtime. Running attempts still reconcile normally.
+        deadline = authority_deadline(policy)
         latest_start = (
-            min(qualification["expires_at"], quote["expires_at"])
-            - quote["expected_runtime_s"]
+            deadline - quote["expected_runtime_s"] if deadline is not None else None
         )
-        if latest_start <= now:
+        if latest_start is not None and latest_start <= now:
             blockers.append(
                 "当前服务时段剩余时间不足以完成此配方，请等待服务续期后重新预检"
             )
@@ -805,7 +838,8 @@ class ExecutionPolicies:
             except (NotFound, ValueError):
                 blockers.append("当前项目的生成预算未配置，请联系管理员。")
                 break
-        approval, cold_latest_start, member_warm = None, None, False
+        approval, cold_latest_start, member_warm, demand = None, None, False, None
+        private_pool = False
         if not blockers:
             capacity = self.control.pool_status(
                 policy["pool"],
@@ -827,15 +861,16 @@ class ExecutionPolicies:
                     else {}
                 ),
             )
-            if capacity["ready"] + capacity["busy"] > 0:
-                from .capacity import pool_members_require_warm_binding
+            from .capacity import pool_members_require_warm_binding
 
-                if pool_members_require_warm_binding(
-                    self.repo,
-                    scope.tenant_id,
-                    policy["pool"],
-                    policy["configuration_id"],
-                ):
+            private_pool = pool_members_require_warm_binding(
+                self.repo,
+                scope.tenant_id,
+                policy["pool"],
+                policy["configuration_id"],
+            )
+            if capacity["ready"] + capacity["busy"] > 0:
+                if private_pool:
                     candidate = self.repo.find_capacity_approval(
                         scope,
                         pool=policy["pool"],
@@ -854,7 +889,15 @@ class ExecutionPolicies:
                         blockers.append(
                             "此双节点执行池尚未接入完整的持续服务，请保留任务并等待启用"
                         )
-        if not blockers and (capacity["ready"] + capacity["busy"] == 0 or member_warm):
+        if not blockers and not private_pool:
+            from .dstack_demand import demand_admission
+
+            demand = demand_admission(self.settings, self.repo, scope, compiled, policy)
+        if (
+            not blockers
+            and not demand
+            and (capacity["ready"] + capacity["busy"] == 0 or member_warm)
+        ):
             # Only an independently approved, current launch can admit a wait.
             # Empty approvals / gates=0 retain the original blocked behavior.
             approval = self.repo.find_capacity_approval(
@@ -883,12 +926,9 @@ class ExecutionPolicies:
                 # full approved boot allowance rather than inventing progress.
                 # Warm ready/busy capacity above never pays this allowance.
                 scale = approval["payload"]["scale_policy"]
-                deadlines = [
-                    qualification["expires_at"],
-                    quote["expires_at"],
-                    approval["expires_at"],
-                    scale["hard_deadline"],
-                ]
+                deadlines = [approval["expires_at"], scale["hard_deadline"]]
+                if deadline is not None:
+                    deadlines.append(deadline)
                 from sqlalchemy import select
                 from .repository import capacity_cycles, instance_intents
 
@@ -912,7 +952,7 @@ class ExecutionPolicies:
                     blockers.append(
                         "剩余运行窗口不足以启动并完成本次生成，请等待服务续期后重新预检"
                     )
-        quote_known = quote["expires_at"] > now
+        quote_known = quote["expires_at"] is None or quote["expires_at"] > now
         base.update(
             pool=policy["pool"],
             configuration_id=policy["configuration_id"],
@@ -930,6 +970,8 @@ class ExecutionPolicies:
         base["admission_state"] = (
             "blocked" if blockers else "waiting_capacity" if approval else "queued"
         )
+        if demand:
+            base["demand_start"] = demand
         if backend == "wangp-worker":
             base["engine_manifest_digest"] = policy["engine_manifest_digest"]
         if "dispatch_backend" in policy:
@@ -951,7 +993,11 @@ class ExecutionPolicies:
                     else {}
                 ),
             )
-        expiry = min(now + 900, latest_start) if not blockers else now + 900
+        expiry = (
+            min(now + 900, latest_start)
+            if not blockers and latest_start is not None
+            else now + 900
+        )
         if approval:
             if not blockers:
                 expiry = min(expiry, cold_latest_start)
@@ -991,6 +1037,7 @@ class ExecutionPolicies:
             or previous.get("output_delivery")
             != current.execution.get("output_delivery")
             or previous.get("delivery_spec") != current.execution.get("delivery_spec")
+            or previous.get("demand_start") != current.execution.get("demand_start")
             or previous.get("backend") == "wangp-worker"
             and previous.get("engine_manifest_digest")
             != current.execution.get("engine_manifest_digest")
@@ -1052,11 +1099,10 @@ class ExecutionPolicies:
                 and policy["pool"] == payload["pool"]
                 and policy["configuration_id"] == payload["configuration_id"]
                 and set(payload["recipe_ids"]) <= set(policy["recipe_ids"])
-                and qualification["status"] in {"accepted", "runtime_required"}
-                and qualification["verified_at"] <= now < qualification["expires_at"]
+                and authority_current(policy, now)
                 and qualification["evidence_id"] == payload["qualification_evidence_id"]
                 and qualification["expires_at"] == payload["qualification_expires_at"]
-                and now < quote["expires_at"] == payload["quote_expires_at"]
+                and quote["expires_at"] == payload["quote_expires_at"]
                 and payload["expires_at"] > now
             )
         except (ValueError, KeyError, TypeError, BackendError):
@@ -1141,7 +1187,6 @@ class ExecutionPolicies:
             )
             if policy is None:
                 return False
-            qualification = policy["qualification"]
             delivery_spec(job)
             quote = reservation_for_duration(
                 policy,
@@ -1161,11 +1206,7 @@ class ExecutionPolicies:
                 )
                 and policy["enabled"]
                 and execution.get("policy_hash") == request_hash(policy)
-                and qualification["status"] in {"accepted", "runtime_required"}
-                and qualification["verified_at"] <= now < qualification["expires_at"]
-                and now < quote["expires_at"]
-                and now + quote["expected_runtime_s"]
-                < min(qualification["expires_at"], quote["expires_at"])
+                and authority_current(policy, now, quote["expected_runtime_s"])
                 and job["request"]["recipe_id"] in policy["recipe_ids"]
                 and job["request"]["request"]["model"] == policy["model_id"]
                 and execution.get("pool") == policy["pool"]

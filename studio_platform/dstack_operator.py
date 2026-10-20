@@ -1204,7 +1204,12 @@ class DstackOperator:
                     422,
                 )
             require(
-                _finite(self.policy.get("expires_at")),
+                "expires_at" in self.policy
+                and (
+                    _finite(self.policy["expires_at"])
+                    or self.policy["expires_at"] is None
+                    and self.policy.get("lifecycle_version") == 2
+                ),
                 "dstack_policy_window_invalid",
                 422,
             )
@@ -1388,8 +1393,20 @@ class DstackOperator:
             "dstack_capacity_disabled",
         )
         require(
-            self.repo.clock() < self.policy["expires_at"], "dstack_authority_expired"
+            self.policy["expires_at"] is None
+            or self.repo.clock() < self.policy["expires_at"],
+            "dstack_authority_expired",
         )
+
+    def demand_start_once(self):
+        from .dstack_demand_start import start_once
+
+        return start_once(self)
+
+    def demand_start_summary(self, connection, now):
+        from .dstack_demand import summary
+
+        return summary(self, connection, now)
 
     def _capacity_request(
         self,
@@ -1436,7 +1453,7 @@ class DstackOperator:
     def _expected_runtime(self, profile):
         """Use the original protected execution quote, never an HTTP estimate."""
         from .execution_profiles import selected_policy
-        from .execution_policy import reservation_for_duration
+        from .execution_policy import authority_current, reservation_for_duration
 
         try:
             policy = selected_policy(
@@ -1456,12 +1473,7 @@ class DstackOperator:
                 and policy["engine_manifest_digest"] == profile["manifest_digest"]
                 and policy["qualification"]["status"]
                 in {"accepted", "runtime_required"}
-                and policy["qualification"]["verified_at"] <= now
-                and now
-                < min(
-                    policy["qualification"]["expires_at"],
-                    policy["reservation"]["expires_at"],
-                ),
+                and authority_current(policy, now),
                 "dstack_execution_policy_unconfirmed",
             )
             duration = reservation_for_duration(
@@ -1672,6 +1684,9 @@ class DstackOperator:
 
     def preview(self, principal, body):
         owner = self.authorize(principal)
+        return self._preview_for_owner(owner, body)
+
+    def _preview_for_owner(self, owner, body, *, demand_job_id=None):
         self._enabled()
         continuing = self.policy.get("lifecycle_version") == 2
         allowed = (
@@ -1716,6 +1731,8 @@ class DstackOperator:
             "dstack_price_ceiling_exceeded",
             422,
         )
+        if self.policy.get("demand_start"):
+            require(chosen_price <= 850000, "dstack_price_ceiling_exceeded", 422)
         require(
             chosen_price <= admin_limits["value"]["max_hourly_price_microusd"],
             "admin_hourly_price_limit_reached",
@@ -1738,7 +1755,8 @@ class DstackOperator:
         now = self.repo.clock()
         if not continuing:
             require(
-                now + ttl <= self.policy["expires_at"],
+                self.policy["expires_at"] is None
+                or now + ttl <= self.policy["expires_at"],
                 "dstack_authority_window_exceeded",
             )
         lifecycle = (
@@ -1868,14 +1886,24 @@ class DstackOperator:
         if continuing:
             payload["lifecycle"] = lifecycle
         expires = min(
-            now + 120,
-            self.policy["expires_at"],
-            request.hard_deadline or self.policy["expires_at"],
+            bound
+            for bound in (now + 120, self.policy["expires_at"], request.hard_deadline)
+            if bound is not None
         )
         if request.host_selection is not None:
             expires = min(expires, request.host_selection["expires_at"])
         with self.repo.transaction() as connection:
+            if demand_job_id is not None:
+                from .identity import lock_account_gate
+
+                lock_account_gate(connection, self.settings.tenant_id)
             self.repo._lock_capacity(connection)
+            if demand_job_id is not None:
+                from .dstack_demand import validate_start
+
+                payload["demand_start"] = validate_start(
+                    self, connection, demand_job_id, profile["id"]
+                )
             require(
                 prices.read(connection, self.profiles[profile["id"]])[0]["snapshot"]
                 == price["snapshot"],
@@ -1973,9 +2001,11 @@ class DstackOperator:
             clock=self.repo.clock,
             fresh_seconds=self.policy["observation_fresh_seconds"],
         )
+        hard_max = 2 if self.policy.get("demand_start") else 128
         require(
-            usage["instances"] + 1 <= self.policy["max_instances"]
-            and usage["physical_gpus"] + 1 <= self.policy["max_physical_gpus"],
+            usage["instances"] + 1 <= min(hard_max, self.policy["max_instances"])
+            and usage["physical_gpus"] + 1
+            <= min(hard_max, self.policy["max_physical_gpus"]),
             "dstack_capacity_limit_exceeded",
         )
         require(
@@ -2166,6 +2196,9 @@ class DstackOperator:
 
     def start(self, principal, body, key):
         owner = self.authorize(principal)
+        return self._start_for_owner(owner, principal.actor_id, body, key)
+
+    def _start_for_owner(self, owner, actor_id, body, key, *, demand_job_id=None):
         require(
             isinstance(body, dict)
             and set(body) == {"preview_id"}
@@ -2176,6 +2209,10 @@ class DstackOperator:
         actor = _actor(self.settings.tenant_id, owner)
         digest = request_hash({"kind": "dstack_start", "body": body})
         with self.repo.transaction() as connection:
+            if demand_job_id is not None:
+                from .identity import lock_account_gate
+
+                lock_account_gate(connection, self.settings.tenant_id)
             self.repo._lock_capacity(connection)
             from .spending_limits import ADMIN_OWNER, lock_owner
 
@@ -2218,6 +2255,17 @@ class DstackOperator:
                 "dstack_profile_not_found",
                 404,
             )
+            demand = value.get("demand_start")
+            if demand_job_id is not None:
+                from .dstack_demand import validate_start
+
+                require(
+                    demand
+                    == validate_start(self, connection, demand_job_id, trusted["id"]),
+                    "dstack_demand_changed",
+                )
+            else:
+                require(demand is None, "dstack_demand_start_internal_only")
             price, _, price_version = OperatorPrices(self.repo, self.settings).read(
                 connection, trusted
             )
@@ -2332,7 +2380,7 @@ class DstackOperator:
                 self.settings.tenant_id,
                 owner,
                 profile["project_id"],
-                principal.actor_id,
+                actor_id,
             )
             intent = self.repo.reserve_instance_intent(
                 scope,
@@ -2406,6 +2454,8 @@ class DstackOperator:
                 "request": asdict(request),
                 "dstack": binding,
             }
+            if demand is not None:
+                payload["demand_start"] = copy.deepcopy(demand)
             if continuing:
                 payload["lifecycle"] = copy.deepcopy(value["lifecycle"])
                 payload["hold_until"] = payload["lifecycle"]["hold_until"]

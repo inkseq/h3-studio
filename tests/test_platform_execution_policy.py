@@ -15,6 +15,8 @@ from studio_platform.capabilities import MODEL, compile_request
 from studio_platform.control import WorkerControl, WorkerSpec
 from studio_platform.execution_policy import (
     ExecutionPolicies,
+    authority_current,
+    authority_deadline,
     read_policy,
     validate_policy,
 )
@@ -732,6 +734,183 @@ class ExecutionPolicyTests(unittest.TestCase):
             self.repo.get_budget("test-owner:sixnine:superdan")["reserved_microusd"],
             500000,
         )
+
+    def test_explicit_nonexpiring_authority_preserves_finite_plan_and_original_hash(
+        self,
+    ):
+        from studio_platform.capabilities import capabilities
+        from studio_platform.repository import request_hash
+
+        now = self.repo.clock()
+        self.repo.clock = lambda: now
+        for section in ("qualification", "reservation"):
+            self.value[section]["expires_at"] = None
+        original = copy.deepcopy(self.value)
+        self.write()
+        admitted = self.evaluate()
+        self.assertTrue(admitted.execution["enabled"], admitted.execution)
+        self.assertEqual(admitted.expires_at, now + 900)
+        self.assertEqual(admitted.execution["policy_hash"], request_hash(original))
+        self.assertIsNone(admitted.execution["qualification_expires_at"])
+        self.assertIsNone(admitted.execution["quote_expires_at"])
+        self.assertEqual(self.value, original)
+        self.assertIsNone(authority_deadline(self.value))
+        plan = self.repo.create_plan(
+            self.scope,
+            self.compiled,
+            admitted.execution,
+            expires_at=admitted.expires_at,
+            estimated_cost_microusd=admitted.cost,
+        )
+        job = self.repo.create_job(
+            self.scope,
+            plan["id"],
+            "nonexpiring-authority",
+            budget_account_ids=admitted.execution["budget_account_ids"],
+        )
+        # No artificial renewal is needed for already admitted authority, but
+        # new confirmations still use the original finite plan lease.
+        self.repo.clock = lambda: now + 86400
+        self.assertTrue(self.policies.activation_allowed(job))
+        for recipe in capabilities(self.settings)["recipes"]:
+            self.assertIsNone(recipe["execution_support"]["expires_at"])
+        with self.assertRaisesRegex(Conflict, "plan_expired"):
+            self.repo.create_job(
+                self.scope,
+                plan["id"],
+                "expired-confirmation",
+                budget_account_ids=admitted.execution["budget_account_ids"],
+            )
+
+    def test_nonexpiring_authority_keeps_any_remaining_finite_bound(self):
+        now = self.repo.clock()
+        self.repo.clock = lambda: now
+        for section in ("qualification", "reservation"):
+            other = "reservation" if section == "qualification" else "qualification"
+            value = copy.deepcopy(self.value)
+            value[section]["expires_at"] = None
+            value[other]["expires_at"] = now + 301
+            self.value = value
+            self.write()
+            with self.subTest(finite=other):
+                self.assertEqual(authority_deadline(value), now + 301)
+                self.assertTrue(authority_current(value, now, 300))
+                self.assertFalse(authority_current(value, now + 1, 300))
+                self.assertEqual(self.evaluate().expires_at, now + 1)
+                self.repo.clock = lambda: now + 1
+                self.assertFalse(self.evaluate().execution["enabled"])
+                self.repo.clock = lambda: now
+
+    def test_nonexpiring_is_explicit_not_missing_or_invalid_authority(self):
+        original = copy.deepcopy(self.value)
+        for section in ("qualification", "reservation"):
+            for value in (False, 0, -1, float("inf"), "never"):
+                invalid = copy.deepcopy(original)
+                invalid[section]["expires_at"] = value
+                with (
+                    self.subTest(section=section, value=value),
+                    self.assertRaises(ValueError),
+                ):
+                    validate_policy(invalid)
+            invalid = copy.deepcopy(original)
+            del invalid[section]["expires_at"]
+            with (
+                self.subTest(section=section, value="missing"),
+                self.assertRaises(ValueError),
+            ):
+                validate_policy(invalid)
+
+    def test_demand_authority_admits_one_original_job_without_claiming_ready_capacity(
+        self,
+    ):
+        from studio_platform.repository import request_hash
+
+        self.control.retire("synthetic-worker", upstream_idle_confirmed=True)
+        marker = {
+            "version": 1,
+            "profile_id": "protected-profile",
+            "profile_hash": "a" * 64,
+            "policy_hash": request_hash(self.value),
+            "test_task_id": "test-task",
+        }
+        with patch(
+            "studio_platform.dstack_demand.demand_admission", return_value=marker
+        ) as demand:
+            admitted = self.evaluate()
+            self.assertTrue(admitted.execution["enabled"], admitted.execution)
+            self.assertEqual(admitted.execution["admission_state"], "queued")
+            self.assertEqual(admitted.execution["registered_healthy_slots"], 0)
+            self.assertEqual(admitted.execution["demand_start"], marker)
+            self.assertNotIn("capacity_approval_id", admitted.execution)
+            demand.assert_called_once_with(
+                self.settings, self.repo, self.scope, self.compiled, self.value
+            )
+            plan = self.repo.create_plan(
+                self.scope,
+                self.compiled,
+                admitted.execution,
+                expires_at=admitted.expires_at,
+                estimated_cost_microusd=admitted.cost,
+            )
+            self.policies.ensure_current(plan, self.scope)
+            self.control.register(
+                WorkerSpec(
+                    "new-warm-worker",
+                    self.value["pool"],
+                    "synthetic-provider",
+                    "new-warm-instance",
+                    ("new-warm-gpu",),
+                    tuple(self.value["recipe_ids"]),
+                    self.value["model_id"],
+                    self.value["configuration_id"],
+                )
+            )
+            self.control.mark_ready("new-warm-worker", upstream_idle_confirmed=True)
+            # Readiness can arrive between preview and confirmation without
+            # changing its original exact automatic-start authority marker.
+            self.policies.ensure_current(plan, self.scope)
+            job = self.repo.create_job(
+                self.scope,
+                plan["id"],
+                "confirmed-demand",
+                budget_account_ids=admitted.execution["budget_account_ids"],
+            )
+        with patch("studio_platform.dstack_demand.demand_admission", return_value=None):
+            self.assertTrue(self.evaluate().execution["enabled"])
+            with self.assertRaisesRegex(Conflict, "execution_policy_changed"):
+                self.policies.ensure_current(plan, self.scope)
+            replay = self.repo.create_job(
+                self.scope,
+                plan["id"],
+                "confirmed-demand",
+                budget_account_ids=admitted.execution["budget_account_ids"],
+            )
+            self.assertEqual(replay["id"], job["id"])
+            self.assertTrue(self.policies.activation_allowed(job))
+        self.assertEqual(job["status"], "queued")
+        self.assertEqual(
+            self.repo.get_budget("test-owner:sixnine:superdan")["reserved_microusd"],
+            500000,
+        )
+
+    def test_demand_authority_does_not_bypass_policy_or_budget_blockers(self):
+        self.control.retire("synthetic-worker", upstream_idle_confirmed=True)
+        self.value["enabled"] = False
+        self.write()
+        with patch("studio_platform.dstack_demand.demand_admission") as demand:
+            self.assertFalse(self.evaluate().execution["enabled"])
+            demand.assert_not_called()
+        self.value["enabled"] = True
+        self.write()
+        self.repo.configure_budget(
+            "test-owner:sixnine:superdan",
+            tenant_id="sixnine",
+            owner_id="superdan",
+            limit_microusd=1,
+        )
+        with patch("studio_platform.dstack_demand.demand_admission") as demand:
+            self.assertFalse(self.evaluate().execution["enabled"])
+            demand.assert_not_called()
 
     def test_submission_guard_does_not_reserve_twice_and_honors_revocation(self):
         admission = self.evaluate()

@@ -10,6 +10,7 @@ import time
 from types import MappingProxyType
 
 from .execution_profiles import read_profiles
+from .execution_policy import authority_current
 
 MAPPING_REVISION = "quality-tiers-v1"
 TIERS = ("fast", "standard", "refine")
@@ -98,13 +99,7 @@ def _current(policy, now):
     return bool(
         policy
         and policy["enabled"]
-        and policy["qualification"]["status"] in {"accepted", "runtime_required"}
-        and policy["qualification"]["verified_at"] <= now
-        and now + policy["reservation"]["expected_runtime_s"]
-        < min(
-            policy["qualification"]["expires_at"],
-            policy["reservation"]["expires_at"],
-        )
+        and authority_current(policy, now, policy["reservation"]["expected_runtime_s"])
     )
 
 

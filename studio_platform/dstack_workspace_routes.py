@@ -32,6 +32,16 @@ def register_routes(app, *, service):
     def admin_state(request: Request):
         return response(workspace.state(principal(request), admin=True))
 
+    @app.get(PREFIX + "/admin/demand-start")
+    def demand_start(request: Request):
+        return response(workspace.demand_start(principal(request)))
+
+    @app.put(PREFIX + "/admin/demand-start")
+    def set_demand_start(
+        request: Request, body: dict, key: str = Header(..., alias="Idempotency-Key")
+    ):
+        return response(workspace.set_demand_start(principal(request), body, key))
+
     @app.post(PREFIX + "/groups", status_code=201)
     def create(
         request: Request, body: dict, key: str = Header(..., alias="Idempotency-Key")

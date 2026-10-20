@@ -205,7 +205,7 @@ def capabilities(settings):
         # Public operational defaults are separate from model defaults. Never
         # serialize the operator policy (budget identities/pool bindings), and
         # never modify compile_request or a caller's explicitly chosen values.
-        from .execution_policy import read_policy
+        from .execution_policy import read_policy, authority_current, authority_deadline
         from .qualification_profiles import QUEUED_TASK_PROFILE
 
         try:
@@ -217,14 +217,8 @@ def capabilities(settings):
             policy
             and policy["enabled"]
             and policy["backend"] == settings.execution_backend
-            and policy["qualification"]["status"] in {"accepted", "runtime_required"}
-            and policy["qualification"]["verified_at"]
-            <= now
-            < policy["qualification"]["expires_at"]
-            and now + policy["reservation"]["expected_runtime_s"]
-            < min(
-                policy["qualification"]["expires_at"],
-                policy["reservation"]["expires_at"],
+            and authority_current(
+                policy, now, policy["reservation"]["expected_runtime_s"]
             )
         ):
             envelope = policy["envelope"]["controls"]
@@ -285,11 +279,12 @@ def capabilities(settings):
                     if runtime_required
                     else "historical_qualification",
                     "available_recipe_ids": [item["id"] for item in available_recipes],
-                    "expires_at": min(
-                        policy["qualification"]["expires_at"],
-                        policy["reservation"]["expires_at"],
-                    )
-                    - policy["reservation"]["expected_runtime_s"],
+                    "expires_at": (
+                        authority_deadline(policy)
+                        - policy["reservation"]["expected_runtime_s"]
+                        if authority_deadline(policy) is not None
+                        else None
+                    ),
                 }
                 if qualified:
                     if "output_delivery" in policy:

@@ -160,6 +160,27 @@ class QualityTierTests(unittest.TestCase):
         with self.assertRaisesRegex(QualitySelectionError, "quality_tier_unavailable"):
             self.resolve(mode="fl")
 
+    def test_nonexpiring_binding_is_current_without_extending_any_finite_bound(self):
+        from studio_platform.execution_profiles import public_profiles
+        from unittest.mock import patch
+
+        value = self.add(STANDARD, "ref")
+        value["qualification"]["expires_at"] = None
+        value["reservation"]["expires_at"] = None
+        self.write()
+        before = self.path.read_bytes()
+        self.assertEqual(self.resolve()["deployment_profile_id"], STANDARD)
+        with patch("time.time", return_value=self.now):
+            profile = next(
+                p for p in public_profiles(self.settings) if p["id"] == STANDARD
+            )
+            self.assertTrue(profile["generation_support"]["ref"]["enabled"])
+        self.assertEqual(self.path.read_bytes(), before)
+        value["reservation"]["expires_at"] = self.now + 1
+        self.write()
+        with self.assertRaisesRegex(QualitySelectionError, "quality_tier_unavailable"):
+            self.resolve()
+
     def test_exact_one_binding_or_ambiguity_and_fast_has_no_fallback(self):
         self.settings = replace(self.settings, default_deployment_profile_id=None)
         self.add(STANDARD, "ref")

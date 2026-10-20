@@ -269,6 +269,191 @@ class AvailabilityTests(unittest.TestCase):
         self.path.write_text("invalid")
         self.assertEqual(self.modes()["fl"]["state"], "unknown")
 
+    def test_nonexpiring_profile_keeps_worker_freshness_and_snapshot_lease(self):
+        spec = self.worker(0)
+        self.values[0]["qualification"]["expires_at"] = None
+        self.values[0]["reservation"]["expires_at"] = None
+        self.write()
+        self.assertEqual(self.modes()["fl"]["state"], "ready")
+        self.assertEqual(self.result()["expires_at"], self.now + 10)
+        self.mutate_worker(spec, expires_at=self.now - 1)
+        self.assertEqual(self.modes()["fl"]["state"], "unknown")
+
+    def test_zero_worker_can_queue_requires_current_demand_and_exact_active_owner(self):
+        from types import SimpleNamespace
+        from studio_platform.dstack_demand import eligible_jobs
+        from studio_platform.dstack_demand_policy import policy_key
+        from studio_platform.identity_schema import metadata, users
+        from studio_platform.operator_capacity import operator_policy
+
+        self.values[0]["dispatch_backend"] = "hatchet-v1"
+        self.write()
+        selected = self.values[0]
+        config = {
+            "version": 1,
+            "project": "isolated-demand-test",
+            "policy": {
+                "enabled": True,
+                "lifecycle_version": 2,
+                "expires_at": None,
+                "demand_start": {"profile_ids": ["fleet-fl"]},
+            },
+            "profiles": [
+                {
+                    "id": "fleet-fl",
+                    "runtime_profile_id": PRUNED,
+                    "mode": "fl",
+                    "configuration_id": selected["configuration_id"],
+                    "pool": selected["pool"],
+                    "owner_id": "superdan",
+                    "max_price_microusd": 850000,
+                }
+            ],
+        }
+        metadata.create_all(self.repo.engine)  # Isolated canonical fixture only.
+        with self.repo.transaction() as connection:
+            for index, (tenant, owner, status) in enumerate(
+                (
+                    (self.settings.tenant_id, "superdan", "active"),
+                    (self.settings.tenant_id, "suspended", "suspended"),
+                    ("other-tenant", "foreign-owner", "active"),
+                ),
+                1,
+            ):
+                connection.execute(
+                    insert(users).values(
+                        id=f"00000000-0000-4000-8000-{index:012d}",
+                        tenant=tenant,
+                        owner=owner,
+                        display_name=owner,
+                        role="user",
+                        status=status,
+                        created_at=self.now,
+                        updated_at=self.now,
+                    )
+                )
+            connection.execute(
+                insert(operator_policy).values(
+                    id=policy_key(self.settings.tenant_id),
+                    payload={"tenant_id": self.settings.tenant_id, "enabled": True},
+                    version=1,
+                    actor="fixture-admin",
+                    updated_at=self.now,
+                )
+            )
+
+        def mode(owner):
+            value = generation_availability(
+                self.settings, self.repo, registry=self.registry, owner=owner
+            )
+            self.assertEqual(value["expires_at"], self.now + 10)
+            return next(
+                p["modes"]["fl"]
+                for p in value["profiles"]
+                if p["deployment_profile_id"] == PRUNED
+            )
+
+        with patch(
+            "studio_platform.dstack_demand._protected_configuration",
+            return_value=config,
+        ):
+            available = mode("superdan")
+            self.assertEqual(available["state"], "unavailable")
+            self.assertFalse(available["available"])
+            self.assertTrue(available["can_queue"])
+            for owner in (None, "suspended", "foreign-owner"):
+                with self.subTest(owner=owner):
+                    self.assertFalse(mode(owner)["can_queue"])
+            # Use the actual native compiler, policy admission, original job
+            # ledger and selector together; there is no worker or rental.
+            compiled, fingerprint = self.compiled()
+            policies = ExecutionPolicies(self.settings, self.repo)
+            admission = policies.evaluate(compiled, self.scope, fingerprint)
+            self.assertTrue(admission.execution["enabled"], admission.execution)
+            self.assertEqual(admission.execution["registered_healthy_slots"], 0)
+            plan = self.repo.create_plan(
+                self.scope,
+                compiled,
+                admission.execution,
+                expires_at=admission.expires_at,
+                estimated_cost_microusd=admission.cost,
+            )
+            policies.ensure_current(plan, self.scope)
+            job = self.repo.create_job(
+                self.scope,
+                plan["id"],
+                "real-cold-demand",
+                budget_account_ids=admission.execution["budget_account_ids"],
+            )
+            service = SimpleNamespace(
+                settings=self.settings,
+                repo=self.repo,
+                config=config,
+                profiles={"fleet-fl": config["profiles"][0]},
+            )
+
+            def eligible():
+                with self.repo.engine.connect() as connection:
+                    return eligible_jobs(service, connection, self.now)
+
+            selected_jobs = eligible()
+            self.assertEqual(len(selected_jobs), 1)
+            self.assertEqual(selected_jobs[0][0]["id"], job["id"])
+            self.assertEqual(selected_jobs[0][1]["id"], "fleet-fl")
+            self.assertEqual(
+                self.repo.get_budget("test-owner:sixnine:superdan")[
+                    "reserved_microusd"
+                ],
+                admission.cost,
+            )
+            with self.repo.transaction() as connection:
+                connection.execute(
+                    update(users)
+                    .where(
+                        users.c.tenant == self.settings.tenant_id,
+                        users.c.owner == "superdan",
+                    )
+                    .values(status="suspended")
+                )
+            self.assertEqual(eligible(), [])
+            with self.repo.transaction() as connection:
+                connection.execute(
+                    update(users)
+                    .where(
+                        users.c.tenant == self.settings.tenant_id,
+                        users.c.owner == "superdan",
+                    )
+                    .values(status="active")
+                )
+            cancelled = self.repo.request_cancel(self.scope, job["id"])
+            self.assertEqual(cancelled["status"], "cancelled")
+            self.assertEqual(eligible(), [])
+            replay = self.repo.create_job(
+                self.scope,
+                plan["id"],
+                "real-cold-demand",
+                budget_account_ids=admission.execution["budget_account_ids"],
+            )
+            self.assertEqual(replay["id"], job["id"])
+            self.assertEqual(replay["status"], "cancelled")
+            self.assertEqual(replay["request"], job["request"])
+            self.assertEqual(replay["execution_plan"], job["execution_plan"])
+            self.assertEqual(
+                self.repo.get_budget("test-owner:sixnine:superdan")[
+                    "reserved_microusd"
+                ],
+                0,
+            )
+            with self.repo.transaction() as connection:
+                connection.execute(
+                    update(operator_policy)
+                    .where(operator_policy.c.id == policy_key(self.settings.tenant_id))
+                    .values(
+                        payload={"tenant_id": self.settings.tenant_id, "enabled": False}
+                    )
+                )
+            self.assertFalse(mode("superdan")["can_queue"])
+
     def test_expired_known_instance_excludes_fresh_worker_and_invalidates_prior_preflight(
         self,
     ):

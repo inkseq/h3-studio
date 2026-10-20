@@ -601,7 +601,7 @@ def availability(value, principal=None, *, settings=None):
             if chosen is not None:
                 modes[mode] = _pick(
                     chosen.get("modes", {}).get(mode, {}),
-                    {"state", "available", "reason_code"},
+                    {"state", "available", "can_queue", "reason_code"},
                 )
                 modes[mode]["reason_code"] = {
                     "ready": "capacity_ready",
@@ -613,6 +613,7 @@ def availability(value, principal=None, *, settings=None):
             else:
                 modes[mode] = {
                     "state": "unavailable",
+                    "can_queue": False,
                     "available": False,
                     "reason_code": reason,
                     "recipe_id": recipe_alias(mode),
