@@ -158,7 +158,7 @@ def _resize_reservation(writer, record, size):
         raise
 
 
-def _publish(writer, record, *, complete):
+def _publish(writer, record, *, status):
     """Receipt CAS, original artifact metadata and accounting commit together."""
     from .artifact_writer import write_receipts, ArtifactWritePending
 
@@ -196,7 +196,7 @@ def _publish(writer, record, *, complete):
         ):
             raise IntegrityError("artifact_poster_original_changed")
         value = dict(rows[0]["metadata"])
-        if complete:
+        if status == "ready":
             if any(
                 role.get("status") != "verified" for role in display["objects"].values()
             ):
@@ -247,9 +247,13 @@ def _publish(writer, record, *, complete):
             value["rendition_status"] = "ready"
             display["phase"] = "complete"
             display.pop("error_code", None)
-        else:
+        elif status == "missing":
             value["rendition_status"] = "missing"
             display["phase"] = "missing"
+        elif status == "pending":
+            value["rendition_status"] = "pending"
+        else:
+            raise IntegrityError("artifact_poster_publication_state_invalid")
         conn.execute(
             update(artifacts)
             .where(artifacts.c.id == rows[0]["id"])
@@ -370,7 +374,9 @@ def ensure(
         display['phase'] = 'planned'
         display.pop('scratch_cleanup', None)
         display.pop('error_code', None)
-    writer._save(record)  # Original CAS claims this display writer before IO.
+    # Claim the original receipt and publish pending in the same transaction,
+    # before reservation, download or decode can begin.
+    _publish(writer, record, status="pending")
     if not display["objects"]:
         _resize_reservation(
             writer,
@@ -421,7 +427,7 @@ def ensure(
                 bytes=sum(v["size_bytes"] for v in manifest.values()),
             )
             _resize_reservation(writer, record, display["scratch_cleanup"]["bytes"])
-            _publish(writer, record, complete=False)
+            _publish(writer, record, status="missing")
             cleanup(writer, record)
             return record
         for name, role in roles.items():
@@ -471,6 +477,6 @@ def ensure(
             writer._verify_remote(role, heartbeat)
         role["status"] = "verified"
         writer._save(record)
-    _publish(writer, record, complete=True)
+    _publish(writer, record, status="ready")
     cleanup(writer, record)
     return record

@@ -206,6 +206,7 @@ def public_artifact_renditions(record):
         status="ready" if value.get("validated") is True else "pending",
         original=value,
         rendition_metadata=display.get("metadata"),
+        rendition_status=value.get("rendition_status"),
         **{role: objects.get(role) for role in RENDITIONS},
     )
     result = public_renditions(view)

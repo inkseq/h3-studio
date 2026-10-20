@@ -23,7 +23,7 @@ from studio_platform.assets import (
     AssetService,
 )
 from studio_platform.media_renditions import public_renditions
-from studio_platform.rendition_backfill import plan, main as backfill_main
+from studio_platform.rendition_backfill import plan, plan_all, main as backfill_main
 from studio_platform.settings import Settings
 from studio_platform.storage import S3ObjectStore, StorageWriteUncertain, StorageError
 from studio_platform.storage_asset_journal import receipts
@@ -382,6 +382,168 @@ class RenditionTests(OfflineTest):
         )
         loader.assert_not_called()
         factory.assert_not_called()
+
+    def test_all_owner_plan_is_tenant_scoped_paged_and_has_no_storage_calls(self):
+        self.legacy_upload()
+        with mock.patch.object(self.service, '_prepare_renditions', return_value={}):
+            self.service.upload('second', 'project', io.BytesIO(png()), 'source.png')
+        foreign = AssetService(self.engine, self.store, self.root, tenant='foreign')
+        with mock.patch.object(foreign, '_prepare_renditions', return_value={}):
+            foreign.upload('hidden', 'project', io.BytesIO(png()), 'source.png')
+        settings = Settings(self.root, database_url=str(self.engine.url))
+        loader = mock.Mock(side_effect=AssertionError('No credential read'))
+        factory = mock.Mock(side_effect=AssertionError('No store construction'))
+        with (
+            mock.patch.object(Settings, 'from_environment', return_value=settings),
+            mock.patch.object(
+                self.store, 'open', side_effect=AssertionError('No object read')
+            ),
+            redirect_stdout(io.StringIO()) as output,
+        ):
+            self.assertEqual(
+                backfill_main(
+                    ['plan', '--all-owners', '--owner-limit', '1'],
+                    credentials_loader=loader,
+                    store_factory=factory,
+                ),
+                0,
+            )
+        first = json.loads(output.getvalue())
+        self.assertEqual([page['owner'] for page in first['owners']], ['owner'])
+        self.assertEqual(first['next_owner_offset'], 1)
+        second = plan_all(self.engine, tenant='sixnine', owner_limit=1, owner_offset=1)
+        self.assertEqual([page['owner'] for page in second['owners']], ['second'])
+        self.assertIsNone(second['next_owner_offset'])
+        loader.assert_not_called()
+        factory.assert_not_called()
+
+    def test_all_owner_apply_reuses_receipts_and_keeps_different_binding_refused(self):
+        original = self.legacy_upload()
+        with mock.patch.object(self.service, '_prepare_renditions', return_value={}):
+            blocked = self.service.upload(
+                'second', 'project', io.BytesIO(png()), 'source.png'
+            )
+        old = self.service.journal.get('second', blocked['id'])
+        old['storage_binding'] = '0' * 64
+        self.service.journal.save(
+            old
+        )  # A synthetic old-binding fixture, not a rebind operation.
+        original_object = self.service.get('owner', original['id'])['original']
+        blocked_object = self.service.get('second', blocked['id'])['original']
+        baseline = self.service.usage('second')
+        settings = Settings(self.root, database_url=str(self.engine.url))
+        with (
+            mock.patch.object(Settings, 'from_environment', return_value=settings),
+            redirect_stdout(io.StringIO()) as output,
+        ):
+            self.assertEqual(backfill_main(['apply', '--all-owners']), 2)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result['state'], 'partial')
+        self.assertEqual(result['attempted'], 2)
+        self.assertEqual(
+            [item['state'] for item in result['results']], ['complete', 'refused']
+        )
+        self.assertEqual(
+            result['results'][1]['reason_code'],
+            'rendition_original_receipt_unconfirmed',
+        )
+        self.assertTrue(
+            public_renditions(self.service.get('owner', original['id']))[
+                'rendition_ready'
+            ]
+        )
+        self.assertEqual(
+            self.service.get('owner', original['id'])['original'], original_object
+        )
+        self.assertEqual(self.service.journal.get('second', blocked['id']), old)
+        self.assertEqual(self.service.usage('second'), baseline)
+        self.assertEqual(
+            self.service.get('second', blocked['id'])['original'], blocked_object
+        )
+
+    def test_all_owner_item_bound_and_repeat_never_regenerate_completed_display(self):
+        first = self.legacy_upload()
+        with mock.patch.object(self.service, '_prepare_renditions', return_value={}):
+            second = self.service.upload(
+                'second', 'project', io.BytesIO(png()), 'source.png'
+            )
+        settings = Settings(self.root, database_url=str(self.engine.url))
+        with (
+            mock.patch.object(Settings, 'from_environment', return_value=settings),
+            redirect_stdout(io.StringIO()) as output,
+        ):
+            self.assertEqual(
+                backfill_main(['apply', '--all-owners', '--max-items', '1']), 2
+            )
+        result = json.loads(output.getvalue())
+        self.assertEqual(result['attempted'], 1)
+        self.assertEqual(result['results'][1]['reason_code'], 'rendition_item_limit')
+        completed = self.service.journal.get('owner', first['id'])
+        accounted = self.service.usage('owner')
+        with (
+            mock.patch.object(Settings, 'from_environment', return_value=settings),
+            redirect_stdout(io.StringIO()) as output,
+        ):
+            self.assertEqual(
+                backfill_main(['apply', '--all-owners', '--max-items', '1']), 0
+            )
+        self.assertEqual(json.loads(output.getvalue())['attempted'], 1)
+        self.assertEqual(self.service.journal.get('owner', first['id']), completed)
+        self.assertEqual(self.service.usage('owner'), accounted)
+        self.assertTrue(
+            public_renditions(self.service.get('second', second['id']))[
+                'rendition_ready'
+            ]
+        )
+
+    def test_all_owner_mode_cannot_globally_take_over_writers_or_override_roots(self):
+        with mock.patch.object(
+            Settings, 'from_environment', side_effect=AssertionError('invalid mode')
+        ):
+            for extra in (
+                ['--assert-writers-stopped'],
+                ['--work-dir', str(self.root)],
+                ['--receipt-version', '1'],
+                ['--asset-id', 'original'],
+            ):
+                with self.subTest(extra=extra), redirect_stdout(io.StringIO()):
+                    self.assertEqual(
+                        backfill_main(['apply', '--all-owners', *extra]), 1
+                    )
+
+    def test_all_owner_snapshot_race_refuses_stale_item_after_earlier_success(self):
+        from studio_platform import rendition_backfill as module
+
+        first = self.legacy_upload()
+        with mock.patch.object(self.service, '_prepare_renditions', return_value={}):
+            second = self.service.upload(
+                'second', 'project', io.BytesIO(png()), 'source.png'
+            )
+        settings = Settings(self.root, database_url=str(self.engine.url))
+        saved = []
+
+        def race(*args, **kwargs):
+            snapshot = plan_all(*args, **kwargs)
+            receipt = self.service.journal.get('second', second['id'])
+            self.service.journal.save(receipt)
+            saved.append(receipt)
+            return snapshot
+
+        with (
+            mock.patch.object(Settings, 'from_environment', return_value=settings),
+            mock.patch.object(module, 'plan_all', side_effect=race),
+            redirect_stdout(io.StringIO()) as output,
+        ):
+            self.assertEqual(backfill_main(['apply', '--all-owners']), 2)
+        rows = json.loads(output.getvalue())['results']
+        self.assertEqual([item['state'] for item in rows], ['complete', 'refused'])
+        self.assertEqual(
+            rows[1]['reason_code'], 'rendition_current_owned_receipt_required'
+        )
+        self.assertTrue(
+            public_renditions(self.service.get('owner', first['id']))['rendition_ready']
+        )
+        self.assertEqual(self.service.journal.get('second', second['id']), saved[0])
 
     def test_stable_webp_signing_keeps_video_and_default_asset_policy_narrow(self):
         store = S3ObjectStore(config(), S3Credentials("fake-access", "fake-secret"))
