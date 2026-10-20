@@ -9,14 +9,15 @@ from unittest import mock
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.testclient import TestClient
-from sqlalchemy import insert
+from sqlalchemy import func, insert, select
 from starlette.background import BackgroundTask
 
 import test_platform_api as fixture
 from studio_platform.auth import Principal
+from studio_platform.capabilities import VERSION, compile_request, public_version
 from studio_platform.quality_http import install
 from studio_platform.quick_chat import DEFAULT_SETTINGS, EMPTY_INPUTS, QuickChatError
-from studio_platform.repository import Conflict, Scope, jobs
+from studio_platform.repository import Conflict, Scope, jobs, plans, request_hash
 
 
 PROFILE = "h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6"
@@ -136,6 +137,199 @@ class QualityHTTPTests(unittest.TestCase):
             value,
         )
         return value
+
+    def _version_project(self):
+        self._identity("user")
+        response = self.client.post("/v1/projects", json={"project": fixture.project()})
+        self.assertEqual(response.status_code, 201, response.text)
+        version = self.client.get("/v1/capabilities").json()["capabilities_version"]
+        self.assertEqual(version, public_version(VERSION))
+        self.assertNotEqual(version, VERSION)
+        return version
+
+    def _plan_count(self):
+        with self.app.state.repository.engine.connect() as connection:
+            return connection.scalar(select(func.count()).select_from(plans))
+
+    def test_public_capability_version_compiles_and_round_trips_direct_and_saved_preflight(
+        self,
+    ):
+        version = self._version_project()
+        repo = self.app.state.repository
+        body = fixture.generation_request()
+        raw, raw_hash = compile_request(body, lambda _: None)
+        public, public_hash = compile_request(
+            {**body, "capabilities_version": version}, lambda _: None
+        )
+        self.assertEqual(public, raw)
+        self.assertEqual(public_hash, raw_hash)
+        self.assertEqual(public["capabilities_version"], VERSION)
+
+        retained = []
+        for supplied in (version, VERSION):
+            response = self.client.post(
+                "/v1/generation-plans",
+                json={**body, "capabilities_version": supplied},
+            )
+            self.assertEqual(response.status_code, 201, response.text)
+            stored = repo.get_plan(
+                Scope(self.settings.tenant_id, "supervan", "story-one"),
+                response.json()["plan_id"],
+            )
+            self.assertEqual(stored["request"]["capabilities_version"], VERSION)
+            self.assertEqual({key: stored["request"][key] for key in raw}, raw)
+            self.assertEqual(stored["request_hash"], request_hash(stored["request"]))
+            retained.append(stored)
+            response = self.client.post(
+                "/v1/projects/story-one/shots/shot-one/generation-plans",
+                json={"expected_version": 1, "capabilities_version": supplied},
+            )
+            self.assertEqual(response.status_code, 201, response.text)
+            saved = repo.get_plan(
+                Scope(self.settings.tenant_id, "supervan", "story-one"),
+                response.json()["plan_id"],
+            )
+            self.assertEqual(saved["request"]["capabilities_version"], VERSION)
+        self.assertEqual(retained[0]["request"], retained[1]["request"])
+        self.assertEqual(retained[0]["request_hash"], retained[1]["request_hash"])
+        count = self._plan_count()
+        stale = public_version(VERSION + "-stale")
+        for path, invalid in (
+            ("/v1/generation-plans", {**body, "capabilities_version": stale}),
+            (
+                "/v1/projects/story-one/shots/shot-one/generation-plans",
+                {"expected_version": 1, "capabilities_version": stale},
+            ),
+        ):
+            response = self.client.post(path, json=invalid)
+            self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(self._plan_count(), count)
+        self.assertEqual(self.client.get("/v1/jobs").json()["jobs"], [])
+
+    def test_machine_quick_chat_preflight_accepts_public_version_and_preserves_original_replay(
+        self,
+    ):
+        self._identity("admin")
+        session_response = self.client.post(
+            "/v1/quick-chat/sessions",
+            json={},
+            headers={"Idempotency-Key": "version-session"},
+        )
+        self.assertEqual(session_response.status_code, 201, session_response.text)
+        session_id = session_response.json()["session"]["id"]
+        authored = self.client.post(
+            "/v1/quick-chat/sessions/" + session_id + "/cards",
+            json={
+                **DEFAULT_SETTINGS,
+                "prompt": "A blue paper bird unfolds on a desk.",
+                "copies": 1,
+                "inputs": copy.deepcopy(EMPTY_INPUTS),
+            },
+            headers={"Idempotency-Key": "version-card"},
+        )
+        self.assertEqual(authored.status_code, 201, authored.text)
+        revision = authored.json()["revision"]
+        service, repo = self.app.state.quick_chat, self.app.state.repository
+        principal = Principal("superdan", "fixture")
+        project_id = service._access(principal, session_id, "projects:read")["payload"][
+            "project_id"
+        ]
+        self._identity("machine")
+        self.app.state.auth.register_client(
+            "tier-http-client",
+            self.client.headers["Authorization"].split()[1],
+            "superdan",
+            [project_id],
+            ["projects:read", "jobs:read", "jobs:write"],
+        )
+        version = self.client.get("/v1/quick-chat/schema").json()["capabilities"][
+            "capabilities_version"
+        ]
+        self.assertEqual(version, public_version(VERSION))
+        path = (
+            "/v1/quick-chat/sessions/"
+            + session_id
+            + "/revisions/"
+            + revision["id"]
+            + "/preflights"
+        )
+        for index, supplied in enumerate((version, VERSION)):
+            body = {
+                "capabilities_version": supplied,
+                "revision_hash": revision["input_hash"],
+            }
+            headers = {"Idempotency-Key": "version-preflight-" + str(index)}
+            response = self.client.post(path, json=body, headers=headers)
+            self.assertEqual(response.status_code, 201, response.text)
+            plan_id = response.json()["items"][0]["plan"]["plan_id"]
+            scope = Scope(self.settings.tenant_id, "superdan", project_id)
+            stored = repo.get_plan(scope, plan_id)
+            self.assertEqual(stored["request"]["capabilities_version"], VERSION)
+            count = self._plan_count()
+            replay = self.client.post(path, json=body, headers=headers)
+            self.assertEqual(replay.status_code, 201, replay.text)
+            self.assertEqual(replay.json()["id"], response.json()["id"])
+            self.assertEqual(repo.get_plan(scope, plan_id), stored)
+            self.assertEqual(self._plan_count(), count)
+        count = self._plan_count()
+        stale = self.client.post(
+            path,
+            json={
+                "capabilities_version": public_version(VERSION + "-stale"),
+                "revision_hash": revision["input_hash"],
+            },
+            headers={"Idempotency-Key": "version-stale-preflight"},
+        )
+        self.assertEqual(stale.status_code, 409, stale.text)
+        self.assertEqual(stale.json()["code"], "preflight_stale")
+        self.assertEqual(self._plan_count(), count)
+        self.assertEqual(
+            service.get_revision(principal, session_id, revision["id"])["input_hash"],
+            revision["input_hash"],
+        )
+        self.assertEqual(self.client.get("/v1/jobs").json()["jobs"], [])
+
+    def test_storyboard_preflight_accepts_public_version_and_refuses_stale_without_new_plan(
+        self,
+    ):
+        version = self._version_project()
+        repo = self.app.state.repository
+        path = "/v1/projects/story-one/storyboard/preflights"
+        for index, supplied in enumerate((version, VERSION)):
+            body = {
+                "expected_version": 1,
+                "shot_ids": ["shot-one"],
+                "copies": 1,
+                "capabilities_version": supplied,
+            }
+            headers = {"Idempotency-Key": "story-version-preflight-" + str(index)}
+            response = self.client.post(path, json=body, headers=headers)
+            self.assertEqual(response.status_code, 200, response.text)
+            plan_id = response.json()["items"][0]["plan_id"]
+            scope = Scope(self.settings.tenant_id, "supervan", "story-one")
+            stored = repo.get_plan(scope, plan_id)
+            self.assertEqual(stored["request"]["capabilities_version"], VERSION)
+            count = self._plan_count()
+            replay = self.client.post(path, json=body, headers=headers)
+            self.assertEqual(replay.status_code, 200, replay.text)
+            self.assertEqual(replay.json()["id"], response.json()["id"])
+            self.assertEqual(repo.get_plan(scope, plan_id), stored)
+            self.assertEqual(self._plan_count(), count)
+        count = self._plan_count()
+        stale = self.client.post(
+            path,
+            json={
+                "expected_version": 1,
+                "shot_ids": ["shot-one"],
+                "copies": 1,
+                "capabilities_version": public_version(VERSION + "-stale"),
+            },
+            headers={"Idempotency-Key": "story-version-stale"},
+        )
+        self.assertEqual(stale.status_code, 409, stale.text)
+        self.assertIn("capabilities_changed", stale.text)
+        self.assertEqual(self._plan_count(), count)
+        self.assertEqual(self.client.get("/v1/jobs").json()["jobs"], [])
 
     def test_real_roles_project_raw_admin_and_detached_public_aliases(self):
         for owner in ("superdan", "supervan"):

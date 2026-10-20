@@ -24,6 +24,22 @@ from comfy_workflow import (
 VERSION = "sixnine-h3-base-20261004-v1"
 MODEL = "MiniMax-H3-Base-BF16"
 RECIPES = {"h3-base-fl2va-v1": "fl", "h3-base-ref2va-v1": "ref"}
+
+
+def public_version(value):
+    """Opaque creator revision; the immutable internal compiler version stays raw."""
+    if not isinstance(value, str):
+        return copy.deepcopy(value)
+    if re.fullmatch(r"video-capabilities-[0-9a-f]{64}", value):
+        return value
+    return "video-capabilities-" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def version_matches(supplied, current=VERSION):
+    """Accept only this exact internal revision or its deterministic public alias."""
+    return isinstance(supplied, str) and supplied in (current, public_version(current))
+
+
 LIMITS = {
     "max_images": 9,
     "max_videos": 3,
@@ -415,7 +431,7 @@ def compile_request(body: dict, resolve_asset, *, backend="comfy-worker"):
         raise ValueError("尚未接入此执行策略；不会静默换服务商或模型")
     if not isinstance(body.get("client_edit", {}), dict):
         raise ValueError("剪辑意图必须为对象")
-    if body.get("capabilities_version", VERSION) != VERSION:
+    if not version_matches(body.get("capabilities_version", VERSION), VERSION):
         raise ValueError("生成能力已变化，请刷新后重新预检")
     recipe = body.get("recipe_id")
     if not isinstance(recipe, str) or recipe not in RECIPES:

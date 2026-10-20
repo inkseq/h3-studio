@@ -34,7 +34,7 @@ from sqlalchemy import (
 )
 
 from .auth import Principal
-from .capabilities import RECIPES, VERSION
+from .capabilities import RECIPES, VERSION, version_matches
 from .content_policy import ContentPolicyError
 from .credits import CreditError
 from .generation_draft import (
@@ -1739,7 +1739,7 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
             },
             {"capabilities_version", "revision_hash"},
         )
-        if body["capabilities_version"] != VERSION:
+        if not version_matches(body["capabilities_version"], VERSION):
             raise QuickChatError(
                 "preflight_stale", "生成能力已更新，请重新加载后预检。"
             )
