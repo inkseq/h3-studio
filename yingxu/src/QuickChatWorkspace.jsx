@@ -1835,6 +1835,25 @@ export default function QuickChatWorkspace() {
                 >
                   <Paperclip size={18} />
                 </button>
+                <span className="opt-icons">
+                  <button
+                    className="ghost round"
+                    title={t('quickView.assistantOptions')}
+                    aria-label={t('quickView.assistantOptions')}
+                    onClick={() => setDialog('assistant')}
+                  >
+                    <Bot size={17} />
+                  </button>
+                  <button
+                    className="ghost round"
+                    disabled={!c.account || busy}
+                    title={t('takes.preferences')}
+                    aria-label={t('takes.preferences')}
+                    onClick={openTakePreferences}
+                  >
+                    <Settings2 size={17} />
+                  </button>
+                </span>
                 <textarea
                   ref={textarea}
                   className="quick-prompt"
@@ -1965,23 +1984,6 @@ export default function QuickChatWorkspace() {
                 <button className="ghost adv-btn" disabled={busy || !recipe} onClick={openControls}>
                   <SlidersHorizontal size={13} />
                   {t('quickView.advanced')}
-                </button>
-                <button
-                  className="ghost small"
-                  title={t('quickView.assistantOptions')}
-                  aria-label={t('quickView.assistantOptions')}
-                  onClick={() => setDialog('assistant')}
-                >
-                  <Bot size={13} />
-                </button>
-                <button
-                  className="ghost small"
-                  disabled={!c.account || busy}
-                  title={t('takes.preferences')}
-                  aria-label={t('takes.preferences')}
-                  onClick={openTakePreferences}
-                >
-                  <Settings2 size={14} />
                 </button>
               </div>
             </div>

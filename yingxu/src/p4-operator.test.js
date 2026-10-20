@@ -832,7 +832,7 @@ test('actual detail and rows expose measured-only stats and never hide keep poli
   assert.match(details, /今日总费用.*上限估算/);
   assert.match(details, /今日已生成视频/);
   assert.doesNotMatch(details, /热机.*相同设置/);
-  const css = await readFile(new URL('./p4-operator.css', import.meta.url), 'utf8');
+  const css = await readFile(new URL('./v2/ops-adapter.css', import.meta.url), 'utf8');
   assert.doesNotMatch(css, /\.p4-keep\s*\{[^}]*display\s*:\s*none/);
 });
 

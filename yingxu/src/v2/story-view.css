@@ -658,3 +658,69 @@
     flex-basis: 0;
   }
 }
+
+/* Behaviour kept from the retired storyboard-workspace.css (never imported since #251). */
+.sb-workspace .library.collapsed {
+  padding: 8px 5px;
+  overflow: hidden;
+}
+.sb-workspace .library.collapsed > :not(.lib-head) {
+  display: none;
+}
+.sb-workspace .library.collapsed .lib-head {
+  margin: 0;
+  justify-content: center;
+}
+/* The picker's JS positioning assumes it never exceeds the viewport. */
+.sb-portal.picker {
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+}
+/* StoryboardPanels sets these body classes while a splitter is dragged. */
+body.sb-resizing .splitter.x i,
+body.sb-resizing-y .splitter.y i {
+  background: var(--accent);
+}
+body.sb-resizing,
+body.sb-resizing * {
+  cursor: col-resize !important;
+  user-select: none;
+}
+body.sb-resizing-y,
+body.sb-resizing-y * {
+  cursor: row-resize !important;
+  user-select: none;
+}
+body.sb-resizing video,
+body.sb-resizing-y video {
+  pointer-events: none;
+}
+.sb-workspace .sb-queue {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.sb-confirm-row {
+  border-top: 1px solid var(--line);
+  padding: 12px 0;
+}
+.sb-portal.sb-dialog {
+  width: min(440px, calc(100vw - 32px));
+}
+.sb-portal .sb-name-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+.sb-portal .sb-name-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sb-portal .sb-dialog-actions {
+  justify-content: flex-end;
+  margin-top: 10px;
+}

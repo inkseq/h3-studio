@@ -6510,6 +6510,13 @@ button.round {
 .composer-opts > * {
   flex: none;
 }
+/* Assistant options and take preferences sit beside the paperclip inside the box
+   (ChatGPT layout), so the option row below never strands a lone icon. */
+.opt-icons {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
 .opt-sep {
   width: 1px;
   height: 18px;
