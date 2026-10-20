@@ -114,6 +114,8 @@ class FixProposal:
     prompt_before: str
     prompt_after: str
     credits: int
+    seconds_before: float | None = None
+    seconds_after: float | None = None  # set when the fix also changes the length
 
     def to_dict(self):
         return asdict(self)

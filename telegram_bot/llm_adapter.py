@@ -92,8 +92,9 @@ FIX_SCHEMA = {
     "properties": {
         "summary": {"type": "string", "description": "≤25字大白话，打算怎么改"},
         "prompt": {"type": "string", "description": "改好的完整提示词"},
+        "seconds": {"type": "integer", "description": "这一段新的秒数（2–6）；不用改时长就填原来的"},
     },
-    "required": ["summary", "prompt"],
+    "required": ["summary", "prompt", "seconds"],
 }
 PART_SCHEMA = {
     "type": "object",
@@ -270,24 +271,30 @@ class LlmAdapter(DemoAdapter):
                 self._looks[(board.id, n)].update(change)  # demo render only
         prompt = (self._board_text(board)
                   + f"\n\n片子做好了。老板对第{n}段说：「{feedback}」\n"
-                  "只改这一段的提示词来解决他的问题，其他保持。summary 用大白话说打算怎么改。")  # fmt: skip
+                  "只改这一段的提示词来解决他的问题，其他保持；嫌拖/嫌快时也调这一段的秒数。"
+                  "summary 用大白话说打算怎么改。")  # fmt: skip
         try:
             result = self.client.json("fix", [{"text": prompt}], FIX_SCHEMA, max_tokens=2048)
             summary, after = str(result["summary"])[:40], str(result["prompt"])[:1200]
+            seconds = float(max(2, min(6, int(result.get("seconds") or card.seconds))))
         except Exception as error:
             log.warning("fix fell back to rules: %s", error)
             return super().propose_fix(board, n, feedback)
+        changed = seconds if seconds != card.seconds else None
         return FixProposal(number=n, feedback=feedback, summary=summary,
                            prompt_before=card.prompt, prompt_after=after,
-                           credits=int(round(card.seconds * 10)))  # fmt: skip
+                           credits=int(round((changed or card.seconds) * 10)),
+                           seconds_before=card.seconds, seconds_after=changed)  # fmt: skip
 
-    def apply_fix(self, board, n, prompt, progress):
+    def apply_fix(self, board, n, prompt, progress, seconds=None):
         look = self._looks.pop((board.id, n), None)
         board = self._copy(board)
         card = board.cards[n - 1]
         progress(0, 1)
         if prompt is not None:
             card.prompt = prompt
+            if seconds:
+                card.seconds = float(seconds)
             if look:
                 card.look = {**card.look, **look}
         card.version = max(t["v"] for t in card.takes) + 1

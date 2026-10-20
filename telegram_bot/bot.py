@@ -801,7 +801,9 @@ class Bot:
         self.api.send_message(
             chat_id,
             f"🛠 第{number}段「{card.title}」打算这样改：\n· {proposal.summary}\n"
-            f"照片不变：{board.material(card.photo)}\n约 {proposal.credits} 积分（演示不扣）",
+            + (f"· 时长：{proposal.seconds_before:g} 秒 → {proposal.seconds_after:g} 秒\n"
+               if proposal.seconds_after else "")
+            + f"照片不变：{board.material(card.photo)}\n约 {proposal.credits} 积分（演示不扣）",
             [
                 [("✅ 就这样改", "fix_go")],
                 [("🎲 不改，再生成一次", "fix_roll"), ("✏️ 我自己说", "fix_own")],
@@ -817,7 +819,8 @@ class Bot:
         prompt = None if reroll else fix["proposal"]["prompt_after"]
         self._action(chat_id, "upload_video")
         progress = self._progress_message(chat_id, f"🔁 重做第{number}段，大约 1 分钟……")
-        board, film = self.adapter.apply_fix(board, number, prompt, progress)
+        seconds = None if reroll else fix["proposal"].get("seconds_after")
+        board, film = self.adapter.apply_fix(board, number, prompt, progress, seconds=seconds)
         self._save_board(chat_id, state, board, film=film.to_dict(), pending_fix=None,
                          last_fix={"number": number, "previous": before})  # fmt: skip
         self._send_film(

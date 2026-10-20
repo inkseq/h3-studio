@@ -295,7 +295,7 @@ class DemoAdapter:
             credits=int(round(card.seconds * 10)),
         )
 
-    def apply_fix(self, board, n, prompt, progress):
+    def apply_fix(self, board, n, prompt, progress, seconds=None):
         board = self._copy(board)
         card = board.cards[n - 1]
         progress(0, 1)
@@ -307,6 +307,8 @@ class DemoAdapter:
                 if addition in prompt:
                     look.update(change)
             card.look = look
+            if seconds:
+                card.seconds = float(seconds)
         card.version = max(t["v"] for t in card.takes) + 1
         board.revision += 1
         film = self._cut(board)

@@ -54,7 +54,7 @@ class FakeGemini:
                            "renames": [{"photo": 2, "name": "拉花"}], "cards": [card(1)]})  # fmt: skip
         if "part" in schema:
             return answer({"part": 3})
-        return answer({"summary": "调亮", "prompt": "更亮的提示词"})
+        return answer({"summary": "调亮", "prompt": "更亮的提示词", "seconds": 2})
 
 
 class LlmAdapterTest(unittest.TestCase):
@@ -103,6 +103,7 @@ class LlmAdapterTest(unittest.TestCase):
         self.assertEqual(
             (proposal.summary, proposal.prompt_after), ("调亮", "更亮的提示词")
         )
+        self.assertEqual((proposal.seconds_before, proposal.seconds_after), (3.0, 2.0))
 
     def test_model_failure_falls_back_to_rules(self):
         self.fake.fail = True
