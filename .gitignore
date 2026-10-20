@@ -46,6 +46,8 @@ inventory.json
 
 # Reviewed multi-worker business API; runtime data remains denied by default.
 !platform_app.py
+!telegram_bot/
+!telegram_bot/*.py
 !studio_platform/
 !studio_platform/__init__.py
 !studio_platform/api.py
