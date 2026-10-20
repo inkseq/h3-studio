@@ -7,20 +7,20 @@ Read this entry, the assigned issue's latest owner comments/claims and affected 
 - Backend/API/schema/infra/GPU/money/Agent docs: Codex, `inkseq/h3-studio`.
 - UI: Claude, canonical `inkseq/inkseq-design/studio-app` AND its `h3-studio/yingxu` sync. Codex does not edit UI; API-client types only when requested by the frontend lane.
 - Shared work starts from an issue API contract (routes, JSON, errors). Post contract changes there. Board: github.com/orgs/inkseq/projects/1; routing: `workflow/project.json`.
-- Claim bounded scope, integration owner, branch/worktree and base before editing. Preserve parallel changes. Per lane: one issue in progress plus one in review. Use GitHub, not a second task database or owner relay.
-- Latest owner decisions win; record material changes in `workflow/owner-changes.md` and replace conflicting current instructions.
-- Acceptance: label staged, ready slices `needs-claude-acceptance`; Claude checks every 2h, comments, sets `accepted`/`changes-requested`. Before each task read new Claude/owner comments on claimed issues.
+- Claim bounded scope, integration owner, branch/worktree and base before editing. Preserve parallel changes. Per lane: one issue in progress plus one in review. GitHub only; no second task database.
+- Latest owner decisions win; record them in `workflow/owner-changes.md` and give the owner a one-line relay for Codex. Re-read that file on origin/main before any production write or spend.
+- Labels replace, never stack: `needs-claude-review` (Tier2 options) or `needs-claude-acceptance` (staged slice); Claude's 2h pass comments, sets `accepted`/`changes-requested` and removes the request label. Read new Claude/owner comments before each task. End every turn with `Waiting on: <who/what, #issue>`.
 
 ## Risk and delivery
 | Tier | Changes | Gate and write-up |
 |---|---|---|
 | 0 | UI/copy/layout/docs | CI, automatic staging, self-check; PR description only, no receipts. |
 | 1 | APIs/additive schema/non-money features | Affected tests, staging self-check; one short issue comment with changes and staging SHA. |
-| 2 | Money/GPU/queue/DBOS/auth/isolation/deletion | Safety tests, non-author safety review, relevant staging acceptance checklist and Claude sign-off. Evidence links, not essays. |
+| 2 | Money/GPU/queue/DBOS/auth/isolation/deletion | Safety tests, non-author safety review, relevant staging acceptance checklist and Claude sign-off. Evidence links. |
 
 Classify behavior, not filenames. Run affected checks once per finished slice, not per edit. Merge small PRs continuously; unfinished features stay flagged. CI auto-deploys staging. Production promotes the same accepted artifact bytes, without rebuild, on Tuesday/Friday. Tier2 needs Claude sign-off. Issues close on promotion, not merge. Continue the next independent staged milestone without approval waits.
 
-Current order (CR42): promote staging batch -> #353 prod backfill -> launch GPU (one operator-held machine; staging cold-start soak) -> go-live checklist issue -> frontend repo merge into `yingxu` -> #347 editor. No new epics before M1.
+Current order (CR42/43): promote staging batch -> #353 prod backfill -> GPU demand start <=2 (CR43; staging cold-start soak first) -> go-live checklist issue -> frontend repo merge into `yingxu` -> #347 editor. No new epics before M1.
 
 ## Safety
 - Reuse existing owners/assets/jobs/attempts/ledger/fences. Preserve immutable accepted inputs, configuration identity, original jobs/media and cumulative accounting. Unknown outcomes require reconciliation, never duplicate generation/rental or invented settlement.
