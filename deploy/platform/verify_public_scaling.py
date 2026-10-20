@@ -206,7 +206,7 @@ def recover(root, state, item, agent, headers):
 def submit(root, state, agent, headers):
     check_state(state)
     health = public.request(agent, 'GET', '/healthz')
-    assert health['auth_ready'] and health['generation_enabled'] and health['execution_backend'] == 'comfy-worker'
+    assert health['auth_ready'] and health['generation_enabled'] and health['execution_backend'] in ('enabled', 'comfy-worker')
     project = public.request(agent, 'GET', '/v1/projects/'+PROJECT, headers=headers)
     entities = {e['id']: e for e in project['project']['entities']}
     for index, item in enumerate(state['shots']):

@@ -66,7 +66,7 @@ def agent_contract():
         "generation_scopes": ["jobs:read", "jobs:write"],
         "generation_authority": "A card or preflight does not start generation. Confirm only within the user's authorization; an HTTP202 is not inference success.",
         "same_session": "Materials and next_settings are visible authoring state. Revisions freeze their own explicit inputs and seeds. Different sessions are isolated.",
-        "history_titles": "Omit title when creating a session to allow optional Gemma 4 short history naming from the first meaningful accepted description. Any explicit title is manual, even the default label. Naming is independent of the conversational assistant and video engine; consult schema.history_titles.enabled. It sends only bounded first text, never media/full history, and failure keeps the original label without automatic retry.",
+        "history_titles": "Omit title when creating a session to allow optional short history naming from the first meaningful accepted description. Any explicit title is manual, even the default label. Naming is independent of the conversational assistant and video engine; consult schema.history_titles.enabled. It sends only bounded first text, never media/full history, and failure keeps the original label without automatic retry.",
         "deployment_profiles": "New video requests use tier standard/refine/fast and mode fl/ref. Fast is currently unavailable. Public deployment_profile_id aliases are quality:standard/refine/fast; recipe aliases are video-fl-v1/video-ref-v1. Read capabilities.deployment_profiles and complete session next_settings, including the selected tier/mode's generation_support controls, input_support, limits, supported_constraints and execution_policy_constraints. Historical joint_cases are timing examples, not an admission allowlist; supported unmeasured combinations need no extra qualification confirmation. Turn-to-card inherits next_settings. Direct cards/revisions require their complete selection and controls; omission/null does not grant legacy routing to Agents. Session changes use PATCH with expected_version and complete next_settings. Preflight checks current matching workers; catalog measurements are historical. Preserve user choice/references; never switch to bypass refusal or rent a GPU. Conversation model selection is separate and unchanged.",
         "take_groups": {
             "preferences_url": "/v1/quick-chat/preferences",
@@ -246,7 +246,7 @@ def agent_contract():
                     "create_card": True,
                     "text": "{complete_prompt}",
                 },
-                "require": "For external Agents writing their own prompt; no website conversational assistant call. Optional Gemma history naming can still run once for an eligible new session. Inherits the session's complete next_settings including deployment_profile_id and selected materials. Read card_id then the card's current_revision_id. Model selection here does not select or call a video engine.",
+                "require": "For external Agents writing their own prompt; no website conversational assistant call. Optional history naming can still run once for an eligible new session. Inherits the session's complete next_settings including deployment_profile_id and selected materials. Read card_id then the card's current_revision_id. Assistant selection here does not select or call a video engine.",
             },
             "card": {
                 "method": "POST",

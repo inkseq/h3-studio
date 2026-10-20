@@ -129,6 +129,22 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(r.status_code, 201, r.text)
         return r.json()
 
+    def test_public_health_has_neutral_execution_state_for_all_callers(self):
+        # Even authenticated callers use the same public liveness contract.
+        for backend, state in (("disabled", "disabled"), ("mock", "enabled")):
+            app = create_app(
+                replace(self.settings, execution_backend=backend),
+                repository=self.app.state.repository,
+                storage=self.app.state.storage,
+            )
+            with TestClient(app) as client:
+                anonymous = client.get("/healthz")
+                self.assertEqual(anonymous.status_code, 200)
+                self.assertEqual(anonymous.json()["execution_backend"], state)
+                for user in ("supervan", "superdan"):
+                    client.post("/api/auth/login", json={"username": user}).raise_for_status()
+                    self.assertEqual(client.get("/healthz").json(), anonymous.json())
+
     def make_plan(self, **changes):
         r = self.client.post("/v1/generation-plans", json=generation_request(**changes))
         self.assertEqual(r.status_code, 201, r.text)

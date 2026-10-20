@@ -74,8 +74,8 @@ from .content_lifecycle import (
 )
 
 
-MODELS = {"gemini-3.8-flash": "Gemini 3.8 Flash", "gemma-4-31b-it": "Gemma 4 31B IT"}
-DEFAULT_MODEL = "gemini-3.8-flash"
+from .assistant_models import DEFAULT_MODEL, resolve as resolve_assistant
+
 EMPTY_INPUTS = {
     "first_frame": None,
     "last_frame": None,
@@ -231,11 +231,12 @@ def settings_check(value):
 
 
 def model_check(value):
-    if value not in MODELS:
+    model = resolve_assistant(value)
+    if model is None:
         raise QuickChatError(
-            "model_not_allowed", "请选择准确的已接入模型ID；不会自动换模型。", 422
+            "model_not_allowed", "请选择已提供的助手选项；不会自动切换。", 422
         )
-    return value
+    return model
 
 
 def cursor_encode(principal, session_id, boundary, direction):
@@ -611,7 +612,6 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
         title = body.get("title", DEFAULT_TITLE)
         if not isinstance(title, str) or not title.strip() or len(title) > 160:
             raise QuickChatError("invalid_title", "会话标题须为1–160字符。", 422)
-        model = model_check(body.get("model_id", DEFAULT_MODEL))
         with self.repo.transaction() as conn:
             owner_reference_gate(conn, self.tenant, principal.owner)
             prior = self._replay(conn, principal, "session-create", key, body)
@@ -621,6 +621,7 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
                         self._access(principal, prior, "projects:read", conn=conn)
                     )
                 }
+            model = model_check(body.get("model_id", DEFAULT_MODEL))
             ident = "session-" + uuid.uuid4().hex
             project = empty_project(
                 {
@@ -3042,7 +3043,6 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
             or len(body["text"]) > 16000
         ):
             raise QuickChatError("invalid_text", "请输入1–16000字符。", 422)
-        model = model_check(body["model_id"])
         mode = body.get("assistant_mode", "assist")
         if mode not in {"none", "assist", "discuss"}:
             raise QuickChatError("invalid_assistant_mode", "助手方式无效。", 422)
@@ -3078,6 +3078,7 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
             if prior:
                 turn = self._get(conn, principal, prior, session_id, "turn")
             else:
+                model = model_check(body["model_id"])
                 self._version(session, body["expected_version"])
                 if mode != "none" and session["payload"]["active_turn_id"]:
                     raise QuickChatError(

@@ -16,7 +16,13 @@ import test_platform_api as fixture
 from studio_platform.auth import Principal
 from studio_platform.capabilities import VERSION, compile_request, public_version
 from studio_platform.quality_http import install
-from studio_platform.quick_chat import DEFAULT_SETTINGS, EMPTY_INPUTS, QuickChatError
+from studio_platform.quick_chat import (
+    DEFAULT_SETTINGS,
+    EMPTY_INPUTS,
+    QuickChatError,
+    objects,
+    operations,
+)
 from studio_platform.repository import Conflict, Scope, jobs, plans, request_hash
 
 
@@ -67,6 +73,206 @@ class QualityHTTPTests(unittest.TestCase):
     # test methods or substitute authentication/projection implementations.
     setUp = fixture.ApiTests.setUp
     login = fixture.ApiTests.login
+
+    def _assistant_machine(self):
+        self._identity("admin")
+        response = self.client.post(
+            "/v1/api-keys",
+            json={
+                "name": "Assistant alias test",
+                "scopes": [
+                    "projects:create",
+                    "projects:read",
+                    "projects:write",
+                    "assistant:run",
+                ],
+                "all_projects": True,
+                "project_ids": [],
+                "expires_in_days": 1,
+            },
+        )
+        self.assertEqual(response.status_code, 201, response.text)
+        self.client.cookies.clear()
+        self.client.headers["Authorization"] = "Bearer " + response.json()["api_key"]
+
+    def test_assistant_catalog_is_neutral_for_users_and_admin_owned_agents(self):
+        from studio_platform.quick_chat_assistant import model_schema
+
+        original = model_schema()
+        aliases = {"assistant:text-image-v1", "assistant:multimodal-v1"}
+        for role in ("admin", "user", "machine", "admin"):
+            with self.subTest(role=role):
+                if role == "machine":
+                    self._assistant_machine()
+                else:
+                    self._identity(role)
+                response = self.client.get("/v1/quick-chat/schema")
+                self.assertEqual(response.status_code, 200, response.text)
+                shown = response.json()
+                if role == "admin":
+                    self.assertEqual(shown["models"], original)
+                    self.assertEqual(
+                        shown["history_titles"]["model_id"], "gemma-4-31b-it"
+                    )
+                else:
+                    self.assertEqual({item["id"] for item in shown["models"]}, aliases)
+                    self.assertEqual(
+                        shown["history_titles"]["model_id"], "assistant:text-image-v1"
+                    )
+                    for name in (
+                        "gemma-4-31b-it",
+                        "gemini-3.8-flash",
+                        "Gemma",
+                        "Gemini",
+                    ):
+                        self.assertNotIn(name, response.text)
+                    support = {item["id"]: item["inputs"] for item in shown["models"]}
+                    self.assertFalse(
+                        support["assistant:text-image-v1"]["video"]["implemented"]
+                    )
+                    self.assertTrue(
+                        support["assistant:multimodal-v1"]["video"]["implemented"]
+                    )
+        self.assertEqual(model_schema(), original)
+
+    def test_assistant_alias_requests_preserve_raw_storage_and_original_wire_replay(
+        self,
+    ):
+        self._identity("user")
+        path = "/v1/quick-chat/sessions"
+        body = {
+            "title": "User wrote gemma-4-31b-it",
+            "model_id": "assistant:text-image-v1",
+        }
+        headers = {"Idempotency-Key": "assistant-session"}
+        response = self.client.post(path, json=body, headers=headers)
+        self.assertEqual(response.status_code, 201, response.text)
+        session = response.json()["session"]
+        self.assertEqual(session["model_id"], "assistant:text-image-v1")
+        self.assertEqual(session["title"], body["title"])
+        sid = session["id"]
+        with mock.patch(
+            "studio_platform.quick_chat.resolve_assistant", return_value=None
+        ):
+            self.assertEqual(
+                self.client.post(path, json=body, headers=headers).json()["session"][
+                    "id"
+                ],
+                sid,
+            )
+        conflict = self.client.post(
+            path, json={**body, "model_id": "gemma-4-31b-it"}, headers=headers
+        )
+        self.assertEqual(conflict.status_code, 409, conflict.text)
+        patch = {
+            "expected_version": session["version"],
+            "model_id": "assistant:multimodal-v1",
+        }
+        response = self.client.patch(
+            path + "/" + sid, json=patch, headers={"Idempotency-Key": "assistant-patch"}
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            response.json()["session"]["model_id"], "assistant:multimodal-v1"
+        )
+        turn_body = {
+            "expected_version": response.json()["session"]["version"],
+            "text": "User wrote Gemini 3.8 Flash",
+            "model_id": "assistant:text-image-v1",
+            "assistant_mode": "none",
+        }
+        turns = path + "/" + sid + "/turns"
+        turn_headers = {"Idempotency-Key": "assistant-turn"}
+        response = self.client.post(turns, json=turn_body, headers=turn_headers)
+        self.assertEqual(response.status_code, 201, response.text)
+        turn = response.json()
+        self.assertEqual(turn["model_id"], "assistant:text-image-v1")
+        self.assertEqual(turn["text"], turn_body["text"])
+        with mock.patch(
+            "studio_platform.quick_chat.resolve_assistant", return_value=None
+        ):
+            replay = self.client.post(turns, json=turn_body, headers=turn_headers)
+        self.assertEqual(replay.status_code, 201, replay.text)
+        self.assertEqual(replay.json()["id"], turn["id"])
+        changed = self.client.post(
+            turns,
+            json={**turn_body, "model_id": "gemma-4-31b-it"},
+            headers=turn_headers,
+        )
+        self.assertEqual(changed.status_code, 409, changed.text)
+        read = self.client.get(turns + "/" + turn["id"])
+        self.assertEqual(read.json()["model_id"], "assistant:text-image-v1")
+        listed = self.client.get(path).json()["sessions"]
+        self.assertEqual(listed[0]["model_id"], "assistant:text-image-v1")
+        events = self.client.get(path + "/" + sid + "/timeline").json()["events"]
+        recorded = next(
+            item["record"] for item in events if item["type"] == "turn.created"
+        )
+        self.assertEqual(recorded["model_id"], "assistant:text-image-v1")
+        with self.app.state.repository.engine.connect() as conn:
+            rows = list(
+                conn.execute(
+                    select(objects).where(objects.c.id.in_([sid, turn["id"]]))
+                ).mappings()
+            )
+            stored = {row["id"]: row["payload"] for row in rows}
+            self.assertEqual(stored[sid]["model_id"], "gemma-4-31b-it")
+            self.assertEqual(stored[turn["id"]]["model_id"], "gemma-4-31b-it")
+            fingerprints = dict(
+                conn.execute(select(operations.c.key, operations.c.fingerprint)).all()
+            )
+            self.assertEqual(fingerprints["assistant-session"], request_hash(body))
+            self.assertEqual(fingerprints["assistant-turn"], request_hash(turn_body))
+        invalid = self.client.patch(
+            path + "/" + sid,
+            json={
+                "expected_version": listed[0]["version"],
+                "model_id": "assistant:unavailable",
+            },
+            headers={"Idempotency-Key": "unavailable-assistant"},
+        )
+        self.assertEqual(invalid.status_code, 422, invalid.text)
+        self._identity("admin")
+        self.assertEqual(self.client.get(path + "/" + sid).status_code, 404)
+        self.assertEqual(self.client.get("/v1/jobs").json()["jobs"], [])
+
+    def test_agent_assistant_alias_resolves_to_original_provider_once(self):
+        from test_platform_quick_chat import FakeAssistant
+
+        self._assistant_machine()
+        service = self.app.state.quick_chat
+        service.assistant = FakeAssistant()
+        service.assistant_enabled = True
+        response = self.client.post(
+            "/v1/quick-chat/sessions",
+            json={
+                "title": "Alias provider test",
+                "model_id": "assistant:multimodal-v1",
+            },
+            headers={"Idempotency-Key": "agent-assistant-session"},
+        )
+        self.assertEqual(response.status_code, 201, response.text)
+        session = response.json()["session"]
+        body = {
+            "expected_version": session["version"],
+            "text": "Discuss a blue cup",
+            "model_id": "assistant:multimodal-v1",
+            "assistant_mode": "discuss",
+        }
+        path = "/v1/quick-chat/sessions/" + session["id"] + "/turns"
+        headers = {"Idempotency-Key": "agent-assistant-turn"}
+        response = self.client.post(path, json=body, headers=headers)
+        self.assertEqual(response.status_code, 201, response.text)
+        self.assertEqual(response.json()["model_id"], "assistant:multimodal-v1")
+        self.assertEqual(len(service.assistant.calls), 1)
+        self.assertEqual(service.assistant.calls[0][0], "gemini-3.8-flash")
+        with mock.patch(
+            "studio_platform.quick_chat.resolve_assistant", return_value=None
+        ):
+            replay = self.client.post(path, json=body, headers=headers)
+        self.assertEqual(replay.status_code, 201, replay.text)
+        self.assertEqual(replay.json()["id"], response.json()["id"])
+        self.assertEqual(len(service.assistant.calls), 1)
 
     def test_builtin_openapi_projects_per_role_without_changing_cached_schema(self):
         original = self.app.openapi()
@@ -544,7 +750,10 @@ class QualityHTTPTests(unittest.TestCase):
                 self.assertEqual(current.status_code, 200, current.text)
                 self.assertEqual(current.headers["Cache-Control"], "no-store")
                 self.assertEqual(
-                    current.json()["session"]["model_id"], session["model_id"]
+                    current.json()["session"]["model_id"],
+                    session["model_id"]
+                    if role == "admin"
+                    else "assistant:multimodal-v1",
                 )
         self.assertEqual(
             service.get_revision(principal, session["id"], revision["id"])[

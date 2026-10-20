@@ -180,7 +180,15 @@ class AgentDiscoveryTests(unittest.TestCase):
         ) as archive:
             contents.extend(archive.read(name) for name in archive.namelist())
         for content in contents:
-            for private in (*MODE_RECIPES.values(), *MODEL_TIERS, *PROFILE_TIERS):
+            for private in (
+                *MODE_RECIPES.values(),
+                *MODEL_TIERS,
+                *PROFILE_TIERS,
+                "gemma-4-31b-it",
+                "gemini-3.8-flash",
+                "Gemma",
+                "Gemini",
+            ):
                 self.assertNotIn(private.encode(), content)
 
     def test_resume_contract_and_burn_limits_match_existing_authenticated_routes(self):

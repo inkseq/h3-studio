@@ -11,6 +11,7 @@ from __future__ import annotations
 import copy
 import re
 
+from . import assistant_models
 from .quality_tiers import (
     TIERS,
     model_tier,
@@ -672,7 +673,7 @@ def _version_schema(value):
 
 
 def schema(value, principal=None, settings=None):
-    """Only JSON-schema identity enums; unrelated assistant-model enums survive."""
+    """Known discovery slots and JSON-schema identities, without changing caches."""
     result = copy.deepcopy(value)
     if is_admin(principal) or not isinstance(result, dict):
         return result
@@ -699,6 +700,20 @@ def schema(value, principal=None, settings=None):
             properties.pop(name)
             if isinstance(result.get("required"), list):
                 result["required"] = [key for key in result["required"] if key != name]
+        elif name == "model_id" and any(
+            assistant_models.resolve(item) for item in field.get("enum", [])
+        ):
+            properties[name] = _identity_schema(
+                field,
+                list(
+                    dict.fromkeys(
+                        assistant_models.public_id(item)
+                        for item in field["enum"]
+                        if item is not None
+                    )
+                ),
+                assistant_models.public_id,
+            )
         else:
             properties[name] = schema(field, principal, settings)
     for container in ("$defs", "definitions"):
@@ -739,6 +754,33 @@ def schema(value, principal=None, settings=None):
         result["default_next_settings"] = selection(
             result["default_next_settings"], principal
         )
+    if isinstance(value.get("models"), list) and any(
+        isinstance(item, dict) and assistant_models.resolve(item.get("id"))
+        for item in value["models"]
+    ):
+        result["models"] = [assistant_catalog(item) for item in value["models"]]
+    if isinstance(value.get("history_titles"), dict):
+        result["history_titles"] = assistant(value["history_titles"])
+    return result
+
+
+def assistant_catalog(value):
+    """Only server-owned assistant catalog identifiers and their display label."""
+    result = copy.deepcopy(value)
+    if "id" in result:
+        result["id"] = assistant_models.public_id(value["id"])
+    if "label" in result:
+        result["label"] = assistant_models.public_label(value.get("id"))
+    return result
+
+
+def assistant(value):
+    """One typed session, turn or title-state object; user text stays untouched."""
+    result = copy.deepcopy(value)
+    if "model_id" in result:
+        result["model_id"] = assistant_models.public_id(value["model_id"])
+    if isinstance(value.get("title_generation"), dict):
+        result["title_generation"] = assistant(value["title_generation"])
     return result
 
 
@@ -905,6 +947,7 @@ def envelope(value, principal=None, settings=None):
             result[key] = [projector(item, principal) for item in value[key]]
     for key in (
         "session",
+        "turn",
         "submission",
         "preflight",
         "data",
@@ -921,7 +964,16 @@ def envelope(value, principal=None, settings=None):
         return error(result, principal)
     if value.get("error_code"):
         result = error(result, principal)
-    for key in ("items", "submissions", "preflights", "events", "versions", "batches"):
+    for key in (
+        "items",
+        "sessions",
+        "turns",
+        "submissions",
+        "preflights",
+        "events",
+        "versions",
+        "batches",
+    ):
         if isinstance(value.get(key), list):
             result[key] = [envelope(item, principal, settings) for item in value[key]]
     if isinstance(value.get("capabilities"), dict):
@@ -957,4 +1009,14 @@ def envelope(value, principal=None, settings=None):
         return plan(result, principal)
     if "recipe_id" in value or "deployment_profile_id" in value:
         result = selection(result, principal)
+    if "model_id" in value and (
+        "title_generation" in value
+        or "assistant_mode" in value
+        or {"id", "text", "next_settings"} <= value.keys()
+    ):
+        # Generic safe-error projection removes technical model fields. A
+        # recognized assistant record still exposes its neutral selector on
+        # failure, without restoring any private error detail or original ID.
+        result["model_id"] = assistant_models.public_id(value["model_id"])
+        result = assistant(result)
     return result

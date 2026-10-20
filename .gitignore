@@ -713,3 +713,4 @@ inventory.json
 !studio_platform/quality_authoring.py
 !studio_platform/quality_views.py
 !studio_platform/quality_http.py
+!studio_platform/assistant_models.py

@@ -606,7 +606,11 @@ def create_app(
         return {
             "status": "ok",
             "generation_enabled": settings.generation_enabled,
-            "execution_backend": settings.execution_backend,
+            # Public liveness must not disclose the engine/provider identity.
+            # Exact execution identity remains in protected configuration checks.
+            "execution_backend": "disabled"
+            if settings.execution_backend == "disabled"
+            else "enabled",
             "auth_ready": auth.ready() or app.state.workos_auth.enabled(),
             "render_enabled": settings.render_enabled,
             "frontend_contract": FRONTEND_CONTRACT,
