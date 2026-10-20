@@ -402,3 +402,11 @@ test('real connection list keeps filtered rows mounted, exposes their toggle and
     else delete globalThis.localStorage;
   }
 });
+
+test('credit-mode assistant caps are whole credits', async () => {
+  const { capCredits } = await import('./assistant-connections-model.js');
+  assert.equal(capCredits('0'), 0);
+  assert.equal(capCredits(' 250 '), 250);
+  for (const bad of ['1.5', '-1', 'abc', '', '007'])
+    assert.throws(() => capCredits(bad), /assistants.invalid/);
+});
