@@ -48,7 +48,19 @@ export function priceRates(body) {
 export function entryList(body) {
   const rows = Array.isArray(body?.entries) ? body.entries : Array.isArray(body) ? body : [];
   return {
-    entries: rows.filter((row) => Number.isSafeInteger(row?.amount)),
+    // Holds and releases move credits in and out of "held" (held_delta) with amount 0.
+    // Rows that change nothing (zero-credit CPU steps) are left out.
+    entries: rows
+      .filter((row) => Number.isSafeInteger(row?.amount))
+      .map((row) => {
+        const held = Number.isSafeInteger(row.held_delta) ? row.held_delta : 0;
+        return {
+          ...row,
+          shown: row.amount !== 0 ? row.amount : -held,
+          onHold: row.amount === 0 && held !== 0,
+        };
+      })
+      .filter((row) => row.shown !== 0),
     next: typeof body?.next_cursor === 'string' ? body.next_cursor : null,
   };
 }
