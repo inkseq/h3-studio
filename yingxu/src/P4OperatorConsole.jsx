@@ -1,4 +1,4 @@
-import StudioHeader from './StudioHeader.jsx';
+import StudioHeader, { useAccountLabel } from './StudioHeader.jsx';
 import { readBrowserLocale, translate } from './i18n/locale.js';
 import { LanguageSwitcher, useI18n } from './i18n/I18nProvider.jsx';
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -1633,6 +1633,7 @@ export default function P4OperatorConsole() {
     if (pageActive) document.title = t('operator.pageTitle');
   }, [locale, pageActive]);
   const c = useCloud(),
+    who = useAccountLabel(c.account),
     controller = useMemo(() => createP4OperatorController({ locale: readBrowserLocale }), []),
     state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState),
     [view, setView] = useState('machines'),
@@ -1744,8 +1745,8 @@ export default function P4OperatorConsole() {
         accountMenu={
           c.account && (
             <details className="ops-account-menu">
-              <summary className="avatar" aria-label={c.account} title={c.account}>
-                {c.account.slice(0, 1).toLocaleUpperCase()}
+              <summary className="avatar" aria-label={who.label} title={who.label}>
+                {who.initial}
               </summary>
               <div>
                 <a href="/settings">{t('settings.title')}</a>

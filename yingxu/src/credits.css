@@ -219,33 +219,42 @@
   }
 }
 
-/* Hosted sign-in (#305) above the username form. */
+/* Hosted sign-in (#305): one clear button; the username form for existing accounts folds away. */
 .hosted-sign-in {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-bottom: 4px;
+  align-items: stretch;
+  gap: 10px;
+  margin: 4px 0 2px;
 }
-.hosted-sign-in > button {
+.hosted-sign-in > .hosted-sign-in-main {
   justify-content: center;
-  height: auto;
-  min-height: 40px;
+  height: 46px;
+  min-height: 46px;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 12px;
+}
+.hosted-sign-in-consent {
+  text-align: center;
+  line-height: 1.5;
 }
 .hosted-sign-in a {
   color: var(--accent);
 }
-.hosted-sign-in-or {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.hosted-sign-in > .hosted-sign-in-legacy {
+  align-self: center;
+  height: auto;
+  min-height: 0;
+  padding: 4px 6px;
+  background: none;
+  border: 0;
   color: var(--muted);
   font-size: 12px;
-  margin-top: 4px;
+  text-decoration: underline;
 }
-.hosted-sign-in-or::before,
-.hosted-sign-in-or::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--line);
+/* Everything after the hosted block (username, password, submit) stays hidden until opened;
+   alerts stay visible. */
+.hosted-sign-in:not(.legacy-open) ~ :not([role='alert']) {
+  display: none;
 }
