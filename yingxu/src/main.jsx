@@ -5,6 +5,10 @@ import videoCacheWorkerURL from './video-cache-worker.js?worker&url';
 import { installVideoCache } from './video-cache-client.js';
 import './demo-v2.css';
 import './v2/page-bridge.css';
+import './skins.css';
+import { applySkin, readSkin } from './skins.js';
+
+applySkin(readSkin());
 createRoot(document.getElementById('root')).render(<App />);
 
 if (import.meta.env.PROD) installVideoCache(videoCacheWorkerURL);
