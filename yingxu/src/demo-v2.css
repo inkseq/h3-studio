@@ -4221,6 +4221,9 @@ pre {
 }
 .qc-trash-btn {
   justify-content: flex-start;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
   color: var(--muted);
 }
 .qc-trash-btn.on {
@@ -6461,13 +6464,37 @@ button.round {
   letter-spacing: 0.04em;
 }
 
-/* quick composer: one row, grouped */
+/* quick composer: grouped options that wrap to a second row on narrow screens instead of
+   scrolling sideways out of sight (#358). */
 .composer-opts {
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  scrollbar-width: none;
+  flex-wrap: wrap;
+  overflow: visible;
   gap: 6px;
   padding-bottom: 2px;
+}
+.composer {
+  max-width: 760px;
+}
+.composer-box {
+  align-items: center;
+}
+.composer-box textarea {
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.composer-box textarea,
+.composer-box textarea:focus-visible {
+  /* Leave room for the option rows inside the 45dvh composer so the box never clips. */
+  max-height: min(240px, max(64px, calc(45dvh - 110px)));
+  outline: none;
+}
+.composer-box textarea:placeholder-shown {
+  overflow: hidden;
+}
+.composer-box textarea::placeholder {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .composer-opts::-webkit-scrollbar {
   display: none;
@@ -6706,4 +6733,23 @@ button.ghost.danger:hover {
   width: auto;
   flex-wrap: nowrap;
   gap: 0;
+}
+
+/* Quick Create composer laid out like a chat box: the text gets the full width on top, the
+   attach and send buttons sit in a toolbar row inside the box. */
+.quick-live .composer-box {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 10px 10px 8px;
+  border-radius: 22px;
+}
+.quick-live .composer-box > textarea {
+  order: -1;
+  flex: 1 0 100%;
+  min-height: 44px;
+  padding: 6px 8px;
+}
+.quick-live .composer-box > button.primary.round {
+  margin-left: auto;
 }
