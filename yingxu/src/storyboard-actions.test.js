@@ -114,11 +114,41 @@ test('scene header rejects foreign, absent and non-scene targets without changin
     entity('other-chapter', 'chapter'),
     entity('foreign-scene', 'scene', 'other-chapter'),
   );
-  for (const sceneId of ['foreign-scene', 'unknown-scene', 'shot-a', null]) {
+  for (const sceneId of ['unknown-scene', 'shot-a', null]) {
     const before = structuredClone(project);
     assert.equal(act(project, { type: 'add', sceneId }), false);
     assert.deepEqual(project, before);
   }
+  // All chapters share one storyboard: a scene in another chapter is a valid target,
+  // and the new shot lands in that scene, not the current chapter.
+  const added = act(project, { type: 'add', sceneId: 'foreign-scene' });
+  assert.equal(get(project, added.id).parentId, 'foreign-scene');
+});
+
+test('chapters: add, rename, move, and shots reorder across chapters', () => {
+  const project = fixture();
+  const first = project.entities.find((e) => e.type === 'chapter');
+  const made = act(project, { type: 'addChapter', title: 'Two', sceneTitle: 'Opening' });
+  const two = get(project, made.id);
+  assert.equal(two.type, 'chapter');
+  const scene = project.entities.find((e) => e.type === 'scene' && e.parentId === two.id);
+  assert.equal(scene.title, 'Opening');
+  assert.ok(act(project, { type: 'renameChapter', id: two.id, title: 'Second' }));
+  assert.equal(two.title, 'Second');
+  assert.equal(act(project, { type: 'renameChapter', id: two.id, title: '  ' }), false);
+  assert.ok(act(project, { type: 'moveChapter', id: two.id, dir: -1 }));
+  const order = () =>
+    project.entities
+      .filter((e) => e.type === 'chapter' && e.parentId === null)
+      .sort((a, b) => a.order - b.order)
+      .map((e) => e.id);
+  assert.deepEqual(order().slice(0, 2), [two.id, first.id]);
+  assert.equal(act(project, { type: 'moveChapter', id: two.id, dir: -1 }), false);
+  // A shot added to the new chapter can be dragged next to a shot in the first chapter.
+  const shot = act(project, { type: 'add', sceneId: scene.id });
+  assert.ok(act(project, { type: 'reorder', from: shot.id, to: 'shot-a' }));
+  assert.equal(get(project, shot.id).parentId, get(project, 'shot-a').parentId);
+  assert.equal(validateProject(project).ok, true);
 });
 
 test('first opt-in materializes inherited context; FL/REF switching keeps all inputs and preferences', () => {

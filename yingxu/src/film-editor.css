@@ -226,3 +226,6 @@
     padding: 4px 10px;
   }
 }
+.film-editor-head > div:first-child {
+  margin-inline-end: auto;
+}

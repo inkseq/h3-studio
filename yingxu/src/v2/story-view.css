@@ -724,3 +724,89 @@ body.sb-resizing-y video {
   justify-content: flex-end;
   margin-top: 10px;
 }
+
+/* Continuous storyboard: chapter dividers between scene groups (owner, 2026-10-21). */
+.sb-chapter + .sb-chapter,
+.sb-chapter + .sb-add-chapter {
+  margin-top: 8px;
+}
+.sb-chapter-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0 8px;
+  margin-bottom: 4px;
+  border-bottom: 2px solid var(--line-2, var(--line));
+}
+.sb-chapter-head:has(.item-menu-popover) {
+  z-index: 5;
+}
+.sb-chapter-head h2 {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  font-size: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sb-chapter-head h2 small {
+  flex: none;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.sb-chapter-meta {
+  flex: none;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.sb-chapter-head .spacer {
+  flex: 1;
+}
+.sb-chapter-head > button:not(.sb-chapter-fold) {
+  white-space: nowrap;
+}
+.sb-chapter-fold {
+  flex: none;
+  padding: 4px;
+}
+.sb-add-chapter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  margin: 12px 0 24px;
+}
+@media (max-width: 760px) {
+  .sb-chapter-head {
+    flex-wrap: wrap;
+  }
+  .sb-chapter-meta {
+    order: 3;
+    flex-basis: 100%;
+    padding-left: 32px;
+  }
+}
+
+/* Narrow takes panel: each take keeps its own "Use this" under the thumbnail. */
+.ver-wrap {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+}
+.ver-wrap > .ver {
+  width: 100%;
+}
+.ver-use {
+  width: 100%;
+  justify-content: center;
+}
+.sb-workspace .storyboard-takes .ver-wrap {
+  flex: 0 0 116px;
+  min-width: 0;
+}

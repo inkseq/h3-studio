@@ -12,10 +12,14 @@ import {
   Minimize2,
   X,
   Scissors,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
-import { useTrash } from './UniversalTrash.jsx';
+import { RenameDialog, useTrash } from './UniversalTrash.jsx';
+import ItemMenu from './ItemMenu.jsx';
 import { usePageActive, useAppLocation } from './AppRouteCache.jsx';
 import { navigateApp } from './app-navigation.js';
+import { store } from './store.js';
 import {
   DndContext,
   DragOverlay,
@@ -119,6 +123,137 @@ function QueueSummary() {
 }
 const FilmEditor = React.lazy(() => import('./FilmEditor.jsx'));
 // Remotion loads only when the editor opens, keeping it out of the storyboard bundle.
+// Chapter divider on the continuous storyboard: title, totals, fold, edit film and a menu.
+function ChapterHeader({ chapter, index, count, shots, folded, onFold, onNewScene }) {
+  const { t } = useI18n();
+  const { state, dispatch } = useStoryboardUI();
+  const trash = useTrash();
+  const [renaming, setRenaming] = useState(false);
+  const locked = state.busy || !!state.workbenchPending;
+  const busyShots = shots.some((shot) =>
+    shot.versions.some((v) => !['done', 'failed', 'cancelled'].includes(v.status)),
+  );
+  const canDelete =
+    count > 1 &&
+    !busyShots &&
+    state.workspaceMode === 'cloud' &&
+    !!trash?.account &&
+    !trash.busy &&
+    !trash.pending;
+  return (
+    <header className="sb-chapter-head">
+      <button
+        type="button"
+        className="ghost small sb-chapter-fold"
+        aria-expanded={!folded}
+        aria-label={t(folded ? 'chapter.unfold' : 'chapter.fold')}
+        onClick={onFold}
+      >
+        {folded ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+      </button>
+      <h2>
+        <small>{t('chapter.number', { n: index + 1 })}</small>
+        {chapter.title}
+      </h2>
+      <span className="muted sb-chapter-meta">
+        {t('chapter.meta', { count: shots.length, duration: fmt(totalDuration(shots)) })}
+      </span>
+      <div className="spacer" />
+      <FilmEditorButton chapterId={chapter.id} />
+      <ItemMenu label={t('chapter.menu')} disabled={locked}>
+        {(close) => (
+          <>
+            <button role="menuitem" onClick={() => (close(), setRenaming(true))}>
+              {t('chapter.rename')}
+            </button>
+            {onNewScene && (
+              <button
+                role="menuitem"
+                onClick={() => {
+                  close();
+                  store.setScope(chapter.id);
+                  onNewScene();
+                }}
+              >
+                {t('chapter.addScene')}
+              </button>
+            )}
+            <button
+              role="menuitem"
+              disabled={index === 0}
+              onClick={() => (close(), dispatch({ type: 'moveChapter', id: chapter.id, dir: -1 }))}
+            >
+              {t('chapter.moveUp')}
+            </button>
+            <button
+              role="menuitem"
+              disabled={index === count - 1}
+              onClick={() => (close(), dispatch({ type: 'moveChapter', id: chapter.id, dir: 1 }))}
+            >
+              {t('chapter.moveDown')}
+            </button>
+            <button
+              role="menuitem"
+              className="danger-text"
+              disabled={!canDelete}
+              title={
+                count <= 1
+                  ? t('chapter.lastChapter')
+                  : busyShots
+                    ? t('chapter.busy')
+                    : state.workspaceMode !== 'cloud'
+                      ? t('chapter.cloudOnly')
+                      : undefined
+              }
+              onClick={() => {
+                close();
+                trash.request('trash', [
+                  { kind: 'entity', project_id: state.project.id, id: chapter.id },
+                ]);
+              }}
+            >
+              {t('chapter.delete')}
+            </button>
+          </>
+        )}
+      </ItemMenu>
+      {renaming && (
+        <RenameDialog
+          title={chapter.title}
+          onClose={() => setRenaming(false)}
+          onSave={async (title) => {
+            if (title.trim() === chapter.title) return;
+            const result = await dispatch({ type: 'renameChapter', id: chapter.id, title });
+            if (result === false || result?.ok === false) throw Error('chapter.renameFailed');
+          }}
+        />
+      )}
+    </header>
+  );
+}
+
+function AddChapter({ count }) {
+  const { t } = useI18n();
+  const { state, dispatch } = useStoryboardUI();
+  return (
+    <button
+      type="button"
+      className="ghost sb-add-chapter"
+      disabled={state.busy || !!state.workbenchPending}
+      onClick={() =>
+        dispatch({
+          type: 'addChapter',
+          title: t('chapter.newTitle', { n: count + 1 }),
+          sceneTitle: t('storyboard.newScene'),
+        })
+      }
+    >
+      <Plus size={14} />
+      {t('chapter.add')}
+    </button>
+  );
+}
+
 function FilmEditorButton({ chapterId }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -153,6 +288,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
     main = useRef(null),
     [room, setRoom] = useState({ height: 0, content: 0 }),
     [theater, setTheater] = useState(false);
+  const [folded, setFolded] = useState(() => new Set());
   useEffect(() => {
     const measure = () => {
       const col = column.current,
@@ -272,11 +408,19 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
         ? dockLayout.compact
         : dockLayout.large,
     );
+  // One continuous storyboard: every chapter's scenes in reading order (owner, 2026-10-21).
+  const chapters = state.project.chapters || [],
+    multi = chapters.length > 1,
+    chapterIndex = new Map(chapters.map((chapter, index) => [chapter.id, index]));
   const groups = (state.scenes || [])
-    .filter((scene) => scene.parentId === state.project.chapterId)
+    .filter((scene) => chapterIndex.has(scene.parentId))
+    .sort(
+      (a, b) => chapterIndex.get(a.parentId) - chapterIndex.get(b.parentId) || a.order - b.order,
+    )
     .map((scene) => ({
       id: scene.id,
       title: scene.title,
+      chapterId: scene.parentId,
       shots: state.shots.filter((shot) => shot.entity?.parentId === scene.id),
     }));
   for (const shot of state.shots) {
@@ -336,7 +480,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                   <PanelLeftClose size={16} />
                 )}
               </button>
-              <h1>{state.project.chapter}</h1>
+              <h1>{multi ? state.project.title : state.project.chapter}</h1>
               <small className="muted">
                 {t(state.shots.length === 1 ? 'storyboard.oneShotSummary' : 'storyboard.copy36', {
                   shots: state.shots.length,
@@ -347,7 +491,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
               </small>
             </div>
             <div className="row tight chapter-actions">
-              <FilmEditorButton chapterId={state.project.chapterId} />
+              {!multi && <FilmEditorButton chapterId={state.project.chapterId} />}
               {filmControl}
               <QueueSummary />
               {!groups.length && (
@@ -399,125 +543,167 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
             strategy={rectSortingStrategy}
           >
             <div className="sb-scene-groups">
-              {groups.map((group) => {
-                const processing = group.shots.some((shot) =>
-                    shot.versions.some((v) =>
-                      [
-                        'planned',
-                        'queued',
-                        'waiting_capacity',
-                        'claimed',
-                        'submitting',
-                        'submission_unknown',
-                        'generating',
-                        'running',
-                        'collecting',
-                        'checking',
-                        'cancel_requested',
-                      ].includes(v.status),
+              {(() => {
+                const renderGroup = (group) => {
+                  const processing = group.shots.some((shot) =>
+                      shot.versions.some((v) =>
+                        [
+                          'planned',
+                          'queued',
+                          'waiting_capacity',
+                          'claimed',
+                          'submitting',
+                          'submission_unknown',
+                          'generating',
+                          'running',
+                          'collecting',
+                          'checking',
+                          'cancel_requested',
+                        ].includes(v.status),
+                      ),
                     ),
-                  ),
-                  lastScene = groups.filter((row) => row.id).length <= 1,
-                  locked = state.busy || !!state.workbenchPending;
-                return (
-                  <section className="scene" key={group.id || 'unparented'}>
-                    <div className="scene-head">
-                      <b>{group.title}</b>
-                      <small>
-                        {t(
-                          group.shots.length === 1
-                            ? 'storyboard.sceneOneShot'
-                            : 'storyboard.sceneShots',
-                          { count: group.shots.length },
-                        )}{' '}
-                        · {fmt(totalDuration(group.shots))}
-                      </small>
-                      <div className="spacer" />
-                      <button
-                        className="small ghost"
-                        disabled={locked || !group.id}
-                        onClick={() =>
-                          dispatch({
-                            type: 'add',
-                            sceneId: group.id,
-                            title: t('storyboard.newShot'),
-                            sceneTitle: t('storyboard.newScene'),
-                          })
-                        }
-                      >
-                        <Plus size={14} />
-                        {t('storyboard.addShot')}
-                      </button>
-                      <button
-                        className="small ghost"
-                        aria-label={t('storyboard.deleteScene')}
-                        title={t(
-                          lastScene
-                            ? 'storyboard.lastScene'
-                            : processing
-                              ? 'storyboard.sceneBusy'
-                              : 'storyboard.deleteScene',
-                        )}
-                        disabled={
-                          locked ||
-                          lastScene ||
-                          processing ||
-                          !group.id ||
-                          state.workspaceMode !== 'cloud' ||
-                          !trash?.account ||
-                          trash.busy ||
-                          !!trash.pending
-                        }
-                        onClick={() =>
-                          trash.request('trash', [
-                            { kind: 'entity', project_id: state.project.id, id: group.id },
-                          ])
-                        }
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                    {group.shots.length ? (
-                      <div className="wall">
-                        {group.shots.map((shot) => (
-                          <ShotCard
-                            key={shot.id}
-                            shot={shot}
-                            index={state.shots.indexOf(shot)}
-                            selected={selected === shot.id}
-                            checked={selection.ids.includes(shot.id)}
-                            picking={selection.ids.length > 0}
-                            onSelect={(event) =>
-                              setSelection((old) =>
-                                selectShot(
-                                  old,
-                                  state.shots.map((s) => s.id),
-                                  shot.id,
-                                  { range: event.shiftKey, toggle: !event.shiftKey },
-                                ),
-                              )
-                            }
-                            onOpen={(id, event) =>
-                              event?.ctrlKey || event?.metaKey || event?.shiftKey
-                                ? setSelection((old) =>
-                                    selectShot(
-                                      old,
-                                      state.shots.map((s) => s.id),
-                                      id,
-                                      { range: event.shiftKey, toggle: !event.shiftKey },
-                                    ),
-                                  )
-                                : setSelected(id)
-                            }
-                          />
-                        ))}
+                    lastScene = groups.filter((row) => row.id).length <= 1,
+                    locked = state.busy || !!state.workbenchPending;
+                  return (
+                    <section className="scene" key={group.id || 'unparented'}>
+                      <div className="scene-head">
+                        <b>{group.title}</b>
+                        <small>
+                          {t(
+                            group.shots.length === 1
+                              ? 'storyboard.sceneOneShot'
+                              : 'storyboard.sceneShots',
+                            { count: group.shots.length },
+                          )}{' '}
+                          · {fmt(totalDuration(group.shots))}
+                        </small>
+                        <div className="spacer" />
+                        <button
+                          className="small ghost"
+                          disabled={locked || !group.id}
+                          onClick={() =>
+                            dispatch({
+                              type: 'add',
+                              sceneId: group.id,
+                              title: t('storyboard.newShot'),
+                              sceneTitle: t('storyboard.newScene'),
+                            })
+                          }
+                        >
+                          <Plus size={14} />
+                          {t('storyboard.addShot')}
+                        </button>
+                        <button
+                          className="small ghost"
+                          aria-label={t('storyboard.deleteScene')}
+                          title={t(
+                            lastScene
+                              ? 'storyboard.lastScene'
+                              : processing
+                                ? 'storyboard.sceneBusy'
+                                : 'storyboard.deleteScene',
+                          )}
+                          disabled={
+                            locked ||
+                            lastScene ||
+                            processing ||
+                            !group.id ||
+                            state.workspaceMode !== 'cloud' ||
+                            !trash?.account ||
+                            trash.busy ||
+                            !!trash.pending
+                          }
+                          onClick={() =>
+                            trash.request('trash', [
+                              { kind: 'entity', project_id: state.project.id, id: group.id },
+                            ])
+                          }
+                        >
+                          <Trash2 size={14} />
+                        </button>
                       </div>
-                    ) : (
-                      <p className="scene-empty muted">{t('storyboard.sceneEmpty')}</p>
-                    )}
-                  </section>
+                      {group.shots.length ? (
+                        <div className="wall">
+                          {group.shots.map((shot) => (
+                            <ShotCard
+                              key={shot.id}
+                              shot={shot}
+                              index={state.shots.indexOf(shot)}
+                              selected={selected === shot.id}
+                              checked={selection.ids.includes(shot.id)}
+                              picking={selection.ids.length > 0}
+                              onSelect={(event) =>
+                                setSelection((old) =>
+                                  selectShot(
+                                    old,
+                                    state.shots.map((s) => s.id),
+                                    shot.id,
+                                    { range: event.shiftKey, toggle: !event.shiftKey },
+                                  ),
+                                )
+                              }
+                              onOpen={(id, event) =>
+                                event?.ctrlKey || event?.metaKey || event?.shiftKey
+                                  ? setSelection((old) =>
+                                      selectShot(
+                                        old,
+                                        state.shots.map((s) => s.id),
+                                        id,
+                                        { range: event.shiftKey, toggle: !event.shiftKey },
+                                      ),
+                                    )
+                                  : setSelected(id)
+                              }
+                            />
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="scene-empty muted">{t('storyboard.sceneEmpty')}</p>
+                      )}
+                    </section>
+                  );
+                };
+                const orphans = groups.filter((group) => !group.chapterId);
+                if (!multi)
+                  return (
+                    <>
+                      {groups.map(renderGroup)}
+                      <AddChapter count={chapters.length} />
+                    </>
+                  );
+                return (
+                  <>
+                    {chapters.map((chapter, index) => {
+                      const own = groups.filter((group) => group.chapterId === chapter.id),
+                        shots = own.flatMap((group) => group.shots);
+                      return (
+                        <div className="sb-chapter" key={chapter.id}>
+                          <ChapterHeader
+                            chapter={chapter}
+                            index={index}
+                            count={chapters.length}
+                            shots={shots}
+                            folded={folded.has(chapter.id)}
+                            onFold={() =>
+                              setFolded((old) => {
+                                const next = new Set(old);
+                                next.has(chapter.id)
+                                  ? next.delete(chapter.id)
+                                  : next.add(chapter.id);
+                                return next;
+                              })
+                            }
+                            onNewScene={onNewScene}
+                          />
+                          {!folded.has(chapter.id) && own.map(renderGroup)}
+                        </div>
+                      );
+                    })}
+                    {orphans.map(renderGroup)}
+                    <AddChapter count={chapters.length} />
+                  </>
                 );
-              })}
+              })()}
             </div>
           </SortableContext>
         </main>

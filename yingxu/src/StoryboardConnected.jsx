@@ -375,6 +375,7 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
     () => ({
       ...storyboardView(s.project, {
         chapterId: s.scopeId,
+        allChapters: true,
         capabilities: c.capabilities,
         jobs: c.jobs,
         queue,
@@ -395,6 +396,7 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
   const currentView = () =>
     storyboardView(store.getState().project, {
       chapterId: store.getState().scopeId,
+      allChapters: true,
       capabilities: cloud.getState().capabilities,
       jobs: cloud.getState().jobs,
     });

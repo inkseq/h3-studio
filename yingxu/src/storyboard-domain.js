@@ -6,6 +6,11 @@ const uid = (kind) => kind + '-' + crypto.randomUUID();
 const find = (p, id) => p.entities.find((e) => e.id === id);
 const mode = (shot) => shot.data.storyboard?.mode || shot.data.h3?.inputMode || 'fl';
 const list = (value) => (Array.isArray(value) ? value : []);
+export const storyChapters = (project) =>
+  children(project, null).filter((e) => e.type === 'chapter');
+// Every shot of the story in reading order: chapter, then scene, then shot.
+export const storyShots = (project) =>
+  storyChapters(project).flatMap((chapter) => chapterShots(project, chapter.id));
 export function chapterShots(project, chapterId) {
   return children(project, chapterId)
     .filter((e) => e.type === 'scene')
@@ -32,7 +37,15 @@ export function storyboardGenerationProfile(capabilities, shot, { quality, sourc
 }
 export function storyboardView(
   project,
-  { chapterId, capabilities, jobs = [], queue = null, busy = false, error = '' } = {},
+  {
+    chapterId,
+    capabilities,
+    jobs = [],
+    queue = null,
+    busy = false,
+    error = '',
+    allChapters = false,
+  } = {},
 ) {
   const chapter =
     find(project, chapterId) || children(project, null).find((e) => e.type === 'chapter');
@@ -106,7 +119,9 @@ export function storyboardView(
     if (matches.length === 1)
       a.suggest = { pid: matches[0].id, vid: matches[0].def, label: matches[0].name };
   }
-  const shots = (chapter ? chapterShots(project, chapter.id) : []).map((s) => {
+  const shots = (
+    allChapters ? storyShots(project) : chapter ? chapterShots(project, chapter.id) : []
+  ).map((s) => {
     const b = s.data.storyboard || {},
       shotJobs = [
         ...new Map(
@@ -199,6 +214,7 @@ export function storyboardView(
       seedLock: !!s.data.h3?.controls?.seed,
       versions,
       chosen: s.data.selectedAssetId || '',
+      chapterId: find(project, s.parentId)?.parentId || null,
       entity: s,
     };
   });
@@ -208,6 +224,7 @@ export function storyboardView(
       title: project.title,
       chapter: chapter?.title || '第一章',
       chapterId: chapter?.id || null,
+      chapters: storyChapters(project).map((e) => ({ id: e.id, title: e.title })),
       style: project.journey?.storyboard?.style || '',
       aspect: project.journey?.brief?.aspect || '16:9',
     },
@@ -334,7 +351,9 @@ export function expandStoryboard(
   };
   const addFrames = () => {
     if (shot.continuePrev) {
-      const previous = state.shots[state.shots.findIndex((s) => s.id === shot.id) - 1],
+      // "Continue from previous" never crosses a chapter boundary (generation is per chapter).
+      const before = state.shots[state.shots.findIndex((s) => s.id === shot.id) - 1],
+        previous = before?.chapterId === shot.chapterId ? before : undefined,
         selected = previous?.versions.find((v) => v.id === previous.chosen),
         frame = asset(shot.previousFrame),
         binding = shot.entity?.data.storyboard?.previousFrame,

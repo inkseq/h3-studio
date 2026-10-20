@@ -3,6 +3,8 @@ import { children, ancestors } from './store.js';
 import { detachDeletedReferences } from './entity-references.js';
 import {
   chapterShots,
+  storyChapters,
+  storyShots,
   patchStoryboardShot,
   storyboardDrop,
   storyboardView,
@@ -268,7 +270,9 @@ export function applyStoryboardAction(project, action, { chapterId, view } = {})
       return false;
     const requested = action.sceneId === undefined ? null : find(project, action.sceneId);
     if (action.sceneId !== undefined && requested?.type !== 'scene') return false;
+    // A shot added to a specific scene belongs to that scene's chapter (all chapters share one page).
     const existing =
+      (requested && find(project, requested.parentId)) ||
       find(project, chapterId || view?.project.chapterId) ||
       children(project, null).find((entity) => entity.type === 'chapter');
     if (
@@ -328,13 +332,11 @@ export function applyStoryboardAction(project, action, { chapterId, view } = {})
     const from = find(project, action.from),
       to = find(project, action.to);
     if (from?.type !== 'shot' || to?.type !== 'shot' || from.id === to.id) return false;
-    const fromChapter = ancestors(project, from.id).find((entity) => entity.type === 'chapter');
-    if (
-      !fromChapter ||
-      ancestors(project, to.id).find((entity) => entity.type === 'chapter')?.id !== fromChapter.id
-    )
-      return false;
-    const all = chapterShots(project, fromChapter.id),
+    const chapterOf = (entity) =>
+      ancestors(project, entity.id).find((row) => row.type === 'chapter');
+    if (!chapterOf(from) || !chapterOf(to)) return false;
+    // Shots can move across scenes and chapters; order is the story's reading order.
+    const all = storyShots(project),
       oldIndex = all.indexOf(from),
       targetIndex = all.indexOf(to);
     if (from.parentId !== to.parentId) {
@@ -360,10 +362,53 @@ export function applyStoryboardAction(project, action, { chapterId, view } = {})
       }
     });
     // Previous-shot identity changes even when another moved row kept its order.
-    chapterShots(project, fromChapter.id)
+    storyShots(project)
       .filter((entity) => entity.data.storyboard?.continuePrevious)
       .forEach(mark);
     return { id: from.id };
+  }
+  if (action.type === 'addChapter') {
+    if (
+      !text(action.title, 160) ||
+      !action.title.trim() ||
+      !text(action.sceneTitle, 160) ||
+      !action.sceneTitle.trim()
+    )
+      return false;
+    const chapter = newStoryboardEntity(project, 'chapter', action.title.trim(), null, {});
+    const last = storyChapters(project)
+      .filter((row) => row.id !== chapter.id)
+      .at(-1);
+    chapter.order = (last?.order ?? 0) + 1;
+    newStoryboardEntity(project, 'scene', action.sceneTitle.trim(), chapter.id, { script: '' });
+    return { id: chapter.id };
+  }
+  if (action.type === 'renameChapter') {
+    const chapter = find(project, action.id);
+    if (chapter?.type !== 'chapter' || !text(action.title, 160) || !action.title.trim())
+      return false;
+    if (chapter.title === action.title.trim()) return false;
+    chapter.title = action.title.trim();
+    chapter.version++;
+    return { id: chapter.id };
+  }
+  if (action.type === 'moveChapter') {
+    const chapters = storyChapters(project),
+      index = chapters.findIndex((row) => row.id === action.id),
+      next = index + (action.dir === -1 ? -1 : 1);
+    if (index < 0 || ![-1, 1].includes(action.dir) || next < 0 || next >= chapters.length)
+      return false;
+    [chapters[index], chapters[next]] = [chapters[next], chapters[index]];
+    chapters.forEach((row, n) => {
+      if (row.order !== n) {
+        row.order = n;
+        row.version++;
+      }
+    });
+    storyShots(project)
+      .filter((entity) => entity.data.storyboard?.continuePrevious)
+      .forEach(mark);
+    return { id: action.id };
   }
   if (
     [
