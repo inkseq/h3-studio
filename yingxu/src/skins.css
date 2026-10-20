@@ -125,6 +125,180 @@ html[data-skin='taisho'] .badge {
   color: #f0b7a8;
 }
 
+/* Skin: 北欧 · 原木 (Nordic). Light: warm paper, birch wood, moss green actions, soft shadows,
+   no ornament. The calmest skin and the light option. */
+html[data-skin='nordic'] {
+  --bg: #f7f4ef;
+  --surface: #ffffff;
+  --surface-2: #fbf9f5;
+  --surface-3: #efeae1;
+  --surface-4: #e3ddd2;
+  --line: rgba(46, 51, 48, 0.09);
+  --line-2: rgba(46, 51, 48, 0.16);
+  --ink: #2e3330;
+  --ink-2: #4f5752;
+  --muted: #7f857f;
+  --accent: #3f5a4c;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(63, 90, 76, 0.12);
+  --fl: #3f6f9a;
+  --fl-soft: rgba(63, 111, 154, 0.12);
+  --ref: #8a6a9e;
+  --ref-soft: rgba(138, 106, 158, 0.12);
+  --warn: #b7791f;
+  --warn-soft: rgba(183, 121, 31, 0.12);
+  --bad: #c0503f;
+  --good: #3f8a5f;
+  --good-soft: rgba(63, 138, 95, 0.12);
+  --char: #3f8a5f;
+  --loc: #b7791f;
+  --prp: #8a6a9e;
+  --r-sm: 9px;
+  --r: 14px;
+  --r-lg: 18px;
+  --shadow: 0 2px 12px rgba(60, 50, 30, 0.08);
+  --shadow-lg: 0 18px 48px rgba(60, 50, 30, 0.14);
+  color-scheme: light;
+}
+html[data-skin='nordic'] .hbar {
+  background: rgba(247, 244, 239, 0.92);
+}
+html[data-skin='nordic'] .story-card .cover-empty,
+html[data-skin='nordic'] .story-card .cover:not(:has(img, video)) {
+  background:
+    linear-gradient(160deg, transparent 55%, rgba(255, 255, 255, 0.6) 55%),
+    linear-gradient(200deg, transparent 50%, rgba(207, 214, 220, 0.7) 50%),
+    linear-gradient(180deg, #9fb3c2, #dfe6ea);
+}
+html[data-skin='nordic'] .account-menu-panel,
+html[data-skin='nordic'] .story-account-panel {
+  box-shadow: var(--shadow-lg);
+}
+
+/* Skin: 装饰艺术 · 黑金 (Art Deco). Black lacquer and brushed gold, a geometric display face,
+   a thin gold rule under the header and fan (sunburst) covers. */
+html[data-skin='deco'] {
+  --bg: #0b0b0b;
+  --surface: #121212;
+  --surface-2: #171717;
+  --surface-3: #202020;
+  --surface-4: #2a2a2a;
+  --line: rgba(201, 165, 76, 0.12);
+  --line-2: rgba(201, 165, 76, 0.24);
+  --ink: #efe6cf;
+  --ink-2: #c9bfa6;
+  --muted: #8f8775;
+  --accent: #c9a54c;
+  --accent-ink: #0b0b0b;
+  --accent-soft: rgba(201, 165, 76, 0.14);
+  --fl: #5fa8a0;
+  --fl-soft: rgba(95, 168, 160, 0.14);
+  --ref: #b9a2d8;
+  --ref-soft: rgba(185, 162, 216, 0.14);
+  --good: #6fbf8e;
+  --good-soft: rgba(111, 191, 142, 0.14);
+  --char: #6fbf8e;
+  --loc: #c9a54c;
+  --prp: #b9a2d8;
+  --r-sm: 3px;
+  --r: 4px;
+  --r-lg: 6px;
+  --skin-display: 'Poiret One', 'Noto Sans SC', sans-serif;
+}
+html[data-skin='deco'] :is(.page-title, .hbar .logo) {
+  font-family: var(--skin-display);
+  letter-spacing: 0.12em;
+}
+html[data-skin='deco'] .hbar {
+  position: relative;
+  background: rgba(11, 11, 11, 0.94);
+  box-shadow: inset 0 -1px 0 var(--accent);
+}
+html[data-skin='deco'] .hbar nav button.on {
+  background: transparent;
+  color: var(--accent);
+  box-shadow:
+    inset 0 2px 0 var(--accent),
+    inset 0 -2px 0 var(--accent);
+}
+html[data-skin='deco'] .story-card .cover-empty,
+html[data-skin='deco'] .story-card .cover:not(:has(img, video)) {
+  background: repeating-conic-gradient(from -90deg at 50% 100%, #3a301a 0 6deg, #121212 6deg 12deg);
+}
+html[data-skin='deco'] .story-card.new {
+  border: 1px dashed var(--line-2);
+}
+
+/* Skin: 地中海 · 爱琴海 (Aegean). Light: whitewash and Aegean blue, lemon-yellow highlights,
+   a Greek key (meander) band under the header. */
+html[data-skin='aegean'] {
+  --bg: #fbfbf8;
+  --surface: #ffffff;
+  --surface-2: #f6f8fb;
+  --surface-3: #e9eff6;
+  --surface-4: #dbe5f0;
+  --line: rgba(19, 48, 79, 0.09);
+  --line-2: rgba(19, 48, 79, 0.17);
+  --ink: #13304f;
+  --ink-2: #33506f;
+  --muted: #6f86a0;
+  --accent: #1f5fa8;
+  --accent-ink: #ffffff;
+  --accent-soft: rgba(31, 95, 168, 0.12);
+  --fl: #1f8fa8;
+  --fl-soft: rgba(31, 143, 168, 0.12);
+  --ref: #7d5fb0;
+  --ref-soft: rgba(125, 95, 176, 0.12);
+  --warn: #b7791f;
+  --warn-soft: rgba(242, 177, 52, 0.18);
+  --bad: #c0503f;
+  --good: #2f8a5f;
+  --good-soft: rgba(47, 138, 95, 0.12);
+  --char: #2f8a5f;
+  --loc: #c48a12;
+  --prp: #7d5fb0;
+  --r-sm: 10px;
+  --r: 16px;
+  --r-lg: 20px;
+  --shadow: 0 2px 12px rgba(19, 48, 79, 0.08);
+  --shadow-lg: 0 18px 48px rgba(19, 48, 79, 0.14);
+  --skin-display: 'Marcellus', 'Noto Serif SC', serif;
+  color-scheme: light;
+}
+html[data-skin='aegean'] :is(.page-title, .hbar .logo) {
+  font-family: var(--skin-display);
+  letter-spacing: 0.04em;
+}
+html[data-skin='aegean'] .hbar {
+  position: relative;
+  background: rgba(251, 251, 248, 0.94);
+}
+html[data-skin='aegean'] .hbar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -10px;
+  height: 10px;
+  opacity: 0.5;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='10' viewBox='0 0 20 10'%3E%3Cpath d='M0 9.5H7.5V1.5H15V6.5H11V4' fill='none' stroke='%231f5fa8' stroke-width='1.2'/%3E%3Cpath d='M15 1.5V9.5H20' fill='none' stroke='%231f5fa8' stroke-width='1.2'/%3E%3C/svg%3E");
+  background-size: 20px 10px;
+}
+html[data-skin='aegean'] .story-card .cover-empty,
+html[data-skin='aegean'] .story-card .cover:not(:has(img, video)) {
+  background: linear-gradient(180deg, #d7ebf8 0 58%, #4f86c4 58% 64%, #1f5fa8 64% 74%, #eef3f8 74%);
+}
+html[data-skin='aegean'] .credits-chip svg {
+  color: #c48a12;
+}
+/* Light skins: the phone bottom tab bar uses a hard-coded dark glass; repaint it. */
+@media (max-width: 760px) {
+  html:is([data-skin='nordic'], [data-skin='aegean']) .hbar nav {
+    background: color-mix(in srgb, var(--surface) 96%, transparent);
+    border-top: 1px solid var(--line-2);
+  }
+}
 /* Skin picker (Settings → Appearance). */
 .skin-picker {
   display: grid;
@@ -147,6 +321,72 @@ html[data-skin='taisho'] .badge {
 .skin-option.on {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
+}
+.skin-option > b {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.skin-tag {
+  padding: 1px 6px;
+  border-radius: 99px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 500;
+}
+/* Mini page mock drawn in the skin's own swatch colours. */
+.skin-preview {
+  --p-line: rgba(255, 255, 255, 0.1);
+  --p-card: color-mix(in srgb, var(--p-bg) 88%, #fff);
+  display: grid;
+  gap: 7px;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  padding: 8px;
+  border-radius: calc(var(--r) - 4px);
+  border: 1px solid var(--line-2);
+  background: var(--p-bg);
+  grid-template-rows: auto 1fr;
+}
+.skin-preview.light {
+  --p-line: rgba(0, 0, 0, 0.1);
+  --p-card: color-mix(in srgb, var(--p-bg) 70%, #fff);
+}
+.skin-preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid var(--p-third);
+}
+.skin-preview-bar i,
+.skin-preview-bar b {
+  height: 6px;
+  width: 18%;
+  border-radius: 99px;
+  background: var(--p-line);
+}
+.skin-preview-bar b {
+  background: var(--p-accent);
+}
+.skin-preview-bar i:first-child {
+  width: 10%;
+  margin-right: auto;
+  background: var(--p-accent);
+}
+.skin-preview-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.skin-preview-cards i {
+  border-radius: 4px;
+  border: 1px solid var(--p-line);
+  background:
+    linear-gradient(180deg, transparent 58%, var(--p-card) 58%),
+    linear-gradient(135deg, var(--p-accent), var(--p-third));
+  opacity: 0.9;
 }
 .skin-swatch {
   display: flex;

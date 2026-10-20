@@ -2,7 +2,8 @@ import { ChatDialog } from './QuickChatControls.jsx';
 import { cloudSystemMessage } from './cloud-model.js';
 import { exportSrt } from './caption-model.js';
 import { chapterHandover, shotListCsv } from './handover-model.js';
-import StudioHeader, { useAccountLabel } from './StudioHeader.jsx';
+import StudioHeader from './StudioHeader.jsx';
+import AccountMenu, { MenuItem } from './AccountMenu.jsx';
 import { LowCreditsDialog } from './CreditsUI.jsx';
 import { LegalPage, PricingPage } from './PublicPages.jsx';
 import Library from './Library.jsx';
@@ -36,7 +37,6 @@ import {
   FolderOpen,
   BookOpen,
   Users,
-  UserRound,
   MapPin,
   Image,
   Clapperboard,
@@ -161,7 +161,6 @@ function SeriesApp({ sidebarView, onSidebarView }) {
     [search, setSearch] = useState(''),
     [legacyGuide, setLegacyGuide] = useState(false);
   const c = useCloud(),
-    who = useAccountLabel(c.account),
     trash = useTrash();
   const storyboardActive = true;
   const importRef = useRef(),
@@ -327,51 +326,34 @@ function SeriesApp({ sidebarView, onSidebarView }) {
       state.project.id === linkTarget.projectId;
   const chapterList = p.entities.filter((e) => e.type === 'chapter').sort(byOrder);
   const accountMenu = (
-    <details className="story-account-menu">
-      <summary aria-label={who.label || t('story.copy14')} title={who.label || t('story.copy14')}>
-        <span className="avatar">
-          {c.account ? who.initial : <UserRound size={17} aria-hidden="true" />}
-        </span>
-      </summary>
-      <div className="story-account-panel">
-        <b>{who.label || t('story.copy14')}</b>
-        <button onClick={() => (c.account ? navigateApp('/settings') : open({ type: 'cloud' }))}>
-          <FolderOpen size={15} />
-          {c.account ? t('settings.title') : t('story.copy3')}
-        </button>
-        <a href="/settings">{t('settings.title')}</a>
-        <button disabled={busy} onClick={backup}>
-          <Download size={15} />
-          {t('story.copy53')}
-        </button>
-        <button onClick={() => open({ type: 'projects' })}>
-          <Upload size={15} />
-          {t('story.copy54')}
-        </button>
-        <button onClick={() => open({ type: 'agent' })}>
-          <Bot size={15} />
-          {t('story.copy31')}
-        </button>
-        <button disabled={!state.undoCount} onClick={() => store.undo()}>
-          <Undo2 size={15} />
-          {t('story.copy2')}
-        </button>
-        <button disabled={!state.redoCount} onClick={() => store.redo()}>
-          <Redo2 size={15} />
-          {t('story.copy49')}
-        </button>
-        {state.workspace.mode === 'cloud' && (
-          <>
-            <button onClick={() => open({ type: 'manage-items' })}>{t('trash.manage')}</button>
-            <TrashMenu
-              target={{ kind: 'project', project_id: p.id, id: p.id }}
-              onRename={() => open({ type: 'project-settings' })}
-            />
-          </>
-        )}
-        <a href="/trash">{t('trash.title')}</a>
-      </div>
-    </details>
+    <AccountMenu
+      account={c.account}
+      onSignIn={() => open({ type: 'cloud' })}
+      items={
+        <>
+          <MenuItem icon={Download} disabled={busy} onClick={backup}>
+            {t('story.copy53')}
+          </MenuItem>
+          <MenuItem icon={Upload} onClick={() => open({ type: 'projects' })}>
+            {t('story.copy54')}
+          </MenuItem>
+          <MenuItem icon={Bot} onClick={() => open({ type: 'agent' })}>
+            {t('story.copy31')}
+          </MenuItem>
+          {state.workspace.mode === 'cloud' && (
+            <>
+              <MenuItem onClick={() => open({ type: 'manage-items' })}>
+                {t('trash.manage')}
+              </MenuItem>
+              <TrashMenu
+                target={{ kind: 'project', project_id: p.id, id: p.id }}
+                onRename={() => open({ type: 'project-settings' })}
+              />
+            </>
+          )}
+        </>
+      }
+    />
   );
   return (
     <>
@@ -484,6 +466,24 @@ function SeriesApp({ sidebarView, onSidebarView }) {
             <span className="badge local">{t('story.copy9')}</span>
           )}
           <div className="spacer" />
+          <button
+            className="ghost icon-only"
+            disabled={!state.undoCount}
+            onClick={() => store.undo()}
+            aria-label={t('story.copy2')}
+            title={t('story.copy2')}
+          >
+            <Undo2 size={15} />
+          </button>
+          <button
+            className="ghost icon-only"
+            disabled={!state.redoCount}
+            onClick={() => store.redo()}
+            aria-label={t('story.copy49')}
+            title={t('story.copy49')}
+          >
+            <Redo2 size={15} />
+          </button>
           <details className="v2-export-menu">
             <summary>
               {t('v2.export')} <ChevronRight size={12} />
