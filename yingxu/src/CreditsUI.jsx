@@ -303,9 +303,9 @@ export function CreditsPanel({ account, active }) {
                       </>
                     )}
                   </small>
-                  <b className={entry.amount > 0 ? 'good' : ''}>
-                    {entry.amount > 0 ? '+' : '−'}
-                    {n(Math.abs(entry.amount))}
+                  <b className={entry.onHold ? 'muted' : entry.shown > 0 ? 'good' : ''}>
+                    {entry.shown > 0 ? '+' : '−'}
+                    {n(Math.abs(entry.shown))}
                   </b>
                 </div>
               );
