@@ -14,6 +14,7 @@ from PIL import Image
 from telegram_bot.adapter import Storyboard
 from telegram_bot.bot import Bot, Store, parse_part, parse_second
 from telegram_bot.demo_adapter import DemoAdapter
+from telegram_bot.feedback import FeedbackLog
 from telegram_bot.telegram_api import TelegramAPI, TelegramError
 
 OWNER = 1001
@@ -105,8 +106,10 @@ class TelegramBotTest(unittest.TestCase):
         root = Path(self.tmp.name)
         self.api = FakeAPI(root)
         self.now = [1000.0]
+        self.log = FeedbackLog(root / "feedback.jsonl")
         self.bot = Bot(self.api, DemoAdapter(root / "work"), Store(root / "state"),
-                       [OWNER], root / "media", clock=lambda: self.now[0])  # fmt: skip
+                       [OWNER], root / "media", clock=lambda: self.now[0],
+                       feedback=self.log)  # fmt: skip
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -306,7 +309,31 @@ class TelegramBotTest(unittest.TestCase):
         self.assertEqual(len(self.board().cards), before - 1)
         self.assertIn("没有重新生成", self.api.sent[-1]["text"])
         self.bot.handle(tap(OWNER, "ok"))
-        self.assertIn("已经保存", self.api.sent[-1]["text"])
+        self.assertIn("已经保存", self.api.sent[-2]["text"])
+        self.assertIn("用得顺手吗", self.api.sent[-1]["text"])  # asked once per film
+        self.bot.handle(tap(OWNER, "rate:1"))
+        self.bot.handle(private(OWNER, text="生成太慢了"))
+        kinds = [row["kind"] for row in self.log.rows()]
+        for kind in ("film_delivered", "fix_applied", "reverted", "satisfied", "rating",
+                     "rating_note"):  # fmt: skip
+            self.assertIn(kind, kinds)
+        note = next(r for r in self.log.rows() if r["kind"] == "rating_note")
+        self.assertEqual(note["text"], "生成太慢了")
+        self.assertNotIn(str(OWNER), note["person"])  # digests use a pseudonym
+
+    def test_idea_command_and_notify(self):
+        self.bot.handle(private(OWNER, text="/idea 能不能自动加字幕"))
+        reply = self.api.sent[-1]
+        self.assertIn("收到", reply["text"])
+        row = self.log.rows()[-1]
+        self.assertEqual((row["kind"], row["text"]), ("idea", "能不能自动加字幕"))
+        self.bot.handle(tap(OWNER, reply["buttons"][0][0][1]))
+        self.assertTrue(self.log.rows()[-1]["notify"])
+        self.bot.handle(private(OWNER, text="/idea"))
+        self.bot.handle(private(OWNER, text="想要背景音乐"))
+        self.assertEqual(self.log.rows()[-1]["text"], "想要背景音乐")
+        self.bot.handle(private(OWNER, voice={"file_id": "v"}))
+        self.assertEqual(self.log.rows()[-1]["kind"], "unsupported")
 
     def test_commands_help_go_status(self):
         self.bot.handle(private(OWNER, text="/help"))
@@ -335,6 +362,33 @@ class TelegramBotTest(unittest.TestCase):
         self.bot.handle(tap(OWNER, f"open:{first.id}"))
         self.assertEqual(self.board().id, first.id)
         self.assertIn("找回了", self.api.sent[-1]["text"])
+
+    def test_shipped_request_is_announced_once_and_digest_counts(self):
+        from telegram_bot.digest import health, report
+
+        self.bot.handle(private(OWNER, text="/idea 想要自动字幕"))
+        self.bot.handle(private(OWNER, text="/idea 想要背景音乐"))  # not opted in
+        first = self.log.rows()[0]["id"]
+        self.bot.handle(tap(OWNER, f"notify:{first}"))
+        for row in self.log.rows():
+            self.log.mark(
+                row["id"], status="shipped", shipped_note="在方案里点「加字幕」"
+            )
+        before = len(self.api.sent)
+        self.bot.announce_shipped()
+        self.bot.announce_shipped()  # only once
+        sent = self.api.sent[before:]
+        self.assertEqual(len(sent), 1)
+        self.assertIn("想要自动字幕", sent[0]["text"])
+        self.assertIn("加字幕", sent[0]["text"])
+
+        numbers = health(self.log.rows())
+        self.assertEqual(numbers["people"], 1)
+        text = report(self.log.rows(), [{"title": "自动字幕", "kind": "功能需求", "count": 1,
+                                          "people": 1, "example": "想要字幕",
+                                          "next_step": "排期", "ids": [first]}], 7)  # fmt: skip
+        self.assertIn("自动字幕", text)
+        self.assertNotIn(str(OWNER), text)  # no raw chat ids in the shareable digest
 
     def test_stale_button_does_nothing_dangerous(self):
         stale = (

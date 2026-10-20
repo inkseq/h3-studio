@@ -14,6 +14,7 @@ from pathlib import Path
 import sys
 
 from .bot import COMMANDS, Bot, Store
+from .feedback import FeedbackLog
 from .demo_adapter import DemoAdapter
 from .telegram_api import ORIGIN, TelegramAPI
 
@@ -84,7 +85,7 @@ def main(argv=None):
     logging.info("running as @%s for %d allowlisted user(s), %s adapter",
                  me.get("username"), len(allowed), config.get("adapter", "demo"))  # fmt: skip
     bot = Bot(api, make_adapter(config, home), Store(home / "state"), allowed,
-              home / "media")  # fmt: skip
+              home / "media", feedback=FeedbackLog(home / "feedback.jsonl"))  # fmt: skip
     bot.poll_forever()
 
 

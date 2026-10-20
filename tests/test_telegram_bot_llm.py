@@ -51,7 +51,8 @@ class FakeGemini:
             })  # fmt: skip
         if "understood" in schema:
             return answer({"summary": "删了结尾", "understood": True, "aspect": "9:16",
-                           "renames": [{"photo": 2, "name": "拉花"}], "cards": [{**card(1), "from_part": 1}]})  # fmt: skip
+                           "renames": [{"photo": 2, "name": "拉花"}], "cards": [{**card(1), "from_part": 1}],
+                           "signal": {"kind": "request", "summary": "想要自动字幕"}})  # fmt: skip
         if "part" in schema:
             return answer({"part": 3})
         return answer({"summary": "调亮", "prompt": "更亮的提示词", "seconds": 2})
@@ -88,6 +89,8 @@ class LlmAdapterTest(unittest.TestCase):
 
         board, summary = self.adapter.revise(board, "结尾不要了")
         self.assertEqual(summary, "删了结尾")
+        self.assertEqual(self.adapter.take_signal()["summary"], "想要自动字幕")
+        self.assertIsNone(self.adapter.take_signal())  # consumed once
         self.assertEqual(len(board.cards), 1)
         self.assertEqual(board.materials[1], "拉花")
         later = self.fake.requests[1]["contents"][0]["parts"]

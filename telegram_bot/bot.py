@@ -30,6 +30,21 @@ class GenerationHeld(Exception):
     """Raised by an adapter that deliberately does not submit paid generation."""
 
 
+class _NoFeedback:
+    def record(self, *args, **kwargs):
+        return None
+
+    def mark(self, *args, **kwargs):
+        return None
+
+    def shipped_unannounced(self):
+        return []
+
+
+SIGNAL_KINDS = {"request": "model_request", "complaint": "model_complaint",
+                "praise": "model_praise"}  # fmt: skip
+
+
 WELCOME = """你好！我帮小店把照片做成宣传短片。
 
 📷 发几张店里的照片，再说一句想做什么，比如「咖啡店开业」。
@@ -42,6 +57,7 @@ COMMANDS = [
     ("find", "找以前做过的片子"),
     ("status", "现在做到哪一步"),
     ("budget", "积分和花费"),
+    ("idea", "提建议 / 哪里不好用"),
     ("help", "怎么用"),
 ]
 HELP = (
@@ -179,13 +195,15 @@ def number_rows(prefix, count, per_row=6, label="{}"):
 
 
 class Bot:
-    def __init__(self, api, adapter, store, allowed_ids, media_dir, clock=time.time):
+    def __init__(self, api, adapter, store, allowed_ids, media_dir, clock=time.time,
+                 feedback=None):
         if not allowed_ids:
             raise ValueError("allowlist is empty; refusing to run")
         self.api, self.adapter, self.store = api, adapter, store
         self.allowed = {int(x) for x in allowed_ids}
         self.media_dir = Path(media_dir)
         self.clock = clock
+        self.fb = feedback or _NoFeedback()
         self.ignored = 0
         self._waiting = set()  # chats whose photos/text may still be arriving
         if hasattr(adapter, "on_saved"):
@@ -250,6 +268,9 @@ class Bot:
             text = "😄 收到！发照片或者说一句想做什么吧。"
         else:
             text = "我现在只认照片和文字。"
+        kind = next((k for k in ("voice", "audio", "video", "video_note", "sticker", "document")
+                     if message.get(k)), "other")  # fmt: skip
+        self.fb.record("unsupported", chat_id, kind)
         self.api.send_message(chat_id, text)
 
     # ---- helpers ----------------------------------------------------------
@@ -339,12 +360,26 @@ class Bot:
     def _failed(self, chat_id, error):
         detail = getattr(error, "step", None)
         where = f"（{detail}）" if detail else ""
+        self.fb.record("error", chat_id, type(error).__name__, step=detail)
         try:
             self.api.send_message(
                 chat_id, f"出错了{where}，已经停下，没有扣费。可以再试一次，或发 /status 看看。"
             )
         except Exception:
             pass
+
+    def _idea(self, chat_id, state, text):
+        self.store.save(chat_id, state)
+        row = self.fb.record("idea", chat_id, text, phase=state["phase"])
+        buttons = [[("🔔 上线了告诉我", f"notify:{row}")]] if row else None
+        self.api.send_message(chat_id, "收到，谢谢！每条我们都会看 🙏", buttons)
+
+    def _signal(self, chat_id, text):
+        """Gemini may notice a feature request or complaint inside a normal message."""
+        signal = self.adapter.take_signal()
+        if signal and signal.get("kind") in SIGNAL_KINDS and signal.get("summary"):
+            self.fb.record(SIGNAL_KINDS[signal["kind"]], chat_id, text,
+                           summary=str(signal["summary"])[:120])  # fmt: skip
 
     def _saved_notice(self, chat_id, link):
         """Called from the adapter's worker when the story is on the website."""
@@ -354,7 +389,8 @@ class Bot:
                 [[("🌐 在网页里打开", "url:" + link)]],
             )  # fmt: skip
 
-    def _stale(self, chat_id):
+    def _stale(self, chat_id, data=None):
+        self.fb.record("stale_button", chat_id, data or "")
         self.api.send_message(chat_id, "这个按钮已经过期了，按最新的消息操作就好。")
 
     # ---- inputs -----------------------------------------------------------
@@ -396,11 +432,26 @@ class Bot:
         if command == "/new":
             return self._new(chat_id)
         state = self.store.load(chat_id)
+        if command == "/idea":
+            idea = text[len(text.split()[0]):].strip()
+            if idea:
+                return self._idea(chat_id, state, idea)
+            state["pending_input"] = {"kind": "idea"}
+            self.store.save(chat_id, state)
+            self.api.send_message(chat_id, "想要什么功能，或者哪里不好用？直接说，一句话就行。")
+            return
         if command:
             return self._command(chat_id, state, command)
         pending = state.get("pending_input")
         if pending:
             state["pending_input"] = None
+            if pending["kind"] == "idea":
+                return self._idea(chat_id, state, text)
+            if pending["kind"] == "rating_note":
+                self.store.save(chat_id, state)
+                self.fb.record("rating_note", chat_id, text)
+                self.api.send_message(chat_id, "记下了，谢谢你说得这么具体 🙏")
+                return
             if pending["kind"] == "edit" and state["phase"] == "proposed":
                 board = self.adapter.edit_card(self._board(state), pending["n"], text)
                 self._save_board(chat_id, state, board)
@@ -422,7 +473,12 @@ class Bot:
                 return
             self._action(chat_id, "typing")
             board, summary = self.adapter.revise(board, text)
+            self._signal(chat_id, text)
             self._save_board(chat_id, state, board, phase="proposed")
+            if summary.startswith("没太听懂"):
+                self.fb.record("not_understood", chat_id, text, board=board.id)
+                self.api.send_message(chat_id, summary)
+                return
             self._send_proposal(chat_id, board, f"改好了（{summary}）：")
             return
         if phase == "delivered":
@@ -501,7 +557,16 @@ class Bot:
             self._generate(chat_id, state)
         elif name == "ok" and phase == "delivered":
             self.store.archive(chat_id, state, time.strftime("%m-%d %H:%M"))
+            self.fb.record("satisfied", chat_id, board=board.id,
+                           fixes=sum(len(c.takes) - 1 for c in board.cards if c.takes))  # fmt: skip
             self.api.send_message(chat_id, "👍 好！片子已经保存，/find 随时能找回。长按视频就能转发。\n做下一条发 /new。")
+            if board.id not in state.get("rated", []):
+                state["rated"] = [*state.get("rated", []), board.id][-20:]
+                self.store.save(chat_id, state)
+                self.api.send_message(
+                    chat_id, "顺便问一句：这次用得顺手吗？",
+                    [[("😍 很顺手", "rate:3"), ("🙂 还行", "rate:2"), ("😕 不太好", "rate:1")]],
+                )  # fmt: skip
         elif name == "q" and phase == "delivered" and arg in ISSUES:
             label, _words = ISSUES[arg]
             self.api.send_message(
@@ -527,6 +592,8 @@ class Bot:
             fix = state["pending_fix"]
             self._propose_fix(chat_id, state, fix["number"], fix["feedback"])
         elif name == "fix_no" and phase == "delivered" and state["pending_fix"]:
+            self.fb.record("wrong_part", chat_id, state["pending_fix"].get("feedback", ""),
+                           guessed=state["pending_fix"].get("number"))  # fmt: skip
             state["pending_fix"] = None
             self.store.save(chat_id, state)
             self.api.send_message(chat_id, "那是哪一段？", number_rows("pick:", parts, 4, "第{}段"))
@@ -550,9 +617,27 @@ class Bot:
             self.store.save(chat_id, state)
             self.api.send_message(chat_id, "好，保留新版。还有要改的继续说，或点「满意」。")
         elif name == "revert" and phase == "delivered" and state["last_fix"]:
+            self.fb.record("reverted", chat_id, board=board.id, part=state["last_fix"]["number"])
             self._revert(chat_id, state)
+        elif name == "rate" and n in (1, 2, 3):
+            self.fb.record("rating", chat_id, str(n), board=(board.id if board else None))
+            if n == 3:
+                self.api.send_message(chat_id, "太好了，谢谢！有想要的功能随时发 /idea 告诉我 🙏")
+            else:
+                state["pending_input"] = {"kind": "rating_note"}
+                self.store.save(chat_id, state)
+                self.api.send_message(
+                    chat_id, "哪里可以更好？说一句就行。", [[("跳过", "skip_note")]]
+                )
+        elif name == "skip_note":
+            state["pending_input"] = None
+            self.store.save(chat_id, state)
+            self.api.send_message(chat_id, "好的，谢谢！")
+        elif name == "notify" and arg:
+            self.fb.mark(arg, notify=True)
+            self.api.send_message(chat_id, "好，上线了第一时间告诉你 🔔")
         else:
-            self._stale(chat_id)
+            self._stale(chat_id, data)
 
     # ---- collecting ---------------------------------------------------------
 
@@ -574,6 +659,17 @@ class Bot:
             state["status_msg"] = self.api.send_message(chat_id, text, buttons)["message_id"]
         self.store.save(chat_id, state)
         self._waiting.add(chat_id)
+
+    def announce_shipped(self):
+        """Close the loop: tell people their request shipped (they opted in)."""
+        for row in self.fb.shipped_unannounced():
+            if row["chat"] not in self.allowed:
+                continue
+            note = f"\n{row['shipped_note']}" if row.get("shipped_note") else ""
+            self.api.send_message(
+                row["chat"], f"🎉 你之前提的「{row['text'][:40]}」已经上线了！{note}\n谢谢你的建议 🙏"
+            )
+            self.fb.mark(row["id"], notified=True)
 
     def tick(self):
         """Act on chats that went quiet; the poll loop calls this between polls."""
@@ -650,6 +746,8 @@ class Bot:
 
     def _new(self, chat_id):
         state = self.store.load(chat_id)
+        if state.get("board"):
+            self.fb.record("new_film", chat_id, previous_phase=state["phase"])
         self.store.archive(chat_id, state, time.strftime("%m-%d %H:%M"))
         self.store.save(chat_id, fresh())
         self._waiting.discard(chat_id)
@@ -733,6 +831,7 @@ class Bot:
         try:
             board, film = self.adapter.generate(chat_id, board, progress)
         except GenerationHeld:
+            self.fb.record("generation_held", chat_id, board=board.id)
             state["phase"] = "confirm"
             self.store.save(chat_id, state)
             link = self.adapter.web_link(board)
@@ -751,6 +850,8 @@ class Bot:
                                   [[("✅ 确认生成", "gen_ok")]])  # fmt: skip
             return
         self._save_board(chat_id, state, board, phase="delivered", film=film.to_dict())
+        self.fb.record("film_delivered", chat_id, board=board.id, parts=len(board.cards),
+                       seconds=board.duration)  # fmt: skip
         self._send_film(chat_id, board, film, "🎉 片子好了！")
 
     def _send_film(self, chat_id, board, film, lead, buttons=None):
@@ -804,6 +905,7 @@ class Bot:
     def _propose_fix(self, chat_id, state, number, feedback):
         board = self._board(state)
         proposal = self.adapter.propose_fix(board, number, feedback)
+        self._signal(chat_id, feedback)
         state["pending_fix"] = {"number": number, "feedback": feedback,
                                 "proposal": proposal.to_dict()}  # fmt: skip
         self.store.save(chat_id, state)
@@ -831,6 +933,8 @@ class Bot:
         progress = self._progress_message(chat_id, f"🔁 重做第{number}段，大约 1 分钟……")
         seconds = None if reroll else fix["proposal"].get("seconds_after")
         board, film = self.adapter.apply_fix(board, number, prompt, progress, seconds=seconds)
+        self.fb.record("fix_applied", chat_id, fix["feedback"], board=board.id, part=number,
+                       reroll=reroll)  # fmt: skip
         self._save_board(chat_id, state, board, film=film.to_dict(), pending_fix=None,
                          last_fix={"number": number, "previous": before})  # fmt: skip
         self._send_film(
@@ -873,5 +977,8 @@ class Bot:
                     log.exception("update %s failed", update["update_id"])
             try:
                 self.tick()
+                if time.monotonic() - getattr(self, "_announced", 0) > 60:
+                    self._announced = time.monotonic()
+                    self.announce_shipped()
             except Exception:
                 log.exception("tick failed")
