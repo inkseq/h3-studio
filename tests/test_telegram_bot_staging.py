@@ -6,6 +6,7 @@ read but generation is never submitted, and that credentials stay hidden.
 """
 
 import json
+import re
 from pathlib import Path
 import tempfile
 import unittest
@@ -36,7 +37,8 @@ class FakeStudio:
         if path == "/v1/projects" and method == "POST":
             return httpx.Response(201, json={"id": "project-1", "version": 1})
         if path == "/v1/assets" and method == "POST":
-            n = sum(p == "POST /v1/assets" for p in self.paths)
+            # IDs follow the photo number, so parallel uploads stay deterministic.
+            n = int(re.search(rb"tg-[0-9a-f]+-p(\d+)", request.content).group(1))
             return httpx.Response(
                 201, json={"asset_id": f"asset-{n}", "status": "ready"}
             )
@@ -108,8 +110,19 @@ class StagingAdapterTest(unittest.TestCase):
         adapter = LlmStagingAdapter(
             Path(self.tmp.name) / "both", self.adapter.client, gemini
         )
-        board = adapter.plan_shots(adapter.start(1, self.photos[:2], "新品上市"))
+        notices = []
+        adapter.on_saved = lambda chat_id, link: notices.append((chat_id, link))
+        board = adapter.plan_shots(adapter.start(7, self.photos[:2], "新品上市"))
+        self.assertEqual(len(board.cards), 3)  # the proposal is ready before the save
+        board = adapter._settle(board)  # wait for the background save
+        self.assertEqual(
+            notices, [(7, "https://staging.inkseq.com/?project=project-1")]
+        )
+        self.assertEqual([c.ref for c in board.cards], ["shot-1", "shot-2", "shot-3"])
         self.assertIn("POST /v1/projects", self.server.paths)
+        self.assertEqual(
+            self.ops("project.update")[0]["patch"]["title"], "阿明咖啡新品"
+        )
         titles = [a["entity"]["title"] for a in self.ops("entity.create")
                   if a["entity"]["type"] == "shot"]  # fmt: skip
         self.assertEqual(titles, ["开场", "超出范围", "结尾"])  # Gemini's parts, saved

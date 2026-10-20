@@ -188,6 +188,8 @@ class Bot:
         self.clock = clock
         self.ignored = 0
         self._waiting = set()  # chats whose photos/text may still be arriving
+        if hasattr(adapter, "on_saved"):
+            adapter.on_saved = self._saved_notice
 
     # ---- gate -------------------------------------------------------------
 
@@ -343,6 +345,14 @@ class Bot:
             )
         except Exception:
             pass
+
+    def _saved_notice(self, chat_id, link):
+        """Called from the adapter's worker when the story is on the website."""
+        if link:
+            self.api.send_message(
+                chat_id, "🌐 方案已经存到网站上了，可以在网页里看和改。",
+                [[("🌐 在网页里打开", "url:" + link)]],
+            )  # fmt: skip
 
     def _stale(self, chat_id):
         self.api.send_message(chat_id, "这个按钮已经过期了，按最新的消息操作就好。")

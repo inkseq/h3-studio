@@ -10,6 +10,7 @@ Pictures shown in the chat are still rendered locally from the same photos.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import logging
 import time
@@ -197,18 +198,30 @@ class StagingAdapter(DemoAdapter):
 
     def start(self, chat_id, photos, brief):
         board = super().start(chat_id, photos, brief)
+        project, assets = self._create_and_upload(board, photos, brief)
+        return self._attach(board, project, assets)
+
+    def _create_and_upload(self, board, photos, brief):
+        """Create the story and upload every photo. Names come later."""
         project = self.client.request(
             "POST", "/v1/projects", step="project", key=self._key(board, "project"),
             json={"title": board.title.replace("（演示）", "（Telegram）"),
                   "logline": (brief or "小店宣传片")[:200]},
         )["id"]  # fmt: skip
+        # One at a time: the small staging host resets concurrent uploads.
         assets = [self.client.upload(project, f"tg-{board.id}-p{n}", path)
                   for n, path in enumerate(photos, 1)]  # fmt: skip
-        self.client.actions(project, [
+        return project, assets
+
+    def _attach(self, board, project, assets, title=None):
+        actions = [
             {"op": "asset.attach", "asset_id": asset, "entity_id": f"material-{n}",
              "title": board.materials[n - 1]}
             for n, asset in enumerate(assets, 1)
-        ], self._key(board, "materials"))  # fmt: skip
+        ]  # fmt: skip
+        if title:
+            actions.append({"op": "project.update", "patch": {"title": title[:160]}})
+        self.client.actions(project, actions, self._key(board, "materials"))
         board.remote.update(project=project, assets=assets, shots=[], next_shot=1)
         return board
 
@@ -229,7 +242,10 @@ class StagingAdapter(DemoAdapter):
         return board
 
     def plan_shots(self, board):
-        board = super().plan_shots(board)
+        return self._save_structure(super().plan_shots(board))
+
+    def _save_structure(self, board):
+        """Chapter, scene, story defaults and every part as a shot."""
         project = board.remote["project"]
         self.client.actions(project, [
             {"op": "entity.create", "entity": {"id": "chapter-1", "type": "chapter",
@@ -311,10 +327,95 @@ class StagingAdapter(DemoAdapter):
 class LlmStagingAdapter(StagingAdapter, LlmAdapter):
     """Gemini plans and revises; every change is saved to the staging story.
 
-    MRO: StagingAdapter's save-after-change wraps LlmAdapter's planning, which
-    in turn falls back to the demo rules if the model is unavailable.
+    The proposal goes to the chat as soon as Gemini is done. Creating the
+    story, uploading photos (~12 s each on staging) and writing the shots run
+    in the background; the bot is told when the web link is ready. Any later
+    change first waits for that save (`_settle`), so the chat and the website
+    never diverge. After a restart the save is simply redone in the foreground.
     """
 
-    def __init__(self, workdir, studio, gemini):
+    STAGING_METHODS = ("rename_material", "revise", "swap_material", "edit_card",
+                       "delete_card", "add_photo", "estimate")  # fmt: skip
+
+    def __init__(self, workdir, studio, gemini, on_saved=None):
         LlmAdapter.__init__(self, workdir, gemini)
         self.client = studio
+        self.on_saved = on_saved  # (chat_id, web link) -> None, called from the worker
+        self._pool = ThreadPoolExecutor(max_workers=2)
+        self._pending = {}  # board id -> ("uploading", future, chat_id) | ("saving", future)
+
+    def start(self, chat_id, photos, brief):
+        board = DemoAdapter.start(self, chat_id, photos, brief)
+        upload = self._pool.submit(self._create_and_upload, board, photos, brief)
+        board = self._plan_with_model(board, photos, brief)
+        self._pending[board.id] = ("uploading", upload, chat_id)
+        return board
+
+    def plan_shots(self, board):
+        board = LlmAdapter.plan_shots(self, board)
+        pending = self._pending.pop(board.id, None)
+        if pending and pending[0] == "uploading":
+            snapshot = type(board).from_dict(board.to_dict())
+            self._pending[board.id] = ("saving", self._pool.submit(
+                self._finish_save, snapshot, pending[1], pending[2]))  # fmt: skip
+            return board
+        return self._settle(board)
+
+    def _finish_save(self, board, upload, chat_id):
+        try:
+            project, assets = upload.result()
+            board = self._attach(board, project, assets, title=board.title)
+            board = self._save_structure(board)
+        except Exception:
+            log.exception("background save to staging failed")
+            raise
+        if self.on_saved:
+            try:
+                self.on_saved(chat_id, StagingAdapter.web_link(self, board))
+            except Exception:
+                log.exception("saved notice failed")
+        return board
+
+    def _settle(self, board):
+        """Bring the website up to date before touching it again."""
+        pending = self._pending.pop(board.id, None)
+        if pending:
+            try:
+                saved = pending[1].result()
+            except Exception:
+                saved = None
+            if pending[0] == "saving" and saved is not None:
+                board.remote.update(saved.remote)
+                for card, saved_card in zip(board.cards, saved.cards):
+                    card.ref = saved_card.ref
+                return board
+            if pending[0] == "uploading" and saved is not None:
+                return self._attach(board, *saved, title=board.title)
+        if not board.remote.get("project"):  # lost by a restart or a failed save
+            project, assets = self._create_and_upload(board, board.photos, board.brief)
+            board = self._attach(board, project, assets, title=board.title)
+            if board.cards:
+                board = self._save_structure(board)
+        return board
+
+    def web_link(self, board, number=None):
+        pending = self._pending.get(board.id)
+        if pending:
+            if not pending[1].done() or pending[1].exception() or pending[0] != "saving":
+                return None  # the bot posts the link once the background save is done
+            return StagingAdapter.web_link(self, pending[1].result(), number)
+        return StagingAdapter.web_link(self, board, number)
+
+
+def _settled(name):
+    method = getattr(StagingAdapter, name)
+
+    def call(self, board, *args, **kwargs):
+        return method(self, self._settle(board), *args, **kwargs)
+
+    call.__name__ = name
+    return call
+
+
+for _name in LlmStagingAdapter.STAGING_METHODS:
+    setattr(LlmStagingAdapter, _name, _settled(_name))

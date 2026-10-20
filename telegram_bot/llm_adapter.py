@@ -218,7 +218,9 @@ class LlmAdapter(DemoAdapter):
     # ---- planning -------------------------------------------------------------
 
     def start(self, chat_id, photos, brief):
-        board = super().start(chat_id, photos, brief)
+        return self._plan_with_model(super().start(chat_id, photos, brief), photos, brief)
+
+    def _plan_with_model(self, board, photos, brief):
         parts = [image_part(path) for path in photos]
         parts.append({"text": f"共 {len(photos)} 张照片，按上面的顺序编号 1–{len(photos)}。\n老板说：{brief or '（没说，按照片自己判断适合什么宣传）'}"})
         try:
