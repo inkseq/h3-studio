@@ -88,17 +88,23 @@ class DemoAdapter:
         board = Storyboard.from_dict(board.to_dict())
         text = instruction.strip()
         changes = []
-        for match in re.finditer(rf"(?:删掉|删除|去掉)第?{NUM}张", text):
-            n = number(match.group(1))
-            if n and 1 <= n <= len(board.cards) and len(board.cards) > 1:
-                board.cards.pop(n - 1)
-                changes.append(f"删掉了第{n}张")
-        for match in re.finditer(rf"第?{NUM}张.{{0,6}}?(?:换成|用)照片{NUM}", text):
+        # Card numbers always refer to the board the user is looking at, so
+        # replacements apply first and deletions last, highest number first.
+        for match in re.finditer(rf"第{NUM}张[^张，,。；;]{{0,6}}?(?:换成|用)照片{NUM}", text):
             n, p = number(match.group(1)), number(match.group(2))
             if n and p and 1 <= n <= len(board.cards) and 1 <= p <= len(board.photos):
                 board.cards[n - 1].photo = p
                 board.cards[n - 1].description = f"照片{p}，{MOTIONS[n % len(MOTIONS)]}"
                 changes.append(f"第{n}张换成照片{p}")
+        doomed = {
+            n
+            for match in re.finditer(rf"(?:删掉|删除|去掉)第?{NUM}张", text)
+            if (n := number(match.group(1))) and 1 <= n <= len(board.cards)
+        }
+        for n in sorted(doomed, reverse=True):
+            if len(board.cards) > 1:
+                board.cards.pop(n - 1)
+                changes.append(f"删掉了第{n}张")
         if "横屏" in text and board.aspect != "16:9":
             board.aspect = "16:9"
             changes.append("改成横屏")

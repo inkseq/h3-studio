@@ -138,10 +138,14 @@ class TelegramBotTest(unittest.TestCase):
         self.bot.handle(private(OWNER, text="删掉第2张，第3张换成照片4，横屏"))
         state = self.bot.store.load(OWNER)
         board = Storyboard.from_dict(state["board"])
+        # Numbers refer to the board as shown: old card 3 gets photo 4, then
+        # old card 2 goes, so old card 3 is now second.
         self.assertEqual(len(board.cards), 4)
-        self.assertEqual(board.cards[2].photo, 4)
+        self.assertEqual([c.photo for c in board.cards], [1, 4, 4, 1])
+        self.assertEqual(board.cards[1].title, "招牌饮品")
         self.assertEqual(board.aspect, "16:9")
         self.assertIn("删掉了第2张", self.api.sent[-1]["text"])
+        self.assertIn("第3张换成照片4", self.api.sent[-1]["text"])
 
     def test_parsers(self):
         self.assertEqual(parse_second("第12秒人脸怪"), 12)
