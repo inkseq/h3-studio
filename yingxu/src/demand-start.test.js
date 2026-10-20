@@ -22,6 +22,10 @@ test('accepts the exact CR43 admin demand_start contract', () => {
   );
 });
 
+test('accepts the slow-download replacement limit reason', () => {
+  assert.equal(validDemandStart({ ...sample, blocked_reason: 'download_retry_limit' }), true);
+});
+
 test('refuses unknown reasons, bad counts and malformed revisions', () => {
   assert.equal(validDemandStart({ ...sample, blocked_reason: 'gpu_vendor_x' }), false);
   assert.equal(validDemandStart({ ...sample, running_machines: -1 }), false);
