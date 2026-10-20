@@ -162,11 +162,31 @@ class ArtifactWriter:
             fingerprint
         )
 
-    def _available(self, conn, record, *, job=None, writable=False, acquire_gate=True):
+    def _available(
+        self,
+        conn,
+        record,
+        *,
+        job=None,
+        writable=False,
+        acquire_gate=True,
+        display=False,
+    ):
         if acquire_gate:
             owner_reference_gate(conn, self.tenant, record["owner"])
         if record.get("binding") != self.binding:
-            raise ArtifactWritePending("artifact_receipt_identity_mismatch")
+            from .artifact_renditions import _validate
+
+            if (
+                not display
+                or record.get("display", {}).get("target_binding") != self.binding
+            ):
+                raise ArtifactWritePending("artifact_receipt_identity_mismatch")
+            _validate(self, record)
+        self._content_available(conn, record, job=job, writable=writable)
+
+    def _content_available(self, conn, record, *, job=None, writable=False):
+        """Read/lifecycle checks also cover an explicitly proved copied source."""
         if job is None:
             from .repository import jobs
 
@@ -204,8 +224,22 @@ class ArtifactWriter:
                     *record.get("display", {}).get("objects", {}).values(),
                 )
             ],
-            storage_binding=self.binding,
+            storage_binding=record["binding"],
         )
+        if record["binding"] != self.binding:
+            assert_content_available(
+                conn,
+                self.tenant,
+                record["owner"],
+                object_keys=[
+                    role["key"]
+                    for role in (
+                        *record["roles"].values(),
+                        *record.get("display", {}).get("objects", {}).values(),
+                    )
+                ],
+                storage_binding=self.binding,
+            )
         if record.get("phase") == "settled":
             from .repository import artifacts
 
@@ -256,6 +290,52 @@ class ArtifactWriter:
         ):
             raise ArtifactWritePending("artifact_receipt_identity_mismatch")
         return dict(record, version=row.version)
+
+    def _get_display(self, job, attempt_id, tag, *, expected_version):
+        """Read one settled original for copy proof; grants no collection authority."""
+        from .repository import jobs
+
+        ident, fingerprint = self._identity(job, attempt_id, tag)
+        with self.engine.connect() as conn:
+            row = (
+                conn.execute(
+                    select(write_receipts)
+                    .join(jobs, jobs.c.id == write_receipts.c.job_id)
+                    .where(
+                        write_receipts.c.id == ident,
+                        write_receipts.c.tenant == self.tenant,
+                        write_receipts.c.owner == job["owner_id"],
+                        write_receipts.c.job_id == job["id"],
+                        write_receipts.c.attempt_id == attempt_id,
+                        jobs.c.tenant_id == self.tenant,
+                        jobs.c.owner_id == job["owner_id"],
+                        jobs.c.status == "succeeded",
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+            if (
+                row is None
+                or type(expected_version) is not int
+                or row["version"] != expected_version
+            ):
+                raise ArtifactWritePending("artifact_poster_version_changed")
+            record = json.loads(row["record"])
+            if (
+                record.get("phase") != "settled"
+                or record.get("id") != ident
+                or record.get("owner") != job["owner_id"]
+                or record.get("tag") != tag
+                or record.get("fingerprint") != fingerprint
+                or record.get("staging_root") != str(self.work_dir)
+            ):
+                raise ArtifactWritePending("artifact_receipt_identity_mismatch")
+            self._content_available(conn, record, job=job)
+            assert_project_renditions_available(
+                conn, self.tenant, record["owner"], job["project_id"]
+            )
+        return dict(record, version=row["version"])
 
     def _path(self, record, role):
         name = role["filename"]
@@ -799,7 +879,7 @@ class ArtifactWriter:
         from .artifact_renditions import _validate
 
         owner_reference_gate(conn, self.tenant, record["owner"])
-        self._available(conn, record, acquire_gate=False)
+        self._available(conn, record, acquire_gate=False, display=True)
         row = (
             conn.execute(
                 select(write_receipts)
@@ -835,7 +915,13 @@ class ArtifactWriter:
             or old_display
             and any(
                 old_display.get(key) != display.get(key)
-                for key in ("version", "source_sha256", "scratch_data_dir")
+                for key in (
+                    "version",
+                    "source_sha256",
+                    "scratch_data_dir",
+                    "target_binding",
+                    "copy_proof",
+                )
             )
             or not set(old_display.get("objects", {}))
             <= set(display.get("objects", {}))

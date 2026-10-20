@@ -186,6 +186,40 @@ class StorageMigrationTests(OfflineTest):
             provenance_file=path,
         )
         self.assertEqual(proof["provenance_sha256"], _sha(path.read_bytes()))
+        from studio_platform.storage_migration import verify_artifact_rendition_sources
+
+        artifact = dict(
+            phase="settled",
+            owner="supervan",
+            binding=_sha(_canonical(dict(provider="local", root=str(self.local.root)))),
+            roles=dict(
+                video=dict(
+                    self.original_receipt()["asset"]["original"], status="verified"
+                )
+            ),
+        )
+        provenance["source_binding"] = artifact["binding"]
+        path.write_bytes(_canonical(provenance))
+        artifact_proof = verify_artifact_rendition_sources(
+            self.receipts,
+            self.remote,
+            artifact,
+            logical_root=self.local.root,
+            provenance_file=path,
+        )
+        self.assertEqual(artifact_proof["source_binding"], artifact["binding"])
+        self.assertNotEqual(artifact_proof["source_binding"], proof["source_binding"])
+        self.assertNotEqual(artifact_proof["target_binding"], proof["target_binding"])
+        provenance["source_binding"] = self.original_receipt()["storage_binding"]
+        path.write_bytes(_canonical(provenance))
+        with self.assertRaisesRegex(MigrationError, "mount_provenance_invalid"):
+            verify_artifact_rendition_sources(
+                self.receipts,
+                self.remote,
+                artifact,
+                logical_root=self.local.root,
+                provenance_file=path,
+            )
         provenance["covering_mount"]["Source"] = str(self.root / "wrong-retained-root")
         path.write_bytes(_canonical(provenance))
         with self.assertRaisesRegex(MigrationError, "mount_provenance_invalid"):

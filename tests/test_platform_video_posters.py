@@ -29,6 +29,7 @@ from studio_platform.queue import TaskQueue
 from studio_platform.repository import artifacts, budget_reservations, Conflict
 from studio_platform.storage import LocalObjectStore, S3ObjectStore, IntegrityError
 from studio_platform.storage_asset_journal import AssetQuotaExceeded
+from studio_platform.storage_migration import MigrationError
 import test_platform_repository as ledger_fixture
 import test_platform_api as api_fixture
 from test_platform_assets import FaultStore
@@ -83,7 +84,7 @@ class PosterWriterTests(ledger_fixture.LedgerCase):
         )
         self.bytes = video(self.temp.name)
 
-    def settled(self):
+    def settled(self, *, audio=False):
         self.job(cost=0)
         queue = TaskQueue(self.repo)
         lease = queue.claim("worker", "test-pool").lease
@@ -95,9 +96,31 @@ class PosterWriterTests(ledger_fixture.LedgerCase):
         directory.mkdir(parents=True)
         path = directory / "verified.mp4"
         path.write_bytes(self.bytes)
-        record = self.writer.prepare(
-            job, lease.attempt_id, tag, [("video", path, "video/mp4", {})]
-        )
+        files = [("video", path, "video/mp4", {})]
+        if audio:
+            sound = directory / 'verified.flac'
+            subprocess.run(
+                [
+                    'ffmpeg',
+                    '-v',
+                    'error',
+                    '-nostdin',
+                    '-y',
+                    '-f',
+                    'lavfi',
+                    '-i',
+                    'sine=frequency=440:duration=2',
+                    '-c:a',
+                    'flac',
+                    str(sound),
+                ],
+                check=True,
+                timeout=20,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            files.append(('audio', sound, 'audio/flac', {'has_audio': True}))
+        record = self.writer.prepare(job, lease.attempt_id, tag, files)
         specs = self.writer.write(record)
         queue.complete(
             lease,
@@ -132,6 +155,355 @@ class PosterWriterTests(ledger_fixture.LedgerCase):
                     updated_at=self.now,
                 )
             )
+
+    def copied_settled(self):
+        from studio_platform.storage_migration import create_plan, apply_plan
+
+        job, attempt, tag = self.settled(audio=True)
+        original = self.writer.get(job, attempt, tag)
+        remote = S3ObjectStore(config(), client=FakeMultipartS3(config()))
+        receipts = Path(self.temp.name) / 'copy-plan'
+        create_plan(self.store.root, remote.config, receipts)
+        apply_plan(receipts, remote)
+        current = ArtifactWriter(
+            self.repo.engine, remote, self.work, tenant=self.scope.tenant_id
+        )
+        return job, attempt, tag, original, current, receipts
+
+    def test_copied_artifact_full_roles_before_put_original_binding_and_unknown_replay(
+        self,
+    ):
+        from studio_platform.storage import StorageWriteUncertain
+
+        job, attempt, tag, original, current, receipts = self.copied_settled()
+        original_job = self.repo.get_job(self.scope, job['id'])
+        with self.repo.engine.connect() as conn:
+            billing = list(conn.execute(select(budget_reservations)).mappings())
+        self.history_state('trashed')
+        with self.assertRaisesRegex(Conflict, 'quick_chat_session_not_active'):
+            self.writer._save(original)
+        with self.assertRaisesRegex(ArtifactWritePending, 'identity_mismatch'):
+            ensure(current, job, attempt, tag, expected_version=original['version'])
+        # The original work path can no longer accept scratch; only the explicit
+        # current-data scratch is used, without changing the frozen root.
+        retained = self.work.with_name('retained-work')
+        self.work.rename(retained)
+        self.work.write_bytes(b'preserve original frozen work path')
+        kwargs = dict(
+            original_copy_receipts=receipts, display_data_dir=Path(self.temp.name)
+        )
+        originals = copy.deepcopy(current.store._client.objects)
+        verified = set()
+        verify = current.store.open
+        put = current.store.put
+        lost = []
+
+        def opened(key):
+            if key in {role['key'] for role in original['roles'].values()}:
+                verified.add(key)
+            return verify(key)
+
+        def lost_ack(key, source, **options):
+            self.assertEqual(
+                verified, {role['key'] for role in original['roles'].values()}
+            )
+            result = put(key, source, **options)
+            if not lost:
+                lost.append(key)
+                raise StorageWriteUncertain(key)
+            return result
+
+        with (
+            mock.patch.object(current.store, 'open', side_effect=opened),
+            mock.patch.object(current.store, 'put', side_effect=lost_ack),
+        ):
+            with self.assertRaisesRegex(ArtifactWritePending, 'put_unknown'):
+                ensure(
+                    current,
+                    job,
+                    attempt,
+                    tag,
+                    expected_version=original['version'],
+                    **kwargs,
+                )
+        pending = self.writer.get(job, attempt, tag)
+        self.assertEqual(pending['display']['objects']['thumb']['key'], lost[0])
+        self.assertEqual(pending['display']['objects']['thumb']['status'], 'unknown')
+        before_calls = len(current.store._client.calls)
+        with self.assertRaisesRegex(ArtifactWritePending, 'writer_unconfirmed'):
+            ensure(
+                current,
+                job,
+                attempt,
+                tag,
+                expected_version=pending['version'],
+                **kwargs,
+            )
+        self.assertEqual(len(current.store._client.calls), before_calls)
+        result = ensure(
+            current,
+            job,
+            attempt,
+            tag,
+            expected_version=pending['version'],
+            interrupted=True,
+            **kwargs,
+        )
+        self.assertEqual(result['display']['phase'], 'complete')
+        self.assertEqual(result['display']['target_binding'], current.binding)
+        self.assertEqual(
+            result['display']['copy_proof']['source_binding'], original['binding']
+        )
+        self.assertEqual(result['roles'], original['roles'])
+        self.assertEqual(result['binding'], original['binding'])
+        self.assertEqual(result['staging_root'], original['staging_root'])
+        self.assertEqual(self.work.read_bytes(), b'preserve original frozen work path')
+        for key, value in originals.items():
+            self.assertEqual(current.store._client.objects[key], value)
+        self.assertEqual(len(current.store._client.objects) - len(originals), 2)
+        self.assertEqual(
+            sum(
+                name == 'put' and details['Key'] == lost[0]
+                for name, details in current.store._client.calls
+            ),
+            1,
+        )
+        for role in result['display']['objects'].values():
+            with current.store.open(role['key']) as stream:
+                body = stream.read()
+            self.assertEqual(len(body), role['size_bytes'])
+            self.assertEqual(hashlib.sha256(body).hexdigest(), role['sha256'])
+            with Image.open(io.BytesIO(body)) as image:
+                image.verify()
+            with Image.open(io.BytesIO(body)) as image:
+                image.load()
+                self.assertEqual(image.format, 'WEBP')
+        usage = current.quota.usage(self.scope.owner_id)
+        calls = len(current.store._client.calls)
+        repeat = ensure(
+            current, job, attempt, tag, expected_version=result['version'], **kwargs
+        )
+        self.assertEqual(
+            {k: v for k, v in repeat.items() if k != 'updated_at'},
+            {k: v for k, v in result.items() if k != 'updated_at'},
+        )
+        self.assertEqual(current.quota.usage(self.scope.owner_id), usage)
+        self.assertFalse(
+            any(name == 'put' for name, _ in current.store._client.calls[calls:])
+        )
+        for field in ('target_binding', 'copy_proof', 'roles', 'binding', 'quota'):
+            changed = copy.deepcopy(result)
+            if field == 'copy_proof':
+                changed['display'][field]['sources_sha256'] = '0' * 64
+            elif field == 'target_binding':
+                changed['display'][field] = '0' * 64
+            elif field == 'roles':
+                changed[field]['audio']['sha256'] = '0' * 64
+            elif field == 'binding':
+                changed[field] = '0' * 64
+            else:
+                changed['reserved_bytes'] -= 1
+                changed['display']['reserved_bytes'] -= 1
+            with (
+                self.subTest(field=field),
+                self.assertRaises((Conflict, IntegrityError)),
+            ):
+                current._save_display(changed, byte_delta=-1 if field == 'quota' else 0)
+        with self.assertRaises(IntegrityError):
+            ensure(
+                self.writer,
+                job,
+                attempt,
+                tag,
+                expected_version=result['version'],
+                display_data_dir=Path(self.temp.name),
+            )
+        self.assertEqual(self.repo.get_job(self.scope, job['id']), original_job)
+        with self.repo.engine.connect() as conn:
+            self.assertEqual(
+                list(conn.execute(select(budget_reservations)).mappings()), billing
+            )
+        from contextlib import redirect_stdout
+        from studio_platform.rendition_backfill import main
+        from studio_platform.settings import Settings
+
+        selected = current.store.config
+        settings = Settings(
+            Path(self.temp.name),
+            tenant_id=self.scope.tenant_id,
+            database_url=self.url,
+            storage_provider='r2',
+            storage_endpoint=selected.endpoint_url,
+            storage_region=selected.region,
+            storage_bucket=selected.bucket,
+            storage_profile=selected.profile,
+        )
+        video_row = next(
+            row
+            for row in self.repo.list_artifacts(self.scope, job['id'])
+            if row['metadata']['kind'] == 'video'
+        )
+        argv = [
+            'apply',
+            '--owner',
+            self.scope.owner_id,
+            '--artifact-id',
+            video_row['id'],
+            '--work-dir',
+            str(self.work),
+            '--receipt-version',
+            str(result['version']),
+            '--use-data-display-scratch',
+            '--original-copy-receipts',
+            str(receipts),
+        ]
+        with (
+            mock.patch.object(Settings, 'from_environment', return_value=settings),
+            redirect_stdout(io.StringIO()) as output,
+        ):
+            self.assertEqual(
+                main(
+                    argv,
+                    credentials_loader=lambda *a, **k: None,
+                    store_factory=lambda *a, **k: current.store,
+                ),
+                0,
+            )
+        self.assertEqual(json.loads(output.getvalue())['state'], 'complete')
+        self.assertEqual(current.quota.usage(self.scope.owner_id), usage)
+
+    def test_copied_artifact_audio_corruption_and_stale_owner_refuse_before_claim(self):
+        job, attempt, tag, original, current, receipts = self.copied_settled()
+        kwargs = dict(
+            original_copy_receipts=receipts, expected_version=original['version']
+        )
+        audio = original['roles']['audio']['key']
+        saved = copy.deepcopy(current.store._client.objects[audio])
+        current.store._client.objects[audio]['body'] = (
+            b'corrupt audio despite valid video'
+        )
+        with self.assertRaisesRegex(MigrationError, 'remote_(?:size|hash)_mismatch'):
+            ensure(current, job, attempt, tag, **kwargs)
+        self.assertEqual(self.writer.get(job, attempt, tag), original)
+        self.assertEqual(
+            set(current.store._client.objects),
+            {v['key'] for v in original['roles'].values()},
+        )
+        current.store._client.objects[audio] = saved
+        calls = len(current.store._client.calls)
+        with self.assertRaisesRegex(ArtifactWritePending, 'version_changed'):
+            ensure(
+                current,
+                job,
+                attempt,
+                tag,
+                **dict(kwargs, expected_version=original['version'] - 1),
+            )
+        foreign = dict(job, owner_id='another-owner')
+        with self.assertRaises(ArtifactWritePending):
+            ensure(current, foreign, attempt, tag, **kwargs)
+        self.history_state('purging')
+        with self.assertRaises(Conflict):
+            ensure(current, job, attempt, tag, **kwargs)
+        self.assertEqual(len(current.store._client.calls), calls)
+
+    def test_copied_artifact_changed_copy_receipt_and_quota_keep_original_intent(self):
+        job, attempt, tag, original, current, receipts = self.copied_settled()
+        usage = current.quota.usage(self.scope.owner_id)
+        current.quota.owner_limit = usage['accounted_bytes'] + 1
+        with self.assertRaises(AssetQuotaExceeded):
+            ensure(
+                current,
+                job,
+                attempt,
+                tag,
+                expected_version=original['version'],
+                original_copy_receipts=receipts,
+            )
+        pending = self.writer.get(job, attempt, tag)
+        self.assertEqual(pending['display']['phase'], 'planned')
+        self.assertEqual(
+            current.quota.usage(self.scope.owner_id),
+            dict(usage, limit_bytes=current.quota.owner_limit),
+        )
+        raw = (receipts / 'copy-receipt.json').read_bytes()
+        (receipts / 'copy-receipt.json').write_bytes(raw + b'\n')
+        with self.assertRaisesRegex(ArtifactWritePending, 'copy_proof_changed'):
+            ensure(
+                current,
+                job,
+                attempt,
+                tag,
+                expected_version=pending['version'],
+                interrupted=True,
+                original_copy_receipts=receipts,
+            )
+        self.assertEqual(self.writer.get(job, attempt, tag), pending)
+
+    def test_copied_artifact_keeps_original_target_tombstones_and_project_trash_closed(
+        self,
+    ):
+        from studio_platform.content_lifecycle import put_tombstone
+        from studio_platform.quick_chat import objects
+        from studio_platform.repository import documents
+        from studio_platform.universal_trash import target_key
+
+        job, attempt, tag, original, current, receipts = self.copied_settled()
+        self.history_state('trashed')
+        calls = len(current.store._client.calls)
+        kwargs = dict(
+            expected_version=original['version'], original_copy_receipts=receipts
+        )
+        video_row = next(
+            row
+            for row in self.repo.list_artifacts(self.scope, job['id'])
+            if row['metadata']['kind'] == 'video'
+        )
+        for kind, value, binding in (
+            ('key', original['roles']['video']['key'], original['binding']),
+            ('key', original['roles']['audio']['key'], current.binding),
+            ('artifact', video_row['id'], None),
+        ):
+            with self.repo.transaction() as conn:
+                put_tombstone(
+                    conn,
+                    self.scope.tenant_id,
+                    self.scope.owner_id,
+                    kind=kind,
+                    value=value,
+                    action_id='original-purge',
+                    now=self.now,
+                    storage_binding=binding,
+                )
+            with self.subTest(kind=kind, binding=binding), self.assertRaises(Conflict):
+                ensure(current, job, attempt, tag, **kwargs)
+            self.assertEqual(len(current.store._client.calls), calls)
+            with self.repo.transaction() as conn:
+                conn.execute(
+                    delete(objects).where(objects.c.kind == 'content_tombstone')
+                )
+        target = dict(
+            kind='project', project_id=self.scope.project_id, id=self.scope.project_id
+        )
+        with self.repo.transaction() as conn:
+            conn.execute(
+                insert(documents).values(
+                    tenant_id=self.scope.tenant_id,
+                    owner_id=self.scope.owner_id,
+                    project_id='__trash',
+                    kind='trash_item',
+                    document_id=target_key(target),
+                    version=1,
+                    payload=dict(target=target, state='trashed'),
+                    updated_at=self.now,
+                )
+            )
+        with self.assertRaisesRegex(Conflict, 'project_in_trash'):
+            ensure(current, job, attempt, tag, **kwargs)
+        self.assertEqual(len(current.store._client.calls), calls)
+        with self.repo.transaction() as conn:
+            conn.execute(delete(documents).where(documents.c.kind == 'trash_item'))
+        self.assertEqual(self.writer.get(job, attempt, tag), original)
 
     def test_historical_display_preserves_original_job_billing_and_collection_guards(
         self,

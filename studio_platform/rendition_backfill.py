@@ -319,6 +319,9 @@ def _apply_owned(repo, settings, args, *, credentials_loader, store_factory):
             display_data_dir=settings.data_dir
             if args.use_data_display_scratch
             else None,
+            original_copy_receipts=getattr(args, "original_copy_receipts", None),
+            original_local_root=getattr(args, "original_local_root", None),
+            original_copy_provenance=getattr(args, "original_copy_provenance", None),
         )
         result = dict(
             state=value['display']['phase'],
@@ -538,7 +541,7 @@ def main(
     parser.add_argument(
         "--original-copy-receipts",
         type=Path,
-        help="Protected existing immutable Local-to-R2 plan/copy receipt directory; exact asset only",
+        help="Protected immutable Local-to-R2 plan/copy receipt directory; one exact asset/artifact only",
     )
     parser.add_argument(
         "--original-local-root",
@@ -560,12 +563,11 @@ def main(
         ) and (
             args.action != "apply"
             or args.all_owners
-            or not args.asset_id
-            or args.artifact_id
+            or bool(args.asset_id) == bool(args.artifact_id)
             or not args.original_copy_receipts
             or bool(args.original_local_root) != bool(args.original_copy_provenance)
         ):
-            raise ValueError("rendition_copy_requires_exact_asset_proof")
+            raise ValueError("rendition_copy_requires_exact_receipt_proof")
         if args.all_owners and (
             args.asset_id
             or args.artifact_id
