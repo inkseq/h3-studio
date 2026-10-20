@@ -151,7 +151,7 @@ def _resize_reservation(writer, record, size):
     record["reserved_bytes"] += size - previous
     display["reserved_bytes"] = size
     try:
-        writer._save(record, byte_delta=size - previous)
+        writer._save_display(record, byte_delta=size - previous)
     except BaseException:
         record["reserved_bytes"] -= size - previous
         display["reserved_bytes"] = previous
@@ -164,7 +164,7 @@ def _publish(writer, record, *, status):
 
     display = record["display"]
     with writer.engine.begin() as conn:
-        writer._available(conn, record, writable=True)
+        writer._display_update(conn, record)
         row = (
             conn.execute(
                 select(write_receipts)
@@ -460,7 +460,7 @@ def ensure(
             if role["status"] in {"putting", "unknown"} and not interrupted:
                 raise ArtifactWritePending("artifact_poster_put_unknown") from None
             role["status"] = "putting"
-            writer._save(record)
+            writer._save_display(record)
             try:
                 with path.open("rb") as stream:
                     writer.store.put(
@@ -472,11 +472,11 @@ def ensure(
                     )
             except (ObjectAlreadyExists, StorageWriteUncertain):
                 role["status"] = "unknown"
-                writer._save(record)
+                writer._save_display(record)
                 raise ArtifactWritePending("artifact_poster_put_unknown") from None
             writer._verify_remote(role, heartbeat)
         role["status"] = "verified"
-        writer._save(record)
+        writer._save_display(record)
     _publish(writer, record, status="ready")
     cleanup(writer, record)
     return record

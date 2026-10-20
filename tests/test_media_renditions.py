@@ -264,7 +264,7 @@ class RenditionTests(OfflineTest):
         self.store = S3ObjectStore(config(), client=fake)
         self.service = self.make_service()
         value = self.legacy_upload()
-        original_save = self.service.journal.save
+        original_save = self.service.journal.save_renditions
 
         def crashed(receipt, **kwargs):
             if (
@@ -274,7 +274,9 @@ class RenditionTests(OfflineTest):
                 raise ProcessStopped()
             return original_save(receipt, **kwargs)
 
-        with mock.patch.object(self.service.journal, "save", side_effect=crashed):
+        with mock.patch.object(
+            self.service.journal, "save_renditions", side_effect=crashed
+        ):
             with self.assertRaises(ProcessStopped):
                 self.service.ensure_image_renditions("owner", value["id"])
         receipt = self.service.journal.get("owner", value["id"])
@@ -382,6 +384,67 @@ class RenditionTests(OfflineTest):
         )
         loader.assert_not_called()
         factory.assert_not_called()
+
+    def test_copy_proof_flags_require_one_exact_asset_before_any_configuration_read(
+        self,
+    ):
+        selections = [
+            ["plan", "--owner", "owner", "--original-copy-receipts", "private"],
+            ["apply", "--all-owners", "--original-copy-receipts", "private"],
+            [
+                "apply",
+                "--owner",
+                "owner",
+                "--artifact-id",
+                "artifact",
+                "--work-dir",
+                "original",
+                "--receipt-version",
+                "1",
+                "--original-copy-receipts",
+                "private",
+            ],
+            [
+                "apply",
+                "--owner",
+                "owner",
+                "--asset-id",
+                "asset",
+                "--receipt-version",
+                "1",
+                "--original-local-root",
+                "/data/objects",
+            ],
+            [
+                "apply",
+                "--owner",
+                "owner",
+                "--asset-id",
+                "asset",
+                "--receipt-version",
+                "1",
+                "--original-copy-receipts",
+                "private",
+                "--original-local-root",
+                "/data/objects",
+            ],
+        ]
+        with mock.patch.object(
+            Settings,
+            "from_environment",
+            side_effect=AssertionError("No configuration or credential load"),
+        ) as settings:
+            for selection in selections:
+                with (
+                    self.subTest(selection=selection),
+                    redirect_stdout(io.StringIO()) as output,
+                ):
+                    self.assertEqual(backfill_main(selection), 1)
+                self.assertEqual(
+                    json.loads(output.getvalue())["reason_code"],
+                    "rendition_copy_requires_exact_asset_proof",
+                )
+            settings.assert_not_called()
 
     def test_all_owner_plan_is_tenant_scoped_paged_and_has_no_storage_calls(self):
         self.legacy_upload()

@@ -124,6 +124,50 @@ region, bucket, service, profile and size limit must match the immutable plan.
 The protected file uses the reviewed `storage_config` runtime reader; keys
 never enter command arguments, process environment, public output or Git.
 
+## Readable historical display copies
+
+An original ready image/video may remain readable after its Quick Chat history
+is trashed. The existing explicit backfill now uses a dedicated display receipt
+CAS for that case. It preserves the original/model identity, receipt binding,
+normal byte/active quotas and operation ownership. Ordinary uploads, collection
+and generation writes still require an active parent. Actual asset/project
+trash, purging/purged history, tombstones and unconfirmed parent bindings remain
+refused. An unknown display PUT retains its original key and reservation.
+
+For an asset whose original Local objects were already immutably copied to the
+current R2 store, the exact-item command may add this operator-only proof:
+
+```sh
+python -m studio_platform.rendition_backfill apply \
+  --owner ORIGINAL_OWNER --asset-id ORIGINAL_ASSET_ID \
+  --receipt-version EXACT_CURRENT_VERSION \
+  --original-copy-receipts PRIVATE_EXISTING_COPY_DIRECTORY \
+  --original-local-root /data/objects \
+  --original-copy-provenance PRIVATE_ACCEPTED_MOUNT_PROOF.json
+```
+
+The copy plan and verified receipt must be protected private files, match the
+current R2 identity, and contain the exact original/model manifests. Every
+selected R2 source is freshly GET-read and fully SHA256-checked before a derived
+PUT. Derived objects are written and verified in current R2 before the original
+asset receipt publishes their metadata; no Local-ready-before-copy window is
+created. The original `storage_binding` and original/model roles stay unchanged.
+The new derived target and proof hashes are frozen in the rendition receipt.
+
+If the plan's literal Local root already reproduces the original binding, omit
+the final two flags. Otherwise both are required: the protected version1
+`logical_local_mount_provenance` receipt binds the explicit logical root to the
+plan source root/identity, original binding, raw/canonical plan digests, copy
+receipt digest and accepted covering bind mount. The command checks the mapped
+path and the **container logical root's** actual device/inode against the plan;
+it does not stat a host-only path, instantiate a Local store or infer an alias
+from matching hashes. Private metadata copies must be available in the CLI's
+container namespace with their original hashes and restrictive permissions.
+
+These proof options require one explicit asset and its current receipt version;
+plan, all-owner and artifact selections reject them. They do not grant authority
+to process other historical objects or rewrite an existing unknown target.
+
 ## Integrity and recovery
 
 Production deployment uses the existing managed migration secret's optional

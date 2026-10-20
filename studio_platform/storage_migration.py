@@ -28,6 +28,7 @@ from .storage import (
     _no_links,
     _sync_directory,
     validate_key,
+    key_belongs_to,
 )
 from .storage_config import S3StorageConfig
 
@@ -542,3 +543,180 @@ def verify_plan(receipt_directory, remote):
             database_accessed=False,
             writer_fence_verified=False,
         )
+
+
+def verify_rendition_sources(
+    receipt_directory, remote, asset_receipt, *, logical_root=None, provenance_file=None
+):
+    """Read only exact copied originals; never adopt a binding or scan Local.
+
+    A historical container path needs explicit, protected accepted mount proof.
+    The current R2 bytes must still match every original/model manifest in full.
+    """
+    _need(isinstance(remote, S3ObjectStore), "rendition_copy_r2_required")
+    directory = _private(receipt_directory)
+
+    def read_digest(path):
+        value = _read(path)
+        with LocalObjectStore._read_file(path) as source:
+            info = os.fstat(source.fileno())
+            _need(
+                os.name == "nt"
+                or info.st_uid == os.getuid()
+                and not info.st_mode & 0o077,
+                "rendition_copy_private_proof_required",
+            )
+            raw = source.read(MAX_JSON + 1)
+        _need(
+            len(raw) <= MAX_JSON and json.loads(raw) == value,
+            "rendition_copy_proof_changed",
+        )
+        return value, _sha(raw)
+
+    plan, raw_plan_sha = read_digest(directory / "plan.json")
+    copied, copied_sha = read_digest(directory / "copy-receipt.json")
+    _need(
+        plan.get("format") == FORMAT
+        and plan.get("target") == _target(remote.config)
+        and plan.get("local_copies_retained") is True
+        and plan.get("database_accessed") is False
+        and copied.get("format") == FORMAT
+        and copied.get("phase") == "copy_verified"
+        and copied.get("operation_id") == plan.get("operation_id")
+        and copied.get("plan_sha256") == _sha(_canonical(plan))
+        and copied.get("target") == plan["target"]
+        and copied.get("local_copies_retained") is True
+        and copied.get("database_accessed") is False
+        and type(plan.get("objects")) is list
+        and len(plan["objects"]) <= MAX_OBJECTS,
+        "rendition_copy_proof_binding_invalid",
+    )
+    source_root = Path(plan["source_root"])
+    _need(
+        source_root.is_absolute() and ".." not in source_root.parts,
+        "rendition_copy_source_root_invalid",
+    )
+    logical = source_root if logical_root is None else Path(logical_root)
+    _need(
+        logical.is_absolute() and ".." not in logical.parts,
+        "rendition_copy_source_root_invalid",
+    )
+    source_binding = _sha(
+        json.dumps({"provider": "local", "root": str(logical)}, sort_keys=True).encode()
+    )
+    _need(
+        source_binding == asset_receipt.get("storage_binding"),
+        "rendition_copy_source_binding_mismatch",
+    )
+    provenance_sha = None
+    if logical != source_root:
+        _need(provenance_file is not None, "rendition_copy_mount_provenance_required")
+        proof, provenance_sha = read_digest(Path(provenance_file))
+        mount = proof.get("covering_mount", {})
+        _need(
+            type(proof.get("version")) is int
+            and proof["version"] == 1
+            and proof.get("type") == "logical_local_mount_provenance"
+            and proof.get("logical_root") == str(logical)
+            and proof.get("source_root") == str(source_root)
+            and proof.get("source_identity") == plan.get("source_identity")
+            and proof.get("source_binding") == source_binding
+            and proof.get("raw_plan_sha256") == raw_plan_sha
+            and proof.get("canonical_plan_sha256") == _sha(_canonical(plan))
+            and proof.get("copy_receipt_sha256") == copied_sha
+            and mount.get("Type") == "bind"
+            and Path(mount["Source"]).is_absolute()
+            and Path(mount["Destination"]).is_absolute()
+            and ".." not in Path(mount["Source"]).parts
+            and ".." not in Path(mount["Destination"]).parts
+            and Path(mount["Source"]) / logical.relative_to(mount["Destination"])
+            == source_root
+            and re.fullmatch(
+                "[0-9a-f]{64}", proof.get("matched_runtime_mounts_sha256", "")
+            ),
+            "rendition_copy_mount_provenance_invalid",
+        )
+        _check_ancestors(logical)
+        info = _no_links(logical)
+        _need(
+            stat.S_ISDIR(info.st_mode)
+            and _identity(info)[:2] == plan["source_identity"],
+            "rendition_copy_source_identity_changed",
+        )
+    elif provenance_file is not None:
+        raise MigrationError("rendition_copy_unexpected_mount_provenance")
+    objects = {item["key"]: item for item in plan["objects"]}
+    _need(
+        len(objects) == len(plan["objects"])
+        and type(copied.get("objects")) is dict
+        and set(copied["objects"]) == set(objects)
+        and all(value == "verified" for value in copied["objects"].values()),
+        "rendition_copy_objects_unconfirmed",
+    )
+    _need(
+        all(
+            type(item.get("size_bytes")) is int
+            and 1 <= item["size_bytes"] <= remote.config.max_single_put_bytes
+            for item in objects.values()
+        )
+        and type(plan.get("total_bytes")) is int
+        and 0 <= plan["total_bytes"] <= MAX_BYTES
+        and sum(item["size_bytes"] for item in objects.values()) == plan["total_bytes"]
+        and copied.get("objects_count") == len(objects)
+        and copied.get("total_bytes") == plan["total_bytes"],
+        "rendition_copy_bytes_invalid",
+    )
+    sources = {}
+    for role in ("original", "model"):
+        spec = asset_receipt["asset"].get(role)
+        if spec is None:
+            continue
+        frozen = asset_receipt.get("objects", {}).get(role, {})
+        item = objects.get(spec.get("key"), {})
+        _need(
+            key_belongs_to(spec.get("key"), asset_receipt["owner"])
+            and frozen.get("phase") == "verified"
+            and all(
+                spec.get(key) == frozen.get(key) == item.get(key)
+                for key in ("key", "size_bytes", "sha256", "content_type")
+            ),
+            "rendition_copy_original_manifest_mismatch",
+        )
+        sources[spec["key"]] = item
+    _need(
+        "original" in asset_receipt["asset"] and sources,
+        "rendition_copy_original_manifest_required",
+    )
+    for item in sources.values():
+        _remote_verify(remote, item)
+    _need(
+        read_digest(directory / "plan.json") == (plan, raw_plan_sha)
+        and read_digest(directory / "copy-receipt.json") == (copied, copied_sha),
+        "rendition_copy_proof_changed",
+    )
+    if provenance_sha is not None:
+        _need(
+            read_digest(Path(provenance_file))[1] == provenance_sha
+            and _identity(_no_links(logical))[:2] == plan["source_identity"],
+            "rendition_copy_proof_changed",
+        )
+    identity = {
+        key: getattr(remote.config, key)
+        for key in (
+            "provider",
+            "endpoint_url",
+            "region",
+            "bucket",
+            "service",
+            "profile",
+        )
+    }
+    return dict(
+        version=1,
+        source_binding=source_binding,
+        target_binding=_sha(json.dumps(identity, sort_keys=True).encode()),
+        plan_sha256=raw_plan_sha,
+        copy_receipt_sha256=copied_sha,
+        provenance_sha256=provenance_sha,
+        sources_sha256=_sha(_canonical([sources[key] for key in sorted(sources)])),
+    )

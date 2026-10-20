@@ -52,6 +52,7 @@ from . import scratch_retention
 from .content_lifecycle import (
     assert_content_available,
     assert_project_writable,
+    assert_project_renditions_available,
     owner_reference_gate,
 )
 
@@ -790,6 +791,105 @@ class ArtifactWriter:
             )
             if result.rowcount != 1:
                 raise ArtifactWritePending("artifact_collection_already_in_progress")
+        record["version"] += 1
+
+    def _display_update(self, conn, record, *, byte_delta=0):
+        """Owner-fenced CAS for display state only; never collection/settlement."""
+        from .repository import jobs
+        from .artifact_renditions import _validate
+
+        owner_reference_gate(conn, self.tenant, record["owner"])
+        self._available(conn, record, acquire_gate=False)
+        row = (
+            conn.execute(
+                select(write_receipts)
+                .where(
+                    write_receipts.c.id == record["id"],
+                    write_receipts.c.tenant == self.tenant,
+                    write_receipts.c.owner == record["owner"],
+                )
+                .with_for_update()
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if (
+            row is None
+            or type(record.get("version")) is not int
+            or row["version"] != record["version"]
+        ):
+            raise ArtifactWritePending("artifact_poster_state_changed")
+        previous = json.loads(row["record"])
+        mutable = {"display", "reserved_bytes", "updated_at", "version"}
+        old_display, display = previous.get("display", {}), record.get("display", {})
+        if (
+            previous.get("phase") != "settled"
+            or record.get("phase") != "settled"
+            or {key: value for key, value in previous.items() if key not in mutable}
+            != {key: value for key, value in record.items() if key not in mutable}
+            or type(byte_delta) is not int
+            or type(record.get("reserved_bytes")) is not int
+            or record["reserved_bytes"] - previous["reserved_bytes"] != byte_delta
+            or display.get("reserved_bytes", 0) - old_display.get("reserved_bytes", 0)
+            != byte_delta
+            or old_display
+            and any(
+                old_display.get(key) != display.get(key)
+                for key in ("version", "source_sha256", "scratch_data_dir")
+            )
+            or not set(old_display.get("objects", {}))
+            <= set(display.get("objects", {}))
+        ):
+            raise ArtifactWritePending("artifact_poster_original_changed")
+        for role, original in old_display.get("objects", {}).items():
+            if {key: value for key, value in original.items() if key != "status"} != {
+                key: value
+                for key, value in display["objects"][role].items()
+                if key != "status"
+            }:
+                raise ArtifactWritePending("artifact_poster_frozen_object_changed")
+        if display.get("reserved_bytes", 0) < sum(
+            value["size_bytes"] for value in display.get("objects", {}).values()
+        ):
+            raise ArtifactWritePending("artifact_poster_accounting_mismatch")
+        job = (
+            conn.execute(
+                select(jobs).where(
+                    jobs.c.id == row["job_id"],
+                    jobs.c.tenant_id == self.tenant,
+                    jobs.c.owner_id == record["owner"],
+                    jobs.c.status == "succeeded",
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if job is None:
+            raise ArtifactWritePending("artifact_poster_original_unconfirmed")
+        assert_project_renditions_available(
+            conn, self.tenant, record["owner"], job["project_id"]
+        )
+        _validate(self, record)
+
+    def _save_display(self, record, *, byte_delta=0):
+        value = {key: value for key, value in record.items() if key != "version"}
+        value["updated_at"] = time.time()
+        with self.engine.begin() as conn:
+            self._display_update(conn, record, byte_delta=byte_delta)
+            if byte_delta:
+                self.quota._change(conn, record["owner"], byte_delta, 0)
+            changed = conn.execute(
+                update(write_receipts)
+                .where(
+                    write_receipts.c.id == record["id"],
+                    write_receipts.c.tenant == self.tenant,
+                    write_receipts.c.owner == record["owner"],
+                    write_receipts.c.version == record["version"],
+                )
+                .values(record=json.dumps(value), version=record["version"] + 1)
+            )
+            if changed.rowcount != 1:
+                raise ArtifactWritePending("artifact_poster_state_changed")
         record["version"] += 1
 
     def _verify_remote(self, role, heartbeat, *, prefix=None):

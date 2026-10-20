@@ -1,6 +1,7 @@
 """Bounded copy safety with isolated local files and fake R2; never DB/cloud IO."""
 
 import io
+import hashlib
 import json
 import os
 from contextlib import redirect_stdout
@@ -14,6 +15,7 @@ from studio_platform.storage_migration import (
     apply_plan,
     create_plan,
     verify_plan,
+    verify_rendition_sources,
 )
 from studio_platform.storage_migration_cli import main as migration_main
 from test_platform_storage import FakeClientError, FakeS3, OfflineTest, config
@@ -54,6 +56,168 @@ class StorageMigrationTests(OfflineTest):
 
     def puts(self):
         return sum(name == "put" for name, _ in self.fake.calls)
+
+    def original_receipt(self):
+        spec = {
+            key: getattr(self.item, key)
+            for key in ("key", "size_bytes", "sha256", "content_type")
+        }
+        return dict(
+            owner="supervan",
+            storage_binding=hashlib.sha256(
+                json.dumps(
+                    dict(provider="local", root=str(self.local.root)), sort_keys=True
+                ).encode()
+            ).hexdigest(),
+            asset=dict(original=spec),
+            objects=dict(original=dict(spec, phase="verified")),
+        )
+
+    def test_display_source_proof_reads_exact_copied_bytes_without_inventory_or_writes(
+        self,
+    ):
+        self.plan()
+        apply_plan(self.receipts, self.remote)
+        before = {path.name: path.read_bytes() for path in self.receipts.iterdir()}
+        puts = self.puts()
+        self.local.write_new(
+            "supervan", "later", io.BytesIO(b"unrelated retained object")
+        )
+        with mock.patch.object(
+            LocalObjectStore,
+            "__init__",
+            side_effect=AssertionError("No Local store construction"),
+        ):
+            proof = verify_rendition_sources(
+                self.receipts, self.remote, self.original_receipt()
+            )
+        self.assertEqual(
+            proof["source_binding"], self.original_receipt()["storage_binding"]
+        )
+        self.assertNotEqual(proof["target_binding"], proof["source_binding"])
+        self.assertEqual(self.puts(), puts)
+        self.assertEqual(
+            {path.name: path.read_bytes() for path in self.receipts.iterdir()}, before
+        )
+        self.fake.objects[self.item.key]["body"] = b"corrupted-but-metadata-unchanged"
+        with self.assertRaisesRegex(MigrationError, "remote_(?:size|hash)_mismatch"):
+            verify_rendition_sources(
+                self.receipts, self.remote, self.original_receipt()
+            )
+        self.assertEqual(self.puts(), puts)
+
+    def test_display_source_binding_is_never_inferred_from_matching_copy_entries(self):
+        self.plan()
+        apply_plan(self.receipts, self.remote)
+        receipt = self.original_receipt()
+        receipt["storage_binding"] = "0" * 64
+        calls = len(self.fake.calls)
+        with self.assertRaisesRegex(
+            MigrationError, "rendition_copy_source_binding_mismatch"
+        ):
+            verify_rendition_sources(self.receipts, self.remote, receipt)
+        self.assertEqual(len(self.fake.calls), calls)
+        receipt = self.original_receipt()
+        receipt["owner"] = "foreign-owner"
+        with self.assertRaisesRegex(
+            MigrationError, "rendition_copy_original_manifest_mismatch"
+        ):
+            verify_rendition_sources(self.receipts, self.remote, receipt)
+        self.assertEqual(len(self.fake.calls), calls)
+
+    def test_explicit_logical_root_requires_protected_mount_and_actual_inode_identity(
+        self,
+    ):
+        self.plan()
+        apply_plan(self.receipts, self.remote)
+        from studio_platform.storage_migration import _canonical, _sha
+
+        plan = json.loads((self.receipts / "plan.json").read_bytes())
+        copied = json.loads((self.receipts / "copy-receipt.json").read_bytes())
+        mount = dict(
+            Type="bind",
+            Source=str(self.root / "host-only-root"),
+            Destination=str(self.root),
+        )
+        plan["source_root"] = str(
+            Path(mount["Source"]) / self.local.root.relative_to(mount["Destination"])
+        )
+        copied["plan_sha256"] = _sha(_canonical(plan))
+        (self.receipts / "plan.json").write_bytes(_canonical(plan))
+        (self.receipts / "copy-receipt.json").write_bytes(_canonical(copied))
+        provenance = dict(
+            version=1,
+            type="logical_local_mount_provenance",
+            logical_root=str(self.local.root),
+            source_root=plan["source_root"],
+            source_identity=plan["source_identity"],
+            source_binding=self.original_receipt()["storage_binding"],
+            raw_plan_sha256=_sha(_canonical(plan)),
+            canonical_plan_sha256=_sha(_canonical(plan)),
+            copy_receipt_sha256=_sha(_canonical(copied)),
+            covering_mount=mount,
+            matched_runtime_mounts_sha256="a" * 64,
+        )
+        path = self.receipts / "mount-provenance.json"
+        path.write_bytes(_canonical(provenance))
+        if os.name != "nt":
+            path.chmod(0o644)
+            with self.assertRaisesRegex(MigrationError, "private_file_required"):
+                verify_rendition_sources(
+                    self.receipts,
+                    self.remote,
+                    self.original_receipt(),
+                    logical_root=self.local.root,
+                    provenance_file=path,
+                )
+        path.chmod(0o600)
+        with self.assertRaisesRegex(MigrationError, "mount_provenance_required"):
+            verify_rendition_sources(
+                self.receipts,
+                self.remote,
+                self.original_receipt(),
+                logical_root=self.local.root,
+            )
+        proof = verify_rendition_sources(
+            self.receipts,
+            self.remote,
+            self.original_receipt(),
+            logical_root=self.local.root,
+            provenance_file=path,
+        )
+        self.assertEqual(proof["provenance_sha256"], _sha(path.read_bytes()))
+        provenance["covering_mount"]["Source"] = str(self.root / "wrong-retained-root")
+        path.write_bytes(_canonical(provenance))
+        with self.assertRaisesRegex(MigrationError, "mount_provenance_invalid"):
+            verify_rendition_sources(
+                self.receipts,
+                self.remote,
+                self.original_receipt(),
+                logical_root=self.local.root,
+                provenance_file=path,
+            )
+        provenance["covering_mount"]["Source"] = mount["Source"] = str(
+            self.root / "host-only-root"
+        )
+        plan["source_identity"][1] += 1
+        copied["plan_sha256"] = _sha(_canonical(plan))
+        (self.receipts / "plan.json").write_bytes(_canonical(plan))
+        (self.receipts / "copy-receipt.json").write_bytes(_canonical(copied))
+        provenance.update(
+            source_identity=plan["source_identity"],
+            raw_plan_sha256=_sha(_canonical(plan)),
+            canonical_plan_sha256=_sha(_canonical(plan)),
+            copy_receipt_sha256=_sha(_canonical(copied)),
+        )
+        path.write_bytes(_canonical(provenance))
+        with self.assertRaisesRegex(MigrationError, "source_identity_changed"):
+            verify_rendition_sources(
+                self.receipts,
+                self.remote,
+                self.original_receipt(),
+                logical_root=self.local.root,
+                provenance_file=path,
+            )
 
     def test_plan_is_offline_then_copy_uses_same_key_hash_mime_and_keeps_local(self):
         second = self.local.write_new(

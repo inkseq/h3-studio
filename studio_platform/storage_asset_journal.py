@@ -32,6 +32,7 @@ from .storage_schema import create_storage_schema
 from .content_lifecycle import (
     assert_content_available,
     assert_project_writable,
+    assert_project_renditions_available,
     content_is_deleted,
     owner_reference_gate,
 )
@@ -412,13 +413,292 @@ class AssetUploadJournal:
         return record
 
     def save(self, receipt, *, byte_delta=0, active_delta=0, client_key=None):
+        self._save(
+            receipt,
+            byte_delta=byte_delta,
+            active_delta=active_delta,
+            client_key=client_key,
+        )
+
+    def save_renditions(self, receipt, *, byte_delta=0, active_delta=0, claim=False):
+        """Only immutable-ready originals and their bounded display state may change."""
+        self._save(
+            receipt,
+            byte_delta=byte_delta,
+            active_delta=active_delta,
+            renditions=True,
+            rendition_claim=claim,
+        )
+
+    def _rendition_update(self, conn, receipt, byte_delta, active_delta, claim):
+        from .media_renditions import RENDITIONS
+
+        row = (
+            conn.execute(
+                select(receipts)
+                .where(
+                    receipts.c.id == receipt["id"],
+                    receipts.c.owner == receipt["owner"],
+                    receipts.c.tenant == self.tenant,
+                )
+                .with_for_update()
+            )
+            .mappings()
+            .first()
+        )
+        if (
+            row is None
+            or type(receipt.get("version")) is not int
+            or row["version"] != receipt["version"]
+        ):
+            raise AssetConflict("rendition_receipt_version_changed")
+        before = json.loads(row["record"])
+        original, asset = before["asset"], receipt["asset"]
+        mutable = {
+            "asset",
+            "objects",
+            "rendition_backfill",
+            "scratch_cleanup",
+            "busy",
+            "reserved",
+            "operation_id",
+            "updated_at",
+            "version",
+        }
+        display = {*RENDITIONS, "rendition_metadata", "rendition_status"}
+        if (
+            {key: value for key, value in before.items() if key not in mutable}
+            != {key: value for key, value in receipt.items() if key not in mutable}
+            or {key: value for key, value in original.items() if key not in display}
+            != {key: value for key, value in asset.items() if key not in display}
+            or original.get("status") != "ready"
+            or original.get("kind") not in {"image", "video"}
+            or before.get("prepared") is not True
+            or before.get("accepted_input") is not True
+            or type(receipt.get("busy")) is not bool
+            or type(receipt.get("reserved")) is not int
+            or type(byte_delta) is not int
+            or type(active_delta) is not int
+            or receipt["reserved"] - before["reserved"] != byte_delta
+            or int(receipt["busy"]) - int(before["busy"]) != active_delta
+            or not before["busy"]
+            and receipt["busy"]
+            and not claim
+        ):
+            raise AssetConflict("rendition_original_identity_changed")
+        current = (
+            conn.execute(
+                select(self.assets).where(
+                    self.assets.c.id == receipt["id"],
+                    self.assets.c.owner == receipt["owner"],
+                    self.assets.c.tenant == self.tenant,
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if (
+            current is None
+            or current["status"] != "ready"
+            or json.loads(current["record"]) != original
+            or current["project_id"] != original["project_id"]
+            or row["project_id"] != original["project_id"]
+        ):
+            raise AssetConflict("rendition_original_identity_changed")
+        if (
+            claim
+            and (
+                receipt["operation_id"] == before["operation_id"]
+                or not receipt["busy"]
+                or byte_delta < 0
+                or not re.fullmatch("[0-9a-f]{32}", receipt["operation_id"])
+            )
+            or not claim
+            and receipt["operation_id"] != before["operation_id"]
+        ):
+            raise AssetConflict("rendition_operation_changed")
+        old_objects, objects = before["objects"], receipt["objects"]
+        if (
+            {key: value for key, value in old_objects.items() if key not in RENDITIONS}
+            != {key: value for key, value in objects.items() if key not in RENDITIONS}
+            or not set(old_objects) <= set(objects)
+            or old_objects.get("original", {}).get("phase") != "verified"
+            or receipt["reserved"]
+            < sum(value["size_bytes"] for value in objects.values() if value.get("key"))
+        ):
+            raise AssetConflict("rendition_original_identity_changed")
+        for role, (edge, cap) in RENDITIONS.items():
+            spec = objects.get(role)
+            if spec is not None:
+                old = old_objects.get(role, {})
+                if (
+                    not isinstance(spec, dict)
+                    or set(spec)
+                    - {
+                        "filename",
+                        "size_bytes",
+                        "sha256",
+                        "content_type",
+                        "width",
+                        "height",
+                        "phase",
+                        "key",
+                    }
+                    or spec.get("filename") != f"{role}-v1.webp"
+                    or spec.get("content_type") != "image/webp"
+                    or type(spec.get("size_bytes")) is not int
+                    or not 1 <= spec["size_bytes"] <= cap
+                    or not re.fullmatch("[0-9a-f]{64}", spec.get("sha256", ""))
+                    or any(
+                        type(spec.get(key)) is not int or not 1 <= spec[key] <= edge
+                        for key in ("width", "height")
+                    )
+                    or spec.get("phase")
+                    not in {
+                        "planned",
+                        "putting",
+                        "put_unknown",
+                        "verifying",
+                        "verified",
+                    }
+                    or spec.get("phase") != "planned"
+                    and not spec.get("key")
+                    or old
+                    and {
+                        key: value
+                        for key, value in old.items()
+                        if key not in {"phase", "key"}
+                    }
+                    != {
+                        key: value
+                        for key, value in spec.items()
+                        if key not in {"phase", "key"}
+                    }
+                    or old.get("key")
+                    and old["key"] != spec.get("key")
+                    or spec.get("key")
+                    and (
+                        not key_belongs_to(spec["key"], receipt["owner"])
+                        or not spec["key"].startswith(
+                            f'owners/{receipt["owner"]}/assets/{receipt["id"]}/'
+                        )
+                    )
+                ):
+                    raise AssetConflict("rendition_frozen_object_changed")
+            if role in original and original[role] != asset.get(role):
+                raise AssetConflict("rendition_frozen_object_changed")
+            if role in asset and (
+                spec is None
+                or spec["phase"] != "verified"
+                or any(
+                    asset[role].get(key) != spec.get(key)
+                    for key in ("key", "size_bytes", "sha256", "content_type")
+                )
+            ):
+                raise AssetConflict("rendition_frozen_object_changed")
+        metadata = asset.get("rendition_metadata")
+        if (
+            "rendition_metadata" in original
+            and original["rendition_metadata"] != metadata
+        ):
+            raise AssetConflict("rendition_frozen_object_changed")
+        if metadata is not None and (
+            metadata.get("version") != 1
+            or metadata.get("source_sha256") != original["original"]["sha256"]
+        ):
+            raise AssetConflict("rendition_original_identity_changed")
+        backfill = receipt.get("rendition_backfill")
+        if backfill is not None and (
+            set(backfill)
+            not in (
+                {"phase", "source", "source_name"},
+                {"phase", "source", "source_name", "target_binding", "copy_proof"},
+            )
+            or backfill["source"] != original["original"]
+            or backfill["source_name"] != "rendition-source" + receipt["suffix"]
+            or backfill["phase"] not in {"planned", "prepared", "complete"}
+        ):
+            raise AssetConflict("rendition_original_identity_changed")
+        old_backfill = before.get("rendition_backfill")
+        if old_backfill and {
+            key: value for key, value in old_backfill.items() if key != "phase"
+        } != {key: value for key, value in (backfill or {}).items() if key != "phase"}:
+            raise AssetConflict("rendition_copy_target_changed")
+        if backfill and "target_binding" in backfill:
+            proof = backfill["copy_proof"]
+            if (
+                set(proof)
+                != {
+                    "version",
+                    "source_binding",
+                    "target_binding",
+                    "plan_sha256",
+                    "copy_receipt_sha256",
+                    "provenance_sha256",
+                    "sources_sha256",
+                }
+                or type(proof.get("version")) is not int
+                or proof["version"] != 1
+                or proof.get("source_binding") != before.get("storage_binding")
+                or proof.get("target_binding") != backfill["target_binding"]
+                or any(
+                    not isinstance(proof.get(key), str)
+                    or not re.fullmatch("[a-f0-9]{64}", proof[key])
+                    for key in (
+                        "source_binding",
+                        "target_binding",
+                        "plan_sha256",
+                        "copy_receipt_sha256",
+                        "sources_sha256",
+                    )
+                )
+                or proof.get("provenance_sha256") is not None
+                and not re.fullmatch("[a-f0-9]{64}", proof["provenance_sha256"])
+            ):
+                raise AssetConflict("rendition_copy_proof_invalid")
+            assert_content_available(
+                conn,
+                self.tenant,
+                receipt["owner"],
+                object_keys=[
+                    spec["key"] for spec in objects.values() if spec.get("key")
+                ],
+                storage_binding=backfill["target_binding"],
+            )
+        self._available(
+            conn, receipt["owner"], asset, receipt=receipt, acquire_gate=False
+        )
+        assert_project_renditions_available(
+            conn, self.tenant, receipt["owner"], original["project_id"]
+        )
+
+    def _save(
+        self,
+        receipt,
+        *,
+        byte_delta=0,
+        active_delta=0,
+        client_key=None,
+        renditions=False,
+        rendition_claim=False,
+    ):
         value = {k: v for k, v in receipt.items() if k != "version"}
         value["updated_at"] = time.time()
         version = receipt["version"]
         with self.engine.begin() as conn:
-            self._available(
-                conn, receipt["owner"], receipt["asset"], receipt=receipt, writable=True
-            )
+            if renditions:
+                owner_reference_gate(conn, self.tenant, receipt["owner"])
+                self._rendition_update(
+                    conn, receipt, byte_delta, active_delta, rendition_claim
+                )
+            else:
+                self._available(
+                    conn,
+                    receipt["owner"],
+                    receipt["asset"],
+                    receipt=receipt,
+                    writable=True,
+                )
             if byte_delta or active_delta:
                 self._change(conn, receipt["owner"], byte_delta, active_delta)
             updates = dict(
@@ -525,7 +805,7 @@ class AssetUploadJournal:
                 return asset
         return None
 
-    def claim(self, receipt, *, interrupted=False):
+    def claim(self, receipt, *, interrupted=False, renditions=False):
         if receipt["busy"] and not interrupted:
             raise AssetConflict(
                 "素材可能仍在处理，请先等待；若服务重启后状态持续不变，请联系管理员恢复同一素材，不要反复上传"
@@ -539,11 +819,17 @@ class AssetUploadJournal:
             reserved=receipt["reserved"] + delta,
             operation_id=uuid.uuid4().hex,
         )
-        self.save(receipt, byte_delta=delta, active_delta=active_delta)
+        if renditions:
+            self.save_renditions(
+                receipt, byte_delta=delta, active_delta=active_delta, claim=True
+            )
+        else:
+            self.save(receipt, byte_delta=delta, active_delta=active_delta)
 
-    def release(self, receipt, retained_bytes):
+    def release(self, receipt, retained_bytes, *, renditions=False):
         if not receipt["busy"]:
             return
         delta = retained_bytes - receipt["reserved"]
         receipt.update(busy=False, reserved=retained_bytes)
-        self.save(receipt, byte_delta=delta, active_delta=-1)
+        save = self.save_renditions if renditions else self.save
+        save(receipt, byte_delta=delta, active_delta=-1)

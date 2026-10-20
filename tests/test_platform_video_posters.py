@@ -1,6 +1,7 @@
 """Real first-frame bytes plus original receipt/recovery fences, offline only."""
 
 import hashlib
+import copy
 from contextlib import closing
 import io
 import json
@@ -13,7 +14,7 @@ import uuid
 from unittest import mock
 
 from PIL import Image
-from sqlalchemy import select, update, delete
+from sqlalchemy import select, update, delete, insert
 
 from studio_platform import media
 from studio_platform.artifact_renditions import ensure
@@ -25,7 +26,7 @@ from studio_platform.media_renditions import (
     public_artifact_renditions,
 )
 from studio_platform.queue import TaskQueue
-from studio_platform.repository import artifacts
+from studio_platform.repository import artifacts, budget_reservations, Conflict
 from studio_platform.storage import LocalObjectStore, S3ObjectStore, IntegrityError
 from studio_platform.storage_asset_journal import AssetQuotaExceeded
 import test_platform_repository as ledger_fixture
@@ -109,6 +110,98 @@ class PosterWriterTests(ledger_fixture.LedgerCase):
     def row(self, job):
         return self.repo.list_artifacts(self.scope, job["id"])[0]
 
+    def history_state(self, state):
+        from studio_platform.quick_chat import objects, metadata
+        from studio_platform.storage_schema import create_storage_schema
+
+        create_storage_schema(self.repo.engine, metadata)
+        with self.repo.transaction() as conn:
+            conn.execute(
+                insert(objects).values(
+                    id="historical-parent",
+                    tenant=self.scope.tenant_id,
+                    owner=self.scope.owner_id,
+                    session_id="historical-parent",
+                    kind="session",
+                    version=1,
+                    payload={
+                        "project_id": self.scope.project_id,
+                        "history": {"trash_state": state},
+                    },
+                    created_at=self.now,
+                    updated_at=self.now,
+                )
+            )
+
+    def test_historical_display_preserves_original_job_billing_and_collection_guards(
+        self,
+    ):
+        job, attempt, tag = self.settled()
+        original = self.row(job)
+        receipt = self.writer.get(job, attempt, tag)
+        original_job = self.repo.get_job(self.scope, job["id"])
+        with self.repo.engine.connect() as conn:
+            billing = list(conn.execute(select(budget_reservations)).mappings())
+        self.history_state("trashed")
+        with self.assertRaisesRegex(Conflict, "quick_chat_session_not_active"):
+            self.writer._save(receipt)
+        result = ensure(
+            self.writer, job, attempt, tag, expected_version=receipt["version"]
+        )
+        row = self.row(job)
+        self.assertTrue(public_artifact_renditions(row)["rendition_ready"])
+        self.assertEqual(result["roles"], receipt["roles"])
+        self.assertEqual(
+            {key: value for key, value in row.items() if key != "metadata"},
+            {key: value for key, value in original.items() if key != "metadata"},
+        )
+        self.assertEqual(
+            {
+                key: value
+                for key, value in row["metadata"].items()
+                if key not in {"display_renditions", "rendition_status"}
+            },
+            original["metadata"],
+        )
+        self.assertEqual(self.repo.get_job(self.scope, job["id"]), original_job)
+        with self.repo.engine.connect() as conn:
+            self.assertEqual(
+                list(conn.execute(select(budget_reservations)).mappings()), billing
+            )
+        for role in result["display"]["objects"].values():
+            with self.store.open(role["key"]) as stream:
+                image = Image.open(stream)
+                image.load()
+                self.assertEqual(image.format, "WEBP")
+        for changed in (
+            "original",
+            "binding",
+            "quota",
+            "matching_quota_delta",
+            "frozen_key",
+        ):
+            value = copy.deepcopy(result)
+            delta = 0
+            if changed == "original":
+                value["roles"]["video"]["sha256"] = "0" * 64
+            elif changed == "binding":
+                value["binding"] = "0" * 64
+            elif changed == "quota":
+                value["reserved_bytes"] += 1
+            elif changed == "matching_quota_delta":
+                delta = -value["display"]["objects"]["thumb"]["size_bytes"]
+                value["reserved_bytes"] += delta
+                value["display"]["reserved_bytes"] += delta
+            else:
+                value["display"]["objects"]["thumb"]["key"] += "-other"
+            with self.subTest(changed=changed), self.assertRaises(Conflict):
+                self.writer._save_display(value, byte_delta=delta)
+        usage = self.writer.quota.usage(self.scope.owner_id)
+        self.assertEqual(
+            ensure(self.writer, job, attempt, tag)["display"]["phase"], "complete"
+        )
+        self.assertEqual(self.writer.quota.usage(self.scope.owner_id), usage)
+
     def test_real_posters_same_artifact_receipt_frozen_roles_quota_and_public_urls(
         self,
     ):
@@ -155,6 +248,7 @@ class PosterWriterTests(ledger_fixture.LedgerCase):
         self,
     ):
         job, attempt, tag = self.settled()
+        self.history_state("trashed")
         self.store.failure = 'after'
         with self.assertRaises(ArtifactWritePending):
             ensure(self.writer, job, attempt, tag)
@@ -611,6 +705,7 @@ class PosterWriterTests(ledger_fixture.LedgerCase):
             1,
         )
         receipt = service.journal.get(self.scope.owner_id, asset['id'])
+        self.history_state('trashed')
         value = service.ensure_renditions(
             self.scope.owner_id, asset['id'], expected_version=receipt['version']
         )
@@ -885,7 +980,7 @@ class PosterWriterTests(ledger_fixture.LedgerCase):
         other = root / 'other-data'
         other.mkdir()
         claimed, release = threading.Event(), threading.Event()
-        save = self.writer._save
+        save = self.writer._save_display
 
         def held(record, **kwargs):
             save(record, **kwargs)
@@ -895,7 +990,7 @@ class PosterWriterTests(ledger_fixture.LedgerCase):
                     raise AssertionError('writer not released')
 
         with (
-            mock.patch.object(self.writer, '_save', side_effect=held),
+            mock.patch.object(self.writer, '_save_display', side_effect=held),
             ThreadPoolExecutor(max_workers=1) as pool,
         ):
             first = pool.submit(

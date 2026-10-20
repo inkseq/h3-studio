@@ -189,6 +189,21 @@ def assert_content_available(
 
 
 def assert_project_writable(connection, tenant, owner, project_id):
+    _assert_project_available(connection, tenant, owner, project_id, ("active",))
+
+
+def assert_project_renditions_available(connection, tenant, owner, project_id):
+    """Display-only receipt updates may retain readable trashed chat history.
+
+    This does not restore authoring authority or permit a project/content purge.
+    The caller must separately validate the immutable original receipt and CAS.
+    """
+    _assert_project_available(
+        connection, tenant, owner, project_id, ("active", "trashed")
+    )
+
+
+def _assert_project_available(connection, tenant, owner, project_id, history_states):
     from .universal_trash import active_target
 
     if inspect(connection).has_table(documents.name) and active_target(
@@ -210,7 +225,10 @@ def assert_project_writable(connection, tenant, owner, project_id):
         )
     ).scalar_one_or_none()
     if session is not None:
-        if session.get("history", {}).get("trash_state", "active") != "active":
+        if (
+            session.get("history", {}).get("trash_state", "active")
+            not in history_states
+        ):
             raise Conflict("quick_chat_session_not_active")
         return
     if not inspect(connection).has_table(documents.name):
