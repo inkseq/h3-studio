@@ -155,6 +155,18 @@ class PreparationTests(unittest.TestCase):
         binding["download_progress"]["last_observed_at"] = 1900
         self.assertFalse(download_timebox_due(binding, 2000))
 
+    def test_missing_current_download_counters_are_ui_history_not_stop_evidence(self):
+        binding = self.download()
+        binding["observed_at"] = 2000
+        record_preparation(
+            binding,
+            dict(phase="model_download", phase_started_at=90, updated_at=1999),
+            2000,
+        )
+        self.assertEqual(binding["preparation"]["download"]["bytes_complete"], 20)
+        self.assertFalse(download_timebox_due(binding, 2000))
+        self.assertIsNone(download_progress_timing(binding, 2000))
+
     def view(self, binding, public=None, now=200):
         return preparation_view(
             {"payload": {"dstack": binding}},

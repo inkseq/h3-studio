@@ -413,6 +413,7 @@ def record_preparation(binding, value, observed_at, *, validation_at=None):
     if incoming is None:
         return
     source_phase_started = incoming.get("phase_started_at")
+    source_download = incoming.get("download")
     prior = safe_preparation(binding.get("preparation"), validation_at) or {}
     phase_same = incoming["phase"] == prior.get("phase")
     incoming["phase_started_at"] = (
@@ -425,7 +426,15 @@ def record_preparation(binding, value, observed_at, *, validation_at=None):
             incoming[key] = copy.deepcopy(prior[key])
     incoming["started_at"] = incoming.get("started_at") or prior.get("started_at")
     _record_download_progress(
-        binding, {**incoming, "phase_started_at": source_phase_started}, validation_at
+        binding,
+        {
+            **incoming,
+            "phase_started_at": source_phase_started,
+            "download": source_download
+            if incoming["phase"] == "model_download"
+            else incoming.get("download"),
+        },
+        validation_at,
     )
     binding["preparation"] = incoming
 
