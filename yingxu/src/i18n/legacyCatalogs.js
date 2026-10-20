@@ -483,7 +483,7 @@ export const legacyCatalogs = {
       'No machine is available. Ask an administrator to start this mode.',
     'availability.disabled': 'Not enabled',
     'availability.disabledMessage':
-      'This mode is not enabled. Ask an administrator to check its configuration.',
+      "This mode isn't available right now. Use Auto, or try again later.",
     'availability.unknown': 'Status unconfirmed',
     'availability.unknownMessage':
       'Execution status cannot be confirmed right now. Refresh and try again.',
@@ -1894,7 +1894,7 @@ export const legacyCatalogs = {
     'availability.unavailable': '暂无机器',
     'availability.unavailableMessage': '暂无可用机器，请联系管理员启动对应模式。',
     'availability.disabled': '暂未开放',
-    'availability.disabledMessage': '该模式暂未开放，请联系管理员核对运行配置。',
+    'availability.disabledMessage': '这个模式暂时不可用，可以先用「自动」，或稍后再试。',
     'availability.unknown': '状态待确认',
     'availability.unknownMessage': '暂时无法确认执行状态，请刷新后重试。',
     'availability.stale': '状态已过期',

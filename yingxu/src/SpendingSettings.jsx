@@ -12,6 +12,7 @@ import StudioHeader, { useAccess, useAccountLabel } from './StudioHeader.jsx';
 import AccountPassword from './AccountPassword.jsx';
 import { CreditsPanel, useCredits } from './CreditsUI.jsx';
 import AdminConsole from './AdminConsole.jsx';
+import SkinPicker from './SkinPicker.jsx';
 import {
   UserRound,
   SlidersHorizontal,
@@ -366,6 +367,7 @@ export default function SpendingSettings({ account }) {
                 </div>
               </div>
             </div>
+            <SkinPicker />
             {account && (
               <>
                 {!hosted && (

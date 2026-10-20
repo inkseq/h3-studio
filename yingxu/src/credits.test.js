@@ -59,11 +59,26 @@ test('only a well-formed 402 insufficient_credits opens the top-up prompt', () =
   assert.equal(insufficientCredits(402, { code: 'insufficient_credits' }), null);
 });
 
-test('entries keep integer amounts and the next cursor', () => {
-  assert.deepEqual(entryList({ entries: [{ amount: 5 }, { amount: 'x' }], next_cursor: 'c2' }), {
-    entries: [{ amount: 5 }],
-    next: 'c2',
+test('entries show held moves for holds/releases and drop rows that change nothing', () => {
+  const list = entryList({
+    entries: [
+      { kind: 'capture', amount: -21, held_delta: -21 },
+      { kind: 'hold', amount: 0, held_delta: 21 },
+      { kind: 'release', amount: 0, held_delta: -21 },
+      { kind: 'hold', amount: 0, held_delta: 0 },
+      { amount: 'x' },
+    ],
+    next_cursor: 'c2',
   });
+  assert.deepEqual(
+    list.entries.map((e) => [e.kind, e.shown, e.onHold]),
+    [
+      ['capture', -21, false],
+      ['hold', -21, true],
+      ['release', 21, true],
+    ],
+  );
+  assert.equal(list.next, 'c2');
 });
 
 test('purchase polling stops when the balance grows, or gives up', async () => {
