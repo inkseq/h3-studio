@@ -234,24 +234,39 @@ export function WorkbenchTakes({ shot, wide = false, onWide, onPreview, previewI
           };
           if (!wide)
             return (
-              <button
-                type="button"
-                className={'ver' + (row.selected ? ' chosen' : '') + (viewing ? ' viewing' : '')}
-                key={row.id}
-                onClick={preview}
-              >
-                {row.kind === 'image' ? (
-                  <StoryboardAssetImage asset={v.asset || v} />
-                ) : (
-                  <StoryboardVideo asset={v.asset || v} muted />
+              <div className="ver-wrap" key={row.id}>
+                <button
+                  type="button"
+                  className={'ver' + (row.selected ? ' chosen' : '') + (viewing ? ' viewing' : '')}
+                  onClick={preview}
+                >
+                  {row.kind === 'image' ? (
+                    <StoryboardAssetImage asset={v.asset || v} />
+                  ) : (
+                    <StoryboardVideo asset={v.asset || v} muted />
+                  )}
+                  <span>
+                    {row.title ||
+                      (Number.isInteger(v.n) ? 'v' + v.n : versionTime(row.created_at, locale, t))}
+                    {row.starred && <Star size={11} aria-label={t('workbench.star')} />}
+                  </span>
+                  {row.selected && <em>{t('takes.selected')}</em>}
+                </button>
+                {/* The narrow panel needs its own "use" action: cloud takes are not always local
+                  versions, so the preview above cannot offer one (found in #347 staging check). */}
+                {!row.selected && !comparing && (
+                  <button
+                    type="button"
+                    className="small ver-use"
+                    disabled={state.busy || !!state.workbenchPending}
+                    onClick={() =>
+                      action({ op: 'storyboard.select', artifact_id: row.id, shot_id: shot.id })
+                    }
+                  >
+                    {t('workbench.use')}
+                  </button>
                 )}
-                <span>
-                  {row.title ||
-                    (Number.isInteger(v.n) ? 'v' + v.n : versionTime(row.created_at, locale, t))}
-                  {row.starred && <Star size={11} aria-label={t('workbench.star')} />}
-                </span>
-                {row.selected && <em>{t('takes.selected')}</em>}
-              </button>
+              </div>
             );
           return (
             <article
