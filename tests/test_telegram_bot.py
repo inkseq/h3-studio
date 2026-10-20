@@ -126,26 +126,60 @@ class TelegramBotTest(unittest.TestCase):
         self.assertEqual(self.api.downloads, 0)
         self.assertEqual(self.bot.ignored, 5)
 
-    def test_storyboard_proposal_and_revision(self):
+    def cards(self, photos, brief):
+        for n in range(1, photos + 1):
+            self.bot.handle(photo(OWNER, n, group="g1"))
+        self.bot.handle(private(OWNER, text=brief))
+        self.bot.handle(tap(OWNER, "outline"))
+        self.bot.handle(tap(OWNER, "plan"))
+        return self.board()
+
+    def board(self):
+        return Storyboard.from_dict(self.bot.store.load(OWNER)["board"])
+
+    def test_materials_then_outline_then_cards(self):
         for n in range(1, 5):
             self.bot.handle(photo(OWNER, n, group="g1"))
         self.assertEqual(sum(m["kind"] == "message" for m in self.api.sent), 1)
         self.bot.handle(private(OWNER, text="咖啡店开业，温馨一点"))
+        self.assertIn("素材整理好了", self.api.sent[-1]["text"])
+        self.bot.handle(private(OWNER, text="3 是吧台"))
+        self.assertEqual(self.board().materials[2], "吧台")
+        self.bot.handle(tap(OWNER, "outline"))
+        self.assertIn("故事大纲", self.api.sent[-1]["text"])
+        self.bot.handle(private(OWNER, text="更热闹一点"))
+        self.assertIn("更热闹一点", self.api.sent[-1]["text"])
+        self.bot.handle(tap(OWNER, "plan"))
         board_msg = self.api.sent[-1]
         self.assertEqual(board_msg["kind"], "photo")
-        self.assertIn("咖啡店", board_msg["text"])
-        self.assertIn("#5", board_msg["text"])  # four photos plus a closing card
-        self.bot.handle(private(OWNER, text="删掉第2张，第3张换成照片4，横屏"))
-        state = self.bot.store.load(OWNER)
-        board = Storyboard.from_dict(state["board"])
-        # Numbers refer to the board as shown: old card 3 gets photo 4, then
-        # old card 2 goes, so old card 3 is now second.
-        self.assertEqual(len(board.cards), 4)
+        self.assertIn("#5", board_msg["text"])
+        self.assertIn(("2", "card:2"), board_msg["buttons"][1])
+
+    def test_card_review_swap_edit_delete(self):
+        self.cards(4, "咖啡店开业")
+        self.bot.handle(tap(OWNER, "card:2"))
+        self.assertIn("用：素材2「手冲」当开头画面", self.api.sent[-1]["text"])
+        self.bot.handle(tap(OWNER, "swap:2"))
+        self.assertIn(("4", "use:2:4"), self.api.sent[-1]["buttons"][0])
+        self.bot.handle(tap(OWNER, "use:2:4"))
+        self.assertEqual(self.board().cards[1].photo, 4)
+        self.assertIn("店内", self.board().cards[1].prompt)
+        self.bot.handle(tap(OWNER, "edit:2"))
+        self.bot.handle(private(OWNER, text="咖啡师倒拉花，慢动作"))
+        self.assertEqual(self.board().cards[1].description, "咖啡师倒拉花，慢动作")
+        self.bot.handle(tap(OWNER, "prompt:2"))
+        self.assertIn("倒拉花", self.api.sent[-1]["text"])
+        self.bot.handle(tap(OWNER, "del:2"))
+        self.assertEqual(len(self.board().cards), 4)
+
+    def test_revision_numbers_refer_to_board_as_shown(self):
+        self.cards(4, "咖啡店开业")
+        self.bot.handle(private(OWNER, text="删掉第2张，第3张换成素材4，横屏"))
+        board = self.board()
         self.assertEqual([c.photo for c in board.cards], [1, 4, 4, 1])
-        self.assertEqual(board.cards[1].title, "招牌饮品")
+        self.assertEqual(board.cards[1].title, "招牌饮品上桌")
         self.assertEqual(board.aspect, "16:9")
         self.assertIn("删掉了第2张", self.api.sent[-1]["text"])
-        self.assertIn("第3张换成照片4", self.api.sent[-1]["text"])
 
     def test_parsers(self):
         self.assertEqual(parse_second("第12秒人脸怪"), 12)
@@ -154,40 +188,54 @@ class TelegramBotTest(unittest.TestCase):
         self.assertIsNone(parse_second("第3张太暗"))
         self.assertEqual(parse_card("第3张太暗"), 3)
         self.assertEqual(parse_card("card 2 brighter"), 2)
-        board = DemoAdapter(self.tmp.name).draft(1, ["a", "b", "c"], "")
+        adapter = DemoAdapter(self.tmp.name)
+        board = adapter.plan_shots(adapter.start(1, ["a", "b", "c"], ""))
         self.assertEqual(board.locate(0), 1)
         self.assertEqual(board.locate(3.2), 2)
         self.assertIsNone(board.locate(board.duration))
 
     @unittest.skipUnless(HAS_FFMPEG, "ffmpeg not installed")
-    def test_generate_locate_and_regenerate_one_card(self):
-        for n in range(1, 4):
-            self.bot.handle(photo(OWNER, n))
-        self.bot.handle(private(OWNER, text="花店，短一点"))
+    def test_generate_fix_review_keep_and_revert(self):
+        self.cards(3, "花店母亲节")
         self.bot.handle(private(OWNER, text="短一点"))
         self.bot.handle(tap(OWNER, "gen"))
+        self.assertIn("内容检查通过", self.api.sent[-1]["text"])
         self.assertIn("不会扣积分", self.api.sent[-1]["text"])
         self.bot.handle(tap(OWNER, "gen_ok"))
-        film_msg = self.api.sent[-1]
-        self.assertEqual(film_msg["kind"], "video")
-        before = self.bot.store.load(OWNER)["film"]["clips"]
+        self.assertEqual(self.api.sent[-1]["kind"], "video")
+        first = self.board()
+        clips = [c.take()["clip"] for c in first.cards]
 
-        self.bot.handle(private(OWNER, text="第3秒人脸怪"))
-        frame_msg = self.api.sent[-1]
-        self.assertEqual(frame_msg["kind"], "photo")
-        self.assertIn("第2张", frame_msg["text"])
-        self.bot.handle(tap(OWNER, "fix_ok"))
-        state = self.bot.store.load(OWNER)
-        after = state["film"]["clips"]
-        self.assertNotEqual(before[1], after[1])
-        self.assertEqual(before[0], after[0])
-        self.assertEqual(before[2:], after[2:])
-        self.assertEqual(state["board"]["cards"][1]["version"], 2)
+        self.bot.handle(private(OWNER, text="第3秒太暗"))
+        self.assertIn("第2张", self.api.sent[-1]["text"])
+        self.bot.handle(tap(OWNER, "fix_yes"))
+        self.assertIn("调亮画面", self.api.sent[-1]["text"])
+        self.bot.handle(tap(OWNER, "fix_diff"))
+        self.assertIn("改后", self.api.sent[-1]["text"])
+        self.bot.handle(tap(OWNER, "fix_go"))
+        fixed = self.board()
+        self.assertEqual(fixed.cards[1].version, 2)
+        self.assertEqual(fixed.cards[1].look["brightness"], 1.35)
+        self.assertIn("提高曝光", fixed.cards[1].prompt)
+        self.assertNotEqual(fixed.cards[1].take()["clip"], clips[1])
+        self.assertEqual([c.take()["clip"] for c in fixed.cards[2:]], clips[2:])
+        self.assertIn(("↩️ 换回 v1", "revert"), self.api.sent[-1]["buttons"][0])
+
+        self.bot.handle(tap(OWNER, "revert"))
+        reverted = self.board()
+        self.assertEqual(reverted.cards[1].version, 1)
+        self.assertEqual(reverted.cards[1].take()["clip"], clips[1])
         self.assertEqual(self.api.sent[-1]["kind"], "video")
 
+        self.bot.handle(private(OWNER, text="第1张人脸怪"))
+        self.bot.handle(tap(OWNER, "fix_roll"))
+        rolled = self.board()
+        self.assertEqual(rolled.cards[0].version, 2)
+        self.assertEqual(rolled.cards[0].prompt, first.cards[0].prompt)
+
     def test_stale_button_does_nothing_dangerous(self):
-        self.bot.handle(tap(OWNER, "gen_ok"))
-        self.bot.handle(tap(OWNER, "fix_ok"))
+        for data in ("gen_ok", "fix_go", "revert", "use:1:1", "card:1"):
+            self.bot.handle(tap(OWNER, data))
         self.assertTrue(all("过期" in m["text"] for m in self.api.sent))
 
 

@@ -6,7 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageEnhance, ImageFont, ImageOps
 
 FONT_CANDIDATES = [
     "C:/Windows/Fonts/msyh.ttc",
@@ -17,6 +17,7 @@ FONT_CANDIDATES = [
 ]
 SIZES = {"9:16": (720, 1280), "16:9": (1280, 720)}
 FPS = 25
+INK, PAPER, MUTED, ACCENT = (11, 12, 12), (238, 241, 236), (154, 163, 156), (199, 243, 107)
 
 
 def font(size):
@@ -44,52 +45,50 @@ def wrap(draw, text, face, width):
     return lines
 
 
-def cover(path, size):
+def styled(path, size, look=None):
+    """Cover-crop a photo and apply the demo look (brightness, warmth, colour)."""
     with Image.open(path) as image:
-        return ImageOps.fit(ImageOps.exif_transpose(image).convert("RGB"), size)
+        image = ImageOps.fit(ImageOps.exif_transpose(image).convert("RGB"), size)
+    look = look or {}
+    if look.get("brightness"):
+        image = ImageEnhance.Brightness(image).enhance(look["brightness"])
+    if look.get("color") is not None:
+        image = ImageEnhance.Color(image).enhance(look["color"])
+    if look.get("warmth"):
+        r, g, b = image.split()
+        shift = int(40 * look["warmth"])
+        r = r.point(lambda v: min(255, max(0, v + shift)))
+        b = b.point(lambda v: min(255, max(0, v - shift)))
+        image = Image.merge("RGB", (r, g, b))
+    return image
 
 
-def grid(board, out):
-    cols, tile_w, tile_h, pad = 3, 300, 400, 16
-    if board.aspect == "16:9":
-        tile_h = 169
-    rows = (len(board.cards) + cols - 1) // cols
+def sheet(tiles, title, subtitle, out, *, tall=True):
+    """tiles: [(photo_path, tag, line1, line2, look)] in a three-column sheet."""
+    cols, tile_w, pad = 3, 300, 16
+    tile_h = 400 if tall else 169
+    rows = max(1, (len(tiles) + cols - 1) // cols)
     text_h, head = 96, 84
-    width = pad + cols * (tile_w + pad)
-    height = head + rows * (tile_h + text_h + pad) + pad
-    sheet = Image.new("RGB", (width, height), (16, 18, 17))
-    draw = ImageDraw.Draw(sheet)
-    draw.text((pad, 18), board.title, font=font(30), fill=(238, 241, 236))
-    draw.text(
-        (pad, 56),
-        f"{len(board.cards)} 个镜头 · {clock(board.duration)} · {board.aspect}",
-        font=font(18),
-        fill=(154, 163, 156),
+    canvas = Image.new(
+        "RGB",
+        (pad + cols * (tile_w + pad), head + rows * (tile_h + text_h + pad) + pad),
+        (16, 18, 17),
     )
+    draw = ImageDraw.Draw(canvas)
+    draw.text((pad, 18), title, font=font(30), fill=PAPER)
+    draw.text((pad, 56), subtitle, font=font(18), fill=MUTED)
     small, label = font(18), font(22)
-    for number, card, start, end in board.timeline():
-        index = number - 1
+    for index, (path, tag, line1, line2, look) in enumerate(tiles):
         x = pad + (index % cols) * (tile_w + pad)
         y = head + (index // cols) * (tile_h + text_h + pad)
-        sheet.paste(cover(board.photos[card.photo - 1], (tile_w, tile_h)), (x, y))
-        draw.rectangle((x, y, x + 54, y + 34), fill=(199, 243, 107))
-        draw.text((x + 8, y + 4), f"#{number}", font=label, fill=(11, 12, 12))
-        draw.text(
-            (x, y + tile_h + 6),
-            f"{clock(start)}–{clock(end)}  {card.title}",
-            font=label,
-            fill=(238, 241, 236),
-        )
-        for line_no, line in enumerate(
-            wrap(draw, card.description, small, tile_w)[:2]
-        ):
-            draw.text(
-                (x, y + tile_h + 38 + line_no * 24),
-                line,
-                font=small,
-                fill=(154, 163, 156),
-            )
-    sheet.save(out, quality=90)
+        canvas.paste(styled(path, (tile_w, tile_h), look), (x, y))
+        width = int(draw.textlength(tag, font=label)) + 16
+        draw.rectangle((x, y, x + width, y + 34), fill=ACCENT)
+        draw.text((x + 8, y + 4), tag, font=label, fill=INK)
+        draw.text((x, y + tile_h + 6), line1, font=label, fill=PAPER)
+        for line_no, line in enumerate(wrap(draw, line2, small, tile_w)[:2]):
+            draw.text((x, y + tile_h + 38 + line_no * 24), line, font=small, fill=MUTED)
+    canvas.save(out, quality=90)
     return out
 
 
@@ -97,16 +96,13 @@ def card_still(board, number, card, out):
     """One full-frame still per card, slightly oversized so the clip can pan."""
     w, h = SIZES[board.aspect]
     big = (int(w * 1.12), int(h * 1.12))
-    image = cover(board.photos[card.photo - 1], big)
+    image = styled(board.photos[card.photo - 1], big, card.look)
     draw = ImageDraw.Draw(image, "RGBA")
     bar = int(big[1] * 0.2)
     draw.rectangle((0, big[1] - bar, big[0], big[1]), fill=(0, 0, 0, 150))
-    title = font(int(w * 0.06))
-    body = font(int(w * 0.035))
+    title, body = font(int(w * 0.06)), font(int(w * 0.035))
     margin = int(w * 0.16)  # stays inside the frame for any pan offset
-    draw.text(
-        (margin, big[1] - bar + 20), card.title, font=title, fill=(255, 255, 255)
-    )
+    draw.text((margin, big[1] - bar + 20), card.title, font=title, fill=(255, 255, 255))
     for line_no, line in enumerate(
         wrap(draw, card.description, body, big[0] - 2 * margin)[:2]
     ):
@@ -120,8 +116,8 @@ def card_still(board, number, card, out):
     pad = int(w * 0.02)
     right = margin + int(draw.textlength(label, font=tag)) + 2 * pad
     draw.rectangle((margin, margin, right, margin + int(w * 0.04) + 2 * pad),
-                   fill=(199, 243, 107, 230))  # fmt: skip
-    draw.text((margin + pad, margin + pad // 2), label, font=tag, fill=(11, 12, 12))
+                   fill=ACCENT + (230,))  # fmt: skip
+    draw.text((margin + pad, margin + pad // 2), label, font=tag, fill=INK)
     image.save(out)
     return out
 
@@ -144,23 +140,14 @@ def run(args):
 def clip(board, number, card, folder):
     """Pan across the still; direction changes with card number and version."""
     folder = Path(folder)
-    still = card_still(board, number, card, folder / f"card{number}-v{card.version}.png")
-    out = folder / f"card{number}-v{card.version}.mp4"
+    stem = f"card{number}-v{card.version}-p{card.photo}-{board.aspect.replace(':', 'x')}"
+    still = card_still(board, number, card, folder / f"{stem}.png")
+    out = folder / f"{stem}.mp4"
     w, h = SIZES[board.aspect]
     d = card.seconds
     direction = (number + card.version) % 4
-    x = {
-        0: f"(iw-{w})*t/{d}",
-        1: f"(iw-{w})*(1-t/{d})",
-        2: f"(iw-{w})/2",
-        3: f"(iw-{w})/2",
-    }[direction]
-    y = {
-        0: f"(ih-{h})/2",
-        1: f"(ih-{h})/2",
-        2: f"(ih-{h})*t/{d}",
-        3: f"(ih-{h})*(1-t/{d})",
-    }[direction]
+    x = [f"(iw-{w})*t/{d}", f"(iw-{w})*(1-t/{d})", f"(iw-{w})/2", f"(iw-{w})/2"][direction]
+    y = [f"(ih-{h})/2", f"(ih-{h})/2", f"(ih-{h})*t/{d}", f"(ih-{h})*(1-t/{d})"][direction]
     run(
         [
             "-loop", "1", "-framerate", str(FPS), "-t", f"{d:.3f}", "-i", str(still),
