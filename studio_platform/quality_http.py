@@ -43,12 +43,14 @@ def principal_for(request, app):
         and not principal.machine
         and principal.identity_source == "legacy"
     ):
-        from .identity import is_admin
-
+        # Auth.hydrate has already checked the identity schema/row for this
+        # request. Only its attested pre-adoption result can use configured
+        # legacy admins; canonical accounts use their freshly hydrated role.
+        # Do not repeat the identity probes for every JSON serialization.
         principal = replace(
             principal,
             role="admin"
-            if is_admin(principal, app.state.repository, app.state.settings)
+            if principal.owner in app.state.settings.operator_admin_owners
             else "user",
         )
     return principal

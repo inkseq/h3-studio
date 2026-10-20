@@ -115,6 +115,11 @@ class QualityTierTests(unittest.TestCase):
                 "recipe_id": "video-ref-v1",
                 "prompt": "Untouched",
             },
+            {
+                "deployment_profile_id": "quality:standard",
+                "recipe_id": MODE_RECIPES["ref"],
+                "prompt": "Untouched",
+            },
         ):
             original = copy.deepcopy(body)
             result, selection = self.normalize(body, allow_internal=False)
@@ -190,7 +195,7 @@ class QualityTierTests(unittest.TestCase):
             {"tier": "standard", "mode": "fl", "recipe_id": "video-ref-v1"},
             {"tier": "standard", "deployment_profile_id": "quality:refine"},
             {"tier": "standard", "mode": "ref", "deployment_profile_id": STANDARD},
-            {"tier": "standard", "mode": "ref", "recipe_id": MODE_RECIPES["ref"]},
+            {"tier": "standard", "mode": "ref", "recipe_id": "private-unknown-recipe"},
         )
         for body in conflicts:
             with self.subTest(body=body):

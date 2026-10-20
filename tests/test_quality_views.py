@@ -22,6 +22,41 @@ MACHINE = Principal("owner", "pat", role="admin", machine=True)
 
 
 class QualityViewTests(unittest.TestCase):
+    def test_revision_summary_controls_only_and_cpu_dtos_keep_original_shape(self):
+        summary = {
+            "id": "revision",
+            "version": 2,
+            "created_at": 123.0,
+            "input_hash": "immutable",
+        }
+        card = {
+            "id": "card",
+            "version": 2,
+            "revisions": [summary],
+            "title": "Original card",
+        }
+        h3 = {"controls": {"steps": 9, "resolution": "720P"}}
+        entity = {"id": "shot", "type": "shot", "data": {"h3": h3}}
+        cpu = {
+            "recipe_id": "chapter-roughcut-v1",
+            "duration": 5,
+            "title": "Original render",
+        }
+        originals = copy.deepcopy((card, entity, cpu))
+        for principal in (USER, MACHINE, None):
+            with self.subTest(principal=principal):
+                self.assertEqual(views.envelope(card, principal), card)
+                self.assertEqual(views.revision(summary, principal), summary)
+                self.assertEqual(views.selection(h3, principal), h3)
+                self.assertEqual(views.entity(entity, principal), entity)
+                self.assertEqual(views.selection(cpu, principal), cpu)
+                unknown = views.selection(
+                    {"recipe_id": "retired-video-recipe"}, principal
+                )
+                self.assertIsNone(unknown["tier"])
+                self.assertEqual(unknown["recipe_id"], "video-unavailable-v1")
+        self.assertEqual((card, entity, cpu), originals)
+
     def test_role_boundary_preserves_user_text_and_unknown_history_has_no_fallback(
         self,
     ):

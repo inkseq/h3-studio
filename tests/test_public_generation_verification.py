@@ -178,6 +178,25 @@ class PublicGenerationVerificationTests(unittest.TestCase):
         self.assertEqual(self.posts, 2)
         self.assert_one_job_and_no_secret(state)
 
+    def test_wrong_public_quality_or_mode_refuses_before_paid_submission(self):
+        original_request = public.request
+        for field, value in (('tier', 'standard'), ('mode', 'ref')):
+
+            def changed_plan(opener, method, path, *args, **kwargs):
+                result = original_request(opener, method, path, *args, **kwargs)
+                if method == 'POST' and path == '/v1/generation-plans':
+                    result['effective_request'][field] = value
+                return result
+
+            with (
+                self.subTest(field=field),
+                patch.object(public, 'request', side_effect=changed_plan),
+                self.assertRaises(AssertionError),
+            ):
+                self.submit()
+            self.assertEqual(self.posts, 0)
+            self.assertEqual(self.repo.list_jobs_for_owner('sixnine', 'superdan'), [])
+
     def test_lost_response_new_pat_recovers_via_get_without_another_post(self):
         self.fail_after_post = RuntimeError(
             'synthetic process interruption after commit'

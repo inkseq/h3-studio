@@ -118,6 +118,27 @@ def _mode(value):
 
 
 def _identities(result, original):
+    identity_fields = {
+        "recipe_id",
+        "recipeId",
+        "deployment_profile_id",
+        "deploymentProfileId",
+        "profile_id",
+        "model",
+        "model_id",
+        "modelId",
+        "model_type",
+        "modelType",
+        "tier",
+        "quality_selection",
+    }.intersection(original)
+    if not identity_fields or (
+        identity_fields <= {"recipe_id", "recipeId"}
+        and all(original[field] == RENDER_RECIPE for field in identity_fields)
+    ):
+        # Revision summaries, controls-only drafts and CPU renders have no
+        # video quality selection. Preserve their existing response shape.
+        return result
     tier, mode = _tier(original), _mode(original)
     result["tier"] = tier
     for field in ("deployment_profile_id", "deploymentProfileId", "profile_id"):

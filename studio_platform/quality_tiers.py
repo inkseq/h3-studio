@@ -184,6 +184,11 @@ def normalize_request(settings, body, *, allow_internal=True, now=None):
             "quality_selection_conflict", "Mode selections disagree."
         )
     mode = mode or inferred_mode
+    # Existing Story clients still emit these exact mode-only recipe names
+    # next to a neutral profile alias. They do not select an internal model;
+    # resolve the explicit tier normally instead of rejecting that round trip.
+    if tier is not None and recipe in MODE_RECIPES.values():
+        public_recipe = True
     # Compatibility for old clients that selected ONLY FL/REF, not a model.
     # Never use this path for an explicit tier/profile/model, or fall through
     # after an unavailable configured default. New docs use tier/mode only.

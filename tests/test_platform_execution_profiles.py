@@ -43,6 +43,8 @@ class ExecutionProfileTests(unittest.TestCase):
             execution_backend="wangp-worker",
             generation_enabled=True,
             execution_profiles_file=self.path,
+            operator_admin_owners=("superdan",),
+            operator_capacity_owners=("superdan",),
         )
         self.scope = Scope("sixnine", "superdan", "story-one")
         self.repo.configure_capacity(max_instances=4, max_physical_gpus=4)

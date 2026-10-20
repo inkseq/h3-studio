@@ -19,6 +19,8 @@ from sqlalchemy import select
 from studio_platform.api import create_app
 from studio_platform.auth import API_SCOPES
 from studio_platform.capabilities import VERSION
+from studio_platform.h3_profile_support import envelope
+from studio_platform.qualification_profiles import QUEUED_TASK_PROFILE
 from studio_platform.quick_chat import objects, operations, events
 from studio_platform.repository import (
     documents,
@@ -30,8 +32,14 @@ from studio_platform.repository import (
     budget_reservations,
     outbox,
 )
+from studio_platform.runtime_catalog import (
+    engine_manifest,
+    get_profile,
+    profile_output_delivery,
+)
 from studio_platform.settings import Settings
 from test_platform_api import png
+from test_platform_execution_policy import policy
 from test_platform_repository import LedgerCase
 from test_agent_skill_quick_chat import helper
 
@@ -44,6 +52,24 @@ class QuickChatRevisionContractTests(LedgerCase):
     def setUp(self):
         super().setUp()
         self.now = time.time()
+        binding = policy(self.now)
+        binding.update(
+            deployment_profile_id=PRUNED,
+            model_id=get_profile(PRUNED)["model_id"],
+            backend="wangp-worker",
+            recipe_ids=["h3-base-fl2va-v1"],
+            engine_manifest_digest=engine_manifest(PRUNED, "fl").digest,
+            output_delivery=profile_output_delivery(PRUNED),
+            envelope=envelope(PRUNED, "fl"),
+        )
+        binding["qualification"].update(
+            status="runtime_required", profile=QUEUED_TASK_PROFILE
+        )
+        profiles_path = Path(self.temp.name) / "profiles.json"
+        profiles_path.write_text(
+            json.dumps({"schema_version": 1, "policies": [binding]}), encoding="utf-8"
+        )
+        profiles_path.chmod(0o600)
         self.app = create_app(
             Settings(
                 Path(self.temp.name) / "api",
@@ -51,6 +77,9 @@ class QuickChatRevisionContractTests(LedgerCase):
                 database_url=self.url,
                 generation_enabled=True,
                 execution_backend="mock",
+                operator_capacity_owners=("superdan",),
+                operator_admin_owners=("superdan",),
+                execution_profiles_file=profiles_path,
             ),
             repository=self.repo,
         )
@@ -182,12 +211,18 @@ class QuickChatRevisionContractTests(LedgerCase):
                 )
 
     def test_required_fields_publish_safe_missing_paths(self):
-        for field in ("prompt", "recipe_id", "controls", "inputs", "copies"):
+        for field in ("prompt", "controls", "inputs", "copies"):
             with self.subTest(field=field):
                 body = self.revision_body()
                 del body[field]
                 response = self.rejected(body, "missing-" + field)
                 self.assert_field_error(response, ["body", field], "missing_field")
+        body = self.revision_body()
+        del body["recipe_id"]
+        # Selection may use recipe aliases or tier/mode. Omitting all selection
+        # is a root validation failure, not a missing required recipe field.
+        response = self.rejected(body, "missing-selection")
+        self.assert_field_error(response, ["body"], "invalid_value")
 
     def test_invalid_required_types_and_values_do_not_leak_inputs(self):
         cases = (
@@ -473,6 +508,7 @@ class QuickChatRevisionContractTests(LedgerCase):
         self,
     ):
         selected = self.native_card()
+        self.assertEqual(selected["revision"]["deployment_profile_id"], PRUNED)
         key = self.client.post(
             "/v1/api-keys",
             json={
@@ -506,6 +542,11 @@ class QuickChatRevisionContractTests(LedgerCase):
             examples["read_revision"]["method"], revision_path, headers=headers
         ).json()
         self.assertEqual(revision["id"], card["current_revision_id"])
+        self.assertEqual(revision["tier"], "standard")
+        self.assertEqual(revision["mode"], "fl")
+        self.assertEqual(revision["deployment_profile_id"], "quality:standard")
+        self.assertEqual(revision["recipe_id"], "video-fl-v1")
+        self.assertNotIn(PRUNED, json.dumps(revision))
         substitutions = {
             "{current_card_version}": card["version"],
             "{new_complete_prompt}": "A blue cup on a table.",
@@ -514,8 +555,8 @@ class QuickChatRevisionContractTests(LedgerCase):
             {
                 "{current_revision." + field + "}": revision[field]
                 for field in (
-                    "deployment_profile_id",
-                    "recipe_id",
+                    "tier",
+                    "mode",
                     "controls",
                     "inputs",
                     "copies",
@@ -534,7 +575,10 @@ class QuickChatRevisionContractTests(LedgerCase):
         self.assertIs(type(body["copies"]), int)
         self.assertIsInstance(body["controls"], dict)
         self.assertIsInstance(body["inputs"], dict)
-        self.assertEqual(body["deployment_profile_id"], PRUNED)
+        self.assertEqual(body["tier"], "standard")
+        self.assertEqual(body["mode"], "fl")
+        self.assertNotIn("deployment_profile_id", body)
+        self.assertNotIn("recipe_id", body)
         path = examples["revision"]["path"].format(
             session_id=self.session["id"], card_id=card["id"]
         )
@@ -599,6 +643,8 @@ class QuickChatRevisionContractTests(LedgerCase):
         naming.assert_not_called()
         for saved in (structured, documented):
             for field in (
+                "tier",
+                "mode",
                 "deployment_profile_id",
                 "recipe_id",
                 "controls",
@@ -669,7 +715,6 @@ class QuickChatRevisionContractTests(LedgerCase):
             set(body["required"]),
             {
                 "prompt",
-                "recipe_id",
                 "controls",
                 "inputs",
                 "copies",
@@ -677,7 +722,15 @@ class QuickChatRevisionContractTests(LedgerCase):
             },
         )
         self.assertTrue(
-            {"deployment_profile_id", "source_revision_id", "turn_id", "title"}
+            {
+                "recipe_id",
+                "tier",
+                "mode",
+                "deployment_profile_id",
+                "source_revision_id",
+                "turn_id",
+                "title",
+            }
             <= set(body["properties"])
         )
         self.assertNotIn("expected_version", body["properties"])

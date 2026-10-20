@@ -142,15 +142,18 @@ def check_state(state):
 
 def check_job(job, state):
     assert not job['simulation'] and job['project_id'] == PROJECT and job['plan_id'] == state['plan_id']
-    assert job['recipe_id'] == RECIPE and job['client_ref']['shot_id'] == 'shot'
+    assert job['recipe_id'] == 'video-fl-v1' and job['client_ref']['shot_id'] == 'shot'
     check_effective(job['effective_request'], state['request'])
     if state.get('job_id'):
         assert job['id'] == state['job_id']
 
 
 def check_effective(effective, requested):
-    assert effective['model'] == 'MiniMax-H3-Base-BF16' and effective['mode'] == 'fl'
-    assert effective['prompt'] == PROMPT and effective['backend'] == 'comfy-local'
+    # Agent readback projects the retained BF16 route to public quality. The
+    # original request recipe, saved body and submission key remain unchanged.
+    assert effective['tier'] == 'refine' and effective['mode'] == 'fl'
+    assert 'model' not in effective and 'backend' not in effective
+    assert effective['prompt'] == PROMPT
     assert all(effective[key] == value for key, value in requested['controls'].items())
 
 
