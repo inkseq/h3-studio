@@ -41,6 +41,7 @@ def transform(path, source):
             raise VastAIRateLimitError() from None''')
     if path.endswith("vastai/compute.py"):
         source = "from " + HELPER_MODULE + " import VastAllocationUnknown, VastSafeReject\n" + source
+        source = replace_once(source, '"inet_down": {"gt": 128}', '"inet_down": {"gte": 1000}')
         start = source.index("        except VastAICreateInstanceError as e:")
         end = source.index("        return JobProvisioningData(", start)
         source = source[:start] + '''        except VastAllocationUnknown:

@@ -81,7 +81,15 @@ class Client:
     def vast_offer_mapping(self, request, *, clock):
         return {
             "observed_at": clock(),
-            "offers": [{"offer_id": "12345", "machine_id": "19493"}],
+            "offers": [
+                {
+                    "offer_id": "12345",
+                    "machine_id": "19493",
+                    "country": "US",
+                    "region": "test-region",
+                    "advertised_download_mbps": 2000,
+                }
+            ],
         }
 
     def reusable_hosts_confirmed(self, approved):

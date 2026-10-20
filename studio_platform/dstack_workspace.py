@@ -279,6 +279,36 @@ def stop_impact(connection, settings, node_ids, now):
     }
 
 
+def _admin_download_details(node, now):
+    """Completed-content averages are not measured network throughput."""
+    from .dstack_preparation import download_progress_timing
+    from .host_policy import bound_observation
+
+    physical = bound_observation(dict(node), now=now) or {}
+    timing = download_progress_timing(node["payload"].get("dstack", {}), now)
+    duration = timing["duration_seconds"] if timing else None
+    completed = timing["bytes_complete"] if timing else None
+    return {
+        "host": {
+            "country": physical.get("country"),
+            "region": physical.get("region"),
+            "advertised_download_mbps": physical.get("advertised_download_mbps"),
+            "bandwidth_basis": "provider_advertised",
+            "observed_at": physical.get("observed_at"),
+            "measured_download_mbps": None,
+        },
+        "completed_content_download": {
+            "average_mbps": completed * 8 / 1_000_000 / duration
+            if duration is not None and duration > 0 and completed is not None
+            else None,
+            "basis": "completed_files",
+            "duration_seconds": duration,
+            "bytes_complete": completed,
+            "bytes_total": timing["bytes_total"] if timing else None,
+        },
+    }
+
+
 class DstackWorkspace:
     def __init__(self, service):
         self.service, self.repo, self.settings = service, service.repo, service.settings
@@ -659,6 +689,8 @@ class DstackWorkspace:
                     now,
                     fresh_seconds=payload.get("observation_fresh_seconds", 30),
                 )
+                if admin:
+                    value.update(_admin_download_details(original, now))
                 value.update(
                     machine_metrics(
                         connection, original, intents[identity], workers, now

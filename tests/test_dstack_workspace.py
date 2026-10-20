@@ -167,6 +167,78 @@ class WorkspaceTests(LedgerCase):
             )
         self.assertEqual(before, after)
 
+    def test_admin_host_download_average_uses_server_completed_content_clock(self):
+        node = self.start_node()
+        fixtures.DstackOperatorTests.running(self, node)
+        started = self.now
+        for elapsed, complete, files in ((0, 1_000_000, 1), (20, 2_000_000, 2)):
+            self.now = started + elapsed
+            self.store.record(
+                node,
+                {
+                    "observed_at": self.now,
+                    "state": "starting",
+                    "ready": False,
+                    "preparation": {
+                        "phase": "model_download",
+                        "phase_started_at": started,
+                        "updated_at": self.now,
+                        "download": {
+                            "bytes_complete": complete,
+                            "bytes_total": 2_000_000,
+                            "files_complete": files,
+                            "files_total": 2,
+                        },
+                    },
+                },
+            )
+        self.now = started + 100
+        self.store.record(
+            node,
+            {
+                "observed_at": self.now,
+                "state": "starting",
+                "ready": False,
+                "preparation": {
+                    "phase": "runtime_start",
+                    "phase_started_at": self.now,
+                    "updated_at": self.now,
+                },
+            },
+        )
+        with self.repo.engine.connect() as connection:
+            before = dict(connection.execute(select(operator_nodes)).mappings().one())
+        row = self.workspace.state(self.owner, admin=True)["nodes"][0]
+        self.assertEqual(row["host"]["country"], "US")
+        self.assertEqual(row["host"]["advertised_download_mbps"], 2000)
+        self.assertEqual(row["host"]["bandwidth_basis"], "provider_advertised")
+        self.assertIsNone(row["host"]["measured_download_mbps"])
+        self.assertEqual(
+            row["completed_content_download"],
+            {
+                "average_mbps": 0.8,
+                "basis": "completed_files",
+                "duration_seconds": 20,
+                "bytes_complete": 2_000_000,
+                "bytes_total": 2_000_000,
+            },
+        )
+        ordinary = self.workspace.state(self.owner)["nodes"][0]
+        self.assertNotIn("host", ordinary)
+        self.assertNotIn("completed_content_download", ordinary)
+        with self.repo.engine.connect() as connection:
+            after = dict(connection.execute(select(operator_nodes)).mappings().one())
+        self.assertEqual(after, before)
+
+    def test_old_admin_node_has_nullable_host_and_download_metadata(self):
+        self.start_node()
+        row = self.workspace.state(self.owner, admin=True)["nodes"][0]
+        self.assertIsNone(row["host"]["country"])
+        self.assertIsNone(row["host"]["advertised_download_mbps"])
+        self.assertIsNone(row["host"]["measured_download_mbps"])
+        self.assertIsNone(row["completed_content_download"]["average_mbps"])
+        self.assertIsNone(row["completed_content_download"]["duration_seconds"])
+
     def waiting_job(self, key=None, *, owner=None, profile_id="5090-fl", scope=None):
         profile = self.service.profiles[profile_id]
         request = {

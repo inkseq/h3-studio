@@ -638,3 +638,243 @@ class DemandStartTests(LedgerCase):
                 original_hold,
             )
         self.assertEqual(self.repo.get_job(self.scope, job['id']), job)
+
+    def close_slow_allocation(self, node_id, machine, *, proof=True):
+        from test_host_policy import physical
+        from studio_platform.repository import instance_intents
+
+        instance = str(60000000 + len(self.client.applied))
+        with self.repo.transaction() as c:
+            node = dict(
+                c.execute(
+                    select(operator_nodes).where(operator_nodes.c.intent_id == node_id)
+                )
+                .mappings()
+                .one()
+            )
+            payload = copy.deepcopy(node['payload'])
+            payload['host_observation'] = physical(machine, instance, self.now)
+            payload['dstack'].update(
+                provider_instance_id=instance, state='runtime_unconfirmed'
+            )
+            c.execute(
+                update(operator_nodes)
+                .where(operator_nodes.c.intent_id == node_id)
+                .values(payload=payload)
+            )
+            c.execute(
+                update(instance_intents)
+                .where(instance_intents.c.id == node_id)
+                .values(provider_instance_id=instance, state='running')
+            )
+            node['payload'] = payload
+            intent = dict(
+                c.execute(
+                    select(instance_intents).where(instance_intents.c.id == node_id)
+                )
+                .mappings()
+                .one()
+            )
+            payload = self.service.record_download_timebox(c, node, intent, self.now)
+            self.assertIsNotNone(payload)
+            payload['stop_reason_code'] = 'dstack_download_timebox_exceeded'
+            payload['dstack'].update(state='stopped', dstack_status='terminated')
+            if proof:
+                payload['dstack']['provider_removal_proof'] = dict(
+                    version=1,
+                    complete=True,
+                    absent=True,
+                    backend='vastai',
+                    run_id=payload['dstack']['run_id'],
+                    provider_instance_id=instance,
+                )
+            c.execute(
+                update(operator_nodes)
+                .where(operator_nodes.c.intent_id == node_id)
+                .values(
+                    payload=payload, desired_state='stopped', runtime_state='stopped'
+                )
+            )
+            c.execute(
+                update(instance_intents)
+                .where(instance_intents.c.id == node_id)
+                .values(state='destroyed')
+            )
+        self.client.runs[payload['dstack']['run_name']].update(
+            status='terminated',
+            latest_job_submission=dict(
+                job_provisioning_data=dict(
+                    backend='vastai',
+                    instance_id=instance,
+                    instance_type=dict(resources=dict(gpus=[dict(name='RTX5090')])),
+                )
+            ),
+        )
+        self.service.provider_inventory = Mock(
+            side_effect=lambda backend: dict(
+                backend='vastai', complete=True, observed_at=self.now, instance_ids=[]
+            )
+        )
+        return payload
+
+    def test_download_replacements_bounded_original_job_history_and_single_journal(
+        self,
+    ):
+        job = self.accepted()
+        self.enabled()
+        for index in range(3):
+            machine = str(19493 + index)
+            self.client.vast_offer_mapping = lambda *args, _machine=machine, **kw: dict(
+                observed_at=self.now,
+                offers=[
+                    dict(
+                        offer_id='12345',
+                        machine_id=_machine,
+                        country='US',
+                        region='test-region',
+                        advertised_download_mbps=2000,
+                    )
+                ],
+            )
+            result = start_once(self.service)
+            self.assertEqual(result['state'], 'accepted')
+            stopped = self.close_slow_allocation(result['node_id'], machine)
+            self.assertFalse(stopped['host_failure']['qualified_start_failure'])
+            self.assertEqual(stopped['download_timebox_event']['machine_id'], machine)
+            outcome = start_once(self.service)
+            if index < 2:
+                self.assertEqual(outcome, dict(state='blocked', reason_code='backoff'))
+                self.now = self.journal()['payload']['next_decision_at'] + 1
+            else:
+                self.assertEqual(
+                    outcome, dict(state='blocked', reason_code='download_retry_limit')
+                )
+        with patch.object(self.service, '_preview_for_owner') as planner:
+            for _ in range(3):
+                self.now += 1000
+                self.assertEqual(
+                    start_once(self.service),
+                    dict(state='blocked', reason_code='download_retry_limit'),
+                )
+            planner.assert_not_called()
+        self.assertEqual(len(self.client.applied), 3)
+        self.assertEqual(self.journal()['payload']['download_replacements'], 2)
+        self.assertEqual(len(self.journal()['payload']['download_stops']), 3)
+        self.assertEqual(self.repo.get_job(self.scope, job['id']), job)
+
+    def test_slow_stop_without_removal_proof_never_reoffers_and_creator_sees_starting(
+        self,
+    ):
+        from studio_platform.dstack_demand import job_wait_stage
+
+        job = self.accepted()
+        self.enabled()
+        result = start_once(self.service)
+        self.close_slow_allocation(result['node_id'], '19493', proof=False)
+        with patch.object(self.service, '_preview_for_owner') as planner:
+            self.assertEqual(start_once(self.service)['state'], 'observing')
+            self.now += 1000
+            self.assertEqual(start_once(self.service)['state'], 'observing')
+            planner.assert_not_called()
+        with self.repo.engine.connect() as c:
+            self.assertEqual(job_wait_stage(c, job, self.now), 'machine_starting')
+        self.assertEqual(self.journal()['payload'].get('download_replacements', 0), 0)
+        self.assertEqual(len(self.client.applied), 1)
+        self.assertEqual(self.repo.get_job(self.scope, job['id']), job)
+
+    def test_download_exclusion_is_job_scoped_and_preferred_country_keeps_fallback(
+        self,
+    ):
+        job = self.accepted()
+        self.enabled()
+        result = start_once(self.service)
+        self.close_slow_allocation(result['node_id'], '19493')
+        start_once(self.service)
+        self.now = self.journal()['payload']['next_decision_at'] + 1
+        # The sole mapped machine is the original slow physical host: no re-rent.
+        self.assertEqual(start_once(self.service)['reason_code'], 'offer_unavailable')
+        self.assertEqual(len(self.client.applied), 1)
+        # Manual start retains its independent path; no new global deny store.
+        preview = self.service.preview(
+            self.owner, dict(profile_id='5090-fl', keep_on='idle')
+        )
+        self.assertTrue(preview['offers'])
+        self.assertEqual(self.repo.get_job(self.scope, job['id']), job)
+
+    def test_us_eu_offer_preference_preserves_other_qualifying_fallback(self):
+        native = self.client.plan
+
+        def plan(spec):
+            result = native(spec)
+            first = result['job_plans'][0]['offers'][0]
+            first['price'] = 0.5
+            second = copy.deepcopy(first)
+            second['instance']['name'] = '54321'
+            second['price'] = 0.7
+            result['job_plans'][0]['offers'].append(second)
+            return result
+
+        self.client.plan = plan
+        self.client.vast_offer_mapping = lambda *a, **kw: dict(
+            observed_at=self.now,
+            offers=[
+                dict(
+                    offer_id='12345',
+                    machine_id='19493',
+                    country='JP',
+                    region='jp-tokyo',
+                    advertised_download_mbps=2000,
+                ),
+                dict(
+                    offer_id='54321',
+                    machine_id='19494',
+                    country='Germany',
+                    region='de-berlin',
+                    advertised_download_mbps=1500,
+                ),
+            ],
+        )
+        preview = self.service.preview(
+            self.owner, dict(profile_id='5090-fl', keep_on='idle')
+        )
+        self.assertEqual([r['offer_id'] for r in preview['offers']], ['54321', '12345'])
+        self.client.vast_offer_mapping = lambda *a, **kw: dict(
+            observed_at=self.now,
+            offers=[
+                dict(
+                    offer_id='12345',
+                    machine_id='19493',
+                    country='JP',
+                    region='jp-tokyo',
+                    advertised_download_mbps=2000,
+                )
+            ],
+        )
+        fallback = self.service.preview(
+            self.owner, dict(profile_id='5090-fl', keep_on='idle')
+        )
+        self.assertEqual([r['offer_id'] for r in fallback['offers']], ['12345'])
+
+    def test_fresh_bandwidth_floor_drift_refuses_before_paid_apply(self):
+        preview = self.service.preview(
+            self.owner, dict(profile_id='5090-fl', keep_on='idle')
+        )
+        for bandwidth in (None, True, float('nan'), 999):
+            self.client.vast_offer_mapping = lambda *a, _rate=bandwidth, **kw: dict(
+                observed_at=self.now,
+                offers=[
+                    dict(
+                        offer_id='12345',
+                        machine_id='19493',
+                        advertised_download_mbps=_rate,
+                    )
+                ],
+            )
+            with (
+                self.subTest(rate=str(bandwidth)),
+                self.assertRaisesRegex(ValueError, 'host_offer_identity_changed'),
+            ):
+                self.service.start(
+                    self.owner, {'preview_id': preview['preview_id']}, 'no-paid-drift'
+                )
+            self.assertEqual(self.client.applied, [])

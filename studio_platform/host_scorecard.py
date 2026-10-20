@@ -85,6 +85,33 @@ def _controls(row):
     return result
 
 
+def _download_timebox_event(node, physical, now):
+    value = node["payload"].get("download_timebox_event")
+    if not isinstance(value, dict) or set(value) != {
+        "version",
+        "job_id",
+        "machine_id",
+        "at",
+        "reason_code",
+    }:
+        return None
+    try:
+        failed = failure(node["payload"].get("host_failure"), now=now)
+        if (
+            type(value["version"]) is not int
+            or value["version"] != 1
+            or failed["qualified_start_failure"] is not False
+            or value["reason_code"] != failed["reason_code"]
+            or value["machine_id"] != physical["machine_id"]
+            or value["at"] != failed["at"]
+            or str(uuid.UUID(value["job_id"])) != value["job_id"]
+        ):
+            return None
+    except (ValueError, TypeError, AttributeError):
+        return None
+    return copy.deepcopy(value)
+
+
 class OperatorHosts:
     def __init__(self, repo, settings, stage_reader=None):
         self.repo, self.settings, self.stage_reader = repo, settings, stage_reader
@@ -359,6 +386,9 @@ class OperatorHosts:
                     "observed_at": value["observed_at"],
                     "quoted_hourly_microusd": value["quoted_hourly_microusd"],
                     "region": value["region"],
+                    "country": value.get("country"),
+                    "advertised_download_mbps": value.get("advertised_download_mbps"),
+                    "download_timebox_event": _download_timebox_event(node, value, now),
                     "profile_id": binding["profile_id"],
                     "mode": binding["mode"],
                 }
@@ -443,6 +473,8 @@ class OperatorHosts:
         latest_fields = (
             "observed_at",
             "region",
+            "country",
+            "advertised_download_mbps",
             "gpu",
             "gpu_count",
             "allocated_ram_mib",
@@ -461,7 +493,9 @@ class OperatorHosts:
             "policy": policy,
             "runs": len(physical),
             "failure_count": len(failed_nodes),
-            "qualified_start_failure_count": len(failures),
+            "qualified_start_failure_count": sum(
+                item["qualified_start_failure"] is True for item in failures
+            ),
             "execution_failure_count": len(execution_failures),
             "failure_rate": len(failed_nodes) / len(physical) if physical else None,
             "last_failure": (
@@ -481,7 +515,7 @@ class OperatorHosts:
                 else None
             ),
             "last_observed_at": latest["observed_at"] if latest else None,
-            "latest_observation": {key: latest[key] for key in latest_fields}
+            "latest_observation": {key: latest.get(key) for key in latest_fields}
             if latest
             else None,
             "rentals": sorted(

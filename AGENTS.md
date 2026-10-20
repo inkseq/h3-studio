@@ -10,6 +10,7 @@ Read this entry, the assigned issue's latest owner comments/claims and affected 
 - Claim bounded scope, integration owner, branch/worktree and base before editing. Preserve parallel changes. Per lane: one issue in progress plus one in review. GitHub only; no second task database.
 - Latest owner decisions win; record them in `workflow/owner-changes.md` and give the owner a one-line relay for Codex. Re-read that file on origin/main before any production write or spend.
 - Labels replace, never stack: `needs-claude-review` (Tier2 options) or `needs-claude-acceptance` (staged slice); Claude's 2h pass comments, sets `accepted`/`changes-requested` and removes the request label. Read new Claude/owner comments before each task. End every turn with `Waiting on: <who/what, #issue>`.
+- Claude waits: use one30-minute review heartbeat; pause it when work resumes (CR46).
 
 ## Risk and delivery
 | Tier | Changes | Gate and write-up |

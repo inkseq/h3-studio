@@ -48,6 +48,8 @@ HOST_FIELDS = {
     "identity_confirmed",
     "physical_id_source",
 }
+OFFER_METADATA_FIELDS = {"country", "region", "advertised_download_mbps"}
+HOST_METADATA_FIELDS = OFFER_METADATA_FIELDS - {"region"}
 
 
 def finite(value, *, minimum=0, maximum=9_000_000_000_000):
@@ -73,10 +75,38 @@ def provider_id(value):
     return numeric_id(value)
 
 
+def offer_metadata(value):
+    """Closed advertised facts, never wire throughput or inferred geography."""
+    require(
+        isinstance(value, dict) and set(value) <= OFFER_METADATA_FIELDS,
+        "host_offer_metadata_invalid",
+    )
+    country, region, bandwidth = (
+        value.get(key) for key in ("country", "region", "advertised_download_mbps")
+    )
+    require(
+        country is None
+        or isinstance(country, str)
+        and re.fullmatch(r"[A-Za-z][A-Za-z .'-]{0,99}", country),
+        "host_offer_metadata_invalid",
+    )
+    require(
+        region is None
+        or isinstance(region, str)
+        and re.fullmatch(r"[a-z0-9-]{1,100}", region),
+        "host_offer_metadata_invalid",
+    )
+    require(
+        bandwidth is None or finite(bandwidth, maximum=1_000_000_000),
+        "host_offer_metadata_invalid",
+    )
+    return {"country": country, "region": region, "advertised_download_mbps": bandwidth}
+
+
 def observation(value, *, now):
     require(
         isinstance(value, dict)
-        and set(value) == HOST_FIELDS
+        and HOST_FIELDS <= set(value) <= HOST_FIELDS | HOST_METADATA_FIELDS
         and type(value["version"]) is int
         and value["version"] == 1
         and value["provider"] == "vastai"
@@ -113,6 +143,7 @@ def observation(value, *, now):
         and 0 < value["quoted_hourly_microusd"] <= 9_000_000_000_000,
         "host_observation_invalid",
     )
+    offer_metadata({key: value[key] for key in OFFER_METADATA_FIELDS if key in value})
     return copy.deepcopy(value)
 
 
@@ -142,9 +173,14 @@ def failure(value, *, now):
         == {"version", "stage", "reason_code", "at", "qualified_start_failure"}
         and value["version"] == 1
         and type(value["version"]) is int
-        and value["stage"] in {"provisioning", "image_pull", "runtime_start"}
-        and value["reason_code"] in START_FAILURES
-        and value["qualified_start_failure"] is True
+        and (
+            value["stage"] in {"provisioning", "image_pull", "runtime_start"}
+            and value["reason_code"] in START_FAILURES
+            and value["qualified_start_failure"] is True
+            or value["stage"] == "model_download"
+            and value["reason_code"] == "dstack_download_timebox_exceeded"
+            and value["qualified_start_failure"] is False
+        )
         and finite(value["at"], minimum=1, maximum=now),
         "host_failure_invalid",
     )
@@ -179,7 +215,7 @@ def automatic_deny(nodes, machine_id, *, now):
             continue
         try:
             item = failure(payload.get("host_failure"), now=now)
-            if item["at"] >= now - 8 * 86400:
+            if item["qualified_start_failure"] and item["at"] >= now - 8 * 86400:
                 events.append((item["at"], node["intent_id"]))
         except (ValueError, KeyError):
             pass
@@ -336,9 +372,13 @@ def selection(value, *, now=None):
     seen = set()
     for item in value["offers"]:
         require(
-            isinstance(item, dict) and set(item) == {"offer_id", "machine_id"},
+            isinstance(item, dict)
+            and {"offer_id", "machine_id"}
+            <= set(item)
+            <= {"offer_id", "machine_id"} | OFFER_METADATA_FIELDS,
             "host_selection_invalid",
         )
+        offer_metadata({key: item[key] for key in OFFER_METADATA_FIELDS if key in item})
         offer, _ = numeric_id(item["offer_id"]), numeric_id(item["machine_id"])
         require(offer not in seen, "host_offer_identity_conflict")
         seen.add(offer)

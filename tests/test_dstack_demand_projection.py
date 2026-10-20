@@ -316,12 +316,19 @@ class DemandProjectionTests(LedgerCase):
             },
         }
         before = copy.deepcopy(job)
-        with patch("studio_platform.dstack_demand._nodes", return_value=[node]):
-            self.assertEqual(job_wait_stage(None, job, self.now), "queued_no_machine")
+        with (
+            self.repo.engine.connect() as connection,
+            patch("studio_platform.dstack_demand._nodes", return_value=[node]),
+        ):
+            self.assertEqual(
+                job_wait_stage(connection, job, self.now), "queued_no_machine"
+            )
             node["payload"]["dstack"]["mode"] = "ref"
-            self.assertEqual(job_wait_stage(None, job, self.now), "loading")
+            self.assertEqual(job_wait_stage(connection, job, self.now), "loading")
             node["payload"]["dstack"]["configuration_id"] = "wrong-config"
-            self.assertEqual(job_wait_stage(None, job, self.now), "queued_no_machine")
+            self.assertEqual(
+                job_wait_stage(connection, job, self.now), "queued_no_machine"
+            )
         self.assertEqual(job, before)
 
     def test_admin_counts_exclude_only_canonical_terminal_history_without_mutating_it(

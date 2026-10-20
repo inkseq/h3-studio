@@ -12,6 +12,10 @@ from studio_platform.host_policy import (
     HostPolicyStore,
     automatic_deny,
     bound_observation,
+    failure,
+    observation,
+    offer_metadata,
+    selection,
 )
 from studio_platform.host_scorecard import OperatorHosts
 from studio_platform.operator_capacity import operator_policy
@@ -65,6 +69,80 @@ class HostPolicyTests(ledger.LedgerCase):
             "expected_revision": host["policy"]["revision"],
             "expected_snapshot": host["policy"]["snapshot"],
         }
+
+    def test_closed_advertised_metadata_preserves_legacy_identity_and_rejects_poison(
+        self,
+    ):
+        original = physical()
+        self.assertEqual(observation(original, now=1200), original)
+        self.assertEqual(
+            offer_metadata({}),
+            {"country": None, "region": None, "advertised_download_mbps": None},
+        )
+        metadata = {
+            "country": "United States",
+            "region": "us-ashburn",
+            "advertised_download_mbps": 1000,
+        }
+        current = {
+            **original,
+            "country": metadata["country"],
+            "advertised_download_mbps": metadata["advertised_download_mbps"],
+        }
+        self.assertEqual(observation(current, now=1200), current)
+        frozen = {
+            "version": 1,
+            "observed_at": 1000,
+            "expires_at": 1120,
+            "policy_snapshot": "a" * 64,
+            "offers": [{"offer_id": "12345", "machine_id": "19492", **metadata}],
+        }
+        self.assertEqual(selection(frozen, now=1050), frozen)
+        for changes in (
+            {"advertised_download_mbps": float("nan")},
+            {"advertised_download_mbps": True},
+            {"country": "https://PRIVATE"},
+            {"region": "PRIVATE\nTOKEN"},
+            {"unexpected": "PRIVATE"},
+        ):
+            with (
+                self.subTest(changes=list(changes)),
+                self.assertRaisesRegex(ValueError, "host_offer_metadata_invalid"),
+            ):
+                offer_metadata({**metadata, **changes})
+
+    def test_two_download_timeboxes_are_history_only_never_automatic_deny(self):
+        nodes = []
+        for identity, at in (("first", 1000), ("second", 1100)):
+            event = {
+                "version": 1,
+                "stage": "model_download",
+                "reason_code": "dstack_download_timebox_exceeded",
+                "at": at,
+                "qualified_start_failure": False,
+            }
+            self.assertEqual(failure(event, now=1200), event)
+            nodes.append(
+                {
+                    "intent_id": identity,
+                    "payload": {
+                        "capacity_backend": "dstack-v1",
+                        "host_observation": physical(at=at),
+                        "dstack": {
+                            "backend": "vastai",
+                            "provider_instance_id": "1234567",
+                        },
+                        "host_failure": event,
+                    },
+                }
+            )
+        self.assertIsNone(automatic_deny(nodes, "19492", now=1200))
+        invalid = {
+            **nodes[0]["payload"]["host_failure"],
+            "qualified_start_failure": True,
+        }
+        with self.assertRaisesRegex(ValueError, "host_failure_invalid"):
+            failure(invalid, now=1200)
 
     def test_unknown_lookup_is_not_fabricated_and_policy_audit_replay(self):
         host = self.service.list(self.owner, admin=True, machine_id="19492")["hosts"][0]

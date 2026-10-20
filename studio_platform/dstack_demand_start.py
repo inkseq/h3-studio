@@ -18,7 +18,65 @@ from .repository import request_hash
 
 KIND = 'dstack_demand'
 LEASE_SECONDS = 60
-STATES = {'planning', 'starting', 'observing', 'backoff'}
+STATES = {'planning', 'starting', 'observing', 'backoff', 'blocked'}
+MAX_DOWNLOAD_REPLACEMENTS = 2
+DOWNLOAD_RETRY_LIMIT = 'download_retry_limit'
+DOWNLOAD_TIMEBOX = 'dstack_download_timebox_exceeded'
+
+
+def download_journal(connection, tenant, job_id):
+    """Read the original per-job journal; malformed retry state grants no rental."""
+    actor = 'dstack-demand:' + request_hash({'tenant': tenant})[:40]
+    row = (
+        connection.execute(
+            select(operator_commands).where(
+                operator_commands.c.actor == actor,
+                operator_commands.c.kind == KIND,
+                operator_commands.c.idempotency_key == 'demand-job-' + job_id,
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        return None
+    from .operator_capacity import require
+
+    payload = row['payload']
+    stops = payload.get('download_stops', [])
+    replacements = payload.get('download_replacements', 0)
+    require(
+        payload.get('version') == 1
+        and payload.get('tenant_id') == tenant
+        and payload.get('job_id') == job_id
+        and type(replacements) is int
+        and 0 <= replacements <= MAX_DOWNLOAD_REPLACEMENTS
+        and isinstance(stops, list)
+        and len(stops) <= MAX_DOWNLOAD_REPLACEMENTS + 1
+        and all(
+            isinstance(s, dict)
+            and set(s) == {'node_id', 'machine_id', 'at'}
+            and isinstance(s['node_id'], str)
+            and 1 <= len(s['node_id']) <= 100
+            and isinstance(s['machine_id'], str)
+            and s['machine_id'].isdigit()
+            and 1 <= len(s['machine_id']) <= 18
+            and type(s['at']) in (int, float)
+            and math.isfinite(s['at'])
+            and s['at'] > 0
+            for s in stops
+        )
+        and len({s['node_id'] for s in stops}) == len(stops),
+        'dstack_demand_download_state_invalid',
+    )
+    return dict(row)
+
+
+def excluded_download_machines(connection, tenant, job_id):
+    row = download_journal(connection, tenant, job_id)
+    if row is None:
+        return set()
+    return {s['machine_id'] for s in row['payload'].get('download_stops', [])}
 
 
 def _delay(job_id, error=None):
@@ -190,6 +248,14 @@ def _claim(service):
             payload = copy.deepcopy(row['payload'])
             if payload.get('version') != 1 or payload.get('phase') not in STATES:
                 return _result('blocked', 'policy_changed'), None
+            checked = download_journal(connection, tenant, job['id'])
+            if checked is None:
+                return _result('blocked', 'policy_changed'), None
+            if payload['phase'] == 'blocked':
+                observing = _result(
+                    'blocked', payload.get('reason_code') or DOWNLOAD_RETRY_LIMIT
+                )
+                continue
             start_key = _start_key(identity, payload['cycle'])
             original = _start_command(connection, service, profile, start_key)
             if original is not None:
@@ -203,6 +269,20 @@ def _claim(service):
                     .first()
                 )
                 if _ended_with_proof(node):
+                    timed_out = (
+                        node['payload'].get('stop_reason_code') == DOWNLOAD_TIMEBOX
+                    )
+                    replacements = payload.get('download_replacements', 0)
+                    if timed_out and replacements >= MAX_DOWNLOAD_REPLACEMENTS:
+                        payload.update(
+                            phase='blocked',
+                            reason_code=DOWNLOAD_RETRY_LIMIT,
+                            next_decision_at=0,
+                            prior_node_id=node['intent_id'],
+                        )
+                        _write(connection, row, payload, now)
+                        observing = _result('blocked', DOWNLOAD_RETRY_LIMIT)
+                        continue
                     payload.update(
                         cycle=payload['cycle'] + 1,
                         preview_id=None,
@@ -210,6 +290,7 @@ def _claim(service):
                         next_decision_at=now + _delay(job['id']),
                         reason_code='backoff',
                         prior_node_id=original['payload']['node_id'],
+                        download_replacements=replacements + int(timed_out),
                     )
                     _write(connection, row, payload, now)
                     return _result('blocked', 'backoff'), None

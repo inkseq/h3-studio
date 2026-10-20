@@ -330,6 +330,9 @@ class NativeVastSafetyTests(unittest.TestCase):
             self.assertEqual(hashlib.sha256(raw).hexdigest(), expected["sha256"])
             sources[path] = installer.transform(path, raw.decode())
             ast.parse(sources[path])
+        compute = sources["dstack/_internal/core/backends/vastai/compute.py"]
+        self.assertIn('"inet_down": {"gte": 1000}', compute)
+        self.assertNotIn('"inet_down": {"gt": 128}', compute)
         native_read_guards(sources, self.advance)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
