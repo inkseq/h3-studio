@@ -542,7 +542,9 @@ class GuidedTests(unittest.TestCase):
         )
         self.assertEqual(invalid.status_code, 422)
         latest = self.client.get("/v1/projects/story-one").json()
-        self.assertEqual(latest, {**result.json(), "created_by": {}})
+        from studio_platform.quality_views import project as creator_project
+
+        self.assertEqual(creator_project(latest), {**result.json(), "created_by": {}})
         self.assertEqual(
             self.client.get(
                 "/v1/projects/story-one/entities?type=shot", headers=headers

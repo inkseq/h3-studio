@@ -57,6 +57,30 @@ SKILL_FILES = (
 MAX_SKILL_BYTES = 512 * 1024
 
 
+def video_quality_contract():
+    """Static video authoring identity; availability still requires live reads."""
+    return {
+        "tiers": ["standard", "refine", "fast"],
+        "modes": ["fl", "ref"],
+        "preferred_input": {"tier": "standard", "mode": "fl"},
+        "compatibility_aliases": {
+            "deployment_profile_id": "quality:standard",
+            "recipe_id": {"fl": "video-fl-v1", "ref": "video-ref-v1"},
+        },
+        "fast": "Currently unavailable; never substitute fewer steps or another tier.",
+        "selection": "Choose tier and mode for new video requests. Consistent neutral aliases remain compatible. Read that tier/mode's live controls, input limits and availability; never silently change the user's choice or references.",
+        "visibility": "Every Agent, including an admin-owned PAT, uses public tiers. Internal video selections require an active human administrator. This does not change the optional conversation model selector or title service.",
+        "errors": {
+            "quality_tier_unavailable": "Preserve the draft and request configuration of this tier/mode.",
+            "quality_tier_ambiguous": "Ask an administrator to resolve routing; do not choose a different model.",
+            "quality_selection_conflict": "Use one consistent tier/mode or neutral alias selection.",
+            "model_selection_admin_required": "Remove the internal video selection from a new request; Agents cannot assume human-admin authority.",
+        },
+        "replay": "Recover accepted work with its exact original body/key and IDs before any new selection. Historical unknown quality stays unknown; never invent provenance or reprice a frozen quote.",
+        "authority": "Tier selection grants no spending, capacity or scopes. Preflight, terms, moderation, human confirmation and owner budgets remain required; rates come from the returned immutable price revision.",
+    }
+
+
 def quick_examples():
     """Static placeholders only; contract tests execute the draft-only examples."""
     return {
@@ -91,16 +115,17 @@ def quick_examples():
                     {
                         "op": "shot.configure_generation",
                         "shot_id": "{shot_id}",
-                        "recipe_id": "h3-base-fl2va-v1",
+                        "tier": "standard",
+                        "mode": "fl",
                         "prompt": "A green leaf moves gently in warm sunlight, with a slow camera push-in.",
                         "controls": {
                             "duration": 5,
-                            "resolution": "768P",
+                            "resolution": "480P",
                             "aspect_ratio": "16:9",
                             "steps": 50,
                             "seed": "42",
                             "generate_audio": True,
-                            "encoder_device": "cpu",
+                            "encoder_device": "default",
                             "video_decode": "tiled",
                         },
                     }
@@ -118,7 +143,8 @@ def quick_examples():
                     {
                         "op": "shot.configure_generation",
                         "shot_id": "{shot_id}",
-                        "recipe_id": "h3-base-ref2va-v1",
+                        "tier": "standard",
+                        "mode": "ref",
                         "inputs": {
                             "images": [
                                 {
@@ -213,7 +239,8 @@ def public_guide():
         "name": "Inkseq / 映序",
         "version": 2,
         "api_version": "v1",
-        "description": "Create one quick H3 clip or edit a multi-chapter story; save the same prompt, separate references and controls visible on the website, plan generation and adopt results without replacing prior takes.",
+        "description": "Create one video clip or edit a multi-chapter story; save the same prompt, separate references and controls visible on the website, plan generation and adopt results without replacing prior takes.",
+        "video_quality": video_quality_contract(),
         "discovery_is_authorization": False,
         "quick_chat": agent_contract(),
         "storyboard_versions": storyboard_versions_contract(),
@@ -254,7 +281,7 @@ def public_guide():
             "path": "/v1/generation-availability",
             "authenticated": True,
             "required_scope_any": ["jobs:read", "jobs:write"],
-            "selection": "Match profiles[].deployment_profile_id and modes.fl or modes.ref with its recipe_id. An omitted/null profile uses only the explicit deployment_profile_id:null row for the actual legacy policy; a missing null row is unknown, never the named default. Never use another profile's availability or silently change the user's model, precision or references.",
+            "selection": "Match the chosen tier's profiles[].deployment_profile_id alias (for example quality:standard), then modes.fl or modes.ref and video-fl-v1/video-ref-v1. Missing or unknown historical selections are not a default. Never use another tier/mode's availability or silently change references.",
             "freshness": "Use observed_at and expires_at; refresh after expiry and wait at least poll_after_seconds between reads. Missing entries or failed/expired observations are unknown, not proof of offline status. If an older server returns 404 or an unsupported contract, preserve the draft and ask an administrator to update/check the service; never fall back to catalog enabled or submit blindly.",
             "state_actions": {
                 "ready": "Continue to preflight.",
@@ -546,7 +573,7 @@ def skill_bundle():
 def llms_text():
     return """# Inkseq / 映序 — Agent integration
 
-> Use the authenticated API for one quick H3 clip or a multi-chapter story. Save the same prompt, separate media inputs and controls the user can edit on the website; plan generation and adopt candidates.
+> Use the authenticated API for one video clip or a multi-chapter story. Save the same prompt, separate media inputs and controls the user can edit on the website; plan generation and adopt candidates.
 
 ## Start here
 - [Agent onboarding](/for-agents): Public HTML; no JavaScript or login is needed to read it.
@@ -561,15 +588,15 @@ def llms_text():
 If a browsing/search tool cannot open these public documents, retrieve them directly over HTTPS from the user's supplied website origin, or ask the user to attach the downloaded guide. A tool-specific reading failure is not evidence that the documents require login. Public reads need no cookie or API key; account/business API calls do require authentication. Resolve all / paths against the same user-supplied origin and never forward credentials through redirects.
 
 ## Quick Chat: sessions and job cards
-Read the guide JSON's quick_chat section and authenticated GET /v1/quick-chat/schema. POST /v1/quick-chat/sessions and preserve returned next_settings including deployment_profile_id. Read capabilities.deployment_profiles and the selected profile's generation_support[fl|ref] controls, input_support, limits, supported_constraints and execution_policy_constraints. Historical joint_cases are timing examples, never an admission allowlist; supported unmeasured combinations need no extra qualification confirmation. POST the session's turns with current expected_version, session model_id, assistant_mode=none, create_card=true and text containing the complete prompt. This inherits session materials and next_settings, creates a card without invoking the disabled-by-default website conversation assistant and does not start generation. The chat model_id is not a video deployment profile.
+Read the guide JSON's quick_chat section and authenticated GET /v1/quick-chat/schema. New video selections use tier=standard|refine|fast and mode=fl|ref; Fast is currently unavailable. Public compatibility identities are quality:standard (likewise refine/fast) and video-fl-v1/video-ref-v1. Read the chosen tier/mode's generation_support controls, input_support and limits. POST session turns with current expected_version, returned session model_id, assistant_mode=none, create_card=true and the complete prompt. This inherits session materials/next_settings and does not start generation. Conversation model_id is separate from video quality; its optional selector is unchanged.
 
 Input compatibility follows the exact selected profile, not a blanket FL/REF rule. Full-control native profiles support REF first/last anchors together with ordinary references, timed image injections, selected video soundtracks and explicit video/audio conditioning or excerpt controls. Retained profiles keep their original first/last versus reference-only boundaries. Read native role counts and aggregate limits before preflight: anchors and injections are distinct from ordinary reference rows, while video/audio excerpts consume their effective reference slots. The server freezes normalized selections and rejects implicit trimming. Runtime failures preserve the original request and expose a safe stage/reason; any retry is an explicit new authorized action after fresh preflight, never an automatic paid loop.
 
 When separately enabled at session creation, the short-title service calls exactly gemma-4-31b-it once using the first meaningful turn text or card prompt. This is ancillary creation-history metadata; it sends no media or conversation history and is independent of the conversation assistant and chat model selection. Direct cards and assistant_mode=none may still trigger this naming call. Omit the session title field to allow automatic naming. Every explicitly supplied creation title or PATCH title is protected as manual, even if its text is the usual default name. Failure or timeout keeps the original title without blocking authoring or accepted generation and without an automatic paid retry. Historical sessions are not bulk-renamed; GET reads do not call a title model. Public documentation is not evidence that naming is enabled on the current deployment.
 
-Alternatively POST the session's cards with explicit deployment_profile_id, recipe_id, prompt, controls, inputs and copies. Copy profile and controls from session next_settings for a new direct card, or from the current revision when revising. An omitted/null deployment_profile_id uses legacy routing, not the session's selected profile. Never remove it or choose a different profile to bypass a blocked preflight. An explicit session change uses PATCH with expected_version and complete next_settings; existing cards remain unchanged. Ordinary generation API keys do not grant GPU rental access.
+Alternatively POST the session's cards with explicit tier, mode, prompt, controls, inputs and copies. Preserve the chosen quality/settings from session next_settings for a new card, or from the current revision when revising. Consistent neutral deployment_profile_id/recipe_id aliases remain compatible; an omitted/null selection does not authorize legacy routing for Agents. Never select another tier/mode to bypass a blocked preflight. Explicit session changes use PATCH with expected_version and complete next_settings; existing cards remain unchanged. Ordinary generation API keys do not grant GPU rental access.
 
-To revise the same card, GET /v1/quick-chat/sessions/{session_id}/cards/{card_id}, then GET its current_revision_id at /v1/quick-chat/sessions/{session_id}/revisions/{revision_id}. POST /v1/quick-chat/sessions/{session_id}/cards/{card_id}/revisions with required integer expected_card_version from the card's version, the new prompt and an explicit copy of deployment_profile_id, recipe_id, controls, inputs and copies from that revision. Session expected_version is not the card version field. Optional source_revision_id records same-session lineage only; it neither selects a revision nor replaces expected_card_version. Optional title defaults to 我的视频 when omitted; include the prior title to preserve it. The downloadable Markdown guide and Skill contain the complete example. Revising saves an immutable draft and preserves prior revisions/submissions; it does not preflight or generate. A genuine 409 version_conflict requires fresh card/revision reads and reconciliation, not guessing the next version. Repair known 422 field errors with a new body/key; an uncertain write keeps its exact original body/key.
+To revise the same card, GET /v1/quick-chat/sessions/{session_id}/cards/{card_id}, then GET its current_revision_id at /v1/quick-chat/sessions/{session_id}/revisions/{revision_id}. POST /v1/quick-chat/sessions/{session_id}/cards/{card_id}/revisions with required integer expected_card_version from the card's version, the new prompt and an explicit copy of known tier, mode, controls, inputs and copies from that revision. Session expected_version is not the card version field. Optional source_revision_id records same-session lineage only; it neither selects a revision nor replaces expected_card_version. Optional title defaults to 我的视频 when omitted; include the prior title to preserve it. The downloadable Markdown guide and Skill contain the complete example. Revising saves an immutable draft and preserves prior revisions/submissions; it does not preflight or generate. A genuine 409 version_conflict requires fresh card/revision reads and reconciliation, not guessing the next version. Repair known 422 field errors with a new body/key; an uncertain write keeps its exact original body/key.
 
 Upload media through same-origin multipart POST /v1/quick-chat/sessions/{session_id}/assets with file and a stable client_asset_id; use ready asset_id values in explicit card inputs or selected session materials. Upload alone does not select a reference. The helper's upload/resume-upload commands accept --session SESSION_ID (or legacy --project, never both); never address the session's hidden project. Read the current revision and preflight it; only confirm a ready preflight within the user's authorization. The submission exposes items[].job_id for the existing shared job and its authenticated artifacts. Preserve write bodies and Idempotency-Key values when recovering uncertain responses.
 
@@ -593,7 +620,7 @@ The production origin is https://inkseq.com. Browser users sign in there once be
 
 After authorization, read GET /v1/agent-guide, /v1/guided-schema, /v1/capabilities and /openapi.json. Static documentation is not proof that generation is enabled. An actual plan may be blocked; do not invent successful media.
 
-Before choosing FL/REF, preflight and a new submission, GET authenticated /v1/generation-availability (PAT jobs:read or jobs:write; the helper's availability command performs only this read). Match the exact profiles[].deployment_profile_id and modes.fl/ref recipe, not any other ready profile. An omitted/null legacy profile matches only the explicit deployment_profile_id:null row, never the named default; a missing null row is unknown. Observe expires_at and poll_after_seconds; expired/missing observations are unknown. ready/busy have available=true but remain subject to capabilities and preflight; busy may queue. starting waits without starting another machine. unavailable/disabled means preserve the draft and ask an administrator to start or configure that exact profile/mode. unknown means refresh, not assume offline. Do not rent, silently change model/precision/mode, or submit blindly to wake a GPU. Existing uncertain jobs still use their original receipt/key. Public discovery contains no live availability.
+Before choosing a tier/mode, preflight and a new submission, GET authenticated /v1/generation-availability (PAT jobs:read or jobs:write; the helper availability command performs only this read). Match the exact quality:standard/refine/fast alias and modes.fl/ref with video-fl-v1/video-ref-v1; never borrow another tier/mode's readiness. Missing/expired observations and unknown historical quality stay unknown. Observe expires_at and poll_after_seconds. ready/busy remain subject to current capabilities and preflight; busy may queue. starting waits without another rental. unavailable/disabled needs an administrator to configure that choice; unknown needs a refresh. Fast currently has no supported route: do not substitute fewer steps, another tier or a different GPU. Existing uncertain jobs always use their original receipt/key. Public discovery contains no live availability.
 
 ## Edit, generate, return control
 Read the current project/version; use atomic guided actions with expected_version and stable Idempotency-Key. On 409 fetch and reconcile. Upload references to the same story. Inspect a generation plan's blockers/estimate before submitting within the user's authorization. Poll the original job; an unknown outcome is never a reason to issue a new paid request.
@@ -611,9 +638,9 @@ When the user authorizes editing an existing card, keep the same session/card ID
 
 1. Authenticated `GET /v1/quick-chat/sessions/{session_id}/cards/{card_id}` returns `version` and `current_revision_id`. Save this card response.
 2. Authenticated `GET /v1/quick-chat/sessions/{session_id}/revisions/{current_revision_id}` returns the snapshot to preserve. Save this revision response. If the card changes while you work, reconcile against a fresh card and its current revision instead of guessing a version.
-3. Copy `deployment_profile_id`, `recipe_id`, `controls`, `inputs` and `copies` explicitly. Change only the fields the user requested. POST to the same card's `/revisions` with required **integer `expected_card_version` equal to the card's `version`**, not the session version or an assumed revision number. The session's `expected_version` field is invalid on this endpoint.
+3. Copy known `tier`, `mode`, `controls`, `inputs` and `copies` explicitly. Consistent neutral aliases remain compatible. Unknown historical quality requires an explicit new quality choice; never guess it. Change only requested fields. POST to the same card's `/revisions` with required **integer `expected_card_version` equal to the card's `version`**, not the session version. The session's `expected_version` field is invalid here.
 
-Optional `source_revision_id` names an authorized revision in this same session as provenance; it does not select the card's current revision, copy its settings or replace the version check. It may be omitted. Optional `title` defaults to `我的视频` when omitted; explicitly copy the prior title to keep that name. Explicit `deployment_profile_id:null` preserves intentional legacy routing, not the session's selected profile; never drop a selected profile to bypass a blocker.
+Optional `source_revision_id` names an authorized revision in this same session as provenance; it does not select the current revision, copy settings or replace the version check. Optional `title` defaults to `我的视频`; explicitly copy the prior title to preserve it. Never remove a quality selection or use a null alias to bypass a blocker.
 
 Example using the downloaded helper (replace IDs with returned IDs; `CURRENT_REVISION_ID` comes from the first GET). These commands only read and save the revised draft:
 
@@ -635,8 +662,8 @@ if revision["id"] != card["current_revision_id"]:
     raise ValueError("Read the card and its current revision again before editing")
 body = {
     "expected_card_version": card["version"],
-    "deployment_profile_id": revision.get("deployment_profile_id"),
-    "recipe_id": revision["recipe_id"],
+    "tier": revision["tier"],
+    "mode": revision["mode"],
     "controls": deepcopy(revision["controls"]),
     "inputs": deepcopy(revision["inputs"]),
     "copies": revision["copies"],
@@ -673,7 +700,7 @@ def guide_markdown():
 
 Start with this guide (`README.md` in the ZIP), then read the adjacent `SKILL.md` in that package. `scripts/connect.py` is the connection helper and `scripts/inkseq.py` is the API/media helper. Downloading the guide or ZIP does not install software, authorize a connection, call a model, start a GPU or submit generation.
 
-All endpoint paths in this document are relative to the HTTPS website origin supplied by the user (loopback HTTP is allowed only for a local preview). The package contains no credential, private account data or current GPU observations. Once connected, refresh the authenticated schemas, capabilities and exact profile/mode availability before creating or submitting work. Offline examples describe the contract, not current availability.
+All endpoint paths in this document are relative to the HTTPS website origin supplied by the user (loopback HTTP is allowed only for a local preview). The package contains no credential, private account data or current GPU observations. Once connected, refresh the authenticated schemas, capabilities and exact tier/mode availability before creating or submitting work. Offline examples describe the contract, not current availability.
 
 ## Structured API contract and request examples
 
@@ -713,7 +740,7 @@ def landing_html():
 <h2>Agent 的调用顺序</h2><ol>'''
         + steps
         + '''</ol>
-<h2>用对话和任务卡创作</h2><p>机器指南的 <code>quick_chat</code> 和认证后的 <code>/v1/quick-chat/schema</code> 提供完整示例：创建会话 → 上传素材 → 创建任务卡 → 预检 → 明确确认 → 查询原任务和下载结果。外部 Agent 可直接提交完整提示词，使用 <code>assistant_mode=none</code>、<code>create_card=true</code>，继承会话素材及 <code>next_settings</code>；网站聊天助手默认关闭，不影响直接创建卡片，也不会因此自动生成。</p><p>直接创建或修改卡片时，明确携带已选 <code>deployment_profile_id</code>、生成方式和参数；新卡片读取会话设置，修改已有卡片读取原版本。省略配方不会继承会话选择，而是走旧路由。先查配方专属能力与限制，不为绕过阻塞而换模型。普通生成 Key 不具有租 GPU 权限。</p><p>会话素材须通过同源 <code>/v1/quick-chat/sessions/{session_id}/assets</code> 上传，不操作隐藏项目。辅助脚本的 upload/resume-upload 支持 --session，会话与原有 --project 参数互斥。Quick Chat 网页有独立发布步骤，返回的 <code>/quick-chat</code> 地址不保证当前部署已能打开；先返回会话、卡片、任务 ID 和经核验的下载结果。用户不需要安装我们的 AI Registry。</p>
+<h2>视频质量与生成方式</h2><p>视频请求使用 <code>tier: standard|refine|fast</code> 和 <code>mode: fl|ref</code>；Fast 当前不可用，减少步数不会选择 Fast。兼容别名为 <code>quality:standard</code>（以及 refine/fast）与 <code>video-fl-v1</code>、<code>video-ref-v1</code>。所有 Agent（含管理员的 PAT）都使用公开档位；先查所选档位和方式的实时能力与限制，不自动切换。对话助手模型选择独立，本次契约不改它。</p><h2>用对话和任务卡创作</h2><p>机器指南的 <code>quick_chat</code> 和认证后的 <code>/v1/quick-chat/schema</code> 提供完整示例：创建会话 → 上传素材 → 创建任务卡 → 预检 → 明确确认 → 查询原任务和下载结果。外部 Agent 可直接提交完整提示词，使用 <code>assistant_mode=none</code>、<code>create_card=true</code>，继承会话素材及 <code>next_settings</code>；网站聊天助手默认关闭，不影响直接创建卡片，也不会因此自动生成。</p><p>直接创建或修改卡片时，明确携带已选 <code>tier</code>、<code>mode</code>、参数、素材和份数；新卡片读取会话设置，修改已有卡片读取原版本。省略档位不会自动继承会话选择；公开 Agent 不使用内部模型选择。先查档位与生成方式的能力，不为绕过阻塞而切换。普通生成 Key 不具有租 GPU 权限。</p><p>会话素材须通过同源 <code>/v1/quick-chat/sessions/{session_id}/assets</code> 上传，不操作隐藏项目。辅助脚本的 upload/resume-upload 支持 --session，会话与原有 --project 参数互斥。Quick Chat 网页有独立发布步骤，返回的 <code>/quick-chat</code> 地址不保证当前部署已能打开；先返回会话、卡片、任务 ID 和经核验的下载结果。用户不需要安装我们的 AI Registry。</p>
 <p>修改同一张卡片时，先读取当前卡片，再读取它的 <code>current_revision_id</code>。向 <code>/v1/quick-chat/sessions/{session_id}/cards/{card_id}/revisions</code> 提交完整的新版本，使用卡片的整数 <code>version</code> 作为 <code>expected_card_version</code>；会话的 <code>expected_version</code> 不能用于这里。明确复制模型配方、参数、素材和份数，再改用户指定的内容。<code>source_revision_id</code> 只是可选的同会话来源记录；要保留原名称则显式复制 <code>title</code>。保存版本不会生成视频。完整请求与错误修正示例见<a href="/for-agents/guide.md">公开 Markdown 指南</a>和 Skill。</p>
 <p>启用自动命名后，新建时未指定标题的创作会用 <code>gemma-4-31b-it</code> 从第一段文字或任务卡提示词生成一次短标题，只用于创作记录；不会发送素材或完整对话。明确指定的名称和手动改名会保留，失败也不影响创作和视频生成，不会自动重试收费调用。旧记录不会批量改名，浏览记录也不会调用命名模型。这个功能与聊天助手、生成视频分别配置；直接创建卡片也可能触发命名。</p>
 <h2>原有快速草稿与故事接口</h2><p>使用本人全部项目范围和 projects:create 权限。为每次新建保存唯一的幂等键；重试原请求沿用原键。返回的 project.journey.reviewShotId 是单镜头 ID。随后用 shot.configure_generation 保存生成设置；创建草稿不会启动 GPU。</p><pre>'''

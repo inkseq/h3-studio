@@ -106,7 +106,13 @@ class ApiTests(unittest.TestCase):
                 {"options": "-csearch_path=" + schema}
             ).render_as_string(hide_password=False)
         self.settings = Settings(
-            Path(self.tmp.name), auth_mode="local-test", database_url=database_url
+            Path(self.tmp.name),
+            auth_mode="local-test",
+            database_url=database_url,
+            # These legacy compiler fixtures intentionally author raw recipes.
+            # Public tier/alias and machine refusal contracts have separate tests.
+            operator_admin_owners=("superdan",),
+            operator_capacity_owners=("superdan",),
         )
         self.app = create_app(self.settings)
         self.client = TestClient(self.app)

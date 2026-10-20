@@ -38,6 +38,36 @@ validated success captures once, proven failure/cancellation releases, and
 unknown execution retains the hold. Human confirmation is still required when
 the exact original quote exceeds the owner's threshold.
 
+## Video quality selection
+
+New video authoring uses `tier:"standard"|"refine"|"fast"` and
+`mode:"fl"|"ref"`, alongside the existing prompt, controls, inputs, copies and
+version fields. Fast is currently unavailable; reducing steps never selects it.
+Read the actual tier/mode limits and availability, then preflight. Do not silently
+switch quality, mode, references or GPU when a choice is unavailable.
+
+Public compatibility aliases remain supported: `deployment_profile_id` is
+`quality:standard` (likewise `quality:refine`/`quality:fast`), and `recipe_id` is
+`video-fl-v1` or `video-ref-v1`. A request must use one consistent selection;
+conflicting tier/mode/alias combinations return `quality_selection_conflict`.
+Every Agent, including an admin-owned PAT, uses public tiers. Raw internal video
+selection returns `model_selection_admin_required`. Conversation model selection
+and optional title metadata are independent and unchanged.
+
+Example new direct card (replace controls with those returned by the live schema):
+
+```json
+{"tier":"standard","mode":"fl","prompt":"A leaf moves in warm sunlight.","controls":{"duration":5,"resolution":"480P"},"inputs":{},"copies":1}
+```
+
+`quality_tier_unavailable` preserves the draft for an administrator's configuration;
+`quality_tier_ambiguous` requires that administrator to resolve routing. Neither is
+permission to substitute another selection. Historical unknown quality remains
+unknown. Original accepted requests replay with their original body/key, plan/job
+IDs and frozen quote before new selection; never rewrite their history or price.
+Rates come from the returned immutable price revision. Tier selection bypasses
+neither terms, moderation, scopes, human confirmation nor budgets.
+
 ## Quick Create requests
 
 Let B = `/v1/quick-chat/sessions/SESSION`.
@@ -45,7 +75,7 @@ Let B = `/v1/quick-chat/sessions/SESSION`.
 | Intent | Method/path | Body / readback |
 |---|---|---|
 | New session | POST `/v1/quick-chat/sessions` | `{title:"User title"}` or `{}`; omitted title allows configured automatic naming, which can be separately paid. Explicit title avoids requesting auto naming. Return session ID/version/model_id/complete next_settings. |
-| Direct card | POST B`/cards` | Complete `deployment_profile_id`, `recipe_id`, `prompt`, `controls`, `inputs`, `copies`; read actual card/revision response. |
+| Direct card | POST B`/cards` | Complete `tier`, `mode`, `prompt`, `controls`, `inputs`, `copies`; consistent neutral aliases are compatible. Read actual card/revision response. |
 | Revise card | POST B`/cards/CARD/revisions` | Same complete snapshot plus integer `expected_card_version`; optional same-session `source_revision_id`. This is not a patch. |
 | Read revision | GET B`/revisions/REVISION` | Immutable `input_hash`, settings, per-item seeds. |
 | Preflight | POST B`/revisions/REVISION/preflights` | `{revision_hash:input_hash,capabilities_version:CURRENT_VERSION}`. |
@@ -59,7 +89,7 @@ Let B = `/v1/quick-chat/sessions/SESSION`.
 | Transfer | POST B`/takes/ITEM/story` | `{target_project_id:PROJECT,expected_project_version:VERSION,parent_id:SCENE}`. No enqueue. |
 | Transfer status | GET B`/story-transfers/TRANSFER` | Match `id`, `source_session_id`, `item_id`, `project_id`, original `expected_project_version`, `parent_id`; completed also has project_version/shot_id/seed_locked/web_url. |
 
-Direct card/revision omitted profile does NOT inherit session preferences: copy the intended full profile/settings. Turn-to-card is an alternative using current `expected_version`, returned `model_id`, `assistant_mode:"none"`, `create_card:true`, and full `text`; it inherits session materials/next_settings. None disables conversation assistance, not independently configured automatic naming. Never address hidden Quick Chat project projections.
+Direct card/revision omitted selection does NOT inherit session preferences: copy known tier/mode and the full intended settings. Unknown historical quality needs an explicit new selection. Turn-to-card is an alternative using current `expected_version`, returned conversation `model_id`, `assistant_mode:"none"`, `create_card:true`, and full `text`; it inherits session materials/next_settings. None disables conversation assistance, not independently configured automatic naming. Never address hidden Quick Chat project projections.
 
 GET/PATCH `/v1/quick-chat/preferences` uses owner CAS `{expected_version, copies_max, takes_fold_count}` as defined by the live schema. Both are editable positive integers (defaults4/8), subject to existing document/model bounds. Lowering a preference does not rewrite historical reads or accepted submissions. Fixed seed belongs only to the first new take; other new takes draw distinct random seeds. Preserve seeds as their returned decimal strings.
 
@@ -140,7 +170,7 @@ GET `/v1/projects` and `/v1/projects/PROJECT`; POST `/v1/projects` creates an ow
 
 A character look is `{id:"day",name:"Day",description:"User description",version:1,gallery:{}}`; gallery accepts front/side/full entity IDs. A character's two looks can be referenced by two shot cast entries `{characterId:"CHARACTER",lookId:"day"}` / a second actual look ID. Gallery references must be authorized existing document assets; do not substitute upload receipt IDs where entity IDs are required.
 
-`shot.configure_generation` action takes `shot_id` and requested recipe_id/prompt/controls/inputs. GET `/v1/projects/PROJECT/shots/SHOT/generation-draft`, then POST its `/generation-plans` with `{expected_version:project_version}` (optional current capabilities_version). Plan generation does not enqueue. POST `/v1/jobs` with `{plan_id:READY_PLAN}` or `/v1/batches` with `{client_project_id:PROJECT,plan_ids:[READY_PLAN,...]}` only within generation authority. Batch admission may partially succeed; observe its original receipt.
+`shot.configure_generation` takes `shot_id` and requested tier/mode, prompt, controls and inputs; consistent neutral recipe/profile aliases also work. GET `/v1/projects/PROJECT/shots/SHOT/generation-draft`, then POST its `/generation-plans` with `{expected_version:project_version}` (optional current capabilities_version). Plan generation does not enqueue. POST `/v1/jobs` with `{plan_id:READY_PLAN}` or `/v1/batches` with `{client_project_id:PROJECT,plan_ids:[READY_PLAN,...]}` only within generation authority. Batch admission may partially succeed; observe its original receipt.
 
 `artifact.adopt` with artifact_id/shot_id/select:false adds a candidate; `shot.select` uses the adopted entity_id, not artifact receipt ID. Adopt actual returned audio separately; `sound.generated` requires a selected adopted video and exactly one matching FLAC from the same succeeded job. Never invent missing audio.
 
@@ -256,7 +286,7 @@ before repeating a write.
 
 ### Input slots and partial edits
 
-`shot.configure_generation` accepts optional `recipe_id`, `prompt`, `controls`, `inputs`. Omitted fields/slots preserve current values. Controls merge by field. Explicit `[]` clears a list slot; `null` clears first/last frame. Changing only the recipe does **not** erase incompatible references: inspect saved inputs and preflight errors, and clear incompatible slots explicitly when requested.
+`shot.configure_generation` accepts optional `tier`, `mode`, neutral selection aliases, `prompt`, `controls`, `inputs`. Omitted fields/slots preserve current values. Controls merge by field. Explicit `[]` clears a list slot; `null` clears first/last frame. Changing only quality/mode does **not** erase incompatible references: inspect saved inputs and preflight errors, and clear incompatible slots explicitly when requested.
 
 | Slot | Value, using same-project upload receipt IDs |
 |---|---|

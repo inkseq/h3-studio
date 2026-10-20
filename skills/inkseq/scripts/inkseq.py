@@ -80,7 +80,7 @@ def write_json(result, destination=None):
 def safe_authoring_fields(body):
     """Standalone, closed field vocabulary: never print server input values."""
     fields = {'body', 'header', 'Idempotency-Key', 'expected_card_version', 'title', 'prompt',
-        'recipe_id', 'controls', 'inputs', 'copies', 'turn_id', 'source_revision_id', 'deployment_profile_id',
+        'recipe_id', 'tier', 'mode', 'controls', 'inputs', 'copies', 'turn_id', 'source_revision_id', 'deployment_profile_id',
         'first_frame', 'last_frame', 'images', 'videos', 'audios', 'guides', 'asset_id', 'media_id',
         'purpose', 'source_range', 'start', 'end', 'include_audio', 'time_seconds', 'use_audio',
         'duration', 'resolution', 'aspect_ratio', 'width', 'height', 'steps', 'seed',
@@ -114,7 +114,10 @@ def check_response(response):
         suffix = f" (Retry-After: {retry:g} seconds)" if retry is not None else ""
         # Standalone helper: preserve only closed, source-level diagnostics.
         # Arbitrary bodies/messages/paths/prompts/credentials stay suppressed.
-        codes = {'preflight_rejected','incompatible_fl_ref_inputs','invalid_duration',
+        codes = {'quality_tier_invalid','quality_mode_invalid','quality_tier_required',
+            'quality_selection_invalid','quality_selection_conflict','quality_tier_unavailable',
+            'quality_tier_ambiguous','model_selection_admin_required',
+            'preflight_rejected','incompatible_fl_ref_inputs','invalid_duration',
             'invalid_canvas_grid','invalid_canvas_area','invalid_canvas_aspect','reference_required',
             'reference_video_exceeds_output','invalid_request','invalid_controls','invalid_inputs',
             'revision_hash_conflict','version_conflict','idempotency_conflict','budget_exceeded','job_capacity_exceeded',

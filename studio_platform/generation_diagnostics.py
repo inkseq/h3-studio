@@ -192,6 +192,10 @@ COMMON_CODES = {
     'version_conflict',
 }
 POLICY_DIAGNOSTICS = {
+    'capacity_source_changed_before_activation': (
+        'The draft changed before activation. Preflight the current draft; the original job and rental accounting are retained.',
+        '启动前草稿已改变，请重新预检当前草稿；原任务和机器费用记录保留。',
+    ),
     'content_moderation_refused': (
         'This request did not pass the content policy. No generation credits were charged.',
         '本次请求未通过内容规则，未扣生成积分。',

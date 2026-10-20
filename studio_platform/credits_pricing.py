@@ -248,6 +248,40 @@ def aggregate_quotes(plans, *, complete=True):
     }
 
 
+def get_tier(compiled, *, execution=None):
+    """Classify a fresh server compilation, never caller labels or step counts."""
+    from .quality_tiers import model_tier, profile_tier
+    from .render_plans import RECIPE as RENDER_RECIPE
+
+    if (
+        compiled.get("recipe_id") == RENDER_RECIPE
+        and isinstance(execution, dict)
+        and execution.get("backend") == "cpu-render"
+    ):
+        return "render"
+    request = compiled.get("request", {})
+    tier = model_tier(request.get("model"))
+    identity = compiled.get("deployment_profile_id")
+    if identity is not None:
+        from .runtime_catalog import get_profile
+
+        if profile_tier(identity) != tier:
+            raise PricingError(
+                "credit_quote_invalid", "Compiled quality is unavailable."
+            )
+        try:
+            matches = get_profile(identity)["model_id"] == request.get("model")
+        except ValueError:
+            matches = False
+        if not matches:
+            raise PricingError(
+                "credit_quote_invalid", "Compiled quality is unavailable."
+            )
+    if tier is None:
+        raise PricingError("credit_quote_invalid", "Compiled quality is unavailable.")
+    return tier
+
+
 def quote(connection, tenant, owner, compiled, *, execution=None):
     """Quote accepted server compilation, never a client tier or take multiplier."""
     from .credits import credit_policy
@@ -289,18 +323,7 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
         raise PricingError(
             "credit_quote_invalid", "Compiled output duration is unavailable."
         )
-    request = compiled.get("request", {})
-    width, height = output.get("width"), output.get("height")
-    standard = (
-        request.get("model") == "MiniMax-H3-Pruned-Rank8-INT8"
-        and type(width) is int
-        and type(height) is int
-        and min(width, height) <= 480
-        and width * height <= 480 * 480 * 1.75
-    )
-    # No TaoMate recipe is registered in the current server catalog. Arbitrary
-    # low step counts never buy the future named accelerator's fast rate.
-    tier = "render" if render else "standard" if standard else "refine"
+    tier = get_tier(compiled, execution=execution)
     rate = 0 if render else price["rates"][tier]
     amount = math.ceil(Fraction(rate * frames, fps))
     seconds = frames / fps

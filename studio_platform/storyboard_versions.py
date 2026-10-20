@@ -580,7 +580,6 @@ class StoryboardVersions:
             raise ValueError(
                 "Expected version and defaults are required / 需要版本和默认设置"
             )
-        value = validate_defaults(body["defaults"])
         scope = Scope(self.tenant, principal.owner, "__preferences")
         receipt_id = request_hash({"actor": principal.actor_id, "key": key})
         with self.repo.transaction() as conn:
@@ -592,6 +591,12 @@ class StoryboardVersions:
                 if old["payload"]["fingerprint"] != request_hash(body):
                     raise Conflict("edit_idempotency_conflict")
                 return old["payload"]["response"]
+            from .quality_authoring import normalize
+
+            selected, _ = normalize(
+                self.settings, self.repo, principal, body["defaults"], partial=True
+            )
+            value = validate_defaults(selected)
             current = preferences(self.repo, self.tenant, principal.owner, conn=conn)
             if current["version"] != body["expected_version"]:
                 raise Conflict("document_version_conflict")

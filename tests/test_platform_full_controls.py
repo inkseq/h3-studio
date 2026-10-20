@@ -9,6 +9,7 @@ import unittest
 
 from fastapi.testclient import TestClient
 from PIL import Image
+from sqlalchemy import select
 
 from studio_platform.api import create_app
 from studio_platform.capabilities import compile_request
@@ -20,8 +21,8 @@ from studio_platform.execution_policy import (
 )
 from studio_platform.h3_profile_support import envelope
 from studio_platform.inference import wangp_profile_dispatch
-from studio_platform.quick_chat import default_next_settings, settings_check
-from studio_platform.repository import Repository, Scope
+from studio_platform.quick_chat import default_next_settings, objects, settings_check
+from studio_platform.repository import Repository, Scope, documents
 from studio_platform.runtime_catalog import (
     engine_manifest,
     get_profile,
@@ -29,6 +30,7 @@ from studio_platform.runtime_catalog import (
 )
 from studio_platform.qualification_profiles import QUEUED_TASK_PROFILE
 from studio_platform.settings import Settings
+from studio_platform.source_snapshot import source_snapshot
 from test_platform_api import generation_request
 from test_platform_execution_policy import policy
 
@@ -69,6 +71,8 @@ class FullControlsIntegrationTests(unittest.TestCase):
             generation_enabled=True,
             execution_profiles_file=self.profiles,
             default_deployment_profile_id=PROFILE,
+            operator_admin_owners=('superdan',),
+            operator_capacity_owners=('superdan',),
         )
         self.repo.configure_capacity(max_instances=2, max_physical_gpus=2)
         for identity, owner in (
@@ -341,8 +345,14 @@ class FullControlsIntegrationTests(unittest.TestCase):
                     json={
                         'expected_version': current['version'],
                         'next_settings': {
-                            'deployment_profile_id': PROFILE,
-                            'recipe_id': 'h3-base-ref2va-v1',
+                            **(
+                                {
+                                    'deployment_profile_id': PROFILE,
+                                    'recipe_id': 'h3-base-ref2va-v1',
+                                }
+                                if channel == 'browser'
+                                else {'tier': 'standard', 'mode': 'ref'}
+                            ),
                             'controls': copy.deepcopy(controls),
                             'copies': 1,
                         },
@@ -372,8 +382,12 @@ class FullControlsIntegrationTests(unittest.TestCase):
                     current['input_refs']['first_frame'], {'asset_id': identity}
                 )
                 body = {
-                    'deployment_profile_id': PROFILE,
-                    'recipe_id': 'h3-base-ref2va-v1',
+                    'deployment_profile_id': (
+                        PROFILE if channel == 'browser' else 'quality:standard'
+                    ),
+                    'recipe_id': (
+                        'h3-base-ref2va-v1' if channel == 'browser' else 'video-ref-v1'
+                    ),
                     'copies': 1,
                     'prompt': 'A blue paper bird unfolds over a desk.',
                     'controls': copy.deepcopy(controls),
@@ -397,11 +411,58 @@ class FullControlsIntegrationTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 201, response.text)
                 revision = response.json()['revision']
                 revisions.append(revision)
-                self.assertEqual(revision['deployment_profile_id'], PROFILE)
+                self.assertEqual(
+                    revision['deployment_profile_id'], body['deployment_profile_id']
+                )
+                self.assertEqual(revision['recipe_id'], body['recipe_id'])
+                if channel == 'agent':
+                    self.assertEqual(revision['tier'], 'standard')
                 self.assertEqual(revision['controls'], controls)
                 for slot in ('first_frame', 'last_frame'):
                     self.assertEqual(revision['inputs'][slot], {'asset_id': identity})
                 self.assertEqual(revision['inputs']['guides'][0]['media_id'], identity)
+                # Public aliases never rewrite the immutable stored source or hashes.
+                with self.repo.engine.connect() as conn:
+                    stored = conn.execute(
+                        select(objects.c.payload).where(
+                            objects.c.tenant == 'sixnine',
+                            objects.c.owner == 'superdan',
+                            objects.c.session_id == sid,
+                            objects.c.kind == 'revision',
+                            objects.c.id == revision['id'],
+                        )
+                    ).scalar_one()
+                    session_source = conn.execute(
+                        select(objects.c.payload).where(
+                            objects.c.tenant == 'sixnine',
+                            objects.c.owner == 'superdan',
+                            objects.c.kind == 'session',
+                            objects.c.id == sid,
+                        )
+                    ).scalar_one()
+                    project = conn.execute(
+                        select(documents.c.payload).where(
+                            self.repo._scope(
+                                documents, Scope('sixnine', 'superdan', '__projects')
+                            ),
+                            documents.c.kind == 'project',
+                            documents.c.document_id == session_source['project_id'],
+                        )
+                    ).scalar_one()
+                self.assertEqual(stored['deployment_profile_id'], PROFILE)
+                self.assertEqual(stored['recipe_id'], 'h3-base-ref2va-v1')
+                self.assertEqual(stored['controls'], controls)
+                self.assertEqual(stored['input_hash'], revision['input_hash'])
+                self.assertEqual(stored['requested_input_hash'], revision['input_hash'])
+                item = stored['items'][0]
+                shot = next(
+                    e for e in project['entities'] if e['id'] == item['shot_id']
+                )
+                self.assertEqual(shot['data']['h3']['deploymentProfileId'], PROFILE)
+                self.assertEqual(shot['data']['h3']['recipeId'], 'h3-base-ref2va-v1')
+                self.assertEqual(
+                    item['projection_hash'], source_snapshot(project, shot['id'])
+                )
                 # Authoring did not create a render or paid generation task.
                 self.assertEqual(client.get('/v1/jobs').json()['jobs'], [])
             self.assertEqual(revisions[0]['controls'], revisions[1]['controls'])

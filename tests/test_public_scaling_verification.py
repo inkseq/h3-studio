@@ -152,6 +152,25 @@ class PublicScalingTests(unittest.TestCase):
         self.assertEqual(self.posts, 6)
         self.assert_keys_revoked_and_no_secrets()
 
+    def test_wrong_public_quality_or_mode_refuses_before_any_paid_job(self):
+        original_request = public.request
+        for field, value in (('tier', 'standard'), ('mode', 'ref')):
+
+            def changed_plan(opener, method, path, *args, **kwargs):
+                result = original_request(opener, method, path, *args, **kwargs)
+                if method == 'POST' and path == '/v1/generation-plans':
+                    result['effective_request'][field] = value
+                return result
+
+            with (
+                self.subTest(field=field),
+                patch.object(public, 'request', side_effect=changed_plan),
+                self.assertRaises(AssertionError),
+            ):
+                self.submit()
+            self.assertEqual(self.posts, 0)
+            self.assertEqual(self.repo.list_jobs_for_owner('sixnine', 'superdan'), [])
+
     def test_prepare_creates_story_without_generation_or_health_read(self):
         original = public.request
         calls = []

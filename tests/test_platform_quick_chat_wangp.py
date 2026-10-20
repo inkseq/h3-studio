@@ -71,6 +71,8 @@ class QuickChatWanGPTests(LedgerCase):
                 database_url=self.url,
                 generation_enabled=True,
                 execution_backend="wangp-worker",
+                operator_capacity_owners=("superdan",),
+                operator_admin_owners=("superdan",),
                 execution_policy_file=path,
             ),
             repository=self.repo,

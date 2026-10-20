@@ -250,6 +250,53 @@ class AgentClientTests(unittest.TestCase):
         self.assertNotIn("PRIVATE", str(error.exception))
         self.assertNotIn("synthetic-test-key", str(error.exception))
 
+    def test_quality_refusals_are_finite_private_and_never_retried(self):
+        for code, status, field in (
+            ("quality_tier_unavailable", 409, "tier"),
+            ("quality_tier_ambiguous", 409, "tier"),
+            ("quality_selection_conflict", 422, "tier"),
+            ("model_selection_admin_required", 403, "mode"),
+            ("invalid_request", 422, "tier"),
+            ("invalid_request", 422, "mode"),
+        ):
+            seen = []
+
+            def handler(request):
+                seen.append((request.method, request.headers["Idempotency-Key"]))
+                return httpx.Response(
+                    status,
+                    json={
+                        "code": code,
+                        "detail": "PRIVATE-MODEL synthetic-test-key",
+                        "field_errors": [
+                            {
+                                "path": ["body", field],
+                                "reason": "invalid_value",
+                                "input": "PRIVATE",
+                            }
+                        ],
+                    },
+                )
+
+            with (
+                self.subTest(code=code, field=field),
+                self.assertRaises(ValueError) as error,
+            ):
+                self.run_client(
+                    handler,
+                    method="POST",
+                    path="/v1/quick-chat/sessions/session-one/cards",
+                    idempotency_key="same-quality-request",
+                )
+            self.assertIn(code, str(error.exception))
+            if code == "invalid_request":
+                self.assertIn('"' + field + '"', str(error.exception))
+            else:
+                self.assertNotIn("field_errors=", str(error.exception))
+            self.assertNotIn("PRIVATE", str(error.exception))
+            self.assertNotIn("synthetic-test-key", str(error.exception))
+            self.assertEqual(seen, [("POST", "same-quality-request")])
+
     def test_card_control_422_paths_follow_the_public_schema_without_echoing_values(
         self,
     ):

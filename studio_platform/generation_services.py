@@ -348,10 +348,16 @@ class GenerationPlanning:
         authoring_recipe=None,
         authoring_context=None,
         defaults_version=None,
+        stored_selection=False,
     ):
         # Entry-point authorization is performed by GenerationAccess before
         # this call; preflight also checks the editable source around derivation.
         project_id = project["id"]
+        from .quality_authoring import normalize
+
+        body, quality = normalize(
+            self.settings, self.repo, principal, body, stored=stored_selection
+        )
         compiled, fingerprint = compile_request(
             body,
             lambda asset_id: self.assets.model_snapshot(
@@ -359,6 +365,11 @@ class GenerationPlanning:
             ),
             backend=self.settings.execution_backend,
         )
+        if quality is not None:
+            from .repository import request_hash
+
+            compiled["quality_selection"] = quality
+            fingerprint = request_hash(compiled)
         ref = compiled["client_ref"]
         if not validate_source_ref(project, ref):
             raise Conflict("shot_version_conflict")

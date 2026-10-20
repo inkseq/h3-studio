@@ -55,6 +55,8 @@ class QuickChatSeedDomainTests(LedgerCase):
             auth_mode="local-test",
             database_url=self.url,
             execution_backend="wangp-worker",
+            operator_admin_owners=("superdan",),
+            operator_capacity_owners=("superdan",),
         )
         self.app = create_app(self.settings, repository=self.repo)
         self.service = self.app.state.quick_chat

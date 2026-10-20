@@ -369,8 +369,13 @@ class Guided:
 
     def save(self, principal, project_id, project, expected_version):
         """Browser full-document save and its content-free activity are atomic."""
-        validate_project(project, self.settings.max_project_bytes)
-        if project["id"] != project_id or type(expected_version) is not int:
+        from .quality_authoring import project as resolve_quality_project
+
+        if (
+            not isinstance(project, dict)
+            or project.get("id") != project_id
+            or type(expected_version) is not int
+        ):
             raise ValueError("需要匹配的项目ID与版本")
         document_scope = Scope(
             self.settings.tenant_id, principal.owner, "__projects", principal.actor_id
@@ -385,14 +390,18 @@ class Guided:
             assert_project_writable(
                 conn, self.settings.tenant_id, principal.owner, project_id
             )
-            assert_reference_payload(
-                conn, self.settings.tenant_id, principal.owner, project
-            )
             row = self.repo._locked(conn, select(documents).where(*where))
             if row is None:
                 raise NotFound("document_not_found")
             if row["version"] != expected_version:
                 raise Conflict("document_version_conflict")
+            project = resolve_quality_project(
+                self.settings, self.repo, principal, project, baseline=row["payload"]
+            )
+            validate_project(project, self.settings.max_project_bytes)
+            assert_reference_payload(
+                conn, self.settings.tenant_id, principal.owner, project
+            )
             values = dict(
                 payload=canonical(project),
                 version=row["version"] + 1,
@@ -438,9 +447,34 @@ class Guided:
             documents.c.kind == "project",
             documents.c.document_id == project_id,
         )
+        # Recover an authorized original receipt before resolving today's tier
+        # mapping or media. Its immutable request fingerprint remains the wire
+        # body, even when a later mapping selects a different deployment.
+        if key:
+            with self.repo.engine.connect() as conn:
+                owner_reference_gate(conn, self.settings.tenant_id, principal.owner)
+                assert_project_writable(
+                    conn, self.settings.tenant_id, principal.owner, project_id
+                )
+                prior = (
+                    conn.execute(select(receipts).where(*where_receipt))
+                    .mappings()
+                    .first()
+                )
+                if prior:
+                    if prior["fingerprint"] != fingerprint:
+                        raise Conflict("edit_idempotency_conflict")
+                    assert_reference_payload(
+                        conn,
+                        self.settings.tenant_id,
+                        principal.owner,
+                        prior["response"],
+                    )
+                    return prior["response"]
         # Resolve immutable source receipts before the document transaction, so
         # no network/filesystem read occupies a database write lock.
         resolved = {}
+        generation_actions = {}
         if not create:
             object_fields(
                 body,
@@ -465,15 +499,31 @@ class Guided:
                     resolved[index] = self.resolve(principal, project_id, action)
                 elif action.get("op") == "shot.configure_generation":
                     from .generation_draft import prepare_patch
+                    from .quality_authoring import normalize
 
+                    selected, _ = normalize(
+                        self.settings, self.repo, principal, action, partial=True
+                    )
+                    generation_actions[index] = selected
                     resolved[index] = prepare_patch(
-                        action,
+                        selected,
                         lambda ident: self.resolve(
                             principal,
                             project_id,
                             {"op": "asset.attach", "asset_id": ident},
                         ),
                     )
+                elif action.get("op") == "storyboard.defaults":
+                    from .quality_authoring import normalize
+
+                    selected, _ = normalize(
+                        self.settings,
+                        self.repo,
+                        principal,
+                        action["value"],
+                        partial=True,
+                    )
+                    generation_actions[index] = {**action, "value": selected}
                 elif action.get("op") in {"storyboard.restore", "storyboard.star"}:
                     resolved[index] = self.app.state.storyboard_versions.resolve_action(
                         principal, project_id, action
@@ -515,7 +565,11 @@ class Guided:
                 if create:
                     if row:
                         raise Conflict("document_version_conflict")
-                    project = copy.deepcopy(body)
+                    from .quality_authoring import project as resolve_quality_project
+
+                    project = resolve_quality_project(
+                        self.settings, self.repo, principal, body
+                    )
                     version = 1
                 else:
                     if row is None:
@@ -524,7 +578,32 @@ class Guided:
                         raise Conflict("document_version_conflict")
                     project = copy.deepcopy(row["payload"])
                     for index, action in enumerate(body["actions"]):
-                        self.apply(project, action, resolved.get(index))
+                        generic = action["op"] in {
+                            "entity.create",
+                            "entity.update",
+                            "journey.update",
+                        }
+                        if generic:
+                            from .quality_authoring import selector_baseline
+
+                            before_action = selector_baseline(project)
+                        self.apply(
+                            project,
+                            generation_actions.get(index, action),
+                            resolved.get(index),
+                        )
+                        if generic:
+                            from .quality_authoring import (
+                                project as resolve_quality_project,
+                            )
+
+                            project = resolve_quality_project(
+                                self.settings,
+                                self.repo,
+                                principal,
+                                project,
+                                baseline=before_action,
+                            )
                     version = row["version"] + 1
                 project["updatedAt"] = now_iso()
                 validate_project(project, self.settings.max_project_bytes)
@@ -1072,7 +1151,7 @@ def register_routes(app):
             "generation_availability": public_guide()["generation_availability"],
             "steps": [
                 "Browser account creates scoped API key; pass Bearer on API calls only",
-                "Before choosing FL/REF, preflight and a new GPU submission, GET /v1/generation-availability; follow generation_availability for exact profile/mode, freshness and administrator/wait guidance. An omitted/null legacy profile matches only the explicit null row. Existing uncertain jobs retain their original receipt/key.",
+                "Before choosing quality and FL/REF, preflight and a new GPU submission, GET /v1/generation-availability; follow generation_availability for neutral tier/mode aliases, freshness and administrator/wait guidance. Read current capabilities for supported controls; unavailable tiers never fall back. Existing uncertain jobs retain their original receipt/key.",
                 "For one clip, create workspace=freestyle; use project.journey.reviewShotId, shot.configure_generation and the saved-draft generation-plans route. Exact examples: /for-agents/guide.json",
                 "POST /v1/projects with title/logline and stable Idempotency-Key; select returned project id",
                 "POST /v1/projects/{id}/actions with expected_version and atomic actions",

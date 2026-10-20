@@ -185,3 +185,20 @@ accepted jobs, if separately submitted, must still be reconciled independently.
 Only an explicit new user choice may start a changed preflight. For versioned
 settings/actions, release a pending UI command only after an exact resource/body
 hash `no_mutation_committed=true` proof, not from arbitrary HTTP 409 status.
+
+## Video quality refusals and retained work
+
+For a new request, use `tier: standard|refine|fast` and `mode: fl|ref`, or the
+consistent neutral aliases `quality:standard` and `video-fl-v1`/`video-ref-v1`.
+Fast is currently unavailable. `quality_tier_unavailable` or
+`quality_tier_ambiguous` needs an administrator's configuration, not another tier,
+fewer steps, dropped references or a rental. `quality_selection_conflict` needs a
+consistent corrected selection; an Agent cannot use a human admin's internal
+selection authority (`model_selection_admin_required`).
+
+Keep an uncertain accepted write's exact original body/key and all returned IDs.
+Replay/recover that original before resolving a new quality choice. Mapping,
+default, price or availability changes never authorize replacing accepted work,
+reissuing a hold, or changing its frozen quote. Unknown historical quality stays
+unknown; choose quality explicitly only for separately authorized new work.
+Video tiers do not change the optional conversation model selector.

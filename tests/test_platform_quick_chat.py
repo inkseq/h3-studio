@@ -69,6 +69,9 @@ class QuickChatTests(unittest.TestCase):
             auth_mode="local-test",
             generation_enabled=True,
             execution_backend="mock",
+            # Raw-recipe authoring fixture; no machine gets admin authority.
+            operator_admin_owners=("superdan",),
+            operator_capacity_owners=("superdan",),
         )
         self.app = create_app(self.settings)
         self.service = self.app.state.quick_chat

@@ -94,6 +94,11 @@ class GenerationAdmission:
             setting = preferences(self.repo, self.settings.tenant_id, principal.owner)
             defaults_version = setting["version"]
             render_project, _ = effective_project(project, shot_id, setting["defaults"])
+        from .quality_authoring import project as resolve_quality_project
+
+        render_project = resolve_quality_project(
+            self.settings, self.repo, principal, render_project, stored=True
+        )
         draft, _ = read_draft(
             render_project, shot_id, capabilities=current_capabilities
         )
@@ -148,7 +153,9 @@ class GenerationAdmission:
         ):
             raise Conflict("storyboard_defaults_changed")
         if defaults_version is None:
-            return self.planning.create(principal, body, latest["payload"])
+            return self.planning.create(
+                principal, body, latest["payload"], stored_selection=True
+            )
         import copy
 
         recipe = {
@@ -191,6 +198,7 @@ class GenerationAdmission:
             authoring_recipe=recipe,
             authoring_context=context,
             defaults_version=defaults_version,
+            stored_selection=True,
         )
 
     def create(
