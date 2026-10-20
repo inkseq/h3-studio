@@ -40,6 +40,13 @@ function micros(value) {
   }
 }
 const money = formatMoneyMicros;
+// Credit mode (#306): the same settings route answers in whole credits instead of microUSD.
+const creditText = (value) => String(Number.isSafeInteger(value) && value >= 0 ? value : 0);
+function wholeCredits(value) {
+  if (typeof value !== 'string' || !/^(?:0|[1-9]\d{0,11})$/.test(value.trim()))
+    throw Error('settings.invalidCredits');
+  return Number(value.trim());
+}
 const settingsSection = (search) => {
   const value = new URLSearchParams(search).get('tab');
   return (
@@ -128,7 +135,8 @@ export default function SpendingSettings({ account }) {
     access = useAccess(account),
     who = useAccountLabel(account);
   // Regular users never see dollars: in credit mode the USD budget tab is admin-only.
-  const showBudget = !(credits || access?.creditsEnabled) || !!admin;
+  const creditMode = user?.unit === 'credits';
+  const showBudget = creditMode || !(credits || access?.creditsEnabled) || !!admin;
   // Hosted (WorkOS) sign-ins have no local password to change.
   const hosted = access?.authentication === 'workos';
   const [busy, setBusy] = useState(false),
@@ -147,13 +155,23 @@ export default function SpendingSettings({ account }) {
       const data = await api.request('/v1/account/spending-settings');
       if (current !== epoch.current) return;
       setUser(data);
-      setDraft({
-        daily: dollars(data.value.daily_limit_microusd),
-        ask: dollars(data.value.ask_above_microusd),
-        connections: Object.fromEntries(
-          data.connections.map((row) => [row.actor_id, dollars(row.daily_limit_microusd)]),
-        ),
-      });
+      setDraft(
+        data.unit === 'credits'
+          ? {
+              daily: creditText(data.value.daily_limit_credits),
+              ask: creditText(data.value.ask_above_credits),
+              connections: Object.fromEntries(
+                data.connections.map((row) => [row.actor_id, creditText(row.daily_limit_credits)]),
+              ),
+            }
+          : {
+              daily: dollars(data.value.daily_limit_microusd),
+              ask: dollars(data.value.ask_above_microusd),
+              connections: Object.fromEntries(
+                data.connections.map((row) => [row.actor_id, dollars(row.daily_limit_microusd)]),
+              ),
+            },
+      );
       if (data.admin) {
         const next = await api.request('/v1/operator/admin/spending-settings');
         if (current !== epoch.current) return;
@@ -213,7 +231,21 @@ export default function SpendingSettings({ account }) {
             max_runtime_seconds: seconds('runtime'),
           },
         };
-      } else
+      } else if (user.unit === 'credits')
+        body = {
+          expected_version: user.version,
+          value: {
+            daily_limit_credits: wholeCredits(draft.daily),
+            ask_above_credits: wholeCredits(draft.ask),
+            connection_credit_limits: {
+              ...user.value.connection_credit_limits,
+              ...Object.fromEntries(
+                Object.entries(draft.connections).map(([key, value]) => [key, wholeCredits(value)]),
+              ),
+            },
+          },
+        };
+      else
         body = {
           expected_version: user.version,
           value: {
@@ -237,7 +269,11 @@ export default function SpendingSettings({ account }) {
       setNotice('settings.saved');
     } catch (failure) {
       if (current === epoch.current)
-        setError(failure.message === 'settings.invalid' ? t(failure.message) : failure.message);
+        setError(
+          ['settings.invalid', 'settings.invalidCredits'].includes(failure.message)
+            ? t(failure.message)
+            : failure.message,
+        );
     } finally {
       if (current === epoch.current) setBusy(false);
     }
@@ -268,7 +304,9 @@ export default function SpendingSettings({ account }) {
             ['defaults', 'settings.defaults', SlidersHorizontal],
             ['assistants', 'assistants.title', Bot],
             ...(credits || section === 'credits' ? [['credits', 'settings.credits', Coins]] : []),
-            ...(showBudget ? [['budget', 'settings.budget', Wallet]] : []),
+            ...(showBudget
+              ? [['budget', creditMode ? 'settings.limits' : 'settings.budget', Wallet]]
+              : []),
             ...(admin ? [['admin', 'settings.admin', ShieldCheck]] : []),
           ].map(([id, label, Icon]) => (
             <button
@@ -284,7 +322,15 @@ export default function SpendingSettings({ account }) {
         </aside>
         <section className="spanel">
           <div className="row tight">
-            <h2>{t(section === 'assistants' ? 'assistants.title' : 'settings.' + section)}</h2>
+            <h2>
+              {t(
+                section === 'assistants'
+                  ? 'assistants.title'
+                  : section === 'budget' && creditMode
+                    ? 'settings.limits'
+                    : 'settings.' + section,
+              )}
+            </h2>
             <div className="spacer" />
             <button
               className="small ghost"
@@ -380,31 +426,40 @@ export default function SpendingSettings({ account }) {
                 void save();
               }}
             >
-              <div className="card-box">
-                <SpendingBreakdown usage={user.usage} scope="account" />
-                {exposure && exposure.limit > 0 && (
-                  <div className="agent-spend spend-admission">
-                    <span>
-                      {t('settings.usage', { amount: money(exposure.amount) })} /{' '}
-                      {money(exposure.limit)}
-                    </span>
-                    <i>
-                      <b style={{ width: exposure.percent + '%' }} />
-                    </i>
-                    <p className="spend-breakdown-note">{t('settings.admissionHelp')}</p>
-                  </div>
-                )}
-              </div>
+              {!creditMode && (
+                <div className="card-box">
+                  <SpendingBreakdown usage={user.usage} scope="account" />
+                  {exposure && exposure.limit > 0 && (
+                    <div className="agent-spend spend-admission">
+                      <span>
+                        {t('settings.usage', { amount: money(exposure.amount) })} /{' '}
+                        {money(exposure.limit)}
+                      </span>
+                      <i>
+                        <b style={{ width: exposure.percent + '%' }} />
+                      </i>
+                      <p className="spend-breakdown-note">{t('settings.admissionHelp')}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+              {creditMode && Number.isSafeInteger(user.usage?.exposure_credits) && (
+                <p className="muted">
+                  {t('settings.creditsToday', { count: user.usage.exposure_credits })}
+                </p>
+              )}
               <section id="my-budget" className="card-box limits" aria-label={t('settings.budget')}>
-                {field('settings.daily', draft.daily, (value) =>
-                  setDraft((previous) => ({ ...previous, daily: value })),
+                {field(
+                  creditMode ? 'settings.dailyCredits' : 'settings.daily',
+                  draft.daily,
+                  (value) => setDraft((previous) => ({ ...previous, daily: value })),
                 )}
-                {field('settings.ask', draft.ask, (value) =>
+                {field(creditMode ? 'settings.askCredits' : 'settings.ask', draft.ask, (value) =>
                   setDraft((previous) => ({ ...previous, ask: value })),
                 )}
               </section>
               <p className="muted">
-                {t('settings.zero')} · {t('settings.day')}
+                {t(creditMode ? 'settings.zeroCredits' : 'settings.zero')} · {t('settings.day')}
               </p>
               <div className="row tight" style={{ justifyContent: 'flex-end' }}>
                 <button className="primary" disabled={busy}>
@@ -413,7 +468,7 @@ export default function SpendingSettings({ account }) {
               </div>
             </form>
           )}
-          {user && draft && section === 'budget' && pageActive && (
+          {user && draft && !creditMode && section === 'budget' && pageActive && (
             <OperatorBudgetPanel account={account} />
           )}
           {admin && section === 'admin' && (
@@ -466,6 +521,7 @@ export default function SpendingSettings({ account }) {
           {section === 'credits' && <CreditsPanel account={account} active={pageActive} />}
           <div id="my-assistants" hidden={section !== 'assistants'}>
             <AssistantConnections
+              creditMode={creditMode}
               embedded
               account={account}
               active={pageActive && section === 'assistants'}

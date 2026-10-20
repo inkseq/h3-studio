@@ -7,6 +7,7 @@ import { useI18n } from './i18n/I18nProvider.jsx';
 import { createQuickChatClient } from './quick-chat-client.js';
 import {
   capMicros,
+  capCredits,
   assistantScope,
   createAssistantOperations,
   creatorName,
@@ -28,6 +29,7 @@ export function AssistantBadge({ createdBy }) {
   ) : null;
 }
 export default function AssistantConnections({
+  creditMode = false,
   account,
   sessionId,
   projectId,
@@ -199,7 +201,9 @@ export default function AssistantConnections({
         authorization_profile_version: profile.version,
         scope: assistantScope(scope, { sessionId, projectId }),
         permission,
-        daily_limit_microusd: capMicros(cap),
+        ...(creditMode
+          ? { daily_limit_credits: capCredits(cap) }
+          : { daily_limit_microusd: capMicros(cap) }),
       });
       if (at === epoch.current) {
         setCreated(result.code ? result : null);
@@ -284,11 +288,15 @@ export default function AssistantConnections({
           capSentence:
             connection.permission === 'organise'
               ? t('assistants.capSentence.organise')
-              : !connection.daily_limit_microusd
-                ? t('assistants.capSentence.none')
-                : t('assistants.capSentence.cap', {
-                    cap: dollars(connection.daily_limit_microusd),
-                  }),
+              : connection.unit === 'credits'
+                ? !connection.daily_limit_credits
+                  ? t('assistants.capSentence.none')
+                  : t('assistants.capSentence.capCredits', { cap: connection.daily_limit_credits })
+                : !connection.daily_limit_microusd
+                  ? t('assistants.capSentence.none')
+                  : t('assistants.capSentence.cap', {
+                      cap: dollars(connection.daily_limit_microusd),
+                    }),
           date: date(connection.expires_at),
         })
       : '';
@@ -355,8 +363,12 @@ export default function AssistantConnections({
                   </select>
                 </label>
                 <label>
-                  {t('assistants.cap')}
-                  <input inputMode="decimal" value={cap} onChange={(e) => setCap(e.target.value)} />
+                  {t(creditMode ? 'assistants.capCredits' : 'assistants.cap')}
+                  <input
+                    inputMode={creditMode ? 'numeric' : 'decimal'}
+                    value={cap}
+                    onChange={(e) => setCap(e.target.value)}
+                  />
                 </label>
                 <small>{t('assistants.zero')}</small>
                 <button disabled={!name.trim()}>{t('assistants.connect')}</button>
@@ -546,14 +558,19 @@ function ConnectionRow({
     [error, setError] = useState('');
   const editable = ['connected', 'paused'].includes(row.status),
     closed = ['revoked', 'expired'].includes(row.status);
-  const cap = draft?.value ?? dollars(row.daily_limit_microusd);
+  const credit = row.unit === 'credits';
+  const cap =
+    draft?.value ??
+    (credit ? String(row.daily_limit_credits ?? 0) : dollars(row.daily_limit_microusd));
   async function save(e) {
     e.preventDefault();
     setError('');
     try {
       const result = await onPatch({
         expected_version: draft?.version ?? row.state_version,
-        daily_limit_microusd: capMicros(cap),
+        ...(credit
+          ? { daily_limit_credits: capCredits(cap) }
+          : { daily_limit_microusd: capMicros(cap) }),
       });
       if (result) setDraft(null);
     } catch {
@@ -585,9 +602,9 @@ function ConnectionRow({
       <SpendingBreakdown usage={row.usage} scope="connection" />
       <form onSubmit={save}>
         <label>
-          {t('assistants.cap')}
+          {t(credit ? 'assistants.capCredits' : 'assistants.cap')}
           <input
-            inputMode="decimal"
+            inputMode={credit ? 'numeric' : 'decimal'}
             value={cap}
             onChange={(e) =>
               setDraft((old) => ({

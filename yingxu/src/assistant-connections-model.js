@@ -8,6 +8,12 @@ export function capMicros(value) {
     throw Error('assistants.invalid');
   }
 }
+// Credit mode (#306): caps are whole credits.
+export function capCredits(value) {
+  const text = String(value ?? '').trim();
+  if (!/^(?:0|[1-9]\d{0,11})$/.test(text)) throw Error('assistants.invalid');
+  return Number(text);
+}
 export function assistantScope(kind, { sessionId, projectId } = {}) {
   if (kind === 'all') return { kind };
   const id = kind === 'session' ? sessionId : kind === 'story' ? projectId : null;
@@ -81,14 +87,16 @@ export function createAssistantOperations({
         row.name !== op.body.name ||
         (op.body.scope && !same(row.scope, op.body.scope)) ||
         (op.body.permission && row.permission !== op.body.permission) ||
-        row.daily_limit_microusd !== (op.body.daily_limit_microusd ?? 0)
+        (Object.hasOwn(op.body, 'daily_limit_credits')
+          ? row.daily_limit_credits !== op.body.daily_limit_credits
+          : row.daily_limit_microusd !== (op.body.daily_limit_microusd ?? 0))
       )
         throw Error('assistants.receipt');
     }
     if (op.method === 'updateConnection') {
       if (!Number.isInteger(row.state_version) || row.state_version <= op.body.expected_version)
         throw Error('assistants.receipt');
-      for (const k of ['paused', 'daily_limit_microusd'])
+      for (const k of ['paused', 'daily_limit_microusd', 'daily_limit_credits'])
         if (Object.hasOwn(op.body, k) && row[k] !== op.body[k]) throw Error('assistants.receipt');
     }
     if (op.method === 'revokeConnection' && row.status !== 'revoked')
