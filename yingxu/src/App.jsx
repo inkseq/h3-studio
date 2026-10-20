@@ -387,19 +387,7 @@ function SeriesApp({ sidebarView, onSidebarView }) {
               onSidebarView('story', { selected: true, projectId: selection?.projectId });
             }}
           />
-          <span className="sep">/</span>
-          <select
-            className="v2-chapter"
-            aria-label={t('nav.chapter')}
-            value={chapter?.id || chapterList[0]?.id || ''}
-            onChange={(e) => focusChapter(e.target.value)}
-          >
-            {chapterList.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.title}
-              </option>
-            ))}
-          </select>
+          {/* Chapters are sections on the one storyboard; no chapter switcher (owner, 2026-10-21). */}
           {state.workspace.mode === 'cloud' ? (
             <details className="v2-cloud-status">
               <summary className={'badge ' + (state.workspace.dirty ? 'local' : 'cloud')}>
