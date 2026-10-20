@@ -288,6 +288,9 @@ def _apply_owned(repo, settings, args, *, credentials_loader, store_factory):
             args.asset_id,
             expected_version=args.receipt_version,
             interrupted=args.assert_writers_stopped,
+            original_copy_receipts=getattr(args, "original_copy_receipts", None),
+            original_local_root=getattr(args, "original_local_root", None),
+            original_copy_provenance=getattr(args, "original_copy_provenance", None),
         )
         current = service.journal.get(args.owner, args.asset_id)
         result = dict(
@@ -532,9 +535,37 @@ def main(
     parser.add_argument("--limit", type=int, default=100)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--assert-writers-stopped", action="store_true")
+    parser.add_argument(
+        "--original-copy-receipts",
+        type=Path,
+        help="Protected existing immutable Local-to-R2 plan/copy receipt directory; exact asset only",
+    )
+    parser.add_argument(
+        "--original-local-root",
+        type=Path,
+        help="Explicit original container Local root, only with accepted protected mount provenance",
+    )
+    parser.add_argument(
+        "--original-copy-provenance",
+        type=Path,
+        help="Protected accepted logical-root mount/physical-identity proof; no inferred aliases",
+    )
     args = parser.parse_args(argv)
     repo = None
     try:
+        if (
+            args.original_copy_receipts
+            or args.original_local_root
+            or args.original_copy_provenance
+        ) and (
+            args.action != "apply"
+            or args.all_owners
+            or not args.asset_id
+            or args.artifact_id
+            or not args.original_copy_receipts
+            or bool(args.original_local_root) != bool(args.original_copy_provenance)
+        ):
+            raise ValueError("rendition_copy_requires_exact_asset_proof")
         if args.all_owners and (
             args.asset_id
             or args.artifact_id

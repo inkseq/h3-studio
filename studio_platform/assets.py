@@ -219,13 +219,14 @@ class AssetService:
         with path.open("rb") as source:
             return _copy(source, _Sink(), self.max_bytes, None)
 
-    def _reserve_to(self, receipt, required):
+    def _reserve_to(self, receipt, required, *, renditions=False):
         previous = receipt["reserved"]
         if required <= previous:
             return
         receipt["reserved"] = required
         try:
-            self.journal.save(receipt, byte_delta=required - previous)
+            save = self.journal.save_renditions if renditions else self.journal.save
+            save(receipt, byte_delta=required - previous)
         except Exception:
             receipt["reserved"] = (
                 previous  # Failed SQL transaction did not charge these bytes.
@@ -243,7 +244,7 @@ class AssetService:
                 retained += info.st_size
         return retained
 
-    def _release(self, receipt):
+    def _release(self, receipt, *, renditions=False):
         uncertain = {"putting", "put_unknown", "verifying", "multipart"}
         if any(s.get("phase") in uncertain for s in receipt["objects"].values()):
             retained = receipt["reserved"]
@@ -253,12 +254,12 @@ class AssetService:
                 receipt["asset"].get(role, {}).get("size_bytes", 0)
                 for role in ASSET_OBJECT_ROLES
             )
-        self.journal.release(receipt, retained)
-        self._cleanup_after_release(receipt)
+        self.journal.release(receipt, retained, renditions=renditions)
+        self._cleanup_after_release(receipt, renditions=renditions)
 
-    def _cleanup_after_release(self, receipt):
+    def _cleanup_after_release(self, receipt, *, renditions=False):
         try:
-            self._cleanup_ready(receipt)
+            self._cleanup_ready(receipt, renditions=renditions)
         except Exception:
             # Cleanup is after acceptance: never report a ready upload as failed
             # or invite a duplicate submission because retained scratch remains.
@@ -277,7 +278,7 @@ class AssetService:
             return
         self._cleanup_after_release(receipt)
 
-    def _cleanup_ready(self, receipt):
+    def _cleanup_ready(self, receipt, *, renditions=False):
         if (
             not isinstance(self.store, S3ObjectStore)
             or self.store.config.provider != "r2"
@@ -345,13 +346,15 @@ class AssetService:
             cleanup = receipt["scratch_cleanup"] = dict(
                 phase="pending", files=files, bytes=stage_bytes
             )
-            self.journal.save(receipt)  # Exact deletion intent before filesystem IO.
+            save = self.journal.save_renditions if renditions else self.journal.save
+            save(receipt)  # Exact deletion intent before filesystem IO.
         if receipt["reserved"] != remote_bytes + cleanup["bytes"]:
             raise IntegrityError("r2_asset_scratch_accounting_mismatch")
         scratch_retention.remove_manifest(directory, cleanup["files"], self.max_bytes)
         receipt["reserved"] = remote_bytes
         cleanup.update(phase="complete", completed_at=time.time())
-        self.journal.save(receipt, byte_delta=-cleanup["bytes"])
+        save = self.journal.save_renditions if renditions else self.journal.save
+        save(receipt, byte_delta=-cleanup["bytes"])
         if directory.exists():
             directory.rmdir()
 
@@ -523,7 +526,7 @@ class AssetService:
         receipt["asset"]["metadata"] = info
         self.journal.save(receipt)
 
-    def _prepare_renditions(self, receipt, source, source_hash):
+    def _prepare_renditions(self, receipt, source, source_hash, *, renditions=False):
         for role in RENDITIONS:
             path = self._stage(receipt) / f"{role}-v1.webp"
             if path.exists():
@@ -542,6 +545,7 @@ class AssetService:
                     + min(POSTER_FRAME_BYTES, self.max_bytes)
                     + 2 * sum(cap for _, cap in RENDITIONS.values()),
                 ),
+                renditions=renditions,
             )
             specs = create_video_renditions(
                 source, self._stage(receipt), max_bytes=self.max_bytes
@@ -584,7 +588,10 @@ class AssetService:
             info.version_id,
         )
 
-    def _write_object(self, receipt, role, *, interrupted=False):
+    def _write_object(self, receipt, role, *, interrupted=False, renditions=False):
+        if renditions and role not in RENDITIONS:
+            raise AssetConflict("rendition_original_identity_changed")
+        save = self.journal.save_renditions if renditions else self.journal.save
         spec = receipt["objects"][role]
         if spec["phase"] == "verified":
             self._verify_stored(spec)
@@ -595,7 +602,7 @@ class AssetService:
             raise IntegrityError("素材暂存副本已变化，不会提交不同内容")
         if self.multipart and size > self.store.config.max_single_put_bytes:
             spec["phase"] = "multipart"
-            self.journal.save(receipt)
+            save(receipt)
             try:
                 state = self.multipart.begin(
                     receipt["owner"],
@@ -612,7 +619,7 @@ class AssetService:
                         "key"
                     ],
                 )
-                self.journal.save(receipt)
+                save(receipt)
                 state = self.multipart.reconcile(
                     receipt["owner"], state["id"], interrupted=interrupted
                 )
@@ -632,7 +639,7 @@ class AssetService:
                 result = self.multipart.complete(receipt["owner"], state["id"])
             except MultipartOutcomeUnknown as error:
                 spec.update(session_id=error.session_id, key=error.key)
-                self.journal.save(receipt)
+                save(receipt)
                 raise
         else:
             if spec["phase"] == "planned":
@@ -642,7 +649,7 @@ class AssetService:
                     ),
                     phase="putting",
                 )
-                self.journal.save(receipt)
+                save(receipt)
                 try:
                     with path.open("rb") as source:
                         self.store.put(
@@ -656,15 +663,15 @@ class AssetService:
                     pass
                 except Exception:
                     spec["phase"] = "put_unknown"
-                    self.journal.save(receipt)
+                    save(receipt)
                     raise StorageWriteUncertain(spec["key"]) from None
                 spec["phase"] = "verifying"
-                self.journal.save(receipt)
+                save(receipt)
             # Unknown outcomes only read back the existing key. Never new-key retry.
             result = self._verify_stored(spec)
         receipt["asset"][role] = asdict(result)
         spec["phase"] = "verified"
-        self.journal.save(receipt)
+        save(receipt)
 
     def _run(self, receipt, *, interrupted=False):
         with self._operation(receipt["id"]):
@@ -729,7 +736,15 @@ class AssetService:
         )
 
     def ensure_renditions(
-        self, owner, asset_id, *, expected_version=None, interrupted=False
+        self,
+        owner,
+        asset_id,
+        *,
+        expected_version=None,
+        interrupted=False,
+        original_copy_receipts=None,
+        original_local_root=None,
+        original_copy_provenance=None,
     ):
         """Explicit offline backfill, on the original receipt and quota authority.
 
@@ -754,8 +769,7 @@ class AssetService:
             if interrupted and expected_version is None:
                 raise AssetConflict("rendition_interrupted_requires_receipt_version")
             if (
-                receipt.get("storage_binding") != self.storage_binding
-                or not receipt.get("prepared")
+                not receipt.get("prepared")
                 or not receipt.get("accepted_input")
                 or receipt["asset"] != asset
                 or receipt.get("suffix") not in media.EXTENSIONS
@@ -763,16 +777,55 @@ class AssetService:
                 raise AssetConflict("rendition_original_receipt_unconfirmed")
             if receipt["busy"] and not interrupted:
                 raise AssetConflict("rendition_writer_still_active")
+            copied_source = None
+            if (
+                receipt.get("storage_binding") != self.storage_binding
+                or original_copy_receipts is not None
+            ):
+                if original_copy_receipts is None:
+                    raise AssetConflict("rendition_original_receipt_unconfirmed")
+                from .storage_migration import verify_rendition_sources
+
+                copied_source = verify_rendition_sources(
+                    original_copy_receipts,
+                    self.store,
+                    receipt,
+                    logical_root=original_local_root,
+                    provenance_file=original_copy_provenance,
+                )
+                backfill = receipt.get("rendition_backfill")
+                if (
+                    backfill is not None
+                    and (
+                        backfill.get("target_binding") != self.storage_binding
+                        or backfill.get("copy_proof") != copied_source
+                    )
+                    or backfill is None
+                    and any(role in receipt["objects"] for role in RENDITIONS)
+                ):
+                    raise AssetConflict("rendition_copy_target_changed")
+            elif (
+                original_local_root is not None or original_copy_provenance is not None
+            ):
+                raise AssetConflict("rendition_copy_proof_required")
             if public_renditions(asset).get("rendition_ready") and not receipt["busy"]:
-                self._cleanup_after_release(receipt)
+                self._cleanup_after_release(receipt, renditions=True)
                 return self.public(asset)
             # Finish an already accepted upload cleanup before changing its
             # exact manifest. Failure leaves it intact for explicit recovery.
-            self._cleanup_after_release(receipt)
+            self._cleanup_after_release(receipt, renditions=True)
             cleanup = receipt.get("scratch_cleanup")
             if cleanup and cleanup.get("phase") != "complete":
                 raise AssetConflict("rendition_scratch_cleanup_pending")
-            self.journal.claim(receipt, interrupted=interrupted)
+            if copied_source is not None and receipt.get("rendition_backfill") is None:
+                receipt["rendition_backfill"] = dict(
+                    phase="planned",
+                    source_name="rendition-source" + receipt["suffix"],
+                    source=dict(asset["original"]),
+                    target_binding=self.storage_binding,
+                    copy_proof=copied_source,
+                )
+            self.journal.claim(receipt, interrupted=interrupted, renditions=True)
             try:
                 backfill = receipt.get("rendition_backfill")
                 if backfill is None:
@@ -789,9 +842,12 @@ class AssetService:
                         source=dict(original),
                     )
                     receipt["asset"]["rendition_status"] = "pending"
-                    self.journal.save(
+                    self.journal.save_renditions(
                         receipt
                     )  # Frozen source before borrowing/encoding bytes.
+                elif copied_source is not None:
+                    receipt["asset"]["rendition_status"] = "pending"
+                    self.journal.save_renditions(receipt)
                 if backfill["source"] != receipt["asset"]["original"]:
                     raise AssetConflict("rendition_original_identity_changed")
                 directory = self._stage(receipt)
@@ -812,6 +868,7 @@ class AssetService:
                     self._reserve_to(
                         receipt,
                         remote + self._stage_bytes(receipt) + future_copy + headroom,
+                        renditions=True,
                     )
                     if source_path.exists():
                         if self._digest(self._file(receipt, source_path.name)) != (
@@ -846,7 +903,7 @@ class AssetService:
                     with media.PROCESSING_ADMISSION.acquire(asset["kind"]):
                         media.inspect(source_path, asset["kind"])
                         specs = self._prepare_renditions(
-                            receipt, source_path, original["sha256"]
+                            receipt, source_path, original["sha256"], renditions=True
                         )
                     # Do not replace a frozen unknown PUT. A prepared backfill
                     # only resumes its original specs and exact object keys.
@@ -858,25 +915,28 @@ class AssetService:
                     backfill["phase"] = "prepared"
                     receipt.pop("scratch_cleanup", None)
                     _sync_directory(directory)
-                    self.journal.save(receipt)
+                    self.journal.save_renditions(receipt)
                 # Prepared retries also reserve every still-unwritten frozen
                 # role before PUT; no new key/body is generated to fit quota.
                 self._reserve_to(
                     receipt,
                     self._stage_bytes(receipt)
                     + sum(spec['size_bytes'] for spec in receipt['objects'].values()),
+                    renditions=True,
                 )
                 for role in RENDITIONS:
-                    self._write_object(receipt, role, interrupted=interrupted)
+                    self._write_object(
+                        receipt, role, interrupted=interrupted, renditions=True
+                    )
                 backfill["phase"] = "complete"
                 receipt["asset"].pop("rendition_status", None)
-                self.journal.save(receipt)
+                self.journal.save_renditions(receipt)
             except Exception:
                 # Process interruption keeps the busy receipt for explicit
                 # stopped-writer recovery; ordinary errors retain proven bytes.
-                self._release(receipt)
+                self._release(receipt, renditions=True)
                 raise
-            self._release(receipt)
+            self._release(receipt, renditions=True)
             return self.public(receipt["asset"])
 
     def reconcile(self, owner, asset_id, *, interrupted=False, expected_version=None):

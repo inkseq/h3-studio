@@ -1,13 +1,16 @@
 """Isolated original ledgers/fake R2; no credentials, network or generation."""
 
 import io
+import copy
+import hashlib
 import json
 from pathlib import Path
 import socket
 import uuid
 from unittest import mock
 
-from sqlalchemy import insert, select
+from PIL import Image
+from sqlalchemy import insert, select, delete
 
 from studio_platform.artifact_writer import ArtifactWriter, write_receipts
 from studio_platform.assets import AssetService, asset_table
@@ -18,8 +21,9 @@ from studio_platform.repository import (
     artifacts,
     budget_accounts,
     budget_reservations,
+    documents,
 )
-from studio_platform.storage import S3ObjectStore
+from studio_platform.storage import S3ObjectStore, StorageWriteUncertain
 from studio_platform.storage_asset_journal import artifact_accounting, receipts
 from studio_platform.storage_schema import create_storage_schema
 from test_platform_repository import LedgerCase
@@ -66,6 +70,398 @@ class CreationHistoryStorageTests(LedgerCase):
             "source.png",
             client_asset_id=client,
         )
+
+    def history_state(self, state):
+        from studio_platform.quick_chat import objects
+
+        with self.repo.transaction() as conn:
+            conn.execute(delete(objects).where(objects.c.id == "historical-parent"))
+            conn.execute(
+                insert(objects).values(
+                    id="historical-parent",
+                    tenant=self.scope.tenant_id,
+                    owner=self.scope.owner_id,
+                    session_id="historical-parent",
+                    kind="session",
+                    version=1,
+                    payload={
+                        "project_id": self.scope.project_id,
+                        "history": {"trash_state": state},
+                    },
+                    created_at=self.now,
+                    updated_at=self.now,
+                )
+            )
+
+    def test_readable_trashed_history_backfills_only_displays_and_preserves_writes(
+        self,
+    ):
+        with mock.patch.object(self.assets, "_prepare_renditions", return_value={}):
+            uploaded = self.upload()
+        original = self.assets.get(self.scope.owner_id, uploaded["id"])
+        receipt = self.assets.journal.get(self.scope.owner_id, uploaded["id"])
+        financial, objects = self.financial_snapshot(), copy.deepcopy(self.fake.objects)
+        self.history_state("trashed")
+        self.assertEqual(self.assets.get(self.scope.owner_id, uploaded["id"]), original)
+        with self.assertRaisesRegex(Conflict, "quick_chat_session_not_active"):
+            self.assets.journal.save(receipt)
+        with self.assertRaisesRegex(Conflict, "quick_chat_session_not_active"):
+            self.upload(client="fresh-upload")
+        result = self.assets.ensure_renditions(
+            self.scope.owner_id, uploaded["id"], expected_version=receipt["version"]
+        )
+        self.assertTrue(result["rendition_ready"])
+        current = self.assets.get(self.scope.owner_id, uploaded["id"])
+        for role in ("original", "model"):
+            self.assertEqual(current[role], original[role])
+        for key, value in objects.items():
+            self.assertEqual(self.fake.objects[key], value)
+        for role in ("thumb", "preview"):
+            spec = current[role]
+            with self.store.open(spec["key"]) as stream:
+                body = stream.read()
+            self.assertEqual(hashlib.sha256(body).hexdigest(), spec["sha256"])
+            with Image.open(io.BytesIO(body)) as image:
+                image.load()
+                self.assertEqual(image.format, "WEBP")
+        self.assertEqual(self.financial_snapshot(), financial)
+        usage = self.assets.usage(self.scope.owner_id)
+        shortened = self.assets.journal.get(self.scope.owner_id, uploaded["id"])
+        delta = -current["thumb"]["size_bytes"]
+        shortened["reserved"] += delta
+        with self.assertRaises(Conflict):
+            self.assets.journal.save_renditions(shortened, byte_delta=delta)
+        self.assertEqual(self.assets.usage(self.scope.owner_id), usage)
+        with self.assertRaisesRegex(Conflict, "rendition_receipt_version_changed"):
+            self.assets.ensure_renditions(
+                self.scope.owner_id, uploaded["id"], expected_version=receipt["version"]
+            )
+        self.assertEqual(
+            self.assets.ensure_renditions(self.scope.owner_id, uploaded["id"]), result
+        )
+        self.assertEqual(self.assets.usage(self.scope.owner_id), usage)
+
+    def test_display_save_refuses_original_identity_operation_and_quota_tampering(self):
+        with mock.patch.object(self.assets, "_prepare_renditions", return_value={}):
+            uploaded = self.upload()
+        receipt = self.assets.journal.get(self.scope.owner_id, uploaded["id"])
+        self.history_state("trashed")
+        before = self.assets.usage(self.scope.owner_id)
+        for field in ("original", "binding", "operation", "quota", "owner", "tenant"):
+            with self.subTest(field=field):
+                value = copy.deepcopy(receipt)
+                if field == "original":
+                    value["asset"]["original"]["sha256"] = "0" * 64
+                elif field == "binding":
+                    value["storage_binding"] = "0" * 64
+                elif field == "operation":
+                    value["operation_id"] = "0" * 32
+                elif field == "owner":
+                    value["owner"] = self.other.owner_id
+                elif field == "tenant":
+                    other = copy.copy(self.assets.journal)
+                    other.tenant = "foreign-tenant"
+                    with self.assertRaises(Conflict):
+                        other.save_renditions(value)
+                    continue
+                else:
+                    value["reserved"] += 1
+                with self.assertRaises(Conflict):
+                    self.assets.journal.save_renditions(value)
+        self.assertEqual(self.assets.usage(self.scope.owner_id), before)
+        unclaimed = copy.deepcopy(receipt)
+        unclaimed["busy"] = True
+        with self.assertRaises(Conflict):
+            self.assets.journal.save_renditions(unclaimed, active_delta=1)
+        self.assertEqual(self.assets.usage(self.scope.owner_id), before)
+        self.assertEqual(
+            self.assets.journal.get(self.scope.owner_id, uploaded["id"]), receipt
+        )
+
+    def copied_local_asset(self):
+        from studio_platform.storage import LocalObjectStore
+        from studio_platform.storage_migration import create_plan, apply_plan
+
+        root = Path(self.temp.name)
+        local = LocalObjectStore(root / "retained-original-local")
+        source_service = AssetService(
+            self.repo.engine,
+            local,
+            root / "asset-data",
+            tenant=self.scope.tenant_id,
+            max_bytes=2 * 1024 * 1024,
+        )
+        with mock.patch.object(source_service, "_prepare_renditions", return_value={}):
+            uploaded = source_service.upload(
+                self.scope.owner_id,
+                self.scope.project_id,
+                io.BytesIO(png()),
+                "source.png",
+            )
+        original = source_service.get(self.scope.owner_id, uploaded["id"])
+        receipt = source_service.journal.get(self.scope.owner_id, uploaded["id"])
+        plan_root = root / "original-copy"
+        create_plan(local.root, self.store.config, plan_root)
+        apply_plan(plan_root, self.store)
+        return uploaded, original, receipt, plan_root
+
+    def test_copied_local_original_keeps_binding_and_publishes_only_verified_r2_displays(
+        self,
+    ):
+        uploaded, original, receipt, plan_root = self.copied_local_asset()
+        root = Path(self.temp.name)
+        copied = copy.deepcopy(self.fake.objects)
+        financial = self.financial_snapshot()
+        self.history_state("trashed")
+        with self.assertRaisesRegex(Conflict, "rendition_original_receipt_unconfirmed"):
+            self.assets.ensure_renditions(
+                self.scope.owner_id, uploaded["id"], expected_version=receipt["version"]
+            )
+        save = self.assets.journal.save_renditions
+
+        def after_verified_put(value, **kwargs):
+            for role in ("thumb", "preview"):
+                if role in value["asset"]:
+                    self.assertIn(value["asset"][role]["key"], self.fake.objects)
+            return save(value, **kwargs)
+
+        put = self.store.put
+        lost = []
+
+        def lost_ack(key, source, **kwargs):
+            value = put(key, source, **kwargs)
+            if not lost:
+                lost.append(key)
+                raise StorageWriteUncertain(key)
+            return value
+
+        with mock.patch.object(
+            self.assets.journal, "save_renditions", side_effect=after_verified_put
+        ):
+            with (
+                mock.patch.object(self.store, "put", side_effect=lost_ack),
+                self.assertRaises(StorageWriteUncertain),
+            ):
+                self.assets.ensure_renditions(
+                    self.scope.owner_id,
+                    uploaded["id"],
+                    expected_version=receipt["version"],
+                    original_copy_receipts=plan_root,
+                )
+            pending = self.assets.journal.get(self.scope.owner_id, uploaded["id"])
+            self.assertEqual(pending["objects"]["thumb"]["key"], lost[0])
+            result = self.assets.ensure_renditions(
+                self.scope.owner_id,
+                uploaded["id"],
+                expected_version=pending["version"],
+                original_copy_receipts=plan_root,
+            )
+        self.assertTrue(result["rendition_ready"])
+        current = self.assets.journal.get(self.scope.owner_id, uploaded["id"])
+        self.assertEqual(current["storage_binding"], receipt["storage_binding"])
+        self.assertEqual(
+            current["rendition_backfill"]["target_binding"], self.assets.storage_binding
+        )
+        for role in ("original", "model"):
+            self.assertEqual(current["asset"][role], original[role])
+            self.assertEqual(current["objects"][role], receipt["objects"][role])
+        for key, value in copied.items():
+            self.assertEqual(self.fake.objects[key], value)
+        self.assertEqual(len(self.fake.objects) - len(copied), 2)
+        self.assertEqual(
+            sum(
+                name == "put" and details["Key"] == lost[0]
+                for name, details in self.fake.calls
+            ),
+            1,
+        )
+        self.assertEqual(self.financial_snapshot(), financial)
+        calls, usage = len(self.fake.calls), self.assets.usage(self.scope.owner_id)
+        self.assets.ensure_renditions(
+            self.scope.owner_id, uploaded["id"], original_copy_receipts=plan_root
+        )
+        self.assertEqual(self.assets.usage(self.scope.owner_id), usage)
+        self.assertFalse(any(name == "put" for name, _ in self.fake.calls[calls:]))
+        from contextlib import redirect_stdout
+        from studio_platform.rendition_backfill import main
+        from studio_platform.settings import Settings
+        from studio_platform.storage_config import S3Credentials
+
+        selected = self.store.config
+        settings = Settings(
+            root / "asset-data",
+            tenant_id=self.scope.tenant_id,
+            database_url=self.url,
+            max_upload_bytes=2 * 1024 * 1024,
+            storage_provider="r2",
+            storage_endpoint=selected.endpoint_url,
+            storage_region=selected.region,
+            storage_bucket=selected.bucket,
+            storage_profile=selected.profile,
+        )
+        with (
+            mock.patch.object(Settings, "from_environment", return_value=settings),
+            redirect_stdout(io.StringIO()) as output,
+        ):
+            self.assertEqual(
+                main(
+                    [
+                        "apply",
+                        "--owner",
+                        self.scope.owner_id,
+                        "--asset-id",
+                        uploaded["id"],
+                        "--receipt-version",
+                        str(
+                            self.assets.journal.get(
+                                self.scope.owner_id, uploaded["id"]
+                            )["version"]
+                        ),
+                        "--original-copy-receipts",
+                        str(plan_root),
+                    ],
+                    credentials_loader=lambda *args, **kwargs: S3Credentials(
+                        "fixture-access", "fixture-secret"
+                    ),
+                    store_factory=lambda *args: self.store,
+                ),
+                0,
+            )
+        self.assertEqual(json.loads(output.getvalue())["state"], "complete")
+        self.assertEqual(self.assets.usage(self.scope.owner_id), usage)
+        copy_file = plan_root / "copy-receipt.json"
+        changed = json.loads(copy_file.read_bytes())
+        changed["verified_at"] += 1
+        copy_file.write_text(json.dumps(changed), encoding="utf-8")
+        with self.assertRaisesRegex(Conflict, "rendition_copy_target_changed"):
+            self.assets.ensure_renditions(
+                self.scope.owner_id, uploaded["id"], original_copy_receipts=plan_root
+            )
+        self.assertEqual(self.assets.usage(self.scope.owner_id), usage)
+
+    def test_copied_pending_r2_key_tombstone_fences_the_old_local_receipt(self):
+        uploaded, _, receipt, plan_root = self.copied_local_asset()
+        self.history_state("trashed")
+        put = self.store.put
+
+        def lost_ack(key, source, **kwargs):
+            put(key, source, **kwargs)
+            raise StorageWriteUncertain(key)
+
+        with (
+            mock.patch.object(self.store, "put", side_effect=lost_ack),
+            self.assertRaises(StorageWriteUncertain),
+        ):
+            self.assets.ensure_renditions(
+                self.scope.owner_id,
+                uploaded["id"],
+                expected_version=receipt["version"],
+                original_copy_receipts=plan_root,
+            )
+        pending = self.assets.journal.get(self.scope.owner_id, uploaded["id"])
+        usage = self.assets.usage(self.scope.owner_id)
+        key = pending["objects"]["thumb"]["key"]
+        self.tombstones(specs=[{"key": key}], binding=self.assets.storage_binding)
+        with (
+            mock.patch.object(
+                self.store, "put", side_effect=AssertionError("No post-tombstone PUT")
+            ),
+            self.assertRaisesRegex(Conflict, "content_purging_or_purged"),
+        ):
+            self.assets.ensure_renditions(
+                self.scope.owner_id,
+                uploaded["id"],
+                expected_version=pending["version"],
+                original_copy_receipts=plan_root,
+            )
+        self.assertEqual(self.assets.usage(self.scope.owner_id), usage)
+        # Private audit access confirms the unknown write/accounting was retained.
+        self.assertEqual(
+            self.assets.journal.get(
+                self.scope.owner_id, uploaded["id"], include_deleted=True
+            ),
+            pending,
+        )
+
+    def test_display_update_keeps_real_trash_purge_and_unconfirmed_parent_fences(self):
+        with mock.patch.object(self.assets, "_prepare_renditions", return_value={}):
+            uploaded = self.upload()
+        receipt = self.assets.journal.get(self.scope.owner_id, uploaded["id"])
+        for state in ("purging", "purged", "unknown"):
+            self.history_state(state)
+            with (
+                self.subTest(state=state),
+                self.assertRaisesRegex(Conflict, "quick_chat_session_not_active"),
+            ):
+                self.assets.journal.save_renditions(copy.deepcopy(receipt))
+        self.history_state("trashed")
+        from studio_platform.universal_trash import target_key
+
+        target = dict(
+            kind="project", project_id=self.scope.project_id, id=self.scope.project_id
+        )
+        with self.repo.transaction() as conn:
+            conn.execute(
+                insert(documents).values(
+                    tenant_id=self.scope.tenant_id,
+                    owner_id=self.scope.owner_id,
+                    project_id="__trash",
+                    kind="trash_item",
+                    document_id=target_key(target),
+                    version=1,
+                    payload=dict(target=target, state="trashed"),
+                    updated_at=self.now,
+                )
+            )
+        with self.assertRaisesRegex(Conflict, "project_in_trash"):
+            self.assets.journal.save_renditions(copy.deepcopy(receipt))
+        with self.repo.transaction() as conn:
+            conn.execute(delete(documents).where(documents.c.kind == "trash_item"))
+            asset_target = dict(
+                kind="asset", project_id=self.scope.project_id, id=uploaded["id"]
+            )
+            conn.execute(
+                insert(documents).values(
+                    tenant_id=self.scope.tenant_id,
+                    owner_id=self.scope.owner_id,
+                    project_id="__trash",
+                    kind="trash_item",
+                    document_id=target_key(asset_target),
+                    version=1,
+                    payload=dict(target=asset_target, state="trashed"),
+                    updated_at=self.now,
+                )
+            )
+        with self.assertRaisesRegex(Conflict, "content_in_trash"):
+            self.assets.journal.save_renditions(copy.deepcopy(receipt))
+        from studio_platform.quick_chat import objects as chat_objects
+
+        with self.repo.transaction() as conn:
+            conn.execute(delete(documents).where(documents.c.kind == "trash_item"))
+            conn.execute(
+                delete(chat_objects).where(chat_objects.c.id == "historical-parent")
+            )
+            conn.execute(
+                insert(documents).values(
+                    tenant_id=self.scope.tenant_id,
+                    owner_id=self.scope.owner_id,
+                    project_id="__projects",
+                    kind="project",
+                    document_id=self.scope.project_id,
+                    version=1,
+                    payload=dict(integration_kind="quick_chat"),
+                    updated_at=self.now,
+                )
+            )
+        with self.assertRaisesRegex(Conflict, "quick_chat_session_binding_unconfirmed"):
+            self.assets.journal.save_renditions(copy.deepcopy(receipt))
+        with self.repo.transaction() as conn:
+            conn.execute(
+                delete(documents).where(documents.c.project_id == "__projects")
+            )
+        self.tombstones(asset_ids=[uploaded["id"]])
+        with self.assertRaisesRegex(Conflict, "content_purging_or_purged"):
+            self.assets.journal.save_renditions(copy.deepcopy(receipt))
 
     def tombstones(self, *, asset_ids=(), artifact_ids=(), specs=(), binding=None):
         with self.repo.transaction() as conn:
