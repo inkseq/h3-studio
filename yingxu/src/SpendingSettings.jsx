@@ -8,7 +8,7 @@ import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } fro
 import { createCloudClient } from './cloud-client.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { readBrowserLocale } from './i18n/locale.js';
-import StudioHeader from './StudioHeader.jsx';
+import StudioHeader, { useAccess, useAccountLabel } from './StudioHeader.jsx';
 import AccountPassword from './AccountPassword.jsx';
 import { CreditsPanel, useCredits } from './CreditsUI.jsx';
 import AdminConsole from './AdminConsole.jsx';
@@ -124,7 +124,13 @@ export default function SpendingSettings({ account }) {
     [draft, setDraft] = useState(null),
     [adminDraft, setAdminDraft] = useState(null);
   // Credits appear once the backend serves /v1/credits (#306).
-  const credits = useCredits(account);
+  const credits = useCredits(account),
+    access = useAccess(account),
+    who = useAccountLabel(account);
+  // Regular users never see dollars: in credit mode the USD budget tab is admin-only.
+  const showBudget = !(credits || access?.creditsEnabled) || !!admin;
+  // Hosted (WorkOS) sign-ins have no local password to change.
+  const hosted = access?.authentication === 'workos';
   const [busy, setBusy] = useState(false),
     [notice, setNotice] = useState(''),
     [error, setError] = useState(''),
@@ -262,7 +268,7 @@ export default function SpendingSettings({ account }) {
             ['defaults', 'settings.defaults', SlidersHorizontal],
             ['assistants', 'assistants.title', Bot],
             ...(credits || section === 'credits' ? [['credits', 'settings.credits', Coins]] : []),
-            ['budget', 'settings.budget', Wallet],
+            ...(showBudget ? [['budget', 'settings.budget', Wallet]] : []),
             ...(admin ? [['admin', 'settings.admin', ShieldCheck]] : []),
           ].map(([id, label, Icon]) => (
             <button
@@ -295,20 +301,32 @@ export default function SpendingSettings({ account }) {
           <div className="ops-tab-panel" hidden={section !== 'account'}>
             <div className="card-box">
               <div className="row tight">
-                <span className="avatar big">
-                  {account?.slice(0, 1).toLocaleUpperCase() || <UserRound size={21} />}
-                </span>
+                <span className="avatar big">{who.initial || <UserRound size={21} />}</span>
                 <div>
-                  <b>{account || t('settings.login')}</b>
+                  <b>{who.label || t('settings.login')}</b>
                   {admin && <small className="muted"> · {t('settings.admin')}</small>}
+                  {access?.email && access.email !== who.label && (
+                    <>
+                      <br />
+                      <small className="muted">{access.email}</small>
+                    </>
+                  )}
+                  {hosted && (
+                    <>
+                      <br />
+                      <small className="muted">{t('account.hostedSignIn')}</small>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
             {account && (
               <>
-                <div className="card-box">
-                  <AccountPassword inline busy={busy} />
-                </div>
+                {!hosted && (
+                  <div className="card-box">
+                    <AccountPassword inline busy={busy} />
+                  </div>
+                )}
                 <VideoCacheSettings account={account} />
                 <button
                   className="ghost danger"

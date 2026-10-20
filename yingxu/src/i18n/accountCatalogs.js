@@ -1,5 +1,8 @@
 export const accountCatalogs = {
   en: {
+    'account.myAccount': 'My account',
+    'account.hostedSignIn':
+      'Signs in with Google, GitHub or email. Manage sign-in methods on the sign-in page.',
     'account.copy1': 'My stories',
     'account.copy2': 'New story',
     'account.copy3': 'Story name',
@@ -347,6 +350,8 @@ export const accountCatalogs = {
       'Inkseq does not currently provide built-in AI scriptwriting, image or music generation, or real-time collaboration.',
   },
   zh: {
+    'account.myAccount': '我的账号',
+    'account.hostedSignIn': '通过 Google、GitHub 或邮箱登录，登录方式在登录页面管理。',
     'account.copy1': '我的故事',
     'account.copy2': '新建故事',
     'account.copy3': '故事名称',

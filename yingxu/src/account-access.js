@@ -21,6 +21,10 @@ export function accessFrom(me) {
   const operator = me?.operator_capacity || {};
   return {
     signedIn: Boolean(me && (me.username || me.account)),
+    displayName: displayName(me),
+    email: typeof me?.email === 'string' ? me.email : null,
+    authentication: typeof me?.authentication === 'string' ? me.authentication : null,
+    creditsEnabled: me?.credits?.enabled === true,
     gpus: !me?.machine && operator.view === true,
     admin: !me?.machine && operator.admin === true,
   };
@@ -40,4 +44,18 @@ export function hostedSignInEnabled(auth) {
 export function hostedSignInUrl(returnTo = '/') {
   const path = typeof returnTo === 'string' && /^\/(?!\/)/.test(returnTo) ? returnTo : '/';
   return '/api/auth/workos/start?return_to=' + encodeURIComponent(path);
+}
+
+// WorkOS users have an internal owner id (u_<hex>) as username; never show that to people.
+const INTERNAL_ID = /^u_[0-9a-f]{16,}$/i;
+export function displayName(me) {
+  if (!me) return null;
+  const name = me.display_name || me.name || me.email;
+  if (typeof name === 'string' && name.trim()) return name.trim();
+  const id = me.username || me.account;
+  return typeof id === 'string' && id && !INTERNAL_ID.test(id) ? id : null;
+}
+export function accountLabel(account, access, fallback) {
+  if (access?.displayName) return access.displayName;
+  return account && !INTERNAL_ID.test(account) ? account : fallback;
 }

@@ -92,7 +92,7 @@ const compiled = new Module(filename);
 compiled.filename = filename;
 compiled.paths = Module._nodeModulePaths(directory);
 compiled._compile(built.outputFiles[0].text, filename);
-test('sidebar exposes row-specific menus and top-level select/hide-test controls without legacy history dialog', () => {
+test('sidebar exposes row-specific menus and select control; hide-test stays admin-only', () => {
   const state = {
     account: 'owner',
     historyView: 'active',
@@ -111,7 +111,7 @@ test('sidebar exposes row-specific menus and top-level select/hide-test controls
   );
   assert.match(html, /More actions for Creation a/);
   assert.match(html, /More actions for Creation b/);
-  assert.match(html, /Hide test/);
+  assert.doesNotMatch(html, /Hide test/);
   assert.match(html, /Select multiple/);
   assert.doesNotMatch(html, /qc-history-dialog|qc-history-list|qc-history-tags/);
 });

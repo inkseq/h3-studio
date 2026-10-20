@@ -1,25 +1,27 @@
 // WorkOS AuthKit sign-in (h3-studio#305): Google, GitHub or email on a hosted page.
-// Shown only when /api/auth/config reports it; the username form stays for existing accounts.
-import React from 'react';
+// Shown only when /api/auth/config reports it. It sits first inside the existing username
+// form; the username fields after it stay folded away until "existing account" is opened.
+import React, { useState } from 'react';
 import { LogIn } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { hostedSignInEnabled, hostedSignInUrl } from './account-access.js';
 
 export default function HostedSignIn({ auth }) {
   const { t } = useI18n();
+  const [legacy, setLegacy] = useState(false);
   if (!hostedSignInEnabled(auth)) return null;
   const here = () => window.location.pathname + window.location.search;
   return (
-    <div className="hosted-sign-in">
+    <div className={'hosted-sign-in' + (legacy ? ' legacy-open' : '')}>
       <button
         type="button"
-        className="primary keep-label"
+        className="primary keep-label hosted-sign-in-main"
         onClick={() => window.location.assign(hostedSignInUrl(here()))}
       >
-        <LogIn size={16} aria-hidden="true" />
+        <LogIn size={17} aria-hidden="true" />
         {t('signIn.hosted')}
       </button>
-      <small className="muted">
+      <small className="muted hosted-sign-in-consent">
         {t('signIn.consentBefore')}
         <a href="/terms">{t('signIn.terms')}</a>
         {t('signIn.comma')}
@@ -28,9 +30,14 @@ export default function HostedSignIn({ auth }) {
         <a href="/content">{t('signIn.contentPolicy')}</a>
         {t('signIn.consentAfter')}
       </small>
-      <div className="hosted-sign-in-or" role="separator">
-        <span>{t('signIn.orUsername')}</span>
-      </div>
+      <button
+        type="button"
+        className="linkish hosted-sign-in-legacy"
+        aria-expanded={legacy}
+        onClick={() => setLegacy(!legacy)}
+      >
+        {t(legacy ? 'signIn.hideUsername' : 'signIn.orUsername')}
+      </button>
     </div>
   );
 }
