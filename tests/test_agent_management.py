@@ -4,10 +4,11 @@ import copy
 import json
 import secrets
 import time
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 from fastapi.testclient import TestClient
-from sqlalchemy import select, func
+from sqlalchemy import select, func, insert
 import test_platform_repository as ledger
 from studio_platform.api import create_app
 from studio_platform.auth import digest, Principal
@@ -180,6 +181,73 @@ class ManagementTests(ledger.LedgerCase):
         ]['breakdown']
         self.assertEqual(set(value), set(connected))
         self.assertEqual(connected['attribution_status'], 'recorded')
+
+    def test_connected_agent_never_inherits_unrelated_shared_legacy_projection(self):
+        self.repo.configure_budget(
+            "usage-shared", tenant_id=self.scope.tenant_id, limit_microusd=20_000_000
+        )
+        self.repo.configure_budget(
+            "usage-other",
+            tenant_id=self.scope.tenant_id,
+            owner_id=self.other.owner_id,
+            limit_microusd=20_000_000,
+        )
+        reference = str(uuid.uuid4())
+        with self.repo.transaction() as conn:
+            for account, ref, amount in (
+                ("usage-other", reference, 100),
+                ("usage-shared", reference, 11304170),
+                ("usage-shared", str(uuid.uuid4()), 500),
+            ):
+                conn.execute(
+                    insert(budget_reservations).values(
+                        id=str(uuid.uuid4()),
+                        account_id=account,
+                        reference_type="instance",
+                        reference_id=ref,
+                        amount_microusd=amount,
+                        state="reserved",
+                        created_at=self.now,
+                    )
+                )
+        grant, _, agent, _, _, _ = self.connect(cap=100_000)
+        usage = self.service.get(self.principal, grant['connection']['id'])['usage']
+        self.assertEqual(usage['projected_microusd'], 0)
+        self.assertEqual(usage['breakdown']['exposure_microusd'], 0)
+        self.assertEqual(usage['charge_breakdown']['exposure_microusd'], 0)
+        with self.repo.engine.connect() as conn:
+            before = list(conn.execute(select(budget_reservations)).mappings())
+        self.repo.create_job(
+            self.scope,
+            self.plan(cost=60_000)['id'],
+            "agent-own-original",
+            budget_account_ids=("owner-budget",),
+            spending_actor=agent.actor_id,
+        )
+        usage = self.service.get(self.principal, grant['connection']['id'])['usage']
+        self.assertEqual(usage['projected_microusd'], 60_000)
+        with self.assertRaisesRegex(BudgetExceeded, 'connection_daily_limit_reached'):
+            self.repo.create_job(
+                self.scope,
+                self.plan(cost=60_000)['id'],
+                "agent-own-over-cap",
+                budget_account_ids=("owner-budget",),
+                spending_actor=agent.actor_id,
+            )
+        with self.repo.engine.connect() as conn:
+            for row in before:
+                self.assertEqual(
+                    dict(
+                        conn.execute(
+                            select(budget_reservations).where(
+                                budget_reservations.c.id == row['id']
+                            )
+                        )
+                        .mappings()
+                        .one()
+                    ),
+                    dict(row),
+                )
 
     def test_pause_resume_revoke_stale_principal_and_accepted_replay(self):
         grant, result, agent, token, _, _ = self.connect()

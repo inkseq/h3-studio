@@ -165,9 +165,9 @@ class SpendingProjectionTests(LedgerCase):
         self.reservation(account="shared", amount=500, owner=None, actor=None)
         account = self.usage()["breakdown"]
         self.assertEqual(account["exposure_microusd"], 1000)
-        self.assertEqual(account["unattributed_exposure_microusd"], 500)
+        self.assertEqual(account["unattributed_exposure_microusd"], 0)
         self.assertEqual(account["unattributed_actor_exposure_microusd"], 300)
-        for actor, expected, original in (("key:a", 100, 900), ("key:b", 200, 1000)):
+        for actor, expected, conservative in (("key:a", 100, 400), ("key:b", 200, 500)):
             usage = self.usage(actor)
             value = usage["breakdown"]
             self.assertEqual(value["attribution_scope"], "connection")
@@ -175,8 +175,98 @@ class SpendingProjectionTests(LedgerCase):
             self.assertEqual(value["reserved_microusd"], expected)
             self.assertNotIn("unattributed_exposure_microusd", value)
             self.assertNotIn("unattributed_actor_exposure_microusd", value)
-            # Display correction cannot silently relax the existing cap policy.
-            self.assertEqual(usage["projected_microusd"], original)
+            self.assertEqual(usage["projected_microusd"], expected)
+            # Unknown actors of this owner still count for internal caps.
+            with self.repo.engine.connect() as conn:
+                self.assertEqual(
+                    daily_projection(
+                        conn,
+                        self.scope.tenant_id,
+                        self.scope.owner_id,
+                        self.now,
+                        actor_id=actor,
+                    ),
+                    conservative,
+                )
+
+    def test_fresh_owner_ignores_other_owned_shared_siblings_and_ownerless_history(
+        self,
+    ):
+        ref = self.reservation(
+            account="other-owner", amount=100, owner=None, actor=None
+        )
+        self.reservation(
+            ident=ref, account="shared", amount=11304170, owner=None, actor=None
+        )
+        self.reservation(account="shared", amount=600, owner=None, actor=None)
+        self.reservation(
+            account="shared",
+            amount=700,
+            state="invoice_pending",
+            created=self.now - 86400,
+            owner=None,
+            actor=None,
+        )
+        self.reservation(
+            account="shared",
+            amount=800,
+            state="settled",
+            actual=800,
+            owner=None,
+            actor=None,
+        )
+        before = self.snapshot()
+        for actor in (None, "key:fresh"):
+            usage = self.usage(actor, owner="u_fb8f_fresh")
+            self.assertEqual(usage["projected_microusd"], 0)
+            for field in ("breakdown", "charge_breakdown"):
+                self.assertEqual(usage[field]["exposure_microusd"], 0)
+                self.assertEqual(
+                    usage[field].get("unattributed_exposure_microusd", 0), 0
+                )
+            with self.repo.engine.connect() as conn:
+                self.assertEqual(
+                    daily_projection(
+                        conn,
+                        self.scope.tenant_id,
+                        "u_fb8f_fresh",
+                        self.now,
+                        actor_id=actor,
+                    ),
+                    0,
+                )
+        self.assertEqual(self.usage(owner="supervan")["projected_microusd"], 11304170)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_owned_legacy_reference_keeps_larger_shared_layer_without_job_or_origin(
+        self,
+    ):
+        ref = self.reservation(amount=100, owner=None, actor=None)
+        self.reservation(
+            ident=ref, account="shared", amount=120, owner=None, actor=None
+        )
+        before = self.snapshot()
+        self.assertEqual(self.usage()["projected_microusd"], 120)
+        self.assertEqual(self.usage("key:unknown")["projected_microusd"], 0)
+        with self.repo.engine.connect() as conn:
+            self.assertEqual(
+                daily_projection(
+                    conn, self.scope.tenant_id, self.scope.owner_id, self.now
+                ),
+                120,
+            )
+            self.assertEqual(
+                daily_projection(
+                    conn,
+                    self.scope.tenant_id,
+                    self.scope.owner_id,
+                    self.now,
+                    actor_id="key:unknown",
+                ),
+                120,
+            )
+        self.assertEqual(self.usage(owner="supervan")["projected_microusd"], 0)
+        self.assertEqual(self.snapshot(), before)
 
     def test_historical_real_job_actor_and_owner_resolve_shared_only_layers(self):
         scope = Scope(self.scope.tenant_id, "superdan", "project-1", "key:historical")
@@ -239,13 +329,19 @@ class SpendingProjectionTests(LedgerCase):
         self.assertEqual(value["unconfirmed_reference_count"], 2)
         self.assertEqual(value["unconfirmed_exposure_microusd"], 300)
         self.assertEqual(value["exposure_microusd"], 300)
-        self.assertEqual(self.usage()["projected_microusd"], 260)
+        self.assertEqual(self.usage()["projected_microusd"], 300)
 
     def test_unknown_state_and_conflicting_ownership_fail_without_writes(self):
         ref = self.reservation(state="unexpected")
         before = self.snapshot()
         with self.assertRaisesRegex(BudgetExceeded, "spending_usage_unconfirmed"):
             self.usage()
+        with self.repo.engine.connect() as conn:
+            with self.assertRaisesRegex(BudgetExceeded, "spending_usage_unconfirmed"):
+                daily_projection(
+                    conn, self.scope.tenant_id, self.scope.owner_id, self.now
+                )
+        self.assertEqual(self.usage(owner="u_fresh")["projected_microusd"], 0)
         self.assertEqual(self.snapshot(), before)
         with self.repo.transaction() as conn:
             conn.execute(
@@ -257,6 +353,31 @@ class SpendingProjectionTests(LedgerCase):
         before = self.snapshot()
         with self.assertRaisesRegex(BudgetExceeded, "spending_usage_unconfirmed"):
             self.usage()
+        with self.repo.engine.connect() as conn:
+            with self.assertRaisesRegex(BudgetExceeded, "spending_usage_unconfirmed"):
+                daily_projection(
+                    conn, self.scope.tenant_id, self.scope.owner_id, self.now
+                )
+        self.assertEqual(self.usage(owner="u_fresh")["projected_microusd"], 0)
+        self.assertEqual(self.snapshot(), before)
+
+    def test_foreign_tenant_origin_conflicting_with_owned_layer_fails_closed(self):
+        ref = self.reservation(amount=100)
+        with self.repo.transaction() as conn:
+            conn.execute(
+                update(spending_origins)
+                .where(spending_origins.c.reference_id == ref)
+                .values(tenant_id="another-tenant")
+            )
+        before = self.snapshot()
+        with self.assertRaisesRegex(BudgetExceeded, "spending_usage_unconfirmed"):
+            self.usage()
+        with self.repo.engine.connect() as conn:
+            with self.assertRaisesRegex(BudgetExceeded, "spending_usage_unconfirmed"):
+                daily_projection(
+                    conn, self.scope.tenant_id, self.scope.owner_id, self.now
+                )
+        self.assertEqual(self.usage(owner="u_fresh")["projected_microusd"], 0)
         self.assertEqual(self.snapshot(), before)
 
     def _sydney_boundary(self, now, hours):
