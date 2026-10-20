@@ -2,7 +2,7 @@ import { ChatDialog } from './QuickChatControls.jsx';
 import { cloudSystemMessage } from './cloud-model.js';
 import { exportSrt } from './caption-model.js';
 import { chapterHandover, shotListCsv } from './handover-model.js';
-import StudioHeader from './StudioHeader.jsx';
+import StudioHeader, { useAccountLabel } from './StudioHeader.jsx';
 import { LowCreditsDialog } from './CreditsUI.jsx';
 import { LegalPage, PricingPage } from './PublicPages.jsx';
 import Library from './Library.jsx';
@@ -161,6 +161,7 @@ function SeriesApp({ sidebarView, onSidebarView }) {
     [search, setSearch] = useState(''),
     [legacyGuide, setLegacyGuide] = useState(false);
   const c = useCloud(),
+    who = useAccountLabel(c.account),
     trash = useTrash();
   const storyboardActive = true;
   const importRef = useRef(),
@@ -327,17 +328,13 @@ function SeriesApp({ sidebarView, onSidebarView }) {
   const chapterList = p.entities.filter((e) => e.type === 'chapter').sort(byOrder);
   const accountMenu = (
     <details className="story-account-menu">
-      <summary aria-label={c.account || t('story.copy14')} title={c.account || t('story.copy14')}>
+      <summary aria-label={who.label || t('story.copy14')} title={who.label || t('story.copy14')}>
         <span className="avatar">
-          {c.account ? (
-            c.account[0].toLocaleUpperCase()
-          ) : (
-            <UserRound size={17} aria-hidden="true" />
-          )}
+          {c.account ? who.initial : <UserRound size={17} aria-hidden="true" />}
         </span>
       </summary>
       <div className="story-account-panel">
-        <b>{c.account || t('story.copy14')}</b>
+        <b>{who.label || t('story.copy14')}</b>
         <button onClick={() => (c.account ? navigateApp('/settings') : open({ type: 'cloud' }))}>
           <FolderOpen size={15} />
           {c.account ? t('settings.title') : t('story.copy3')}

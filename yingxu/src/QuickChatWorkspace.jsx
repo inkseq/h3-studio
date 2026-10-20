@@ -2,7 +2,7 @@ import { usePageActive, useAppLocation } from './AppRouteCache.jsx';
 import { assistantLabel, modelsVisible } from './model-visibility.js';
 import HostedSignIn from './HostedSignIn.jsx';
 import { navigateApp } from './app-navigation.js';
-import StudioHeader from './StudioHeader.jsx';
+import StudioHeader, { useAccess, useAccountLabel } from './StudioHeader.jsx';
 import QuickChatPreferences from './QuickChatPreferences.jsx';
 import { checkedPreferences, createConversationFiles } from './quick-chat-takes.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -139,6 +139,7 @@ function settingsForMode(capabilities, current, mode) {
 function Login({ onClose, onDone }) {
   const { t, locale } = useI18n();
   const c = useCloud(),
+    who = useAccountLabel(c.account),
     [username, setUsername] = useState(''),
     [password, setPassword] = useState(''),
     [error, setError] = useState('');
@@ -148,7 +149,7 @@ function Login({ onClose, onDone }) {
         <>
           <p>
             {t('workspace.copy1')}
-            <b>{c.account}</b>
+            <b>{who.label}</b>
           </p>
           <p>{t('workspace.copy118')}</p>
           <button onClick={() => quietly(cloud.logout().then(onClose))}>
@@ -234,6 +235,8 @@ export default function QuickChatWorkspace() {
     if (pageActive) document.title = t('workspace.copy117');
   }, [locale, pageActive]);
   const c = useCloud(),
+    who = useAccountLabel(c.account),
+    access = useAccess(c.account),
     controller = useMemo(() => createQuickChatController(), []),
     state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState),
     [prompt, setPrompt] = useState(() => readDraft(null, null)),
@@ -1493,14 +1496,10 @@ export default function QuickChatWorkspace() {
             onClick={() =>
               c.account ? navigateApp('/settings?section=account') : setDialog('login')
             }
-            aria-label={c.account || t('story.copy14')}
-            title={c.account || t('story.copy14')}
+            aria-label={who.label || t('story.copy14')}
+            title={who.label || t('story.copy14')}
           >
-            {c.account ? (
-              c.account.slice(0, 1).toLocaleUpperCase()
-            ) : (
-              <UserRound size={17} aria-hidden="true" />
-            )}
+            {c.account ? who.initial : <UserRound size={17} aria-hidden="true" />}
           </button>
         }
       />
@@ -1534,26 +1533,29 @@ export default function QuickChatWorkspace() {
             <Bot size={14} />
             {t('quickView.handOff')}
           </button>
-          <a className="ghost small qc-machines" href="/operator">
-            <span>{t('quickView.availableMachines')}</span>
-            {['fl', 'ref'].map((mode) => {
-              const status = modeAvailability(
-                state.availability,
-                state.capabilities,
-                settings,
-                mode,
-                undefined,
-                locale,
-              );
-              return (
-                <span className="quick-machine-mode" key={mode}>
-                  <i className={status.available ? 'ok' : ''} />
-                  {t(mode === 'fl' ? 'v2.firstLast' : 'v2.reference')} ·{' '}
-                  {t(status.available ? 'quickView.machineReady' : 'quickView.machineMissing')}
-                </span>
-              );
-            })}
-          </a>
+          {/* Machines are an admin concern; regular users only see queue and credits. */}
+          {access?.gpus && (
+            <a className="ghost small qc-machines" href="/operator">
+              <span>{t('quickView.availableMachines')}</span>
+              {['fl', 'ref'].map((mode) => {
+                const status = modeAvailability(
+                  state.availability,
+                  state.capabilities,
+                  settings,
+                  mode,
+                  undefined,
+                  locale,
+                );
+                return (
+                  <span className="quick-machine-mode" key={mode}>
+                    <i className={status.available ? 'ok' : ''} />
+                    {t(mode === 'fl' ? 'v2.firstLast' : 'v2.reference')} ·{' '}
+                    {t(status.available ? 'quickView.machineReady' : 'quickView.machineMissing')}
+                  </span>
+                );
+              })}
+            </a>
+          )}
           <a className="ghost small qc-trash-btn" href="/trash?kind=conversation">
             <Trash2 size={13} />
             {t('history.copy29')}

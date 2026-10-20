@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useAccess } from './StudioHeader.jsx';
 import { createPortal } from 'react-dom';
 import { Archive, CheckSquare, MoreHorizontal, Pencil, Tag, Trash2 } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -131,6 +132,8 @@ export function QuickChatRowActions({
   );
 }
 export default function QuickChatSidebar({ state, controller, busy, onSelect, active = true }) {
+  // Test-record filtering is an operator tool.
+  const access = useAccess(state.account);
   const { t, locale } = useI18n(),
     [menu, setMenu] = useState(null),
     [editing, setEditing] = useState(null),
@@ -259,15 +262,17 @@ export default function QuickChatSidebar({ state, controller, busy, onSelect, ac
           <CheckSquare size={13} />
           {t(selecting ? 'history.copy26' : 'history.copy27')}
         </button>
-        <label>
-          <input
-            type="checkbox"
-            disabled={locked || !state.account}
-            checked={state.hideTests}
-            onChange={(event) => safely(() => controller.hideTests(event.target.checked))}
-          />
-          {t('history.copy28')}
-        </label>
+        {access?.admin && (
+          <label>
+            <input
+              type="checkbox"
+              disabled={locked || !state.account}
+              checked={state.hideTests}
+              onChange={(event) => safely(() => controller.hideTests(event.target.checked))}
+            />
+            {t('history.copy28')}
+          </label>
+        )}
       </div>
       {selecting && (
         <div className="quick-sidebar-selection">
