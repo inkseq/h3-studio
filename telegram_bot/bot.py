@@ -64,6 +64,7 @@ BRIEF_ICONS = ["🎉", "🆕", "🎁", "☕"]
 ISSUES = {"dark": ("🔆 太暗", "画面太暗"), "slow": ("🐢 太慢", "节奏太慢"),
           "face": ("🙂 人物怪", "人物变形")}  # fmt: skip
 QUIET_SECONDS = 3.5  # wait this long after the last photo/text before acting
+MIN_PHOTOS = 3  # fewer than this: ask for more instead of starting on our own
 HISTORY_LIMIT = 10
 NEED_PHOTOS = "先发几张店里的照片吧：门头、产品、环境、人都可以。"
 SECOND_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:秒|s\b|sec)|(\d+):(\d{2})", re.I)
@@ -269,6 +270,7 @@ class Bot:
         rows = [
             [("🎬 开始生成", "gen"), ("✏️ 改一下", "revise")],
             [("🔍 看每一段", "parts"), ("📷 照片名字", "photos")],
+            [("📝 看每段提示词", "prompts")],
         ]
         link = self.adapter.web_link(board)
         if link:
@@ -279,6 +281,19 @@ class Bot:
             self.adapter.grid(board),
             f"{lead}\n\n{timeline_text(board)}\n\n满意就点「开始生成」；想改直接说，比如「第2段用照片3」「短一点」。",
             rows,
+        )
+
+    def _send_prompts(self, chat_id, board):
+        """Every part's full generation description in one message."""
+        blocks = [
+            f"第{n}段 {clock(start)}–{clock(end)} · {card.seconds:g}秒 · 照片{card.photo}{MODES[card.mode]}\n{card.prompt}"
+            for n, card, start, end in board.timeline()
+        ]
+        self.api.send_message(
+            chat_id,
+            "📝 每一段的提示词（生成时就按这个来）：\n\n" + "\n\n".join(blocks)
+            + "\n\n想改哪段就说，比如「第2段改成咖啡师倒拉花」。",
+            [[("⬅️ 回到方案", "board")]],
         )
 
     def _send_photos(self, chat_id, board, lead="📷 我认出了这些照片："):
@@ -420,7 +435,16 @@ class Bot:
         elif name == "open":
             self._open(chat_id, state, arg)
         elif name == "start" and phase == "collecting":
-            self._start(chat_id, state)
+            if state["photos"] and not state["brief"]:
+                self._ask_brief(chat_id, state)
+            else:
+                self._start(chat_id, state)
+        elif name == "more" and phase == "collecting":
+            self._close(chat_id, state.get("picks_msg"), "好，等你再发几张。")
+            state["picks_msg"] = None
+            self.store.save(chat_id, state)
+        elif name == "prompts" and phase in ("proposed", "confirm", "delivered"):
+            self._send_prompts(chat_id, board)
         elif name == "brief" and phase == "collecting" and n and n <= len(BRIEFS):
             state["brief"] = BRIEFS[n - 1]
             self._start(chat_id, state)
@@ -554,16 +578,31 @@ class Bot:
             self._waiting.discard(chat_id)
             state["last_input"] = None
             self.store.save(chat_id, state)
-            if state["photos"] and state["brief"]:
-                self._start(chat_id, state)
-            elif state["photos"]:
-                buttons = [[(f"{BRIEF_ICONS[i]} {b}", f"brief:{i + 1}") for i, b in enumerate(BRIEFS[:2])],
-                           [(f"{BRIEF_ICONS[i]} {b}", f"brief:{i + 1}") for i, b in enumerate(BRIEFS[2:], 2)]]  # fmt: skip
-                sent = self.api.send_message(chat_id, "想做什么样的片子？点一个，或者直接说一句。", buttons)
+            if len(state["photos"]) < MIN_PHOTOS and state["photos"]:
+                # Too few photos to tell a story: ask once, never start on our own.
+                count = len(state["photos"])
+                sent = self.api.send_message(
+                    chat_id,
+                    f"现在只有 {count} 张照片，好几段会用同一张。\n"
+                    "再发几张门头、产品、店里、人的照片，片子会好看很多。",
+                    [[("📷 我再发几张", "more"), ("▶️ 就用这些", "start")]],
+                )
                 state["picks_msg"] = sent["message_id"]
                 self.store.save(chat_id, state)
+            elif state["photos"] and state["brief"]:
+                self._start(chat_id, state)
+            elif state["photos"]:
+                self._ask_brief(chat_id, state)
             else:
                 self.api.send_message(chat_id, NEED_PHOTOS)
+
+    def _ask_brief(self, chat_id, state):
+        self._close(chat_id, state.get("picks_msg"), "👌 好，就用这些照片。")
+        buttons = [[(f"{BRIEF_ICONS[i]} {b}", f"brief:{i + 1}") for i, b in enumerate(BRIEFS[:2])],
+                   [(f"{BRIEF_ICONS[i]} {b}", f"brief:{i + 1}") for i, b in enumerate(BRIEFS[2:], 2)]]  # fmt: skip
+        sent = self.api.send_message(chat_id, "想做什么样的片子？点一个，或者直接说一句。", buttons)
+        state["picks_msg"] = sent["message_id"]
+        self.store.save(chat_id, state)
 
     def _start(self, chat_id, state):
         """Photos and a sentence become one complete proposal."""

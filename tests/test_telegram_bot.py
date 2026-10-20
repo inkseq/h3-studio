@@ -165,9 +165,33 @@ class TelegramBotTest(unittest.TestCase):
         self.assertEqual(self.labels(proposal)[:2], ["🎬 开始生成", "✏️ 改一下"])
         self.assertEqual(self.board().brief, "咖啡店开业；温馨一点")
 
+    def test_too_few_photos_ask_before_starting(self):
+        self.bot.handle(photo(OWNER, 1))
+        self.bot.handle(private(OWNER, text="咖啡店开业"))
+        self.quiet()
+        ask = self.api.sent[-1]
+        self.assertIn("只有 1 张照片", ask["text"])
+        self.assertEqual(self.labels(ask), ["📷 我再发几张", "▶️ 就用这些"])
+        self.assertEqual(self.bot.store.load(OWNER)["phase"], "collecting")
+        self.bot.handle(tap(OWNER, "more"))
+        self.assertIn("好，等你再发几张。", self.api.edits)
+        for n in (2, 3):
+            self.bot.handle(photo(OWNER, n))
+        self.quiet()  # three photos and a sentence: starts by itself
+        self.assertIn("方案排好了", self.api.sent[-1]["text"])
+
+    def test_prompts_for_every_part_in_one_message(self):
+        board = self.cards(3, "咖啡店开业")
+        self.bot.handle(tap(OWNER, "prompts"))
+        text = self.api.sent[-1]["text"]
+        for number, card in enumerate(board.cards, 1):
+            self.assertIn(f"第{number}段", text)
+            self.assertIn(card.prompt, text)
+
     def test_photos_without_words_offer_quick_picks(self):
         self.bot.handle(photo(OWNER, 1))
         self.quiet()
+        self.bot.handle(tap(OWNER, "start"))  # "就用这些"
         picks = self.api.sent[-1]
         self.assertIn("想做什么样的片子", picks["text"])
         self.assertIn("🎉 开业宣传", self.labels(picks))
@@ -303,7 +327,7 @@ class TelegramBotTest(unittest.TestCase):
         self.assertIn("/help", self.api.sent[-1]["text"])
 
     def test_new_archives_and_find_reopens(self):
-        first = self.cards(2, "咖啡店开业")
+        first = self.cards(3, "咖啡店开业")
         self.bot.handle(private(OWNER, text="/new"))
         self.assertIn("已存档", self.api.sent[-1]["text"])
         self.bot.handle(private(OWNER, text="/find"))
