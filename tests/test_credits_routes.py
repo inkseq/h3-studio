@@ -1,6 +1,7 @@
 """Public quote, owner isolation and audited pricing/credit APIs; offline SQL."""
 
 from concurrent.futures import ThreadPoolExecutor
+import copy
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -24,7 +25,9 @@ from studio_platform.credits_pricing import (
 )
 from studio_platform.credits_routes import CreditAPI
 from studio_platform.identity_schema import admin_audit, metadata, users
+from studio_platform.render_plans import compile_film_export, compile_render
 from test_platform_repository import LedgerCase
+import test_platform_render_plans as render_fixtures
 
 
 class CreditsRouteTests(LedgerCase):
@@ -214,15 +217,102 @@ class CreditsRouteTests(LedgerCase):
                 ("refine", 62),
             )
 
-    def test_cpu_assembly_is_free_only_with_server_render_backend(self):
+    def render_compiled(self):
+        compiled, _, blockers, _ = compile_render(
+            render_fixtures.BODY, render_fixtures.story(), render_fixtures.source
+        )
+        self.assertFalse(blockers)
+        return compiled
+
+    def test_real_chapter_compiler_quotes_zero_with_credits_enabled(self):
+        revision = self.enable()
+        compiled = self.render_compiled()
+        original = copy.deepcopy(compiled)
+        self.assertNotIn("frames", compiled["output_spec"])
+        value = self.get_quote(compiled, execution={"backend": "cpu-render"})
+        self.assertEqual(
+            (value["tier"], value["credits"], value["frames"], value["fps"]),
+            ("render", 0, 48, 24),
+        )
+        self.assertTrue(value["enforced"])
+        self.assertEqual(value["price_revision"], revision)
+        self.assertEqual(value["output_seconds"], 2)
+        self.assertEqual(compiled, original)
+
+    def test_real_film_export_compiler_quotes_all_chapter_frames_at_zero(self):
+        revision = self.enable()
+        chapter = self.render_compiled()
+        receipt = {
+            "chapter_id": "chapter-one",
+            "video": next(iter(chapter["sources"].values())),
+            "audio": None,
+            "output_spec": chapter["output_spec"],
+        }
+        compiled = compile_film_export(
+            "story-one", "film-one", [receipt, {**receipt, "chapter_id": "chapter-two"}]
+        )
+        self.assertEqual(compiled["request"]["render"]["version"], 4)
+        self.assertNotIn("frames", compiled["output_spec"])
+        value = self.get_quote(compiled, execution={"backend": "cpu-render"})
+        self.assertEqual(
+            (value["tier"], value["credits"], value["frames"], value["output_seconds"]),
+            ("render", 0, 96, 4),
+        )
+        self.assertEqual(value["price_revision"], revision)
+        self.assertEqual(public_quote({"credit_quote": value})["credits"], 0)
+
+    def test_generation_cannot_borrow_render_duration_or_free_backend(self):
         self.enable()
-        render = self.compiled(recipe_id="chapter-roughcut-v1")
-        self.assertGreater(self.get_quote(render)["credits"], 0)
-        free = self.get_quote(render, execution={"backend": "cpu-render"})
-        self.assertEqual((free["tier"], free["credits"]), ("render", 0))
         self.assertGreater(
             self.get_quote(execution={"backend": "cpu-render"})["credits"], 0
         )
+        render = self.render_compiled()
+        for compiled, execution in (
+            (render, None),
+            (render, {"backend": "other"}),
+            (self.compiled(recipe_id="chapter-roughcut-v1"), {"backend": "cpu-render"}),
+            (
+                self.compiled(output_spec={**render["output_spec"]}),
+                {"backend": "cpu-render"},
+            ),
+        ):
+            with self.subTest(recipe=compiled["recipe_id"], execution=execution):
+                with self.assertRaisesRegex(PricingError, "credit_quote_invalid"):
+                    self.get_quote(compiled, execution=execution)
+
+    def test_quotes_reject_conflicting_duration_fields_for_render_and_generation(self):
+        self.enable()
+        for compiled, execution, other_key in (
+            (self.render_compiled(), {"backend": "cpu-render"}, "frames"),
+            (self.compiled(), None, "frame_count"),
+        ):
+            for other in (1, True, "124", None):
+                with self.subTest(recipe=compiled["recipe_id"], other=other):
+                    changed = copy.deepcopy(compiled)
+                    changed["output_spec"][other_key] = other
+                    with self.assertRaisesRegex(PricingError, "credit_quote_invalid"):
+                        self.get_quote(changed, execution=execution)
+
+    def test_quotes_reject_invalid_canonical_frames_and_fps(self):
+        self.enable()
+        for compiled, execution, frame_key in (
+            (self.render_compiled(), {"backend": "cpu-render"}, "frame_count"),
+            (self.compiled(), None, "frames"),
+        ):
+            for field, values in (
+                (frame_key, (None, True, False, 0, -1, 1.5, "48", 10_000_001)),
+                ("fps", (None, True, 0, -1, 1.5, "24", 241)),
+            ):
+                for invalid in values:
+                    with self.subTest(
+                        recipe=compiled["recipe_id"], field=field, value=invalid
+                    ):
+                        changed = copy.deepcopy(compiled)
+                        changed["output_spec"][field] = invalid
+                        with self.assertRaisesRegex(
+                            PricingError, "credit_quote_invalid"
+                        ):
+                            self.get_quote(changed, execution=execution)
 
     def test_new_price_does_not_reprice_frozen_plan_and_projection_is_read_only(self):
         revision = self.enable()

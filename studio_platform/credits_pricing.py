@@ -262,17 +262,6 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
     ).first()
     if user is None or user.status != "active":
         raise PricingError("account_unavailable", "The account is unavailable.", 403)
-    output = compiled.get("output_spec", {})
-    frames, fps = output.get("frames"), output.get("fps", FPS)
-    if (
-        type(frames) is not int
-        or not 1 <= frames <= 10_000_000
-        or type(fps) is not int
-        or not 1 <= fps <= 240
-    ):
-        raise PricingError(
-            "credit_quote_invalid", "Compiled output duration is unavailable."
-        )
     from .render_plans import RECIPE as RENDER_RECIPE
 
     render = (
@@ -280,6 +269,26 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
         and isinstance(execution, dict)
         and execution.get("backend") == "cpu-render"
     )
+    output = compiled.get("output_spec", {})
+    # CPU chapter/Film compilers use frame_count; generation still requires
+    # its original frames contract, even when a caller supplies a render tier.
+    frame_key, other_key = (
+        ("frame_count", "frames") if render else ("frames", "frame_count")
+    )
+    frames, fps = output.get(frame_key), output.get("fps", FPS)
+    if (
+        type(frames) is not int
+        or not 1 <= frames <= 10_000_000
+        or type(fps) is not int
+        or not 1 <= fps <= 240
+        or (
+            other_key in output
+            and (type(output[other_key]) is not int or output[other_key] != frames)
+        )
+    ):
+        raise PricingError(
+            "credit_quote_invalid", "Compiled output duration is unavailable."
+        )
     request = compiled.get("request", {})
     width, height = output.get("width"), output.get("height")
     standard = (
