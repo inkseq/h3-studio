@@ -67,6 +67,41 @@ class QualityHTTPTests(unittest.TestCase):
     setUp = fixture.ApiTests.setUp
     login = fixture.ApiTests.login
 
+    def test_builtin_openapi_projects_per_role_without_changing_cached_schema(self):
+        original = self.app.openapi()
+        frozen = copy.deepcopy(original)
+        self.assertIn(
+            RECIPE,
+            original["components"]["schemas"]["CreateCardRequest"]["properties"][
+                "recipe_id"
+            ]["anyOf"][0]["enum"],
+        )
+        for role in ("admin", "user", "machine", "admin"):
+            with self.subTest(role=role):
+                self._identity(role)
+                response = self.client.get("/openapi.json")
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.headers["Cache-Control"], "no-store")
+                public = response.json()
+                for name in ("CreateCardRequest", "ReviseCardRequest"):
+                    recipe = public["components"]["schemas"][name]["properties"][
+                        "recipe_id"
+                    ]
+                    if role == "admin":
+                        self.assertIn(RECIPE, recipe["anyOf"][0]["enum"])
+                        self.assertEqual(public, frozen)
+                    else:
+                        self.assertEqual(
+                            recipe["anyOf"][0]["enum"], ["video-fl-v1", "video-ref-v1"]
+                        )
+                        self.assertNotIn(RECIPE, str(public["components"]["schemas"]))
+                self.assertIs(self.app.openapi(), original)
+                self.assertEqual(original, frozen)
+        self._identity("anonymous")
+        response = self.client.get("/openapi.json")
+        self.assertEqual(response.status_code, 401)
+        self.assertNotIn(RECIPE, response.text)
+
     def _identity(self, role):
         self.client.cookies.clear()
         self.client.headers.pop("Authorization", None)

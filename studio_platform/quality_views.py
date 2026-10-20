@@ -677,6 +677,11 @@ def schema(value, principal=None, settings=None):
                 key: schema(item, principal, settings)
                 for key, item in result[container].items()
             }
+    if isinstance(result.get("components", {}).get("schemas"), dict):
+        result["components"]["schemas"] = {
+            name: schema(component, principal, settings)
+            for name, component in result["components"]["schemas"].items()
+        }
     for container in ("allOf", "anyOf", "oneOf"):
         if isinstance(result.get(container), list):
             result[container] = [

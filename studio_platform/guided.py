@@ -1151,7 +1151,7 @@ def register_routes(app):
             "generation_availability": public_guide()["generation_availability"],
             "steps": [
                 "Browser account creates scoped API key; pass Bearer on API calls only",
-                "Before choosing FL/REF, preflight and a new GPU submission, GET /v1/generation-availability; follow generation_availability for exact profile/mode, freshness and administrator/wait guidance. An omitted/null legacy profile matches only the explicit null row. Existing uncertain jobs retain their original receipt/key.",
+                "Before choosing quality and FL/REF, preflight and a new GPU submission, GET /v1/generation-availability; follow generation_availability for neutral tier/mode aliases, freshness and administrator/wait guidance. Read current capabilities for supported controls; unavailable tiers never fall back. Existing uncertain jobs retain their original receipt/key.",
                 "For one clip, create workspace=freestyle; use project.journey.reviewShotId, shot.configure_generation and the saved-draft generation-plans route. Exact examples: /for-agents/guide.json",
                 "POST /v1/projects with title/logline and stable Idempotency-Key; select returned project id",
                 "POST /v1/projects/{id}/actions with expected_version and atomic actions",

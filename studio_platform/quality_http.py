@@ -10,6 +10,7 @@ from dataclasses import replace
 
 from fastapi.routing import APIRoute, request_response
 from starlette.responses import JSONResponse
+from starlette.routing import Route
 
 
 def _selected(path):
@@ -68,6 +69,26 @@ def install(app):
     from . import quality_views
 
     for route in app.routes:
+        if (
+            isinstance(route, Route)
+            and not isinstance(route, APIRoute)
+            and route.path == "/openapi.json"
+        ):
+            # FastAPI registers its schema as a builtin Starlette Route. Read
+            # the cached original without changing it; only this JSON response
+            # is projected for the authenticated request's actual principal.
+            async def openapi_response(request):
+                return JSONResponse(
+                    quality_views.schema(
+                        app.openapi(),
+                        principal_for(request, app),
+                        settings=app.state.settings,
+                    ),
+                    headers={"Cache-Control": "no-store"},
+                )
+
+            route.app = request_response(openapi_response)
+            continue
         if not isinstance(route, APIRoute) or not _selected(route.path):
             continue
         original = route.get_route_handler()
