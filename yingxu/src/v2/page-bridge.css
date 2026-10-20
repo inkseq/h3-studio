@@ -804,3 +804,11 @@ dialog.modal.wide {
   flex: none;
   margin-left: -4px;
 }
+
+/* Story top bar: below laptop width the Connect AI and Settings buttons show icons only,
+   so the account menu stays on screen (tablet 768px overflowed). */
+@media (max-width: 1100px) {
+  .wbar .bar-label {
+    display: none;
+  }
+}

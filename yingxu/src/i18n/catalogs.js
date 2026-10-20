@@ -1,5 +1,6 @@
 import { quickViewCatalogs } from './quickViewCatalogs.js';
 import { filmCatalogs } from './filmCatalogs.js';
+import { editorCatalogs } from './editorCatalogs.js';
 import { sessionTakeCatalogs } from './sessionTakeCatalogs.js';
 import { storyOpenCatalogs } from './storyOpenCatalogs.js';
 import { v2Catalogs } from './v2Catalogs.js';
@@ -29,6 +30,7 @@ import { legacyCatalogs } from './legacyCatalogs.js';
 export const catalogs = {
   en: {
     ...filmCatalogs.en,
+    ...editorCatalogs.en,
     ...sessionTakeCatalogs.en,
     ...storyOpenCatalogs.en,
     ...v2Catalogs.en,
@@ -80,6 +82,7 @@ export const catalogs = {
   },
   zh: {
     ...filmCatalogs.zh,
+    ...editorCatalogs.zh,
     ...sessionTakeCatalogs.zh,
     ...storyOpenCatalogs.zh,
     ...v2Catalogs.zh,
