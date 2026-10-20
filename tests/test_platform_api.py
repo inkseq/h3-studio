@@ -142,7 +142,9 @@ class ApiTests(unittest.TestCase):
                 self.assertEqual(anonymous.status_code, 200)
                 self.assertEqual(anonymous.json()["execution_backend"], state)
                 for user in ("supervan", "superdan"):
-                    client.post("/api/auth/login", json={"username": user}).raise_for_status()
+                    client.post(
+                        "/api/auth/login", json={"username": user}
+                    ).raise_for_status()
                     self.assertEqual(client.get("/healthz").json(), anonymous.json())
 
     def make_plan(self, **changes):
