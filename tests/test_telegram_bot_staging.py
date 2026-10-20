@@ -97,6 +97,34 @@ class StagingAdapterTest(unittest.TestCase):
         estimate = self.adapter.estimate(board)
         self.assertIn("quality_tier_unavailable", estimate.checks[0])
 
+    def test_gemini_plan_is_saved_as_the_staging_story(self):
+        from telegram_bot.llm_adapter import GeminiClient
+        from telegram_bot.staging_adapter import LlmStagingAdapter
+        from tests.test_telegram_bot_llm import KEY, FakeGemini
+
+        gemini = GeminiClient(
+            KEY, "gemini-test", transport=httpx.MockTransport(FakeGemini())
+        )
+        adapter = LlmStagingAdapter(
+            Path(self.tmp.name) / "both", self.adapter.client, gemini
+        )
+        board = adapter.plan_shots(adapter.start(1, self.photos[:2], "新品上市"))
+        self.assertIn("POST /v1/projects", self.server.paths)
+        titles = [a["entity"]["title"] for a in self.ops("entity.create")
+                  if a["entity"]["type"] == "shot"]  # fmt: skip
+        self.assertEqual(titles, ["开场", "超出范围", "结尾"])  # Gemini's parts, saved
+        self.assertEqual(
+            [a["title"] for a in self.ops("asset.attach")], ["门头招牌", "拿铁拉花"]
+        )
+        self.assertEqual(self.ops("storyboard.defaults")[0]["value"]["controls"],
+                         {"aspect_ratio": "9:16"})  # fmt: skip
+        board, _summary = adapter.revise(board, "结尾不要了")  # Gemini keeps one part
+        self.assertEqual(
+            sorted(a["entity_id"] for a in self.ops("entity.delete")),
+            ["shot-2", "shot-3"],
+        )
+        self.assertEqual(board.remote["project"], "project-1")
+
     def test_refuses_anything_but_staging(self):
         with self.assertRaises(ValueError):
             StudioClient("https://inkseq.com", "qa-user", PASSWORD)

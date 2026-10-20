@@ -45,6 +45,7 @@ CARD_SCHEMA = {
         "mode": {"type": "string", "enum": ["first_frame", "reference"]},
         "seconds": {"type": "integer"},
         "prompt": {"type": "string"},
+        "from_part": {"type": "integer", "description": "修改时：这段原来是第几段；新加的段填 0"},
     },
     "required": ["title", "description", "photo", "mode", "seconds", "prompt"],
 }
@@ -172,13 +173,15 @@ class LlmAdapter(DemoAdapter):
 
     def __init__(self, workdir, client):
         super().__init__(workdir)
-        self.client = client
+        self.llm = client
         self._looks = {}
 
     # ---- checks -------------------------------------------------------------
 
-    def _cards(self, raw, photos):
-        cards = []
+    def _cards(self, raw, photos, old=()):
+        """Build parts from model JSON. A revised part that names its original
+        (from_part) keeps that part's identity, takes and saved story shot."""
+        cards, used = [], set()
         for item in raw[:MAX_PARTS]:
             photo = int(item.get("photo") or 1)
             cards.append(Card(
@@ -189,6 +192,13 @@ class LlmAdapter(DemoAdapter):
                 prompt=str(item.get("prompt") or item.get("description") or "")[:1200],
                 mode=item.get("mode") if item.get("mode") in ("first_frame", "reference") else "first_frame",
             ))  # fmt: skip
+            origin = int(item.get("from_part") or 0)
+            if 1 <= origin <= len(old) and origin not in used:
+                used.add(origin)
+                before = old[origin - 1]
+                card = cards[-1]
+                card.ref, card.takes, card.version = before.ref, before.takes, before.version
+                card.look, card.note = before.look, before.note
         if not cards:
             raise ValueError("no parts")
         return cards
@@ -212,7 +222,7 @@ class LlmAdapter(DemoAdapter):
         parts = [image_part(path) for path in photos]
         parts.append({"text": f"共 {len(photos)} 张照片，按上面的顺序编号 1–{len(photos)}。\n老板说：{brief or '（没说，按照片自己判断适合什么宣传）'}"})
         try:
-            plan = self.client.json("plan", parts, PLAN_SCHEMA, thinking=None)
+            plan = self.llm.json("plan", parts, PLAN_SCHEMA, thinking=None)
             board.cards = self._cards(plan["cards"], len(photos))
         except Exception as error:
             log.warning("plan fell back to template: %s", error)
@@ -238,17 +248,18 @@ class LlmAdapter(DemoAdapter):
     def revise(self, board, instruction):
         prompt = (self._board_text(board)
                   + f"\n\n老板现在说：「{instruction}」\n按他的意思改分段，返回改好后的全部分段；"
-                  "没要求改的段保持原样。删段、加段、换照片、调时长、改画幅、改照片名字都可以。"
+                  "没要求改的段保持原样，每段用 from_part 标明它原来是第几段（新加的填 0）。"
+                  "删段、加段、换照片、调时长、改画幅、改照片名字都可以。"
                   "如果听不懂要改什么，understood=false 并保持原样。")  # fmt: skip
         try:
-            result = self.client.json("revise", [{"text": prompt}], REVISE_SCHEMA)
+            result = self.llm.json("revise", [{"text": prompt}], REVISE_SCHEMA)
         except Exception as error:
             log.warning("revise fell back to rules: %s", error)
             return super().revise(board, instruction)
         if not result.get("understood", True):
             return board, "没太听懂，可以说具体一点，比如「第2段用照片3」"
         board = self._copy(board)
-        board.cards = self._cards(result["cards"], len(board.photos))
+        board.cards = self._cards(result["cards"], len(board.photos), board.cards)
         board.aspect = result.get("aspect") if result.get("aspect") in ("9:16", "16:9") else board.aspect
         for item in result.get("renames") or []:
             n = int(item.get("photo") or 0)
@@ -274,7 +285,7 @@ class LlmAdapter(DemoAdapter):
                   "只改这一段的提示词来解决他的问题，其他保持；嫌拖/嫌快时也调这一段的秒数。"
                   "summary 用大白话说打算怎么改。")  # fmt: skip
         try:
-            result = self.client.json("fix", [{"text": prompt}], FIX_SCHEMA, max_tokens=2048)
+            result = self.llm.json("fix", [{"text": prompt}], FIX_SCHEMA, max_tokens=2048)
             summary, after = str(result["summary"])[:40], str(result["prompt"])[:1200]
             seconds = float(max(2, min(6, int(result.get("seconds") or card.seconds))))
         except Exception as error:
@@ -307,7 +318,7 @@ class LlmAdapter(DemoAdapter):
         prompt = (self._board_text(board)
                   + f"\n\n片子做好了。老板说：「{text}」\n他说的是哪一段？拿不准就填 0。")  # fmt: skip
         try:
-            part = int(self.client.json("locate", [{"text": prompt}], PART_SCHEMA, 256)["part"])
+            part = int(self.llm.json("locate", [{"text": prompt}], PART_SCHEMA, 256)["part"])
         except Exception as error:
             log.warning("locate failed: %s", error)
             return None

@@ -51,7 +51,7 @@ class FakeGemini:
             })  # fmt: skip
         if "understood" in schema:
             return answer({"summary": "删了结尾", "understood": True, "aspect": "9:16",
-                           "renames": [{"photo": 2, "name": "拉花"}], "cards": [card(1)]})  # fmt: skip
+                           "renames": [{"photo": 2, "name": "拉花"}], "cards": [{**card(1), "from_part": 1}]})  # fmt: skip
         if "part" in schema:
             return answer({"part": 3})
         return answer({"summary": "调亮", "prompt": "更亮的提示词", "seconds": 2})
@@ -84,7 +84,7 @@ class LlmAdapterTest(unittest.TestCase):
         self.assertEqual([c.photo for c in board.cards], [1, 1, 2])  # 9 → 1
         self.assertEqual([c.seconds for c in board.cards], [3.0, 6.0, 2.0])  # clamped
         self.assertTrue((self.root / "usage" / "llm.jsonl").exists())
-        self.assertNotIn(KEY, repr(self.adapter.client))
+        self.assertNotIn(KEY, repr(self.adapter.llm))
 
         board, summary = self.adapter.revise(board, "结尾不要了")
         self.assertEqual(summary, "删了结尾")

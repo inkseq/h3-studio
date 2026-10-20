@@ -11,6 +11,7 @@ Pictures shown in the chat are still rendered locally from the same photos.
 from __future__ import annotations
 
 import hashlib
+import logging
 import time
 
 import httpx
@@ -18,8 +19,10 @@ import httpx
 from .adapter import Estimate
 from .bot import GenerationHeld
 from .demo_adapter import DemoAdapter
+from .llm_adapter import LlmAdapter
 
 STAGING = "https://staging.inkseq.com"
+log = logging.getLogger("telegram_bot")
 
 
 class StudioError(Exception):
@@ -206,7 +209,7 @@ class StagingAdapter(DemoAdapter):
              "title": board.materials[n - 1]}
             for n, asset in enumerate(assets, 1)
         ], self._key(board, "materials"))  # fmt: skip
-        board.remote = {"project": project, "assets": assets, "shots": [], "next_shot": 1}
+        board.remote.update(project=project, assets=assets, shots=[], next_shot=1)
         return board
 
     def add_photo(self, board, path):
@@ -235,6 +238,11 @@ class StagingAdapter(DemoAdapter):
                                                "parentId": "chapter-1", "title": "宣传片",
                                                "data": {"script": "\n".join(board.outline)}}},
         ], self._key(board, "structure"))  # fmt: skip
+        try:  # story-level default so the web storyboard shows the chosen aspect
+            self.client.actions(project, [{"op": "storyboard.defaults", "value": {
+                "controls": {"aspect_ratio": board.aspect}}}], self._key(board, "defaults"))  # fmt: skip
+        except StudioError as error:
+            log.warning("story aspect default not saved: %s", error)
         return self._sync(board, "plan")
 
     def revise(self, board, instruction):
@@ -298,3 +306,15 @@ class StagingAdapter(DemoAdapter):
 
     def generate(self, chat_id, board, progress):
         raise GenerationHeld()
+
+
+class LlmStagingAdapter(StagingAdapter, LlmAdapter):
+    """Gemini plans and revises; every change is saved to the staging story.
+
+    MRO: StagingAdapter's save-after-change wraps LlmAdapter's planning, which
+    in turn falls back to the demo rules if the model is unavailable.
+    """
+
+    def __init__(self, workdir, studio, gemini):
+        LlmAdapter.__init__(self, workdir, gemini)
+        self.client = studio

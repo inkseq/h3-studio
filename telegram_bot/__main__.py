@@ -47,9 +47,9 @@ def make_adapter(config, home):
             raise SystemExit("gemini registry profile endpoint or key mismatch")
         client = GeminiClient(key.api_key, llm["model"], usage_log=home / "llm-usage.jsonl")
         return LlmAdapter(home / "work", client)
-    if config["adapter"] != "staging":
-        raise SystemExit("adapter must be demo, llm or staging")
-    from .staging_adapter import STAGING, StagingAdapter, StudioClient
+    if config["adapter"] not in ("staging", "llm+staging"):
+        raise SystemExit("adapter must be demo, llm, staging or llm+staging")
+    from .staging_adapter import STAGING, LlmStagingAdapter, StagingAdapter, StudioClient
 
     staging = config["staging"]
     accounts = json.loads(Path(staging["qa_accounts"]).read_text(encoding="utf-8"))
@@ -57,7 +57,14 @@ def make_adapter(config, home):
         raise SystemExit("staging adapter refuses a non-staging account file")
     account = next(a for a in accounts["accounts"] if a["username"] == staging["account"])
     client = StudioClient(STAGING, account["username"], account["password"])
-    return StagingAdapter(home / "work", client)
+    if config["adapter"] == "staging":
+        return StagingAdapter(home / "work", client)
+    from .llm_adapter import GeminiClient
+
+    llm = config["llm"]
+    key = load_registry("gemini", llm["profile"])
+    gemini = GeminiClient(key.api_key, llm["model"], usage_log=home / "llm-usage.jsonl")
+    return LlmStagingAdapter(home / "work", client, gemini)
 
 
 def main(argv=None):
