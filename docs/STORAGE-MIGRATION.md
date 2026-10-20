@@ -68,6 +68,40 @@ after adding new display objects. Do not declare R2 thumbnails ready until that
 copy is verified: between Local publication and completed copy, the R2 route may
 correctly report that the new object is absent.
 
+## Bounded all-owner display backfill
+
+`python -m studio_platform.rendition_backfill plan --all-owners` lists the existing
+tenant's ready assets and succeeded video artifacts, including owners without an
+active login. It does not load storage credentials or read objects. Owner pages
+use `--owner-limit` (default20, maximum100) and `--owner-offset`; each owner's
+asset/artifact pages retain `--limit`/`--offset` (maximum100 items per kind).
+Follow `next_owner_offset` and each owner's independent `next_offset` /
+`artifacts_next_offset`, or use the original explicit `--owner` mode for that page.
+Counts and completion describe the requested pages, not an unbounded whole-store scan.
+
+After reviewing that metadata, `apply --all-owners --max-items 100` attempts at
+most100 original receipts from those pages (maximum1000). Every attempt rechecks
+the snapshotted owner and receipt version through the same single-item path.
+Ready records are left alone; busy, missing-receipt or different-binding records
+remain unchanged or refused, with a finite per-item reason. Earlier successful
+items remain accepted if a later item fails. Exit2 / `state=partial` means there
+are skipped/refused items or more requested pages; it is not successful global
+coverage. Re-running never regenerates a completed rendition or resets quota.
+
+Bulk mode cannot globally assert stopped writers, override artifact roots, pass
+one receipt version for several records, or rebind storage. For each artifact it
+uses that original receipt's frozen staging root; the explicit
+`--use-data-display-scratch` option still freezes the current data directory in
+that receipt's auxiliary display intent. Original video/audio, accepted roles,
+storage bindings and normal scratch/derived-byte accounting are preserved.
+
+An accepted artifact display attempt publishes `rendition_status: pending` in
+the same receipt/metadata CAS before downloading or decoding. Original downloads
+remain available. Verified completion becomes ready; a bounded first-frame
+failure becomes missing. An uncertain PUT stays pending and retains the original
+keys/reservation for exact stopped-writer recovery, rather than being retried by
+the all-owner command.
+
 Example (replace the uppercase bucket placeholder with the approved name):
 
 ```sh

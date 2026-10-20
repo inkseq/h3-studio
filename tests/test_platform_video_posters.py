@@ -159,6 +159,10 @@ class PosterWriterTests(ledger_fixture.LedgerCase):
         with self.assertRaises(ArtifactWritePending):
             ensure(self.writer, job, attempt, tag)
         record = self.writer.get(job, attempt, tag)
+        pending = GenerationRead.artifact(self.row(job))
+        self.assertEqual(pending['rendition_status'], 'pending')
+        self.assertFalse(pending['rendition_ready'])
+        self.assertNotIn('thumbnail_url', pending)
         frozen = dict(record['display']['objects'])
         key = frozen['thumb']['key']
         with self.assertRaises(ArtifactWritePending):
@@ -186,6 +190,42 @@ class PosterWriterTests(ledger_fixture.LedgerCase):
         )
         self.assertEqual(self.store.calls.count(key), 1)
 
+    def test_pending_is_committed_with_original_receipt_before_remote_read(self):
+        job, attempt, tag = self.settled()
+        original = self.row(job)
+        receipt = self.writer.get(job, attempt, tag)
+        verify = self.writer._verify_remote
+        observed = []
+
+        def observe(role, heartbeat, **kwargs):
+            current = self.writer.get(job, attempt, tag)
+            if current['display']['phase'] == 'complete':
+                return verify(role, heartbeat, **kwargs)
+            row = self.row(job)
+            public = GenerationRead.artifact(row)
+            observed.append(current['version'])
+            self.assertGreater(current['version'], receipt['version'])
+            self.assertIn(current['display']['phase'], {'planned', 'prepared'})
+            self.assertEqual(public['rendition_status'], 'pending')
+            self.assertFalse(public['rendition_ready'])
+            self.assertNotIn('thumbnail_url', public)
+            self.assertEqual(row['id'], original['id'])
+            for name in ('object_key', 'sha256', 'size_bytes', 'content_type'):
+                self.assertEqual(row['metadata'][name], original['metadata'][name])
+            self.assertEqual(current['roles'], receipt['roles'])
+            return verify(role, heartbeat, **kwargs)
+
+        with mock.patch.object(self.writer, '_verify_remote', side_effect=observe):
+            completed = ensure(self.writer, job, attempt, tag)
+        self.assertTrue(observed)
+        self.assertEqual(completed['display']['phase'], 'complete')
+        self.assertEqual(
+            GenerationRead.artifact(self.row(job))['rendition_status'], 'ready'
+        )
+        self.assertEqual(
+            self.repo.get_job(self.scope, job['id'])['status'], 'succeeded'
+        )
+
     def test_bad_prefix_is_missing_without_failing_original_or_decoding_full_video(
         self,
     ):
@@ -201,6 +241,9 @@ class PosterWriterTests(ledger_fixture.LedgerCase):
         )
         self.assertEqual(self.row(job)['metadata']['rendition_status'], 'missing')
         self.assertFalse(public_artifact_renditions(self.row(job))['rendition_ready'])
+        self.assertEqual(
+            public_artifact_renditions(self.row(job))['rendition_status'], 'missing'
+        )
         self.assertFalse((self.work / tag / 'display-v1').exists())
         self.assertEqual(record['display']['reserved_bytes'], 0)
         self.assertEqual(
@@ -446,6 +489,101 @@ class PosterWriterTests(ledger_fixture.LedgerCase):
             foreign = plan(self.repo.engine, tenant=self.scope.tenant_id, owner='other')
         self.assertEqual(foreign['coverage']['artifacts']['total'], 0)
 
+    def test_all_owner_missing_receipt_table_reports_original_artifact_and_refuses_apply(
+        self,
+    ):
+        from contextlib import redirect_stdout
+        from studio_platform import rendition_backfill as module
+        from studio_platform.artifact_writer import write_receipts
+        from studio_platform.settings import Settings
+
+        job, _, _ = self.settled()
+        original = self.row(job)
+        write_receipts.drop(self.repo.engine)  # Only this test's isolated ledger.
+        with mock.patch.object(
+            self.store, 'open', side_effect=AssertionError('No object I/O')
+        ):
+            page = module.plan_all(self.repo.engine, tenant=self.scope.tenant_id)
+        self.assertEqual(
+            [item['owner'] for item in page['owners']], [self.scope.owner_id]
+        )
+        report = page['owners'][0]
+        self.assertEqual(report['coverage']['artifacts']['total'], 1)
+        self.assertEqual(report['coverage']['artifacts']['missing_original_receipt'], 1)
+        self.assertEqual(report['artifacts'][0]['artifact_id'], original['id'])
+        self.assertIsNone(report['artifacts'][0]['receipt_version'])
+        self.assertEqual(
+            report['artifacts'][0]['reason_code'], 'missing_original_receipt'
+        )
+        settings = Settings(
+            Path(self.temp.name), tenant_id=self.scope.tenant_id, database_url=self.url
+        )
+        with (
+            mock.patch.object(Settings, 'from_environment', return_value=settings),
+            mock.patch.object(
+                module,
+                '_apply_owned',
+                side_effect=AssertionError('No receipt adoption'),
+            ) as apply,
+            redirect_stdout(io.StringIO()) as output,
+        ):
+            self.assertEqual(module.main(['apply', '--all-owners']), 2)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result['attempted'], 0)
+        self.assertEqual(result['state'], 'partial')
+        self.assertEqual(
+            result['results'][0]['reason_code'], 'missing_original_receipt'
+        )
+        apply.assert_not_called()
+        self.assertEqual(self.row(job), original)
+
+    def test_all_owner_cli_includes_artifact_only_owner_and_preserves_original_root(
+        self,
+    ):
+        from contextlib import redirect_stdout
+        from studio_platform.rendition_backfill import plan_all, main
+        from studio_platform.settings import Settings
+
+        job, attempt, tag = self.settled()
+        original = self.writer.get(job, attempt, tag)
+        original_artifact = self.row(job)
+        page = plan_all(self.repo.engine, tenant=self.scope.tenant_id)
+        self.assertEqual(
+            [item['owner'] for item in page['owners']], [self.scope.owner_id]
+        )
+        self.assertEqual(page['owners'][0]['items'], [])
+        self.assertEqual(
+            page['owners'][0]['artifacts'][0]['artifact_id'], original_artifact['id']
+        )
+        settings = Settings(
+            Path(self.temp.name), tenant_id=self.scope.tenant_id, database_url=self.url
+        )
+        with (
+            mock.patch.object(Settings, 'from_environment', return_value=settings),
+            redirect_stdout(io.StringIO()) as output,
+        ):
+            self.assertEqual(
+                main(['apply', '--all-owners', '--use-data-display-scratch']), 0
+            )
+        result = json.loads(output.getvalue())
+        self.assertEqual(result['attempted'], 1)
+        self.assertEqual(result['results'][0]['state'], 'complete')
+        after = self.writer.get(job, attempt, tag)
+        for key in (
+            'id',
+            'owner',
+            'tag',
+            'fingerprint',
+            'binding',
+            'staging_root',
+            'roles',
+            'phase',
+        ):
+            self.assertEqual(after[key], original[key], key)
+        self.assertEqual(after['display']['scratch_data_dir'], self.temp.name)
+        self.assertEqual(self.row(job)['id'], original_artifact['id'])
+        self.assertTrue(public_artifact_renditions(self.row(job))['rendition_ready'])
+
     def test_asset_video_backfill_and_legacy_coverage_keep_original_receipt_and_bytes(
         self,
     ):
@@ -550,14 +688,14 @@ class PosterWriterTests(ledger_fixture.LedgerCase):
         self.assertEqual(missing['display']['phase'], 'missing')
         self.assertEqual(missing['display']['scratch_cleanup']['phase'], 'complete')
         baseline = self.writer.quota.usage(self.scope.owner_id)['accounted_bytes']
-        original_save = self.writer._save
+        original_publish = module._publish
         import threading
 
         claimed, release = threading.Event(), threading.Event()
 
-        def held_claim(record, **kwargs):
-            original_save(record, **kwargs)
-            if record['display']['phase'] == 'planned' and not claimed.is_set():
+        def held_claim(writer, record, *, status):
+            original_publish(writer, record, status=status)
+            if status == 'pending' and not claimed.is_set():
                 claimed.set()
                 if not release.wait(5):
                     raise AssertionError('test retry was not released')
@@ -565,7 +703,7 @@ class PosterWriterTests(ledger_fixture.LedgerCase):
         from concurrent.futures import ThreadPoolExecutor
 
         with (
-            mock.patch.object(self.writer, '_save', side_effect=held_claim),
+            mock.patch.object(module, '_publish', side_effect=held_claim),
             ThreadPoolExecutor(max_workers=1) as pool,
         ):
             first = pool.submit(ensure, self.writer, job, attempt, tag)
