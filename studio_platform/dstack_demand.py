@@ -176,6 +176,59 @@ def demand_admission(settings, repo, scope, compiled, policy):
         return None
 
 
+def cold_admission_current(repo, connection, scope, compiled, execution):
+    """Recognize an already validated cold plan at the original admission gate.
+
+    This is not policy evaluation or rental authority. The caller has checked
+    the current execution policy; here the same capacity/account gate prevents
+    a legacy warm-drain check from rejecting that exact protected cold marker.
+    """
+    from .capacity import pool_members_require_warm_binding
+    from .dstack_demand_policy import read_runtime
+    from .identity import account_status
+
+    try:
+        marker, policy_hash = (
+            execution.get("demand_start"),
+            execution.get("policy_hash"),
+        )
+        if (
+            scope is None
+            or type(marker) is not dict
+            or type(marker.get("version")) is not int
+            or marker["version"] != 1
+            or not isinstance(policy_hash, str)
+            or len(policy_hash) != 64
+            or any(value not in "0123456789abcdef" for value in policy_hash)
+            or execution.get("capacity_binding") is not None
+            or execution.get("capacity_approval_id") is not None
+            or execution.get("admission_state") != "queued"
+            or not read_runtime(connection, scope.tenant_id)["enabled"]
+            or account_status(connection, scope.tenant_id, scope.owner_id) != "active"
+        ):
+            return False
+        config = _protected_configuration()
+        # The stored execution deliberately has no model_id; the immutable
+        # compiled request already owns it. Reuse the existing profile match.
+        selection = {**execution, "model_id": compiled.get("request", {}).get("model")}
+        profile = _profile_for(
+            config, compiled, selection, scope.owner_id, repo.clock()
+        )
+        if profile is None or pool_members_require_warm_binding(
+            repo, scope.tenant_id, execution["pool"], execution["configuration_id"]
+        ):
+            return False
+        return marker == {
+            "version": 1,
+            "profile_id": profile["id"],
+            "profile_hash": profile_hash(config, profile),
+            "policy_hash": policy_hash,
+            "test_task_id": config["policy"]["demand_start"].get("test_task_id"),
+        }
+    except (ValueError, KeyError, TypeError, OSError):
+        return False
+
+
 def eligible_jobs(service, connection, now):
     """Confirmed unsubmitted work only; never treat a wake hint as authority."""
     from .execution_policy import ExecutionPolicies

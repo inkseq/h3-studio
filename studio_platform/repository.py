@@ -1915,7 +1915,9 @@ class Repository:
         )
         return total
 
-    def _require_pool_not_stopping(self, connection, pool, execution, compiled):
+    def _require_pool_not_stopping(
+        self, connection, pool, execution, compiled, *, scope=None
+    ):
         """Close the preflight/shutdown race while holding the global gate.
 
         Already committed jobs return idempotently before this check. A new
@@ -1944,6 +1946,11 @@ class Repository:
         )
         if not stopping:
             return
+        if execution.get("pool") == pool and execution.get("demand_start") is not None:
+            from .dstack_demand import cold_admission_current
+
+            if cold_admission_current(self, connection, scope, compiled, execution):
+                return
         workers = connection.execute(
             select(registered_workers).where(registered_workers.c.pool == pool)
         ).mappings()
@@ -2087,7 +2094,7 @@ class Repository:
                 pool = identifier(execution.get("pool", "h3-base-ref"))
                 if initial_status == "queued":
                     self._require_pool_not_stopping(
-                        connection, pool, execution, plan["request"]
+                        connection, pool, execution, plan["request"], scope=scope
                     )
                 runtime = float(execution.get("expected_runtime_s", 600))
                 if not 0 < runtime <= 86400:
@@ -2214,7 +2221,11 @@ class Repository:
                     execution.get("output_delivery", ""),
                 )
             self._require_pool_not_stopping(
-                connection, job["pool"], plan["execution_plan"], plan["request"]
+                connection,
+                job["pool"],
+                plan["execution_plan"],
+                plan["request"],
+                scope=scope,
             )
             self._reserve(
                 connection,
