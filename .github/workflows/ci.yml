@@ -407,7 +407,8 @@ jobs:
           tags: sixnine-platform:${{ github.sha }}
           labels: org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=sixnine-platform-linux-amd64
-          cache-to: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'type=gha,mode=max,scope=sixnine-platform-linux-amd64' || '' }}
+          # Cache upload is optional; image build/load and every release gate remain mandatory.
+          cache-to: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && 'type=gha,mode=max,scope=sixnine-platform-linux-amd64,timeout=1m,ignore-error=true' || '' }}
       - name: Test exact unprivileged Linux image without network
         run: |
           docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true \
