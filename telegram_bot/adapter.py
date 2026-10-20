@@ -31,6 +31,7 @@ class Card:
     takes: list = field(default_factory=list)  # [{"v", "prompt", "photo", "look", "clip"}]
     look: dict = field(default_factory=dict)  # demo-only visual adjustments
     note: str = ""
+    ref: str = ""  # server shot entity ID once saved to a real story
 
     def take(self, version=None):
         version = self.version if version is None else version
@@ -50,6 +51,7 @@ class Storyboard:
     tier: str = "预览"
     style: str = ""
     revision: int = 1
+    remote: dict = field(default_factory=dict)  # server story/asset IDs, if any
 
     def timeline(self):
         """[(number, card, start, end)] with 1-based card numbers."""
@@ -143,3 +145,6 @@ class StudioAdapter(Protocol):
     def grid(self, board: Storyboard) -> str: ...
     def card_preview(self, board: Storyboard, number: int) -> str: ...
     def frame(self, film: Film, second: float) -> str: ...
+    # real-story links and late photos (no-ops for the demo)
+    def web_link(self, board: Storyboard, number: int | None = None) -> str | None: ...
+    def add_photo(self, board: Storyboard, path: str) -> Storyboard: ...

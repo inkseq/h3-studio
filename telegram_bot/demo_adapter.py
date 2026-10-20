@@ -342,6 +342,12 @@ class DemoAdapter:
         render.styled(board.photos[card.photo - 1], (540, 960), card.look).save(out)
         return str(out)
 
+    def web_link(self, board, number=None):
+        return None
+
+    def add_photo(self, board, path):
+        return board
+
     def frame(self, film, second):
         out = Path(film.path).with_name(f"frame-r{film.revision}-{second:.1f}s.jpg")
         return render.frame(film.path, second, str(out))

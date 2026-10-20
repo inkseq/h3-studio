@@ -30,6 +30,23 @@ def load_token(profile):
     return config.api_key
 
 
+def make_adapter(config, home):
+    """demo (default) or staging; staging signs in as a staging QA account."""
+    if config.get("adapter", "demo") == "demo":
+        return DemoAdapter(home / "work")
+    if config["adapter"] != "staging":
+        raise SystemExit("adapter must be demo or staging")
+    from .staging_adapter import STAGING, StagingAdapter, StudioClient
+
+    staging = config["staging"]
+    accounts = json.loads(Path(staging["qa_accounts"]).read_text(encoding="utf-8"))
+    if accounts.get("base_url") != STAGING:
+        raise SystemExit("staging adapter refuses a non-staging account file")
+    account = next(a for a in accounts["accounts"] if a["username"] == staging["account"])
+    client = StudioClient(STAGING, account["username"], account["password"])
+    return StagingAdapter(home / "work", client)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="telegram_bot")
     parser.add_argument("--home", default=".local/telegram-bot")
@@ -44,9 +61,9 @@ def main(argv=None):
     api = TelegramAPI(load_token(config["registry_profile"]))
     me = api.get_me()
     api.set_commands(COMMANDS)
-    logging.info("running as @%s for %d allowlisted user(s), demo adapter",
-                 me.get("username"), len(allowed))  # fmt: skip
-    bot = Bot(api, DemoAdapter(home / "work"), Store(home / "state"), allowed,
+    logging.info("running as @%s for %d allowlisted user(s), %s adapter",
+                 me.get("username"), len(allowed), config.get("adapter", "demo"))  # fmt: skip
+    bot = Bot(api, make_adapter(config, home), Store(home / "state"), allowed,
               home / "media")  # fmt: skip
     bot.poll_forever()
 

@@ -21,6 +21,10 @@ from .adapter import MODES, Film, Storyboard
 from .render import clock
 from .telegram_api import TelegramError
 
+
+class GenerationHeld(Exception):
+    """Raised by an adapter that deliberately does not submit paid generation."""
+
 log = logging.getLogger("telegram_bot")
 
 WELCOME = """你好！我帮小店做宣传短片。
@@ -186,18 +190,26 @@ class Bot:
             if not self._allowed(query.get("from"), chat):
                 self.ignored += 1
                 return
-            return self._callback(chat["id"], query)
+            try:
+                return self._callback(chat["id"], query)
+            except Exception as error:
+                self._failed(chat["id"], error)
+                raise
         message = update.get("message")
         if not message or not self._allowed(message.get("from"), message.get("chat")):
             self.ignored += 1
             return
         chat_id = message["chat"]["id"]
-        if message.get("photo"):
-            return self._photo(chat_id, message)
-        text = (message.get("text") or "").strip()
-        if text:
-            return self._text(chat_id, text)
-        self.api.send_message(chat_id, "目前支持照片和文字消息。")
+        try:
+            if message.get("photo"):
+                return self._photo(chat_id, message)
+            text = (message.get("text") or "").strip()
+            if text:
+                return self._text(chat_id, text)
+            self.api.send_message(chat_id, "目前支持照片和文字消息。")
+        except Exception as error:
+            self._failed(chat_id, error)
+            raise
 
     # ---- helpers ----------------------------------------------------------
 
@@ -227,6 +239,9 @@ class Bot:
     def _send_board(self, chat_id, board, lead):
         rows = [[("🔍 看卡片：", "noop")]] + number_rows("card:", len(board.cards))
         rows += [[("🎬 开始生成", "gen"), ("✏️ 怎么改", "revise")], [("🆕 重新开始", "new")]]
+        link = self.adapter.web_link(board)
+        if link:
+            rows.append([("🌐 在网页里打开这个故事", "url:" + link)])
         self.api.send_photo(
             chat_id, self.adapter.grid(board), f"{lead}\n\n{timeline_text(board)}", rows
         )
@@ -282,7 +297,7 @@ class Bot:
             board = self._board(state)
             board.photos.append(str(dest))
             board.materials.append(f"照片{number}")
-            state["board"] = board.to_dict()
+            state["board"] = self.adapter.add_photo(board, str(dest)).to_dict()
         if state["board"]:
             self.store.save(chat_id, state)
             self.api.send_message(
@@ -435,6 +450,14 @@ class Bot:
             self._revert(chat_id, state)
         else:
             self._stale(chat_id)
+
+    def _failed(self, chat_id, error):
+        detail = getattr(error, "step", None)
+        where = f"（{detail}）" if detail else ""
+        try:
+            self.api.send_message(chat_id, f"出错了{where}，已经停下，没有扣费。可以再试一次，或发 /status 看看现在的状态。")
+        except Exception:
+            pass
 
     def _stale(self, chat_id):
         self.api.send_message(chat_id, "这个按钮已经过期了，按最新的消息操作就好。")
@@ -601,6 +624,17 @@ class Bot:
         progress = self._progress_message(chat_id, "🎬 生成中……")
         try:
             board, film = self.adapter.generate(chat_id, board, progress)
+        except GenerationHeld:
+            state["phase"] = "confirm"
+            self.store.save(chat_id, state)
+            link = self.adapter.web_link(board)
+            self.api.send_message(
+                chat_id,
+                "⏸ 停在这里了：真的生成要开显卡，需要老板批准，这次测试不提交。\n"
+                "故事板和镜头卡已经保存在网站上，可以在网页里继续看和改。",
+                [[("🌐 在网页里打开", "url:" + link)]] if link else None,
+            )
+            return
         except Exception:
             log.exception("demo generate failed")
             state["phase"] = "confirm"

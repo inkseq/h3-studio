@@ -24,7 +24,12 @@ def keyboard(rows):
     return json.dumps(
         {
             "inline_keyboard": [
-                [{"text": label, "callback_data": data} for label, data in row]
+                [
+                    {"text": label, "url": data[4:]}
+                    if data.startswith("url:")
+                    else {"text": label, "callback_data": data}
+                    for label, data in row
+                ]
                 for row in rows
             ]
         },
