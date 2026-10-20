@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Cpu, Images, LayoutGrid, MessageSquare, Settings2, Trash2, UserRound } from 'lucide-react';
+import { Cpu, Images, LayoutGrid, MessageSquare, Settings2, Trash2 } from 'lucide-react';
 import { LanguageSwitcher, useI18n } from './i18n/I18nProvider.jsx';
 import { navigateApp } from './app-navigation.js';
 import { accountLabel, readAccess, resetAccess } from './account-access.js';
 import { CreditsChip } from './CreditsUI.jsx';
+import AccountMenu from './AccountMenu.jsx';
 
 // What the signed-in account may see (role, sign-in method, credits); re-read when it changes.
 export function useAccess(account) {
@@ -39,9 +40,14 @@ export function useAccountLabel(account) {
   return { label, initial: label ? label.trim().slice(0, 1).toLocaleUpperCase() : null };
 }
 
-export default function StudioHeader({ account, active = 'works', accountMenu }) {
-  const { t } = useI18n(),
-    who = useAccountLabel(account);
+export default function StudioHeader({
+  account,
+  active = 'works',
+  accountMenu,
+  menuItems,
+  onSignIn,
+}) {
+  const { t } = useI18n();
   // GPUs only for accounts the backend lets view capacity (#304); regular users never run machines.
   const [access, setAccess] = useState(null);
   useEffect(() => {
@@ -90,17 +96,7 @@ export default function StudioHeader({ account, active = 'works', accountMenu })
       >
         <Trash2 size={15} />
       </button>
-      {accountMenu || (
-        <button
-          type="button"
-          className="avatar"
-          onClick={() => navigateApp(account ? '/settings' : '/quick-chat')}
-          aria-label={who.label || t('story.copy14')}
-          title={who.label || t('story.copy14')}
-        >
-          {account ? who.initial : <UserRound size={17} aria-hidden="true" />}
-        </button>
-      )}
+      {accountMenu || <AccountMenu account={account} items={menuItems} onSignIn={onSignIn} />}
     </header>
   );
 }

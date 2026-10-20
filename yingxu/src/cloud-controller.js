@@ -3,6 +3,7 @@ import { storyboardCommandStore, verifyStoryboardReceipt } from './storyboard-co
 import { boundVideoRange, videoBinding } from './video-cut-model.js';
 import { createCloudClient, safeCloudPath } from './cloud-client.js';
 import { store as defaultStore } from './store.js';
+import { translateForAccount } from './i18n/locale.js';
 import { getFile, setCloudMediaHandlers } from './media.js';
 import {
   executionPresetControls,
@@ -347,7 +348,15 @@ export function createCloudController({
         if (observedEpoch !== epoch) return;
         if (error.status === 401) {
           if (state.account || current().workspace.mode === 'cloud') expire();
-        } else emit({ error: '账户状态暂未核对：' + error.message });
+        } else
+          emit({
+            error:
+              !error.status || error.status >= 500
+                ? translateForAccount(state.account, 'cloud.unreachable')
+                : translateForAccount(state.account, 'cloud.sessionUnchecked', {
+                    reason: error.message,
+                  }),
+          });
       } finally {
         sessionCheck = null;
       }
