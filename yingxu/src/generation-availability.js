@@ -65,6 +65,11 @@ export function modeAvailability(
     return result('unknown');
   const available = ['ready', 'busy'].includes(row.state);
   if (row.available !== available) return result('unknown');
+  // CR43 demand start: no ready machine, but the server says this account may
+  // queue and a machine will start. `available` here gates the ordinary
+  // preflight/confirm action only; the server still checks everything.
+  if (!available && row.can_queue === true && ['unavailable', 'starting'].includes(row.state))
+    return { ...result('cold', true, row.reason_code || null), physical: false };
   return result(row.state, available, row.reason_code || null);
 }
 

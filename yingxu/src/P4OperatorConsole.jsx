@@ -22,6 +22,7 @@ import { cloudController as cloud } from './cloud-controller.js';
 import { createP4OperatorController } from './p4-operator-controller.js';
 import OperatorBudgetPanel, { AdminBudgetPanel, BudgetWorkspace } from './OperatorBudgetPanel.jsx';
 import OperatorJobsPanel from './OperatorJobsPanel.jsx';
+import DemandStartPanel from './DemandStartPanel.jsx';
 import OperatorHostsPanel, { OfferHostHistory } from './OperatorHostsPanel.jsx';
 import { inventoryError, inventoryOutcome, referenceHostOffers } from './operator-host-model.js';
 import {
@@ -2066,6 +2067,7 @@ export default function P4OperatorConsole() {
                   admin
                   busy={blocked}
                 />
+                <DemandStartPanel controller={controller} state={state} busy={blocked} />
                 <OperatorJobsPanel controller={controller} state={state} busy={blocked} />
                 <AdminBudgetPanel controller={controller} state={state} busy={blocked} />
                 <AdminView

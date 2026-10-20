@@ -73,7 +73,8 @@ const copy = (value) => structuredClone(value),
     '/?' + new URLSearchParams({ project, ...(entity ? { entity } : {}) });
 export function LibraryMedia({ row, api, detail = false }) {
   const { t } = useI18n(),
-    [failed, setFailed] = useState('');
+    [failed, setFailed] = useState(''),
+    [retry, setRetry] = useState({ url: '', count: 0 });
   const id = row.artifact_id || row.asset_id,
     kind = row.artifact_id ? 'artifacts' : 'assets';
   const imageRead = row.type === 'image' || (!detail && row.type === 'video');
@@ -93,9 +94,14 @@ export function LibraryMedia({ row, api, detail = false }) {
   } catch {}
   const thumbnail = useThumbnailSource(api, url, { enabled: !detail && imageRead }),
     src = detail ? url : thumbnail.src;
+  const retries = retry.url === url ? retry.count : 0;
   const onError = () => {
-    setFailed(url);
     thumbnail.finish();
+    // A busy media lane answers 429 when many thumbnails load at once; try the
+    // same thumbnail twice more after a pause before showing the notice.
+    if (!detail && imageRead && retries < 2)
+      setTimeout(() => setRetry({ url, count: retries + 1 }), 3000 * (retries + 1));
+    else setFailed(url);
   };
   if (!imageRead && !detail) return null;
   if (!url || failed === url)
@@ -110,6 +116,7 @@ export function LibraryMedia({ row, api, detail = false }) {
   if (imageRead)
     return src ? (
       <img
+        key={retries}
         ref={thumbnail.ref}
         className="library-media"
         src={src}

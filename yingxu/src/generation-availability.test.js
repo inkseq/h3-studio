@@ -345,3 +345,28 @@ test('draft turns remain writable without available machines and never submit ge
   assert.equal(controller.getState().pending, null);
   assert.equal(controller.getState().materials[0].asset_id, 'kept-image');
 });
+
+test('CR43 can_queue lets a cold mode submit without claiming a ready machine', () => {
+  const cold = snapshot('unavailable', 'starting');
+  cold.profiles[0].modes.fl.can_queue = true;
+  cold.profiles[0].modes.ref.can_queue = true;
+  for (const mode of ['fl', 'ref']) {
+    const status = modeAvailability(cold, capabilities, settings, mode);
+    assert.equal(status.state, 'cold');
+    assert.equal(status.available, true);
+    assert.equal(status.physical, false);
+  }
+  assert.equal(requireModeAvailable(cold, capabilities, settings, 'fl').state, 'cold');
+  // Old snapshots without can_queue, or can_queue false, keep refusing.
+  assert.equal(modeAvailability(snapshot('unavailable'), capabilities, settings).available, false);
+  const off = snapshot('unavailable');
+  off.profiles[0].modes.fl.can_queue = false;
+  assert.equal(modeAvailability(off, capabilities, settings).state, 'unavailable');
+  // A disabled mode never becomes submittable, and a ready row stays ready.
+  const disabled = snapshot('disabled');
+  disabled.profiles[0].modes.fl.can_queue = true;
+  assert.equal(modeAvailability(disabled, capabilities, settings).available, false);
+  const ready = snapshot('ready');
+  ready.profiles[0].modes.fl.can_queue = true;
+  assert.equal(modeAvailability(ready, capabilities, settings).state, 'ready');
+});
