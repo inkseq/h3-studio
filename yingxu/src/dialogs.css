@@ -1,0 +1,154 @@
+/* :root raises specificity above older feature rules such as .qc-v2 .qc-dialog. */
+/* One dialog look for the whole studio (#358 follow-up). Loaded after the page styles so it wins
+   over the older per-feature dialog rules, and built only from design tokens so every skin
+   restyles it. Feature dialogs keep their own content layout; this sets the frame, sizes,
+   fields, buttons and messages. */
+
+:root dialog.qc-dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: min(86dvh, 900px);
+  padding: 20px 22px 22px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg, 16px);
+  background: var(--surface-2);
+  color: var(--ink);
+  box-shadow: var(--shadow-lg, 0 24px 60px rgba(0, 0, 0, 0.5));
+  font-size: 14px;
+  line-height: 1.55;
+}
+:root dialog.qc-dialog.qc-dialog-wide {
+  width: min(720px, calc(100vw - 32px));
+}
+:root dialog.qc-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(2px);
+}
+:root dialog.qc-dialog .qc-dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+:root dialog.qc-dialog .qc-dialog-head h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.35;
+  text-wrap: balance;
+}
+:root dialog.qc-dialog .qc-dialog-head > button {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm, 8px);
+  background: transparent;
+  color: var(--muted);
+}
+:root dialog.qc-dialog .qc-dialog-head > button:hover {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+
+/* Fields: label above, one focus ring (border + soft halo), never a second outline. */
+:root dialog.qc-dialog label {
+  color: var(--ink-2);
+}
+:root
+  dialog.qc-dialog
+  :is(input:not([type='checkbox']):not([type='radio']):not([type='range']), select, textarea) {
+  border-color: var(--line-2);
+  background-color: var(--surface);
+  color: var(--ink);
+  border-radius: var(--r-sm, 8px);
+}
+:root dialog.qc-dialog :is(input, select, textarea):focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+/* Native option lists follow the skin (dark skins get a dark list, light skins a light one). */
+:root dialog.qc-dialog select,
+select {
+  color-scheme: inherit;
+}
+
+/* Buttons keep their natural width instead of stretching into input-like bars. A form's last
+   primary/submit button sits at the end, like a dialog footer. */
+/* fit-content is not "auto", so column flex/grid parents stop stretching the button, while
+   buttons in a row keep their normal alignment. */
+:root dialog.qc-dialog :is(form, fieldset, section, article, div, details) > button:not(.round) {
+  width: fit-content;
+  max-width: 100%;
+}
+:root dialog.qc-dialog :is(form, fieldset) > :is(button[type='submit'], button.primary):last-child {
+  margin-inline-start: auto;
+}
+:root dialog.qc-dialog button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Messages: errors and notices read as short callouts, not loose red text. */
+:root dialog.qc-dialog [role='alert'] {
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  border-radius: var(--r-sm, 8px);
+  background: color-mix(in srgb, var(--bad, #ff7a6b) 12%, transparent);
+  color: var(--bad, #ff7a6b);
+  font-size: 13px;
+}
+:root dialog.qc-dialog [role='status'] {
+  color: var(--ink-2);
+}
+
+@media (max-width: 560px) {
+  :root dialog.qc-dialog,
+  :root dialog.qc-dialog.qc-dialog-wide {
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+    padding: 16px;
+  }
+}
+
+/* Small status pills inside dialogs (for example the rough-cut format) were a fixed light colour. */
+:root .cloud-badge {
+  border-color: var(--line-2);
+  background: var(--surface-3);
+  color: var(--ink-2);
+}
+
+/* Native dropdown lists: paint options from the skin so they never open as white lists. */
+select option,
+select optgroup {
+  background-color: var(--surface-2);
+  color: var(--ink);
+}
+
+/* Local projects: the backup/import actions sit on one tidy wrapping row. */
+:root dialog.qc-dialog .project-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 8px;
+}
+:root dialog.qc-dialog .project-tools > button {
+  margin: 0;
+}
+
+/* Dropdown menus list actions as left-aligned rows with their labels at every width. */
+:root :is(.v2-export-menu, .v2-cloud-status) .card-box > button {
+  justify-content: flex-start;
+  text-align: left;
+}
+
+/* The hosted sign-in button is the one full-width action (it was shrunk by the rule above). */
+:root dialog.qc-dialog .hosted-sign-in > button.hosted-sign-in-main {
+  width: 100%;
+}
+:root dialog.qc-dialog .hosted-sign-in > button.hosted-sign-in-legacy {
+  margin-inline: auto;
+}

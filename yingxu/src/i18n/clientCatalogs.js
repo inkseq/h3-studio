@@ -33,6 +33,8 @@ export const clientCatalogs = {
     'client.notFound': 'This cloud feature is not connected, or the content does not exist.',
     'client.login': 'Sign in to the cloud studio again.',
     'client.status': 'The service did not complete the request ({status}).',
+    'client.unavailable':
+      'Can’t reach the cloud right now. Your work is safe; try again in a moment.',
     'client.uploadTimeout':
       'The upload timed out. Check Media status and storage usage before recovering; the upload was not automatically repeated.',
     'client.mediaTimeout':
@@ -90,6 +92,7 @@ export const clientCatalogs = {
     'client.notFound': '此云功能尚未连接，或该内容不存在。',
     'client.login': '请重新登录云工作室。',
     'client.status': '服务暂未完成请求（{status}）。',
+    'client.unavailable': '暂时连不上云端，作品不受影响，请稍后再试。',
     'client.uploadTimeout':
       '上传等待超时。请先到“素材状态与存储用量”核对是否已收到文件，再决定恢复；未自动重新上传。',
     'client.mediaTimeout': '媒体读取等待超时。请重试预览或下载原文件；不会重新提交生成。',

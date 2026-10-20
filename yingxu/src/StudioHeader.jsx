@@ -5,6 +5,7 @@ import { navigateApp } from './app-navigation.js';
 import { accountLabel, readAccess, resetAccess } from './account-access.js';
 import { CreditsChip } from './CreditsUI.jsx';
 import AccountMenu from './AccountMenu.jsx';
+import InkMark from './InkMark.jsx';
 
 // What the signed-in account may see (role, sign-in method, credits); re-read when it changes.
 export function useAccess(account) {
@@ -68,7 +69,8 @@ export default function StudioHeader({
   return (
     <header className="hbar">
       <a className="logo" href="/">
-        {t('app.name')}
+        <InkMark size={26} />
+        <span>{t('app.name')}</span>
       </a>
       <nav aria-label={t('nav.mobile')}>
         {links.map(([id, href, label, Icon]) => (

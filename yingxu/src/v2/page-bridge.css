@@ -753,3 +753,54 @@ dialog.modal.wide {
   margin: 0;
   justify-content: center;
 }
+
+/* Story library sidebar at narrow widths (#358 follow-up): the owner can drag it down to 140 px.
+   Profile cards keep the name on one line with an ellipsis, and below 240 px the tabs stack to one
+   column, the initial badge and the help tip hide, and buttons may wrap. */
+.sb-workspace .library:not(.collapsed) {
+  container: sb-library / inline-size;
+}
+.sb-workspace .library .pcard-body {
+  flex: 1;
+  min-width: 0;
+}
+.sb-workspace .library .pcard-body > :is(b, small) {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@container sb-library (max-width: 240px) {
+  .sb-workspace .library .lib-tabs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sb-workspace .library .pcard :is(.athumb, .profile-initial),
+  .sb-workspace .library .lib-tip {
+    display: none;
+  }
+  .sb-workspace .library .add-profile {
+    white-space: normal;
+    text-align: left;
+  }
+  .sb-workspace .library .lib-head > small {
+    display: none;
+  }
+}
+
+/* Where two scrollbars meet, the browser paints a white square; keep it the page colour. */
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Ink-drop brand mark in the header replaces the old gradient square. */
+.hbar .logo::before {
+  content: none;
+  display: none;
+}
+.hbar .logo {
+  gap: 6px;
+}
+.hbar .logo > .ink-mark {
+  flex: none;
+  margin-left: -4px;
+}

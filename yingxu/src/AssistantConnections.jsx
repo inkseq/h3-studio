@@ -16,6 +16,7 @@ import {
   assistantConnectionsView,
 } from './assistant-connections-model.js';
 import { usePageActive } from './AppRouteCache.jsx';
+import { useAccess } from './StudioHeader.jsx';
 import './v2/ops-adapter.css';
 const dollars = microsToDollars;
 export function AssistantBadge({ createdBy }) {
@@ -37,6 +38,9 @@ export default function AssistantConnections({
   embedded = false,
   active = true,
 }) {
+  // Users never see dollars (#304): spending caps show in credits, or in USD to admins only.
+  const access = useAccess(account),
+    money = creditMode || !!access?.admin;
   const { t, locale } = useI18n(),
     client = useMemo(() => {
       const c = createQuickChatClient();
@@ -316,7 +320,12 @@ export default function AssistantConnections({
       {!embedded && <h2>{t('assistants.title')}</h2>}
       <p>{t('assistants.workStays')}</p>
       {!account ? (
-        <button onClick={onLogin}>{t('assistants.login')}</button>
+        <div className="assistant-signin">
+          <p>{t('assistants.login')}</p>
+          <button type="button" className="primary keep-label" onClick={onLogin}>
+            {t('story.copy14')}
+          </button>
+        </div>
       ) : (
         <>
           {operation.pending && (
@@ -362,16 +371,22 @@ export default function AssistantConnections({
                     <option value="generate">{t('assistants.generate')}</option>
                   </select>
                 </label>
-                <label>
-                  {t(creditMode ? 'assistants.capCredits' : 'assistants.cap')}
-                  <input
-                    inputMode={creditMode ? 'numeric' : 'decimal'}
-                    value={cap}
-                    onChange={(e) => setCap(e.target.value)}
-                  />
-                </label>
-                <small>{t('assistants.zero')}</small>
-                <button disabled={!name.trim()}>{t('assistants.connect')}</button>
+                {money && (
+                  <>
+                    <label>
+                      {t(creditMode ? 'assistants.capCredits' : 'assistants.cap')}
+                      <input
+                        inputMode={creditMode ? 'numeric' : 'decimal'}
+                        value={cap}
+                        onChange={(e) => setCap(e.target.value)}
+                      />
+                    </label>
+                    <small>{t('assistants.zero')}</small>
+                  </>
+                )}
+                <button className="primary" disabled={!name.trim()}>
+                  {t('assistants.connect')}
+                </button>
               </fieldset>
             </form>
           ) : (
@@ -415,6 +430,7 @@ export default function AssistantConnections({
             busy={busy}
             scopeLabel={scopeLabel}
             permissionLabel={permissionLabel}
+            money={money}
             onPatch={(row, body) =>
               act(() => ops.current.execute('updateConnection', [row.id], body))
             }
@@ -495,6 +511,7 @@ export function ConnectionList({
   busy,
   scopeLabel,
   permissionLabel,
+  money = true,
   onPatch,
   onRevoke,
   onActivity,
@@ -530,6 +547,7 @@ export function ConnectionList({
           t={t}
           scopeLabel={scopeLabel}
           permissionLabel={permissionLabel}
+          money={money}
           onPatch={(body) => onPatch(row, body)}
           onRevoke={() => onRevoke(row)}
           onActivity={() => onActivity(row)}
@@ -549,6 +567,7 @@ function ConnectionRow({
   t,
   scopeLabel,
   permissionLabel,
+  money,
   onPatch,
   onRevoke,
   onActivity,
@@ -558,7 +577,8 @@ function ConnectionRow({
     [error, setError] = useState('');
   const editable = ['connected', 'paused'].includes(row.status),
     closed = ['revoked', 'expired'].includes(row.status);
-  const credit = row.unit === 'credits';
+  const credit = row.unit === 'credits',
+    showCap = credit || money;
   const cap =
     draft?.value ??
     (credit ? String(row.daily_limit_credits ?? 0) : dollars(row.daily_limit_microusd));
@@ -599,8 +619,8 @@ function ConnectionRow({
       <p>
         {scopeLabel(row.scope)} · {permissionLabel(row.permission)}
       </p>
-      <SpendingBreakdown usage={row.usage} scope="connection" />
-      <form onSubmit={save}>
+      {showCap && <SpendingBreakdown usage={row.usage} scope="connection" />}
+      <form onSubmit={save} hidden={!showCap}>
         <label>
           {t(credit ? 'assistants.capCredits' : 'assistants.cap')}
           <input

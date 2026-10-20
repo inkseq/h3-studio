@@ -273,7 +273,9 @@ export function createCloudClient({
                       ? ui('client.notFound', expectedAccount)
                       : response.status === 401
                         ? ui('client.login', expectedAccount)
-                        : ui('client.status', expectedAccount, { status: response.status });
+                        : response.status >= 500
+                          ? ui('client.unavailable', expectedAccount)
+                          : ui('client.status', expectedAccount, { status: response.status });
           const budgetKey = [
             'user_daily_limit_reached',
             'connection_daily_limit_reached',
