@@ -160,6 +160,17 @@ class StorageMigrationTests(OfflineTest):
         )
         path = self.receipts / "mount-provenance.json"
         path.write_bytes(_canonical(provenance))
+        if os.name != "nt":
+            path.chmod(0o644)
+            with self.assertRaisesRegex(MigrationError, "private_file_required"):
+                verify_rendition_sources(
+                    self.receipts,
+                    self.remote,
+                    self.original_receipt(),
+                    logical_root=self.local.root,
+                    provenance_file=path,
+                )
+        path.chmod(0o600)
         with self.assertRaisesRegex(MigrationError, "mount_provenance_required"):
             verify_rendition_sources(
                 self.receipts,

@@ -274,7 +274,9 @@ class RenditionTests(OfflineTest):
                 raise ProcessStopped()
             return original_save(receipt, **kwargs)
 
-        with mock.patch.object(self.service.journal, "save_renditions", side_effect=crashed):
+        with mock.patch.object(
+            self.service.journal, "save_renditions", side_effect=crashed
+        ):
             with self.assertRaises(ProcessStopped):
                 self.service.ensure_image_renditions("owner", value["id"])
         receipt = self.service.journal.get("owner", value["id"])

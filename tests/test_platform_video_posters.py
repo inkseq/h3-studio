@@ -173,7 +173,13 @@ class PosterWriterTests(ledger_fixture.LedgerCase):
                 image = Image.open(stream)
                 image.load()
                 self.assertEqual(image.format, "WEBP")
-        for changed in ("original", "binding", "quota", "matching_quota_delta", "frozen_key"):
+        for changed in (
+            "original",
+            "binding",
+            "quota",
+            "matching_quota_delta",
+            "frozen_key",
+        ):
             value = copy.deepcopy(result)
             delta = 0
             if changed == "original":
