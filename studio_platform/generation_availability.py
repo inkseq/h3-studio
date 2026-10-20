@@ -194,7 +194,7 @@ def _mode_result(
     *,
     control,
     snapshot,
-    owner,
+    owner=None,
 ):
     demand = None
     if (
