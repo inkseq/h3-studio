@@ -11,7 +11,7 @@ import hashlib
 import math
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, insert, or_, select, update
+from sqlalchemy import and_, insert, select, update
 
 from .repository import (
     BudgetExceeded,
@@ -246,13 +246,22 @@ def check_credit_spending(connection, repo, scope, job, amount, *, actor_id):
                 )
 
 
-def daily_projection(connection, tenant, owner, now, *, actor_id=None):
-    start, _ = day_window(now)
-    # A job's original owner also covers historical shared-only reservations.
+def _owned_spending_references(connection, tenant, owner):
+    """Resolve one owner before projecting all of an obligation's budget layers.
+
+    Tenant-wide legacy funding is not evidence of an individual owner's spend.
+    Shared sibling layers still count when another original layer, job or origin
+    positively identifies this owner; conflicting owned evidence fails closed.
+    """
     query = (
         select(
             budget_reservations,
+            budget_accounts.c.owner_id.label("account_owner"),
+            jobs.c.tenant_id.label("job_tenant"),
+            jobs.c.owner_id.label("job_owner"),
             jobs.c.actor_id.label("job_actor"),
+            spending_origins.c.tenant_id.label("origin_tenant"),
+            spending_origins.c.owner_id.label("origin_owner"),
             spending_origins.c.actor_id.label("origin_actor"),
         )
         .join(budget_accounts, budget_accounts.c.id == budget_reservations.c.account_id)
@@ -271,45 +280,63 @@ def daily_projection(connection, tenant, owner, now, *, actor_id=None):
                 spending_origins.c.reference_id == budget_reservations.c.reference_id,
             ),
         )
-        .where(
-            budget_accounts.c.tenant_id == tenant,
-            or_(
-                budget_accounts.c.owner_id == owner,
-                and_(jobs.c.tenant_id == tenant, jobs.c.owner_id == owner),
-                and_(
-                    spending_origins.c.tenant_id == tenant,
-                    spending_origins.c.owner_id == owner,
-                ),
-                and_(
-                    budget_accounts.c.owner_id.is_(None),
-                    jobs.c.owner_id.is_(None),
-                    spending_origins.c.owner_id.is_(None),
-                ),
-            ),
-        )
+        .where(budget_accounts.c.tenant_id == tenant)
     )
-    amounts = {}
+    references = {}
     for row in connection.execute(query).mappings():
-        attribution = row["origin_actor"] or row["job_actor"]
-        # Historic Quick Chat collapsed actors. Its unknown attribution cannot
-        # be used to promise spare capacity on any individual connection.
-        if actor_id and attribution not in (actor_id, None, "quick-chat-execution"):
+        references.setdefault((row["reference_type"], row["reference_id"]), []).append(
+            row
+        )
+    for reference, rows in references.items():
+        owners = {
+            row["account_owner"] for row in rows if row["account_owner"] is not None
+        }
+        tenant_conflict = False
+        for row in rows:
+            for source in ("job", "origin"):
+                if row[source + "_owner"] is not None:
+                    tenant_conflict |= row[source + "_tenant"] != tenant
+                    owners.add(row[source + "_owner"])
+        if owner not in owners:
             continue
-        if row["state"] in {"reserved", "invoice_pending"}:
-            amount = money(row["amount_microusd"])
-            if row["actual_cost_microusd"] is not None:
-                raise BudgetExceeded("spending_usage_unconfirmed")
-        elif row["state"] in {"settled", "released"}:
-            amount = money(row["actual_cost_microusd"])
-            if (
-                row["settled_at"] is not None
-                and max(row["created_at"], row["settled_at"]) < start
-            ):
-                continue
-        else:
+        if (
+            owners != {owner}
+            or tenant_conflict
+            or reference[0] not in {"job", "instance"}
+        ):
             raise BudgetExceeded("spending_usage_unconfirmed")
-        key = (row["reference_type"], row["reference_id"])
-        amounts[key] = max(amounts.get(key, 0), amount)
+        if any(
+            row["state"] not in {"reserved", "invoice_pending", "settled", "released"}
+            for row in rows
+        ):
+            raise BudgetExceeded("spending_usage_unconfirmed")
+        yield reference, rows
+
+
+def daily_projection(connection, tenant, owner, now, *, actor_id=None):
+    start, _ = day_window(now)
+    amounts = {}
+    for reference, rows in _owned_spending_references(connection, tenant, owner):
+        for row in rows:
+            attribution = row["origin_actor"] or row["job_actor"]
+            # Unknown actors within this proven owner remain conservative for
+            # connection caps; unrelated tenant liabilities never enter them.
+            if actor_id and attribution not in (actor_id, None, "quick-chat-execution"):
+                continue
+            if row["state"] in {"reserved", "invoice_pending"}:
+                amount = money(row["amount_microusd"])
+                if row["actual_cost_microusd"] is not None:
+                    raise BudgetExceeded("spending_usage_unconfirmed")
+            elif row["state"] in {"settled", "released"}:
+                amount = money(row["actual_cost_microusd"])
+                if (
+                    row["settled_at"] is not None
+                    and max(row["created_at"], row["settled_at"]) < start
+                ):
+                    continue
+            else:
+                raise BudgetExceeded("spending_usage_unconfirmed")
+            amounts[reference] = max(amounts.get(reference, 0), amount)
     return sum(amounts.values())
 
 
@@ -545,8 +572,8 @@ def empty_usage_breakdown(*, actor_id=None, connected=True):
         },
     }
     if not actor_id:
-        # The first amount is disjoint from account exposure. The second is a
-        # subset of known-owner exposure, never another additive cost layer.
+        # Keep the old unattributed-ownership key at zero for compatibility.
+        # Only unknown actors within this proven owner can carry exposure.
         value.update(
             unattributed_exposure_microusd=0, unattributed_actor_exposure_microusd=0
         )
@@ -628,61 +655,14 @@ def usage_breakdown(
     or a shared/unknown dollar amount. All reads preserve the original ledger.
     """
     start, _ = day_window(now)
-    query = (
-        select(
-            budget_reservations,
-            budget_accounts.c.owner_id.label("account_owner"),
-            jobs.c.tenant_id.label("job_tenant"),
-            jobs.c.owner_id.label("job_owner"),
-            jobs.c.actor_id.label("job_actor"),
-            spending_origins.c.tenant_id.label("origin_tenant"),
-            spending_origins.c.owner_id.label("origin_owner"),
-            spending_origins.c.actor_id.label("origin_actor"),
-        )
-        .join(budget_accounts, budget_accounts.c.id == budget_reservations.c.account_id)
-        .outerjoin(
-            jobs,
-            and_(
-                budget_reservations.c.reference_type == "job",
-                jobs.c.id == budget_reservations.c.reference_id,
-            ),
-        )
-        .outerjoin(
-            spending_origins,
-            and_(
-                spending_origins.c.reference_type
-                == budget_reservations.c.reference_type,
-                spending_origins.c.reference_id == budget_reservations.c.reference_id,
-            ),
-        )
-        .where(budget_accounts.c.tenant_id == tenant)
-    )
-    references = {}
-    for row in connection.execute(query).mappings():
-        references.setdefault((row["reference_type"], row["reference_id"]), []).append(
-            row
-        )
     value = empty_usage_breakdown(actor_id=actor_id)
     if excluded_references is not None:
         value.update(waived_reference_count=0, waived_exposure_microusd=0)
-    for (kind, _), rows in references.items():
-        owners = {
-            row["account_owner"] for row in rows if row["account_owner"] is not None
-        }
-        tenant_conflict = False
-        for row in rows:
-            for source in ("job", "origin"):
-                if row[source + "_owner"] is not None:
-                    tenant_conflict |= row[source + "_tenant"] != tenant
-                    owners.add(row[source + "_owner"])
-        if owners and owner not in owners:
-            continue
-        if tenant_conflict or kind not in value["by_kind"] or len(owners) > 1:
-            raise BudgetExceeded("spending_usage_unconfirmed")
+    for (kind, _), rows in _owned_spending_references(connection, tenant, owner):
         row = rows[0]
         actor = row["origin_actor"] or row["job_actor"]
         actor = actor if actor not in (None, "quick-chat-execution") else None
-        if actor_id and (owners != {owner} or actor != actor_id):
+        if actor_id and actor != actor_id:
             continue
         current = _display_reference(rows, start, now)
         if (
@@ -691,9 +671,6 @@ def usage_breakdown(
         ):
             value["waived_reference_count"] += 1
             value["waived_exposure_microusd"] += current["exposure_microusd"]
-            continue
-        if not owners:
-            value["unattributed_exposure_microusd"] += current["exposure_microusd"]
             continue
         if not actor_id and actor is None:
             value["unattributed_actor_exposure_microusd"] += current[
@@ -720,17 +697,16 @@ def public_usage(connection, tenant, owner, now, *, actor_id=None):
             )
         )
     }
+    breakdown = usage_breakdown(connection, tenant, owner, now, actor_id=actor_id)
     value = {
-        "projected_microusd": daily_projection(
-            connection, tenant, owner, now, actor_id=actor_id
-        ),
+        "projected_microusd": breakdown["exposure_microusd"],
         "day": datetime.fromtimestamp(now, timezone.utc)
         .astimezone(ZoneInfo("Australia/Sydney"))
         .date()
         .isoformat(),
         "timezone": "Australia/Sydney",
         "includes_unresolved_prior_days": True,
-        "breakdown": usage_breakdown(connection, tenant, owner, now, actor_id=actor_id),
+        "breakdown": breakdown,
         "charge_breakdown": usage_breakdown(
             connection,
             tenant,

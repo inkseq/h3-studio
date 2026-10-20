@@ -156,6 +156,53 @@ class SpendingLimitsTests(LedgerCase):
         self.assertEqual(self.projection("key:one"), 100_000)
         self.assertEqual(self.projection("key:two"), 100_000)
 
+    def test_unknown_actor_of_owned_work_still_consumes_connection_cap(self):
+        self.settings(connections={"key:one": 100_000})
+        self.submit(cost=60_000, actor="quick-chat-execution")
+        self.assertEqual(self.projection("key:one"), 60_000)
+        with self.assertRaisesRegex(BudgetExceeded, "connection_daily_limit_reached"):
+            self.submit(cost=60_000, actor="key:one")
+
+    def test_ownerless_funding_does_not_consume_owner_cap_but_global_budget_still_binds(
+        self,
+    ):
+        self.settings(daily=100_000)
+        self.repo.configure_pool("legacy-pool", max_instances=1, max_physical_gpus=1)
+        self.repo.configure_budget(
+            "shared", tenant_id=self.scope.tenant_id, limit_microusd=100_000
+        )
+        intent = self.repo.reserve_instance_intent(
+            self.other,
+            "legacy-pool",
+            "original-legacy",
+            reserved_cost_microusd=100_000,
+            hard_deadline=self.now + 3600,
+            budget_account_ids=("shared",),
+            dry_run=False,
+        )
+        with self.repo.transaction() as connection:
+            connection.execute(
+                spending_origins.delete().where(
+                    spending_origins.c.reference_type == "instance",
+                    spending_origins.c.reference_id == intent["id"],
+                )
+            )
+        shared = self.repo.get_budget("shared")
+        self.assertEqual(self.projection(), 0)
+        self.submit(cost=60_000)
+        with self.assertRaisesRegex(BudgetExceeded, "user_daily_limit_reached"):
+            self.submit(cost=60_000)
+        plan = self.plan(cost=10_000)
+        with self.assertRaisesRegex(BudgetExceeded, "budget_exceeded"):
+            self.repo.create_job(
+                self.scope,
+                plan["id"],
+                "shared-still-full",
+                budget_account_ids=("shared",),
+            )
+        self.assertEqual(self.repo.get_budget("shared"), shared)
+        self.assertEqual(self.projection(), 60_000)
+
     def test_quote_confirmation_is_single_use_and_replay_stays_idempotent(self):
         self.settings(ask=1)
         plan = self.plan()
