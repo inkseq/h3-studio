@@ -616,6 +616,8 @@ class Bot:
         if state["brief"]:
             self._close(chat_id, state.get("picks_msg"), f"✅ 要做：{state['brief'][:40]}")
         self._action(chat_id, "typing")
+        if getattr(self.adapter, "thinks", False):
+            self.api.send_message(chat_id, "🧠 正在看照片、排方案，大约 20 秒……")
         board = self.adapter.start(chat_id, state["photos"], state["brief"])
         board = self.adapter.plan_shots(board)
         self._save_board(chat_id, state, board, phase="proposed", film=None,
@@ -776,6 +778,10 @@ class Bot:
             )
             return
         number = parse_part(text)
+        if number is None:
+            # "结尾那段太拖了": a model adapter may tell which part is meant.
+            self._action(chat_id, "typing")
+            number = self.adapter.guess_part(board, text)
         if number is not None and 1 <= number <= len(board.cards):
             return self._propose_fix(chat_id, state, number, text)
         state["pending_fix"] = {"number": None, "feedback": text}

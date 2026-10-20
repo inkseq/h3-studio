@@ -92,7 +92,7 @@ class DemoAdapter:
 
     def _prompt(self, board, card):
         parts = [
-            f"{board.materials[card.photo - 1]}（素材{card.photo}{MODES[card.mode]}）",
+            f"{board.materials[card.photo - 1]}（照片{card.photo}{MODES[card.mode]}）",
             card.description,
             MOTIONS[(card.photo - 1) % len(MOTIONS)],
             board.style or "温馨自然光",
@@ -364,6 +364,9 @@ class DemoAdapter:
 
     def web_link(self, board, number=None):
         return None
+
+    def guess_part(self, board, text):
+        return None  # only a model adapter can tell "结尾那段" means the last part
 
     def add_photo(self, board, path):
         return board

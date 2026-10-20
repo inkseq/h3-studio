@@ -18,24 +18,37 @@ from .demo_adapter import DemoAdapter
 from .telegram_api import ORIGIN, TelegramAPI
 
 
-def load_token(profile):
+def load_registry(service, profile):
     root = Path(os.environ.get("AI_REGISTRY_ROOT", r"C:\Users\danmo\Desktop\AI-Registry"))
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
     from api_registry import load_api
 
-    config = load_api("telegram-bot", profile=profile)
+    return load_api(service, profile=profile)
+
+
+def load_token(profile):
+    config = load_registry("telegram-bot", profile)
     if config.base_url != ORIGIN or not config.api_key:
         raise SystemExit("registry profile endpoint or token mismatch")
     return config.api_key
 
 
 def make_adapter(config, home):
-    """demo (default) or staging; staging signs in as a staging QA account."""
+    """demo (default), llm (Gemini plans, local demo film) or staging (QA story)."""
     if config.get("adapter", "demo") == "demo":
         return DemoAdapter(home / "work")
+    if config["adapter"] == "llm":
+        from .llm_adapter import ORIGIN as GEMINI, GeminiClient, LlmAdapter
+
+        llm = config["llm"]
+        key = load_registry("gemini", llm["profile"])
+        if key.base_url != GEMINI or not key.api_key:
+            raise SystemExit("gemini registry profile endpoint or key mismatch")
+        client = GeminiClient(key.api_key, llm["model"], usage_log=home / "llm-usage.jsonl")
+        return LlmAdapter(home / "work", client)
     if config["adapter"] != "staging":
-        raise SystemExit("adapter must be demo or staging")
+        raise SystemExit("adapter must be demo, llm or staging")
     from .staging_adapter import STAGING, StagingAdapter, StudioClient
 
     staging = config["staging"]
