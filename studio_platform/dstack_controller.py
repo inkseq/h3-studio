@@ -1,4 +1,4 @@
-"""CPU reconciliation of owned dstack runs; never retries a rental or GPU POST.
+"""CPU reconciliation and one guarded demand decision; never replays a GPU POST.
 
 The original database owns leases, budgets, jobs and drain decisions. dstack
 owns capacity. Native readiness owns the private model endpoint. PostgreSQL
@@ -953,8 +953,46 @@ class DstackController:
         return {
             "state": "running",
             "nodes": results,
+            "demand_start": self._demand_start(),
             "invoice_check": self._invoice_check(),
         }
+
+    def _demand_start(self):
+        """One decision through the original service, after existing idle cleanup.
+
+        The service owns current eligibility, the runtime kill switch, original
+        command identity and the atomic manual/automatic capacity guard. The
+        broad business-demand predicate above is only a wake/recovery hint.
+        An unknown result is observed on the next tick, never retried here.
+        """
+        trigger = getattr(self.service, "demand_start_once", None)
+        if not callable(trigger):
+            return {"state": "disabled", "reason_code": "demand_start_unavailable"}
+        try:
+            result = trigger()
+            if not isinstance(result, dict) or result.get("state") not in {
+                "disabled",
+                "idle",
+                "blocked",
+                "accepted",
+                "observing",
+            }:
+                raise ValueError("dstack_demand_start_result_invalid")
+            fields = ("state", "reason_code", "command_id", "node_id")
+            value = {key: result[key] for key in fields if result.get(key) is not None}
+            if any(
+                not isinstance(item, str) or not 1 <= len(item) <= 200
+                for item in value.values()
+            ):
+                raise ValueError("dstack_demand_start_result_invalid")
+            return value
+        except Exception:
+            # A failed response may follow an already committed original start.
+            # Do not issue a second command, choose an offer, or expose errors.
+            return {
+                "state": "blocked",
+                "reason_code": "dstack_demand_start_observation_failed",
+            }
 
 
 class SlotProcesses:

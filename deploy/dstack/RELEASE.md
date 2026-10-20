@@ -391,3 +391,68 @@ namespace/volume identity, inactive-path fences and failure state retention.
 Existing platform/operator release tests cover the unchanged legacy path.
 These tests do not claim live deployment or real GPU acceptance; those require
 the release receipt and the separately authorized Quick Chat/Agent videos.
+
+## Demand start (CR43)
+
+Production activation is a separate audited step after Claude accepts the
+staging cold-start soak. Deploying the code does not enable automatic rental.
+The original capacity controller, job ledger, operator commands and global
+capacity lock are reused; there is no additional queue or scheduler.
+
+Protected operator policy opts in explicitly with
+`demand_start: {"profile_ids": ["EXISTING_FL_PROFILE", "EXISTING_REF_PROFILE"]}`.
+Only these existing profiles may fund automatic capacity; their tenant, native
+mode/configuration/manifest and shared pool remain exact. Job owners and signed
+asset/result access are unchanged. Staging additionally supplies its current
+`test_task_id` here and retains the task budget, idle stop and maximum runtime.
+The operator policy and selected execution qualification/reservation may use
+explicit `expires_at: null` for no authority expiry. Offers, previews,
+confirmation plans, worker heartbeats and private member approvals remain
+finite. Never replace expiry with a distant date or edit accepted job inputs.
+
+Human-admin `GET /v1/operator/dstack/admin/workspace` adds `demand_start`:
+`enabled`, `revision`, `hard_max_machines`, `running_machines`,
+`starting_machines`, `uncertain_machines`, `queued_generation_jobs`,
+`queued_by_mode` (fl/ref) and `blocked_reason`. These counts are advisory;
+the original start transaction rechecks actual dstack/provider occupancy.
+Manual and automatic starts together cannot exceed two machines or the lower
+configured capacity. Each machine retains its 850000 microusd/hour ceiling;
+normal audited operator price preferences may lower that price.
+
+The human-admin runtime switch uses
+`GET/PUT /v1/operator/dstack/admin/demand-start`. PUT requires an
+`Idempotency-Key`, exact `expected_revision`, boolean `enabled` and a reason.
+It defaults OFF in every environment. CAS, original command replay and an
+outbox audit are committed together. OFF prevents new automatic commands;
+it does not cancel accepted startup/running work or disable manual starts.
+Automatic machines always use ordinary idle stop, never an indefinite hold.
+Compatible queued/running work pauses that mode's idle timer; unrelated modes
+do not keep an unused machine alive. Explicit manual holds are not rewritten.
+
+Confirmed, active, unsubmitted native jobs trigger one decision per controller
+tick. Preflight alone, private member-bound work, cancelled/terminal tasks and
+unknown upstream submissions do not trigger rental. Account and job-row locks
+fence cancellation/suspension/claim races before the original reservation.
+Planning and 429 backoff use the existing operator-command journal. Response
+loss preserves the same preview/start identity; replacement requires existing
+positive no-allocation/removal evidence. No invoice is fabricated or forgiven.
+
+Creator availability keeps `state`/`available` truthful and adds `can_queue`.
+The normal preflight/confirmation is still required. Accepted job reads add
+neutral `wait_diagnostic.stage`: queued_no_machine, machine_starting,
+downloading, loading, awaiting_worker, running or unknown. The frontend owns
+the copy; do not expose provider/model names or dollars in this hint.
+
+Before production enable, use the existing audited settings to clear old
+production USD daily/connection caps, retain credit and confirmation settings,
+and make the fleet hourly setting at least twice the per-machine ceiling
+(redundant under the two-machine limit). Existing retired account caps remain
+accounting-only; actual spend, original reservations and unsettled invoices are
+retained. Staging keeps USD20 per acceptance task without this relaxation.
+
+Acceptance is two normal cold cycles within one USD20 task: confirmed QA job,
+automatic allocation, native readiness, one original video plus separate audio
+in R2, idle stop and positive dstack/provider removal. A natural unknown branch
+not observed live must be reported as unexercised; do not induce paid failures.
+After testing, stop test machines and switch demand start OFF. Never operate
+owner production machines during this preparation or soak.

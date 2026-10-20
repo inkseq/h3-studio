@@ -210,6 +210,58 @@ class PoolMemberTests(LedgerCase):
             self.assertEqual(result.execution["admission_state"], "blocked")
             self.assertTrue(any("双节点" in b for b in result.execution["blockers"]))
 
+    def test_cold_demand_cannot_replace_original_private_pool_approval(self):
+        with patch("studio_platform.dstack_demand.demand_admission") as demand:
+            demand.return_value = {"version": 1, "profile_id": "unbound-demand"}
+            result = self.policies.evaluate(self.compiled, self.scope, self.fingerprint)
+        demand.assert_not_called()
+        self.assertTrue(result.execution["enabled"], result.execution)
+        self.assertEqual(result.execution["admission_state"], "waiting_capacity")
+        self.assertEqual(result.execution["capacity_approval_id"], self.grant["id"])
+        self.assertEqual(result.execution["capacity_binding"], "pool-members-v1")
+        self.assertNotIn("demand_start", result.execution)
+        original = self.waiter("private-with-demand-config")
+        self.assertEqual(self.rows(capacity_waiters)[0]["job_id"], original["id"])
+        self.assertEqual(self.rows(instance_intents), [])
+
+    def test_warm_continuing_pool_keeps_finite_approval_when_demand_is_enabled(self):
+        self.repo.set_capacity_approval_enabled("cold-approval", enabled=False)
+        grant = self.approve(
+            approval_id="continuing-approval",
+            backend="wangp-worker",
+            engine_manifest_digest=DIGEST,
+            pool_members=MEMBERS,
+            pool_controller="continuing-two-members-v1",
+        )
+        rogue, spec = self.worker("unbound")
+        with patch("studio_platform.dstack_demand.demand_admission") as demand:
+            demand.return_value = {"version": 1, "profile_id": "unbound-demand"}
+            result = self.policies.evaluate(self.compiled, self.scope, self.fingerprint)
+        demand.assert_not_called()
+        self.assertTrue(result.execution["enabled"], result.execution)
+        self.assertEqual(result.execution["capacity_approval_id"], grant["id"])
+        self.assertEqual(result.execution["capacity_binding"], "pool-members-v1")
+        self.assertEqual(result.execution["admission_state"], "waiting_capacity")
+        self.assertNotIn("demand_start", result.execution)
+        plan = self.repo.create_plan(
+            self.scope,
+            self.compiled,
+            result.execution,
+            expires_at=result.expires_at,
+            estimated_cost_microusd=result.cost,
+        )
+        job = self.repo.create_job(
+            self.scope,
+            plan["id"],
+            "private-warm-demand",
+            initial_status="waiting_capacity",
+            budget_account_ids=result.execution["budget_account_ids"],
+        )
+        self.assertIsNone(rogue.claim(spec.worker_id, "cold-pool"))
+        self.assertEqual(
+            self.repo.get_job(self.scope, job["id"])["status"], "waiting_capacity"
+        )
+
     def test_concurrent_reservations_bind_each_member_once_and_never_double_charge(
         self,
     ):

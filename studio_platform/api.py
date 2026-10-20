@@ -738,7 +738,10 @@ def create_app(
         from .generation_availability import generation_availability
 
         return generation_availability(
-            settings, repo, registry=app.state.operator_capacity.registry
+            settings,
+            repo,
+            registry=app.state.operator_capacity.registry,
+            owner=principal.owner,
         )
 
     @app.get("/v1/projects")

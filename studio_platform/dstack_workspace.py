@@ -18,6 +18,7 @@ from .operator_capacity import (
     OperatorError,
     operator_commands,
     operator_nodes,
+    operator_policy,
     require,
     safe_id,
 )
@@ -28,6 +29,7 @@ from .repository import (
     instance_intents,
     jobs,
     metadata,
+    outbox,
     registered_workers,
     request_hash,
 )
@@ -315,6 +317,112 @@ class DstackWorkspace:
         )
         return identity
 
+    def demand_start(self, principal):
+        self._authorize(principal, admin=True)
+        with self.repo.engine.connect() as connection:
+            return self.service.demand_start_summary(connection, self.repo.clock())
+
+    def set_demand_start(self, principal, body, key):
+        from .dstack_demand_policy import load_runtime, policy_key
+        from .identity import account_identity, lock_account_gate
+
+        self._authorize(principal, admin=True)
+        require(
+            isinstance(body, dict)
+            and set(body) == {"expected_revision", "enabled", "reason"}
+            and (
+                body["expected_revision"] is None
+                or (
+                    isinstance(body["expected_revision"], str)
+                    and len(body["expected_revision"]) == 64
+                    and all(c in "0123456789abcdef" for c in body["expected_revision"])
+                )
+            )
+            and type(body["enabled"]) is bool
+            and isinstance(body["reason"], str)
+            and body["reason"] == body["reason"].strip()
+            and 1 <= len(body["reason"]) <= 500
+            and not any(ord(c) < 32 or ord(c) == 127 for c in body["reason"]),
+            "dstack_demand_policy_invalid",
+            422,
+        )
+        with self.repo.transaction() as connection:
+            lock_account_gate(connection, self.settings.tenant_id)
+            self.repo._lock_capacity(connection)
+            # Authorization precedes replay too: a demoted administrator must
+            # not recover privileged results through an old command key.
+            identity = account_identity(
+                connection, self.settings.tenant_id, principal.owner
+            )
+            require(
+                identity is None
+                or (
+                    identity.get("status") == "active"
+                    and identity.get("role") == "admin"
+                ),
+                "admin_required",
+                403,
+            )
+            actor, digest, prior = self._journal(
+                connection, principal, key, "dstack_demand_set", body
+            )
+            if prior:
+                return copy.deepcopy(prior["payload"])
+            old, version = load_runtime(connection, self.settings.tenant_id)
+            require(
+                old["revision"] == body["expected_revision"],
+                "dstack_demand_policy_conflict",
+            )
+            now = self.repo.clock()
+            stored = {
+                "version": version + 1,
+                "payload": {
+                    "tenant_id": self.settings.tenant_id,
+                    "enabled": body["enabled"],
+                },
+                "actor": principal.actor_id,
+                "updated_at": now,
+            }
+            identity = policy_key(self.settings.tenant_id)
+            if version:
+                changed = connection.execute(
+                    update(operator_policy)
+                    .where(
+                        operator_policy.c.id == identity,
+                        operator_policy.c.version == version,
+                    )
+                    .values(**stored)
+                )
+                require(changed.rowcount == 1, "dstack_demand_policy_conflict")
+            else:
+                connection.execute(
+                    insert(operator_policy).values(id=identity, **stored)
+                )
+            result, _ = load_runtime(connection, self.settings.tenant_id)
+            command_id = self._command(
+                connection, actor, key, digest, "dstack_demand_set", result
+            )
+            connection.execute(
+                insert(outbox).values(
+                    id=str(uuid.uuid4()),
+                    event_type="operator.demand_start_updated",
+                    aggregate_id=identity,
+                    payload={
+                        "tenant_id": self.settings.tenant_id,
+                        "actor_id": principal.actor_id,
+                        "actor_owner": principal.owner,
+                        "reason": body["reason"],
+                        "command_id": command_id,
+                        "old": old,
+                        "new": result,
+                        "old_version": version,
+                        "new_version": version + 1,
+                    },
+                    created_at=now,
+                )
+            )
+            return result
+
     def create_group(self, principal, body, key):
         owner = self._authorize(principal)
         name = body.get("name") if isinstance(body, dict) else None
@@ -468,6 +576,9 @@ class DstackWorkspace:
                 projected[node["node_id"]] = {**node, "owner_id": account}
         result, groups = [], []
         with self.repo.engine.connect() as connection:
+            demand_start = (
+                self.service.demand_start_summary(connection, now) if admin else None
+            )
             # The preceding owner-state projection is advisory. A machine
             # accepted between those reads belongs to the next poll, never a
             # half-built row or a KeyError while dependent groups are rendered.
@@ -738,7 +849,7 @@ class DstackWorkspace:
             "nodes": result,
             "groups": groups,
             "queue": queue,
-            **({"accounts": accounts} if admin else {}),
+            **({"accounts": accounts, "demand_start": demand_start} if admin else {}),
         }
 
     def group_command(self, principal, group_id, body, key, kind):

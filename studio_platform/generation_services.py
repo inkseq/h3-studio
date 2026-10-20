@@ -256,10 +256,15 @@ class GenerationRead:
     def job(self, principal, job_id):
         job = self.access.job(principal, job_id)
         value = self.public_job(job, principal=principal)
-        if job["status"] == "queued":
+        if job["status"] in {"queued", "waiting_capacity"}:
             from .control import WorkerControl
+            from .dstack_demand import job_wait_stage
 
             value["wait_diagnostic"] = WorkerControl(self.repo).queued_diagnostic(job)
+            with self.repo.engine.connect() as connection:
+                value["wait_diagnostic"]["stage"] = job_wait_stage(
+                    connection, job, self.repo.clock()
+                )
         return value
 
     def list_jobs(self, principal, *, project_id=None, limit=100, offset=0):

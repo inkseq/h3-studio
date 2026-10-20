@@ -4,7 +4,7 @@ from contextlib import ExitStack
 from sqlalchemy import select
 
 from .control import WorkerControl, REAL_GPU_BACKENDS
-from .execution_policy import read_policy
+from .execution_policy import read_policy, authority_current
 from .execution_profiles import read_profiles
 from .operator_capacity import (
     operator_nodes,
@@ -12,7 +12,7 @@ from .operator_capacity import (
     OperatorError,
     CONTROLLER_FRESH_SECONDS,
 )
-from .repository import instance_intents
+from .repository import Scope, instance_intents
 from .runtime_catalog import public_catalog, profile_output_delivery
 
 MODES = {"fl": "h3-base-fl2va-v1", "ref": "h3-base-ref2va-v1"}
@@ -24,6 +24,7 @@ def _result(recipe, state, reason):
         "state": state,
         "reason_code": reason,
         "available": state in {"ready", "busy"},
+        "can_queue": state in {"ready", "busy"},
     }
 
 
@@ -182,8 +183,20 @@ def _preparing(repo, registry, policy, mode, now, *, snapshot):
 
 
 def _mode_result(
-    settings, repo, registry, policy, valid, mode, recipe, now, *, control, snapshot
+    settings,
+    repo,
+    registry,
+    policy,
+    valid,
+    mode,
+    recipe,
+    now,
+    *,
+    control,
+    snapshot,
+    owner=None,
 ):
+    demand = None
     if (
         not settings.generation_enabled
         or settings.execution_backend not in REAL_GPU_BACKENDS
@@ -195,13 +208,8 @@ def _mode_result(
         state, reason = "disabled", "profile_not_configured"
     elif not policy["enabled"] or policy["backend"] != settings.execution_backend:
         state, reason = "disabled", "profile_disabled"
-    elif (
-        policy["qualification"]["status"] not in {"accepted", "runtime_required"}
-        or policy["qualification"]["verified_at"] > now
-        or now + policy["reservation"]["expected_runtime_s"]
-        >= min(
-            policy["qualification"]["expires_at"], policy["reservation"]["expires_at"]
-        )
+    elif not authority_current(
+        policy, now, policy["reservation"]["expected_runtime_s"]
     ):
         state, reason = "disabled", "profile_authority_expired"
     else:
@@ -244,10 +252,26 @@ def _mode_result(
                 "unknown": "capacity_readiness_unconfirmed",
                 "unavailable": "matching_capacity_unavailable",
             }[state]
-    return _result(recipe, state, reason)
+        if owner is not None and state not in {"ready", "busy"}:
+            from .dstack_demand import demand_admission
+
+            demand = demand_admission(
+                settings,
+                repo,
+                Scope(settings.tenant_id, owner, "__availability"),
+                {
+                    "deployment_profile_id": policy.get("deployment_profile_id"),
+                    "recipe_id": recipe,
+                    "request": {"mode": mode, "model": policy["model_id"]},
+                },
+                policy,
+            )
+    result = _result(recipe, state, reason)
+    result["can_queue"] = result["available"] or demand is not None
+    return result
 
 
-def generation_availability(settings, repo, *, registry=None):
+def generation_availability(settings, repo, *, registry=None, owner=None):
     now = repo.clock()
     try:
         policies = read_profiles(settings.execution_profiles_file)
@@ -273,6 +297,7 @@ def generation_availability(settings, repo, *, registry=None):
                     now,
                     control=control,
                     snapshot=snapshot,
+                    owner=owner,
                 )
             profiles.append({"deployment_profile_id": profile["id"], "modes": modes})
         # Missing profile selection is the existing legacy route, never the default
@@ -296,6 +321,7 @@ def generation_availability(settings, repo, *, registry=None):
                         now,
                         control=control,
                         snapshot=snapshot,
+                        owner=owner,
                     )
                     for mode, recipe in MODES.items()
                 },

@@ -1,6 +1,7 @@
 """Original-ledger lifecycle and admission; no provider, media or GPU calls."""
 
 from dataclasses import replace
+import copy
 from contextlib import contextmanager
 from unittest.mock import patch
 from types import SimpleNamespace
@@ -162,6 +163,209 @@ class DstackControllerTests(fixture.DstackOperatorTests):
             ),
             controller.runtime.slot(node).spec.worker_id,
         )
+
+    def _continuing_capacity(self):
+        from studio_platform.dstack_operator import DstackOperator
+
+        self.config['policy'].update(
+            lifecycle_version=2,
+            reservation_seconds=3600,
+            max_instances=2,
+            max_physical_gpus=2,
+        )
+        self.service = DstackOperator(
+            self.repo, self.settings, self.capacity, self.config
+        )
+        profile = self.service.profiles['5090-fl']
+        selected = patch(
+            'studio_platform.execution_profiles.selected_policy',
+            return_value=dict(
+                enabled=True,
+                backend='wangp-worker',
+                dispatch_backend='hatchet-v1',
+                pool=profile['pool'],
+                configuration_id=profile['configuration_id'],
+                model_id=profile['model_id'],
+                engine_manifest_digest=profile['manifest_digest'],
+                qualification=dict(
+                    status='accepted', verified_at=1.0, expires_at=20000.0
+                ),
+                reservation=dict(expected_runtime_s=1800, expires_at=20000.0),
+                envelope=dict(max_duration_seconds=4.0),
+            ),
+        )
+        selected.start()
+        self.addCleanup(selected.stop)
+
+    def _queued_native(self, mode):
+        from studio_platform.runtime_catalog import (
+            engine_manifest,
+            profile_output_delivery,
+        )
+
+        profile = self.service.profiles['5090-fl']
+        manifest = engine_manifest(fixture.PROFILE, mode)
+        plan = self.repo.create_plan(
+            self.scope,
+            dict(
+                recipe_id=manifest.document['generation_recipe_id'],
+                deployment_profile_id=fixture.PROFILE,
+                request=dict(model=profile['model_id'], mode=mode),
+            ),
+            dict(
+                enabled=True,
+                backend='wangp-worker',
+                dispatch_backend='hatchet-v1',
+                output_delivery=profile_output_delivery(fixture.PROFILE),
+                deployment_profile_id=fixture.PROFILE,
+                model_id=profile['model_id'],
+                engine_manifest_digest=manifest.digest,
+                configuration_id=profile['configuration_id']
+                if mode == 'fl'
+                else 'ref-configuration',
+                pool=profile['pool'],
+                expected_runtime_s=120,
+            ),
+            expires_at=self.now + 1000,
+            estimated_cost_microusd=0,
+        )
+        created = self.repo.create_job(self.scope, plan['id'], 'queued-' + mode)
+        return self.repo.get_job(self.scope, created['id'])
+
+    def _continuing_ready(self):
+        from studio_platform.runtime_catalog import profile_output_delivery
+
+        self._continuing_capacity()
+        node = self.start()['node_id']
+        self.running(node)
+        controller = self.controller()
+        original_slot = controller.runtime.slot
+
+        def native_slot(identity):
+            slot = original_slot(identity)
+            return replace(
+                slot,
+                spec=replace(
+                    slot.spec, output_delivery=profile_output_delivery(fixture.PROFILE)
+                ),
+            )
+
+        controller.runtime.slot = native_slot
+        self.assertEqual(controller.tick()['nodes'][0]['state'], 'ready')
+        self.consumer(node, controller)
+        return node, controller
+
+    def test_demand_decision_runs_once_after_observation_and_does_not_replay_unknown(
+        self,
+    ):
+        node = self.start()['node_id']
+        controller = self.controller()
+        decisions = []
+
+        def observe(current):
+            decisions.append(('observed', current['intent_id']))
+            return dict(node_id=current['intent_id'], state='starting')
+
+        def decide():
+            self.assertEqual(decisions, [('observed', node)])
+            decisions.append(('demand', node))
+            raise TimeoutError('private provider error must not escape')
+
+        with (
+            patch.object(controller, '_tick_node', side_effect=observe),
+            patch.object(
+                self.service, 'demand_start_once', side_effect=decide, create=True
+            ) as trigger,
+        ):
+            result = controller.tick()
+        trigger.assert_called_once_with()
+        self.assertEqual(result['nodes'], [dict(node_id=node, state='starting')])
+        self.assertEqual(
+            result['demand_start'],
+            dict(state='blocked', reason_code='dstack_demand_start_observation_failed'),
+        )
+        self.assertEqual(len(self.client.applied), 1)
+
+    def test_disabled_demand_does_not_disable_manual_lifecycle_or_run_from_wake_checks(
+        self,
+    ):
+        node, controller = self.ready()
+        with patch.object(
+            self.service,
+            'demand_start_once',
+            return_value=dict(state='disabled'),
+            create=True,
+        ) as trigger:
+            controller.has_demand()
+            controller.safety_sweep()
+            trigger.assert_not_called()
+            self.service.node_command(
+                self.owner, node, {}, 'manual-demand-disabled-stop'
+            )
+            result = controller.tick()
+        trigger.assert_called_once_with()
+        self.assertEqual(result['demand_start'], dict(state='disabled'))
+        self.assertEqual(len(self.client.applied), 1)
+        self.assertEqual(len(self.client.stopped), 1)
+        with patch.object(self.service, 'demand_start_once', None, create=True):
+            self.assertEqual(
+                controller._demand_start(),
+                dict(state='disabled', reason_code='demand_start_unavailable'),
+            )
+
+    def test_two_fl_slots_do_not_keep_idle_fl_alive_for_queued_ref(self):
+        first, controller = self._continuing_ready()
+        second = self.start('second-fl')['node_id']
+        ref = self._queued_native('ref')
+        original_ref = copy.deepcopy(ref)
+        self.now += 610
+
+        def decide():
+            with self.repo.engine.connect() as connection:
+                desired = {
+                    row.intent_id: row.desired_state
+                    for row in connection.execute(
+                        select(
+                            operator_nodes.c.intent_id, operator_nodes.c.desired_state
+                        )
+                    )
+                }
+            self.assertEqual(desired, {first: 'stopped', second: 'running'})
+            return dict(state='blocked', reason_code='capacity_limit')
+
+        with patch.object(
+            self.service, 'demand_start_once', side_effect=decide, create=True
+        ) as trigger:
+            result = controller.tick()
+        trigger.assert_called_once_with()
+        self.assertEqual(result['demand_start']['reason_code'], 'capacity_limit')
+        self.assertEqual(len(self.client.applied), 2)
+        self.assertEqual(len(self.client.stopped), 1)
+        self.assertEqual(self.repo.get_job(self.scope, ref['id']), original_ref)
+
+    def test_compatible_queued_work_keeps_idle_machine_and_original_job(self):
+        node, controller = self._continuing_ready()
+        queued = self._queued_native('fl')
+        original = copy.deepcopy(queued)
+        self.now += 610
+        with patch.object(
+            self.service,
+            'demand_start_once',
+            return_value=dict(state='idle'),
+            create=True,
+        ):
+            controller.tick()
+        self.assertEqual(self.client.stopped, [])
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(
+                connection.execute(
+                    select(operator_nodes.c.desired_state).where(
+                        operator_nodes.c.intent_id == node
+                    )
+                ).scalar_one(),
+                'running',
+            )
+        self.assertEqual(self.repo.get_job(self.scope, queued['id']), original)
 
     def test_exact_ready_registers_hatchet_slot_without_second_apply(self):
         node, controller = self.ready()
