@@ -74,6 +74,17 @@ const keepUntil = (policy) => {
   return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 };
 const countText = (t, key, values) => t(key + (values.count === 1 ? '.one' : ''), values);
+// CR43 admin host metadata (#193): country/region from the frozen offer; never inferred.
+const hostPlace = (node) =>
+  [
+    node.host?.country,
+    node.host?.region && node.host.region !== node.host?.country ? node.host.region : null,
+  ]
+    .filter(Boolean)
+    .join(' / ') ||
+  node.region ||
+  '';
+
 function Dialog({ title, subtitle, onClose, wide = false, children }) {
   const { t, locale } = useI18n();
   const active = usePageActive(),
@@ -379,7 +390,26 @@ export function MachineRow({
         </b>
         <small className="muted">
           {dstackProvider(node.provider)}
-          {admin && <> · {node.owner_id}</>} · {node.region || t('operator.status48')} · {fee.label}
+          {admin && <> · {node.owner_id}</>} · {hostPlace(node) || t('operator.status48')}
+          {Number.isFinite(node.host?.advertised_download_mbps) && (
+            <>
+              {' '}
+              · {t('operator.hostMbps', { mbps: Math.round(node.host.advertised_download_mbps) })}
+            </>
+          )}
+          {Number.isFinite(node.completed_content_download?.duration_seconds) && (
+            <>
+              {' '}
+              ·{' '}
+              {t('operator.weightsIn', {
+                minutes: Math.max(
+                  1,
+                  Math.round(node.completed_content_download.duration_seconds / 60),
+                ),
+              })}
+            </>
+          )}{' '}
+          · {fee.label}
           {t('operator.more.perHour')} · <Timer size={11} />
           <span className="p4-keep">{keepText(node, locale)}</span>
         </small>

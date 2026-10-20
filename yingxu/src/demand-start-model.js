@@ -8,6 +8,7 @@ const REASONS = [
   'policy_unavailable',
   'no_qualified_profile',
   'retry_backoff',
+  'download_retry_limit',
 ];
 const count = (value) => (Number.isInteger(value) && value >= 0 ? value : null);
 
