@@ -472,6 +472,10 @@ dbos==3.3.0 \
     --hash=sha256:398e5c3182d0aa9fa4115c9f06028202365d0c356c172f2ec21c1fd8be6e441b \
     --hash=sha256:5b5fe81272e7f0b16b8e98befe1d4475b1ad72ba57e0a421900e3f7df21eb898
     # via -r requirements.lock.txt
+disposable-email-domains==0.0.283 \
+    --hash=sha256:31bb1abb8bbf48b14597bdd4df041006fbc9b6fa8ef6c4a915e54e1a5fdfb827 \
+    --hash=sha256:de1449347a19e034d4436273c90d87ff925a703496d4a8dbf280f39f2a9078b7
+    # via -r requirements.lock.txt
 fastapi==0.142.2 \
     --hash=sha256:06366626f2e70576367714d9ab2fe8472e6c8456dba69b399f9f797ab5e92570 \
     --hash=sha256:bd5f4d81f1e93a88bcd77caf4dfe3c2dbffc3805407a0007e9a114c18b3a670b

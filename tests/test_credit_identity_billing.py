@@ -1,5 +1,8 @@
 """WorkOS welcome and original reviewed billing wired to customer credits."""
 
+from concurrent.futures import ThreadPoolExecutor
+import sys
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import uuid
@@ -7,9 +10,19 @@ import uuid
 from sqlalchemy import Column, MetaData, String, Table, insert, select, update
 
 from studio_platform import credits
-from studio_platform.auth import Principal
-from studio_platform.credit_schema import entries, metadata as credit_metadata
-from studio_platform.credits_pricing import DEFAULT_RATES, quote
+from studio_platform.auth import Principal, sessions
+from studio_platform.credit_schema import (
+    accounts,
+    entries,
+    metadata as credit_metadata,
+    prices,
+)
+from studio_platform.credits_pricing import (
+    DEFAULT_CONFIGURATION,
+    DEFAULT_RATES,
+    PricingError,
+    quote,
+)
 from studio_platform.credits_routes import CreditAPI
 from studio_platform.identity_schema import metadata as identity_metadata, users
 from studio_platform.queue import TaskQueue
@@ -34,7 +47,7 @@ class CreditIdentityBillingTests(unittest.TestCase):
         self.addCleanup(value.tearDown)
         return value
 
-    def adopt(self, fixture, *, version=None, welcome=0):
+    def adopt(self, fixture, *, version=None, welcome=0, enabled=True, publish=True):
         tenant = fixture.settings.tenant_id
         if version is None:
             version = Table(
@@ -72,6 +85,8 @@ class CreditIdentityBillingTests(unittest.TestCase):
                     )
         service = CreditAPI(fixture.repo, fixture.settings)
         actor = getattr(fixture, "legacy", None) or fixture.admin
+        if not publish:
+            return service
         price = service.publish(
             actor,
             {
@@ -81,15 +96,16 @@ class CreditIdentityBillingTests(unittest.TestCase):
             },
             key="wire-prices",
         )
-        service.policy(
-            actor,
-            {
-                "expected_revision": price["revision"],
-                "enabled": True,
-                "reason": "Disposable wire acceptance",
-            },
-            key="wire-enable",
-        )
+        if enabled:
+            service.policy(
+                actor,
+                {
+                    "expected_revision": price["revision"],
+                    "enabled": True,
+                    "reason": "Disposable wire acceptance",
+                },
+                key="wire-enable",
+            )
         return service
 
     def rows(self, fixture, table):
@@ -103,21 +119,28 @@ class CreditIdentityBillingTests(unittest.TestCase):
             auth_fixture.WorkOSAuthTests,
             "test_config_requires_protected_credentials_and_adopted_schema",
         )
-        service = self.adopt(fixture, version=fixture.version, welcome=37)
+        service = self.adopt(
+            fixture, version=fixture.version, welcome=200, enabled=False
+        )
+        policy = service.policy(fixture.legacy)
+        self.assertFalse(policy["enabled"])
         value, state = fixture.start()
         principal = fixture.auth.session(fixture.finish(value, state)["token"])
-        self.assertEqual(service.balance(principal)["balance"], 37)
+        self.assertEqual(service.balance(principal)["balance"], 200)
         value, state = fixture.start()
         repeated = fixture.auth.session(fixture.finish(value, state)["token"])
         self.assertEqual(repeated.owner, principal.owner)
-        self.assertEqual(service.balance(repeated)["balance"], 37)
+        self.assertEqual(service.balance(repeated)["balance"], 200)
         grants = self.rows(fixture, entries)
         self.assertEqual(len(grants), 1)
         self.assertEqual(
             (grants[0]["kind"], grants[0]["amount"], grants[0]["reference_type"]),
-            ("grant", 37, "signup"),
+            ("grant", 200, "signup"),
         )
         self.assertEqual(grants[0]["idempotency_key"], "welcome:" + principal.user_id)
+        self.assertEqual(grants[0]["price_revision"], policy["active_revision"])
+        self.assertEqual(grants[0]["origin"], "workos")
+        self.assertFalse(service.policy(fixture.legacy)["enabled"])
         fixture.provider.user.id = "user_" + "Z" * 24
         fixture.provider.user.email = "linked-legacy@example.test"
         value, state = fixture.start(link=True, principal=fixture.legacy)
@@ -135,7 +158,8 @@ class CreditIdentityBillingTests(unittest.TestCase):
             auth_fixture.WorkOSAuthTests,
             "test_config_requires_protected_credentials_and_adopted_schema",
         )
-        self.adopt(fixture, version=fixture.version, welcome=37)
+        self.adopt(fixture, version=fixture.version, welcome=200, enabled=False)
+        original_sessions = self.rows(fixture, sessions)
         value, state = fixture.start()
         with patch.object(
             credits,
@@ -148,9 +172,157 @@ class CreditIdentityBillingTests(unittest.TestCase):
                 fixture.finish(value, state)
         self.assertEqual(fixture.count_users(), 2)
         self.assertEqual(self.rows(fixture, entries), [])
+        self.assertEqual(self.rows(fixture, accounts), [])
+        self.assertEqual(self.rows(fixture, sessions), original_sessions)
         with self.assertRaisesRegex(WorkOSError, "workos_state_invalid"):
             fixture.finish(value, state)
         self.assertEqual(len(fixture.provider.auth_calls), 1)
+
+    def test_disposable_or_unknown_classification_allows_login_without_grant(self):
+        for email, missing_list in (
+            ("person@sub.MAILINATOR.com", False),
+            ("person@example.test", True),
+        ):
+            with self.subTest(email=email, missing_list=missing_list):
+                fixture = self.fixture(
+                    auth_fixture.WorkOSAuthTests,
+                    "test_config_requires_protected_credentials_and_adopted_schema",
+                )
+                service = self.adopt(
+                    fixture, version=fixture.version, welcome=200, enabled=False
+                )
+                fixture.provider.user.email = email
+                value, state = fixture.start()
+                with patch.dict(
+                    sys.modules,
+                    {"disposable_email_domains": None} if missing_list else {},
+                ):
+                    principal = fixture.auth.session(
+                        fixture.finish(value, state)["token"]
+                    )
+                self.assertTrue(principal.owner.startswith("u_"))
+                self.assertEqual(service.balance(principal)["balance"], 0)
+                self.assertEqual(self.rows(fixture, accounts), [])
+                self.assertEqual(self.rows(fixture, entries), [])
+
+    def test_unadopted_credits_allow_workos_signup_without_grant(self):
+        fixture = self.fixture(
+            auth_fixture.WorkOSAuthTests,
+            "test_config_requires_protected_credentials_and_adopted_schema",
+        )
+        value, state = fixture.start()
+        with patch.object(credits, "grant") as grant:
+            principal = fixture.auth.session(fixture.finish(value, state)["token"])
+        self.assertTrue(principal.owner.startswith("u_"))
+        self.assertEqual(fixture.count_users(), 3)
+        grant.assert_not_called()
+
+    def test_default_zero_and_unpublished_prices_do_not_grant(self):
+        for published in (False, True):
+            with self.subTest(published=published):
+                fixture = self.fixture(
+                    auth_fixture.WorkOSAuthTests,
+                    "test_config_requires_protected_credentials_and_adopted_schema",
+                )
+                self.adopt(
+                    fixture, version=fixture.version, enabled=False, publish=published
+                )
+                value, state = fixture.start()
+                # A future default change cannot authorize an unpublished grant.
+                with patch.dict(
+                    DEFAULT_CONFIGURATION,
+                    {"welcome_credits": 0 if published else 200},
+                ):
+                    principal = fixture.auth.session(
+                        fixture.finish(value, state)["token"]
+                    )
+                self.assertTrue(principal.owner.startswith("u_"))
+                self.assertEqual(self.rows(fixture, entries), [])
+                self.assertEqual(self.rows(fixture, accounts), [])
+
+    def test_published_revision_changes_only_future_signups_and_not_existing_qa(self):
+        fixture = self.fixture(
+            auth_fixture.WorkOSAuthTests,
+            "test_config_requires_protected_credentials_and_adopted_schema",
+        )
+        service = self.adopt(fixture, version=fixture.version, enabled=False)
+        value, state = fixture.start()
+        existing = fixture.auth.session(fixture.finish(value, state)["token"])
+        original_prices = self.rows(fixture, prices)
+        publication = service.publish(
+            fixture.legacy,
+            {
+                "expected_revision": original_prices[0]["revision"],
+                "rates": dict(DEFAULT_RATES),
+                "welcome_credits": 200,
+                "reason": "Disposable future-signup policy acceptance",
+            },
+            key="future-welcome",
+        )
+        value, state = fixture.start()
+        replay = fixture.auth.session(fixture.finish(value, state)["token"])
+        self.assertEqual(replay.owner, existing.owner)
+        self.assertEqual(service.balance(replay)["balance"], 0)
+        self.assertEqual(service.balance(fixture.legacy)["balance"], 0)
+        self.assertEqual(self.rows(fixture, entries), [])
+        fixture.provider.user.id = "user_" + "B" * 24
+        fixture.provider.user.email = "new-person@example.test"
+        value, state = fixture.start()
+        new = fixture.auth.session(fixture.finish(value, state)["token"])
+        self.assertEqual(service.balance(new)["balance"], 200)
+        self.assertEqual(
+            self.rows(fixture, entries)[0]["price_revision"], publication["revision"]
+        )
+        self.assertIn(original_prices[0], self.rows(fixture, prices))
+        self.assertFalse(service.policy(fixture.legacy)["enabled"])
+
+    def test_same_verified_email_with_different_subjects_can_only_grant_once(self):
+        fixture = self.fixture(
+            auth_fixture.WorkOSAuthTests,
+            "test_config_requires_protected_credentials_and_adopted_schema",
+        )
+        self.adopt(fixture, version=fixture.version, welcome=200, enabled=False)
+
+        def signup(index):
+            identity = fixture.service._provider_user(
+                SimpleNamespace(
+                    id="user_" + ("C" if index else "D") * 24,
+                    email="PERSON@EXAMPLE.TEST" if index else "person@example.test",
+                    email_verified=True,
+                    first_name="Synthetic",
+                    last_name="Signup",
+                )
+            )
+            try:
+                return fixture.service._upsert(identity, {"purpose": "signin"}, None)
+            except WorkOSError as error:
+                return error.code
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            outcomes = list(executor.map(signup, range(2)))
+        self.assertEqual(sum(type(value) is dict for value in outcomes), 1)
+        self.assertIn("workos_link_required", outcomes)
+        self.assertEqual(fixture.count_users(), 3)
+        self.assertEqual([row["amount"] for row in self.rows(fixture, entries)], [200])
+
+    def test_corrupt_published_pricing_rolls_back_identity_and_session(self):
+        fixture = self.fixture(
+            auth_fixture.WorkOSAuthTests,
+            "test_config_requires_protected_credentials_and_adopted_schema",
+        )
+        self.adopt(fixture, version=fixture.version, welcome=200, enabled=False)
+        with fixture.repo.transaction() as connection:
+            connection.execute(
+                update(prices).values(configuration={"welcome_credits": 200})
+            )
+        original_sessions = self.rows(fixture, sessions)
+        value, state = fixture.start()
+        with self.assertRaisesRegex(PricingError, "credit_prices_invalid"):
+            fixture.finish(value, state)
+        self.assertEqual(fixture.count_users(), 2)
+        self.assertEqual(self.rows(fixture, accounts), [])
+        self.assertEqual(self.rows(fixture, entries), [])
+        self.assertEqual(self.rows(fixture, sessions), original_sessions)
 
     def test_original_billing_waiver_refunds_captured_credits_once_and_retains_usd_history(
         self,

@@ -174,16 +174,44 @@ def require_admin(
     return principal.owner
 
 
+def _public_profile(current, connection, tenant):
+    """Expose only the current human's profile, never bearer-owner PII."""
+    unavailable = {"display_name": None, "email": None}
+    if current is None or current.machine:
+        return unavailable
+    if current.identity_source == "legacy":
+        return {"display_name": current.owner, "email": None}
+    row = (
+        connection.execute(
+            select(users.c.display_name, users.c.email).where(
+                users.c.tenant == tenant,
+                users.c.owner == current.owner,
+                users.c.id == current.user_id,
+                users.c.status == "active",
+            )
+        )
+        .mappings()
+        .first()
+    )
+    return unavailable if row is None else dict(row)
+
+
 def public_identity(principal, repository, settings):
     """Account profile fields; dollar reservations are not product credits."""
     with repository.engine.connect() as connection:
         current = hydrate(principal, connection, settings.tenant_id)
+        profile = _public_profile(current, connection, settings.tenant_id)
     if current is None:
-        return {"role": "user", "status": "suspended", "user_id": None}
+        return {"role": "user", "status": "suspended", "user_id": None, **profile}
     role = current.role
     if current.identity_source == "legacy" and not current.machine:
         configured = set(getattr(settings, "operator_capacity_owners", ())) | set(
             getattr(settings, "operator_admin_owners", ())
         )
         role = "admin" if current.owner in configured else "user"
-    return {"role": role, "status": current.status, "user_id": current.user_id}
+    return {
+        "role": role,
+        "status": current.status,
+        "user_id": current.user_id,
+        **profile,
+    }

@@ -392,6 +392,7 @@ def grant(
     kind="grant",
     reference_type="admin_action",
     reference_id=None,
+    price_revision=None,
     origin=None,
     receipt_url=None,
 ):
@@ -412,6 +413,7 @@ def grant(
         reason=reason,
         idempotency_key=idempotency_key,
         now=now,
+        price_revision=price_revision,
         origin=origin,
         receipt_url=receipt_url,
     )

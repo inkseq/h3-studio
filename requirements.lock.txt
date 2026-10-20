@@ -12,6 +12,7 @@ click==8.5.0
 croniter==6.2.4
 cryptography==50.0.2
 dbos==3.3.0
+disposable-email-domains==0.0.283
 fastapi==0.142.2
 greenlet==3.5.6
 h11==0.16.0

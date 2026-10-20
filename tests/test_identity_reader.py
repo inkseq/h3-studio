@@ -177,6 +177,16 @@ class IdentityReaderTests(unittest.TestCase):
     def test_partial_schema_never_enables_legacy_allowlists(self):
         admin_audit.create(self.repo.engine)
         self.assertIsNone(self.auth.session(self.token))
+        self.assertEqual(
+            public_identity(self.original, self.repo, self.settings),
+            {
+                "role": "user",
+                "status": "suspended",
+                "user_id": None,
+                "display_name": None,
+                "email": None,
+            },
+        )
         self.assertFalse(is_admin(self.original, self.repo, self.settings))
         with self.assertRaisesRegex(OperatorError, "admin_required"):
             require_admin(self.original, self.repo, self.settings)
@@ -213,8 +223,109 @@ class IdentityReaderTests(unittest.TestCase):
                 "role": "admin",
                 "status": "active",
                 "user_id": current.user_id,
+                "display_name": "superdan",
+                "email": None,
             },
         )
+
+    def test_auth_me_profile_is_current_human_owned_and_private_from_machines(self):
+        from fastapi.testclient import TestClient
+        from studio_platform.api import COOKIE, create_app
+        from studio_platform.settings import Settings
+
+        app = create_app(
+            Settings(self.directory / "profile-app", auth_mode="local-test"),
+            repository=self.repo,
+        )
+        with TestClient(app) as client:
+            self.assertEqual(
+                client.post(
+                    "/api/auth/login", json={"username": "superdan"}
+                ).status_code,
+                200,
+            )
+            legacy = client.get("/api/auth/me").json()
+            self.assertEqual(
+                (legacy["username"], legacy["display_name"], legacy["email"]),
+                ("superdan", "superdan", None),
+            )
+            self.assertFalse(inspect(self.repo.engine).has_table(users.name))
+
+            self.adopt(role="user")
+            self.change(display_name="Current creator", email="current@example.test")
+            with self.repo.transaction() as connection:
+                for ident, tenant, owner in (
+                    ("00000000-0000-4000-8000-000000000002", "other", "superdan"),
+                    ("00000000-0000-4000-8000-000000000003", "sixnine", "another"),
+                ):
+                    connection.execute(
+                        insert(users).values(
+                            id=ident,
+                            tenant=tenant,
+                            owner=owner,
+                            role="admin",
+                            status="active",
+                            display_name="Foreign creator",
+                            email="foreign@example.test",
+                            created_at=1000.0,
+                            updated_at=1000.0,
+                        )
+                    )
+            response = client.get(
+                "/api/auth/me", params={"tenant": "other", "owner": "another"}
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.headers["cache-control"], "no-store")
+            current = response.json()
+            self.assertEqual(
+                (current["username"], current["display_name"], current["email"]),
+                ("superdan", "Current creator", "current@example.test"),
+            )
+            self.assertEqual(current["role"], "user")
+            self.assertFalse(any(current["operator_capacity"].values()))
+            self.change(display_name="Updated creator", email="updated@example.test")
+            refreshed = client.get("/api/auth/me").json()
+            self.assertEqual(
+                (refreshed["display_name"], refreshed["email"]),
+                ("Updated creator", "updated@example.test"),
+            )
+
+            key = app.state.auth.create_key(
+                "superdan",
+                authenticated_session=app.state.auth.session(
+                    client.cookies.get(COOKIE)
+                ),
+                name="profile-agent",
+                scopes=["jobs:read"],
+                all_projects=True,
+            )["api_key"]
+            machine = client.get(
+                "/api/auth/me", headers={"Authorization": "Bearer " + key}
+            ).json()
+            self.assertTrue(machine["machine"])
+            self.assertEqual(machine["username"], "superdan")
+            self.assertEqual(machine["scopes"], ["jobs:read"])
+            self.assertIsNone(machine["display_name"])
+            self.assertIsNone(machine["email"])
+            self.assertFalse(any(machine["operator_capacity"].values()))
+
+            self.change(status="suspended")
+            self.assertEqual(client.get("/api/auth/me").status_code, 401)
+            self.change(status="active")
+            self.assertEqual(
+                client.post(
+                    "/api/auth/login", json={"username": "superdan"}
+                ).status_code,
+                200,
+            )
+            with self.repo.transaction() as connection:
+                connection.execute(
+                    users.delete().where(
+                        users.c.tenant == "sixnine", users.c.owner == "superdan"
+                    )
+                )
+            # The identically named owner in the other tenant is no fallback.
+            self.assertEqual(client.get("/api/auth/me").status_code, 401)
 
     def test_operator_service_guards_use_canonical_role_without_env_grant(self):
         from studio_platform.dstack_operator import DstackOperator

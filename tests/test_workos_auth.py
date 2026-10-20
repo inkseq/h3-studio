@@ -550,6 +550,8 @@ class WorkOSAuthTests(LedgerCase):
             self.assertEqual(who["authentication"], "workos")
             self.assertEqual(who["role"], "user")
             self.assertTrue(who["username"].startswith("u_"))
+            self.assertEqual(who["display_name"], "New Creator")
+            self.assertEqual(who["email"], "person@example.test")
             self.assertEqual(
                 client.patch(
                     "/v1/account", json={"display_name": "Web creator"}
@@ -559,6 +561,10 @@ class WorkOSAuthTests(LedgerCase):
             self.assertEqual(
                 client.get("/v1/account").json()["display_name"], "Web creator"
             )
+            refreshed = client.get("/api/auth/me").json()
+            self.assertEqual(refreshed["display_name"], "Web creator")
+            self.assertEqual(refreshed["email"], who["email"])
+            self.assertEqual(refreshed["username"], who["username"])
             self.assertEqual(
                 client.post("/v1/account/authkit-widget-token").json(),
                 {"token": "DO-NOT-SAVE-WIDGET"},
