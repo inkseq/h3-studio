@@ -275,16 +275,20 @@ export default function QuickChatControls({
             <p role="alert">{t('workspace.copy74')}</p>
           ) : (
             <>
-              <details className="quick-model-details">
-                <summary>{t('quickView.modelDetails')}</summary>
-                <DeploymentProfileSelect
-                  capabilities={capabilities}
-                  value={draft.deployment_profile_id}
-                  mode={recipe?.mode}
-                  disabled={busy}
-                  onChange={(value) => setDraft({ ...draft, deployment_profile_id: value })}
-                />
-              </details>
+              {/* Deployment profiles and sampler/VAE/runtime knobs are operator tools; regular
+                  users get the common settings and references only. */}
+              {operator && (
+                <details className="quick-model-details">
+                  <summary>{t('quickView.modelDetails')}</summary>
+                  <DeploymentProfileSelect
+                    capabilities={capabilities}
+                    value={draft.deployment_profile_id}
+                    mode={recipe?.mode}
+                    disabled={busy}
+                    onChange={(value) => setDraft({ ...draft, deployment_profile_id: value })}
+                  />
+                </details>
+              )}
               <label className="qc-field">
                 <span>{t('workspace.copy75')}</span>
                 <select
@@ -461,47 +465,52 @@ export default function QuickChatControls({
                   <p className="qc-muted">{recipe.custom_canvas_constraints?.description}</p>
                 </div>
               )}
-              {CONTROL_GROUPS.slice(1).map(([name, names]) => (
-                <details key={name}>
-                  <summary>{groupLabels[name] || name}</summary>
-                  <div className="qc-form-grid">{fields(names)}</div>
-                  {name === '参考与时间' && (
-                    <>
-                      <ProfileInputBoundary support={recipe.execution_support} />
-                      <p className="qc-muted">{t('workspace.copy136')}</p>
-                      {scope === 'card' && onEditMaterials && (
-                        <button
-                          type="button"
-                          disabled={busy || !!pendingMode}
-                          onClick={() => onEditMaterials(clone(draft), prompt)}
-                        >
-                          {t('workspace.copy85')}
-                        </button>
-                      )}
-                    </>
-                  )}
-                  {name === '随机性与采样' && <p className="qc-muted">{t('workspace.copy137')}</p>}
-                  {name === '运行与导出' && <p className="qc-muted">{t('workspace.copy138')}</p>}
-                </details>
-              ))}
-              {Object.keys(schema).some(
-                (name) =>
-                  !allGroups.has(name) &&
-                  !['guides', 'video_audio', 'width', 'height'].includes(name),
-              ) && (
-                <details>
-                  <summary>{t('workspace.copy86')}</summary>
-                  <div className="qc-form-grid">
-                    {fields(
-                      Object.keys(schema).filter(
-                        (name) =>
-                          !allGroups.has(name) &&
-                          !['guides', 'video_audio', 'width', 'height'].includes(name),
-                      ),
+              {CONTROL_GROUPS.slice(1)
+                .filter(([name]) => operator || name === '参考与时间')
+                .map(([name, names]) => (
+                  <details key={name}>
+                    <summary>{groupLabels[name] || name}</summary>
+                    <div className="qc-form-grid">{fields(names)}</div>
+                    {name === '参考与时间' && (
+                      <>
+                        <ProfileInputBoundary support={recipe.execution_support} />
+                        <p className="qc-muted">{t('workspace.copy136')}</p>
+                        {scope === 'card' && onEditMaterials && (
+                          <button
+                            type="button"
+                            disabled={busy || !!pendingMode}
+                            onClick={() => onEditMaterials(clone(draft), prompt)}
+                          >
+                            {t('workspace.copy85')}
+                          </button>
+                        )}
+                      </>
                     )}
-                  </div>
-                </details>
-              )}
+                    {name === '随机性与采样' && (
+                      <p className="qc-muted">{t('workspace.copy137')}</p>
+                    )}
+                    {name === '运行与导出' && <p className="qc-muted">{t('workspace.copy138')}</p>}
+                  </details>
+                ))}
+              {operator &&
+                Object.keys(schema).some(
+                  (name) =>
+                    !allGroups.has(name) &&
+                    !['guides', 'video_audio', 'width', 'height'].includes(name),
+                ) && (
+                  <details>
+                    <summary>{t('workspace.copy86')}</summary>
+                    <div className="qc-form-grid">
+                      {fields(
+                        Object.keys(schema).filter(
+                          (name) =>
+                            !allGroups.has(name) &&
+                            !['guides', 'video_audio', 'width', 'height'].includes(name),
+                        ),
+                      )}
+                    </div>
+                  </details>
+                )}
             </>
           )}
           {error && (
