@@ -22,6 +22,130 @@ MACHINE = Principal("owner", "pat", role="admin", machine=True)
 
 
 class QualityViewTests(unittest.TestCase):
+    def test_capability_version_known_dto_slots_are_neutral_without_rehashing(self):
+        from studio_platform.capabilities import VERSION, public_version
+        from studio_platform.repository import request_hash
+
+        compiled = {
+            "capabilities_version": VERSION,
+            "recipe_id": RECIPE,
+            "request": {"prompt": VERSION, "model": MODEL},
+        }
+        original_hash = request_hash(compiled)
+        saved = {
+            "capabilities_version": VERSION,
+            "request_hash": original_hash,
+            "input_hash": "original-input-hash",
+            "prompt": VERSION,
+            "user_metadata": {"capabilities_version": VERSION},
+            "draft": {
+                "capabilities_version": VERSION,
+                "recipe_id": RECIPE,
+                "prompt": VERSION,
+                "controls": {"steps": 9},
+            },
+            "items": [
+                {
+                    "plan": {
+                        "plan_id": "plan",
+                        "request_hash": original_hash,
+                        "capabilities_version": VERSION,
+                        "request": compiled,
+                        "effective_request": {
+                            "capabilities_version": VERSION,
+                            "prompt": VERSION,
+                        },
+                    }
+                }
+            ],
+        }
+        original = copy.deepcopy(saved)
+        alias = public_version(VERSION)
+        for principal in (USER, MACHINE, None):
+            with self.subTest(principal=principal):
+                caps = views.capabilities({"capabilities_version": VERSION}, principal)
+                self.assertEqual(caps["capabilities_version"], alias)
+                shown = views.envelope(saved, principal)
+                self.assertEqual(shown["capabilities_version"], alias)
+                self.assertEqual(shown["draft"]["capabilities_version"], alias)
+                plan = shown["items"][0]["plan"]
+                self.assertEqual(plan["capabilities_version"], alias)
+                self.assertEqual(plan["request"]["capabilities_version"], alias)
+                self.assertEqual(
+                    plan["effective_request"]["capabilities_version"], alias
+                )
+                self.assertEqual(shown["prompt"], VERSION)
+                self.assertEqual(shown["draft"]["prompt"], VERSION)
+                self.assertEqual(shown["user_metadata"], original["user_metadata"])
+                self.assertEqual(shown["request_hash"], original_hash)
+                self.assertEqual(plan["request_hash"], original_hash)
+                self.assertEqual(shown["input_hash"], original["input_hash"])
+                self.assertEqual(views.envelope(shown, principal), shown)
+        self.assertEqual(
+            views.capabilities({"capabilities_version": VERSION}, ADMIN)[
+                "capabilities_version"
+            ],
+            VERSION,
+        )
+        self.assertEqual(views.envelope(saved, ADMIN), original)
+        self.assertEqual(saved, original)
+        self.assertEqual(request_hash(compiled), original_hash)
+
+    def test_capability_version_schema_aliases_only_the_declared_version_field(self):
+        from studio_platform.capabilities import VERSION, public_version
+
+        raw = {
+            "components": {
+                "schemas": {
+                    "VersionedRequest": {
+                        "properties": {
+                            "capabilities_version": {
+                                "anyOf": [
+                                    {"type": "string", "enum": [VERSION]},
+                                    {"type": "null"},
+                                ],
+                                "default": VERSION,
+                            },
+                            "prompt": {
+                                "type": "string",
+                                "default": VERSION,
+                                "enum": [VERSION],
+                            },
+                            "model_id": {"enum": ["gemma-4-31b-it"]},
+                        }
+                    }
+                }
+            },
+            "properties": {"capabilities_version": {"const": VERSION}},
+        }
+        original = copy.deepcopy(raw)
+        for principal in (USER, MACHINE, None):
+            with self.subTest(principal=principal):
+                shown = views.schema(raw, principal)
+                fields = shown["components"]["schemas"]["VersionedRequest"][
+                    "properties"
+                ]
+                self.assertEqual(
+                    fields["capabilities_version"]["default"], public_version(VERSION)
+                )
+                self.assertEqual(
+                    fields["capabilities_version"]["anyOf"][0]["enum"],
+                    [public_version(VERSION)],
+                )
+                self.assertEqual(
+                    shown["properties"]["capabilities_version"]["const"],
+                    public_version(VERSION),
+                )
+                self.assertEqual(
+                    fields["prompt"],
+                    original["components"]["schemas"]["VersionedRequest"]["properties"][
+                        "prompt"
+                    ],
+                )
+                self.assertEqual(fields["model_id"]["enum"], ["gemma-4-31b-it"])
+        self.assertEqual(views.schema(raw, ADMIN), original)
+        self.assertEqual(raw, original)
+
     def test_revision_summary_controls_only_and_cpu_dtos_keep_original_shape(self):
         summary = {
             "id": "revision",

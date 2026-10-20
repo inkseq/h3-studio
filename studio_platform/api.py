@@ -31,7 +31,7 @@ from .media_renditions import public_renditions, RENDITIONS
 from .upload_route import AssetUploadRoute
 from .auth import Auth, AuthenticationError, LoginLimited
 from .identity import is_admin, public_identity, require_admin
-from .capabilities import VERSION, capabilities
+from .capabilities import VERSION, capabilities, version_matches
 from .media import MediaError, MediaBusy
 from .project_validation import validate_project
 from .repository import Repository, NotFound, Conflict, BudgetExceeded, artifacts, jobs
@@ -1115,7 +1115,7 @@ def create_app(
             or body["expected_version"] < 1
         ):
             raise ValueError("需要当前项目的expected_version")
-        if body.get("capabilities_version", VERSION) != VERSION:
+        if not version_matches(body.get("capabilities_version", VERSION), VERSION):
             raise ValueError("生成能力已变化，请刷新后重新预检")
         authorized_project(principal, project_id, "projects:read")
         record = authorized_project(principal, project_id, "jobs:write")

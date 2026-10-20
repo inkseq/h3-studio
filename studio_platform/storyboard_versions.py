@@ -24,6 +24,7 @@ from .repository import (
 )
 from .content_lifecycle import owner_reference_gate, assert_project_writable
 from .generation_draft import shot_entity, validate_controls_patch
+from .capabilities import version_matches
 
 
 class StoryboardPreflightRequest(BaseModel):
@@ -783,9 +784,9 @@ class StoryboardVersions:
                     raise Conflict("document_version_conflict")
                 project = project_row["payload"]
                 caps = self.admission.capabilities_provider()
-                if (
-                    body.get("capabilities_version", caps["capabilities_version"])
-                    != caps["capabilities_version"]
+                if not version_matches(
+                    body.get("capabilities_version", caps["capabilities_version"]),
+                    caps["capabilities_version"],
                 ):
                     raise Conflict("capabilities_changed")
                 self.app.state.quick_chat._copies_allowed(

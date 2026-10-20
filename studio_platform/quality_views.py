@@ -75,7 +75,7 @@ def _pick(value, fields):
 
 def _managed(value):
     """Existing trusted DTO, minus model/runtime slots; never filter user text."""
-    return (
+    result = (
         {
             key: copy.deepcopy(item)
             for key, item in value.items()
@@ -84,6 +84,16 @@ def _managed(value):
         if isinstance(value, dict)
         else {}
     )
+    return _version_fields(result)
+
+
+def _version_fields(value):
+    """Only the published capability-version slot, never arbitrary strings."""
+    if "capabilities_version" in value:
+        from .capabilities import public_version
+
+        value["capabilities_version"] = public_version(value["capabilities_version"])
+    return value
 
 
 def _tier(value):
@@ -533,7 +543,9 @@ def capabilities(value, principal=None, *, settings=None):
             "simulation",
         },
     )
-    result["capabilities_version"] = value.get("capabilities_version")
+    from .capabilities import public_version
+
+    result["capabilities_version"] = public_version(value.get("capabilities_version"))
     result["recipes"] = [recipe(item, principal) for item in value.get("recipes", [])]
     result["deployment_profiles"] = []
     default = value.get("default_deployment_profile_id")
@@ -644,14 +656,32 @@ def _profile_schema_alias(value):
     return profile_alias(tier) if tier else None
 
 
+def _version_schema(value):
+    from .capabilities import public_version
+
+    result = copy.deepcopy(value)
+    for name in ("default", "const"):
+        if name in result:
+            result[name] = public_version(result[name])
+    if isinstance(result.get("enum"), list):
+        result["enum"] = [public_version(item) for item in result["enum"]]
+    for name in ("allOf", "anyOf", "oneOf"):
+        if isinstance(result.get(name), list):
+            result[name] = [_version_schema(item) for item in result[name]]
+    return result
+
+
 def schema(value, principal=None, settings=None):
     """Only JSON-schema identity enums; unrelated assistant-model enums survive."""
     result = copy.deepcopy(value)
     if is_admin(principal) or not isinstance(result, dict):
         return result
+    _version_fields(result)
     properties = result.get("properties", {})
     for name, field in list(properties.items()):
-        if name in {"deployment_profile_id", "deploymentProfileId"}:
+        if name == "capabilities_version":
+            properties[name] = _version_schema(field)
+        elif name in {"deployment_profile_id", "deploymentProfileId"}:
             properties[name] = _identity_schema(
                 field,
                 [profile_alias(tier) for tier in TIERS],
@@ -834,7 +864,7 @@ def envelope(value, principal=None, settings=None):
         return copy.deepcopy(value)
     if "deployment_profiles" in value:
         return capabilities(value, principal, settings=settings)
-    result = copy.deepcopy(value)
+    result = _version_fields(copy.deepcopy(value))
     singles = {
         "job": job,
         "plan": plan,
