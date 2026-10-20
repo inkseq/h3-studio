@@ -1,0 +1,160 @@
+/* Skin: 大正 · 和风 (Taisho, Japanese traditional). Ink black and deep pine green, crimson
+   actions, wisteria and teal accents, warm paper text, a serif display face, an ichimatsu
+   (checkered) band under the header and a faint asanoha (hemp-leaf) texture. */
+html[data-skin='taisho'] {
+  --bg: #0b100e;
+  --surface: #111816;
+  --surface-2: #16201c;
+  --surface-3: #1d2924;
+  --surface-4: #25332d;
+  --line: rgba(232, 222, 200, 0.08);
+  --line-2: rgba(232, 222, 200, 0.15);
+  --ink: #efe7d6;
+  --ink-2: #c9bfab;
+  --muted: #8d8775;
+  --accent: #c8423b;
+  --accent-ink: #fbf3e6;
+  --accent-soft: rgba(200, 66, 59, 0.16);
+  --fl: #4fa38a;
+  --fl-soft: rgba(79, 163, 138, 0.16);
+  --ref: #a98bd4;
+  --ref-soft: rgba(169, 139, 212, 0.16);
+  --warn: #d9a441;
+  --good: #4fa38a;
+  --good-soft: rgba(79, 163, 138, 0.16);
+  --char: #4fa38a;
+  --loc: #d9a441;
+  --prp: #a98bd4;
+  --r-sm: 6px;
+  --r: 10px;
+  --r-lg: 14px;
+  --skin-display: 'Noto Serif SC', 'Shippori Mincho', 'Songti SC', serif;
+}
+html[data-skin='taisho'] body {
+  background-color: var(--bg);
+  /* Asanoha: six-pointed hemp-leaf lattice, very faint. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='97' viewBox='0 0 56 97'%3E%3Cg fill='none' stroke='%23efe7d6' stroke-opacity='0.035' stroke-width='1'%3E%3Cpath d='M28 0v32.3M0 16.2l28 16.1 28-16.1M0 48.5l28-16.2 28 16.2M28 32.3v32.4M0 80.8l28-16.1 28 16.1M28 64.7V97M0 16.2v64.6M56 16.2v64.6M0 16.2L28 0l28 16.2M0 80.8L28 97l28-16.2'/%3E%3C/g%3E%3C/svg%3E");
+}
+html[data-skin='taisho'] :is(h1, h2, .page-title, .logo, .hbar .logo) {
+  font-family: var(--skin-display);
+  letter-spacing: 0.02em;
+}
+/* Ichimatsu band under the header: pine green and ink checks. */
+html[data-skin='taisho'] .hbar {
+  position: relative;
+  background: rgba(11, 16, 14, 0.92);
+}
+html[data-skin='taisho'] .hbar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -4px;
+  height: 4px;
+  background: repeating-conic-gradient(#1f5a48 0 25%, #0b100e 0 50%) 0 0 / 8px 8px;
+  opacity: 0.9;
+  pointer-events: none;
+}
+html[data-skin='taisho'] .hbar nav button.on {
+  background: var(--surface-3);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+html[data-skin='taisho'] button.primary,
+html[data-skin='taisho'] .primary {
+  background: linear-gradient(180deg, #d24a42, #a8322d);
+  color: var(--accent-ink);
+  border-color: #7f2420;
+}
+html[data-skin='taisho'] .card-box,
+html[data-skin='taisho'] .story-card,
+html[data-skin='taisho'] .libp-tile {
+  border-color: var(--line-2);
+}
+html[data-skin='taisho'] .credits-chip svg,
+html[data-skin='taisho'] .credits-big svg {
+  color: #d9a441;
+}
+
+/* Stronger motifs: seigaiha waves behind page titles, ichimatsu covers, wisteria accents. */
+html[data-skin='taisho'] .home-main::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 220px;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='40' viewBox='0 0 80 40'%3E%3Cg fill='none' stroke='%232f7a63' stroke-opacity='0.22' stroke-width='1.4'%3E%3Cpath d='M0 40a40 40 0 0 1 80 0M10 40a30 30 0 0 1 60 0M20 40a20 20 0 0 1 40 0M30 40a10 10 0 0 1 20 0'/%3E%3Cpath d='M-40 20a40 40 0 0 1 80 0M-30 20a30 30 0 0 1 60 0M-20 20a20 20 0 0 1 40 0M40 20a40 40 0 0 1 80 0M50 20a30 30 0 0 1 60 0M60 20a20 20 0 0 1 40 0'/%3E%3C/g%3E%3C/svg%3E");
+  background-size: 80px 40px;
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, transparent 100%);
+  mask-image: linear-gradient(180deg, #000 0%, transparent 100%);
+}
+html[data-skin='taisho'] .home-main {
+  position: relative;
+}
+html[data-skin='taisho'] .home-main > * {
+  position: relative;
+}
+html[data-skin='taisho'] .page-title {
+  font-size: 30px;
+}
+html[data-skin='taisho'] .page-title svg,
+html[data-skin='taisho'] .hbar .logo::before {
+  color: var(--accent);
+}
+html[data-skin='taisho'] .story-card .cover-empty,
+html[data-skin='taisho'] .story-card .cover:not(:has(img, video)) {
+  background:
+    radial-gradient(circle at 80% 26%, rgba(200, 66, 59, 0.35) 0 16px, transparent 17px),
+    linear-gradient(180deg, transparent 40%, rgba(11, 16, 14, 0.85)),
+    repeating-conic-gradient(#13291f 0 25%, #0e1714 0 50%) 0 0 / 24px 24px;
+}
+html[data-skin='taisho'] .story-card {
+  border-color: rgba(169, 139, 212, 0.28);
+}
+html[data-skin='taisho'] .story-card:hover {
+  border-color: var(--ref);
+  box-shadow:
+    0 0 0 1px var(--ref),
+    0 12px 32px rgba(0, 0, 0, 0.45);
+}
+html[data-skin='taisho'] .story-card.new {
+  border: 1px dashed rgba(169, 139, 212, 0.5);
+  background: linear-gradient(180deg, rgba(169, 139, 212, 0.06), transparent);
+}
+html[data-skin='taisho'] .badge {
+  background: rgba(200, 66, 59, 0.18);
+  color: #f0b7a8;
+}
+
+/* Skin picker (Settings → Appearance). */
+.skin-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+.skin-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  height: auto;
+  min-height: 0;
+  padding: 12px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--surface-2);
+  text-align: left;
+}
+.skin-option.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.skin-swatch {
+  display: flex;
+  gap: 4px;
+}
+.skin-swatch i {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
