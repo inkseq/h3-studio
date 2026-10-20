@@ -254,11 +254,16 @@ class StagingAdapter(DemoAdapter):
                                                "parentId": "chapter-1", "title": "宣传片",
                                                "data": {"script": "\n".join(board.outline)}}},
         ], self._key(board, "structure"))  # fmt: skip
-        try:  # story-level default so the web storyboard shows the chosen aspect
-            self.client.actions(project, [{"op": "storyboard.defaults", "value": {
-                "controls": {"aspect_ratio": board.aspect}}}], self._key(board, "defaults"))  # fmt: skip
+        try:  # the web storyboard reads journey.brief.aspect; generation reads defaults
+            self.client.actions(project, [
+                {"op": "journey.update", "patch": {"brief": {
+                    "entry": "idea", "aspect": board.aspect,
+                    "seconds": int(round(board.duration))}}},
+                {"op": "storyboard.defaults", "value": {
+                    "controls": {"aspect_ratio": board.aspect}}},
+            ], self._key(board, "defaults"))  # fmt: skip
         except StudioError as error:
-            log.warning("story aspect default not saved: %s", error)
+            log.warning("story aspect not saved: %s", error)
         return self._sync(board, "plan")
 
     def revise(self, board, instruction):

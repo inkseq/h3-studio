@@ -367,6 +367,11 @@ class DemoAdapter:
     def web_link(self, board, number=None):
         return None
 
+    hears = False  # no speech-to-text without a model
+
+    def transcribe(self, path):
+        return None
+
     def take_signal(self):
         return None  # only a model adapter notices requests inside normal messages
 

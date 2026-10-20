@@ -187,8 +187,16 @@ def image_part(path, side=768):
                            "data": base64.b64encode(buffer.getvalue()).decode("ascii")}}  # fmt: skip
 
 
+TRANSCRIPT_SCHEMA = {
+    "type": "object",
+    "properties": {"text": {"type": "string", "description": "逐字转写；听不清就留空"}},
+    "required": ["text"],
+}
+
+
 class LlmAdapter(DemoAdapter):
     thinks = True  # the bot warns that the first plan takes a while
+    hears = True  # Gemini transcribes voice notes
 
     def __init__(self, workdir, client):
         super().__init__(workdir)
@@ -337,6 +345,17 @@ class LlmAdapter(DemoAdapter):
         film = self._cut(board)
         progress(1, 1)
         return board, film
+
+    def transcribe(self, path):
+        audio = base64.b64encode(Path(path).read_bytes()).decode("ascii")
+        parts = [{"inlineData": {"mimeType": "audio/ogg", "data": audio}},
+                 {"text": "把这段老板发来的语音逐字转写成文字（保持原语言，加标点）。不要回答内容，只转写。"}]  # fmt: skip
+        try:
+            text = self.llm.json("transcribe", parts, TRANSCRIPT_SCHEMA, max_tokens=1024)["text"]
+        except Exception as error:
+            log.warning("transcribe failed: %s", error)
+            return None
+        return str(text).strip()[:500] or None
 
     def take_signal(self):
         signal, self._signal = self._signal, None

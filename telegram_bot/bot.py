@@ -47,7 +47,7 @@ SIGNAL_KINDS = {"request": "model_request", "complaint": "model_complaint",
 
 WELCOME = """你好！我帮小店把照片做成宣传短片。
 
-📷 发几张店里的照片，再说一句想做什么，比如「咖啡店开业」。
+📷 发几张店里的照片，再说一句想做什么（打字或发语音都行），比如「咖啡店开业」。
 其余的我来排，你看了满意再生成。
 
 （演示模式：不扣积分。发 /help 看更多）"""
@@ -81,6 +81,7 @@ ISSUES = {"dark": ("🔆 太暗", "画面太暗"), "slow": ("🐢 太慢", "节�
           "face": ("🙂 人物怪", "人物变形")}  # fmt: skip
 QUIET_SECONDS = 3.5  # wait this long after the last photo/text before acting
 MIN_PHOTOS = 3  # fewer than this: ask for more instead of starting on our own
+MAX_VOICE_SECONDS = 60
 HISTORY_LIMIT = 10
 NEED_PHOTOS = "先发几张店里的照片吧：门头、产品、环境、人都可以。"
 SECOND_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:秒|s\b|sec)|(\d+):(\d{2})", re.I)
@@ -245,6 +246,8 @@ class Bot:
             text = (message.get("text") or "").strip()
             if text:
                 return self._text(chat_id, text)
+            if message.get("voice") and self.adapter.hears:
+                return self._voice(chat_id, message["voice"])
             self._unsupported(chat_id, message)
         except Exception as error:
             self._failed(chat_id, error)
@@ -258,6 +261,24 @@ class Bot:
         if str(document.get("mime_type", "")).startswith("image/"):
             return document  # photo sent "as file": keeps full quality
         return None
+
+    def _voice(self, chat_id, voice):
+        """A voice note is transcribed, shown back, then handled like typed text."""
+        if voice.get("duration", 0) > MAX_VOICE_SECONDS:
+            self.api.send_message(chat_id, f"语音有点长，{MAX_VOICE_SECONDS} 秒以内就好，或者打几个字。")
+            return
+        self._action(chat_id, "typing")
+        folder = self.media_dir / str(chat_id)
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / f"voice-{voice['file_unique_id']}.ogg"
+        self.api.download(voice["file_id"], path)
+        text = self.adapter.transcribe(str(path))
+        if not text:
+            self.fb.record("not_understood", chat_id, "(voice)")
+            self.api.send_message(chat_id, "这段语音没听清，可以再说一遍，或者打几个字。")
+            return
+        self.api.send_message(chat_id, f"🎤 听到：{text}")
+        return self._text(chat_id, text)
 
     def _unsupported(self, chat_id, message):
         if message.get("voice") or message.get("audio"):

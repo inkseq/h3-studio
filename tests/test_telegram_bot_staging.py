@@ -131,6 +131,7 @@ class StagingAdapterTest(unittest.TestCase):
         )
         self.assertEqual(self.ops("storyboard.defaults")[0]["value"]["controls"],
                          {"aspect_ratio": "9:16"})  # fmt: skip
+        self.assertEqual(self.ops("journey.update")[0]["patch"]["brief"]["aspect"], "9:16")
         board, _summary = adapter.revise(board, "结尾不要了")  # Gemini keeps one part
         self.assertEqual(
             sorted(a["entity_id"] for a in self.ops("entity.delete")),

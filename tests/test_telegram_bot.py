@@ -390,6 +390,28 @@ class TelegramBotTest(unittest.TestCase):
         self.assertIn("自动字幕", text)
         self.assertNotIn(str(OWNER), text)  # no raw chat ids in the shareable digest
 
+    def test_voice_notes_are_transcribed_then_handled_as_text(self):
+        class Hearing(DemoAdapter):
+            hears = True
+
+            def transcribe(self, path):
+                return "咖啡店开业，温馨一点" if Path(path).exists() else None
+
+        self.bot.adapter = Hearing(Path(self.tmp.name) / "hear")
+        for n in range(1, 4):
+            self.bot.handle(photo(OWNER, n))
+        voice = {"file_id": "v1", "file_unique_id": "uv1", "duration": 4}
+        self.bot.handle(private(OWNER, voice=voice))
+        self.assertIn(
+            "🎤 听到：咖啡店开业，温馨一点",
+            self.api.sent[-1]["text"] + "".join(self.api.edits),
+        )
+        self.quiet()
+        self.assertIn("方案排好了", self.api.sent[-1]["text"])
+        self.assertEqual(self.board().brief, "咖啡店开业，温馨一点")
+        self.bot.handle(private(OWNER, voice={**voice, "duration": 300}))
+        self.assertIn("有点长", self.api.sent[-1]["text"])
+
     def test_stale_button_does_nothing_dangerous(self):
         stale = (
             "gen_ok",
