@@ -630,7 +630,7 @@ function SeriesApp({ sidebarView, onSidebarView }) {
                             : t('story.copy80')
           }
           onClose={close}
-          wide={['add', 'help', 'agent'].includes(modal.type)}
+          wide={['help', 'agent'].includes(modal.type)}
         >
           {modal.type === 'roughcut' && (
             <React.Suspense fallback={<p role="status">{t('story.copy41')}</p>}>
@@ -1134,7 +1134,7 @@ function AddForm({ project: p, state, initialKind, onDone }) {
         </div>
       )}
       <p className="muted">{descriptions[kind]}</p>
-      <Field label={t('story.type.' + kind) + t('story.copy143')}>
+      <Field label={t('story.nameOf', { type: t('story.type.' + kind) })}>
         <input
           value={title}
           disabled={busy}

@@ -23,7 +23,8 @@ export default function AgentConnect({
         projectId={ready ? projectId : undefined}
         onLogin={onOpenCloud}
       />
-      {!ready && (
+      {/* Signed out, the assistants panel already offers sign-in; this note is for signed-in local work. */}
+      {account && !ready && (
         <p>
           {t('assistants.scopeUnavailable')}{' '}
           <button disabled={busy} onClick={workspace.mode === 'cloud' ? onSaveCloud : onOpenCloud}>
