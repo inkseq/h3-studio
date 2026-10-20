@@ -142,7 +142,9 @@ class QualityViewTests(unittest.TestCase):
                         "prompt"
                     ],
                 )
-                self.assertEqual(fields["model_id"]["enum"], ["gemma-4-31b-it"])
+                self.assertEqual(
+                    fields["model_id"]["enum"], ["assistant:text-image-v1"]
+                )
         self.assertEqual(views.schema(raw, ADMIN), original)
         self.assertEqual(raw, original)
 
@@ -553,7 +555,9 @@ class QualityViewTests(unittest.TestCase):
             },
         }
         result = views.schema(schema, USER)
-        self.assertEqual(result["properties"]["model_id"]["enum"], ["gemma-4-31b-it"])
+        self.assertEqual(
+            result["properties"]["model_id"]["enum"], ["assistant:text-image-v1"]
+        )
         self.assertNotIn("model_id", result["$defs"]["Video"]["properties"])
         self.assertNotIn(PROFILE, json.dumps(result))
         self.assertNotIn(MODEL, json.dumps(result))
@@ -606,7 +610,15 @@ class QualityViewTests(unittest.TestCase):
                     create_recipe["anyOf"][0]["enum"], ["video-fl-v1", "video-ref-v1"]
                 )
                 self.assertIn(None, create_recipe["enum"])
-                self.assertEqual(public_chat["models"], chat["models"])
+                self.assertEqual(
+                    public_chat["models"],
+                    [
+                        {
+                            "id": "assistant:text-image-v1",
+                            "label": "Text and image assistant",
+                        }
+                    ],
+                )
                 self.assertEqual(
                     public_chat["card_authoring"]["optimistic_concurrency"],
                     chat["card_authoring"]["optimistic_concurrency"],
@@ -966,7 +978,7 @@ class QualityViewTests(unittest.TestCase):
         self.assertEqual(views.envelope(raw, ADMIN), raw)
         self.assertEqual(raw, original)
 
-    def test_actual_timeline_record_projects_revision_preflight_submission_but_keeps_chat_model(
+    def test_actual_timeline_record_projects_revision_preflight_submission_and_chat_model(
         self,
     ):
         raw = {
@@ -1063,11 +1075,53 @@ class QualityViewTests(unittest.TestCase):
             shown["events"][2]["record"]["items"][0]["job"]["deployment_profile_id"],
             "quality:standard",
         )
-        self.assertEqual(shown["events"][3]["record"]["model_id"], "gemma-4-31b-it")
+        self.assertEqual(
+            shown["events"][3]["record"]["model_id"], "assistant:text-image-v1"
+        )
         self.assertEqual(
             shown["events"][3]["record"]["text"], raw["events"][3]["record"]["text"]
         )
         self.assertEqual(shown["next_cursor"], "original-cursor")
+        self.assertEqual(raw, original)
+
+    def test_assistant_history_unknowns_are_unavailable_and_user_text_is_untouched(
+        self,
+    ):
+        text = "User deliberately wrote gemma-4-31b-it / Gemini 3.8 Flash"
+        session = {
+            "id": "session-old",
+            "title": text,
+            "model_id": "unknown-historical-provider",
+            "title_generation": {
+                "model_id": "gemma-4-31b-it",
+                "status": "completed",
+                "error_code": None,
+            },
+        }
+        turn = {
+            "id": "turn-old",
+            "text": text,
+            "reply": text,
+            "model_id": "gemini-3.8-flash",
+            "assistant_mode": "none",
+            "status": "failed",
+            "error_code": "assistant_disabled",
+        }
+        raw = {"sessions": [session], "turn": turn, "next_cursor": "original"}
+        original = copy.deepcopy(raw)
+        for principal in (USER, MACHINE, None):
+            shown = views.envelope(raw, principal)
+            self.assertEqual(shown["sessions"][0]["model_id"], "assistant:unavailable")
+            self.assertEqual(
+                shown["sessions"][0]["title_generation"]["model_id"],
+                "assistant:text-image-v1",
+            )
+            self.assertEqual(shown["turn"]["model_id"], "assistant:multimodal-v1")
+            self.assertEqual(shown["sessions"][0]["title"], text)
+            self.assertEqual(shown["turn"]["text"], text)
+            self.assertEqual(shown["turn"]["reply"], text)
+            self.assertEqual(shown["next_cursor"], "original")
+        self.assertEqual(views.envelope(raw, ADMIN), raw)
         self.assertEqual(raw, original)
 
 

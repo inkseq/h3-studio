@@ -189,7 +189,7 @@ def submit(root, state, agent, headers):
         return recover_submission(root, state, agent, headers)
     if not state.get('plan_id'):
         health = public.request(agent, 'GET', '/healthz')
-        assert health['auth_ready'] and health['generation_enabled'] and health['execution_backend'] == 'comfy-worker'
+        assert health['auth_ready'] and health['generation_enabled'] and health['execution_backend'] in ('enabled', 'comfy-worker')
         project, shot = prepare_story(agent, headers)
         body = {'client_ref': {'project_id': PROJECT, 'shot_id': 'shot', 'shot_version': shot['version']},
             'recipe_id': RECIPE, 'prompt': PROMPT,
