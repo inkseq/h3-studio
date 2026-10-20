@@ -117,8 +117,8 @@ Object.assign(trashCatalogs.zh, {
   'trash.kind.video': '视频',
   'trash.kind.audio': '音频',
   'trash.kind.asset': '文件',
-  'trash.kind.artifact': '生成版本',
-  'trash.kind.take': '版本',
+  'trash.kind.artifact': '生成结果',
+  'trash.kind.take': '生成的一条',
 });
 
 trashCatalogs.en['trash.cloudOnly'] = 'Open the saved story to use recoverable trash.';

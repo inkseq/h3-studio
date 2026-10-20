@@ -1558,7 +1558,13 @@ export default function QuickChatWorkspace() {
                   <span className="quick-machine-mode" key={mode}>
                     <i className={status.available ? 'ok' : ''} />
                     {t(mode === 'fl' ? 'v2.firstLast' : 'v2.reference')} ·{' '}
-                    {t(status.available ? 'quickView.machineReady' : 'quickView.machineMissing')}
+                    {t(
+                      status.state === 'cold'
+                        ? 'availability.cold'
+                        : status.available
+                          ? 'quickView.machineReady'
+                          : 'quickView.machineMissing',
+                    )}
                   </span>
                 );
               })}

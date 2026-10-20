@@ -127,7 +127,7 @@ export const assistantCatalogs = {
     'assistants.event.user_daily_limit_reached': '已达到账户每日上限',
     'assistants.event.session.created': '已创建创作会话',
     'assistants.event.revision.created': '已创建提案版本',
-    'assistants.event.take.created': '已创建生成版本',
+    'assistants.event.take.created': '已生成一条',
     'assistants.event.project.created': '已创建故事',
     'assistants.event.chapter.created': '已创建章节',
     'assistants.event.scene.created': '已创建场景',

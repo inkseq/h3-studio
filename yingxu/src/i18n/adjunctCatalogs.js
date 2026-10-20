@@ -946,7 +946,8 @@ export const adjunctCatalogs = {
     'adjunct.storyboardConnected.copy315': '确认镜头生成',
     'adjunct.storyboardConnected.copy316': '核对这次生成',
     'adjunct.storyboardConnected.copy317': '关闭',
-    'adjunct.storyboardConnected.copy318': '确认后进入现有任务队列；结果会保留为新版本，由你选择。',
+    'adjunct.storyboardConnected.copy318':
+      '确认后进入现有任务队列；结果会保留为新的一条，由你选择。',
     'adjunct.storyboardConnected.copy319': '镜头',
     'adjunct.storyboardConnected.copy320': '预检通过',
     'adjunct.storyboardConnected.copy321': '尚不能生成',

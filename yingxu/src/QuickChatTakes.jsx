@@ -18,6 +18,15 @@ import {
 import { Check, Columns2, RefreshCw, Star, FolderInput } from 'lucide-react';
 import './v2/quick-view.css';
 
+// Closed CR43 vocabulary from GET /v1/jobs/{id} wait_diagnostic.stage.
+const WAIT_STAGES = [
+  'queued_no_machine',
+  'machine_starting',
+  'downloading',
+  'loading',
+  'awaiting_worker',
+];
+
 function Preview({ take, controller, hover = false }) {
   const { t } = useI18n(),
     media = takeMedia(take);
@@ -77,6 +86,7 @@ export default function QuickChatTakes({
     [parent, setParent] = useState(''),
     [result, setResult] = useState(null),
     [position, setPosition] = useState(null),
+    [stage, setStage] = useState(null),
     generation = useRef(0),
     storyFence = useRef(createReadFence()),
     projectFence = useRef(createReadFence());
@@ -196,10 +206,11 @@ export default function QuickChatTakes({
   useEffect(() => {
     let alive = true;
     setPosition(null);
+    setStage(null);
     if (
       active?.job_id &&
       ['queued', 'waiting_capacity'].includes(active.job?.status || active.status)
-    )
+    ) {
       controller.client
         .queuePosition(active.job_id)
         .then((value) => {
@@ -207,6 +218,15 @@ export default function QuickChatTakes({
           if (alive && value.job_id === active.job_id) setPosition(value.position);
         })
         .catch(() => {});
+      controller.client
+        .job(active.job_id)
+        .then((job) => {
+          guard();
+          const next = job?.wait_diagnostic?.stage;
+          if (alive && job?.id === active.job_id && WAIT_STAGES.includes(next)) setStage(next);
+        })
+        .catch(() => {});
+    }
     return () => {
       alive = false;
     };
@@ -508,6 +528,7 @@ export default function QuickChatTakes({
       {active?.job_id &&
         ['queued', 'waiting_capacity'].includes(active.job?.status || active.status) && (
           <p title={t('takes.queueAdvisory')}>
+            {stage && <b className="qc-wait-stage">{t('takes.stage.' + stage)} · </b>}
             {Number.isInteger(position) && position > 0
               ? t('takes.queue', { position })
               : t('takes.queueUnknown')}{' '}
