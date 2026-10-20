@@ -65,8 +65,8 @@ class TelegramAPI:
     def get_me(self):
         return self.call("getMe")
 
-    def get_updates(self, offset=None):
-        data = {"timeout": self.poll_timeout,
+    def get_updates(self, offset=None, timeout=None):
+        data = {"timeout": self.poll_timeout if timeout is None else timeout,
                 "allowed_updates": json.dumps(["message", "callback_query"])}  # fmt: skip
         if offset is not None:
             data["offset"] = offset
@@ -78,11 +78,19 @@ class TelegramAPI:
             data["reply_markup"] = keyboard(buttons)
         return self.call("sendMessage", data)
 
-    def edit_message_text(self, chat_id, message_id, text):
-        return self.call(
-            "editMessageText",
-            {"chat_id": chat_id, "message_id": message_id, "text": text[:4000]},
-        )
+    def edit_message_text(self, chat_id, message_id, text, buttons=None):
+        data = {"chat_id": chat_id, "message_id": message_id, "text": text[:4000]}
+        if buttons:
+            data["reply_markup"] = keyboard(buttons)
+        return self.call("editMessageText", data)
+
+    def send_chat_action(self, chat_id, action="typing"):
+        return self.call("sendChatAction", {"chat_id": chat_id, "action": action})
+
+    def set_commands(self, commands):
+        """commands: [(name, description)] shown in the Telegram menu."""
+        payload = [{"command": c, "description": d} for c, d in commands]
+        return self.call("setMyCommands", {"commands": json.dumps(payload, ensure_ascii=False)})
 
     def _send_file(self, method, field, chat_id, path, caption, buttons):
         data = {"chat_id": chat_id, "caption": caption[:1000]}

@@ -13,7 +13,7 @@ import os
 from pathlib import Path
 import sys
 
-from .bot import Bot, Store
+from .bot import COMMANDS, Bot, Store
 from .demo_adapter import DemoAdapter
 from .telegram_api import ORIGIN, TelegramAPI
 
@@ -43,6 +43,7 @@ def main(argv=None):
         raise SystemExit("allowed_user_ids is empty; refusing to run")
     api = TelegramAPI(load_token(config["registry_profile"]))
     me = api.get_me()
+    api.set_commands(COMMANDS)
     logging.info("running as @%s for %d allowlisted user(s), demo adapter",
                  me.get("username"), len(allowed))  # fmt: skip
     bot = Bot(api, DemoAdapter(home / "work"), Store(home / "state"), allowed,

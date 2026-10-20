@@ -25,6 +25,7 @@ class FakeAPI:
     def __init__(self, folder):
         self.folder = Path(folder)
         self.sent = []
+        self.edits = []
         self.downloads = 0
 
     def _record(self, kind, chat_id, text, buttons=None, path=None):
@@ -50,7 +51,11 @@ class FakeAPI:
         assert Path(path).stat().st_size > 0
         return self._record("video", chat_id, caption, buttons, path)
 
-    def edit_message_text(self, chat_id, message_id, text):
+    def edit_message_text(self, chat_id, message_id, text, buttons=None):
+        self.edits.append(text)
+        return True
+
+    def send_chat_action(self, chat_id, action="typing"):
         return True
 
     def answer_callback(self, callback_id, text=None):
@@ -101,8 +106,13 @@ class TelegramBotTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)
         self.api = FakeAPI(root)
+        self.now = [1000.0]
         self.bot = Bot(self.api, DemoAdapter(root / "work"), Store(root / "state"),
-                       [OWNER], root / "media")  # fmt: skip
+                       [OWNER], root / "media", clock=lambda: self.now[0])  # fmt: skip
+
+    def quiet(self):
+        self.now[0] += 10
+        self.bot.tick()
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -130,6 +140,7 @@ class TelegramBotTest(unittest.TestCase):
         for n in range(1, photos + 1):
             self.bot.handle(photo(OWNER, n, group="g1"))
         self.bot.handle(private(OWNER, text=brief))
+        self.quiet()
         self.bot.handle(tap(OWNER, "outline"))
         self.bot.handle(tap(OWNER, "plan"))
         return self.board()
@@ -141,8 +152,14 @@ class TelegramBotTest(unittest.TestCase):
         for n in range(1, 5):
             self.bot.handle(photo(OWNER, n, group="g1"))
         self.assertEqual(sum(m["kind"] == "message" for m in self.api.sent), 1)
-        self.bot.handle(private(OWNER, text="咖啡店开业，温馨一点"))
+        self.bot.handle(private(OWNER, text="咖啡店开业"))
+        self.bot.handle(private(OWNER, text="温馨一点"))
+        self.assertIn("已收到 4 张", self.api.edits[-1])
+        self.bot.tick()  # not quiet yet: nothing happens
+        self.assertNotIn("素材整理好了", self.api.sent[-1]["text"])
+        self.quiet()
         self.assertIn("素材整理好了", self.api.sent[-1]["text"])
+        self.assertEqual(self.board().brief, "咖啡店开业；温馨一点")
         self.bot.handle(private(OWNER, text="3 是吧台"))
         self.assertEqual(self.board().materials[2], "吧台")
         self.bot.handle(tap(OWNER, "outline"))
@@ -232,6 +249,47 @@ class TelegramBotTest(unittest.TestCase):
         rolled = self.board()
         self.assertEqual(rolled.cards[0].version, 2)
         self.assertEqual(rolled.cards[0].prompt, first.cards[0].prompt)
+
+    def test_text_without_photos_waits_then_asks_for_photos(self):
+        self.bot.handle(private(OWNER, text="想给花店做个片子"))
+        self.assertEqual(len(self.api.sent), 1)  # one status message only
+        self.quiet()
+        self.assertIn("先发几张", self.api.sent[-1]["text"])
+        self.assertEqual(self.bot.store.load(OWNER)["phase"], "collecting")
+
+    def test_commands_help_go_status(self):
+        self.bot.handle(private(OWNER, text="/help"))
+        for name in ("/new", "/go", "/find", "/status", "/budget"):
+            self.assertIn(name, self.api.sent[-1]["text"])
+        for n in range(1, 3):
+            self.bot.handle(photo(OWNER, n))
+        self.bot.handle(private(OWNER, text="/go"))  # no need to wait
+        self.assertIn("素材整理好了", self.api.sent[-1]["text"])
+        self.bot.handle(private(OWNER, text="/go"))
+        self.assertIn("故事大纲", self.api.sent[-1]["text"])
+        self.bot.handle(private(OWNER, text="/go"))
+        self.assertEqual(self.bot.store.load(OWNER)["phase"], "proposed")
+        self.bot.handle(private(OWNER, text="/go"))
+        self.bot.handle(private(OWNER, text="/go"))
+        # /go never spends: it only asks for the confirm button again.
+        self.assertEqual(self.bot.store.load(OWNER)["phase"], "confirm")
+        self.assertIn(("✅ 确认生成", "gen_ok"), self.api.sent[-1]["buttons"][0])
+        self.bot.handle(private(OWNER, text="/status"))
+        self.assertIn("等你确认生成", self.api.sent[-1]["text"])
+        self.bot.handle(private(OWNER, text="/nope"))
+        self.assertIn("/help", self.api.sent[-1]["text"])
+
+    def test_new_archives_and_find_reopens(self):
+        first = self.cards(2, "咖啡店开业")
+        self.bot.handle(private(OWNER, text="/new"))
+        self.assertIn("已存档", self.api.sent[-1]["text"])
+        self.assertEqual(self.bot.store.load(OWNER)["phase"], "collecting")
+        self.bot.handle(private(OWNER, text="/find"))
+        self.assertEqual(self.api.sent[-1]["buttons"][0][0][1], f"open:{first.id}")
+        self.bot.handle(tap(OWNER, f"open:{first.id}"))
+        self.assertEqual(self.board().id, first.id)
+        self.assertEqual(self.bot.store.load(OWNER)["phase"], "proposed")
+        self.assertIn("找回了", self.api.sent[-1]["text"])
 
     def test_stale_button_does_nothing_dangerous(self):
         for data in ("gen_ok", "fix_go", "revert", "use:1:1", "card:1"):

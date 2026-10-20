@@ -31,7 +31,32 @@ WELCOME = """你好！我帮小店做宣传短片。
 4. 满意就点「开始生成」；片子出来后说「第12秒太暗」，我只改那一段
 
 现在是演示模式：不扣积分、不用显卡，片子是照片做的示意。
-随时发 /new 重新开始。"""
+发 /help 看所有命令。"""
+COMMANDS = [
+    ("new", "做一条新片子（当前的会存档）"),
+    ("go", "继续下一步"),
+    ("find", "找以前做过的片子"),
+    ("status", "现在做到哪一步"),
+    ("budget", "积分和花费"),
+    ("help", "怎么用"),
+]
+HELP = (
+    "直接聊天就行：发照片、说想要什么、说哪里要改。\n"
+    "要花积分或做决定时，我会给按钮让你点。\n\n"
+    + "\n".join(f"/{name}  {text}" for name, text in COMMANDS)
+    + "\n\n/go 碰到要花积分的步骤，也会先让你确认。"
+)
+PHASES = {
+    "collecting": "收照片",
+    "materials": "整理素材",
+    "outline": "写故事大纲",
+    "proposed": "审镜头卡",
+    "confirm": "等你确认生成",
+    "generating": "生成中",
+    "delivered": "片子做好了，可以按秒修改",
+}
+QUIET_SECONDS = 3.5  # wait this long after the last photo/text before acting
+HISTORY_LIMIT = 10
 NEED_PHOTOS = "先发几张店里的照片吧：门头、产品、环境、人都可以。"
 SECOND_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(?:秒|s\b|sec)|(\d+):(\d{2})", re.I)
 CARD_RE = re.compile(r"第\s*(\d+)\s*张|#\s*(\d+)|card\s*(\d+)", re.I)
@@ -41,7 +66,7 @@ RENAME_RE = re.compile(r"^(?:素材)?\s*(\d+)\s*(?:号)?\s*(?:是|叫|改成|改
 def fresh():
     return {"phase": "collecting", "photos": [], "brief": "", "board": None,
             "film": None, "pending_fix": None, "pending_input": None,
-            "last_fix": None}  # fmt: skip
+            "last_fix": None, "status_msg": None, "last_input": None}  # fmt: skip
 
 
 class Store:
@@ -58,12 +83,31 @@ class Store:
             return fresh()
         return {**fresh(), **json.loads(path.read_text(encoding="utf-8"))}
 
-    def save(self, chat_id, state):
-        path = self._path(chat_id)
+    def _write(self, path, value):
         fd, tmp = tempfile.mkstemp(dir=self.folder, suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(state, handle, ensure_ascii=False, indent=1)
+            json.dump(value, handle, ensure_ascii=False, indent=1)
         os.replace(tmp, path)
+
+    def save(self, chat_id, state):
+        self._write(self._path(chat_id), state)
+
+    def _history_path(self, chat_id):
+        return self.folder / f"chat-{int(chat_id)}-history.json"
+
+    def history(self, chat_id):
+        path = self._history_path(chat_id)
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+
+    def archive(self, chat_id, state, when):
+        """Keep a finished or abandoned film so /find can reopen it."""
+        if not state.get("board"):
+            return
+        board = state["board"]
+        entries = [e for e in self.history(chat_id) if e["id"] != board["id"]]
+        entries.insert(0, {"id": board["id"], "title": board["title"], "when": when,
+                           "phase": state["phase"], "state": state})  # fmt: skip
+        self._write(self._history_path(chat_id), entries[:HISTORY_LIMIT])
 
     def offset(self):
         path = self.folder / "offset.json"
@@ -113,14 +157,15 @@ def number_rows(prefix, count, per_row=6):
 
 
 class Bot:
-    def __init__(self, api, adapter, store, allowed_ids, media_dir):
+    def __init__(self, api, adapter, store, allowed_ids, media_dir, clock=time.time):
         if not allowed_ids:
             raise ValueError("allowlist is empty; refusing to run")
         self.api, self.adapter, self.store = api, adapter, store
         self.allowed = {int(x) for x in allowed_ids}
         self.media_dir = Path(media_dir)
+        self.clock = clock
         self.ignored = 0
-        self._last_group = None
+        self._waiting = set()  # chats whose photos/text may still be arriving
 
     # ---- gate -------------------------------------------------------------
 
@@ -238,33 +283,29 @@ class Bot:
             board.photos.append(str(dest))
             board.materials.append(f"照片{number}")
             state["board"] = board.to_dict()
-        self.store.save(chat_id, state)
-        group = message.get("media_group_id")
-        if group and group == self._last_group:
-            return
-        self._last_group = group
         if state["board"]:
+            self.store.save(chat_id, state)
             self.api.send_message(
                 chat_id,
                 f"已加入素材{number}。可以说「{number} 是招牌菜」改名字"
                 + (f"，或「第3张换成素材{number}」。" if state["phase"] == "proposed" else "。"),
             )
-        else:
-            self.api.send_message(
-                chat_id,
-                "📷 收到照片。继续发，或者说一句想做什么；都发完了也可以直接点按钮。",
-                [[("📦 整理素材", "start")]],
-            )
+            return
+        self._collecting(chat_id, state)
 
     def _text(self, chat_id, text):
-        if text in ("/start", "/help"):
+        command = text.split()[0].split("@")[0].lower() if text.startswith("/") else ""
+        if command == "/start":
             self.api.send_message(chat_id, WELCOME)
             return
-        if text == "/new":
-            self.store.save(chat_id, fresh())
-            self.api.send_message(chat_id, "好，重新开始。" + NEED_PHOTOS)
+        if command == "/help":
+            self.api.send_message(chat_id, HELP)
             return
+        if command == "/new":
+            return self._new(chat_id)
         state = self.store.load(chat_id)
+        if command:
+            return self._command(chat_id, state, command)
         pending = state.get("pending_input")
         if pending:
             state["pending_input"] = None
@@ -277,9 +318,8 @@ class Bot:
                 return self._propose_fix(chat_id, state, pending["n"], text)
         phase = state["phase"]
         if phase == "collecting":
-            state["brief"] = text
-            self.store.save(chat_id, state)
-            return self._start(chat_id, state)
+            state["brief"] = f"{state['brief']}；{text}" if state["brief"] else text
+            return self._collecting(chat_id, state)
         if phase == "materials":
             match = RENAME_RE.match(text)
             board = self._board(state)
@@ -317,20 +357,17 @@ class Bot:
         cards = len(board.cards) if board else 0
 
         if name == "new":
-            self.store.save(chat_id, fresh())
-            self.api.send_message(chat_id, "好，重新开始。" + NEED_PHOTOS)
+            self._new(chat_id)
+        elif name == "open":
+            self._open(chat_id, state, arg)
         elif name == "noop":
             pass
         elif name == "start" and phase == "collecting":
             self._start(chat_id, state)
         elif name == "outline" and phase == "materials":
-            state["phase"] = "outline"
-            self.store.save(chat_id, state)
-            self._send_outline(chat_id, board)
+            self._to_outline(chat_id, state)
         elif name == "plan" and phase == "outline":
-            board = self.adapter.plan_shots(board)
-            self._save_board(chat_id, state, board, phase="proposed")
-            self._send_board(chat_id, board, "🎞 镜头卡排好了。点数字看每张卡的细节：")
+            self._to_cards(chat_id, state)
         elif name == "board" and phase == "proposed":
             self._send_board(chat_id, board, "当前分镜：")
         elif name == "card" and phase == "proposed" and n and n <= cards:
@@ -366,16 +403,7 @@ class Bot:
                 "直接告诉我改什么，比如：\n· 第3张换成素材5\n· 删掉第4张\n· 短一点 / 横屏\n· 第2张要更温馨\n也可以点数字进卡片里改。",
             )
         elif name == "gen" and phase in ("proposed", "confirm"):
-            estimate = self.adapter.estimate(board)
-            state["phase"] = "confirm"
-            self.store.save(chat_id, state)
-            check = ("⚠️ 内容检查：\n" + "\n".join(f"· {c}" for c in estimate.checks)
-                     if estimate.checks else "✅ 内容检查通过")  # fmt: skip
-            self.api.send_message(
-                chat_id,
-                f"{check}\n生成 {clock(estimate.seconds)}，{board.tier}档，约 {estimate.credits} 积分。\n{estimate.note}",
-                [[("✅ 确认生成", "gen_ok"), ("✏️ 再改改", "revise")]],
-            )
+            self._ask_generate(chat_id, state)
         elif name == "gen_ok" and phase == "confirm":
             self._generate(chat_id, state)
         elif name == "fix_yes" and phase == "delivered" and state["pending_fix"]:
@@ -413,18 +441,163 @@ class Bot:
 
     # ---- steps ------------------------------------------------------------
 
+    def _collecting(self, chat_id, state):
+        """Photos and text keep arriving: keep one status message and wait."""
+        state["last_input"] = self.clock()
+        count = len(state["photos"])
+        text = f"📷 已收到 {count} 张照片" if count else "📝 记下了"
+        if state["brief"]:
+            text += f"\n要求：{state['brief'][:80]}"
+        text += "\n\n继续发也行；停几秒我就开始整理，或者直接点按钮。"
+        buttons = [[("📦 都发完了，整理素材", "start")]] if count else None
+        message_id = state.get("status_msg")
+        try:
+            if not message_id:
+                raise TelegramError("sendMessage", "no status message yet")
+            self.api.edit_message_text(chat_id, message_id, text, buttons)
+        except TelegramError:
+            state["status_msg"] = self.api.send_message(chat_id, text, buttons)["message_id"]
+        self.store.save(chat_id, state)
+        self._waiting.add(chat_id)
+
+    def tick(self):
+        """Act on chats that went quiet; the poll loop calls this between polls."""
+        for chat_id in list(self._waiting):
+            state = self.store.load(chat_id)
+            last = state.get("last_input")
+            if state["phase"] != "collecting" or last is None:
+                self._waiting.discard(chat_id)
+                continue
+            if self.clock() - last < QUIET_SECONDS:
+                continue
+            self._waiting.discard(chat_id)
+            if state["photos"] and state["brief"]:
+                self._start(chat_id, state)
+            elif state["brief"]:
+                state["last_input"] = None
+                self.store.save(chat_id, state)
+                self.api.send_message(chat_id, NEED_PHOTOS)
+            # photos without a sentence: wait for text, the button or /go
+
+    def _new(self, chat_id):
+        state = self.store.load(chat_id)
+        self.store.archive(chat_id, state, time.strftime("%m-%d %H:%M"))
+        self.store.save(chat_id, fresh())
+        self._waiting.discard(chat_id)
+        saved = "，刚才那条已存档（/find 能找回）" if state.get("board") else ""
+        self.api.send_message(chat_id, f"好，做一条新的{saved}。\n{NEED_PHOTOS}")
+
+    def _open(self, chat_id, state, film_id):
+        entry = next((e for e in self.store.history(chat_id) if e["id"] == film_id), None)
+        if entry is None:
+            return self._stale(chat_id)
+        if state.get("board") and state["board"]["id"] != film_id:
+            self.store.archive(chat_id, state, time.strftime("%m-%d %H:%M"))
+        restored = {**fresh(), **entry["state"], "pending_input": None,
+                    "status_msg": None, "last_input": None}  # fmt: skip
+        if restored["phase"] == "generating":
+            restored["phase"] = "confirm"
+        self.store.save(chat_id, restored)
+        board = self._board(restored)
+        lead = f"找回了「{board.title}」："
+        if restored["film"]:
+            self._send_film(chat_id, board, Film.from_dict(restored["film"]), lead)
+        elif restored["phase"] in ("proposed", "confirm"):
+            self._send_board(chat_id, board, lead)
+        else:
+            self.api.send_message(
+                chat_id, f"{lead}现在在「{PHASES[restored['phase']]}」这一步，发 /go 继续。"
+            )
+
+    def _command(self, chat_id, state, command):
+        phase = state["phase"]
+        if command == "/go":
+            steps = {
+                "collecting": self._start,
+                "materials": self._to_outline,
+                "outline": self._to_cards,
+                "proposed": self._ask_generate,
+                "confirm": self._ask_generate,  # never spends: re-asks to confirm
+            }
+            if phase in steps:
+                return steps[phase](chat_id, state)
+            if phase == "generating":
+                return self.api.send_message(chat_id, "还在生成，稍等一下～")
+            return self.api.send_message(
+                chat_id, "片子已经做好了。要改就说「第12秒……」，要做新的发 /new。"
+            )
+        if command == "/status":
+            lines = [f"现在：{PHASES[phase]}", f"照片：{len(state['photos'])} 张"]
+            if state["board"]:
+                board = self._board(state)
+                lines.append(f"片子：{board.title}，{len(board.cards)} 个镜头，{clock(board.duration)}")
+            if state["brief"]:
+                lines.append(f"要求：{state['brief'][:60]}")
+            lines.append("发 /go 继续下一步。")
+            return self.api.send_message(chat_id, "\n".join(lines))
+        if command == "/find":
+            entries = self.store.history(chat_id)
+            if not entries:
+                return self.api.send_message(
+                    chat_id, "还没有存档的片子。做完一条后发 /new，它就会存在这里。"
+                )
+            rows = [[(f"{e['title']} · {e['when']} · {PHASES.get(e['phase'], '')}",
+                      f"open:{e['id']}")] for e in entries]  # fmt: skip
+            return self.api.send_message(chat_id, "以前做过的片子，点一下接着改：", rows)
+        if command == "/budget":
+            return self.api.send_message(
+                chat_id,
+                "演示模式：不扣积分，也不会用显卡。\n接上正式账户后，这里显示剩余积分和最近的花费。",
+            )
+        self.api.send_message(chat_id, "没有这个命令。发 /help 看能用的命令。")
+
+    def _to_outline(self, chat_id, state):
+        state["phase"] = "outline"
+        self.store.save(chat_id, state)
+        self._send_outline(chat_id, self._board(state))
+
+    def _to_cards(self, chat_id, state):
+        self._action(chat_id, "typing")
+        board = self.adapter.plan_shots(self._board(state))
+        self._save_board(chat_id, state, board, phase="proposed")
+        self._send_board(chat_id, board, "🎞 镜头卡排好了。点数字看每张卡的细节：")
+
+    def _ask_generate(self, chat_id, state):
+        board = self._board(state)
+        estimate = self.adapter.estimate(board)
+        state["phase"] = "confirm"
+        self.store.save(chat_id, state)
+        check = ("⚠️ 内容检查：\n" + "\n".join(f"· {c}" for c in estimate.checks)
+                 if estimate.checks else "✅ 内容检查通过")  # fmt: skip
+        self.api.send_message(
+            chat_id,
+            f"{check}\n生成 {clock(estimate.seconds)}，{board.tier}档，约 {estimate.credits} 积分。\n{estimate.note}",
+            [[("✅ 确认生成", "gen_ok"), ("✏️ 再改改", "revise")]],
+        )
+
+    def _action(self, chat_id, action):
+        """Show "typing…"/"sending video…" while working; purely cosmetic."""
+        try:
+            self.api.send_chat_action(chat_id, action)
+        except (TelegramError, AttributeError):
+            pass
+
     def _start(self, chat_id, state):
+        self._waiting.discard(chat_id)
         if not state["photos"]:
             self.api.send_message(chat_id, NEED_PHOTOS)
             return
+        self._action(chat_id, "typing")
         board = self.adapter.start(chat_id, state["photos"], state["brief"])
-        self._save_board(chat_id, state, board, phase="materials", film=None)
+        self._save_board(chat_id, state, board, phase="materials", film=None,
+                         last_input=None, status_msg=None)  # fmt: skip
         self._send_materials(chat_id, board)
 
     def _generate(self, chat_id, state):
         board = self._board(state)
         state["phase"] = "generating"
         self.store.save(chat_id, state)
+        self._action(chat_id, "upload_video")
         progress = self._progress_message(chat_id, "🎬 生成中……")
         try:
             board, film = self.adapter.generate(chat_id, board, progress)
@@ -521,7 +694,8 @@ class Bot:
         offset = self.store.offset()
         while True:
             try:
-                updates = self.api.get_updates(offset)
+                # Poll briefly while a chat is still sending, so it can go quiet.
+                updates = self.api.get_updates(offset, timeout=1 if self._waiting else None)
             except TelegramError as error:
                 log.warning("poll failed: %s", error)
                 time.sleep(5)
@@ -533,3 +707,7 @@ class Bot:
                     self.handle(update)
                 except Exception:
                     log.exception("update %s failed", update["update_id"])
+            try:
+                self.tick()
+            except Exception:
+                log.exception("tick failed")
