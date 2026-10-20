@@ -147,6 +147,56 @@ class HostScorecardTests(ledger.LedgerCase):
         self.assertEqual(last["last_diagnostic"]["outcome"], "cancelled")
         self.assertEqual(last["failure_count"], 1)
 
+    def test_download_timebox_retains_physical_history_without_startup_deny(self):
+        event = {
+            "version": 1,
+            "job_id": str(uuid.uuid4()),
+            "machine_id": "19493",
+            "at": self.now,
+            "reason_code": "dstack_download_timebox_exceeded",
+        }
+        with self.repo.transaction() as conn:
+            row = (
+                conn.execute(
+                    select(operator_nodes).where(
+                        operator_nodes.c.intent_id == self.node
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            payload = copy.deepcopy(row["payload"])
+            # Frozen historical rows predate advertised telemetry; reading a
+            # new server must not rewrite them or invent a country/rate.
+            for physical in (
+                payload["host_observation"],
+                payload["dstack"]["host_observation"],
+            ):
+                physical.pop("country", None)
+                physical.pop("advertised_download_mbps", None)
+            payload["host_failure"] = {
+                "version": 1,
+                "stage": "model_download",
+                "reason_code": event["reason_code"],
+                "at": self.now,
+                "qualified_start_failure": False,
+            }
+            payload["download_timebox_event"] = event
+            conn.execute(
+                update(operator_nodes)
+                .where(operator_nodes.c.intent_id == self.node)
+                .values(payload=payload)
+            )
+        host = self.hosts.list(self.owner)["hosts"][0]
+        self.assertEqual(host["failure_count"], 1)
+        self.assertEqual(host["qualified_start_failure_count"], 0)
+        self.assertEqual(host["last_failure"]["stage"], "model_download")
+        self.assertEqual(host["last_failure"]["reason_code"], event["reason_code"])
+        self.assertEqual(host["rentals"][0]["download_timebox_event"], event)
+        self.assertIsNone(host["latest_observation"]["country"])
+        self.assertIsNone(host["latest_observation"]["advertised_download_mbps"])
+        self.assertEqual(host["policy"]["effective"], "default")
+
     def test_same_account_physical_snapshot_survives_terminal_provider_absence(self):
         binding = self.store.load(self.node)
         self.store.record(

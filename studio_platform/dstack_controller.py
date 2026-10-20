@@ -23,6 +23,7 @@ from sqlalchemy import or_, select
 from .control import WorkerControl, worker_spec_payload
 from .dstack_capacity import idle_action, _owns, _terminal_no_allocation_shape
 from .demand_wakeup import IDLE_SAFETY_SECONDS
+from .dstack_preparation import download_timebox_due
 from .dstack_operator import (
     BACKEND_MARKER,
     _request,
@@ -108,6 +109,7 @@ class DstackController:
         # Scheduling stamps only. They never authorize admission, retirement,
         # settlement or a claim that the original PUT allocated nothing.
         self._passive_unknown = {}
+        self._removal_checked_at = {}
         self._invoice_checked_at = None
 
     def _business_demand(self, connection):
@@ -561,6 +563,7 @@ class DstackController:
                 ),
             )
             if current["desired_state"] == "running":
+                payload = dict(current["payload"])
                 if reason_code == "dstack_idle_expired":
                     from .worker_admission import matching_dstack_queued_jobs
 
@@ -572,7 +575,66 @@ class DstackController:
                     )
                     if matching_dstack_queued_jobs(connection, intent, current):
                         return False
-                payload = dict(current["payload"])
+                elif reason_code == "dstack_download_timebox_exceeded":
+                    intent = self.repo._locked(
+                        connection,
+                        select(instance_intents).where(
+                            instance_intents.c.id == node["intent_id"]
+                        ),
+                    )
+                    now = self.repo.clock()
+                    binding = payload.get("dstack", {})
+                    worker_id = "dstack-" + node["intent_id"].replace("-", "")
+                    workers = list(
+                        connection.execute(
+                            select(registered_workers).where(
+                                or_(
+                                    registered_workers.c.id == worker_id,
+                                    (
+                                        registered_workers.c.provider
+                                        == intent["provider"]
+                                    )
+                                    & (
+                                        registered_workers.c.instance_id
+                                        == intent["provider_instance_id"]
+                                    ),
+                                )
+                            )
+                        ).mappings()
+                    )
+                    ids = [worker_id, *[worker["id"] for worker in workers]]
+                    record = getattr(self.service, "record_download_timebox", None)
+                    if (
+                        not download_timebox_due(
+                            binding,
+                            now,
+                            fresh_seconds=self.service.policy[
+                                "observation_fresh_seconds"
+                            ],
+                        )
+                        or not _cold_unadmitted_runtime(
+                            binding,
+                            workers,
+                            intent["provider_instance_id"],
+                            now,
+                            self.service.policy["observation_fresh_seconds"],
+                        )
+                        or connection.execute(
+                            select(attempts.c.id)
+                            .where(attempts.c.worker_id.in_(ids))
+                            .limit(1)
+                        ).first()
+                        or connection.execute(
+                            select(jobs.c.id)
+                            .where(jobs.c.lease_worker_id.in_(ids))
+                            .limit(1)
+                        ).first()
+                        or not callable(record)
+                    ):
+                        return False
+                    payload = record(connection, current, intent, now)
+                    if not isinstance(payload, dict):
+                        return False
                 payload["stop_reason_code"] = reason_code
                 connection.execute(
                     update(operator_nodes)
@@ -783,6 +845,24 @@ class DstackController:
             }
         payload = current["payload"]
         now = self.repo.clock()
+        if (
+            current["desired_state"] == "running"
+            and download_timebox_due(
+                binding,
+                now,
+                fresh_seconds=self.service.policy["observation_fresh_seconds"],
+            )
+            and self._request_stop(
+                current, reason_code="dstack_download_timebox_exceeded"
+            )
+        ):
+            # Fence this exact cold host first. The next tick uses the original
+            # begin_stop checks; no worker is launched and the queued job stays.
+            return {
+                "node_id": intent_id,
+                "state": "draining",
+                "code": "dstack_download_timebox_exceeded",
+            }
         observed = binding.get("observed_at")
         fresh = (
             type(observed) in (int, float)
@@ -896,6 +976,31 @@ class DstackController:
                 self.worker_process.ensure(intent_id, slot)
         return {"node_id": intent_id, "state": observation["state"]}
 
+    def _refresh_pending_removal(self, node, intent):
+        """Bounded exact terminal read; no native boot, invoice or invented proof."""
+        binding = node["payload"].get("dstack", {})
+        now = self.repo.clock()
+        if (
+            node["desired_state"] != "stopped"
+            or binding.get("state") != "stopped"
+            or binding.get("dstack_status")
+            not in {"done", "failed", "terminated", "aborted"}
+            or not binding.get("run_id")
+            or not intent.get("provider_instance_id")
+            or binding.get("provider_instance_id") != intent["provider_instance_id"]
+            or binding.get("provider_removal_proof")
+        ):
+            self._removal_checked_at.pop(node["intent_id"], None)
+            return
+        last = self._removal_checked_at.get(
+            node["intent_id"], binding.get("observed_at")
+        )
+        if type(last) not in (int, float) or not math.isfinite(last) or now - last < 30:
+            return
+        # Stamp before I/O: even a failed/unknown GET cannot become a hot loop.
+        self._removal_checked_at[node["intent_id"]] = now
+        self.capacity.observe_terminal(node["intent_id"])
+
     def tick(self):
         heartbeat_cpu = getattr(self.worker_process, "heartbeat_cpu", None)
         if callable(heartbeat_cpu):
@@ -926,6 +1031,7 @@ class DstackController:
                             .one()
                         )
                     _, active, unsafe, _ = self._obligations(intent)
+                    self._refresh_pending_removal(node, intent)
                     if not active and not unsafe:
                         if self.worker_process:
                             self.worker_process.stop(node["intent_id"])

@@ -330,6 +330,14 @@ def validate_start(service, connection, job_id, profile_id):
     require(
         locked is not None and locked["status"] == "queued", "dstack_demand_changed"
     )
+    from .dstack_demand_start import download_journal, DOWNLOAD_RETRY_LIMIT
+
+    journal = download_journal(connection, service.settings.tenant_id, job_id)
+    require(
+        journal is None
+        or journal['payload'].get('reason_code') != DOWNLOAD_RETRY_LIMIT,
+        'dstack_demand_download_retry_limit',
+    )
     match = next(
         (
             (job, profile)
@@ -434,15 +442,26 @@ def _matches(node, job):
 def job_wait_stage(connection, job, now):
     if job["status"] in {"claimed", "submitting", "running"}:
         return "running"
+    from .dstack_demand_start import download_journal, DOWNLOAD_RETRY_LIMIT
+
+    journal = download_journal(connection, job['tenant_id'], job['id'])
+    payload = journal['payload'] if journal else {}
+    if payload.get('reason_code') == DOWNLOAD_RETRY_LIMIT:
+        return 'queued_no_machine'
+    replacing = bool(
+        payload.get('prior_node_id') or payload.get('download_stops')
+    ) and payload.get('phase') in {'backoff', 'planning', 'starting', 'observing'}
     matches = [
         node_stage(n, now)
         for n in _nodes(connection, job["tenant_id"])
         if _matches(n, job)
     ]
+    if replacing:
+        matches = [s for s in matches if s != 'unknown']
     for stage in ("running", "loading", "downloading", "machine_starting", "unknown"):
         if stage in matches:
             return "awaiting_worker" if stage == "running" else stage
-    return "queued_no_machine"
+    return 'machine_starting' if replacing else "queued_no_machine"
 
 
 def summary(service, connection, now):
@@ -497,6 +516,13 @@ def summary(service, connection, now):
     running = stages.count("running")
     starting = sum(s in {"machine_starting", "downloading", "loading"} for s in stages)
     uncertain = stages.count("unknown")
+    from .dstack_demand_start import download_journal, DOWNLOAD_RETRY_LIMIT
+
+    retry_limited = bool(work) and all(
+        (row := download_journal(connection, service.settings.tenant_id, job['id']))
+        and row['payload'].get('reason_code') == DOWNLOAD_RETRY_LIMIT
+        for job, _ in work
+    )
     reason = (
         "disabled"
         if not runtime["enabled"]
@@ -508,6 +534,8 @@ def summary(service, connection, now):
         if not work
         else "allocation_uncertain"
         if uncertain
+        else DOWNLOAD_RETRY_LIMIT
+        if retry_limited
         else "machine_limit"
         if running + starting >= HARD_MAX_MACHINES
         else None

@@ -53,6 +53,28 @@ from .runtime_catalog import engine_manifest, get_profile
 
 BACKEND_MARKER = "dstack-v1"
 MAX_HOST_CANDIDATES = 10
+PREFERRED_DOWNLOAD_COUNTRIES = frozenset(
+    'us at be bg hr cy cz dk ee fi fr de gr hu ie it lv lt lu mt nl pl pt ro sk si es se'.split()
+) | frozenset(
+    (
+        'United States|United States of America|Austria|Belgium|Bulgaria|Croatia|Cyprus|'
+        'Czechia|Czech Republic|Denmark|Estonia|Finland|France|Germany|Greece|Hungary|'
+        'Ireland|Italy|Latvia|Lithuania|Luxembourg|Malta|Netherlands|Poland|Portugal|'
+        'Romania|Slovakia|Slovenia|Spain|Sweden'
+    )
+    .lower()
+    .split('|')
+)
+
+
+def preferred_download_offer(offer):
+    country = offer.get('country')
+    return (
+        isinstance(country, str)
+        and country.strip().lower() in PREFERRED_DOWNLOAD_COUNTRIES
+    )
+
+
 PROVIDERS = {"vastai": "vast", "runpod": "runpod"}
 # Pinned dstack/gpuhunt scheduler labels, not native CUDA device identities.
 # The native worker still checks the full physical name, capability and VRAM.
@@ -1408,6 +1430,123 @@ class DstackOperator:
 
         return summary(self, connection, now)
 
+    def record_download_timebox(self, connection, current, intent, now):
+        """Journal an owned cold stop on the original job and host history.
+
+        The controller rechecks its cold/no-execution fence under this same
+        capacity lock. This callback never starts/stops a provider or settles
+        money; the original stop path owns those operations.
+        """
+        from .dstack_demand import profile_hash
+        from .dstack_demand_start import (
+            DOWNLOAD_TIMEBOX,
+            MAX_DOWNLOAD_REPLACEMENTS,
+            _start_command,
+            _start_key,
+            _write,
+            download_journal,
+        )
+        from .host_policy import bound_observation, failure
+
+        payload = copy.deepcopy(current['payload'])
+        demand = payload.get('demand_start')
+        if not isinstance(demand, dict) or not isinstance(demand.get('job_id'), str):
+            return None
+        profile = self.profiles.get(demand.get('profile_id'))
+        physical = bound_observation(current, now=now)
+        if (
+            profile is None
+            or physical is None
+            or physical['provider_instance_id'] != intent['provider_instance_id']
+        ):
+            return None
+        job = (
+            connection.execute(
+                select(jobs).where(
+                    jobs.c.id == demand['job_id'],
+                    jobs.c.tenant_id == self.settings.tenant_id,
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if (
+            job is None
+            or job['status'] != 'queued'
+            or any(
+                (
+                    demand.get('plan_id') != job['plan_id'],
+                    demand.get('request_hash') != job['request_hash'],
+                    demand.get('execution_hash') != request_hash(job['execution_plan']),
+                    demand.get('profile_id') != profile['id'],
+                    demand.get('profile_hash') != profile_hash(self.config, profile),
+                )
+            )
+        ):
+            return None
+        row = download_journal(connection, self.settings.tenant_id, job['id'])
+        if row is None:
+            return None
+        identity = request_hash(
+            {
+                'tenant': self.settings.tenant_id,
+                'job_id': job['id'],
+                'profile_hash': demand['profile_hash'],
+            }
+        )
+        journal = copy.deepcopy(row['payload'])
+        if row['request_hash'] != identity or type(journal.get('cycle')) is not int:
+            return None
+        original = _start_command(
+            connection, self, profile, _start_key(identity, journal['cycle'])
+        )
+        if original is None or original['payload']['node_id'] != current['intent_id']:
+            return None
+        stops = journal.get('download_stops', [])
+        existing = next(
+            (s for s in stops if s['node_id'] == current['intent_id']), None
+        )
+        if existing is None:
+            if len(stops) >= MAX_DOWNLOAD_REPLACEMENTS + 1:
+                return None
+            stops.append(
+                {
+                    'node_id': current['intent_id'],
+                    'machine_id': physical['machine_id'],
+                    'at': now,
+                }
+            )
+            journal['download_stops'] = stops
+            _write(connection, row, journal, now)
+        payload['host_failure'] = failure(
+            {
+                'version': 1,
+                'stage': 'model_download',
+                'reason_code': DOWNLOAD_TIMEBOX,
+                'at': existing['at'] if existing else now,
+                'qualified_start_failure': False,
+            },
+            now=now,
+        )
+        payload['download_timebox_event'] = {
+            'version': 1,
+            'job_id': job['id'],
+            'machine_id': physical['machine_id'],
+            'at': existing['at'] if existing else now,
+            'reason_code': DOWNLOAD_TIMEBOX,
+        }
+        self.repo._emit(
+            connection,
+            'dstack.download_timebox_stop_requested',
+            current['intent_id'],
+            {
+                'job_id': job['id'],
+                'machine_id': physical['machine_id'],
+                'reason_code': DOWNLOAD_TIMEBOX,
+            },
+        )
+        return payload
+
     def _capacity_request(
         self,
         profile,
@@ -1807,10 +1946,24 @@ class DstackOperator:
                 from .host_policy import original_nodes
 
                 nodes = original_nodes(connection, self.settings.tenant_id)
+                excluded = set()
+                if demand_job_id is not None:
+                    from .dstack_demand_start import excluded_download_machines
+
+                    excluded = excluded_download_machines(
+                        connection, self.settings.tenant_id, demand_job_id
+                    )
                 allowed = [
                     r
                     for r in offers
                     if r.get("offer_id") in by_offer
+                    and by_offer[r['offer_id']]['machine_id'] not in excluded
+                    and type(by_offer[r['offer_id']].get('advertised_download_mbps'))
+                    in (int, float)
+                    and math.isfinite(
+                        by_offer[r['offer_id']]['advertised_download_mbps']
+                    )
+                    and by_offer[r['offer_id']]['advertised_download_mbps'] >= 1000
                     and store.read(
                         connection, by_offer[r["offer_id"]]["machine_id"], nodes=nodes
                     )[0]["effective"]
@@ -1822,12 +1975,13 @@ class DstackOperator:
                 offers = sorted(
                     allowed,
                     key=lambda r: (
+                        not preferred_download_offer(by_offer[r['offer_id']]),
                         store.read(
                             connection,
                             by_offer[r["offer_id"]]["machine_id"],
                             nodes=nodes,
                         )[0]["effective"]
-                        != "prefer"
+                        != "prefer",
                     ),
                 )[:MAX_HOST_CANDIDATES]
                 require(offers, "dstack_no_compatible_host_offers")
@@ -2342,10 +2496,24 @@ class DstackOperator:
                 fresh = self.capacity.client.vast_offer_mapping(
                     _request(original), clock=self.repo.clock
                 )
-                current = {r["offer_id"]: r["machine_id"] for r in fresh["offers"]}
+                current = {
+                    r['offer_id']: r['machine_id']
+                    for r in fresh['offers']
+                    if type(r.get('advertised_download_mbps')) in (int, float)
+                    and math.isfinite(r['advertised_download_mbps'])
+                    and r['advertised_download_mbps'] >= 1000
+                }
+                excluded = set()
+                if demand_job_id is not None:
+                    from .dstack_demand_start import excluded_download_machines
+
+                    excluded = excluded_download_machines(
+                        connection, self.settings.tenant_id, demand_job_id
+                    )
                 require(
                     all(
                         current.get(r["offer_id"]) == r["machine_id"]
+                        and r['machine_id'] not in excluded
                         for r in host_selection["offers"]
                     ),
                     "host_offer_identity_changed",

@@ -55,9 +55,11 @@ DIAGNOSTICS = (
         "worker_heartbeat_expired",
         "worker_window_expired",
         "dstack_broker_unavailable",
+        "dstack_download_timebox_exceeded",
     }
 )
 REASONS = {
+    "dstack_download_timebox_exceeded": "下载长时间没有完成新的文件，正在更换机器",
     "dstack_no_capacity_billing_pending": "没有满足当前条件的可用机器；未分配实例，账单待核对",
     "dstack_never_allocated": "启动失败，已核实未分配机器",
     "dstack_allocation_requires_reconciliation": "启动分配结果尚未确认，保留原记录等待核对",
@@ -132,6 +134,224 @@ def _known(value, choices):
     return isinstance(value, str) and value in choices
 
 
+DOWNLOAD_COUNTERS = ("bytes_complete", "bytes_total", "files_complete", "files_total")
+DOWNLOAD_IDENTITY = (
+    "intent_id",
+    "run_id",
+    "provider_instance_id",
+    "backend",
+    "profile_id",
+    "mode",
+    "configuration_id",
+    "manifest_digest",
+    "spec_digest",
+)
+
+
+def _download_identity(binding):
+    if not isinstance(binding, dict) or any(
+        not isinstance(binding.get(key), str) or not binding[key]
+        for key in DOWNLOAD_IDENTITY
+    ):
+        return None
+    return {key: binding[key] for key in DOWNLOAD_IDENTITY}
+
+
+def _download_counts(value):
+    if not isinstance(value, dict):
+        return None
+    result = {key: _count(value.get(key)) for key in DOWNLOAD_COUNTERS}
+    if (
+        any(item is None for item in result.values())
+        or not 0 < result["bytes_total"]
+        or not 0 < result["files_total"] <= 64
+        or result["bytes_complete"] > result["bytes_total"]
+        or result["files_complete"] > result["files_total"]
+    ):
+        return None
+    return result
+
+
+def _download_watch(binding, now):
+    if not isinstance(binding, dict) or not _number(now):
+        return None
+    value = binding.get("download_progress")
+    if (
+        not isinstance(value, dict)
+        or set(value)
+        != {
+            "version",
+            "valid",
+            "identity",
+            "started_at",
+            "last_progress_at",
+            "last_observed_at",
+            "source_phase_started_at",
+            "completed_at",
+            *DOWNLOAD_COUNTERS,
+        }
+        or type(value["version"]) is not int
+        or value["version"] != 1
+        or value["valid"] is not True
+        or _download_identity(binding) is None
+        or value["identity"] != _download_identity(binding)
+        or _download_counts(value) is None
+        or any(
+            _stamp(value.get(key), now) is None
+            for key in (
+                "started_at",
+                "last_progress_at",
+                "last_observed_at",
+                "source_phase_started_at",
+            )
+        )
+        or not value["started_at"]
+        <= value["last_progress_at"]
+        <= value["last_observed_at"]
+        or value["completed_at"] is not None
+        and (
+            _stamp(value["completed_at"], now) is None
+            or not value["started_at"]
+            <= value["completed_at"]
+            <= value["last_observed_at"]
+        )
+    ):
+        return None
+    return value
+
+
+def _record_download_progress(binding, incoming, now):
+    """Server clock/counter latch; remote times can invalidate, never backdate it."""
+    identity = _download_identity(binding)
+    if identity is None or not _number(now):
+        return
+    prior = binding.get("download_progress")
+    watch = _download_watch(binding, now) if prior is not None else None
+    phase = incoming["phase"]
+    counts = _download_counts(incoming.get("download"))
+    if phase != "model_download":
+        stopped_at = _stamp(binding.get("first_stopped_at"), now)
+        if watch is not None and (
+            phase
+            in {
+                "runtime_start",
+                "runtime_verification",
+                "runtime_ready",
+                "model_load",
+                "stopping",
+                "stopped",
+                "failed",
+                "setup_failed",
+            }
+            or stopped_at is not None
+            and stopped_at >= watch["started_at"]
+        ):
+            complete = copy.deepcopy(watch)
+            if (
+                counts is not None
+                and all(
+                    counts[key] == watch[key] for key in ("bytes_total", "files_total")
+                )
+                and all(
+                    counts[key] >= watch[key]
+                    for key in ("bytes_complete", "files_complete")
+                )
+            ):
+                if any(
+                    counts[key] > watch[key]
+                    for key in ("bytes_complete", "files_complete")
+                ):
+                    complete["last_progress_at"] = now
+                complete.update(counts)
+            complete["last_observed_at"] = now
+            if complete["completed_at"] is None:
+                complete["completed_at"] = stopped_at if stopped_at is not None else now
+            binding["download_progress"] = complete
+        return
+    valid = (
+        counts is not None
+        and incoming.get("updated_at") is not None
+        and incoming.get("phase_started_at") is not None
+        and incoming.get("reason_code") is None
+    )
+    if prior is not None and (
+        watch is None
+        or not valid
+        or incoming["phase_started_at"] != watch["source_phase_started_at"]
+        or any(counts[key] != watch[key] for key in ("bytes_total", "files_total"))
+        or any(counts[key] < watch[key] for key in ("bytes_complete", "files_complete"))
+    ):
+        binding["download_progress"] = {
+            **(prior if isinstance(prior, dict) else {}),
+            "valid": False,
+        }
+        return
+    if not valid:
+        return
+    if watch is None:
+        watch = {
+            "version": 1,
+            "valid": True,
+            "identity": identity,
+            "started_at": now,
+            "last_progress_at": now,
+            "last_observed_at": now,
+            "source_phase_started_at": incoming["phase_started_at"],
+            "completed_at": None,
+            **counts,
+        }
+    else:
+        watch = copy.deepcopy(watch)
+        if any(
+            counts[key] > watch[key] for key in ("bytes_complete", "files_complete")
+        ):
+            watch["last_progress_at"] = now
+        watch.update(counts, last_observed_at=now)
+    if (
+        counts["bytes_complete"] == counts["bytes_total"]
+        and counts["files_complete"] == counts["files_total"]
+    ):
+        if watch["completed_at"] is None:
+            watch["completed_at"] = now
+    binding["download_progress"] = watch
+
+
+def download_progress_timing(binding, now):
+    """Completed-content timing only; never measured wire/network throughput."""
+    value = _download_watch(binding, now)
+    if value is None:
+        return None
+    return {
+        "started_at": value["started_at"],
+        "duration_seconds": (
+            now if value["completed_at"] is None else value["completed_at"]
+        )
+        - value["started_at"],
+        "bytes_complete": value["bytes_complete"],
+        "bytes_total": value["bytes_total"],
+        "basis": "completed_files",
+    }
+
+
+def download_timebox_due(binding, now, *, fresh_seconds=30):
+    value = _download_watch(binding, now)
+    preparation = binding.get("preparation") if isinstance(binding, dict) else None
+    return bool(
+        value is not None
+        and isinstance(preparation, dict)
+        and _number(fresh_seconds)
+        and preparation.get("phase") == "model_download"
+        and _download_counts(preparation.get("download"))
+        == {key: value[key] for key in DOWNLOAD_COUNTERS}
+        and value["completed_at"] is None
+        and now - value["started_at"] > 1500
+        and now - value["last_progress_at"] >= 300
+        and 0 <= now - value["last_observed_at"] <= fresh_seconds
+        and _stamp(binding.get("observed_at"), now) is not None
+        and 0 <= now - binding["observed_at"] <= fresh_seconds
+    )
+
+
 def safe_preparation(value, now):
     """Strict additive JSON subset, including old/malformed receipt handling."""
     if not isinstance(value, dict):
@@ -183,7 +403,8 @@ def record_preparation(binding, value, observed_at, *, validation_at=None):
 
     A controller retry must not restart the stage stopwatch. Completed download
     counts remain useful after the service starts; a missing field cannot erase
-    them. These counters never determine readiness or paid-resource authority.
+    them. Counters never grant readiness; a guarded cold-host stop additionally
+    requires the server latch, exact identity and original execution fences.
     """
     # Provider proof is timestamped before a potentially long SSH operation;
     # do not refresh its age just to accept the later native receipt timestamp.
@@ -191,6 +412,7 @@ def record_preparation(binding, value, observed_at, *, validation_at=None):
     incoming = safe_preparation(value, validation_at)
     if incoming is None:
         return
+    source_phase_started = incoming.get("phase_started_at")
     prior = safe_preparation(binding.get("preparation"), validation_at) or {}
     phase_same = incoming["phase"] == prior.get("phase")
     incoming["phase_started_at"] = (
@@ -202,6 +424,9 @@ def record_preparation(binding, value, observed_at, *, validation_at=None):
         if key not in incoming and key in prior:
             incoming[key] = copy.deepcopy(prior[key])
     incoming["started_at"] = incoming.get("started_at") or prior.get("started_at")
+    _record_download_progress(
+        binding, {**incoming, "phase_started_at": source_phase_started}, validation_at
+    )
     binding["preparation"] = incoming
 
 

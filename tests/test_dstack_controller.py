@@ -5,7 +5,7 @@ import copy
 from contextlib import contextmanager
 from unittest.mock import patch
 from types import SimpleNamespace
-from sqlalchemy import select, update
+from sqlalchemy import insert, select, update
 from studio_platform.control import WorkerSpec
 from studio_platform.dstack_controller import DstackController
 from studio_platform.dstack_controller import SlotProcesses
@@ -772,6 +772,210 @@ class DstackControllerTests(fixture.DstackOperatorTests):
         self.running(node)
         self.assertEqual(controller.tick()["nodes"][0]["state"], "ready")
         self.assertEqual(self.client.stopped, [])
+
+    def _timed_out_download(self):
+        self._continuing_capacity()
+        node = self.start()["node_id"]
+        self.capacity.readiness = None
+        self.running(node)
+        started = self.now
+        receipt = dict(
+            phase="model_download",
+            phase_started_at=started,
+            updated_at=started,
+            download=dict(
+                bytes_complete=20, bytes_total=100, files_complete=1, files_total=3
+            ),
+        )
+
+        def observe_download(*args, **kwargs):
+            value = dict(
+                state="runtime_unconfirmed",
+                ready=False,
+                observed_at=self.now,
+                reason_code="dstack_runtime_downloading_weights",
+                preparation=receipt,
+            )
+            self.store.record(node, value)
+            return value
+
+        observe_download()
+        self.now += 1501
+        observe_download()
+        controller = self.controller()
+        controller.runtime.readiness = lambda *args: None
+        controller.runtime.slot = lambda *args: self.fail(
+            "cold timeout launched a slot"
+        )
+        return node, controller, observe_download
+
+    def test_download_timebox_fences_only_cold_host_preserving_original_queued_job(
+        self,
+    ):
+        node, controller, observe = self._timed_out_download()
+        job = self._queued_native("fl")
+        original = self.repo.get_job(self.scope, job["id"])
+        counts = self.counts()
+        calls = []
+
+        def record(connection, current, intent, now):
+            calls.append((current["intent_id"], intent["provider_instance_id"], now))
+            return copy.deepcopy(current["payload"])
+
+        with (
+            patch.object(self.capacity, "observe", side_effect=observe),
+            patch.object(self.service, "record_download_timebox", side_effect=record),
+        ):
+            first = controller.tick()["nodes"][0]
+            self.assertEqual(first["code"], "dstack_download_timebox_exceeded")
+            self.assertEqual(first["state"], "draining")
+            self.assertEqual(self.client.stopped, [])
+            self.assertEqual(controller.tick()["nodes"][0]["state"], "stopping")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(self.client.stopped), 1)
+        self.assertEqual(self.repo.get_job(self.scope, job["id"]), original)
+        self.assertEqual(self.counts(), counts)
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(list(connection.execute(select(attempts))), [])
+            self.assertEqual(list(connection.execute(select(registered_workers))), [])
+
+    def test_download_timebox_rechecks_runtime_and_execution_history_under_lock(self):
+        node, controller, _ = self._timed_out_download()
+        original = copy.deepcopy(controller._nodes()[0]["payload"])
+        for change in (
+            {"observed_at": self.now - 31},
+            {"provider_instance_id": "different"},
+            {"first_runtime_ready_at": self.now - 1},
+            {"runtime_incarnation": "c" * 32},
+            {"state": "ready"},
+        ):
+            with self.subTest(change=change):
+                payload = copy.deepcopy(original)
+                payload["dstack"].update(change)
+                with self.repo.transaction() as connection:
+                    connection.execute(
+                        update(operator_nodes)
+                        .where(operator_nodes.c.intent_id == node)
+                        .values(payload=payload)
+                    )
+                with patch.object(self.service, "record_download_timebox") as record:
+                    self.assertFalse(
+                        controller._request_stop(
+                            controller._nodes()[0],
+                            reason_code="dstack_download_timebox_exceeded",
+                        )
+                    )
+                    record.assert_not_called()
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(operator_nodes)
+                .where(operator_nodes.c.intent_id == node)
+                .values(payload=original)
+            )
+        # Even a canonical slot with a changed instance must not hide previous
+        # acquisition. A queued job leased to it is enough to refuse the stop.
+        job = self._queued_native("fl")
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(jobs)
+                .where(jobs.c.id == job["id"])
+                .values(lease_worker_id="dstack-" + node.replace("-", ""))
+            )
+        with patch.object(self.service, "record_download_timebox") as record:
+            self.assertFalse(
+                controller._request_stop(
+                    controller._nodes()[0],
+                    reason_code="dstack_download_timebox_exceeded",
+                )
+            )
+            record.assert_not_called()
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(jobs).where(jobs.c.id == job["id"]).values(lease_worker_id=None)
+            )
+            connection.execute(
+                insert(attempts).values(
+                    id="canonical-previous-attempt",
+                    job_id=job["id"],
+                    number=1,
+                    status="submission_unknown",
+                    fence=1,
+                    worker_id="dstack-" + node.replace("-", ""),
+                    created_at=self.now,
+                    updated_at=self.now,
+                    submission_started_at=self.now,
+                    upstream_stopped=0,
+                )
+            )
+        with patch.object(self.service, "record_download_timebox") as record:
+            self.assertFalse(
+                controller._request_stop(
+                    controller._nodes()[0],
+                    reason_code="dstack_download_timebox_exceeded",
+                )
+            )
+            record.assert_not_called()
+        self.assertEqual(self.client.stopped, [])
+
+    def test_download_timebox_requires_bound_original_demand_callback(self):
+        node, controller, _ = self._timed_out_download()
+        # The real service refuses this manually started fixture: timeout
+        # eligibility alone must not create demand/history authority.
+        self.assertFalse(
+            controller._request_stop(
+                controller._nodes()[0], reason_code="dstack_download_timebox_exceeded"
+            )
+        )
+        self.assertEqual(controller._nodes()[0]["desired_state"], "running")
+        self.assertEqual(self.client.stopped, [])
+
+    def test_stopped_terminal_rechecks_delayed_provider_absence_without_native_launch(
+        self,
+    ):
+        node = self.start()["node_id"]
+        self.capacity.readiness = None
+        self.running(node)
+        controller = self.controller()
+        self.service.node_command(self.owner, node, {}, "pending-removal-stop")
+        run = self.client.runs[self.store.load(node)["run_name"]]
+        run["status"] = "terminated"
+        inventory_calls = []
+        ids = ["1234567"]
+
+        def inventory(backend):
+            inventory_calls.append(self.now)
+            return dict(
+                backend=backend,
+                observed_at=self.now,
+                complete=True,
+                instance_ids=list(ids),
+            )
+
+        self.client.provider_inventory = inventory
+        controller.runtime.readiness = lambda *args: self.fail(
+            "terminal read launched native"
+        )
+        controller.runtime.slot = lambda *args: self.fail("terminal read launched slot")
+        controller.tick()
+        self.assertEqual(self.store.load(node)["state"], "stopped")
+        self.assertNotIn("provider_removal_proof", self.store.load(node))
+        original_calls = len(inventory_calls)
+        self.now += 29
+        controller.tick()
+        self.assertEqual(len(inventory_calls), original_calls)
+        self.now += 1
+        controller.tick()
+        self.assertEqual(len(inventory_calls), original_calls + 1)
+        ids.clear()
+        self.now += 30
+        controller.tick()
+        binding = self.store.load(node)
+        self.assertTrue(binding["provider_removal_proof"]["absent"])
+        self.assertEqual(binding["billing_state"], "unsettled")
+        self.assertEqual(self.repo.list_instance_intents()[0]["state"], "destroyed")
+        controller.tick()
+        self.assertEqual(len(inventory_calls), original_calls + 2)
+        self.assertEqual(len(self.client.applied), 1)
 
     def test_manual_stop_cancels_cold_download_without_waiting_for_ready(self):
         node = self.start()["node_id"]

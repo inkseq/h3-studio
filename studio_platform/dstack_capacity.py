@@ -725,7 +725,7 @@ class DstackClient:
         query = {
             "direct_port_count": {"gte": 1},
             "reliability2": {"gte": request.min_reliability},
-            "inet_down": {"gt": 128},
+            "inet_down": {"gte": 1000},
             "verified": {"eq": True},
             "cuda_max_good": {"gte": 12.8},
             "compute_cap": {"gte": 600},
@@ -772,13 +772,43 @@ class DstackClient:
                 or machine <= 0
             ):
                 continue
+            bandwidth = row.get("inet_down")
+            if not (
+                type(bandwidth) in (int, float)
+                and math.isfinite(bandwidth)
+                and 1000 <= bandwidth <= 1_000_000_000
+            ):
+                continue
             # Vast verification has appeared as a string as well as boolean.
             # Missing is unobserved, never projected as verified=False. The
             # exact verified-first search/native plan remains authoritative.
             verified = row.get("verified")
             if verified is False or verified in ("unverified", "deverified"):
                 continue
-            item = {"offer_id": str(offer), "machine_id": str(machine)}
+            # The native Resources/JPD model omits advertised network speed.
+            # Retain only bounded facts from this exact, frozen offer instead.
+            location = row.get("geolocation")
+            country, region = row.get("country"), None
+            if isinstance(location, str) and 0 < len(location) <= 200:
+                parts = location.replace(", ", ",").split(",")
+                if len(parts) == 2:
+                    city, advertised_country = parts
+                    country = country if country is not None else advertised_country
+                    location = advertised_country + "-" + city
+                normalized = location.lower().replace(" ", "")
+                if re.fullmatch(r"[a-z0-9-]{1,100}", normalized):
+                    region = normalized
+            if not isinstance(country, str) or not re.fullmatch(
+                r"[A-Za-z][A-Za-z .'-]{0,99}", country
+            ):
+                country = None
+            item = {
+                "offer_id": str(offer),
+                "machine_id": str(machine),
+                "country": country,
+                "region": region,
+                "advertised_download_mbps": bandwidth,
+            }
             _require(
                 str(offer) not in found or found[str(offer)] == item,
                 "dstack_host_offer_identity_conflict",
@@ -2133,11 +2163,11 @@ class DstackCapacity:
             )
             if strict:
                 approved = {
-                    r["offer_id"]: r["machine_id"]
-                    for r in binding["host_selection"]["offers"]
+                    r["offer_id"]: r for r in binding["host_selection"]["offers"]
                 }
                 _require(
-                    approved.get(kind["name"]) == identity.get("machine_id"),
+                    approved.get(kind["name"], {}).get("machine_id")
+                    == identity.get("machine_id"),
                     "dstack_host_allocation_changed",
                 )
             resource = kind.get("resources", {})
@@ -2175,6 +2205,20 @@ class DstackCapacity:
                 "identity_confirmed": True,
                 "physical_id_source": "vast_machine_id",
             }
+            if strict:
+                from .host_policy import offer_metadata
+
+                advertised = offer_metadata(
+                    {
+                        key: approved[kind["name"]][key]
+                        for key in ("country", "region", "advertised_download_mbps")
+                        if key in approved[kind["name"]]
+                    }
+                )
+                value.update(
+                    country=advertised["country"],
+                    advertised_download_mbps=advertised["advertised_download_mbps"],
+                )
             from .host_policy import observation
 
             return observation(value, now=now)

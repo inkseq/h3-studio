@@ -1,16 +1,160 @@
 """Progress receipt accuracy/security; no provider or inference operations."""
 
 import json
+import copy
 import unittest
 
 from studio_platform.dstack_preparation import (
     preparation_view,
     record_preparation,
     safe_preparation,
+    download_progress_timing,
+    download_timebox_due,
 )
 
 
 class PreparationTests(unittest.TestCase):
+    def download(self, *, now=100, bytes_complete=20, files_complete=1, binding=None):
+        if binding is None:
+            binding = dict(
+                intent_id="intent-one",
+                run_id="run-one",
+                provider_instance_id="123",
+                backend="vastai",
+                profile_id="native-one",
+                mode="ref",
+                configuration_id="config-one",
+                manifest_digest="a" * 64,
+                spec_digest="b" * 64,
+            )
+        binding["observed_at"] = now
+        record_preparation(
+            binding,
+            dict(
+                phase="model_download",
+                phase_started_at=90,
+                updated_at=95,
+                download=dict(
+                    bytes_complete=bytes_complete,
+                    bytes_total=100,
+                    files_complete=files_complete,
+                    files_total=3,
+                ),
+            ),
+            now,
+        )
+        return binding
+
+    def test_download_timebox_requires_both_elapsed_and_no_progress(self):
+        binding = self.download()
+        self.download(binding=binding, now=1500)
+        self.assertFalse(download_timebox_due(binding, 1500))
+        self.download(binding=binding, now=1600)
+        self.assertFalse(download_timebox_due(binding, 1600))  # Strictly >1500.
+        self.download(binding=binding, now=1601)
+        self.assertTrue(download_timebox_due(binding, 1601))
+        self.download(binding=binding, now=1602, bytes_complete=50)
+        self.assertFalse(download_timebox_due(binding, 1602))
+        self.download(binding=binding, now=1901, bytes_complete=50)
+        self.assertFalse(download_timebox_due(binding, 1901))
+        self.download(binding=binding, now=1902, bytes_complete=50)
+        self.assertTrue(download_timebox_due(binding, 1902))
+        # Restarting a controller and observing identical source heartbeats
+        # cannot reset server-latched progress or shorten the phase timebox.
+        restored = json.loads(json.dumps(binding))
+        self.assertEqual(restored["download_progress"]["started_at"], 100)
+        self.assertEqual(restored["download_progress"]["last_progress_at"], 1602)
+        self.assertFalse(download_timebox_due(restored, 1933))
+
+    def test_download_clock_identity_and_counter_resets_never_authorize_stop(self):
+        original = self.download()
+        for change in (
+            {"run_id": "changed"},
+            {"provider_instance_id": "456"},
+            {"manifest_digest": "c" * 64},
+            {"download_progress": None},
+            {"download_progress": "malformed"},
+        ):
+            with self.subTest(change=change):
+                binding = copy.deepcopy(original)
+                binding.update(change)
+                self.download(binding=binding, now=2000)
+                self.assertFalse(download_timebox_due(binding, 2000))
+                if change.get("download_progress", False) is not None:
+                    self.assertIsNone(download_progress_timing(binding, 2000))
+        for changes in (
+            {"phase_started_at": 91},
+            {"phase_started_at": 3000},
+            {"updated_at": 3000},
+            {
+                "download": dict(
+                    bytes_complete=19, bytes_total=100, files_complete=1, files_total=3
+                )
+            },
+            {
+                "download": dict(
+                    bytes_complete=20, bytes_total=101, files_complete=1, files_total=3
+                )
+            },
+        ):
+            with self.subTest(changes=changes):
+                binding = copy.deepcopy(original)
+                value = dict(
+                    phase="model_download",
+                    phase_started_at=90,
+                    updated_at=95,
+                    download=dict(
+                        bytes_complete=20,
+                        bytes_total=100,
+                        files_complete=1,
+                        files_total=3,
+                    ),
+                )
+                value.update(changes)
+                binding["observed_at"] = 2000
+                record_preparation(binding, value, 2000)
+                self.assertFalse(download_timebox_due(binding, 2000))
+        # A first future/old native epoch cannot backdate the server phase.
+        binding = self.download(now=2000)
+        self.assertEqual(download_progress_timing(binding, 2000)["duration_seconds"], 0)
+        self.assertFalse(download_timebox_due(binding, 2000))
+
+    def test_download_completion_timing_latches_across_later_phases_and_stop(self):
+        binding = self.download()
+        self.download(binding=binding, now=400, bytes_complete=100, files_complete=3)
+        record_preparation(binding, dict(phase="runtime_start", updated_at=450), 450)
+        record_preparation(binding, dict(phase="stopped", updated_at=1000), 1000)
+        self.assertEqual(
+            download_progress_timing(binding, 2000),
+            dict(
+                started_at=100,
+                duration_seconds=300,
+                bytes_complete=100,
+                bytes_total=100,
+                basis="completed_files",
+            ),
+        )
+        self.assertFalse(download_timebox_due(binding, 2000))
+        binding["download_progress"]["started_at"] = 3000
+        self.assertIsNone(download_progress_timing(binding, 2000))
+        partial = self.download()
+        partial["first_stopped_at"] = 400
+        record_preparation(partial, dict(phase="provisioning", updated_at=400), 400)
+        self.assertEqual(
+            download_progress_timing(partial, 2000)["duration_seconds"], 300
+        )
+        self.assertEqual(download_progress_timing(partial, 2000)["bytes_complete"], 20)
+
+    def test_download_stop_requires_fresh_provider_and_watch_observations(self):
+        binding = self.download()
+        self.download(binding=binding, now=2000)
+        self.assertTrue(download_timebox_due(binding, 2000))
+        binding["observed_at"] = 1900
+        self.assertFalse(download_timebox_due(binding, 2000))
+        binding["observed_at"] = 2000
+        binding["download_progress"]["last_observed_at"] = 1900
+        self.assertFalse(download_timebox_due(binding, 2000))
+
     def view(self, binding, public=None, now=200):
         return preparation_view(
             {"payload": {"dstack": binding}},

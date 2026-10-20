@@ -201,6 +201,64 @@ class DstackCapacityTests(unittest.TestCase):
     def start(self):
         return self.capacity.start(request(), PUB)
 
+    def test_allocated_offer_telemetry_is_frozen_and_requires_matching_machine(self):
+        selected = {
+            "version": 1,
+            "observed_at": 10.0,
+            "expires_at": 130.0,
+            "policy_snapshot": "d" * 64,
+            "offers": [
+                {
+                    "offer_id": "12345",
+                    "machine_id": "19493",
+                    "country": "US",
+                    "region": "us-ashburn",
+                    "advertised_download_mbps": 1000,
+                }
+            ],
+        }
+        binding = request(host_selection=selected).binding(PUB)
+        self.client.vast_instance_identity = lambda identity: {
+            "provider_instance_id": identity,
+            "machine_id": "19493",
+            "reliability": 0.99,
+        }
+        provisioning = {
+            "backend": "vastai",
+            "instance_id": "1234567",
+            "region": "us-ashburn",
+            "price": 0.7,
+            "instance_type": {
+                "name": "12345",
+                "resources": {
+                    "cpus": 12,
+                    "memory_mib": 96 * 1024,
+                    "disk": {"size_mib": 128 * 1024},
+                    "gpus": [{"name": "RTX5090", "memory_mib": 32 * 1024}],
+                },
+            },
+        }
+        before = copy.deepcopy(binding)
+        physical = self.capacity._host_observation(provisioning, binding, 20.0)
+        self.assertEqual(
+            (
+                physical["country"],
+                physical["region"],
+                physical["advertised_download_mbps"],
+            ),
+            ("US", "us-ashburn", 1000),
+        )
+        self.assertEqual(binding, before)
+        old = copy.deepcopy(binding)
+        old["host_selection"]["offers"] = [{"offer_id": "12345", "machine_id": "19493"}]
+        legacy = self.capacity._host_observation(provisioning, old, 20.0)
+        self.assertIsNone(legacy["country"])
+        self.assertIsNone(legacy["advertised_download_mbps"])
+        changed = copy.deepcopy(binding)
+        changed["host_selection"]["offers"][0]["machine_id"] = "99999"
+        with self.assertRaisesRegex(DstackError, "dstack_host_allocation_unconfirmed"):
+            self.capacity._host_observation(provisioning, changed, 20.0)
+
     def test_journal_precedes_apply_and_repeat_never_reapplies(self):
         self.start()
         self.capacity.start(request(), PUB)
@@ -1667,7 +1725,12 @@ class DstackRESTTests(unittest.TestCase):
                 200,
                 json={
                     "offers": [
-                        {"id": 12345, "machine_id": 19493, "verified": "verified"}
+                        {
+                            "id": 12345,
+                            "machine_id": 19493,
+                            "verified": "verified",
+                            "inet_down": 1000,
+                        }
                     ]
                 },
             )
@@ -1681,12 +1744,53 @@ class DstackRESTTests(unittest.TestCase):
                 request(), clock=lambda: 1000.0
             )
         self.assertEqual(
-            result["offers"], [{"offer_id": "12345", "machine_id": "19493"}]
+            result["offers"],
+            [
+                {
+                    "offer_id": "12345",
+                    "machine_id": "19493",
+                    "country": None,
+                    "region": None,
+                    "advertised_download_mbps": 1000,
+                }
+            ],
         )
         sleep.assert_called_once_with(2.125)
         self.assertEqual([req.method for req in seen], ["POST", "POST"])
         self.assertEqual(seen[0].content, seen[1].content)
         self.assertEqual(json.loads(seen[0].content)["verified"], {"eq": True})
+        self.assertEqual(json.loads(seen[0].content)["inet_down"], {"gte": 1000})
+
+    def test_vast_bandwidth_floor_refuses_unknown_and_preserves_advertised_location(
+        self,
+    ):
+        seen = []
+        rates = [999, None, True, "2000", 1000, 2500]
+        rows = [
+            {
+                "id": i + 1,
+                "machine_id": i + 100,
+                "inet_down": rate,
+                "geolocation": "Ashburn, US" if i == 4 else "Seoul, South Korea",
+            }
+            for i, rate in enumerate(rates)
+        ]
+
+        def provider(req):
+            seen.append(json.loads(req.content))
+            return httpx.Response(200, json={"offers": rows})
+
+        result = self.provider_client("vastai", provider).vast_offer_mapping(
+            request(), clock=lambda: 1000.0
+        )
+        self.assertEqual([row["offer_id"] for row in result["offers"]], ["5", "6"])
+        self.assertEqual(result["offers"][0]["country"], "US")
+        self.assertEqual(result["offers"][0]["region"], "us-ashburn")
+        self.assertEqual(result["offers"][1]["country"], "South Korea")
+        self.assertEqual(result["offers"][1]["region"], "southkorea-seoul")
+        self.assertEqual(seen[0]["inet_down"], {"gte": 1000})
+        self.assertNotIn("region", seen[0])
+        self.assertNotIn("country", seen[0])
 
     def test_429_exhaustion_or_long_retry_after_never_returns_empty_inventory(self):
         for header, calls, delays, retry_after in (

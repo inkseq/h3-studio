@@ -59,7 +59,15 @@ class HostSelectionTests(ledger.LedgerCase):
         self.assertEqual(binding["run_spec"]["profile"], {"instance_types": ["12345"]})
         self.assertEqual(
             binding["host_selection"]["offers"],
-            [{"offer_id": "12345", "machine_id": "19493"}],
+            [
+                {
+                    "offer_id": "12345",
+                    "machine_id": "19493",
+                    "country": "US",
+                    "region": "test-region",
+                    "advertised_download_mbps": 2000,
+                }
+            ],
         )
         self.deny()
         self.now += 121
@@ -86,14 +94,30 @@ class HostSelectionTests(ledger.LedgerCase):
         preview = self.preview()
         self.client.vast_offer_mapping = lambda *a, **kw: {
             "observed_at": self.now,
-            "offers": [{"offer_id": "12345", "machine_id": "other"}],
+            "offers": [
+                {
+                    "offer_id": "12345",
+                    "machine_id": "other",
+                    "country": "US",
+                    "region": "test-region",
+                    "advertised_download_mbps": 2000,
+                }
+            ],
         }
         with self.assertRaises(ValueError):
             self.start(preview)
         self.assertEqual(self.client.applied, [])
         self.client.vast_offer_mapping = lambda *a, **kw: {
             "observed_at": self.now,
-            "offers": [{"offer_id": "12345", "machine_id": "19493"}],
+            "offers": [
+                {
+                    "offer_id": "12345",
+                    "machine_id": "19493",
+                    "country": "US",
+                    "region": "test-region",
+                    "advertised_download_mbps": 2000,
+                }
+            ],
         }
         self.client.reusable_hosts_confirmed = Mock(
             side_effect=DstackError("dstack_host_reuse_identity_unknown")
@@ -158,8 +182,20 @@ class HostSelectionTests(ledger.LedgerCase):
         self.client.vast_offer_mapping = lambda *a, **kw: {
             "observed_at": self.now,
             "offers": [
-                {"offer_id": "12345", "machine_id": "19493"},
-                {"offer_id": "54321", "machine_id": "19494"},
+                {
+                    "offer_id": "12345",
+                    "machine_id": "19493",
+                    "country": "US",
+                    "region": "test-region",
+                    "advertised_download_mbps": 2000,
+                },
+                {
+                    "offer_id": "54321",
+                    "machine_id": "19494",
+                    "country": "US",
+                    "region": "test-region",
+                    "advertised_download_mbps": 2000,
+                },
             ],
         }
         policy = self.hosts.list(self.owner, admin=True, machine_id="19494")["hosts"][
@@ -206,7 +242,13 @@ class HostSelectionTests(ledger.LedgerCase):
         self.client.vast_offer_mapping = lambda *a, **kw: {
             "observed_at": self.now,
             "offers": [
-                {"offer_id": str(12345 + i), "machine_id": str(19493 + i)}
+                {
+                    "offer_id": str(12345 + i),
+                    "machine_id": str(19493 + i),
+                    "country": "US",
+                    "region": "test-region",
+                    "advertised_download_mbps": 2000,
+                }
                 for i in range(14)
             ],
         }
@@ -382,7 +424,12 @@ class NativeHostTransportTests(unittest.TestCase):
         value._provider_document = Mock(
             return_value={
                 "offers": [
-                    {"id": 12345, "machine_id": 19493, "verified": "verified"},
+                    {
+                        "id": 12345,
+                        "machine_id": 19493,
+                        "verified": "verified",
+                        "inet_down": 1000,
+                    },
                     {"id": 9999, "machine_id": None},
                     {"id": 7777, "machine_id": 19492, "verified": False},
                 ]
@@ -392,7 +439,16 @@ class NativeHostTransportTests(unittest.TestCase):
 
         mapping = value.vast_offer_mapping(cap.request(), clock=lambda: 1000)
         self.assertEqual(
-            mapping["offers"], [{"offer_id": "12345", "machine_id": "19493"}]
+            mapping["offers"],
+            [
+                {
+                    "offer_id": "12345",
+                    "machine_id": "19493",
+                    "country": None,
+                    "region": None,
+                    "advertised_download_mbps": 1000,
+                }
+            ],
         )
         call = value._provider_document.call_args
         self.assertNotIn("q", call.kwargs["body"])

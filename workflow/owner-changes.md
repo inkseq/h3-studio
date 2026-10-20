@@ -160,3 +160,13 @@ Owner supersedes the time-boxed production authority renewal (#193 option 2) and
 ## CR-20261020-44 — handoff: decisions reach Codex, explicit waits, clean labels
 
 Owner adopts three Claude process fixes after CR43 nearly missed an in-flight renewal. (1) Any session that records an owner decision also gives the owner a one-line relay for Codex; Codex re-reads `workflow/owner-changes.md` on origin/main before any production write or spend. (2) Codex and Claude end every turn with `Waiting on: <who/what, #issue>` so the owner sees when to say "continue". (3) Labels replace, never stack: `needs-claude-review` for Tier2 option reviews, `needs-claude-acceptance` for staged slices; Claude sets `accepted`/`changes-requested` and removes the request label. Source: direct owner chat 2026-10-20.
+
+## CR-20261021-45 — slow-download protection and the original C2 replacement
+
+Owner adds the latest #193 download time-box and minimum advertised-bandwidth conditions before the demand-start soak can close. Keep the Tier2 options/review gate for the bounded controller/offer-selection/admin-visibility change; baking weights, a persistent cache or daytime warm capacity remains a later owner cost decision. Source: direct owner continuation and Claude comments6296849470/6296879928 on2026-10-20 UTC.
+
+Owner explicitly orders stopping staging test Vast instance56923906 (physical machine34612, Vietnam, slow cross-border download) through the **existing guarded operator stop**, never the Vast console. Record its actual timings as a slow-download outlier. Then rerun the original cycle2 on a US/EU offer with good advertised download bandwidth, inside the same `launch193-cr43-20261021` USD20 task; retain max_price, idle stop and maximum runtime. Preserve original job/attempt/input/credit-hold identities and existing billing. An allocated slow host is not provably zero-spend; keep its unsettled liability until actual billing evidence. No production GPU action or activation before accepted staging soak. Source: direct owner decision2026-10-20 UTC.
+
+## CR-20261021-46 — wake after a Claude review wait
+
+When this session actually stops awaiting Claude review or acceptance, schedule one same-thread30-minute review-check heartbeat. Read the original issue's latest comments/labels and continue the already-authorized work when review arrives. On receiving new work or resuming implementation, pause that check first; enable it again at the next real review wait. Reuse the existing check instead of stacking automations. No review outcome expands spending or production authority. Source: direct owner instruction2026-10-21 Australia/Sydney.
