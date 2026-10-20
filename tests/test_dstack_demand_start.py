@@ -1,7 +1,8 @@
 """Original-command planning, response-loss and capacity fences; fake HTTP only."""
 
 import copy
-from unittest.mock import patch
+import json
+from unittest.mock import Mock, patch
 
 from sqlalchemy import insert, select, update
 
@@ -14,7 +15,7 @@ from studio_platform.operator_capacity import (
     operator_nodes,
     operator_policy,
 )
-from studio_platform.repository import jobs, request_hash
+from studio_platform.repository import budget_reservations, jobs, request_hash
 from test_platform_repository import LedgerCase
 import test_dstack_operator as original
 
@@ -127,6 +128,245 @@ class DemandStartTests(LedgerCase):
                 .one()
             )
 
+    def historical_unknown(self):
+        from test_dstack_capacity import no_capacity_run
+
+        preview = self.service.preview(
+            self.owner, {'profile_id': '5090-fl', 'keep_on': 'idle'}
+        )
+        old = self.service.start(
+            self.owner, {'preview_id': preview['preview_id']}, 'historical-unknown'
+        )['node_id']
+        bound = self.store.load(old)
+        run = no_capacity_run(self.client.runs[bound['run_name']])
+        message = 'sixnine_vast_attempts_v1:' + json.dumps(
+            dict(
+                version=1,
+                outcome='unknown',
+                attempted_count=1,
+                attempts=[
+                    dict(
+                        ask_id='12345',
+                        http_status=400,
+                        code='mutation_unknown',
+                        outcome='unknown',
+                        contract_id=None,
+                    )
+                ],
+            )
+        )
+        run['latest_job_submission']['termination_reason_message'] = message
+        run['jobs'][0]['job_submissions'][0]['termination_reason_message'] = message
+        self.client.runs[bound['run_name']] = run
+        self.capacity.observe(old)
+        return old
+
+    def old_holds(self, identity):
+        with self.repo.engine.connect() as connection:
+            return [
+                dict(row)
+                for row in connection.execute(
+                    select(budget_reservations).where(
+                        budget_reservations.c.reference_id == identity
+                    )
+                ).mappings()
+            ]
+
+    def provisioned(self, identity):
+        bound = self.store.load(identity)
+        self.client.runs[bound['run_name']].update(
+            status='provisioning',
+            latest_job_submission=dict(
+                job_provisioning_data=dict(
+                    backend='vastai',
+                    instance_id='test-' + identity,
+                    instance_type=dict(resources=dict(gpus=[dict(name='RTX5090')])),
+                )
+            ),
+        )
+
+    def test_terminal_unknown_history_frees_live_capacity_without_settling_it(self):
+        old = self.historical_unknown()
+        before, holds = self.store.load(old), self.old_holds(old)
+        self.assertEqual(before['state'], 'creation_unknown')
+        self.assertTrue(all(row['state'] == 'reserved' for row in holds))
+        self.service.provider_inventory = Mock(
+            return_value=dict(
+                backend='vastai',
+                complete=True,
+                observed_at=self.now,
+                instance_ids=[],
+            )
+        )
+        job = self.accepted()
+        self.enabled()
+        result = start_once(self.service)
+        self.assertEqual(result['state'], 'accepted')
+        self.assertNotEqual(result['node_id'], old)
+        self.assertEqual(self.store.load(old), before)
+        self.assertEqual(self.old_holds(old), holds)
+        self.assertEqual(self.repo.get_job(self.scope, job['id']), job)
+        # The current allocation still consumes the configured lower ceiling.
+        self.provisioned(result['node_id'])
+        self.service.policy['max_instances'] = 1
+        self.accepted()
+        with patch.object(self.service, '_preview_for_owner') as planner:
+            self.assertEqual(
+                start_once(self.service),
+                dict(state='blocked', reason_code='capacity_limit'),
+            )
+            planner.assert_not_called()
+        self.assertEqual(len(self.client.applied), 2)
+
+    def test_genuinely_unknown_allocation_blocks_before_any_new_plan(self):
+        old = self.historical_unknown()
+        before, holds = self.store.load(old), self.old_holds(old)
+        job = self.accepted()
+        self.enabled()
+        for overrides in (
+            dict(complete=False),
+            dict(stale=True),
+            dict(instance_ids=['unaccounted-instance']),
+        ):
+            inventory = {
+                'backend': 'vastai',
+                'complete': True,
+                'observed_at': self.now,
+                'instance_ids': [],
+                **{k: v for k, v in overrides.items() if k != 'stale'},
+            }
+            if overrides.get('stale'):
+                inventory['observed_at'] -= 121
+            with (
+                self.subTest(inventory=inventory),
+                patch.object(self.service, '_preview_for_owner') as planner,
+            ):
+                self.service.provider_inventory = Mock(return_value=inventory)
+                self.assertEqual(
+                    start_once(self.service),
+                    dict(state='blocked', reason_code='allocation_uncertain'),
+                )
+                planner.assert_not_called()
+                self.assertEqual(
+                    start_once(self.service),
+                    dict(state='blocked', reason_code='backoff'),
+                )
+                self.service.provider_inventory.assert_called_once()
+            self.now += 80
+        self.assertEqual(len(self.client.applied), 1)
+        self.assertEqual(self.store.load(old), before)
+        self.assertEqual(self.old_holds(old), holds)
+        self.assertEqual(self.repo.get_job(self.scope, job['id']), job)
+
+    def test_counted_stopped_history_without_absence_proof_blocks_new_plan(self):
+        old = self.historical_unknown()
+        with self.repo.transaction() as connection:
+            node = (
+                connection.execute(
+                    select(operator_nodes).where(operator_nodes.c.intent_id == old)
+                )
+                .mappings()
+                .one()
+            )
+            payload = copy.deepcopy(node['payload'])
+            payload['dstack'].update(state='stopped', observed_at=self.now)
+            connection.execute(
+                update(operator_nodes)
+                .where(operator_nodes.c.intent_id == old)
+                .values(
+                    payload=payload, desired_state='stopped', runtime_state='stopped'
+                )
+            )
+        self.service.provider_inventory = Mock(
+            return_value=dict(
+                backend='vastai',
+                complete=False,
+                observed_at=self.now,
+                instance_ids=[],
+            )
+        )
+        before, holds = self.store.load(old), self.old_holds(old)
+        job = self.accepted()
+        self.enabled()
+        with patch.object(self.service, '_preview_for_owner') as planner:
+            self.assertEqual(
+                start_once(self.service),
+                dict(state='blocked', reason_code='allocation_uncertain'),
+            )
+            planner.assert_not_called()
+        self.assertEqual(len(self.client.applied), 1)
+        self.assertEqual(self.store.load(old), before)
+        self.assertEqual(self.old_holds(old), holds)
+        self.assertEqual(self.repo.get_job(self.scope, job['id']), job)
+
+    def test_uncertain_fleet_cooldown_prevents_another_jobs_live_read(self):
+        self.historical_unknown()
+        self.service.provider_inventory = Mock(
+            return_value=dict(
+                backend='vastai',
+                complete=False,
+                observed_at=self.now,
+                instance_ids=[],
+            )
+        )
+        originals = [self.accepted(), self.accepted()]
+        self.enabled()
+        with (
+            patch.object(
+                self.service,
+                '_live_capacity_usage',
+                wraps=self.service._live_capacity_usage,
+            ) as live,
+            patch.object(self.service, '_preview_for_owner') as planner,
+        ):
+            self.assertEqual(
+                start_once(self.service),
+                dict(state='blocked', reason_code='allocation_uncertain'),
+            )
+            live.assert_called_once()
+            self.assertEqual(
+                start_once(self.service), dict(state='blocked', reason_code='backoff')
+            )
+            live.assert_called_once()
+            planner.assert_not_called()
+        self.assertEqual(len(self.client.applied), 1)
+        for job in originals:
+            self.assertEqual(self.repo.get_job(self.scope, job['id']), job)
+
+    def test_fresh_ready_row_with_failed_live_read_blocks_new_plan(self):
+        old = self.historical_unknown()
+        with self.repo.transaction() as connection:
+            node = (
+                connection.execute(
+                    select(operator_nodes).where(operator_nodes.c.intent_id == old)
+                )
+                .mappings()
+                .one()
+            )
+            payload = copy.deepcopy(node['payload'])
+            payload['dstack'].update(state='ready', observed_at=self.now)
+            connection.execute(
+                update(operator_nodes)
+                .where(operator_nodes.c.intent_id == old)
+                .values(payload=payload, runtime_state='ready')
+            )
+        before, holds = self.store.load(old), self.old_holds(old)
+        job = self.accepted()
+        self.enabled()
+        with (
+            patch.object(self.client, 'get', side_effect=TimeoutError('read failed')),
+            patch.object(self.service, '_preview_for_owner') as planner,
+        ):
+            self.assertEqual(
+                start_once(self.service),
+                dict(state='blocked', reason_code='allocation_uncertain'),
+            )
+            planner.assert_not_called()
+        self.assertEqual(len(self.client.applied), 1)
+        self.assertEqual(self.store.load(old), before)
+        self.assertEqual(self.old_holds(old), holds)
+        self.assertEqual(self.repo.get_job(self.scope, job['id']), job)
+
     def test_off_is_creation_free_and_manual_start_retains_its_path(self):
         self.accepted()
         self.assertEqual(start_once(self.service), {'state': 'disabled'})
@@ -148,7 +388,9 @@ class DemandStartTests(LedgerCase):
         ) as preview:
             first = start_once(self.service)
             self.assertEqual(first['state'], 'accepted')
-            self.assertEqual(start_once(self.service)['node_id'], first['node_id'])
+            with patch.object(self.service, '_live_capacity_usage') as live:
+                self.assertEqual(start_once(self.service)['node_id'], first['node_id'])
+                live.assert_not_called()
             preview.assert_called_once()
         self.assertEqual(len(self.client.applied), 1)
         self.assertEqual(self.repo.get_job(self.scope, job['id']), job)
@@ -170,9 +412,10 @@ class DemandStartTests(LedgerCase):
         preview = self.service.preview(
             self.owner, {'profile_id': '5090-fl', 'keep_on': 'idle'}
         )
-        self.service.start(
+        manual = self.service.start(
             self.owner, {'preview_id': preview['preview_id']}, 'manual-first'
         )
+        self.provisioned(manual['node_id'])
         with patch.object(
             self.service, '_preview_for_owner', wraps=self.service._preview_for_owner
         ) as planner:
@@ -181,6 +424,9 @@ class DemandStartTests(LedgerCase):
         self.assertLessEqual(len(self.client.applied), 2)
         self.assertEqual(sum(result['state'] == 'accepted' for result in results), 1)
         self.assertEqual(len(self.client.applied), 2)
+        for identity in self.client.applied:
+            self.provisioned(identity)
+        self.now += 80  # Past any uncertainty backoff from parallel decisions.
         self.assertEqual(
             start_once(self.service),
             {'state': 'blocked', 'reason_code': 'capacity_limit'},
@@ -242,7 +488,9 @@ class DemandStartTests(LedgerCase):
         ) as preview:
             self.assertEqual(start_once(self.service)['reason_code'], 'backoff')
             self.now += 120
-            self.assertEqual(start_once(self.service)['reason_code'], 'backoff')
+            with patch.object(self.service, '_live_capacity_usage') as live:
+                self.assertEqual(start_once(self.service)['reason_code'], 'backoff')
+                live.assert_not_called()
             preview.assert_called_once()
         self.assertGreaterEqual(self.journal()['payload']['next_decision_at'], 1180)
         self.assertEqual(self.client.applied, [])
@@ -259,6 +507,9 @@ class DemandStartTests(LedgerCase):
                 start_once(self.service)['reason_code'], 'allocation_uncertain'
             )
         frozen = copy.deepcopy(self.journal()['payload'])
+        with patch.object(self.service, '_live_capacity_usage') as live:
+            self.assertEqual(start_once(self.service)['reason_code'], 'backoff')
+            live.assert_not_called()
         self.now += 80
         with patch.object(
             self.service,

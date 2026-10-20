@@ -1986,7 +1986,7 @@ class DstackOperator:
             require(command["request_hash"] == digest, "operator_idempotency_conflict")
         return dict(command) if command else None
 
-    def _limits(self, connection, hourly):
+    def _live_capacity_usage(self, connection):
         # Legacy invoices/intents remain in the ledger, but are not current
         # dstack capacity. Only exact owned new-path allocations count here.
         nodes = [
@@ -1994,13 +1994,16 @@ class DstackOperator:
             for node in connection.execute(select(operator_nodes)).mappings()
             if node["payload"].get("capacity_backend") == BACKEND_MARKER
         ]
-        usage = live_capacity_usage(
+        return live_capacity_usage(
             self.capacity.client,
             nodes,
             provider_inventory=self.provider_inventory,
             clock=self.repo.clock,
             fresh_seconds=self.policy["observation_fresh_seconds"],
         )
+
+    def _limits(self, connection, hourly):
+        usage = self._live_capacity_usage(connection)
         hard_max = 2 if self.policy.get("demand_start") else 128
         require(
             usage["instances"] + 1 <= min(hard_max, self.policy["max_instances"])

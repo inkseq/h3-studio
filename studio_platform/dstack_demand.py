@@ -1,7 +1,8 @@
 """Demand projections over the original jobs, operator policy and machine rows.
 
-No provider calls in admission/status. The existing controller owns the start
-decision; the original operator start transaction remains the allocation fence.
+Creator admission/status uses stored projections. Human-admin capacity counts
+reuse the existing read-only live-capacity witness. The original operator start
+transaction remains the allocation fence.
 """
 
 import json
@@ -342,7 +343,8 @@ def node_stage(node, now):
     binding = payload.get("dstack", {})
     preparation = binding.get("preparation", {})
     phase = preparation.get("phase") if isinstance(preparation, dict) else None
-    model = preparation.get("model", {}) if isinstance(preparation, dict) else {}
+    model = preparation.get("model") if isinstance(preparation, dict) else None
+    model = model if isinstance(model, dict) else {}
     phase = phase or binding.get("bootstrap_phase")
     if (
         phase in {"model_load", "loading", "loading_model", "model_loading"}
@@ -396,9 +398,33 @@ def summary(service, connection, now):
     runtime = read_runtime(connection, service.settings.tenant_id)
     configured = demand_configuration(service.config, now=now) is not None
     work = eligible_jobs(service, connection, now) if configured else []
-    stages = [
-        node_stage(n, now) for n in _nodes(connection, service.settings.tenant_id)
-    ]
+    nodes = _nodes(connection, service.settings.tenant_id)
+    stages = [node_stage(n, now) for n in nodes]
+    if configured and nodes:
+        try:
+            # Human-admin reads are advisory, not an allocation or settlement.
+            # The same canonical witness is re-read under the original start
+            # lock before reserving capacity. Never turn old UI state alone
+            # into either a live slot or positive removal evidence.
+            usage = service._live_capacity_usage(connection)
+            observed = {o["intent_id"]: o for o in usage["observations"]}
+            stages = [
+                None
+                if observed.get(n["intent_id"], {}).get("counted") is False
+                else "unknown"
+                if n["intent_id"] not in observed
+                or observed[n["intent_id"]].get("reason_code")
+                in {
+                    "dstack_capacity_unconfirmed",
+                    "dstack_terminal_provider_unconfirmed",
+                }
+                else node_stage(n, now) or "unknown"
+                for n in nodes
+            ]
+        except Exception:
+            # Missing/unreadable evidence cannot erase even a stopped marker's
+            # potential live occupancy. Keep original rows and invoices intact.
+            stages = ["unknown" for _ in nodes]
     # Display all accepted native waiting work, including blocked jobs. Rental
     # eligibility above remains a separate, stricter authority decision.
     counts = {"fl": 0, "ref": 0}
