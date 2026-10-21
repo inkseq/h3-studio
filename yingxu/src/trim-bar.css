@@ -93,3 +93,6 @@
     height: 44px;
   }
 }
+.editor .trim-bar-times {
+  flex-basis: 100%;
+}

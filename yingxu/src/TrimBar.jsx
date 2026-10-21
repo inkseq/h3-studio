@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Pause, Play } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { cutFps } from './video-cut-model.js';
 import { snap } from './film-edit-model.js';
@@ -36,11 +35,19 @@ export default function TrimBar({ duration, start, end, getVideo, onCommit, disa
       }
     };
     const stop = () => setPlaying(false);
+    // The video's own play button plays the kept range: start at the in-point when outside it.
+    const start = () => {
+      if (node.currentTime < range[0] || node.currentTime >= range[1] - frame / 2)
+        node.currentTime = range[0];
+      setPlaying(true);
+    };
     node.addEventListener('timeupdate', tick);
     node.addEventListener('pause', stop);
+    node.addEventListener('play', start);
     return () => {
       node.removeEventListener('timeupdate', tick);
       node.removeEventListener('pause', stop);
+      node.removeEventListener('play', start);
     };
   });
   const seek = (value) => {
@@ -85,22 +92,29 @@ export default function TrimBar({ duration, start, end, getVideo, onCommit, disa
     el.addEventListener('pointerup', up);
     el.addEventListener('pointercancel', up);
   };
-  const toggle = () => {
-    const node = getVideo?.();
-    if (!node) return;
-    if (!node.paused) return node.pause();
-    if (node.currentTime < range[0] || node.currentTime >= range[1] - frame / 2)
-      node.currentTime = range[0];
-    setPlaying(true);
-    node.play().catch(() => setPlaying(false));
-  };
   const [inPoint, outPoint] = range;
   return (
     <div className={'trim-bar' + (disabled || !total ? ' off' : '')}>
       <div
         className="trim-bar-track"
         ref={bar}
-        onPointerDown={(event) => total && seek(at(event.clientX))}
+        onPointerDown={(event) => {
+          if (!total) return;
+          // Press and drag anywhere on the bar to scrub the playhead.
+          const el = event.currentTarget;
+          el.setPointerCapture(event.pointerId);
+          getVideo?.()?.pause();
+          seek(at(event.clientX));
+          const move = (e) => seek(at(e.clientX));
+          const up = () => {
+            el.removeEventListener('pointermove', move);
+            el.removeEventListener('pointerup', up);
+            el.removeEventListener('pointercancel', up);
+          };
+          el.addEventListener('pointermove', move);
+          el.addEventListener('pointerup', up);
+          el.addEventListener('pointercancel', up);
+        }}
       >
         <span className="trim-bar-cut" style={{ left: 0, width: pct(inPoint, total) }} />
         <span className="trim-bar-cut" style={{ left: pct(outPoint, total), right: 0 }} />
@@ -136,10 +150,6 @@ export default function TrimBar({ duration, start, end, getVideo, onCommit, disa
         ))}
       </div>
       <div className="trim-bar-row">
-        <button type="button" className="small" disabled={!total} onClick={toggle}>
-          {playing ? <Pause size={13} /> : <Play size={13} />}
-          {t(playing ? 'editor.pause' : 'editor.playRange')}
-        </button>
         <span className="trim-bar-times muted">
           {total
             ? t('editor.trimTimes', {

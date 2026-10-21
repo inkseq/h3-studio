@@ -489,6 +489,12 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
                         src={selectedSource}
                         preload="auto"
                         playsInline
+                        title={t('editor.clickToPlay')}
+                        onClick={(event) => {
+                          const node = event.currentTarget;
+                          if (node.paused) void node.play().catch(() => {});
+                          else node.pause();
+                        }}
                         onLoadedMetadata={(event) => {
                           onDuration(selected.asset.id, event.currentTarget.duration);
                           event.currentTarget.currentTime = selected.startFrame / cutFps;
