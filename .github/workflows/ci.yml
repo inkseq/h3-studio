@@ -222,6 +222,8 @@ jobs:
           # Ubuntu24.04's host pg_dump16 cannot dump the PostgreSQL17 service.
           # Reuse that exact, already-pulled service's client; no new install.
           docker exec "$POSTGRES_TEST_CONTAINER" pg_dump --version
+          # Host pg_restore16 cannot decode PG17 custom archives either.
+          docker exec "$POSTGRES_TEST_CONTAINER" pg_restore --version
           python - <<'PY'
           import os, pathlib, re
           container = os.environ['POSTGRES_TEST_CONTAINER']
@@ -248,8 +250,23 @@ jobs:
               subprocess.run(command, stdout=archive, check=True, timeout=590)
           '''.replace('CONTAINER_ID', container))
           wrapper.chmod(0o700)
+          restore = pathlib.Path(os.environ['RUNNER_TEMP']) / 'inkseq-ci-pg-restore'
+          restore.write_text('''#!/usr/bin/env python3
+          import subprocess, sys
+          arguments = sys.argv[1:]
+          fixed = ['--data-only', '--table=platform_budget_reservations', '--file=-']
+          if len(arguments) != 4 or arguments[:3] != fixed:
+              raise SystemExit('Only the original reservation archive readback is allowed')
+          with open(arguments[3], 'rb') as archive:
+              subprocess.run(
+                  ['docker', 'exec', '-i', 'CONTAINER_ID', 'pg_restore', *fixed],
+                  stdin=archive, check=True, timeout=30,
+              )
+          '''.replace('CONTAINER_ID', container))
+          restore.chmod(0o700)
           with open(os.environ['GITHUB_ENV'], 'a') as output:
               output.write('PLATFORM_TEST_PG_DUMP=' + str(wrapper) + '\n')
+              output.write('PLATFORM_TEST_PG_RESTORE=' + str(restore) + '\n')
           PY
       - name: Complete PostgreSQL suite shard (isolated CI service)
         env:
