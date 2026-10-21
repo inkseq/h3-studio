@@ -21,6 +21,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Upload,
+  Scissors,
 } from 'lucide-react';
 import { TrashMenu, RenameDialog } from './UniversalTrash.jsx';
 import { WorkbenchTakes, WorkbenchCopies, WorkbenchDefaults } from './StoryboardWorkbench.jsx';
@@ -1792,6 +1793,21 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                 <Pin size={14} />
                 {tr('storyboard.copy81')}
               </button>
+              {viewing.id === shot.chosen && (
+                <button
+                  className="small"
+                  title={tr('editor.trimHere')}
+                  onClick={() =>
+                    // The storyboard opens the film editor straight into this shot's fine trim.
+                    window.dispatchEvent(
+                      new CustomEvent('inkseq:fine-trim', { detail: { shotId: shot.id } }),
+                    )
+                  }
+                >
+                  <Scissors size={14} />
+                  {tr('editor.trim')}
+                </button>
+              )}
               {msg && <small className="okmsg">{msg}</small>}
             </div>
           ))}

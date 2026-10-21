@@ -440,6 +440,18 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
       group.shots.push(shot);
     }
   }
+  // "Fine trim" in the shot panel opens the film editor on that shot's chapter, trimming it.
+  const [fineTrim, setFineTrim] = useState(null);
+  useEffect(() => {
+    const open = (event) => {
+      const shot = state.shots.find((item) => item.id === event.detail?.shotId),
+        scene = (state.scenes || []).find((item) => item.id === shot?.entity?.parentId),
+        chapterId = scene?.parentId || state.project.chapterId;
+      if (shot && chapterId) setFineTrim({ shotId: shot.id, chapterId });
+    };
+    window.addEventListener('inkseq:fine-trim', open);
+    return () => window.removeEventListener('inkseq:fine-trim', open);
+  }, [state.shots, state.scenes, state.project.chapterId]);
   const count = state.shots.filter((shot) => shot.chosen).length,
     pending = state.shots.filter((shot) => !shot.versions.length);
   return (
@@ -809,6 +821,15 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
             onClose={() => (expanded ? setExpanded(false) : setSelected(null))}
           />
         </aside>
+      )}
+      {fineTrim && (
+        <React.Suspense fallback={<p role="status">{t('settings.loading')}</p>}>
+          <FilmEditor
+            chapterId={fineTrim.chapterId}
+            initialTrim={fineTrim.shotId}
+            onClose={() => setFineTrim(null)}
+          />
+        </React.Suspense>
       )}
       <ProfileEditor />
     </div>
