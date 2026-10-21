@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import urllib.request
 
 if __package__:
     from .ci_test_shards import SLOW_MODULE_PATHS
@@ -67,6 +68,117 @@ BACKEND_MODULES = frozenset({"agent_discovery", "caption_server", "diagnostics",
                              "project_validation", "render_backend", "render_cli", "render_plans"})
 GATES = ("python", "postgres", "frontend", "containers", "frontend_tools", "macos_helper")
 SHA = re.compile(r"[0-9a-f]{40}")
+REPOSITORY = "inkseq/h3-studio"
+WORKFLOW_PATH = ".github/workflows/ci.yml"
+MAX_RUN_PAGES = 3
+RUNS_PER_PAGE = 10
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, newurl):
+        raise ValueError("staging_baseline_redirect_refused")
+
+
+def github_json(path):
+    """Read only fixed-repository Actions metadata; never log the runner token."""
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if (
+        os.environ.get("GITHUB_REPOSITORY") != REPOSITORY
+        or not token
+        or len(token) > 4096
+        or any(ord(c) < 33 for c in token)
+        or not path.startswith("/repos/" + REPOSITORY + "/actions/")
+    ):
+        raise ValueError("staging_baseline_unavailable")
+    url = "https://api.github.com" + path
+    request = urllib.request.Request(url, headers={
+        "Authorization": "Bearer " + token,
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    })
+    opener = urllib.request.build_opener(NoRedirect())
+    try:
+        with opener.open(request, timeout=5) as response:
+            if response.status != 200 or response.url != url:
+                raise ValueError()
+            raw = response.read(2 * 1024**2 + 1)
+        if len(raw) > 2 * 1024**2:
+            raise ValueError()
+        value = json.loads(raw)
+        if not isinstance(value, dict):
+            raise ValueError()
+        return value
+    except Exception:
+        raise ValueError("staging_baseline_unavailable") from None
+
+
+def git_ancestor(root, base, head):
+    subprocess.run(
+        ["git", "merge-base", "--is-ancestor", base, head], cwd=root,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True,
+    )
+
+
+def staging_platform_baseline(root, head, *, read_json=None):
+    """Find a completed platform deployment, not merely a green test/publish.
+
+    The attempt-specific jobs endpoint prevents mixing an older successful job
+    with a failed rerun. Bounded or unavailable history falls back to full CI.
+    Changed paths still come exclusively from the complete local Git diff.
+    """
+    read_json = read_json or github_json
+    prefix = "/repos/" + REPOSITORY + "/actions/"
+    for page in range(1, MAX_RUN_PAGES + 1):
+        value = read_json(prefix + "workflows/ci.yml/runs?branch=main&event=push"
+                          + "&status=success&per_page=" + str(RUNS_PER_PAGE)
+                          + "&page=" + str(page))
+        if not isinstance(value, dict):
+            raise ValueError("staging_baseline_invalid")
+        runs = value.get("workflow_runs")
+        if not isinstance(runs, list) or len(runs) > RUNS_PER_PAGE:
+            raise ValueError("staging_baseline_invalid")
+        for run in runs:
+            if not isinstance(run, dict) or (
+                not isinstance(run.get("repository"), dict)
+                or run["repository"].get("full_name") != REPOSITORY
+                or run.get("path") != WORKFLOW_PATH
+                or run.get("event") != "push" or run.get("head_branch") != "main"
+            ):
+                raise ValueError("staging_baseline_invalid")
+            if run.get("status") != "completed" or run.get("conclusion") != "success":
+                continue
+            commit, run_id, attempt = run.get("head_sha"), run.get("id"), run.get("run_attempt")
+            if (not isinstance(commit, str) or not SHA.fullmatch(commit)
+                    or type(run_id) is not int or run_id <= 0
+                    or type(attempt) is not int or attempt <= 0):
+                raise ValueError("staging_baseline_invalid")
+            jobs_value = read_json(prefix + "runs/" + str(run_id) + "/attempts/"
+                                   + str(attempt) + "/jobs?per_page=100&page=1")
+            if not isinstance(jobs_value, dict):
+                raise ValueError("staging_baseline_invalid")
+            jobs = jobs_value.get("jobs")
+            if (not isinstance(jobs, list) or type(jobs_value.get("total_count")) is not int
+                    or jobs_value["total_count"] != len(jobs) or len(jobs) > 100):
+                raise ValueError("staging_baseline_invalid")
+            selected = {}
+            for job in jobs:
+                if (not isinstance(job, dict) or type(job.get("run_id")) is not int
+                        or job.get("run_id") != run_id or not isinstance(job.get("name"), str)
+                        or job.get("head_sha") != commit
+                        or "run_attempt" in job and type(job["run_attempt"]) is not int
+                        or job.get("run_attempt", attempt) != attempt):
+                    raise ValueError("staging_baseline_invalid")
+                name = job.get("name")
+                if name in {"containers", "deploy-staging-aws"}:
+                    if name in selected:
+                        raise ValueError("staging_baseline_invalid")
+                    selected[name] = job.get("status") == "completed" and job.get("conclusion") == "success"
+            if selected == {"containers": True, "deploy-staging-aws": True}:
+                git_ancestor(root, commit, head)
+                return {"commit": commit, "run_id": run_id, "run_attempt": attempt}
+        if len(runs) < RUNS_PER_PAGE:
+            break
+    raise ValueError("staging_baseline_unavailable")
 
 
 def path_kind(path: str) -> str:
@@ -226,6 +338,14 @@ def plan(event_name: str, event: dict, head: str, ref: str, root: Path) -> dict:
             # an empty successful docs-only run. No raw paths/errors are logged.
             result = selection({"full"}, reason="diff-unavailable-requires-full")
     if event_name == 'push' and ref == 'refs/heads/main':
+        try:
+            baseline = staging_platform_baseline(root, head)
+            cumulative = classify(git_changes(root, baseline['commit'], head))
+            if cumulative['containers']:
+                result = selection({'full'}, reason='unshipped-platform-changes')
+            result['staging_platform_baseline'] = baseline
+        except (ValueError, UnicodeError, OSError, subprocess.SubprocessError):
+            result = selection({'full'}, reason='staging-baseline-unavailable-requires-full')
         if result['containers']:
             # A platform candidate includes the matching static/API pair.
             result['frontend'] = True

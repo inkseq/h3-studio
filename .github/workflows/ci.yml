@@ -63,6 +63,7 @@ jobs:
   changes:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions: {contents: read, actions: read}
     outputs:
       python: ${{ steps.scope.outputs.python }}
       postgres: ${{ steps.scope.outputs.postgres }}
@@ -86,6 +87,8 @@ jobs:
         run: python -m unittest test_ci_changes test_ci_test_shards -v
       - name: Select checks from the complete local diff and validate dispatch inputs
         id: scope
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: python tools/ci_changes.py
 
   macos-helper:
