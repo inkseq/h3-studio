@@ -109,7 +109,9 @@ export default function Landing() {
                 <ArrowRight size={18} />
               </button>
             </div>
-            <small className="muted">{t('landing.noAccount')}</small>
+            {hostedSignInEnabled(c.auth) && (
+              <small className="muted">{t('landing.noAccount')}</small>
+            )}
           </div>
           <DemoBoard />
         </section>
