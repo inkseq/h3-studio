@@ -496,8 +496,17 @@ class WorkOSAuth:
             if credits_ready(connection):
                 from .credits import grant
                 from .credits_pricing import current
+                from .generation_budget_binding import ensure_owner_binding
                 from .welcome_eligibility import eligible_email
 
+                ensure_owner_binding(
+                    connection,
+                    self.settings,
+                    row,
+                    actor_user_id=row["id"],
+                    reason="Automatic zero-allowance binding for new credit account",
+                    now=now,
+                )
                 price = current(connection, self.settings.tenant_id)
                 welcome = price["configuration"]["welcome_credits"]
                 if (

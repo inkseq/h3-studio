@@ -420,6 +420,43 @@ class CreditAPI:
             self._remember(connection, principal, key, fingerprint, value)
             return value
 
+    def bind_generation_budget(self, principal, user_id, body, *, key):
+        from .generation_budget_binding import ensure_owner_binding
+
+        self._key(key)
+        if type(body) is not dict or set(body) != {"reason"}:
+            raise PricingError("generation_budget_binding_invalid", "Provide a reason.")
+        reason = self._reason(body["reason"])
+        with self.repo.transaction() as connection:
+            lock_account_gate(connection, exclusive=True)
+            actor = self._actor(connection, principal)
+            saved, fingerprint = self._journal(
+                connection, principal, key, "generation-budget:" + user_id, body
+            )
+            if saved is not None:
+                return saved
+            target = (
+                connection.execute(
+                    select(users).where(
+                        users.c.tenant == self.settings.tenant_id, users.c.id == user_id
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if target is None:
+                raise PricingError("user_not_found", "User not found.", 404)
+            result = ensure_owner_binding(
+                connection,
+                self.settings,
+                target,
+                actor_user_id=actor["id"],
+                reason=reason,
+                now=self.repo.clock(),
+            )
+            self._remember(connection, principal, key, fingerprint, result)
+            return result
+
 
 def register_routes(app):
     service = CreditAPI(app.state.repository, app.state.settings)
@@ -490,3 +527,16 @@ def register_routes(app):
         key: str | None = Header(None, alias="Idempotency-Key"),
     ):
         return response(service.adjust(request.state.principal, user_id, body, key=key))
+
+    @app.post("/v1/admin/users/{user_id}/generation-budget-binding")
+    def bind_generation_budget(
+        user_id: str,
+        request: Request,
+        body: dict,
+        key: str | None = Header(None, alias="Idempotency-Key"),
+    ):
+        return response(
+            service.bind_generation_budget(
+                request.state.principal, user_id, body, key=key
+            )
+        )
