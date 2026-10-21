@@ -420,15 +420,20 @@ def create_app(
                 if not principal:
                     return JSONResponse({"detail": "服务身份无效"}, status_code=401)
             else:
-                principal = await run_in_threadpool(
-                    auth.session,
-                    request.cookies.get(COOKIE),
-                    # A provider outage or legacy missing SID must never
-                    # prevent the holder revoking their own local sessions.
-                    # These two endpoints grant no other account authority.
-                    verify_provider=request.url.path
-                    not in {"/api/auth/logout", "/api/auth/sessions/revoke-all"},
-                )
+                # A provider outage or legacy missing SID must never prevent
+                # the holder revoking only their own local sessions. Ordinary
+                # callers keep the existing session(token) adapter contract.
+                if request.url.path in {
+                    "/api/auth/logout",
+                    "/api/auth/sessions/revoke-all",
+                }:
+                    principal = await run_in_threadpool(
+                        auth.session, request.cookies.get(COOKIE), verify_provider=False
+                    )
+                else:
+                    principal = await run_in_threadpool(
+                        auth.session, request.cookies.get(COOKIE)
+                    )
         except SessionUnavailable:
             return JSONResponse(
                 {

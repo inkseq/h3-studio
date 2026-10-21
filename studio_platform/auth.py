@@ -107,6 +107,7 @@ WORKOS_PRIVATE_PROJECT = "__authkit"
 WORKOS_SESSION_KIND = "authkit_session"
 WORKOS_SESSION_FIELDS = {"sid", "subject", "client_id", "access_expires_at"}
 _DUMMY = bcrypt.hashpw(secrets.token_bytes(32), bcrypt.gensalt(rounds=12))
+_PROVIDER_CHECK = object()
 
 
 class AuthenticationError(Exception):
@@ -590,17 +591,22 @@ class Auth:
         )
 
     def _session_hash(self, token_hash, *, renew=False, verify_provider=True):
-        if (
-            verify_provider
-            and self.session_checker is not None
-            and not self.session_checker(token_hash)
-        ):
-            return None
+        principal = self._local_session_hash(
+            token_hash,
+            renew=renew,
+            require_provider=verify_provider and self.session_checker is not None,
+        )
+        if principal is _PROVIDER_CHECK:
+            # The first local read has CLOSED its connection before checking
+            # AuthKit. Password sessions keep their original one-read path.
+            if not self.session_checker(token_hash):
+                return None
+            return self._local_session_hash(token_hash, renew=renew)
+        return principal
+
+    def _local_session_hash(self, token_hash, *, renew=False, require_provider=False):
         now = self.clock()
         with self.engine.begin() as conn:
-            from .identity import lock_account_gate
-
-            lock_account_gate(conn)
             row = (
                 conn.execute(
                     select(sessions).where(
@@ -615,6 +621,8 @@ class Auth:
             )
             if not row:
                 return None
+            if require_provider and row["auth_mode"] == "workos":
+                return _PROVIDER_CHECK
             if (
                 self._grant_account(
                     conn,
