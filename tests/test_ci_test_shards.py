@@ -254,6 +254,7 @@ class ShardTests(unittest.TestCase):
         # Assert the maintained safety boundary, not a duplicate retired list.
         critical = {
             "test_platform_repository",
+            "test_credit_admission_reader",
             "test_platform_queue",
             "test_platform_control",
             "test_platform_worker",

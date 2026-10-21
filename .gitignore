@@ -736,3 +736,9 @@ inventory.json
 !studio_platform/quality_views.py
 !studio_platform/quality_http.py
 !studio_platform/assistant_models.py
+
+# Read-only 007 compatibility bridge; no runtime policy or fixture data.
+!studio_platform/credit_admission.py
+!studio_platform/migrations/versions/v20261022_0007_credit_admission.py
+!tests/test_credit_admission_reader.py
+!docs/CREDIT-ADMISSION-READER.md
