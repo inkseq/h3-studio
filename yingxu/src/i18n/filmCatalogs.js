@@ -9,6 +9,11 @@ export const filmCatalogs = {
     'film.frozen':
       'Uses saved story revision {version}. Later story edits will not change this film.',
     'film.revision': 'Story revision {version}',
+    'film.sound': 'Sound',
+    'film.soundChoose': 'Choose…',
+    'film.soundClips': "Each clip's own sound (added automatically)",
+    'film.soundEditor': 'As set in the editor',
+    'film.soundSilent': 'Silent',
     'film.resolution': 'Output resolution',
     'film.captions': 'Burn confirmed chapter captions',
     'film.captionHint':
@@ -101,6 +106,11 @@ export const filmCatalogs = {
     'film.frozen': '使用已保存的故事版本 {version}；之后编辑故事不会改变本次成片。',
     'film.revision': '故事版本 {version}',
     'film.resolution': '输出分辨率',
+    'film.sound': '声音',
+    'film.soundChoose': '请选择',
+    'film.soundClips': '各镜头原声（自动加入）',
+    'film.soundEditor': '按剪辑器里的设置',
+    'film.soundSilent': '静音',
     'film.captions': '烧录已确认的章节字幕',
     'film.captionHint': '请先确认每章的字幕轨道；本流程不会生成新字幕。',
     'film.preflight': '预检并查看估算',

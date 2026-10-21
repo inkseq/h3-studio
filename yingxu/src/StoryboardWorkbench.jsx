@@ -1,7 +1,16 @@
-import { Columns2, Maximize2, Minimize2, RefreshCw, Star } from 'lucide-react';
+import {
+  Columns2,
+  Maximize2,
+  Minimize2,
+  MoreHorizontal,
+  RefreshCw,
+  Sparkles,
+  Star,
+  Trash2,
+} from 'lucide-react';
 import { profileLabel } from './model-visibility.js';
 import { isActiveTrashItem } from './trash-commands.js';
-import { TrashMenu, RenameDialog } from './UniversalTrash.jsx';
+import { TrashMenu, RenameDialog, useTrash } from './UniversalTrash.jsx';
 import TakeRecipe from './QuickChatTakeRecipe.jsx';
 import GenerationControl from './GenerationControl.jsx';
 import { effectiveControlSchema, recipeFor } from './quick-chat-model.js';
@@ -447,95 +456,157 @@ export function WorkbenchTakes({ shot, wide = false, onWide, onPreview, previewI
     </section>
   );
 }
-export function WorkbenchBulk({ ids, onClear, onSelectAll }) {
+// Floating bar for selected shots (owner, 2026-10-21): quick selection as links, two main
+// actions, and everything else under "More" so the row stays readable.
+export function WorkbenchBulk({ ids, onClear, onSelectAll, onSelectPending, pendingCount = 0 }) {
   const { t, locale } = useI18n(),
     { state, dispatch } = useStoryboardUI(),
+    trash = useTrash(),
     [copies, setCopies] = useState('1'),
     [scene, setScene] = useState(''),
-    [profile, setProfile] = useState('');
+    [profile, setProfile] = useState(''),
+    [more, setMore] = useState(false);
   useEffect(() => {
     setCopies('1');
     setScene('');
     setProfile('');
   }, [state.contextId]);
+  useEffect(() => {
+    if (!ids.length) setMore(false);
+  }, [ids.length]);
   const valid =
     Number.isInteger(Number(copies)) && Number(copies) >= 1 && Number(copies) <= state.copiesMax;
+  const locked = state.busy || !!state.workbenchPending;
   if (!ids.length) return null;
   return (
-    <div className="workbench-bulk">
-      <b>{t('workbench.selected', { count: ids.length })}</b>
-      <button onClick={onSelectAll}>{t('workbench.all')}</button>
-      <button onClick={onClear}>{t('workbench.clear')}</button>
-      <WorkbenchCopies value={copies} onChange={setCopies} max={state.copiesMax} />
-      {!state.copiesMax && (
-        <button onClick={() => dispatch({ type: 'workbenchRefresh' })}>
-          {t('workbench.refresh')}
-        </button>
-      )}
-      <button
-        disabled={!ids.length || !valid || state.busy || !!state.workbenchPending}
-        onClick={() =>
-          dispatch({ type: 'workbenchGenerate', ids: [...ids], copies: Number(copies) })
-        }
-      >
-        {t('workbench.preflight')}
-      </button>
-      <select
-        value={profile}
-        onChange={(e) => setProfile(e.target.value)}
-        aria-label={t('workbench.profile')}
-      >
-        <option value="">{t('workbench.keepProfile')}</option>
-        {state.capabilities?.deployment_profiles?.map((p) => (
-          <option key={p.id} value={p.id}>
-            {profileLabel(p, locale)}
-          </option>
-        ))}
-      </select>
-      {['draft', 'final'].map((operation) => (
+    <div
+      className="workbench-bulk"
+      role="toolbar"
+      aria-label={t('workbench.selected', { count: ids.length })}
+    >
+      <div className="workbench-bulk-row">
+        <b>{t('workbench.selected', { count: ids.length })}</b>
+        <span className="workbench-bulk-links">
+          <button type="button" className="link" onClick={onSelectAll}>
+            {t('workbench.all')}
+          </button>
+          {pendingCount > 0 && (
+            <button type="button" className="link" onClick={onSelectPending}>
+              {t('workbench.onlyPending', { count: pendingCount })}
+            </button>
+          )}
+          <button type="button" className="link" onClick={onClear}>
+            {t('workbench.clear')}
+          </button>
+        </span>
+        <span className="workbench-bulk-spacer" />
         <button
-          key={operation}
-          disabled={!ids.length || state.busy || !!state.workbenchPending}
+          className="primary"
+          disabled={!valid || locked}
           onClick={() =>
-            dispatch({
-              type: 'workbenchAction',
-              profileId: profile || undefined,
-              action: { op: 'storyboard.bulk', shot_ids: [...ids], operation },
-            })
+            dispatch({ type: 'workbenchGenerate', ids: [...ids], copies: Number(copies) })
           }
         >
-          {t('workbench.' + operation)}
+          <Sparkles size={14} />
+          {t('workbench.generateSelected', { count: ids.length })}
         </button>
-      ))}
-      <select
-        aria-label={t('workbench.scene')}
-        value={scene}
-        onChange={(e) => setScene(e.target.value)}
-      >
-        <option value="">{t('workbench.scene')}</option>
-        {state.scenes?.map((row) => (
-          <option key={row.id} value={row.id}>
-            {row.title}
-          </option>
-        ))}
-      </select>
-      <button
-        disabled={!scene || !ids.length || state.busy || !!state.workbenchPending}
-        onClick={() =>
-          dispatch({
-            type: 'workbenchAction',
-            action: {
-              op: 'storyboard.bulk',
-              shot_ids: [...ids],
-              operation: 'move',
-              parent_id: scene,
-            },
-          })
-        }
-      >
-        {t('workbench.move')}
-      </button>
-      <small>{t('workbench.qualityHint')}</small>
+        {trash?.account && (
+          <button
+            disabled={locked || trash.busy || !!trash.pending}
+            onClick={async () => {
+              const receipt = await trash.request(
+                'trash',
+                ids.map((id) => ({ kind: 'entity', project_id: state.project.id, id })),
+              );
+              if (receipt?.state === 'completed') onClear();
+            }}
+          >
+            <Trash2 size={14} />
+            {t('workbench.trashSelected')}
+          </button>
+        )}
+        <button
+          type="button"
+          className="ghost"
+          aria-expanded={more}
+          aria-label={t('workbench.more')}
+          title={t('workbench.more')}
+          onClick={() => setMore((v) => !v)}
+        >
+          <MoreHorizontal size={16} />
+        </button>
+      </div>
+      {more && (
+        <div className="workbench-bulk-more">
+          <WorkbenchCopies value={copies} onChange={setCopies} max={state.copiesMax} />
+          {!state.copiesMax && (
+            <button onClick={() => dispatch({ type: 'workbenchRefresh' })}>
+              {t('workbench.refresh')}
+            </button>
+          )}
+          <span className="workbench-bulk-group">
+            {['draft', 'final'].map((operation) => (
+              <button
+                key={operation}
+                disabled={locked}
+                onClick={() =>
+                  dispatch({
+                    type: 'workbenchAction',
+                    profileId: profile || undefined,
+                    action: { op: 'storyboard.bulk', shot_ids: [...ids], operation },
+                  })
+                }
+              >
+                {t('workbench.' + operation)}
+              </button>
+            ))}
+            <select
+              value={profile}
+              onChange={(e) => setProfile(e.target.value)}
+              aria-label={t('workbench.profile')}
+            >
+              <option value="">{t('workbench.keepProfile')}</option>
+              {state.capabilities?.deployment_profiles?.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {profileLabel(p, locale)}
+                </option>
+              ))}
+            </select>
+          </span>
+          <span className="workbench-bulk-group">
+            <select
+              aria-label={t('workbench.scene')}
+              value={scene}
+              onChange={(e) => setScene(e.target.value)}
+            >
+              <option value="">{t('workbench.scene')}</option>
+              {state.scenes?.map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.title}
+                </option>
+              ))}
+            </select>
+            <button
+              disabled={!scene || locked}
+              onClick={() =>
+                dispatch({
+                  type: 'workbenchAction',
+                  action: {
+                    op: 'storyboard.bulk',
+                    shot_ids: [...ids],
+                    operation: 'move',
+                    parent_id: scene,
+                  },
+                })
+              }
+            >
+              {t('workbench.move')}
+            </button>
+          </span>
+          <WorkbenchFork ids={ids} />
+          <small className="muted">{t('workbench.qualityHint')}</small>
+        </div>
+      )}
     </div>
   );
 }

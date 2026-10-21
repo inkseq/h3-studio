@@ -44,7 +44,10 @@ test('actual workbench renders its initial unread state without generation or de
   const html = renderToStaticMarkup(
     React.createElement(compiled.exports.Preview, { adapter, shot }),
   );
-  assert.match(html, /disabled="">Check estimate/);
+  assert.match(
+    html,
+    /<button class="primary" disabled="">(?:(?!<\/button>).)*Generate 1<\/button>/,
+  );
   assert.match(html, /No takes yet/);
   assert.match(html, /Generation defaults/);
   assert.doesNotMatch(html, />Delete<|>Move to trash<|workbench\./);

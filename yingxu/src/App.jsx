@@ -2,12 +2,12 @@ import { ChatDialog } from './QuickChatControls.jsx';
 import InkLoader from './InkLoader.jsx';
 import { cloudSystemMessage } from './cloud-model.js';
 import { exportSrt } from './caption-model.js';
-import { chapterHandover, shotListCsv } from './handover-model.js';
 import StudioHeader from './StudioHeader.jsx';
 import AccountMenu, { MenuItem } from './AccountMenu.jsx';
 import { LowCreditsDialog } from './CreditsUI.jsx';
 import { LegalPage, PricingPage } from './PublicPages.jsx';
 import Landing from './Landing.jsx';
+import { CloudSaveStatus, useCloudAutosave } from './CloudAutosave.jsx';
 import Library from './Library.jsx';
 import UniversalTrash, {
   TrashProvider,
@@ -157,6 +157,7 @@ function SeriesApp({ sidebarView, onSidebarView }) {
   }, [pageActive]);
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState),
     p = state.project;
+  useCloudAutosave();
   const [modal, setModal] = useState(null),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false),
@@ -391,8 +392,8 @@ function SeriesApp({ sidebarView, onSidebarView }) {
           {/* Chapters are sections on the one storyboard; no chapter switcher (owner, 2026-10-21). */}
           {state.workspace.mode === 'cloud' ? (
             <details className="v2-cloud-status">
-              <summary className={'badge ' + (state.workspace.dirty ? 'local' : 'cloud')}>
-                {t(state.workspace.dirty ? 'story.copy46' : 'story.copy11')}
+              <summary className="v2-autosave">
+                <CloudSaveStatus plain />
               </summary>
               <div className="card-box">
                 <button disabled={c.busy} onClick={() => void cloud.save().catch(() => {})}>
@@ -481,47 +482,29 @@ function SeriesApp({ sidebarView, onSidebarView }) {
             <div className="card-box">
               <button onClick={() => open({ type: 'roughcut' })}>
                 <Clapperboard size={15} />
-                {t('v2.roughCut')}
+                <span>
+                  {t('v2.roughCut')}
+                  <small className="muted export-hint">{t('v2.roughCutHint')}</small>
+                </span>
               </button>
-              <button
-                onClick={() => {
-                  try {
-                    download(
-                      new Blob([exportSrt(p, chapter?.id || chapterList[0]?.id)], {
-                        type: 'application/x-subrip',
-                      }),
-                      p.title + '.srt',
-                    );
-                  } catch {
-                    store.notify(t('v2.exportNeedsCaptions'));
-                  }
-                }}
-              >
-                {t('v2.subtitles')}
-              </button>
-              <button
-                onClick={() => {
-                  try {
-                    download(
-                      new Blob(
-                        [
-                          shotListCsv(
-                            chapterHandover(p, chapter?.id || chapterList[0]?.id, {
-                              cloud: state.workspace.mode === 'cloud',
-                            }),
-                          ),
-                        ],
-                        { type: 'text/csv;charset=utf-8' },
-                      ),
-                      p.title + '.csv',
-                    );
-                  } catch {
-                    store.notify(t('v2.exportError'));
-                  }
-                }}
-              >
-                {t('v2.shotList')}
-              </button>
+              {(() => {
+                // Subtitles are offered only when this chapter has some (owner, 2026-10-21).
+                let srt = '';
+                try {
+                  srt = exportSrt(p, chapter?.id || chapterList[0]?.id);
+                } catch {
+                  srt = '';
+                }
+                return srt ? (
+                  <button
+                    onClick={() =>
+                      download(new Blob([srt], { type: 'application/x-subrip' }), p.title + '.srt')
+                    }
+                  >
+                    {t('v2.subtitles')}
+                  </button>
+                ) : null;
+              })()}
               <button disabled={busy} onClick={backup}>
                 {t('story.copy53')}
               </button>

@@ -1,4 +1,4 @@
-import { WorkbenchBulk, WorkbenchFork } from './StoryboardWorkbench.jsx';
+import { WorkbenchBulk } from './StoryboardWorkbench.jsx';
 import './v2/story-view.css';
 import { selectShot, emptySelection } from './storyboard-selection.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -14,6 +14,10 @@ import {
   Scissors,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Sparkles,
 } from 'lucide-react';
 import { RenameDialog, useTrash } from './UniversalTrash.jsx';
 import ItemMenu from './ItemMenu.jsx';
@@ -260,6 +264,28 @@ function AddChapter({ count }) {
   );
 }
 
+// A remembered on/off switch for collapsible chrome (per browser; storage may be unavailable).
+function usePersistentFlag(key) {
+  const [value, setValue] = useState(() => {
+    try {
+      return globalThis.localStorage?.getItem(key) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const set = (next) =>
+    setValue((old) => {
+      const v = typeof next === 'function' ? next(old) : next;
+      try {
+        globalThis.localStorage?.setItem(key, v ? '1' : '0');
+      } catch {
+        // Private windows may refuse storage; the choice just won't be remembered.
+      }
+      return v;
+    });
+  return [value, set];
+}
+
 function FilmEditorButton({ chapterId }) {
   const { t } = useI18n();
   const { dispatch } = useStoryboardUI();
@@ -413,6 +439,8 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
     dock = useStoryboardPanelSize('dock', 190, 110, 900),
     drawer = useStoryboardPanelSize('drawer', 440, 340, 820),
     dockLayout = storyboardDockLayout({ ...room, manual: dock.custom ? dock.size : null });
+  const [headCompact, setHeadCompact] = usePersistentFlag('inkseq.sbHeadCompact'),
+    [dockMini, setDockMini] = usePersistentFlag('inkseq.sbDockMini');
   const toggleDock = () =>
     dock.set(
       dockLayout.size > (dockLayout.compact + dockLayout.large) / 2
@@ -445,20 +473,15 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
       group.shots.push(shot);
     }
   }
-  // "Fine trim" in the shot panel opens the film editor on that shot's chapter, trimming it.
-  const [fineTrim, setFineTrim] = useState(null);
-  useEffect(() => {
-    const open = (event) => {
-      const shot = state.shots.find((item) => item.id === event.detail?.shotId),
-        scene = (state.scenes || []).find((item) => item.id === shot?.entity?.parentId),
-        chapterId = scene?.parentId || state.project.chapterId;
-      if (shot && chapterId) setFineTrim({ shotId: shot.id, chapterId });
-    };
-    window.addEventListener('inkseq:fine-trim', open);
-    return () => window.removeEventListener('inkseq:fine-trim', open);
-  }, [state.shots, state.scenes, state.project.chapterId]);
   const count = state.shots.filter((shot) => shot.chosen).length,
     pending = state.shots.filter((shot) => !shot.versions.length);
+  // First shot of each chapter, so the dock timeline can mark chapter boundaries.
+  const chapterStarts = new Set();
+  if (multi)
+    for (const chapter of chapters) {
+      const first = groups.find((g) => g.chapterId === chapter.id && g.shots.length)?.shots[0];
+      if (first) chapterStarts.add(first.id);
+    }
   return (
     <div
       className={'layout A' + (libraryCollapsed ? ' library-collapsed' : '')}
@@ -504,7 +527,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
               setSelected(null);
           }}
         >
-          <div className="chapter-head">
+          <div className={'chapter-head sb-topbar' + (headCompact ? ' compact' : '')}>
             <div className="row tight chapter-summary">
               <button
                 className="small ghost"
@@ -522,18 +545,16 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
               </button>
               <h1>{multi ? state.project.title : state.project.chapter}</h1>
               <small className="muted">
-                {t(state.shots.length === 1 ? 'storyboard.oneShotSummary' : 'storyboard.copy36', {
+                {t('storyboard.summary', {
                   shots: state.shots.length,
                   duration: fmt(totalDuration(state.shots)),
                   chosen: count,
-                  aspect: state.project.aspect,
                 })}
               </small>
             </div>
             <div className="row tight chapter-actions">
-              {!multi && <FilmEditorButton chapterId={state.project.chapterId} />}
-              {filmControl}
               <QueueSummary />
+              {!multi && <FilmEditorButton chapterId={state.project.chapterId} />}
               {!groups.length && (
                 <button
                   disabled={state.busy || !!state.workbenchPending}
@@ -550,34 +571,39 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                 </button>
               )}
               {onNewScene && (
-                <button onClick={onNewScene}>
+                <button onClick={onNewScene} title={t('v2.newScene')}>
                   <Plus size={14} />
-                  {t('v2.newScene')}
+                  <span className="label">{t('v2.newScene')}</span>
                 </button>
               )}
+              {pending.length > 0 && (
+                <button
+                  disabled={state.busy || !state.copiesMax}
+                  title={t('storyboard.copy35', { count: pending.length })}
+                  onClick={() =>
+                    dispatch({
+                      type: 'workbenchGenerate',
+                      ids: pending.map((shot) => shot.id),
+                      copies: 1,
+                    })
+                  }
+                >
+                  <Sparkles size={14} />
+                  <span className="label">{t('storyboard.copy35', { count: pending.length })}</span>
+                </button>
+              )}
+              <span className="sb-film-primary">{filmControl}</span>
               <button
-                className="primary"
-                disabled={state.busy || !pending.length || !state.copiesMax}
-                onClick={() =>
-                  dispatch({
-                    type: 'workbenchGenerate',
-                    ids: pending.map((shot) => shot.id),
-                    copies: 1,
-                  })
-                }
+                type="button"
+                className="ghost sb-head-toggle"
+                aria-label={t(headCompact ? 'storyboard.headExpand' : 'storyboard.headCollapse')}
+                title={t(headCompact ? 'storyboard.headExpand' : 'storyboard.headCollapse')}
+                onClick={() => setHeadCompact((v) => !v)}
               >
-                {t('storyboard.copy35', { count: pending.length })}
+                {headCompact ? <ChevronsUpDown size={15} /> : <ChevronsDownUp size={15} />}
               </button>
             </div>
           </div>
-          <WorkbenchBulk
-            ids={selection.ids}
-            onClear={() => setSelection(emptySelection())}
-            onSelectAll={() =>
-              setSelection({ ids: state.shots.map((s) => s.id), anchor: state.shots[0]?.id })
-            }
-          />
-          <WorkbenchFork ids={selection.ids} />
           <SortableContext
             items={state.shots.map((shot) => 'shot:' + shot.id)}
             strategy={rectSortingStrategy}
@@ -746,6 +772,17 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
               })()}
             </div>
           </SortableContext>
+          <WorkbenchBulk
+            ids={selection.ids}
+            pendingCount={pending.length}
+            onClear={() => setSelection(emptySelection())}
+            onSelectAll={() =>
+              setSelection({ ids: state.shots.map((s) => s.id), anchor: state.shots[0]?.id })
+            }
+            onSelectPending={() =>
+              setSelection({ ids: pending.map((s) => s.id), anchor: pending[0]?.id })
+            }
+          />
         </main>
         {theater && (
           <section className="sb-theater" role="dialog" aria-label={t('storyboard.theater')}>
@@ -758,7 +795,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
             </button>
           </section>
         )}
-        {!theater && (
+        {!theater && !dockMini && (
           <StoryboardSplitter
             panel={dock}
             axis="y"
@@ -770,10 +807,13 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
           />
         )}
         <div
-          className={'dock' + (theater ? ' in-theater' : dockLayout.size > 300 ? ' tall' : '')}
-          style={{ height: theater ? 130 : dockLayout.size }}
+          className={
+            'dock' +
+            (theater ? ' in-theater' : dockMini ? ' mini' : dockLayout.size > 300 ? ' tall' : '')
+          }
+          style={{ height: theater ? 130 : dockMini ? 64 : dockLayout.size }}
         >
-          {!theater && (
+          {!theater && !dockMini && (
             <div className="dock-screen">
               <Screen player={player} />
               <button
@@ -796,13 +836,38 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
               >
                 {theater ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
               </button>
+              {!theater && (
+                <button
+                  className="small ghost dock-mini-toggle"
+                  aria-label={t(dockMini ? 'storyboard.dockExpand' : 'storyboard.dockCollapse')}
+                  title={t(dockMini ? 'storyboard.dockExpand' : 'storyboard.dockCollapse')}
+                  onClick={() => setDockMini((v) => !v)}
+                >
+                  {dockMini ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                </button>
+              )}
             </div>
             <Timeline
               player={player}
+              chapterStarts={chapterStarts}
               selectedId={theater ? player.seg?.shot.id : selected}
-              onPick={theater ? undefined : setSelected}
+              onPick={
+                theater
+                  ? undefined
+                  : (id) => {
+                      setSelected(id);
+                      // Bring the card into view so a long board shows which shot this is.
+                      requestAnimationFrame(() =>
+                        document
+                          .querySelector('[data-shot-card="' + id + '"]')
+                          ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
+                      );
+                    }
+              }
             />
-            <small className="muted sb-timeline-hint">{t('storyboard.copy21')}</small>
+            {!dockMini && (
+              <small className="muted sb-timeline-hint">{t('storyboard.copy21')}</small>
+            )}
           </div>
         </div>
       </div>
@@ -826,16 +891,6 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
             onClose={() => (expanded ? setExpanded(false) : setSelected(null))}
           />
         </aside>
-      )}
-      {fineTrim && (
-        <React.Suspense fallback={<p role="status">{t('settings.loading')}</p>}>
-          <FilmEditor
-            chapterId={fineTrim.chapterId}
-            initialTrim={fineTrim.shotId}
-            onClose={() => setFineTrim(null)}
-            onUploadAudio={(files) => dispatch({ type: 'uploadFiles', files })}
-          />
-        </React.Suspense>
       )}
       <ProfileEditor />
     </div>

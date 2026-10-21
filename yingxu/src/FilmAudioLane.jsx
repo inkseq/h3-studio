@@ -103,12 +103,15 @@ function Block({ block, x, selected, onSelect, onMove, onTrim, pxPerSecond }) {
 
 /** The sound lane under the clips, plus add/upload and the selected track's controls. */
 export default function FilmAudioLane({
+  part,
   blocks,
   x,
   width,
   pxPerSecond,
-  audioAssets,
+  audioAssets = [],
   busy,
+  selected,
+  onSelect,
   onAdd,
   onUpload,
   onMove,
@@ -117,27 +120,27 @@ export default function FilmAudioLane({
   onRemove,
 }) {
   const { t } = useI18n();
-  const [selected, setSelected] = useState(null),
-    [menu, setMenu] = useState(false),
+  const [menu, setMenu] = useState(false),
+    [wholeFilm, setWholeFilm] = useState(false),
     file = useRef(null);
   const current = blocks.find((b) => b.track.id === selected);
-  // Stack overlapping blocks onto rows so none hides another.
-  const rows = [];
-  const placed = blocks
-    .filter((b) => b.placement)
-    .sort((a, b) => a.placement.start - b.placement.start)
-    .map((b) => {
-      let row = rows.findIndex((end) => end <= b.placement.start + 1e-6);
-      if (row < 0) row = rows.push(0) - 1;
-      rows[row] = b.placement.end;
-      return { ...b, row };
-    });
-  return (
-    <>
+  if (part === 'lane') {
+    // Stack overlapping blocks onto rows so none hides another.
+    const rows = [];
+    const placed = blocks
+      .filter((b) => b.placement)
+      .sort((a, b) => a.placement.start - b.placement.start)
+      .map((b) => {
+        let row = rows.findIndex((end) => end <= b.placement.start + 1e-6);
+        if (row < 0) row = rows.push(0) - 1;
+        rows[row] = b.placement.end;
+        return { ...b, row };
+      });
+    return (
       <div
         className="film-audio-lane"
         style={{ width, height: Math.max(1, rows.length) * 30 + 8 }}
-        onPointerDown={(event) => event.target === event.currentTarget && setSelected(null)}
+        onPointerDown={(event) => event.target === event.currentTarget && onSelect(null)}
       >
         {!placed.length && <span className="film-audio-empty muted">{t('editor.noAudio')}</span>}
         {placed.map((block) => (
@@ -147,105 +150,116 @@ export default function FilmAudioLane({
               x={x}
               pxPerSecond={pxPerSecond}
               selected={selected === block.track.id}
-              onSelect={setSelected}
+              onSelect={onSelect}
               onMove={onMove}
               onTrim={onTrim}
             />
           </div>
         ))}
       </div>
-      <div className="film-audio-bar">
-        <div className="film-audio-add">
-          <button
-            type="button"
-            className="small"
-            disabled={busy}
-            aria-expanded={menu}
-            onClick={() => setMenu((v) => !v)}
-          >
-            <Plus size={13} />
-            {t('editor.addAudio')}
-          </button>
-          {menu && (
-            <div className="film-audio-menu" role="menu">
+    );
+  }
+  return (
+    <div className="film-audio-bar">
+      <div className="film-audio-add">
+        <button
+          type="button"
+          className="small"
+          disabled={busy}
+          aria-expanded={menu}
+          onClick={() => setMenu((v) => !v)}
+        >
+          <Plus size={13} />
+          {t('editor.addAudio')}
+        </button>
+        {menu && (
+          <div className="film-audio-menu" role="menu">
+            <label className="film-audio-whole">
+              <input
+                type="checkbox"
+                checked={wholeFilm}
+                onChange={(e) => setWholeFilm(e.target.checked)}
+              />
+              {t('editor.wholeFilm')}
+            </label>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setMenu(false);
+                file.current?.click();
+              }}
+            >
+              <Upload size={13} />
+              {t('editor.uploadAudio')}
+            </button>
+            {audioAssets.map((asset) => (
               <button
+                key={asset.id}
                 type="button"
                 role="menuitem"
                 onClick={() => {
                   setMenu(false);
-                  file.current?.click();
+                  onAdd(asset, { wholeFilm });
                 }}
               >
-                <Upload size={13} />
-                {t('editor.uploadAudio')}
+                <Music size={13} />
+                {asset.title}
               </button>
-              {audioAssets.map((asset) => (
-                <button
-                  key={asset.id}
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setMenu(false);
-                    onAdd(asset);
-                  }}
-                >
-                  <Music size={13} />
-                  {asset.title}
-                </button>
-              ))}
-            </div>
-          )}
-          <input
-            ref={file}
-            type="file"
-            accept="audio/*"
-            hidden
-            onChange={(event) => {
-              const files = Array.from(event.target.files || []);
-              event.target.value = '';
-              if (files.length) onUpload(files);
-            }}
-          />
-        </div>
-        {current ? (
-          <div className="film-audio-controls">
-            <b>{current.title}</b>
-            {current.generated && <small className="muted">{t('editor.followsClip')}</small>}
-            <label>
-              {t('editor.volume')}
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={Math.round((current.track.gain ?? 0.7) * 100)}
-                onChange={(e) => onSet(current.track.id, { gain: Number(e.target.value) / 100 })}
-              />
-              <span className="muted">{Math.round((current.track.gain ?? 0.7) * 100)}%</span>
-            </label>
-            <button
-              type="button"
-              className="small"
-              onClick={() => onSet(current.track.id, { muted: !current.track.muted })}
-            >
-              {current.track.muted ? <Volume2 size={13} /> : <VolumeX size={13} />}
-              {t(current.track.muted ? 'editor.unmute' : 'editor.mute')}
-            </button>
-            <button
-              type="button"
-              className="small ghost"
-              onClick={() => {
-                onRemove(current.track.id);
-                setSelected(null);
-              }}
-            >
-              <Trash2 size={13} />
-              {t('editor.removeAudio')}
-            </button>
+            ))}
           </div>
-        ) : (
-          <small className="muted">{t('editor.audioHint')}</small>
         )}
+        <input
+          ref={file}
+          type="file"
+          accept="audio/*"
+          hidden
+          onChange={(event) => {
+            const files = Array.from(event.target.files || []);
+            event.target.value = '';
+            if (files.length) onUpload(files, { wholeFilm });
+          }}
+        />
       </div>
-    </>
+      {current ? (
+        <div className="film-audio-controls">
+          <b>{current.title}</b>
+          {current.generated && <small className="muted">{t('editor.followsClip')}</small>}
+          <label>
+            {t('editor.volume')}
+            <input
+              type="range"
+              min="0"
+              max="100"
+              step="1"
+              value={Math.round((current.track.gain ?? 0.7) * 100)}
+              onChange={(e) => onSet(current.track.id, { gain: Number(e.target.value) / 100 })}
+            />
+            <span className="muted">{Math.round((current.track.gain ?? 0.7) * 100)}%</span>
+          </label>
+          <button
+            type="button"
+            className="small"
+            onClick={() => onSet(current.track.id, { muted: !current.track.muted })}
+          >
+            {current.track.muted ? <Volume2 size={13} /> : <VolumeX size={13} />}
+            {t(current.track.muted ? 'editor.unmute' : 'editor.mute')}
+          </button>
+          <button
+            type="button"
+            className="small ghost"
+            onClick={() => {
+              onRemove(current.track.id);
+              onSelect(null);
+            }}
+          >
+            <Trash2 size={13} />
+            {t('editor.removeAudio')}
+          </button>
+        </div>
+      ) : (
+        <small className="muted">{t('editor.audioHint')}</small>
+      )}
+    </div>
   );
 }

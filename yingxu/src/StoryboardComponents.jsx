@@ -21,14 +21,17 @@ import {
   ChevronLeft,
   ChevronRight,
   Upload,
-  Scissors,
   Pencil,
 } from 'lucide-react';
 import { TrashMenu, TrashButton, RenameDialog } from './UniversalTrash.jsx';
 import { WorkbenchTakes, WorkbenchCopies, WorkbenchDefaults } from './StoryboardWorkbench.jsx';
 import { AssistantBadge } from './AssistantConnections.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { store } from './store.js';
+import { cutFps, videoCut } from './video-cut-model.js';
+import { trimClip } from './film-edit-model.js';
+import TrimBar from './TrimBar.jsx';
 import { createPortal } from 'react-dom';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { useSortable } from '@dnd-kit/sortable';
@@ -1468,6 +1471,7 @@ export function ShotCard({
       style={style}
       {...attributes}
       {...listeners}
+      data-shot-card={shot.id}
       className={
         'card' +
         (selected ? ' selected' : '') +
@@ -1689,6 +1693,38 @@ function growTextarea(node) {
   node.style.height = Math.min(node.scrollHeight + 2, 480) + 'px';
 }
 
+// The chosen take's trim, right under the panel's video (owner, 2026-10-21): drag a handle and
+// the video shows that frame; letting go saves the new range. No separate editor needed.
+function ShotTrim({ shotId, mediaRef }) {
+  const project = useSyncExternalStore(store.subscribe, () => store.getState().project);
+  const [probed, setProbed] = useState(null);
+  const shot = project.entities.find((e) => e.id === shotId),
+    video = project.entities.find((e) => e.id === shot?.data.selectedAssetId);
+  const getVideo = () => mediaRef.current?.querySelector('video') || null;
+  useEffect(() => {
+    const node = getVideo();
+    if (!node) return;
+    const read = () => Number.isFinite(node.duration) && setProbed(node.duration);
+    read();
+    node.addEventListener('loadedmetadata', read);
+    return () => node.removeEventListener('loadedmetadata', read);
+  });
+  if (!shot || video?.type !== 'video') return null;
+  const cut = videoCut(shot, video),
+    known = video.data.metadata?.duration ?? video.data.metadata?.duration_s,
+    start = (cut.aligned?.startFrame ?? 0) / cutFps,
+    end = start + (cut.requestedFrames || 0) / cutFps;
+  return (
+    <TrimBar
+      duration={Number.isFinite(known) ? known : probed}
+      start={start}
+      end={end > start ? end : start + 1 / cutFps}
+      getVideo={getVideo}
+      onCommit={(s, e, total) => store.editProject((p) => void trimClip(p, shotId, s, e, total))}
+    />
+  );
+}
+
 export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
   const { t: tr, locale } = useI18n();
   const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
@@ -1707,7 +1743,8 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
     setCopies('1');
   }, [shotId, state.contextId]);
   // Text boxes grow with what is typed, like a chat composer; size them for saved text too.
-  const editorRef = useRef(null);
+  const editorRef = useRef(null),
+    mediaRef = useRef(null);
   useEffect(() => {
     editorRef.current?.querySelectorAll('textarea').forEach(growTextarea);
   });
@@ -1780,7 +1817,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
       </header>
 
       <div className="ed-media">
-        <div className="ed-preview">
+        <div className="ed-preview" ref={mediaRef}>
           {['done', 'succeeded'].includes(viewing?.status) ? (
             <StoryboardVideo key={viewing.id} asset={viewing.asset || viewing} controls />
           ) : (
@@ -1822,24 +1859,13 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                 <Pin size={14} />
                 {tr('storyboard.copy81')}
               </button>
-              {viewing.id === shot.chosen && (
-                <button
-                  className="small"
-                  title={tr('editor.trimHere')}
-                  onClick={() =>
-                    // The storyboard opens the film editor straight into this shot's fine trim.
-                    window.dispatchEvent(
-                      new CustomEvent('inkseq:fine-trim', { detail: { shotId: shot.id } }),
-                    )
-                  }
-                >
-                  <Scissors size={14} />
-                  {tr('editor.trim')}
-                </button>
-              )}
               {msg && <small className="okmsg">{msg}</small>}
             </div>
           ))}
+
+        {viewing?.id === shot.chosen && ['done', 'succeeded'].includes(viewing?.status) && (
+          <ShotTrim shotId={shot.id} mediaRef={mediaRef} />
+        )}
 
         <WorkbenchTakes
           shot={shot}
@@ -2394,7 +2420,7 @@ export function Transport({ player }) {
   );
 }
 
-function Segment({ seg, selected, onPick }) {
+function Segment({ seg, index, chapterStart, selected, onPick }) {
   const { t: tr, locale } = useI18n();
   const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { state } = useStore();
@@ -2415,25 +2441,28 @@ function Segment({ seg, selected, onPick }) {
       style={{ flexGrow: seg.dur, flexBasis: 0 }}
       className={
         'tseg' +
+        (chapterStart ? ' chapter-start' : '') +
         (selected ? ' selected' : '') +
         (drag.isDragging ? ' dragging' : '') +
         (drop.isOver && !drag.isDragging ? ' drop-target' : '')
       }
       onClick={() => onPick(seg)}
-      title={status.label}
+      title={`${String(index + 1).padStart(2, '0')} · ${seg.shot.title} · ${fmt(seg.dur)} · ${status.label}`}
     >
       {seg.version ? (
         <StoryboardAssetImage asset={seg.version.asset || seg.version} />
       ) : (
         <div className="tseg-empty" />
       )}
-      <span className="tseg-title">{seg.shot.title}</span>
+      <span className="tseg-title">
+        <b>{String(index + 1).padStart(2, '0')}</b> {seg.shot.title}
+      </span>
       <span className={'tseg-dot ' + status.tone} />
     </button>
   );
 }
 
-export function Timeline({ player, selectedId, onPick }) {
+export function Timeline({ player, selectedId, onPick, chapterStarts }) {
   const { t: tr, locale } = useI18n();
   const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { segs, total, t, setT } = player;
@@ -2444,10 +2473,12 @@ export function Timeline({ player, selectedId, onPick }) {
   return (
     <div className="timeline">
       <div className="track video">
-        {segs.map((seg) => (
+        {segs.map((seg, index) => (
           <Segment
             key={seg.shot.id}
             seg={seg}
+            index={index}
+            chapterStart={index > 0 && !!chapterStarts?.has(seg.shot.id)}
             selected={seg.shot.id === selectedId}
             onPick={pick}
           />
