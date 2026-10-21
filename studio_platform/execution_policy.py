@@ -820,7 +820,10 @@ class ExecutionPolicies:
 
         with self.repo.engine.connect() as connection:
             frozen_credit = credit_quote(
-                connection, scope.tenant_id, scope.owner_id, compiled,
+                connection,
+                scope.tenant_id,
+                scope.owner_id,
+                compiled,
                 execution={**base, "budget_account_ids": account_ids},
             )
         role_map = {}
@@ -843,7 +846,9 @@ class ExecutionPolicies:
                     and account["project_id"] != scope.project_id
                 ):
                     raise NotFound("budget_not_found")
-                if role_map.get(account_id) != "accounting" and account["spent_microusd"] + account["reserved_microusd"] + quote[
+                if role_map.get(account_id) != "accounting" and account[
+                    "spent_microusd"
+                ] + account["reserved_microusd"] + quote[
                     "cost_microusd"
                 ] > effective_budget_limit(account):
                     raise BudgetExceeded("budget_exceeded")

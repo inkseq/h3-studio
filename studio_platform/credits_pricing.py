@@ -244,7 +244,9 @@ def aggregate_quotes(plans, *, complete=True):
     )
     revisions = sorted({plan["price_revision"] for plan in quoted})
     return {
-        "admission": "credits" if all(plan.get("admission") == "credits" for plan in quoted) else "usd",
+        "admission": "credits"
+        if all(plan.get("admission") == "credits" for plan in quoted)
+        else "usd",
         "credits": sum(plan["credits"] for plan in quoted) if known else None,
         "price_revision": revisions[0] if len(revisions) == 1 else None,
         "price_revisions": revisions,
@@ -357,7 +359,8 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
 
     if ready(connection):
         result.update(
-            version=2, admission="credits",
+            version=2,
+            admission="credits",
             budget_rows=roles(connection, tenant, owner, execution or {}),
         )
     return result

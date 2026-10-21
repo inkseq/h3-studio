@@ -351,7 +351,9 @@ class CreditsRouteTests(LedgerCase):
         self.assertEqual(self.get_quote()["credits"], 52)
         self.assertEqual(frozen["credits"], 21)
         projection = public_quote({"credit_quote": frozen})
-        self.assertEqual(set(projection), {"credits", "price_revision", "breakdown", "admission"})
+        self.assertEqual(
+            set(projection), {"credits", "price_revision", "breakdown", "admission"}
+        )
         self.assertNotIn("user_id", projection)
         self.assertTrue(hide_dollar_estimate({"credit_quote": frozen}, self.user))
         self.assertFalse(hide_dollar_estimate({"credit_quote": frozen}, self.admin))

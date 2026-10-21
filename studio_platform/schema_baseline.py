@@ -108,7 +108,9 @@ def _check(value):
     # PG deparses each term inside parentheses. Reject every other grammar
     # instead of stripping semantically meaningful parentheses/quotes in SQL.
     value = str(value)
-    from .migrations.versions.v20261022_0007_credit_admission import normalize_check as role_check
+    from .migrations.versions.v20261022_0007_credit_admission import (
+        normalize_check as role_check,
+    )
 
     role = role_check(value)
     if role is not None:
@@ -936,7 +938,8 @@ def adopt_credit_admission(connection, *, expected_fingerprint, tenant_id):
         not connection.in_transaction()
         or connection.dialect.name != 'postgresql'
         or not re.fullmatch(r'[a-f0-9]{64}', expected_fingerprint or '')
-        or not isinstance(tenant_id, str) or not 1 <= len(tenant_id) <= 200
+        or not isinstance(tenant_id, str)
+        or not 1 <= len(tenant_id) <= 200
     ):
         raise BaselineError('credit_admission_adoption_requires_verified_transaction')
     connection.exec_driver_sql("SET LOCAL lock_timeout = '5s'")
@@ -946,14 +949,24 @@ def adopt_credit_admission(connection, *, expected_fingerprint, tenant_id):
     before = compare_schema(connection)
     if before['schema_fingerprint'] != expected_fingerprint:
         raise BaselineError('schema_snapshot_changed')
-    if not before['matches'] or before['recorded_revision'] not in LIVE_PAYMENT_REVISIONS:
+    if (
+        not before['matches']
+        or before['recorded_revision'] not in LIVE_PAYMENT_REVISIONS
+    ):
         raise BaselineError('credit_admission_adoption_requires_adopted006')
     if credit_policy(connection, tenant_id)['enabled']:
         raise BaselineError('credit_admission_adoption_requires_charging_off')
-    if connection.execute(select(jobs.c.id).where(or_(
-        jobs.c.status.not_in(('succeeded', 'failed', 'cancelled')),
-        jobs.c.lease_worker_id.is_not(None), jobs.c.lease_expires_at.is_not(None),
-    )).limit(1)).first():
+    if connection.execute(
+        select(jobs.c.id)
+        .where(
+            or_(
+                jobs.c.status.not_in(('succeeded', 'failed', 'cancelled')),
+                jobs.c.lease_worker_id.is_not(None),
+                jobs.c.lease_expires_at.is_not(None),
+            )
+        )
+        .limit(1)
+    ).first():
         raise BaselineError('credit_admission_adoption_requires_quiescence')
     if before['recorded_revision'] == CREDIT_ADMISSION_REVISION:
         return dict(state='already_adopted', before=before, after=before)
@@ -961,7 +974,8 @@ def adopt_credit_admission(connection, *, expected_fingerprint, tenant_id):
 
     config = alembic_config()
     config.attributes.update(
-        verified_baseline_connection=connection, verified_baseline_mode='upgrade',
+        verified_baseline_connection=connection,
+        verified_baseline_mode='upgrade',
         verified_credit_admission_mode=True,
     )
     command.upgrade(config, CREDIT_ADMISSION_REVISION)
@@ -1092,7 +1106,8 @@ def main(argv=None):
                 )
             elif args.command == 'adopt-credit-admission':
                 result = adopt_credit_admission(
-                    connection, expected_fingerprint=args.expected_fingerprint,
+                    connection,
+                    expected_fingerprint=args.expected_fingerprint,
                     tenant_id=settings.tenant_id,
                 )
             else:

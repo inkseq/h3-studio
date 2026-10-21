@@ -8,7 +8,11 @@ never exported. Recovery is an isolated, disabled copy, not automatic failover.
 from __future__ import annotations
 
 from .asset_objects import ASSET_OBJECT_ROLES
-from .schema_version import PAYMENT_REVISION, PAYMENT_REVISIONS, CREDIT_ADMISSION_REVISION
+from .schema_version import (
+    PAYMENT_REVISION,
+    PAYMENT_REVISIONS,
+    CREDIT_ADMISSION_REVISION,
+)
 
 import csv
 from contextlib import closing
@@ -358,7 +362,9 @@ def _export_business_db(snapshot, destination):
     payments_present = payment_present(existing)
     from .credit_admission import sqlite_revision as admission_revision
 
-    payment_revision = admission_revision(snapshot) or sqlite_revision(snapshot) or PAYMENT_REVISION
+    payment_revision = (
+        admission_revision(snapshot) or sqlite_revision(snapshot) or PAYMENT_REVISION
+    )
     _create_business_schema(
         destination,
         include_identity=identity_present,

@@ -1664,9 +1664,16 @@ class Repository:
         if reference_type == "job":
             from .credit_admission import validate
 
-            job = connection.execute(select(jobs).where(
-                jobs.c.id == reference_id, self._scope(jobs, scope),
-            )).mappings().first()
+            job = (
+                connection.execute(
+                    select(jobs).where(
+                        jobs.c.id == reference_id,
+                        self._scope(jobs, scope),
+                    )
+                )
+                .mappings()
+                .first()
+            )
             # Legacy/manual accounting references can predate a job row. They
             # retain enforced USD admission; absence can never confer a role.
             if job is not None:

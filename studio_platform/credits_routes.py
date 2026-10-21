@@ -251,7 +251,9 @@ class CreditAPI:
                 "report_30d": {
                     "captured_credits": _aggregate_integer(captured),
                     "provider_cost_usd": None,
-                    "credit_cost_margin": report(connection, self.settings.tenant_id, self.repo.clock()),
+                    "credit_cost_margin": report(
+                        connection, self.settings.tenant_id, self.repo.clock()
+                    ),
                 },
             }
 

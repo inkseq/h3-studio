@@ -23,7 +23,11 @@ from sqlalchemy.schema import CreateTable
 
 from .migrations.versions import v20261020_0005_stripe_payments as frozen
 from .migrations.versions import v20261021_0006_stripe_live_mode as live_frozen
-from .schema_version import LIVE_PAYMENT_REVISION, LIVE_PAYMENT_REVISIONS, PAYMENT_REVISIONS
+from .schema_version import (
+    LIVE_PAYMENT_REVISION,
+    LIVE_PAYMENT_REVISIONS,
+    PAYMENT_REVISIONS,
+)
 
 PAYMENT_REVISION = frozen.revision
 
