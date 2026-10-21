@@ -611,6 +611,11 @@ class MigrationArtifacts(unittest.TestCase):
             '842aab11c9068281c39c17a999f25191d4a181e6',
             '935bd72d03ed46e2599d75ab6ddbc7923a86c111',
             '751378aad82e1a6d045e638090466b99d76c2015',
+            '498e073113564881a621189c8bb312315d2f4d9b',
+            '5165403eb95966962f659168a50ad239d595c360',
+            'e3a852fe013300dcb468d6f5a9875e183e1109be',
+            '57043af14df1e1db3f1711a33ed172f762fb022d',
+            '3d6355caafdbb8dca6648cdd9b3a04fd9b6dafe8',
         }
         self.assertEqual(
             set(maintenance.RETAINED_DSTACK_HELPER_PAIRS), expected_commits
@@ -638,6 +643,8 @@ class MigrationArtifacts(unittest.TestCase):
         for commit in (
             '935bd72d03ed46e2599d75ab6ddbc7923a86c111',
             '751378aad82e1a6d045e638090466b99d76c2015',
+            '498e073113564881a621189c8bb312315d2f4d9b',
+            '5165403eb95966962f659168a50ad239d595c360',
         ):
             self.assertEqual(
                 maintenance.RETAINED_DSTACK_HELPER_PAIRS[commit],
@@ -655,6 +662,18 @@ class MigrationArtifacts(unittest.TestCase):
                 'fba8d75a6845fe2fe7c78ea120747797b2f57ec80e0c6bc4861a0f6bfda54790',
             ),
         )
+        for commit in (
+            'e3a852fe013300dcb468d6f5a9875e183e1109be',
+            '57043af14df1e1db3f1711a33ed172f762fb022d',
+            '3d6355caafdbb8dca6648cdd9b3a04fd9b6dafe8',
+        ):
+            self.assertEqual(
+                maintenance.RETAINED_DSTACK_HELPER_PAIRS[commit],
+                (
+                    '588fe9b1e68119428a8cc5aa81aa043efb8f40cae6917eb13f873d74d2f0e1a1',
+                    'fba8d75a6845fe2fe7c78ea120747797b2f57ec80e0c6bc4861a0f6bfda54790',
+                ),
+            )
         trusted_path = (
             Path(maintenance.__file__).resolve().with_name('migration_check.py')
         )
@@ -710,12 +729,23 @@ class MigrationArtifacts(unittest.TestCase):
         original = '842aab11c9068281c39c17a999f25191d4a181e6'
         current = '935bd72d03ed46e2599d75ab6ddbc7923a86c111'
         previous = '751378aad82e1a6d045e638090466b99d76c2015'
+        promoted = 'e3a852fe013300dcb468d6f5a9875e183e1109be'
+        paired = '57043af14df1e1db3f1711a33ed172f762fb022d'
+        production = '498e073113564881a621189c8bb312315d2f4d9b'
+        rollback = '5165403eb95966962f659168a50ad239d595c360'
+        staging = '3d6355caafdbb8dca6648cdd9b3a04fd9b6dafe8'
         for commit, pair in (
             ('f' * 40, pairs[original]),
             ('f' * 40, pairs[current]),
             (original, pairs[current]),
             (current, pairs[original]),
             (previous, pairs[original]),
+            ('f' * 40, pairs[promoted]),
+            (promoted, pairs[production]),
+            (paired, pairs[rollback]),
+            (production, pairs[promoted]),
+            (rollback, pairs[paired]),
+            (staging, pairs[production]),
         ):
             (self.artifact / maintenance.MANIFEST).write_text(
                 json.dumps({'commit': commit, 'dstack': {}})
