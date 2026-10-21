@@ -75,6 +75,29 @@ def retention_intent(root, value, *, completed=False):
         'state': 'completed' if completed else 'in_progress'}, sort_keys=True) + '\n').encode())
 
 
+def frontend_preflight(root, value, api):
+    """Refuse incompatible static bytes before acquiring a retention pin.
+
+    This is only an early refusal. The existing deployer still verifies the
+    archive, approved/running image and activation probe before changing UI.
+    """
+    if value['kind'] != 'frontend':
+        return
+    raw = read_object(api, 'releases/'+value['commit']+'/frontend/frontend-manifest.json', 256*1024)
+    release.require(release_candidate.digest(raw) == value['manifests']['frontend'], 'candidate_manifest_changed')
+    frontend = json.loads(raw)
+    release.require(frontend.get('commit') == value['commit'], 'candidate_manifest_changed')
+    state = release._protected_json(root/'release-state.json')
+    current = state.get('current')
+    release.require(isinstance(current, str) and release.SHA.fullmatch(current)
+        and state.get('pending') is None and state.get('status') in {'app_ready', 'rolled_back_app_only'},
+        'current_application_requires_reconciliation')
+    directory = root/'releases'/current
+    release.approved_manifest(root, directory, current)
+    backend = release._protected_json(directory/'release-manifest.json', maximum=16384)
+    frontend_release.compatible(frontend, backend)
+
+
 def run(target, commit, *, root=release.ROOT, api=None):
     sealed = deployment_target.host(root)
     release.require(target in {'staging', 'production'} and sealed['name'] == target, 'environment_release_wrong_host')
@@ -98,6 +121,7 @@ def run(target, commit, *, root=release.ROOT, api=None):
     with (root/'release.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         approvals(root, value, api)
+        frontend_preflight(root, value, api)
         retention_intent(root, value)
     if value['kind'] == 'platform':
         deploy_approved.deploy(commit, root=root)
@@ -116,8 +140,16 @@ def main(argv=None):
         release.require(len(argv) == 2, 'environment_and_commit_required')
         print(json.dumps(run(*argv)))
         return 0
-    except Exception:
-        print('Environment release incomplete; preserve and inspect the original candidate/command', file=sys.stderr)
+    except Exception as error:
+        # Closed diagnostics only; never serialize provider errors, bodies or secrets.
+        safe = {'frontend_requires_matching_deployed_api', 'candidate_manifest_changed',
+            'another_environment_release_requires_reconciliation', 'retention_promotion_intent_unknown',
+            'current_application_requires_reconciliation', 'migration_root_helpers_need_reviewed_update',
+            'environment_release_wrong_host', 'staging_target_invalid', 'invalid_commit',
+            'independent_promotion_approval_required'}
+        code = str(error) if isinstance(error, release.ReleaseError) and str(error) in safe else (
+            'environment_release_lock_busy' if isinstance(error, BlockingIOError) else 'environment_release_failed')
+        print(code+'; preserve and inspect the original candidate/command', file=sys.stderr)
         return 1
 
 

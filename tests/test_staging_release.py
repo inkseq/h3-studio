@@ -224,6 +224,122 @@ class TargetTests(unittest.TestCase):
 
 
 class CandidateTests(unittest.TestCase):
+    def test_frontend_mismatch_never_writes_an_active_intent_or_calls_deploy(self):
+        fake_lock = types.SimpleNamespace(LOCK_EX=1, LOCK_NB=2, flock=Mock())
+        with tempfile.TemporaryDirectory() as name:
+            root = Path(name)
+            with (
+                patch.dict(sys.modules, {'fcntl': fake_lock}),
+                patch.object(
+                    host.deployment_target,
+                    'host',
+                    return_value=target.profile('staging'),
+                ),
+                patch.object(host, 'publication', return_value=publication('frontend')),
+                patch.object(host, 'approvals'),
+                patch.object(
+                    host,
+                    'frontend_preflight',
+                    side_effect=host.release.ReleaseError(
+                        'frontend_requires_matching_deployed_api'
+                    ),
+                ),
+                patch.object(host.deploy_frontend, 'deploy') as deploy,
+                patch.object(host, 'retention_intent') as pin,
+                self.assertRaisesRegex(
+                    host.release.ReleaseError, 'matching_deployed_api'
+                ),
+            ):
+                host.run('staging', COMMIT, root=root, api=Mock())
+            deploy.assert_not_called()
+            pin.assert_not_called()
+            self.assertFalse((root / 'environment-release-intent.json').exists())
+
+    def test_frontend_preflight_pins_manifest_and_checks_approved_current_contract(
+        self,
+    ):
+        current = 'b' * 40
+        value = publication('frontend')
+        frontend = {
+            'commit': COMMIT,
+            'api_compatibility': 'c' * 64,
+            'api_contract': 'sixnine-web-v1',
+        }
+        raw = candidate.encode(frontend)
+        value['manifests']['frontend'] = candidate.digest(raw)
+        backend = {
+            'contracts': {
+                'version': 1,
+                'api_compatibility': 'd' * 64,
+                'worker_compatibility': 'e' * 64,
+                'frontend_contract': 'sixnine-web-v1',
+            }
+        }
+        root = Path('synthetic-root')
+        with (
+            patch.object(host, 'read_object', return_value=raw),
+            patch.object(
+                host.release,
+                '_protected_json',
+                side_effect=[
+                    {'current': current, 'pending': None, 'status': 'app_ready'},
+                    backend,
+                ],
+            ),
+            patch.object(host.release, 'approved_manifest') as approved,
+            self.assertRaisesRegex(host.release.ReleaseError, 'matching_deployed_api'),
+        ):
+            host.frontend_preflight(root, value, Mock())
+        approved.assert_called_once_with(root, root / 'releases' / current, current)
+        backend['contracts']['api_compatibility'] = frontend['api_compatibility']
+        with (
+            patch.object(host, 'read_object', return_value=raw),
+            patch.object(
+                host.release,
+                '_protected_json',
+                side_effect=[
+                    {'current': current, 'pending': None, 'status': 'app_ready'},
+                    backend,
+                ],
+            ),
+            patch.object(host.release, 'approved_manifest'),
+        ):
+            host.frontend_preflight(root, value, Mock())
+        value['manifests']['frontend'] = 'f' * 64
+        with (
+            patch.object(host, 'read_object', return_value=raw),
+            patch.object(host.release, '_protected_json') as read_state,
+            self.assertRaisesRegex(
+                host.release.ReleaseError, 'candidate_manifest_changed'
+            ),
+        ):
+            host.frontend_preflight(root, value, Mock())
+        read_state.assert_not_called()
+
+    def test_cli_reports_closed_refusal_without_exposing_arbitrary_errors(self):
+        for error, wanted in (
+            (
+                host.release.ReleaseError('frontend_requires_matching_deployed_api'),
+                'frontend_requires_matching_deployed_api',
+            ),
+            (
+                host.release.ReleaseError(
+                    'another_environment_release_requires_reconciliation'
+                ),
+                'another_environment_release_requires_reconciliation',
+            ),
+            (BlockingIOError('private-path'), 'environment_release_lock_busy'),
+            (RuntimeError('private-provider-payload'), 'environment_release_failed'),
+        ):
+            output = io.StringIO()
+            with (
+                patch.object(host, 'run', side_effect=error),
+                patch('sys.stderr', output),
+            ):
+                self.assertEqual(host.main(['staging', COMMIT]), 1)
+            self.assertIn(wanted, output.getvalue())
+            self.assertNotIn('private-', output.getvalue())
+
     def test_acceptance_binds_complete_tuple_and_all_required_evidence(self):
         value = publication()
         accepted = proof(value)
@@ -397,7 +513,14 @@ class MainAndRehearsalTests(unittest.TestCase):
             ('yingxu/src/App.jsx', 'stage-frontend'),
             ('README.md', 'check'),
         ):
-            with patch.object(ci_changes, 'git_changes', return_value=[('M', path)]):
+            with (
+                patch.object(ci_changes, 'git_changes', return_value=[('M', path)]),
+                patch.object(
+                    ci_changes,
+                    'staging_platform_baseline',
+                    return_value={'commit': 'b' * 40, 'run_id': 1, 'run_attempt': 1},
+                ),
+            ):
                 result = ci_changes.plan(
                     'push', {'before': 'b' * 40}, COMMIT, 'refs/heads/main', Path('.')
                 )

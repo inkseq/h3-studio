@@ -1,6 +1,8 @@
 """CI scope must fail closed; fixtures never invoke GitHub, Docker or a cloud."""
 
 from pathlib import Path
+import io
+import json
 import subprocess
 import tempfile
 import unittest
@@ -102,8 +104,17 @@ class ChangeClassificationTests(unittest.TestCase):
                 )
 
     def test_docs_only_push_keeps_the_stable_test_aggregator(self):
-        with patch.object(
-            ci, "git_changes", return_value=[("M", "AGENTS.md"), ("M", "WORKFLOW.md")]
+        with (
+            patch.object(
+                ci,
+                "git_changes",
+                return_value=[("M", "AGENTS.md"), ("M", "WORKFLOW.md")],
+            ),
+            patch.object(
+                ci,
+                "staging_platform_baseline",
+                return_value={"commit": BASE, "run_id": 1, "run_attempt": 1},
+            ),
         ):
             result = ci.plan("push", {"before": BASE}, SHA, MAIN, Path("."))
         self.assertEqual(result["category"], "docs")
@@ -282,6 +293,247 @@ class ChangeClassificationTests(unittest.TestCase):
             )
         read.assert_called_once_with(Path("fixture"), BASE, SHA)
         self.assertEqual(result["category"], "docs")
+
+
+class StagingBaselineTests(unittest.TestCase):
+    def run_record(self, run_id=7, **changes):
+        return dict(
+            id=run_id,
+            run_attempt=2,
+            repository={"full_name": ci.REPOSITORY},
+            path=ci.WORKFLOW_PATH,
+            event="push",
+            head_branch="main",
+            head_sha=BASE,
+            status="completed",
+            conclusion="success",
+            **changes,
+        )
+
+    def jobs(self, run_id=7, *, containers="success", deploy="success"):
+        return {
+            "total_count": 2,
+            "jobs": [
+                dict(
+                    run_id=run_id,
+                    head_sha=BASE,
+                    run_attempt=2,
+                    name=name,
+                    status="completed",
+                    conclusion=conclusion,
+                )
+                for name, conclusion in (
+                    ("containers", containers),
+                    ("deploy-staging-aws", deploy),
+                )
+            ],
+        }
+
+    def test_only_same_attempt_successful_platform_deploy_is_a_baseline(self):
+        requested = []
+
+        def read(path):
+            requested.append(path)
+            if "/workflows/" in path:
+                return {"workflow_runs": [self.run_record(i) for i in (9, 8, 7)]}
+            if "/runs/9/" in path:  # Green docs run, no deployment.
+                return self.jobs(9, containers="skipped", deploy="skipped")
+            if "/runs/8/" in path:  # Green frontend deployment, no platform.
+                return self.jobs(8, containers="skipped")
+            return self.jobs()
+
+        with patch.object(ci, "git_ancestor") as ancestor:
+            result = ci.staging_platform_baseline(Path("fixture"), SHA, read_json=read)
+        self.assertEqual(result, {"commit": BASE, "run_id": 7, "run_attempt": 2})
+        ancestor.assert_called_once_with(Path("fixture"), BASE, SHA)
+        self.assertTrue(all("/attempts/2/jobs?" in p for p in requested[1:]))
+        self.assertTrue(
+            all(p.startswith("/repos/inkseq/h3-studio/actions/") for p in requested)
+        )
+
+    def test_cross_repository_workflow_and_job_identity_cannot_prove_a_deploy(self):
+        cases = [
+            ({"repository": {"full_name": "other/repo"}}, None),
+            ({"path": ".github/workflows/other.yml"}, None),
+            ({"head_branch": "feature"}, None),
+            ({"event": "pull_request"}, None),
+            ({"repository": None}, None),
+            ({}, {"run_id": 8}),
+            ({}, {"head_sha": SHA}),
+            ({}, {"run_attempt": 1}),
+            ({}, {"name": {}}),
+        ]
+        for run_change, job_change in cases:
+            record = self.run_record()
+            record.update(run_change)
+            jobs = self.jobs()
+            if job_change:
+                jobs["jobs"][0].update(job_change)
+            with (
+                self.subTest(run=run_change, job=job_change),
+                patch.object(ci, "git_ancestor") as ancestor,
+                self.assertRaises(ValueError),
+            ):
+                ci.staging_platform_baseline(
+                    Path("."),
+                    SHA,
+                    read_json=lambda path: (
+                        {"workflow_runs": [record]} if "/workflows/" in path else jobs
+                    ),
+                )
+            ancestor.assert_not_called()
+
+    def test_failed_deploy_incomplete_jobs_and_bounded_history_are_not_success(self):
+        for jobs in (
+            self.jobs(deploy="failure"),
+            self.jobs(deploy="cancelled"),
+            dict(self.jobs(), total_count=101),
+        ):
+            with self.subTest(jobs=jobs), self.assertRaises(ValueError):
+                ci.staging_platform_baseline(
+                    Path("."),
+                    SHA,
+                    read_json=lambda path: (
+                        {"workflow_runs": [self.run_record()]}
+                        if "/workflows/" in path
+                        else jobs
+                    ),
+                )
+        pages = []
+
+        def read(path):
+            if "/workflows/" in path:
+                pages.append(path)
+                return {
+                    "workflow_runs": [
+                        self.run_record(i + 1) for i in range(ci.RUNS_PER_PAGE)
+                    ]
+                }
+            ident = int(path.split("/runs/", 1)[1].split("/", 1)[0])
+            return self.jobs(ident, containers="skipped")
+
+        with self.assertRaises(ValueError):
+            ci.staging_platform_baseline(Path("."), SHA, read_json=read)
+        self.assertEqual(len(pages), ci.MAX_RUN_PAGES)
+
+    def test_runtime_from_cancelled_predecessor_forces_full_main_platform(self):
+        with (
+            patch.object(
+                ci,
+                "staging_platform_baseline",
+                return_value={"commit": BASE, "run_id": 7, "run_attempt": 2},
+            ),
+            patch.object(
+                ci,
+                "git_changes",
+                side_effect=[
+                    [("M", "yingxu/src/App.jsx")],
+                    [("M", "studio_platform/frontend.py"), ("M", "yingxu/src/App.jsx")],
+                ],
+            ) as read,
+        ):
+            result = ci.plan("push", {"before": "c" * 40}, SHA, MAIN, Path("."))
+        self.assertEqual(result["action"], "stage-platform")
+        self.assertEqual(result["reason"], "unshipped-platform-changes")
+        self.assertTrue(
+            all(result[g] for g in ("python", "postgres", "containers", "frontend"))
+        )
+        self.assertEqual(read.call_args_list[-1].args, (Path("."), BASE, SHA))
+        self.assertEqual(result["staging_platform_baseline"]["run_attempt"], 2)
+
+    def test_known_runtime_keeps_frontend_docs_fast_unknown_history_never_does(self):
+        for changes, action in (
+            ([("M", "README.md")], "check"),
+            ([("M", "yingxu/src/App.jsx")], "stage-frontend"),
+        ):
+            with (
+                self.subTest(changes=changes),
+                patch.object(
+                    ci,
+                    "staging_platform_baseline",
+                    return_value={"commit": BASE, "run_id": 7, "run_attempt": 2},
+                ),
+                patch.object(ci, "git_changes", return_value=changes),
+            ):
+                known = ci.plan("push", {"before": BASE}, SHA, MAIN, Path("."))
+            self.assertEqual(known["action"], action)
+            self.assertFalse(known["containers"])
+            for error in (
+                ValueError("missing"),
+                OSError("unavailable"),
+                subprocess.CalledProcessError(1, "git"),
+            ):
+                with (
+                    patch.object(ci, "staging_platform_baseline", side_effect=error),
+                    patch.object(ci, "git_changes", return_value=changes),
+                ):
+                    unknown = ci.plan("push", {"before": BASE}, SHA, MAIN, Path("."))
+                self.assertEqual(unknown["action"], "stage-platform")
+                self.assertTrue(unknown["macos_helper"])
+
+    def test_pr_never_reads_deployment_history(self):
+        with (
+            patch.object(
+                ci,
+                "staging_platform_baseline",
+                side_effect=AssertionError("no API on PR"),
+            ) as read,
+            patch.object(ci, "git_changes", return_value=[("M", "README.md")]),
+        ):
+            result = ci.plan(
+                "pull_request",
+                {"pull_request": {"base": {"sha": BASE}}},
+                SHA,
+                "refs/pull/1/merge",
+                Path("."),
+            )
+        self.assertFalse(result["containers"])
+        read.assert_not_called()
+
+    def test_github_reader_does_not_follow_redirect_or_expose_token_errors(self):
+        class Response(io.BytesIO):
+            status = 200
+            url = "https://api.github.com/repos/inkseq/h3-studio/actions/test"
+
+        with (
+            patch.dict(
+                ci.os.environ,
+                {
+                    "GITHUB_REPOSITORY": ci.REPOSITORY,
+                    "GITHUB_TOKEN": "synthetic-runner-token",
+                },
+            ),
+            patch.object(ci.urllib.request, "build_opener") as opener,
+        ):
+            opener.return_value.open.return_value = Response(
+                json.dumps({"jobs": []}).encode()
+            )
+            self.assertEqual(
+                ci.github_json("/repos/inkseq/h3-studio/actions/test"), {"jobs": []}
+            )
+            request = opener.return_value.open.call_args.args[0]
+            self.assertEqual(request.full_url, Response.url)
+            self.assertEqual(opener.return_value.open.call_args.kwargs["timeout"], 5)
+            response = Response(b"{}")
+            response.url = "https://other.invalid/"
+            opener.return_value.open.return_value = response
+            with self.assertRaisesRegex(ValueError, "^staging_baseline_unavailable$"):
+                ci.github_json("/repos/inkseq/h3-studio/actions/test")
+        with self.assertRaisesRegex(ValueError, "redirect_refused"):
+            ci.NoRedirect().redirect_request(
+                None, None, 302, "", {}, "https://other.invalid/"
+            )
+
+    def test_changes_job_has_actions_read_only_and_scoped_token(self):
+        workflow = (
+            Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml"
+        ).read_text()
+        changes = workflow.split("\n  changes:\n", 1)[1].split("\n  macos-helper:", 1)[
+            0
+        ]
+        self.assertIn("permissions: {contents: read, actions: read}", changes)
+        self.assertIn("GITHUB_TOKEN: ${{ github.token }}", changes)
+        self.assertNotIn("id-token: write", changes)
 
 
 class DispatchTests(unittest.TestCase):
