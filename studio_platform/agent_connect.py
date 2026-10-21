@@ -526,6 +526,10 @@ class AgentConnect(AgentManagementMixin):
 
         state = read_doc(conn, self.tenant, row["owner"], "connection_state", row["id"])
         claim = state["payload"].get("claimed_telegram_user") if state else None
+        if claim is not None:
+            # Original atomic exchange time is the authority, including for
+            # existing control payloads that predate this public projection.
+            claim = {**claim, "claimed_at": row["claimed_at"]}
         return {**value, "claimed_telegram_user": claim}
 
     def list(self, principal, *, limit=50, offset=0):

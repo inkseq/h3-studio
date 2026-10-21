@@ -593,10 +593,14 @@ class AgentConnectTests(LedgerCase):
         token, _, body = self.telegram_material(grant)
         exchanged = self.service.exchange(**body)
         current = self.service.get(self.principal, grant["connection"]["id"])
+        expected_claim = {
+            **body["telegram_user"],
+            "claimed_at": exchanged["connection"]["claimed_at"],
+        }
         self.assertEqual(current["client"], "telegram")
-        self.assertEqual(current["claimed_telegram_user"], body["telegram_user"])
+        self.assertEqual(current["claimed_telegram_user"], expected_claim)
         self.assertEqual(
-            exchanged["connection"]["claimed_telegram_user"], body["telegram_user"]
+            exchanged["connection"]["claimed_telegram_user"], expected_claim
         )
         self.assertEqual(current["authorization"], grant["connection"]["authorization"])
         self.assertEqual(self.auth.bearer(token).owner, "superdan")
@@ -605,7 +609,7 @@ class AgentConnectTests(LedgerCase):
             self.service.list(self.principal)["connections"][0][
                 "claimed_telegram_user"
             ],
-            body["telegram_user"],
+            expected_claim,
         )
 
     def test_telegram_recovery_requires_same_claim_nonce_and_saved_material(self):
@@ -613,6 +617,10 @@ class AgentConnectTests(LedgerCase):
         grant = self.telegram_issue(telegram_nonce=nonce)
         _, verifier, body = self.telegram_material(grant, nonce=nonce)
         first = self.service.exchange(**body)
+        expected_claim = {
+            **body["telegram_user"],
+            "claimed_at": first["connection"]["claimed_at"],
+        }
         for changes, error in (
             ({"telegram_user": {"id": "999"}}, "connection_telegram_user_mismatch"),
             (
@@ -630,7 +638,7 @@ class AgentConnectTests(LedgerCase):
         self.assertTrue(recovered["recovered"])
         self.assertEqual(recovered["key"]["id"], first["key"]["id"])
         self.assertEqual(
-            recovered["connection"]["claimed_telegram_user"], body["telegram_user"]
+            recovered["connection"]["claimed_telegram_user"], expected_claim
         )
         self.assertEqual(self.count(personal_keys), 1)
 
@@ -687,7 +695,8 @@ class AgentConnectTests(LedgerCase):
         self.assertEqual(len(winners), 1)
         _, verifier, body, result = winners[0]
         self.assertEqual(
-            result["connection"]["claimed_telegram_user"], body["telegram_user"]
+            result["connection"]["claimed_telegram_user"],
+            {**body["telegram_user"], "claimed_at": result["connection"]["claimed_at"]},
         )
         recovered = self.service.exchange(
             **(body | {"source": "recovery"}), recovery_verifier=verifier
@@ -729,6 +738,7 @@ class AgentConnectTests(LedgerCase):
         self.service.exchange(**body)
         ident = grant["connection"]["id"]
         before = self.service.get(self.principal, ident)
+        expected_claim = {**body["telegram_user"], "claimed_at": before["claimed_at"]}
         paused = self.service.change_connection(
             self.principal,
             ident,
@@ -736,18 +746,77 @@ class AgentConnectTests(LedgerCase):
             "pause-telegram",
         )
         self.assertTrue(paused["paused"])
-        self.assertEqual(paused["claimed_telegram_user"], body["telegram_user"])
+        self.assertEqual(paused["claimed_telegram_user"], expected_claim)
         capped = self.service.change_connection(
             self.principal,
             ident,
             {"expected_version": paused["state_version"], "daily_limit_microusd": 10},
             "cap-telegram",
         )
-        self.assertEqual(capped["claimed_telegram_user"], body["telegram_user"])
+        self.assertEqual(capped["claimed_telegram_user"], expected_claim)
         self.service.revoke(self.principal, ident)
         ended = self.service.get(self.principal, ident)
         self.assertEqual(ended["status"], "revoked")
-        self.assertEqual(ended["claimed_telegram_user"], body["telegram_user"])
+        self.assertEqual(ended["claimed_telegram_user"], expected_claim)
+
+    def test_telegram_claim_time_projects_original_row_without_backfill(self):
+        from studio_platform.agent_management import read_doc
+
+        grant = self.telegram_issue()
+        _, verifier, body = self.telegram_material(grant)
+        first = self.service.exchange(**body)
+        ident = grant["connection"]["id"]
+        with self.repo.engine.connect() as conn:
+            row = (
+                conn.execute(select(connections).where(connections.c.id == ident))
+                .mappings()
+                .one()
+            )
+            stored_before = read_doc(
+                conn,
+                self.service.tenant,
+                self.principal.owner,
+                "connection_state",
+                ident,
+            )
+        original_time = row["claimed_at"]
+        self.assertEqual(
+            first["connection"]["claimed_telegram_user"]["claimed_at"], original_time
+        )
+        self.assertNotIn(
+            "claimed_at", stored_before["payload"]["claimed_telegram_user"]
+        )
+        self.now += 30
+        recovered = self.service.exchange(**body, recovery_verifier=verifier)
+        self.assertEqual(
+            recovered["connection"]["claimed_telegram_user"]["claimed_at"],
+            original_time,
+        )
+        current = self.service.get(self.principal, ident)
+        paused = self.service.change_connection(
+            self.principal,
+            ident,
+            {"expected_version": current["state_version"], "paused": True},
+            "pause-claim-time",
+        )
+        self.assertEqual(paused["claimed_telegram_user"]["claimed_at"], original_time)
+        with self.repo.engine.connect() as conn:
+            stored_after = read_doc(
+                conn,
+                self.service.tenant,
+                self.principal.owner,
+                "connection_state",
+                ident,
+            )
+            current_time = conn.execute(
+                select(connections.c.claimed_at).where(connections.c.id == ident)
+            ).scalar_one()
+        self.assertEqual(current_time, original_time)
+        self.assertEqual(
+            stored_after["payload"]["claimed_telegram_user"],
+            stored_before["payload"]["claimed_telegram_user"],
+        )
+        self.assertNotIn("claimed_at", stored_after["payload"]["claimed_telegram_user"])
 
 
 if __name__ == "__main__":
