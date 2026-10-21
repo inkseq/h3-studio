@@ -41,9 +41,22 @@ export function hostedSignInEnabled(auth) {
 }
 
 // Same-origin relative path only; the backend checks it again.
-export function hostedSignInUrl(returnTo = '/') {
+// `hint` opens the hosted page on sign-up or sign-in (#395); omitted, WorkOS decides.
+export function hostedSignInUrl(returnTo = '/', hint) {
   const path = typeof returnTo === 'string' && /^\/(?!\/)/.test(returnTo) ? returnTo : '/';
-  return '/api/auth/workos/start?return_to=' + encodeURIComponent(path);
+  const screen = hint === 'sign-up' || hint === 'sign-in' ? '&screen_hint=' + hint : '';
+  return '/api/auth/workos/start?return_to=' + encodeURIComponent(path) + screen;
+}
+
+// After sign-out the server may return the hosted provider's logout page, which ends the
+// WorkOS session too, so the next sign-in asks for an account again (#395). Only https.
+export function providerLogoutUrl(value) {
+  try {
+    const url = new URL(value?.logout_url);
+    return url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 // WorkOS users have an internal owner id (u_<hex>) as username; never show that to people.
