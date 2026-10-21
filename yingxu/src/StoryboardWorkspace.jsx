@@ -813,6 +813,17 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
           }
           style={{ height: theater ? 130 : dockMini ? 64 : dockLayout.size }}
         >
+          {!theater && (
+            <button
+              type="button"
+              className="dock-mini-toggle"
+              aria-label={t(dockMini ? 'storyboard.dockExpand' : 'storyboard.dockCollapse')}
+              title={t(dockMini ? 'storyboard.dockExpand' : 'storyboard.dockCollapse')}
+              onClick={() => setDockMini((v) => !v)}
+            >
+              {dockMini ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
+          )}
           {!theater && !dockMini && (
             <div className="dock-screen">
               <Screen player={player} />
@@ -836,16 +847,6 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
               >
                 {theater ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
               </button>
-              {!theater && (
-                <button
-                  className="small ghost dock-mini-toggle"
-                  aria-label={t(dockMini ? 'storyboard.dockExpand' : 'storyboard.dockCollapse')}
-                  title={t(dockMini ? 'storyboard.dockExpand' : 'storyboard.dockCollapse')}
-                  onClick={() => setDockMini((v) => !v)}
-                >
-                  {dockMini ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                </button>
-              )}
             </div>
             <Timeline
               player={player}

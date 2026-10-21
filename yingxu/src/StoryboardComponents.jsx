@@ -1592,102 +1592,6 @@ function Slot({ id, label, hint, children, onClear, onPick, onFiles, className =
   );
 }
 
-function SaveFrame({ shot, version, onDone }) {
-  const { t: tr, locale } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
-  const { state, dispatch, db } = useStore(),
-    sugg = shotProfiles(shot)
-      .map((x) => ({ ...x, p: db.profile(x.id) }))
-      .filter((x) => x.p);
-  const [t, setT] = useState(0),
-    [target, setTarget] = useState(
-      sugg[0] ? `${sugg[0].id}|${sugg[0].variant || sugg[0].p.def}` : '',
-    ),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState('');
-  const max = version.duration || shot.duration;
-  async function save() {
-    setBusy(true);
-    setError('');
-    try {
-      const [pid, vid] = target ? target.split('|') : [null, null];
-      const receipt = await dispatch({
-        type: 'saveFrame',
-        shot: shot.id,
-        version: version.id,
-        artifactId: version.artifactId,
-        t,
-        pid,
-        vid,
-      });
-      if (!receipt || receipt?.ok === false) {
-        setError(receipt?.error || tr('storyboard.detail43'));
-        return;
-      }
-      onDone(pid ? tr('storyboard.detail44') : tr('storyboard.detail45'));
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <div className="saveframe">
-      <b>{tr('storyboard.copy78')}</b>
-      <StoryboardVideo
-        asset={version.asset || version}
-        controls
-        onTimeUpdate={(event) => setT(Number(event.currentTarget.currentTime.toFixed(3)))}
-      />
-      <label className="field">
-        <span>{tr('storyboard.copy79')}</span>
-        <input
-          type="number"
-          min={0}
-          max={max}
-          step={0.001}
-          value={t}
-          onChange={(event) => setT(Number(event.target.value))}
-        />
-      </label>
-      <select
-        aria-label={tr('storyboard.detail76')}
-        value={target}
-        onChange={(event) => setTarget(event.target.value)}
-      >
-        <option value="">{tr('storyboard.copy80')}</option>
-        {sugg.map((x) => (
-          <option key={x.id} value={`${x.id}|${x.variant || x.p.def}`}>
-            {tr('storyboard.mixed19', {
-              profile: x.p.name,
-              version: variantOf(x.p, x.variant)?.name,
-            })}
-          </option>
-        ))}
-        {state.profiles.map((p) => (
-          <optgroup key={p.id} label={TYPE_LABEL[p.type] + ' · ' + p.name}>
-            {p.variants.map((v) => (
-              <option key={v.id} value={`${p.id}|${v.id}`}>
-                {p.name} · {v.name}
-              </option>
-            ))}
-          </optgroup>
-        ))}
-      </select>
-      {error && (
-        <p role="alert" className="warn">
-          {error}
-        </p>
-      )}
-      <button
-        className="primary small"
-        disabled={busy || !version.artifactId || !Number.isFinite(t) || t < 0 || t > max}
-        onClick={save}
-      >
-        {busy ? tr('storyboard.detail46') : tr('storyboard.detail47')}
-      </button>
-    </div>
-  );
-}
-
 function growTextarea(node) {
   node.style.height = 'auto';
   node.style.height = Math.min(node.scrollHeight + 2, 480) + 'px';
@@ -1836,32 +1740,46 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
               </button>
             )}
         </div>
-        {['done', 'succeeded'].includes(viewing?.status) &&
-          (saving ? (
-            <SaveFrame
-              shot={shot}
-              version={viewing}
-              onDone={(t) => {
-                setSaving(false);
-                setMsg(t);
+        {['done', 'succeeded'].includes(viewing?.status) && (
+          <div className="row tight">
+            <StoryboardDownloads version={viewing} title={shot.title} />
+            <button
+              className="small"
+              disabled={saving}
+              title={tr('storyboard.saveFrameHint')}
+              onClick={() => {
+                // Save the frame on screen right away, in the background (owner, 2026-10-22).
+                const node = mediaRef.current?.querySelector('video');
+                node?.pause();
+                const at = Number((node?.currentTime || 0).toFixed(3));
+                setSaving(true);
+                setMsg(tr('storyboard.savingFrame', { seconds: at.toFixed(2) }));
+                Promise.resolve(
+                  dispatch({
+                    type: 'saveFrame',
+                    shot: shot.id,
+                    version: viewing.id,
+                    artifactId: viewing.artifactId,
+                    t: at,
+                  }),
+                )
+                  .then((receipt) =>
+                    setMsg(
+                      !receipt || receipt.ok === false
+                        ? receipt?.error || tr('storyboard.detail43')
+                        : tr('storyboard.frameSaved', { seconds: at.toFixed(2) }),
+                    ),
+                  )
+                  .catch((error) => setMsg(error?.message || tr('storyboard.detail43')))
+                  .finally(() => setSaving(false));
               }}
-            />
-          ) : (
-            <div className="row tight">
-              <StoryboardDownloads version={viewing} title={shot.title} />
-              <button
-                className="small"
-                onClick={() => {
-                  setSaving(true);
-                  setMsg('');
-                }}
-              >
-                <Pin size={14} />
-                {tr('storyboard.copy81')}
-              </button>
-              {msg && <small className="okmsg">{msg}</small>}
-            </div>
-          ))}
+            >
+              <Pin size={14} />
+              {tr('storyboard.copy81')}
+            </button>
+            {msg && <small className="okmsg">{msg}</small>}
+          </div>
+        )}
 
         {viewing?.id === shot.chosen && ['done', 'succeeded'].includes(viewing?.status) && (
           <ShotTrim shotId={shot.id} mediaRef={mediaRef} />
@@ -2470,8 +2388,51 @@ export function Timeline({ player, selectedId, onPick, chapterStarts }) {
     setT(seg.start);
     onPick?.(seg.shot.id);
   };
+  // A thin bar above the strip: press and drag to scrub to any moment (owner, 2026-10-22).
+  const scrub = (event) => {
+    if (!total) return;
+    const el = event.currentTarget,
+      r = el.getBoundingClientRect();
+    const at = (x) => Math.max(0, Math.min(total, ((x - r.left) / r.width) * total));
+    el.setPointerCapture(event.pointerId);
+    setT(at(event.clientX));
+    const move = (e) => setT(at(e.clientX));
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  };
   return (
     <div className="timeline">
+      <div
+        className="timeline-scrub"
+        role="slider"
+        tabIndex={0}
+        aria-label={tr('storyboard.scrub')}
+        aria-valuemin={0}
+        aria-valuemax={Math.round(total)}
+        aria-valuenow={Math.round(t)}
+        onPointerDown={scrub}
+        onKeyDown={(event) => {
+          const step = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0;
+          if (!step) return;
+          event.preventDefault();
+          setT(Math.max(0, Math.min(total, t + step)));
+        }}
+      >
+        <span
+          className="timeline-scrub-fill"
+          style={{ width: `${total ? (t / total) * 100 : 0}%` }}
+        />
+        <span
+          className="timeline-scrub-knob"
+          style={{ left: `${total ? (t / total) * 100 : 0}%` }}
+        />
+      </div>
       <div className="track video">
         {segs.map((seg, index) => (
           <Segment
