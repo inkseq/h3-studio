@@ -392,3 +392,167 @@
     display: none;
   }
 }
+
+/* Sound lane (#408): blocks share the clip track's scale and scroll with it. */
+.film-tracks-scroll {
+  overflow-x: auto;
+  padding-bottom: 6px;
+  overscroll-behavior-x: contain;
+}
+.film-editor-tracks > .film-tracks-scroll > .film-track:first-child {
+  overflow: visible;
+  width: max-content;
+  min-width: 100%;
+}
+.film-audio-lane {
+  position: relative;
+  min-width: 100%;
+  margin-top: 6px;
+  border: 1px dashed var(--line-2, var(--line));
+  border-radius: 10px;
+}
+.film-audio-empty {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.film-audio-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 26px;
+}
+.film-audio {
+  position: absolute;
+  top: 0;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--accent) 22%, var(--surface-2, var(--surface)));
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  color: var(--ink);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  overflow: hidden;
+}
+.film-audio.generated {
+  background: color-mix(in srgb, #74adff 18%, var(--surface-2, var(--surface)));
+  border-color: color-mix(in srgb, #74adff 50%, transparent);
+  cursor: pointer;
+}
+.film-audio.muted {
+  opacity: 0.45;
+}
+.film-audio.selected {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
+.film-audio-label {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.film-audio-trim {
+  flex: none;
+  width: 8px;
+  align-self: stretch;
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+  cursor: ew-resize;
+}
+.film-audio-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-top: 8px;
+  font-size: 12px;
+}
+.film-audio-add {
+  position: relative;
+}
+.film-audio-add > button,
+.film-audio-controls button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.film-audio-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 5;
+  min-width: 200px;
+  max-height: 260px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--line-2, var(--line));
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+}
+.film-audio-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-start;
+  border: 0;
+  background: none;
+  text-align: left;
+  padding: 7px 10px;
+}
+.film-audio-menu button:hover {
+  background: var(--surface-3, var(--surface-2));
+}
+.film-audio-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.film-audio-controls label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.film-audio-controls input[type='range'] {
+  width: 120px;
+  accent-color: var(--accent);
+}
+.film-clip-sound {
+  position: absolute;
+  right: 52px;
+  bottom: 6px;
+  z-index: 1;
+  padding: 2px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.film-clip-sound.on {
+  color: #74adff;
+}
+.film-clip-sound:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+@media (pointer: coarse) {
+  .film-audio-trim {
+    width: 16px;
+  }
+}

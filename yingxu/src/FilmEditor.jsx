@@ -1,7 +1,7 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
 import React, { useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Player } from '@remotion/player';
-import { AbsoluteFill, Html5Video, Sequence } from 'remotion';
+import { AbsoluteFill, Html5Audio, Html5Video, Sequence } from 'remotion';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -11,10 +11,11 @@ import {
   Eye,
   EyeOff,
   GripVertical,
-  Mic,
   Pause,
   Play,
   Scissors,
+  Volume2,
+  VolumeX,
   X,
 } from 'lucide-react';
 import { store } from './store.js';
@@ -30,6 +31,18 @@ import {
   snap,
   trimClip,
 } from './film-edit-model.js';
+import {
+  addAudioTrack,
+  audioBlocks,
+  chapterTimeline,
+  clipSound,
+  moveTrack,
+  removeTrack,
+  setTrack,
+  toggleClipSound,
+  trimTrack,
+} from './film-audio-model.js';
+import FilmAudioLane, { timeScale } from './FilmAudioLane.jsx';
 import './film-editor.css';
 
 const SIZES = { '9:16': [720, 1280], '16:9': [1280, 720], '1:1': [960, 960], '4:3': [960, 720] };
@@ -37,7 +50,7 @@ const PX_PER_SECOND = 56;
 
 // The whole cut as one Remotion composition: each included clip is a Sequence that plays
 // its source from the trimmed in-point, so the preview matches the exporter frame for frame.
-function Cut({ clips, sources, cues = [] }) {
+function Cut({ clips, sources, cues = [], audio = [] }) {
   return (
     <AbsoluteFill style={{ background: '#000' }}>
       {clips.map((clip) => (
@@ -46,6 +59,7 @@ function Cut({ clips, sources, cues = [] }) {
             <Html5Video
               src={sources[clip.asset.id]}
               trimBefore={clip.startFrame}
+              muted
               style={{ width: '100%', height: '100%', objectFit: 'contain' }}
             />
           ) : (
@@ -62,6 +76,14 @@ function Cut({ clips, sources, cues = [] }) {
           )}
         </Sequence>
       ))}
+      {/* The film's sound is exactly the chapter's sound tracks, as in the export. */}
+      {audio.map((a) =>
+        sources[a.assetId] ? (
+          <Sequence key={'audio-' + a.id} from={a.from} durationInFrames={a.frames}>
+            <Html5Audio src={sources[a.assetId]} trimBefore={a.trimBefore} volume={a.volume} />
+          </Sequence>
+        ) : null,
+      )}
       {cues.map((cue) => (
         <Sequence key={'cue-' + cue.id} from={cue.from} durationInFrames={cue.frames}>
           <AbsoluteFill
@@ -333,7 +355,34 @@ function ClipTrimmer({ clip, url, source, onApply, onCancel }) {
   );
 }
 
-function ClipCard({ clip, duration, active, busy, onSeek, onToggle, onTrim, onFineTrim }) {
+// A freshly uploaded file's length, read locally before its server metadata exists.
+function probeDuration(file) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file),
+      node = new Audio();
+    const done = (value) => {
+      URL.revokeObjectURL(url);
+      resolve(value);
+    };
+    node.preload = 'metadata';
+    node.onloadedmetadata = () => done(node.duration);
+    node.onerror = () => done(NaN);
+    node.src = url;
+  });
+}
+
+function ClipCard({
+  clip,
+  duration,
+  active,
+  busy,
+  sound,
+  onSeek,
+  onToggle,
+  onTrim,
+  onFineTrim,
+  onSound,
+}) {
   const { t } = useI18n();
   const sortable = useSortable({ id: clip.id, disabled: busy });
   const [drag, setDrag] = useState({ side: null, dx: 0 });
@@ -353,6 +402,7 @@ function ClipCard({ clip, duration, active, busy, onSeek, onToggle, onTrim, onFi
   return (
     <div
       ref={sortable.setNodeRef}
+      data-clip-id={clip.id}
       className={
         'film-clip' +
         (clip.included ? '' : ' excluded') +
@@ -411,6 +461,20 @@ function ClipCard({ clip, duration, active, busy, onSeek, onToggle, onTrim, onFi
       >
         <Scissors size={13} />
       </button>
+      <button
+        type="button"
+        className={'film-clip-sound' + (sound?.state === 'on' ? ' on' : '')}
+        disabled={busy || !sound || sound.state === 'none'}
+        title={
+          sound?.state === 'none'
+            ? sound.issue
+            : t(sound?.state === 'on' ? 'editor.clipSoundOn' : 'editor.clipSoundOff')
+        }
+        aria-label={t(sound?.state === 'on' ? 'editor.clipSoundOn' : 'editor.clipSoundOff')}
+        onClick={() => onSound(clip)}
+      >
+        {sound?.state === 'on' ? <Volume2 size={13} /> : <VolumeX size={13} />}
+      </button>
       <TrimHandle
         side="end"
         disabled={!canTrim}
@@ -426,7 +490,7 @@ function ClipCard({ clip, duration, active, busy, onSeek, onToggle, onTrim, onFi
   );
 }
 
-export default function FilmEditor({ chapterId, initialTrim = null, onClose }) {
+export default function FilmEditor({ chapterId, initialTrim = null, onClose, onUploadAudio }) {
   const { t } = useI18n();
   const s = useSyncExternalStore(store.subscribe, store.getState, store.getState),
     project = s.project;
@@ -523,6 +587,76 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose }) {
     if (clip.included && Number.isInteger(clip.from)) player.current?.seekTo(clip.from);
   };
   const assets = [...new Map(clips.filter((c) => c.playable).map((c) => [c.asset.id, c])).values()];
+  // Sound: chapter tracks placed on the exporter's timeline; the preview plays exactly these.
+  const blocks = useMemo(() => audioBlocks(project, chapterId), [project, chapterId]);
+  const audioAssets = project.entities.filter(
+    (e) => e.type === 'audio' && e.data.fileId && !e.data.missingFile && !e.data.sourceJobId,
+  );
+  const audio = blocks
+    .filter((b) => b.placement && !b.track.muted && b.asset)
+    .map((b) => ({
+      id: b.track.id,
+      assetId: b.asset.id,
+      from: Math.round(b.placement.start * cutFps),
+      frames: Math.max(1, Math.round((b.placement.end - b.placement.start) * cutFps)),
+      trimBefore: Math.round(Number(b.track.start) * cutFps),
+      volume: b.track.gain ?? 0.7,
+    }));
+  const trackRef = useRef(null),
+    [segments, setSegments] = useState([]),
+    [laneWidth, setLaneWidth] = useState(0);
+  // Measure the rendered clip cards so the sound lane uses the same horizontal scale.
+  React.useLayoutEffect(() => {
+    const node = trackRef.current;
+    if (!node) return;
+    const measure = () => {
+      const timeline = chapterTimeline(store.getState().project, chapterId);
+      const cards = new Map(
+        [...node.querySelectorAll('[data-clip-id]')].map((el) => [el.dataset.clipId, el]),
+      );
+      const next = timeline
+        .map((seg) => {
+          const el = cards.get(seg.id);
+          return el && { ...seg, left: el.offsetLeft, width: el.offsetWidth };
+        })
+        .filter(Boolean);
+      setSegments((old) => (JSON.stringify(old) === JSON.stringify(next) ? old : next));
+      setLaneWidth(node.scrollWidth);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [clips, chapterId]);
+  const x = useMemo(() => timeScale(segments, PX_PER_SECOND), [segments]);
+  const playhead = () => (player.current?.getCurrentFrame?.() || 0) / cutFps;
+  const addAudio = async (asset, file) => {
+    let duration = asset.data.metadata?.duration ?? asset.data.metadata?.duration_s;
+    if (!Number.isFinite(duration) && file) duration = await probeDuration(file);
+    edit((p) =>
+      addAudioTrack(
+        p,
+        chapterId,
+        p.entities.find((e) => e.id === asset.id),
+        playhead(),
+        duration,
+      ),
+    );
+  };
+  const uploadAudio = async (files) => {
+    if (!onUploadAudio) return;
+    setError('');
+    try {
+      const result = await onUploadAudio(files);
+      const ids = result?.ids || [];
+      for (const [index, id] of ids.entries()) {
+        const asset = store.getState().project.entities.find((e) => e.id === id);
+        if (asset?.type === 'audio') await addAudio(asset, files[index]);
+      }
+    } catch (e) {
+      setError(e?.message || t('editor.saveFailed'));
+    }
+  };
   return (
     <div
       className="film-editor"
@@ -577,6 +711,17 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose }) {
           onDuration={onDuration}
         />
       ))}
+      {blocks
+        .filter((b) => b.asset?.data.fileId && !assets.some((c) => c.asset.id === b.asset.id))
+        .map((b) => (
+          <ClipSource
+            key={'audio-src-' + b.asset.id}
+            asset={b.asset}
+            needsDuration={false}
+            onUrl={onUrl}
+            onDuration={onDuration}
+          />
+        ))}
       {!clips.length ? (
         <p className="film-editor-empty">{t('editor.empty')}</p>
       ) : (
@@ -600,7 +745,7 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose }) {
               <Player
                 ref={player}
                 component={Cut}
-                inputProps={{ clips: included, sources, cues: captions ? cues : [] }}
+                inputProps={{ clips: included, sources, cues: captions ? cues : [], audio }}
                 durationInFrames={Math.max(1, total)}
                 fps={cutFps}
                 compositionWidth={width}
@@ -617,48 +762,59 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose }) {
             </p>
           )}
           <div className="film-editor-tracks">
-            <DndContext
-              sensors={sensors}
-              collisionDetection={closestCenter}
-              onDragEnd={({ active, over }) => {
-                if (!over || active.id === over.id) return;
-                const to = clips.findIndex((clip) => clip.id === over.id);
-                edit((p) => moveShot(p, chapterId, active.id, to));
-              }}
-            >
-              <SortableContext
-                items={clips.map((clip) => clip.id)}
-                strategy={horizontalListSortingStrategy}
+            <div className="film-tracks-scroll">
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={({ active, over }) => {
+                  if (!over || active.id === over.id) return;
+                  const to = clips.findIndex((clip) => clip.id === over.id);
+                  edit((p) => moveShot(p, chapterId, active.id, to));
+                }}
               >
-                <div className="film-track">
-                  {clips.map((clip) => (
-                    <ClipCard
-                      key={clip.id}
-                      clip={clip}
-                      duration={clip.asset ? durations[clip.asset.id] : null}
-                      active={current === clip.id}
-                      busy={busy}
-                      onSeek={seek}
-                      onToggle={(c) => edit((p) => setIncluded(p, chapterId, c.id, !c.included))}
-                      onTrim={(c, start, end, source) =>
-                        edit((p) => trimClip(p, c.id, start, end, source))
-                      }
-                      onFineTrim={(c) => {
-                        player.current?.pause();
-                        setCurrent(c.id);
-                        setTrimming(c.id);
-                      }}
-                    />
-                  ))}
-                </div>
-              </SortableContext>
-            </DndContext>
-            <div className="film-track film-track-voices" aria-disabled="true">
-              <span className="film-track-label">
-                <Mic size={13} />
-                {t('editor.voices')}
-              </span>
-              <span className="film-voices-soon">{t('editor.voicesSoon')}</span>
+                <SortableContext
+                  items={clips.map((clip) => clip.id)}
+                  strategy={horizontalListSortingStrategy}
+                >
+                  <div className="film-track" ref={trackRef}>
+                    {clips.map((clip) => (
+                      <ClipCard
+                        key={clip.id}
+                        clip={clip}
+                        duration={clip.asset ? durations[clip.asset.id] : null}
+                        active={current === clip.id}
+                        busy={busy}
+                        onSeek={seek}
+                        onToggle={(c) => edit((p) => setIncluded(p, chapterId, c.id, !c.included))}
+                        onTrim={(c, start, end, source) =>
+                          edit((p) => trimClip(p, c.id, start, end, source))
+                        }
+                        onFineTrim={(c) => {
+                          player.current?.pause();
+                          setCurrent(c.id);
+                          setTrimming(c.id);
+                        }}
+                        sound={clipSound(project, chapterId, clip.id)}
+                        onSound={(c) => edit((p) => toggleClipSound(p, chapterId, c.id))}
+                      />
+                    ))}
+                  </div>
+                </SortableContext>
+              </DndContext>
+              <FilmAudioLane
+                blocks={blocks}
+                x={x}
+                width={laneWidth || undefined}
+                pxPerSecond={PX_PER_SECOND}
+                audioAssets={audioAssets}
+                busy={busy}
+                onAdd={(asset) => addAudio(asset)}
+                onUpload={uploadAudio}
+                onMove={(id, start) => edit((p) => moveTrack(p, chapterId, id, start))}
+                onTrim={(id, side, delta) => edit((p) => trimTrack(p, chapterId, id, side, delta))}
+                onSet={(id, patch) => edit((p) => setTrack(p, chapterId, id, patch))}
+                onRemove={(id) => edit((p) => removeTrack(p, chapterId, id))}
+              />
             </div>
           </div>
           <footer className="film-editor-foot muted">
