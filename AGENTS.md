@@ -1,33 +1,32 @@
-# Inkseq / H3 session entry
+# Inkseq / H3 entry
 
-Working agreement: [#328](https://github.com/inkseq/h3-studio/issues/328) governs lanes, risk tiers and delivery; it supersedes conflicting older pacing rules.
-Read this entry, the assigned issue's latest owner comments/claims and affected contracts only. Use current origin/main; never reset preserved checkouts.
+[#328](https://github.com/inkseq/h3-studio/issues/328) governs lanes/tiers/delivery over older pacing. Read this entry, latest issue owner comments/claims and needed contracts on origin/main; preserve old checkouts.
 
-## Ownership and coordination
-- Backend/API/schema/infra/GPU/money/Agent docs: Codex, `inkseq/h3-studio`.
-- UI: Claude, canonical `inkseq/inkseq-design/studio-app` AND its `h3-studio/yingxu` sync. Codex does not edit UI; API-client types only when requested by the frontend lane.
-- Shared work starts from an issue API contract (routes, JSON, errors). Post contract changes there. Board: github.com/orgs/inkseq/projects/1; routing: `workflow/project.json`.
-- Claim bounded scope, integration owner, branch/worktree and base before editing. Preserve parallel changes. Per lane: one issue in progress plus one in review. GitHub only; no second task database.
-- Latest owner decisions win; record them in `workflow/owner-changes.md` and give the owner a one-line relay for Codex. Re-read that file on origin/main before any production write or spend.
-- Labels replace, never stack: `needs-claude-review` (Tier2 options) or `needs-claude-acceptance` (staged slice); Claude's 2h pass comments, sets `accepted`/`changes-requested` and removes the request label. Read new Claude/owner comments before each task. End every turn with `Waiting on: <who/what, #issue>`.
-- Waits: keep one 30-minute heartbeat while "Waiting on" names anyone but yourself (Claude, owner, CI, a date). Each wake re-reads origin/main AGENTS.md + owner-changes.md and the claimed issues, and resumes at once if the blocker is gone. Never hard-code rules in the wake prompt (CR46/48).
+## Coordination
+- Codex: backend/API/schema/infra/GPU/money/Agent docs in `inkseq/h3-studio`.
+- Claude: canonical `inkseq/inkseq-design/studio-app` AND `h3-studio/yingxu` sync. Codex edits UI only for frontend-requested API-client types.
+- Share issue API routes/JSON/errors before work; post changes there. Board: github.com/orgs/inkseq/projects/1; routing: `workflow/project.json`.
+- Claim scope/integration owner/branch/worktree/base before edits; preserve parallel work. One issue in progress + one in review per lane. GitHub only; no task database.
+- Latest owner decisions win: record in `workflow/owner-changes.md`, relay one line for Codex; re-read it on origin/main before production writes/spend.
+- Replace, never stack labels: `needs-claude-review` (Tier2 options) / `needs-claude-acceptance` (staged). Claude's 2h pass comments, sets `accepted`/`changes-requested`, removes request label. Read new comments before tasks. End turns: `Waiting on: <who/what, #issue>`.
+- Keep one same-thread 30min watchdog enabled. First local activity lease (2h since refresh): busy exits without GitHub/rules; idle makes one read-only GitHub query, exits if none. Read current rules/issues before acting; see CR52.
 
-## Risk and delivery
+## Delivery
 | Tier | Changes | Gate and write-up |
 |---|---|---|
 | 0 | UI/copy/layout/docs | CI, automatic staging, self-check; PR description only, no receipts. |
 | 1 | APIs/additive schema/non-money features | Affected tests, staging self-check; one short issue comment with changes and staging SHA. |
 | 2 | Money/GPU/queue/DBOS/auth/isolation/deletion | Safety tests, non-author safety review, relevant staging acceptance checklist and Claude sign-off. Evidence links. |
 
-Classify behavior, not filenames. Run affected checks once per finished slice, not per edit. Merge small PRs continuously; unfinished features stay flagged. CI auto-deploys staging. Production promotes the same accepted artifact bytes, without rebuild, as soon as accepted (any day, CR47). Tier2 needs Claude sign-off. Issues close on promotion, not merge. Continue the next independent staged milestone without approval waits.
+Classify behavior; check slices once. Merge small PRs; flag unfinished features. CI auto-deploys staging. Promote identical accepted bytes immediately without rebuild, any day (CR47); Tier2 needs Claude sign-off. Close on promotion, not merge. Continue independent staged milestones while waiting.
 
-Current order (CR42/43): promote staging batch -> #353 prod backfill -> GPU demand start <=2 (CR43; staging cold-start soak first) -> go-live checklist issue -> frontend repo merge into `yingxu` -> #347 editor. No new epics before M1.
+Order (CR42/43): promote staging batch -> #353 prod backfill -> GPU demand start <=2 (staging soak first) -> go-live checklist -> frontend repo merge into `yingxu` -> #347 editor. No new epics before M1.
 
 ## Safety
-- Reuse existing owners/assets/jobs/attempts/ledger/fences. Preserve immutable accepted inputs, configuration identity, original jobs/media and cumulative accounting. Unknown outcomes require reconciliation, never duplicate generation/rental or invented settlement.
-- Test GPUs: USD20 per change/acceptance task, counting its confirmed spend plus running committed price. Other tasks' unresolved projections do not consume it. Preserve editable admin limits, original accounting and task tags. Every rental has max_price, idle stop (normally10min), maximum runtime (normally2h); stop near the limit and after testing. Staging only; never operate owner production machines/jobs.
-- Pre-authorized on staging (owner 2026-10-20), no asking: QA accounts and their test connections/keys/grants (revoke after), Stripe TEST mode, test GPUs within USD20/task, staging config/backfills. Ask, batched once at task start, only for: production, live money, real users' data, new credentials/provider accounts, budget overrun, permanent deletion. Live payments/legal stay with owner. After2h without direction, post five lines of evidence/options and choose another bounded approach.
-- Use central AI Registry loaders and exact profiles; read its instructions before credentials/cleanup. Never copy secrets into project env files, logs or GitHub.
-- Browser: Chrome via cua_repl; staging acceptance uses qa-admin/qa-user. No repeated login, DevTools MCP or autoConnect.
-- Tier2: first compare fix-only/small/larger options in the issue; Claude reviews; disagreements go to the owner. New queue/scheduler/storage/provider/table family needs owner approval; prefer delete/reuse.
-- Chinese owner handoffs: Tier0 1-2 lines; Tier1/2 ~10 lines: user gain, changed flow steps and failure effect, verified code/test/staging/prod, 1-3 "Owner 技术理解" points. Exact SHAs, links. GitHub: English. Release claims with Session: Unclaimed. [WORKFLOW.md](WORKFLOW.md).
+- Reuse owners/assets/jobs/attempts/ledger/fences. Preserve immutable accepted inputs/config identity, original jobs/media and cumulative accounting. Unknown outcomes require reconciliation, never duplicate generation/rental or invented settlement.
+- Test GPUs: USD20/change or acceptance task: confirmed spend + running committed price; other-task projections do not count. Preserve editable admin limits/accounting/tags. Each rental: max_price, idle stop (normally10min), max runtime (normally2h); stop near limit/at test completion. Staging only; no owner production machines/jobs.
+- Staging pre-authorized (2026-10-20): QA accounts/test connections/keys/grants (revoke after), Stripe TEST, USD20/task GPUs, config/backfills. Ask once, batched at task start, only for production/live money/real users' data/new credentials or provider accounts/overrun/permanent deletion. Owner owns live payments/legal. After2h without direction, post five evidence/options lines and change bounded approach.
+- Use central AI Registry loaders/exact profiles; read instructions before credentials/cleanup. No secrets in project env/logs/GitHub.
+- Chrome via cua_repl; staging qa-admin/qa-user. No repeated login, DevTools MCP or autoConnect.
+- Tier2: compare fix-only/small/larger options in issue; Claude reviews, disagreements to owner. New queue/scheduler/storage/provider/table family needs owner approval; prefer delete/reuse.
+- Chinese handoffs: Tier0 1-2 lines; Tier1/2 ~10: user gain, flow/failure effect, code/test/staging/prod proof, 1-3 "Owner 技术理解" points, SHAs/links. GitHub English. Release claims: Session: Unclaimed. [WORKFLOW.md](WORKFLOW.md).
