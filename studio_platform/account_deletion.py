@@ -22,6 +22,7 @@ from .auth import (
     WORKOS_PRIVATE_OWNER,
     WORKOS_PRIVATE_PROJECT,
     WORKOS_SESSION_KIND,
+    digest,
 )
 from .content_lifecycle import owner_reference_gate, put_tombstone
 from .identity import lock_account_gate
@@ -39,7 +40,7 @@ from .repository import (
     instance_intents,
     request_hash,
 )
-from .session_authority import read, write, advance
+from .session_authority import read, write, advance, deleted_workos_subject
 
 CONTEXT = ContextVar("original_account_cleanup", default=None)
 PREVIEW_SECONDS = 600
@@ -653,6 +654,19 @@ class AccountDeletion:
                 {"operation_id": ident, "user_id": user["id"]},
                 now,
             )
+            if payload["provider"]["subject"]:
+                write(
+                    conn,
+                    self.tenant,
+                    "deleted_subject",
+                    deleted_workos_subject(self.tenant, payload["provider"]["subject"]),
+                    {
+                        "operation_id": ident,
+                        "user_id": user["id"],
+                        "client_hash": digest(payload["provider"]["client_id"]),
+                    },
+                    now,
+                )
             write(
                 conn,
                 self.tenant,

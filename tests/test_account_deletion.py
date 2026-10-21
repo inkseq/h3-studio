@@ -8,6 +8,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 import unittest
 from unittest.mock import patch, Mock
 import uuid
@@ -37,7 +38,7 @@ from studio_platform.identity_schema import (
 from studio_platform.payment_schema import metadata as payment_metadata
 from studio_platform.quick_chat import objects
 from studio_platform.repository import Conflict, Scope, documents
-from studio_platform.session_authority import read, write
+from studio_platform.session_authority import read, write, deleted_workos_subject
 from studio_platform.settings import Settings
 from test_platform_repository import LedgerCase
 
@@ -459,6 +460,14 @@ class AccountDeletionTests(LedgerCase):
         with self.repo.engine.connect() as conn:
             self.assertIsNone(
                 read(conn, self.scope.tenant_id, "deletion_owner", self.owner)
+            )
+            self.assertIsNone(
+                read(
+                    conn,
+                    self.scope.tenant_id,
+                    "deleted_subject",
+                    deleted_workos_subject(self.scope.tenant_id, self.subject),
+                )
             )
             self.assertEqual(
                 conn.execute(
@@ -884,6 +893,94 @@ class AccountDeletionTests(LedgerCase):
                 conn.execute(select(credit_accounts.c.user_id)).scalars().all(),
                 [self.user_id],
             )
+
+    def test_verified_old_exchange_before_upsert_cannot_resurrect_deleted_subject(self):
+        from studio_platform.workos_auth import WorkOSAuth, WorkOSError
+        from test_workos_auth import FakeProvider
+
+        provider = FakeProvider(lambda: self.now)
+        provider.user.id = self.subject
+        provider.user.email = "private@example.test"
+        config = {"client_id": "client_" + "A" * 24, "api_key": "offline"}
+        self.workos.config = lambda: dict(config)
+        service = WorkOSAuth(
+            self.repo, self.auth, self.settings, sdk_factory=provider.client
+        )
+        service.config = lambda: dict(config)
+        original_upsert = service._upsert
+        before_budget = self.repo.get_budget("owner-budget")
+        original_subject = self.subject
+
+        def finish(start):
+            return service.callback(
+                code="OFFLINE-VERIFIED-CODE",
+                state=parse_qs(urlsplit(start["url"]).query)["state"][0],
+                cookie=start["cookie"],
+                origin=self.settings.public_origin,
+            )
+
+        def paused(identity, transaction, principal):
+            # This boundary is reached only after the real PKCE state consume,
+            # provider exchange and RS256 subject/client/session verification.
+            self.assertEqual(identity["subject"], original_subject)
+            self.assertEqual(len(provider.auth_calls), 1)
+            self.assertEqual(transaction["auth_epoch"], 0)
+            ident = self.confirm()["operation_id"]
+            self.finish(ident)
+            with self.repo.engine.connect() as conn:
+                marker = read(
+                    conn,
+                    self.scope.tenant_id,
+                    "deleted_subject",
+                    deleted_workos_subject(self.scope.tenant_id, original_subject),
+                )
+                self.assertEqual(
+                    marker,
+                    {
+                        "operation_id": ident,
+                        "user_id": self.user_id,
+                        "client_hash": digest(config["client_id"]),
+                    },
+                )
+                self.assertNotIn(original_subject, str(marker))
+            return original_upsert(identity, transaction, principal)
+
+        with patch(
+            "studio_platform.workos_auth._jwks",
+            return_value=SimpleNamespace(
+                get_signing_key_from_jwt=lambda _token: SimpleNamespace(
+                    key=provider.key.public_key()
+                )
+            ),
+        ):
+            start = service.start(origin=self.settings.public_origin, return_to="/")
+            with patch.object(service, "_upsert", side_effect=paused):
+                with self.assertRaisesRegex(WorkOSError, "account_deleted") as failure:
+                    finish(start)
+                self.assertEqual(failure.exception.status, 403)
+            # A later client rotation must not become a lookup escape hatch.
+            config["client_id"] = "client_" + "R" * 24
+            provider.claims["client_id"] = config["client_id"]
+            start = service.start(origin=self.settings.public_origin, return_to="/")
+            with self.assertRaisesRegex(WorkOSError, "account_deleted"):
+                finish(start)
+        with self.repo.engine.connect() as conn:
+            self.assertEqual(
+                conn.execute(select(users.c.id)).scalars().all(), [self.user_id]
+            )
+            self.assertEqual(
+                conn.execute(select(credit_accounts.c.user_id)).scalars().all(),
+                [self.user_id],
+            )
+            self.assertIsNone(
+                read(
+                    conn,
+                    "another-tenant",
+                    "deleted_subject",
+                    deleted_workos_subject("another-tenant", original_subject),
+                )
+            )
+        self.assertEqual(self.repo.get_budget("owner-budget"), before_budget)
 
     def test_concurrent_transport_epochs_only_delete_original_provider_user_once(self):
         ident = self.confirm()["operation_id"]

@@ -128,7 +128,14 @@ release, redacts owner authoring/Quick Create content with existing execution
 redaction rules, and replaces profile fields with a suspended opaque tombstone.
 The canonical user UUID, original payment/credit/budget entries and idempotency
 keys remain. Signed late payment/refund handling still resolves that UUID;
-a new same-email WorkOS identity receives a fresh UUID/owner. Completed
+a new same-email WorkOS identity receives a fresh UUID/owner.
+The same confirmation transaction also retains a private provider-subject
+hash fence, bound to tenant and the fixed WorkOS issuer, with original-client
+hash provenance. An exchange verified before confirmation but arriving at
+canonical upsert after it receives `403/account_deleted` before creating any
+UUID, welcome grant or budget binding. Changing the OAuth client cannot
+resurrect that same provider subject; a genuinely new subject may sign up.
+Completed
 account journals can prove expected missing backup objects only through their
 matching original markers, tombstones, storage identities and byte hashes;
 pending, ambiguous, shared or mismatched evidence remains UNKNOWN.
@@ -143,6 +150,8 @@ anonymization or legal acceptance**. Production enable requires all of:
    recreate deleted profiles or re-enable revoked credentials.
 4. Independent safety review and actual disposable staging phase/recovery
    acceptance, including the provider boundary, before any production flag.
+   Retained/rollback auth readers must honor `deleted_subject`, alongside a
+   matching B worker and backup restore markers; A-only binaries do not.
 
 No production data deletion, hosted provider action, LIVE purchase/refund or
 GPU action is authorized by the local implementation or its offline fixtures.
