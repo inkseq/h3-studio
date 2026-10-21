@@ -253,6 +253,7 @@ class ShardTests(unittest.TestCase):
     def test_postgres_manifest_preserves_current_critical_suites(self):
         # Assert the maintained safety boundary, not a duplicate retired list.
         critical = {
+            "test_credit_only_admission",
             "test_platform_repository",
             "test_platform_queue",
             "test_platform_control",
