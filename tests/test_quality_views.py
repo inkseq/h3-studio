@@ -22,6 +22,58 @@ MACHINE = Principal("owner", "pat", role="admin", machine=True)
 
 
 class QualityViewTests(unittest.TestCase):
+    def test_render_capabilities_are_typed_public_fields_not_freeform_metadata(self):
+        render = {
+            "recipe_id": "chapter-roughcut-v1",
+            "enabled": True,
+            "render_contract_version": 5,
+            "playback_rates": [0.5, 0.75, 1, 1.25, 1.5, 2],
+            "detached_generated_audio": True,
+            "audio_fades_max_s": 5,
+            "clip_sound_crossfade_values_s": [0, 0.25, 0.5, 1],
+            "resolutions": ["480P", "720P"],
+            "aspects": ["1:1"],
+        }
+        raw = {
+            "chapter_render": {
+                **render,
+                "model_id": MODEL,
+                "provider": "private-provider",
+                "runtime": {"configuration_id": PROFILE},
+                "future_metadata": {"model_id": MODEL},
+            },
+            "upload_max_bytes": 123456,
+        }
+        before = copy.deepcopy(raw)
+        for principal in (USER, MACHINE, None):
+            with self.subTest(principal=principal):
+                shown = views.capabilities(raw, principal)
+                self.assertEqual(shown["chapter_render"], render)
+                self.assertEqual(shown["upload_max_bytes"], 123456)
+                self.assertNotIn(MODEL, json.dumps(shown))
+                self.assertNotIn(PROFILE, json.dumps(shown))
+                self.assertNotIn("private-provider", json.dumps(shown))
+                shown["chapter_render"]["playback_rates"].append(4)
+        self.assertEqual(views.capabilities(raw, ADMIN), before)
+        self.assertEqual(raw, before)
+
+        poisoned = {
+            "chapter_render": {
+                "recipe_id": RECIPE,
+                "enabled": {"model_id": MODEL},
+                "fps": MODEL,
+                "resolutions": [MODEL],
+                "aspects": [{"provider": MODEL}],
+                "playback_rates": [0.5, {"model_id": MODEL}],
+                "clip_sound_crossfade_values_s": [float("nan")],
+            },
+            "upload_max_bytes": {"model_id": MODEL},
+        }
+        shown = views.capabilities(poisoned, USER)
+        self.assertEqual(shown["chapter_render"], {})
+        self.assertNotIn("upload_max_bytes", shown)
+        self.assertNotIn(MODEL, json.dumps(shown))
+
     def test_capability_version_known_dto_slots_are_neutral_without_rehashing(self):
         from studio_platform.capabilities import VERSION, public_version
         from studio_platform.repository import request_hash

@@ -147,6 +147,51 @@ class ApiTests(unittest.TestCase):
                     ).raise_for_status()
                     self.assertEqual(client.get("/healthz").json(), anonymous.json())
 
+    def test_creator_and_admin_http_keep_exact_public_render_v5_capabilities(self):
+        app = create_app(
+            replace(self.settings, render_enabled=True, max_upload_bytes=123456),
+            repository=self.app.state.repository,
+            storage=self.app.state.storage,
+        )
+        expected = {
+            "recipe_id": "chapter-roughcut-v1",
+            "implemented": True,
+            "enabled": True,
+            "resolutions": ["480P", "720P"],
+            "aspects": ["16:9", "9:16", "1:1", "4:3", "3:4"],
+            "fps": 24,
+            "max_shots": 50,
+            "max_duration": 600,
+            "max_audio_tracks": 32,
+            "video_original_audio": False,
+            "subtitles": True,
+            "transitions": False,
+            "source_trim": True,
+            "generated_audio": True,
+            "render_contract_version": 5,
+            "playback_rates": [0.5, 0.75, 1, 1.25, 1.5, 2],
+            "detached_generated_audio": True,
+            "audio_fades_max_s": 5,
+            "clip_sound_crossfade_values_s": [0, 0.25, 0.5, 1],
+        }
+        with TestClient(app) as client:
+            anonymous = client.get("/v1/capabilities")
+            self.assertEqual(anonymous.status_code, 401)
+            for user, role in (("supervan", "user"), ("superdan", "admin")):
+                with self.subTest(user=user):
+                    client.post(
+                        "/api/auth/login", json={"username": user}
+                    ).raise_for_status()
+                    self.assertEqual(client.get("/api/auth/me").json()["role"], role)
+                    response = client.get("/v1/capabilities")
+                    self.assertEqual(response.status_code, 200)
+                    shown = response.json()
+                    self.assertEqual(shown["chapter_render"], expected)
+                    self.assertEqual(shown["upload_max_bytes"], 123456)
+                    if role == "user":
+                        self.assertNotIn("h3-base-fl2va-v1", str(shown["recipes"]))
+                        self.assertNotIn("model_id", str(shown["chapter_render"]))
+
     def make_plan(self, **changes):
         r = self.client.post("/v1/generation-plans", json=generation_request(**changes))
         self.assertEqual(r.status_code, 201, r.text)

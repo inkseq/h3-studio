@@ -9,6 +9,7 @@ selection uses protected bindings only when the caller explicitly passes setting
 from __future__ import annotations
 
 import copy
+import math
 import re
 
 from . import assistant_models
@@ -526,6 +527,57 @@ def _selected(candidates, mode, default, tier, settings):
     ), "quality_tier_ambiguous" if len(enabled) > 1 else "quality_tier_unavailable"
 
 
+def _chapter_render(value):
+    """Public renderer facts only; never copy runtime or future freeform slots."""
+    booleans = {
+        "implemented",
+        "enabled",
+        "video_original_audio",
+        "subtitles",
+        "transitions",
+        "source_trim",
+        "generated_audio",
+        "detached_generated_audio",
+    }
+    numbers = {
+        "fps",
+        "max_shots",
+        "max_duration",
+        "max_audio_tracks",
+        "render_contract_version",
+        "audio_fades_max_s",
+    }
+
+    def number(item):
+        return type(item) in (int, float) and math.isfinite(item) and item >= 0
+
+    result = _pick(
+        value,
+        {key for key in booleans if type(value.get(key)) is bool}
+        | {key for key in numbers if number(value.get(key))},
+    )
+    if value.get("recipe_id") == RENDER_RECIPE:
+        result["recipe_id"] = RENDER_RECIPE
+    for key, valid in (
+        (
+            "resolutions",
+            lambda item: isinstance(item, str) and re.fullmatch(r"[0-9]{3,4}P", item),
+        ),
+        (
+            "aspects",
+            lambda item: (
+                isinstance(item, str) and re.fullmatch(r"[0-9]{1,2}:[0-9]{1,2}", item)
+            ),
+        ),
+        ("playback_rates", number),
+        ("clip_sound_crossfade_values_s", number),
+    ):
+        items = value.get(key)
+        if isinstance(items, list) and all(valid(item) for item in items):
+            result[key] = copy.deepcopy(items)
+    return result
+
+
 def capabilities(value, principal=None, *, settings=None):
     profiles = value.get("deployment_profiles", [])
     if is_admin(principal):
@@ -544,6 +596,10 @@ def capabilities(value, principal=None, *, settings=None):
             "simulation",
         },
     )
+    if type(value.get("upload_max_bytes")) is int and value["upload_max_bytes"] > 0:
+        result["upload_max_bytes"] = value["upload_max_bytes"]
+    if isinstance(value.get("chapter_render"), dict):
+        result["chapter_render"] = _chapter_render(value["chapter_render"])
     from .capabilities import public_version
 
     result["capabilities_version"] = public_version(value.get("capabilities_version"))
