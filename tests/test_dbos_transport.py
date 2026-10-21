@@ -7,7 +7,7 @@ import subprocess
 import sys
 import threading
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from studio_platform.dbos_transport import DurableSlots, _Slot, workflow_id
 from studio_platform.control import WorkerControl
@@ -214,13 +214,101 @@ class DurableDomainTests(LedgerCase):
         settings = Settings(self.directory, auth_mode="local-test", render_enabled=True)
         with DurableSlots(self.repo, settings, self.directory / "executor") as slots:
             slots.add_render_slots()
-            self.assertEqual(len(slots._slots), 3)
+            self.assertEqual(
+                set(slots._slots),
+                {
+                    "dbos-cpu-render-v1",
+                    "dbos-cpu-render-v2",
+                    "dbos-cpu-render-v3",
+                    "dbos-cpu-render-v5",
+                },
+            )
             self.assertEqual(slots.children, {})
             for slot in slots._slots.values():
                 self.assertEqual(slot.spec.backend, "cpu-render")
                 worker = self.control.get(slot.spec.worker_id)
                 self.assertEqual(worker["state"], "ready")
                 self.assertEqual(worker["expires_at"], self.now + 3600)
+
+    def test_startup_v5_claim_is_exact_and_all_versions_share_the_cpu_fence(self):
+        from studio_platform.render_plans import CONFIGURATIONS, MODEL, POOL, RECIPE
+        from studio_platform.settings import Settings
+
+        settings = Settings(self.directory, auth_mode="local-test", render_enabled=True)
+        with DurableSlots(self.repo, settings, self.directory / "executor") as slots:
+            slots.add_render_slots()
+            jobs = {}
+            for version in (1, 2, 3, 4, 5):
+                plan = self.repo.create_plan(
+                    self.scope,
+                    {
+                        "recipe_id": RECIPE,
+                        "request": {
+                            "model": MODEL,
+                            "render": {
+                                "version": version,
+                                **({"stage": "chapter"} if version == 5 else {}),
+                            },
+                        },
+                    },
+                    {
+                        "pool": POOL,
+                        "backend": "cpu-render",
+                        "enabled": True,
+                        "configuration_id": CONFIGURATIONS[version],
+                    },
+                    expires_at=self.now + 1000,
+                    estimated_cost_microusd=0,
+                )
+                jobs[version] = self.repo.create_job(
+                    self.scope, plan["id"], "render-version-" + str(version)
+                )
+            # Holding the shared operation mutex prevents even the new slot
+            # from leasing; distinct configuration rows add no CPU capacity.
+            slots._cpu_operation.acquire()
+            try:
+                slots.turn(
+                    self.scope.tenant_id,
+                    self.scope.owner_id,
+                    self.scope.project_id,
+                    jobs[5]["id"],
+                )
+            finally:
+                slots._cpu_operation.release()
+            self.assertEqual(
+                self.repo.get_job(self.scope, jobs[5]["id"])["attempt_no"], 0
+            )
+
+            @contextmanager
+            def occupied_fence():
+                yield False, None
+
+            with patch.object(slots, "_cpu_fence", side_effect=occupied_fence) as fence:
+                slots.turn(
+                    self.scope.tenant_id,
+                    self.scope.owner_id,
+                    self.scope.project_id,
+                    jobs[5]["id"],
+                )
+                self.assertEqual(fence.call_count, 4)
+            self.assertEqual(
+                self.repo.get_job(self.scope, jobs[5]["id"])["attempt_no"], 0
+            )
+            v5 = self.control.get("dbos-cpu-render-v5")
+            for version, job in jobs.items():
+                self.assertEqual(self.control.matches(v5, job), version == 5)
+            claimed = self.control.claim("dbos-cpu-render-v5", POOL)
+            self.assertEqual(claimed.job["id"], jobs[5]["id"])
+            for version in (1, 2, 3, 4):
+                self.assertEqual(
+                    self.repo.get_job(self.scope, jobs[version]["id"])["attempt_no"], 0
+                )
+            self.assertTrue(
+                self.control.matches(self.control.get("dbos-cpu-render-v3"), jobs[4])
+            )
+            self.assertEqual(
+                self.control.capacity(), {"instances": 0, "physical_gpus": 0}
+            )
 
     @unittest.skipUnless(
         os.name == "posix", "Inherited POSIX shared CPU operation fence"

@@ -13,13 +13,20 @@ MAX_LINE_CHARACTERS = 18
 _ID = re.compile(r"[A-Za-z0-9_-]{1,160}$")
 
 
-def caption_signature(project, chapter_id, shots):
+def caption_signature(project, chapter_id, shots, *, render_version=None):
     """Rebuild the object saved by caption-model.js, without trusting its copy."""
     entities = {entity["id"]: entity for entity in project["entities"]}
+    from .render_timing import enabled, has_speed, shot_frames
+
+    v5 = render_version != 3 and enabled(project, chapter_id, shots)
     basis, cursor = [], 0
     for shot in shots:
         start = cursor / 24
-        cursor += max(0, math.floor(shot["data"].get("seconds", 0) * 24 + 0.5))
+        cursor += (
+            shot_frames(shot)[1]
+            if v5 and has_speed(shot)
+            else max(0, math.floor(shot["data"].get("seconds", 0) * 24 + 0.5))
+        )
         asset = entities.get(shot["data"].get("selectedAssetId"))
         item = {
             "id": shot["id"],
@@ -61,10 +68,24 @@ def caption_signature(project, chapter_id, shots):
                 generatedFrom=copy.deepcopy(track["generatedFrom"]),
                 needsReview=bool(track.get("needsReview")),
             )
+        if v5:
+            item.update(
+                {
+                    key: copy.deepcopy(track[key])
+                    for key in (
+                        "detached",
+                        "slow_rate_audio_enabled",
+                        "fade_in_s",
+                        "fade_out_s",
+                    )
+                    if key in track
+                }
+            )
+            item["gain"] = track.get("gain", 1)
         audio.append(item)
     cues = journey.get("captionTracks", {}).get(chapter_id, {}).get("cues", [])
     ordered = sorted(cues, key=lambda cue: (cue["start"], cue["end"]))
-    return {
+    value = {
         "basis": basis,
         "soundMode": journey.get("sound", {}).get("mode") or None,
         "audio": audio,
@@ -72,6 +93,11 @@ def caption_signature(project, chapter_id, shots):
             {key: cue[key] for key in ("id", "start", "end", "text")} for cue in ordered
         ],
     }
+    from .render_timing import crossfade
+
+    if v5:
+        value["render_v5"] = {"clip_sound_crossfade_s": crossfade(project, chapter_id)}
+    return value
 
 
 def validate_caption_text(text):
@@ -133,7 +159,7 @@ def validate_normalized_subtitles(value, frame_count):
     return value
 
 
-def compile_subtitles(project, chapter_id, shots, frame_count):
+def compile_subtitles(project, chapter_id, shots, frame_count, *, render_version=None):
     track = project.get("journey", {}).get("captionTracks", {}).get(chapter_id, {})
     cues = track.get("cues") if isinstance(track, dict) else None
     value = {"preset": PRESET, "cues": []}
@@ -211,7 +237,7 @@ def compile_subtitles(project, chapter_id, shots, frame_count):
         value["cues"].append(cue)
     try:
         if track.get("confirmedSnapshot") != caption_signature(
-            project, chapter_id, shots
+            project, chapter_id, shots, render_version=render_version
         ):
             blockers.append("这一版字幕或时间线尚未人工确认；请核对后重新确认字幕")
     except (KeyError, TypeError, ValueError):

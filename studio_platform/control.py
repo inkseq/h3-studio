@@ -106,7 +106,12 @@ class WorkerSpec:
                 or self.physical_gpu_ids
                 or self.model_id != "sixnine-chapter-roughcut-v1"
                 or self.configuration_id
-                not in {"cpu-render-v1", "cpu-render-v2", "cpu-render-v3"}
+                not in {
+                    "cpu-render-v1",
+                    "cpu-render-v2",
+                    "cpu-render-v3",
+                    "cpu-render-v5",
+                }
                 or self.recipe_ids != ("chapter-roughcut-v1",)
             ):
                 raise ValueError("cpu_render_identity_required")

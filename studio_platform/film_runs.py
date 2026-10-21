@@ -191,7 +191,14 @@ def frozen_story(project, results, *, chapters=None):
         # ignored an authoring filmCuts draft: never reinterpret that work after
         # a release. Only this transient copy receives the frozen membership.
         value.setdefault("journey", {})["filmCuts"] = {
-            chapter["chapter_id"]: {"shotIds": list(chapter["shot_ids"])}
+            chapter["chapter_id"]: {
+                "shotIds": list(chapter["shot_ids"]),
+                **(
+                    {"clip_sound_crossfade_s": chapter["clip_sound_crossfade_s"]}
+                    if "clip_sound_crossfade_s" in chapter
+                    else {}
+                ),
+            }
             for chapter in chapters
         }
     entities = {item["id"]: item for item in value["entities"]}
@@ -477,6 +484,8 @@ class FilmRuns:
                 "warnings",
             )
         }
+        if value.get("render_contract_version") == 5:
+            result["render_contract_version"] = 5
         result["counts"].update(
             generated_completed=sum(
                 item["shot_id"] in value["results"] for item in value["generation"]
@@ -568,6 +577,18 @@ class FilmRuns:
         )
         if not 1 <= len(chapters) <= 50:
             raise ValueError("film_chapter_count_limit")
+        from .render_timing import crossfade, enabled, has_speed, shot_frames
+
+        render_version = (
+            5
+            if any(
+                enabled(
+                    project, chapter["id"], ordered_chapter(project, chapter["id"])[2]
+                )
+                for chapter in chapters
+            )
+            else 3
+        )
         missing, results, chapter_rows, warnings = [], {}, [], []
         total_seconds = 0
         for chapter in chapters:
@@ -577,14 +598,21 @@ class FilmRuns:
             if options["burn_subtitles"]:
                 from .caption_server import caption_signature, compile_subtitles
 
-                frames = sum(
-                    max(
-                        1, math.floor(shot.get("data", {}).get("seconds", 5) * 24 + 0.5)
+                frames = (
+                    sum(shot_frames(shot)[1] for shot in shots)
+                    if render_version == 5
+                    else sum(
+                        max(
+                            1,
+                            math.floor(
+                                shot.get("data", {}).get("seconds", 5) * 24 + 0.5
+                            ),
+                        )
+                        for shot in shots
                     )
-                    for shot in shots
                 )
                 _, _, caption_blockers, _ = compile_subtitles(
-                    project, chapter["id"], shots, frames
+                    project, chapter["id"], shots, frames, render_version=render_version
                 )
                 if caption_blockers:
                     track = (
@@ -595,7 +623,9 @@ class FilmRuns:
                     try:
                         confirmed = isinstance(track, dict) and track.get(
                             "confirmedSnapshot"
-                        ) == caption_signature(project, chapter["id"], shots)
+                        ) == caption_signature(
+                            project, chapter["id"], shots, render_version=render_version
+                        )
                     except (KeyError, TypeError, ValueError):
                         confirmed = False
                     if confirmed:
@@ -610,13 +640,28 @@ class FilmRuns:
                     "artifact_id": None,
                 }
             )
+            if render_version == 5:
+                chapter_rows[-1]["clip_sound_crossfade_s"] = crossfade(
+                    project, chapter["id"]
+                )
+                chapter_rows[-1]["timing"] = [
+                    {
+                        "shot_id": shot["id"],
+                        "source_frames": shot_frames(shot)[0],
+                        "frames": shot_frames(shot)[1],
+                        "playback_rate": shot_frames(shot)[2],
+                    }
+                    for shot in shots
+                ]
             for shot in shots:
                 from .render_plans import finite
 
                 seconds = shot.get("data", {}).get("seconds", 5)
                 if not finite(seconds, 1 / 24, 600):
                     raise ValueError("film_shot_duration_invalid")
-                total_seconds += seconds
+                total_seconds += (
+                    shot_frames(shot)[1] / 24 if render_version == 5 else seconds
+                )
                 selected = next(
                     (
                         entity
@@ -627,12 +672,32 @@ class FilmRuns:
                     None,
                 )
                 if selected is None:
+                    if has_speed(shot):
+                        raise Conflict("film_speed_source_requires_review")
                     missing.append(shot["id"])
                     continue
                 try:
                     source = self.app.state.resolve_render_source(
                         principal, project_id, selected, "video"
                     )
+                    if has_speed(shot):
+                        from .render_plans import video_range
+
+                        selected_range = shot["data"]["selectedVideoRange"]
+                        original = {
+                            **shot,
+                            "data": {
+                                **shot["data"],
+                                "selectedVideoRange": {
+                                    key: value
+                                    for key, value in selected_range.items()
+                                    if key != "playback_rate"
+                                },
+                            },
+                        }
+                        video_range(
+                            original, selected, source["duration"], shot_frames(shot)[0]
+                        )
                     if source.get("source_job_id"):
                         from .storyboard_versions import preferences
 
@@ -657,6 +722,8 @@ class FilmRuns:
                         "source_hash": request_hash(source),
                     }
                 except (NotFound, Conflict, ValueError):
+                    if has_speed(shot):
+                        raise Conflict("film_speed_source_requires_review") from None
                     missing.append(shot["id"])
         if len(missing) > 100 or total_seconds > 600:
             raise ValueError("film_size_limit")
@@ -759,6 +826,8 @@ class FilmRuns:
                 "generate": len(missing),
             },
         }
+        if render_version == 5:
+            value["render_contract_version"] = 5
         if not generation:
             from .credits import credit_policy
 
@@ -1131,6 +1200,7 @@ class FilmRuns:
                     lambda entity, kind: self.app.state.resolve_render_source(
                         principal, project_id, entity, kind
                     ),
+                    contract_version=value.get("render_contract_version", 3),
                 )
                 if burn_subtitles:
                     from .caption_server import compile_subtitles
@@ -1147,11 +1217,15 @@ class FilmRuns:
                         chapter["chapter_id"],
                         original_shots,
                         compiled["output_spec"]["frame_count"],
+                        render_version=value.get("render_contract_version", 3),
                     )
                     blockers.extend(caption_blockers)
                     compiled["request"]["render"]["subtitles"] = subtitles
                     compiled["server_source_hash"] = render_source_hash(
-                        project, chapter["chapter_id"], burn_subtitles=True
+                        project,
+                        chapter["chapter_id"],
+                        burn_subtitles=True,
+                        contract_version=value.get("render_contract_version", 3),
                     )
                 value = self._render_plan(
                     principal, value, chapter["chapter_id"], compiled, blockers
@@ -1224,6 +1298,8 @@ class FilmRuns:
                     ),
                 }
             )
+            if value.get("render_contract_version") == 5:
+                chapter_results[-1]["render_version"] = 5
         if not value["export"]["plan_id"]:
             compiled = compile_film_export(project_id, run_id, chapter_results)
             value = self._render_plan(principal, value, "export", compiled, [])
