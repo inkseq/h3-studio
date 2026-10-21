@@ -314,6 +314,27 @@ export function TrashMenu({ target, onRename, onEdit, onTrashSettled, disabled =
     </ItemMenu>
   );
 }
+// One-click "move to trash" for panels with a single obvious action (no menu).
+export function TrashButton({ target, onTrashSettled, disabled = false }) {
+  const ctx = useTrash(),
+    { t } = useI18n();
+  if (!ctx?.account) return null;
+  return (
+    <button
+      type="button"
+      className="ghost round trash-button"
+      title={t('trash.move')}
+      aria-label={t('trash.move')}
+      disabled={disabled || ctx.busy || !!ctx.pending}
+      onClick={async () => {
+        await ctx.request('trash', [target]);
+        onTrashSettled?.();
+      }}
+    >
+      <Trash2 size={15} />
+    </button>
+  );
+}
 export default function UniversalTrash() {
   const ctx = useTrash(),
     { t, locale } = useI18n(),

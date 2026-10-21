@@ -6778,3 +6778,66 @@ button.ghost.danger:hover {
 .quick-live .composer-box > button.primary.round {
   margin-left: auto;
 }
+
+/* Shot panel title: edit in place, with a pencil that focuses it; trash is one button. */
+.ed-title-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.ed-title-row .ed-title {
+  min-width: 0;
+  max-width: 100%;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+}
+.ed-title-row .ed-title:hover {
+  border-bottom-color: var(--line-2);
+}
+.ed-rename {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  color: var(--muted);
+}
+.ed-head .trash-button {
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  color: var(--muted);
+}
+.ed-head .trash-button:hover:not(:disabled) {
+  color: var(--bad);
+}
+.editor textarea {
+  resize: none;
+  overflow-y: auto;
+  min-height: 56px;
+}
+/* Shot panel footer: a plain checkbox on the text's first line, and a one-line copies field. */
+.check input[type='checkbox'] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 1px 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  accent-color: var(--accent);
+}
+.check {
+  line-height: 18px;
+}
+.copies-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.copies-field input {
+  height: 32px;
+}

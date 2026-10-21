@@ -23,7 +23,7 @@ function versionTime(value, locale, t) {
 export function WorkbenchCopies({ value, onChange, max }) {
   const { t } = useI18n();
   return (
-    <label>
+    <label className="copies-field">
       {t('workbench.copies')}{' '}
       <input
         type="number"

@@ -22,8 +22,9 @@ import {
   ChevronRight,
   Upload,
   Scissors,
+  Pencil,
 } from 'lucide-react';
-import { TrashMenu, RenameDialog } from './UniversalTrash.jsx';
+import { TrashMenu, TrashButton, RenameDialog } from './UniversalTrash.jsx';
 import { WorkbenchTakes, WorkbenchCopies, WorkbenchDefaults } from './StoryboardWorkbench.jsx';
 import { AssistantBadge } from './AssistantConnections.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -1683,6 +1684,11 @@ function SaveFrame({ shot, version, onDone }) {
   );
 }
 
+function growTextarea(node) {
+  node.style.height = 'auto';
+  node.style.height = Math.min(node.scrollHeight + 2, 480) + 'px';
+}
+
 export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
   const { t: tr, locale } = useI18n();
   const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
@@ -1700,6 +1706,11 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
     setMsg('');
     setCopies('1');
   }, [shotId, state.contextId]);
+  // Text boxes grow with what is typed, like a chat composer; size them for saved text too.
+  const editorRef = useRef(null);
+  useEffect(() => {
+    editorRef.current?.querySelectorAll('textarea').forEach(growTextarea);
+  });
   if (!shot) return null;
   const index = state.shots.indexOf(shot);
   const info = expand(shot, db, locale);
@@ -1728,21 +1739,39 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
     durationRange = info.durationRange;
 
   return (
-    <section className={'editor' + (inline ? ' inline' : '') + (wide ? ' wide' : '')}>
+    <section
+      ref={editorRef}
+      className={'editor' + (inline ? ' inline' : '') + (wide ? ' wide' : '')}
+      onInput={(event) => event.target.tagName === 'TEXTAREA' && growTextarea(event.target)}
+    >
       <header className="ed-head">
         <div>
           <small>{tr('storyboard.finish19', { number: String(index + 1).padStart(2, '0') })}</small>
-          <input
-            className="ed-title"
-            aria-label={tr('storyboard.finish10')}
-            value={shot.title}
-            onChange={(e) => upd({ title: e.target.value })}
-          />
+          <div className="ed-title-row">
+            <input
+              className="ed-title"
+              aria-label={tr('storyboard.finish10')}
+              value={shot.title}
+              size={Math.max(4, Math.min(28, [...(shot.title || '')].length + 1))}
+              onChange={(e) => upd({ title: e.target.value })}
+              onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+            />
+            <button
+              type="button"
+              className="ghost round ed-rename"
+              title={tr('trash.rename')}
+              aria-label={tr('trash.rename')}
+              onClick={(e) => {
+                const input = e.currentTarget.parentElement.querySelector('.ed-title');
+                input?.focus();
+                input?.select();
+              }}
+            >
+              <Pencil size={13} />
+            </button>
+          </div>
         </div>
-        <TrashMenu
-          target={{ kind: 'entity', project_id: state.project.id, id: shot.id }}
-          onRename={() => document.querySelector('.ed-title')?.focus()}
-        />
+        <TrashButton target={{ kind: 'entity', project_id: state.project.id, id: shot.id }} />
         {onClose && (
           <button className="x big" aria-label={tr('storyboard.closeEditor')} onClick={onClose}>
             <X size={14} />
