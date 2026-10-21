@@ -262,6 +262,7 @@ function AddChapter({ count }) {
 
 function FilmEditorButton({ chapterId }) {
   const { t } = useI18n();
+  const { dispatch } = useStoryboardUI();
   const [open, setOpen] = useState(false);
   if (!chapterId) return null;
   return (
@@ -272,7 +273,11 @@ function FilmEditorButton({ chapterId }) {
       </button>
       {open && (
         <React.Suspense fallback={<p role="status">{t('settings.loading')}</p>}>
-          <FilmEditor chapterId={chapterId} onClose={() => setOpen(false)} />
+          <FilmEditor
+            chapterId={chapterId}
+            onClose={() => setOpen(false)}
+            onUploadAudio={(files) => dispatch({ type: 'uploadFiles', files })}
+          />
         </React.Suspense>
       )}
     </>
@@ -828,6 +833,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
             chapterId={fineTrim.chapterId}
             initialTrim={fineTrim.shotId}
             onClose={() => setFineTrim(null)}
+            onUploadAudio={(files) => dispatch({ type: 'uploadFiles', files })}
           />
         </React.Suspense>
       )}
