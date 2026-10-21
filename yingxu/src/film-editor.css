@@ -428,3 +428,36 @@ button.autosave-status {
     width: 16px;
   }
 }
+
+/* Speed and detached sound (render v5, #408): full-width rows under the source and trim bar. */
+.film-speed,
+.film-detach {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.film-speed > span {
+  margin-right: 4px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.film-speed button.on {
+  border-color: var(--accent);
+  color: var(--ink);
+}
+.film-speed small {
+  flex-basis: 100%;
+}
+.film-tclip-rate {
+  position: absolute;
+  top: 4px;
+  left: 5px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 0.6);
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+}

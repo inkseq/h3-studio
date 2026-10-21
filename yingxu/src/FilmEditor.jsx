@@ -6,19 +6,31 @@ import { AbsoluteFill, Html5Audio, Html5Video, Sequence } from 'remotion';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Eye, EyeOff, Volume2, VolumeX, X } from 'lucide-react';
+import { Eye, EyeOff, Gauge, Unlink, Volume2, VolumeX, X } from 'lucide-react';
 import { store } from './store.js';
 import { useStoryboardMediaUrl } from './StoryboardMedia.jsx';
 import { cutFps } from './video-cut-model.js';
 import { captionTrack, orderedCues } from './caption-model.js';
-import { cutFrames, editorClips, moveShot, setIncluded, trimClip } from './film-edit-model.js';
+import {
+  CROSSFADES,
+  clipSoundCrossfade,
+  cutFrames,
+  editorClips,
+  moveShot,
+  setClipSoundCrossfade,
+  setClipSpeed,
+  setIncluded,
+  trimClip,
+} from './film-edit-model.js';
 import {
   addAudioTrack,
   audioBlocks,
   clipSound,
+  detachClipSound,
   moveTrack,
   removeTrack,
   setTrack,
+  setTrackFade,
   toggleClipSound,
   trimTrack,
 } from './film-audio-model.js';
@@ -27,6 +39,13 @@ import TrimBar from './TrimBar.jsx';
 import { CloudSaveStatus } from './CloudAutosave.jsx';
 import { cloudController } from './cloud-controller.js';
 import './film-editor.css';
+
+// Linear fade in/out over the given number of frames, as the exporter's afade.
+const envelope = (frame, frames, fadeIn, fadeOut) =>
+  Math.max(
+    0,
+    Math.min(1, fadeIn > 0 ? frame / fadeIn : 1, fadeOut > 0 ? (frames - frame) / fadeOut : 1),
+  );
 
 const SIZES = { '9:16': [720, 1280], '16:9': [1280, 720], '1:1': [960, 960], '4:3': [960, 720] };
 
@@ -41,6 +60,7 @@ function Cut({ clips, sources, cues = [], audio = [] }) {
             <Html5Video
               src={sources[clip.asset.id]}
               trimBefore={clip.startFrame}
+              playbackRate={clip.rate}
               muted
               style={{ width: '100%', height: '100%', objectFit: 'contain' }}
             />
@@ -62,7 +82,12 @@ function Cut({ clips, sources, cues = [], audio = [] }) {
       {audio.map((a) =>
         sources[a.assetId] ? (
           <Sequence key={'audio-' + a.id} from={a.from} durationInFrames={a.frames}>
-            <Html5Audio src={sources[a.assetId]} trimBefore={a.trimBefore} volume={a.volume} />
+            <Html5Audio
+              src={sources[a.assetId]}
+              trimBefore={a.trimBefore}
+              playbackRate={a.rate}
+              volume={(f) => a.volume * envelope(f, a.frames, a.fadeIn, a.fadeOut)}
+            />
           </Sequence>
         ) : null,
       )}
@@ -205,6 +230,9 @@ function TimelineClip({ clip, pps, selected, playing, busy, sound, onSelect }) {
         <b>{clip.index + 1}</b>
         {width >= 72 && <span>{clip.title}</span>}
       </span>
+      {clip.rate !== 1 && width >= 30 && (
+        <span className="film-tclip-rate">{t('editor.rate', { rate: clip.rate })}</span>
+      )}
       {width >= 40 && sound?.state === 'on' && (
         <Volume2 className="film-tclip-sound" size={12} aria-label={t('editor.clipSoundOn')} />
       )}
@@ -325,7 +353,16 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
     title: c.title,
     start: c.from / cutFps,
     end: (c.from + c.frames) / cutFps,
+    rate: c.rate,
   }));
+  // Render v5 controls show only when the server advertises them (#408).
+  const caps = cloudController.getState().capabilities?.chapter_render,
+    v5 = caps?.render_contract_version >= 5,
+    rates = (v5 && caps.playback_rates) || null,
+    fadeMax = (v5 && caps.audio_fades_max_s) || 0,
+    canDetach = v5 && !!caps.detached_generated_audio,
+    crossfades = (v5 && caps.clip_sound_crossfade_values_s) || null,
+    crossfade = crossfades ? clipSoundCrossfade(project, chapterId) : 0;
   const blocks = useMemo(
     () => audioBlocks(project, chapterId, cutTimeline),
     [project, chapterId, JSON.stringify(cutTimeline)],
@@ -333,16 +370,37 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
   const audioAssets = project.entities.filter(
     (e) => e.type === 'audio' && e.data.fileId && !e.data.missingFile && !e.data.sourceJobId,
   );
+  // Clips' own sounds that are heard, by clip id, for the automatic boundary blend.
+  const audibleOwn = new Set(
+    blocks
+      .filter((b) => b.generated && b.placement && !b.effectiveMuted)
+      .map((b) => b.track.shotId),
+  );
   const audio = blocks
-    .filter((b) => b.placement && !b.track.muted && b.asset)
-    .map((b) => ({
-      id: b.track.id,
-      assetId: b.asset.id,
-      from: Math.round(b.placement.start * cutFps),
-      frames: Math.max(1, Math.round((b.placement.end - b.placement.start) * cutFps)),
-      trimBefore: Math.round(Number(b.track.start) * cutFps),
-      volume: b.track.gain ?? 0.7,
-    }));
+    .filter((b) => b.placement && !b.effectiveMuted && b.asset)
+    .map((b) => {
+      const frames = Math.max(1, Math.round((b.placement.end - b.placement.start) * cutFps)),
+        at = b.generated ? cutTimeline.findIndex((c) => c.id === b.track.shotId) : -1,
+        // Half the blend on each side of a boundary between two heard clip sounds, at most
+        // half the clip; a longer manual fade wins.
+        edge = Math.min((crossfade / 2) * cutFps, frames / 2),
+        before = at > 0 && audibleOwn.has(cutTimeline[at - 1].id) ? edge : 0,
+        after =
+          at >= 0 && at < cutTimeline.length - 1 && audibleOwn.has(cutTimeline[at + 1].id)
+            ? edge
+            : 0;
+      return {
+        id: b.track.id,
+        assetId: b.asset.id,
+        from: Math.round(b.placement.start * cutFps),
+        frames,
+        trimBefore: Math.round(Number(b.track.start) * cutFps),
+        rate: at >= 0 ? cutTimeline[at].rate || 1 : 1,
+        volume: b.track.gain ?? 0.7,
+        fadeIn: Math.max(before, (fadeMax ? b.track.fade_in_s || 0 : 0) * cutFps),
+        fadeOut: Math.max(after, (fadeMax ? b.track.fade_out_s || 0 : 0) * cutFps),
+      };
+    });
   const x = useMemo(() => timeScale([], pps), [pps]);
   const laneWidth = Math.max(seconds * pps, 200);
   const playhead = () => frame / cutFps;
@@ -472,7 +530,12 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
                 <button
                   type="button"
                   className={'small ghost' + (selectedSound?.state === 'on' ? ' on' : '')}
-                  disabled={busy || !selectedSound || selectedSound.state === 'none'}
+                  disabled={
+                    busy ||
+                    !selectedSound ||
+                    selectedSound.state === 'none' ||
+                    selectedSound.state === 'detached'
+                  }
                   title={selectedSound?.state === 'none' ? selectedSound.issue : undefined}
                   onClick={() => edit((p) => toggleClipSound(p, chapterId, selected.id))}
                 >
@@ -509,13 +572,66 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
                     key={selected.id}
                     duration={selected.sourceSeconds ?? durations[selected.asset.id]}
                     start={selected.startFrame / cutFps}
-                    end={(selected.startFrame + selected.frames) / cutFps}
+                    end={(selected.startFrame + selected.sourceFrames) / cutFps}
                     getVideo={() => sourceVideo.current}
                     disabled={busy}
                     onCommit={(start, end, source) =>
                       edit((p) => trimClip(p, selected.id, start, end, source))
                     }
                   />
+                  {rates && (
+                    <div className="film-speed" role="group" aria-label={t('editor.speed')}>
+                      <Gauge size={14} aria-hidden="true" />
+                      <span>{t('editor.speed')}</span>
+                      {rates.map((rate) => (
+                        <button
+                          key={rate}
+                          type="button"
+                          className={'small ghost' + (selected.rate === rate ? ' on' : '')}
+                          aria-pressed={selected.rate === rate}
+                          disabled={busy}
+                          onClick={() =>
+                            selected.rate !== rate &&
+                            edit((p) =>
+                              setClipSpeed(
+                                p,
+                                selected.id,
+                                rate,
+                                selected.sourceSeconds ?? durations[selected.asset.id],
+                              ),
+                            )
+                          }
+                        >
+                          {t('editor.rate', { rate })}
+                        </button>
+                      ))}
+                      {selectedSound?.slow && selectedSound.state === 'off' && (
+                        <small className="muted">{t('editor.slowSoundMuted')}</small>
+                      )}
+                    </div>
+                  )}
+                  {canDetach && selectedSound?.track && (
+                    <div className="film-detach">
+                      {selectedSound.state === 'detached' ? (
+                        <small className="muted">{t('editor.soundIsDetached')}</small>
+                      ) : (
+                        <button
+                          type="button"
+                          className="small ghost"
+                          disabled={busy}
+                          title={t('editor.detachHint')}
+                          onClick={() => {
+                            const id = selectedSound.track.id;
+                            edit((p) => detachClipSound(p, chapterId, id, cutTimeline));
+                            setSelectedAudio(id);
+                          }}
+                        >
+                          <Unlink size={13} />
+                          {t('editor.detachSound')}
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <p className="muted film-inspector-empty">{t('editor.trimNeedsVideo')}</p>
@@ -530,6 +646,26 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
           <div className="film-zoom">
             <small className="muted">{t('editor.dragHint')}</small>
             <span className="film-zoom-spacer" />
+            {crossfades && (
+              <label title={t('editor.crossfadeHint')}>
+                {t('editor.crossfade')}
+                <select
+                  value={crossfade}
+                  disabled={busy}
+                  onChange={(e) =>
+                    edit((p) => setClipSoundCrossfade(p, chapterId, Number(e.target.value)))
+                  }
+                >
+                  {crossfades
+                    .filter((value) => CROSSFADES.includes(value))
+                    .map((value) => (
+                      <option key={value} value={value}>
+                        {value ? t('editor.seconds', { value }) : t('editor.crossfadeOff')}
+                      </option>
+                    ))}
+                </select>
+              </label>
+            )}
             <label>
               {t('editor.zoom')}
               <input
@@ -603,6 +739,10 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
             onAdd={(asset, options) => addAudio(asset, null, options)}
             onUpload={uploadAudio}
             onSet={(id, patch) => edit((p) => setTrack(p, chapterId, id, patch))}
+            fadeMax={fadeMax}
+            onFade={(id, side, value) =>
+              edit((p) => setTrackFade(p, chapterId, id, side, value, fadeMax))
+            }
             onRemove={(id) => edit((p) => removeTrack(p, chapterId, id))}
           />
           {excluded.length > 0 && (

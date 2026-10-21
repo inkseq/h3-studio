@@ -35,11 +35,15 @@ function audible(project) {
 export function audioBlocks(project, chapterId, timeline = chapterTimeline(project, chapterId)) {
   return (project.journey?.soundTracks?.[chapterId] || []).map((track) => {
     const asset = project.entities.find((e) => e.id === (track.assetId || track.audioId));
-    const shot = track.generatedFrom ? timeline.find((s) => s.id === track.shotId) : null;
+    const shot = track.generatedFrom ? timeline.find((s) => s.id === track.shotId) : null,
+      source = track.detached ? detachedSource(project, track) : null;
     return {
       track,
-      generated: !!track.generatedFrom,
-      title: shot ? shot.title : asset?.title || track.id,
+      // Follows its clip (cannot be moved on its own) unless detached.
+      generated: !!track.generatedFrom && !track.detached,
+      detached: !!track.detached,
+      title: shot ? shot.title : source ? source.title : asset?.title || track.id,
+      effectiveMuted: effectiveMuted(track, shot),
       placement: trackPlacement(track, timeline),
       fileId: asset?.data.fileId || track.fileId,
       asset,
@@ -47,12 +51,33 @@ export function audioBlocks(project, chapterId, timeline = chapterTimeline(proje
   });
 }
 
-/** The clip's own (generated) sound: 'on', 'off', or an unavailable reason. */
-export function clipSound(project, chapterId, shotId) {
-  const track = (project.journey?.soundTracks?.[chapterId] || []).find(
-    (t) => t.generatedFrom && t.shotId === shotId,
+// The shot whose generated video a detached track came from, for its label.
+function detachedSource(project, track) {
+  return project.entities.find(
+    (e) => e.type === 'shot' && e.data.selectedAssetId === track.generatedFrom?.videoEntityId,
   );
-  if (track) return { state: track.muted ? 'off' : 'on', track };
+}
+
+// Below 0.75x a clip's own sound is silent unless the user turned it on for the slow clip.
+export function effectiveMuted(track, timelineEntry) {
+  if (track.muted) return true;
+  const rate = track.generatedFrom && !track.detached ? timelineEntry?.rate || 1 : 1;
+  return rate < 0.75 && !track.slow_rate_audio_enabled;
+}
+
+/** The clip's own (generated) sound: 'on', 'off', 'detached', or an unavailable reason. */
+export function clipSound(project, chapterId, shotId) {
+  const tracks = project.journey?.soundTracks?.[chapterId] || [],
+    track = tracks.find((t) => t.generatedFrom && !t.detached && t.shotId === shotId);
+  const shot = project.entities.find((e) => e.id === shotId);
+  if (track) {
+    const rate = shot?.data.selectedVideoRange?.playback_rate ?? 1;
+    return { state: effectiveMuted(track, { rate }) ? 'off' : 'on', track, slow: rate < 0.75 };
+  }
+  const detached = tracks.find(
+    (t) => t.detached && t.generatedFrom?.videoEntityId === shot?.data.selectedAssetId,
+  );
+  if (detached) return { state: 'detached', track: detached };
   const option = generatedAudioOption(project, shotId);
   return option.issue ? { state: 'none', issue: option.issue } : { state: 'off', track: null };
 }
@@ -61,12 +86,49 @@ export function clipSound(project, chapterId, shotId) {
 export function toggleClipSound(project, chapterId, shotId) {
   const current = clipSound(project, chapterId, shotId);
   if (current.state === 'none') throw Error(current.issue);
+  if (current.state === 'detached') throw Error('editor.soundDetached');
   if (!current.track) {
-    upsertGeneratedSound(project, shotId);
+    const track = upsertGeneratedSound(project, shotId);
+    if (current.slow) track.slow_rate_audio_enabled = true;
     return;
   }
-  current.track.muted = current.state === 'on';
-  if (!current.track.muted) audible(project);
+  if (current.state === 'on') current.track.muted = true;
+  else {
+    current.track.muted = false;
+    // Turning sound on for a slowed clip is the explicit choice the exporter asks for.
+    if (current.slow) current.track.slow_rate_audio_enabled = true;
+    audible(project);
+  }
+}
+
+/** Make a clip's own sound an independent track at its current place, at normal speed.
+ * It keeps its verified source and no longer follows the clip. Mutates `project`. */
+export function detachClipSound(
+  project,
+  chapterId,
+  trackId,
+  timeline = chapterTimeline(project, chapterId),
+) {
+  const track = findTrack(project, chapterId, trackId);
+  if (!track.generatedFrom || track.detached) throw Error('editor.audioMissing');
+  const placement = trackPlacement(track, timeline);
+  if (!placement) throw Error('editor.audioMissing');
+  track.detached = true;
+  track.shotId = '';
+  track.offset = round(placement.start);
+  delete track.slow_rate_audio_enabled;
+}
+
+/** Fade a track in/out over `seconds` (0–5, within the track's length). */
+export function setTrackFade(project, chapterId, trackId, side, seconds, max = 5) {
+  const track = findTrack(project, chapterId, trackId),
+    key = side === 'in' ? 'fade_in_s' : 'fade_out_s',
+    other = side === 'in' ? 'fade_out_s' : 'fade_in_s',
+    value = round(Math.min(max, Math.max(0, Number(seconds) || 0)));
+  const length = Number(track.end) - Number(track.start);
+  if (value + (track[other] || 0) > length + 1e-6) throw Error('editor.fadeTooLong');
+  if (value) track[key] = value;
+  else delete track[key];
 }
 
 /** Add music or voice from a project audio entity at `at` seconds. Mutates `project`. */
@@ -96,7 +158,7 @@ export function addAudioTrack(project, chapterId, asset, at, duration, role = 'm
 /** Move a music/voice track so it starts at `start` seconds on the film. */
 export function moveTrack(project, chapterId, trackId, start) {
   const track = findTrack(project, chapterId, trackId);
-  if (track.generatedFrom) throw Error('editor.audioFollowsClip');
+  if (track.generatedFrom && !track.detached) throw Error('editor.audioFollowsClip');
   track.shotId = '';
   track.offset = round(Math.max(0, start));
 }
@@ -111,7 +173,7 @@ export function trimTrack(
   timeline = chapterTimeline(project, chapterId),
 ) {
   const track = findTrack(project, chapterId, trackId);
-  if (track.generatedFrom) throw Error('editor.audioFollowsClip');
+  if (track.generatedFrom && !track.detached) throw Error('editor.audioFollowsClip');
   const placement = trackPlacement(track, timeline);
   if (!placement) throw Error('editor.audioMissing');
   const duration = Number.isFinite(track.duration) ? track.duration : track.end;

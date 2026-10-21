@@ -20,7 +20,8 @@ export function chapterTiming(shots) {
   return shots.map((shot) => {
     const start = cursor / 24;
     cursor += Math.max(0, Math.floor((Number(shot.data.seconds) || 0) * 24 + 0.5));
-    return { id: shot.id, title: shot.title, start, end: cursor / 24, shot };
+    const rate = shot.data.selectedVideoRange?.playback_rate ?? 1;
+    return { id: shot.id, title: shot.title, start, end: cursor / 24, shot, rate };
   });
 }
 export function trackPlacement(track, timeline) {
@@ -30,7 +31,9 @@ export function trackPlacement(track, timeline) {
     sourceStart = Number(track.start),
     sourceEnd = Number(track.end),
     start = (origin?.start || 0) + offset,
-    length = sourceEnd - sourceStart;
+    // A clip's own sound plays at the clip's speed; detached and other tracks at normal speed.
+    rate = origin && track.generatedFrom && !track.detached ? origin.rate || 1 : 1,
+    length = (sourceEnd - sourceStart) / rate;
   if (
     !Number.isFinite(offset) ||
     offset < 0 ||
