@@ -66,6 +66,12 @@ function collision(args) {
     const best = hits.find((hit) => /^(slot|vdrop|voicedrop):/.test(String(hit.id)));
     return best ? [best] : hits;
   }
+  // Timeline segments reorder among themselves: drop on the segment under the pointer.
+  if (id.startsWith('seg:')) {
+    const segs = args.droppableContainers.filter((c) => String(c.id).startsWith('segto:'));
+    const hits = pointerWithin({ ...args, droppableContainers: segs });
+    return hits.length ? hits : closestCenter({ ...args, droppableContainers: segs });
+  }
   return closestCenter({
     ...args,
     droppableContainers: args.droppableContainers.filter((container) =>
@@ -873,6 +879,10 @@ function StoryboardShell({ onLegacyGuide, onCanvas, onNewScene, filmControl }) {
       o = String(over.id);
     if (a.startsWith('shot:') && o.startsWith('shot:'))
       return dispatch({ type: 'reorder', from: a.slice(5), to: o.slice(5) });
+    if (a.startsWith('seg:') && o.startsWith('segto:'))
+      return a.slice(4) === o.slice(6)
+        ? undefined
+        : dispatch({ type: 'reorder', from: a.slice(4), to: o.slice(6) });
     const item = a.startsWith('asset:')
       ? { asset: a.slice(6) }
       : a.startsWith('profile:')
