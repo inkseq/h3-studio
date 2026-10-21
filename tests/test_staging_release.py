@@ -797,6 +797,7 @@ class PaymentLiveRehearsalTests(unittest.TestCase):
             source.chmod(0o600)
             image = 'sha256:' + 'a' * 64
             calls = []
+            regular = offline_rehearsal.release.regular
 
             def command(args, **kwargs):
                 calls.append(args)
@@ -807,6 +808,16 @@ class PaymentLiveRehearsalTests(unittest.TestCase):
                 )
 
             with (
+                # This orchestration fixture is owned by the test runner, not
+                # root; file/permission guard behavior has separate tests.
+                patch.object(offline_rehearsal.release, 'protected_directory'),
+                patch.object(
+                    offline_rehearsal.release,
+                    'regular',
+                    side_effect=lambda path, **kw: regular(
+                        path, maximum=kw.get('maximum')
+                    ),
+                ),
                 patch.object(
                     offline_rehearsal.deployment_target,
                     'host',
