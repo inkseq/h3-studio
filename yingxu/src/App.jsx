@@ -7,6 +7,7 @@ import StudioHeader from './StudioHeader.jsx';
 import AccountMenu, { MenuItem } from './AccountMenu.jsx';
 import { LowCreditsDialog } from './CreditsUI.jsx';
 import { LegalPage, PricingPage } from './PublicPages.jsx';
+import Landing from './Landing.jsx';
 import Library from './Library.jsx';
 import UniversalTrash, {
   TrashProvider,
@@ -1299,6 +1300,8 @@ function AppContent() {
   }, [path, sidebarView]);
   const routes = {
     '/': ({ location: page }) => {
+      // Creating needs an account: signed-out visitors see the landing page.
+      if (!account) return c.sessionReady ? <Landing /> : <InkLoader label={t('app.name')} />;
       const destination = readAgentLink(page.search),
         here =
           destination &&
