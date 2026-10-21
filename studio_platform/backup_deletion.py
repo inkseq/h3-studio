@@ -3,6 +3,7 @@
 import hashlib
 import json
 import math
+import uuid
 
 
 def _token(kind, value, binding=None):
@@ -38,6 +39,7 @@ def deletion_evidence(db, references):
             tenant=tenant,
             owner=owner,
             session=session,
+            business=business,
             kind=kind,
             payload=value,
         )
@@ -45,6 +47,43 @@ def deletion_evidence(db, references):
         if kind == 'content_tombstone':
             tombstones.setdefault((tenant, owner, business), []).append(row)
     sources = {}
+
+    def account_action(row):
+        """A completed ORIGINAL account journal, never a general deleted-owner flag."""
+        p = row['payload']
+        try:
+            user_id = str(uuid.UUID(p['user_id']))
+            if str(uuid.UUID(row['id'])) != row['id']:
+                return False
+            if (
+                row['session'] != row['id']
+                or row['business'] != user_id
+                or p.get('operation_id') != row['id']
+                or p.get('owner') != row['owner']
+                or p.get('phase') != 'completed'
+                or p.get('provider') != {'state': 'deleted'}
+            ):
+                return False
+            for kind, ident, value in (
+                ('deletion', row['id'], {'owner': row['owner'], 'user_id': user_id}),
+                (
+                    'deletion_owner',
+                    row['owner'],
+                    {'operation_id': row['id'], 'user_id': user_id},
+                ),
+            ):
+                records = list(
+                    db.execute(
+                        "SELECT payload FROM platform_documents WHERE tenant_id=? AND owner_id='__session_authority' AND project_id='__session_authority' AND kind=? AND document_id=?",
+                        (row['tenant'], kind, ident),
+                    )
+                )
+                if len(records) != 1 or json.loads(records[0][0]) != value:
+                    return False
+            return True
+        except (KeyError, TypeError, ValueError):
+            return False
+
     # Reuse the cleanup contract's conservative identity census. A retained
     # active reference anywhere prevents a deleted-content suppression.
     from .content_lifecycle import reference_ids
@@ -62,6 +101,7 @@ def deletion_evidence(db, references):
             'history_action',
             'history_preview',
             'universal_purge',
+            'account_deletion',
         ):
             retain(row['payload'])
     for table, columns in (
@@ -132,7 +172,7 @@ def deletion_evidence(db, references):
     # every reference in large archives. Duplicate keys remain ambiguous.
     plans = {}
     for ident, row in objects.items():
-        if row['kind'] not in ('history_action', 'universal_purge'):
+        if row['kind'] not in ('history_action', 'universal_purge', 'account_deletion'):
             continue
         try:
             plan = row['payload']['plan']
@@ -176,14 +216,20 @@ def deletion_evidence(db, references):
                 if (
                     not action
                     or (action['tenant'], action['owner']) != (tenant, owner)
-                    or action['kind'] not in ('history_action', 'universal_purge')
+                    or action['kind']
+                    not in ('history_action', 'universal_purge', 'account_deletion')
                 ):
                     break
                 p = action['payload']
                 object_index, plan = plans[action['id']]
                 if (
                     p.get('state') != 'completed'
-                    or p.get('action') not in ('purge', 'empty_trash')
+                    or (
+                        p.get('action') != 'account_delete'
+                        or not account_action(action)
+                        if action['kind'] == 'account_deletion'
+                        else p.get('action') not in ('purge', 'empty_trash')
+                    )
                     or p.get('accounting_released') is not True
                     or not _time(p.get('completed_at'))
                     or ref['id'] not in plan[kind + '_ids']
@@ -231,7 +277,7 @@ def deletion_evidence(db, references):
         for proofs in result.values():
             for proof in proofs:
                 action = objects[proof['action_id']]
-                if action['kind'] == 'universal_purge':
+                if action['kind'] in ('universal_purge', 'account_deletion'):
                     proven.setdefault(
                         (action['tenant'], action['owner'], proof['table']), set()
                     ).add(proof['id'])
@@ -265,7 +311,8 @@ def deletion_evidence(db, references):
             for proofs in result.values()
             for p in proofs
             if p['id'] in proven
-            and objects[p['action_id']]['kind'] == 'universal_purge'
+            and objects[p['action_id']]['kind']
+            in ('universal_purge', 'account_deletion')
         }
         retain(request)
         for value, eligible in (

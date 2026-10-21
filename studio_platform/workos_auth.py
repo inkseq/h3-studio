@@ -47,6 +47,7 @@ MESSAGES = {
     "workos_link_session_changed": "The original account session changed. Start linking again.",
     "workos_sign_in_cancelled": "Sign-in was not completed. Please try again.",
     "account_suspended": "This account is suspended. Contact an administrator.",
+    "account_deleted": "This sign-in identity was deleted. Use a new account.",
     "account_unavailable": "The account is unavailable.",
     "browser_required": "Use your browser session for this account operation.",
     "profile_invalid": "Provide a display name of 1 to 200 characters.",
@@ -400,9 +401,26 @@ class WorkOSAuth:
         return {"subject": subject, "email": email.lower(), "display_name": name}
 
     def _upsert(self, identity, transaction, principal):
+        from .session_authority import deleted_workos_subject, read
+
         with self.repo.transaction() as connection:
             lock_account_gate(connection, exclusive=True)
             self._ready(connection)
+            # Deletion clears the profile's provider ID. Retain only its
+            # private hash fence so an already-verified late exchange cannot
+            # create another UUID, welcome grant or budget binding for it.
+            if (
+                read(
+                    connection,
+                    self.settings.tenant_id,
+                    "deleted_subject",
+                    deleted_workos_subject(
+                        self.settings.tenant_id, identity["subject"]
+                    ),
+                )
+                is not None
+            ):
+                raise WorkOSError("account_deleted", 403)
             target = (
                 connection.execute(
                     select(users)

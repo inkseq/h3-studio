@@ -277,6 +277,99 @@ class ExpectedDeletionTests(unittest.TestCase):
                 with self.assertRaises(backup.BackupError):
                     backup.verify_local(source, allow_incomplete=True)
 
+    def test_account_deletion_requires_original_completed_journal_and_exact_identity(
+        self,
+    ):
+        def account_action(db, payload, spec, action, ident, failure=None):
+            operation = '11111111-1111-4111-8111-111111111111'
+            user = '22222222-2222-4222-8222-222222222222'
+            payload.update(
+                action='account_delete',
+                operation_id=operation,
+                owner='superdan',
+                user_id=user,
+                phase='completed',
+                provider={'state': 'deleted'},
+            )
+            if failure == 'pending':
+                payload['state'] = 'pending'
+            if failure == 'wrong_bytes':
+                payload['plan']['objects'][0]['sha256'] = 'f' * 64
+            db.execute(
+                "UPDATE platform_quick_chat_objects SET id=?,session_id=?,kind='account_deletion',business_key=?,payload=? WHERE id=?",
+                (operation, operation, user, json.dumps(payload), action),
+            )
+            for tid, raw in db.execute(
+                "SELECT id,payload FROM platform_quick_chat_objects WHERE kind='content_tombstone'"
+            ).fetchall():
+                value = json.loads(raw)
+                value['action_id'] = operation
+                db.execute(
+                    'UPDATE platform_quick_chat_objects SET session_id=?,payload=? WHERE id=?',
+                    (operation, json.dumps(value), tid),
+                )
+            tenant = self.scope.tenant_id
+            for kind, key, body in (
+                ('deletion', operation, {'owner': 'superdan', 'user_id': user}),
+                (
+                    'deletion_owner',
+                    'superdan',
+                    {'operation_id': operation, 'user_id': user},
+                ),
+            ):
+                if failure == 'missing_original' and kind == 'deletion':
+                    continue
+                if failure == 'foreign_owner' and kind == 'deletion':
+                    body['owner'] = 'foreign'
+                if failure == 'wrong_operation' and kind == 'deletion_owner':
+                    body['operation_id'] = 'foreign'
+                db.execute(
+                    'INSERT INTO platform_documents (tenant_id,owner_id,project_id,kind,document_id,payload,version,updated_at) VALUES (?,?,?,?,?,?,1,3)',
+                    (
+                        tenant,
+                        '__session_authority',
+                        '__session_authority',
+                        kind,
+                        key,
+                        json.dumps(body),
+                    ),
+                )
+            if failure == 'shared_live':
+                db.execute(
+                    "INSERT INTO platform_quick_chat_objects (id,tenant,owner,session_id,kind,parent_id,business_key,version,payload,created_at,updated_at) VALUES ('shared-live',?,'foreign','foreign','turn',NULL,'shared-live',1,?,1,3)",
+                    (tenant, json.dumps({'saved_artifact': ident})),
+                )
+
+        for failure in (
+            None,
+            'pending',
+            'missing_original',
+            'foreign_owner',
+            'wrong_operation',
+            'wrong_bytes',
+            'shared_live',
+        ):
+            with self.subTest(failure=failure):
+                case = ExpectedDeletionTests()
+                case.setUp()
+                try:
+                    manifest = backup.verify_local(
+                        case.source(
+                            lambda *args: account_action(*args, failure=failure)
+                        ),
+                        allow_incomplete=True,
+                    )
+                    self.assertEqual(
+                        manifest['coverage']['expected_missing_objects'],
+                        int(failure is None),
+                    )
+                    self.assertEqual(
+                        manifest['coverage']['unexpected_missing_objects'],
+                        int(failure is not None),
+                    )
+                finally:
+                    case.doCleanups()
+
     def test_remote_reconcile_restore_and_daily_keep_expected_summary(self):
         source = self.source()
         target = self.target()

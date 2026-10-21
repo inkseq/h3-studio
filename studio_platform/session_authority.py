@@ -2,9 +2,21 @@
 
 from sqlalchemy import and_, insert, select, update
 
-from .repository import documents
+from .repository import documents, request_hash
 
 OWNER = PROJECT = "__session_authority"
+
+
+def deleted_workos_subject(tenant, subject):
+    """Stable provider identity, including across an OAuth client rotation."""
+    return request_hash(
+        {
+            "tenant": tenant,
+            "provider": "workos",
+            "issuer": "https://api.workos.com",
+            "subject": subject,
+        }
+    )
 
 
 def where(tenant, kind, ident):

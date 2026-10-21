@@ -79,6 +79,8 @@ inventory.json
 !studio_platform/account_sessions.py
 !studio_platform/account_session_routes.py
 !studio_platform/account_workflows.py
+!studio_platform/account_deletion.py
+!studio_platform/account_deletion_routes.py
 !docs/ACCOUNT-LIFECYCLE-CONTRACT.md
 !studio_platform/capabilities.py
 !studio_platform/generation_draft.py
