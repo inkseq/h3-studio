@@ -401,6 +401,35 @@ class RenderV5Tests(unittest.TestCase):
         self.assertTrue((directory / "source-000.framemd5").is_file())
         self.assertFalse((directory / "clip-000.mp4").exists())
 
+    def test_false_long_flac_header_cannot_hide_one_missing_sample_before_atempo(self):
+        self.video("red", "red", seconds=1, size="256x256")
+        self.tone("sound", 1, 440)
+        job = self.v5(
+            [self.shot("red", 24, 48, 0.5)],
+            [self.track("sound", 0, 32001, 0, 64000, 0.5)],
+        )
+        original = media.probe
+
+        def exaggerated_header(path, *args, **kwargs):
+            info = original(path, *args, **kwargs)
+            if path.name.startswith("input-") and path.suffix == ".flac":
+                info["format"]["duration"] = "2.000000"
+                info["streams"][0]["duration"] = "2.000000"
+            return info
+
+        with mock.patch.object(media, "probe", side_effect=exaggerated_header):
+            prepared = self.backend.prepare(
+                job, "short-decoded-audio-v5", self.store, lambda: None
+            )
+            with self.assertRaises(SubmissionRejected):
+                self.backend.submit(prepared, "short-decoded-audio-v5")
+        directory = self.backend._directory("short-decoded-audio-v5")
+        segment = directory / "audio-000.flac"
+        self.assertEqual(
+            round(float(original(segment)["format"]["duration"]) * 32000), 32000
+        )
+        self.assertFalse((directory / "result.flac").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
