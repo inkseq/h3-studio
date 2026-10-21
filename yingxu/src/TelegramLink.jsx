@@ -4,6 +4,18 @@ import { useI18n } from './i18n/I18nProvider.jsx';
 
 export const TELEGRAM_BOT = 'InkseqBot';
 // Telegram's start parameter allows 64 characters of [A-Za-z0-9_-]; the one-time code fits.
+// The bot's one-time nonce from /connect/telegram?r=… (43–128 URL-safe characters).
+export const validTelegramNonce = (value) =>
+  typeof value === 'string' && /^[A-Za-z0-9_-]{43,128}$/.test(value);
+
+// Telegram usernames can change, so the id is only the last fallback for display.
+export function telegramUserLabel(user) {
+  if (!user) return '';
+  if (typeof user.username === 'string' && user.username) return '@' + user.username;
+  if (typeof user.display_name === 'string' && user.display_name) return user.display_name;
+  return String(user.id || '');
+}
+
 export function telegramDeepLink(code) {
   const payload = 'l_' + String(code || '');
   if (!/^[A-Za-z0-9_-]{3,64}$/.test(payload)) return null;

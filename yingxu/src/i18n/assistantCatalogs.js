@@ -3,6 +3,7 @@ export const assistantCatalogs = {
     'telegram.target': 'Connect to',
     'telegram.agentTab': 'AI assistant',
     'telegram.tab': 'Telegram',
+    'telegram.claimedBy': 'Linked to Telegram {name}',
     'telegram.explain':
       'Link the Inkseq Telegram bot to this account. It saves stories to your Works and uses your credits within the daily cap you set. You can disconnect it here at any time.',
     'telegram.connect': 'Connect Telegram',
@@ -129,6 +130,7 @@ export const assistantCatalogs = {
     'telegram.target': '连接到',
     'telegram.agentTab': 'AI 助手',
     'telegram.tab': 'Telegram',
+    'telegram.claimedBy': '已绑定 Telegram {name}',
     'telegram.explain':
       '把映序的 Telegram 机器人连到这个账号。它会把故事存进你的作品，在你设的每日上限内用你的积分。随时可以在这里断开。',
     'telegram.connect': '连接 Telegram',
