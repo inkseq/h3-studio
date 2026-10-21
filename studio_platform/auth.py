@@ -102,6 +102,10 @@ API_SCOPES = frozenset(
 USERS = frozenset({"superdan", "supervan"})
 TOKEN = re.compile(r"^[A-Za-z0-9_-]{43,128}$")
 PASSWORD_HASH = re.compile(r"^\$2[aby]\$12\$[./A-Za-z0-9]{53}$")
+WORKOS_PRIVATE_OWNER = "__authkit"
+WORKOS_PRIVATE_PROJECT = "__authkit"
+WORKOS_SESSION_KIND = "authkit_session"
+WORKOS_SESSION_FIELDS = {"sid", "subject", "client_id", "access_expires_at"}
 _DUMMY = bcrypt.hashpw(secrets.token_bytes(32), bcrypt.gensalt(rounds=12))
 
 
@@ -143,6 +147,22 @@ class Principal:
 
 def digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _workos_session_shape(value):
+    """Minimal logout metadata shape; this is never authentication authority."""
+    return (
+        type(value) is dict
+        and set(value) == WORKOS_SESSION_FIELDS
+        and isinstance(value["sid"], str)
+        and re.fullmatch(r"session_[A-Za-z0-9]{10,80}", value["sid"]) is not None
+        and isinstance(value["subject"], str)
+        and re.fullmatch(r"user_[A-Za-z0-9]{10,80}", value["subject"]) is not None
+        and isinstance(value["client_id"], str)
+        and re.fullmatch(r"client_[A-Za-z0-9]{12,80}", value["client_id"]) is not None
+        and type(value["access_expires_at"]) is int
+        and value["access_expires_at"] > 0
+    )
 
 
 class Auth:
@@ -471,11 +491,28 @@ class Auth:
             )
         return None
 
-    def issue_workos_session(self, owner, workos_user_id):
+    def _workos_document(self, owner, token_hash):
+        from .repository import documents
+
+        return (
+            documents.c.tenant_id == self.tenant,
+            documents.c.owner_id == WORKOS_PRIVATE_OWNER,
+            documents.c.project_id == WORKOS_PRIVATE_PROJECT,
+            documents.c.kind == WORKOS_SESSION_KIND,
+            documents.c.document_id == digest(owner + "\0" + token_hash),
+        )
+
+    def issue_workos_session(self, owner, workos_user_id, *, provider_session=None):
         """Trusted verified-SDK callback only, after its canonical upsert commits."""
         if not isinstance(workos_user_id, str) or not 1 <= len(workos_user_id) <= 200:
             raise AuthenticationError("WorkOS 登录身份不可用")
         token, now = secrets.token_urlsafe(32), self.clock()
+        if provider_session is not None and (
+            not _workos_session_shape(provider_session)
+            or provider_session["subject"] != workos_user_id
+            or provider_session["access_expires_at"] <= now
+        ):
+            raise AuthenticationError("WorkOS 登录身份不可用")
         with self.engine.begin() as connection:
             if self.engine.dialect.name == "sqlite":
                 connection.exec_driver_sql("BEGIN IMMEDIATE")
@@ -493,6 +530,26 @@ class Auth:
                     expires=now + self.session_seconds,
                 )
             )
+            if provider_session is not None:
+                from .repository import documents
+
+                connection.execute(
+                    insert(documents).values(
+                        tenant_id=self.tenant,
+                        owner_id=WORKOS_PRIVATE_OWNER,
+                        project_id=WORKOS_PRIVATE_PROJECT,
+                        kind=WORKOS_SESSION_KIND,
+                        document_id=digest(owner + "\0" + digest(token)),
+                        version=1,
+                        payload={
+                            **provider_session,
+                            "owner": owner,
+                            "session_hash": digest(token),
+                            "session_created_at": now,
+                        },
+                        updated_at=now,
+                    )
+                )
         return token
 
     def session(self, token):
@@ -574,15 +631,73 @@ class Auth:
                 )
         return principal
 
+    def _consume_workos_logout(self, conn, row, token_hash):
+        from .repository import documents
+
+        where = self._workos_document(row["username"], token_hash)
+        record = conn.execute(
+            select(documents.c.payload).where(*where).with_for_update()
+        ).first()
+        # Consume this exact binding even when stale/malformed. Access-token
+        # expiry only gated issuance; the sliding local session owns this SID.
+        conn.execute(delete(documents).where(*where))
+        value = record[0] if record is not None else None
+        if (
+            type(value) is dict
+            and set(value)
+            == WORKOS_SESSION_FIELDS | {"owner", "session_hash", "session_created_at"}
+            and value["owner"] == row["username"]
+            and value["session_hash"] == token_hash
+            and type(value["session_created_at"]) in (int, float)
+            and value["session_created_at"] == row["created"]
+            and row["expires"] > self.clock()
+        ):
+            candidate = {key: value[key] for key in WORKOS_SESSION_FIELDS}
+            if _workos_session_shape(candidate):
+                account = self._grant_account(conn, row["username"], "workos", 0.0)
+                if (
+                    account is not None
+                    and account["workos_user_id"] == candidate["subject"]
+                ):
+                    return candidate
+        return None
+
     def logout(self, token):
+        provider_session = None
         if isinstance(token, str) and TOKEN.fullmatch(token):
             with self.engine.begin() as conn:
+                if self.engine.dialect.name == "sqlite":
+                    conn.exec_driver_sql("BEGIN IMMEDIATE")
+                token_hash = digest(token)
+                row = (
+                    conn.execute(
+                        select(sessions)
+                        .where(
+                            sessions.c.tenant == self.tenant,
+                            sessions.c.token_hash == token_hash,
+                        )
+                        .with_for_update()
+                    )
+                    .mappings()
+                    .first()
+                )
+                if row is not None and row["auth_mode"] == "workos":
+                    try:
+                        with conn.begin_nested():
+                            provider_session = self._consume_workos_logout(
+                                conn, row, token_hash
+                            )
+                    except Exception:
+                        # A failed metadata read/delete must not roll back local
+                        # revocation. Any orphan is inert without its session.
+                        provider_session = None
                 conn.execute(
                     delete(sessions).where(
                         sessions.c.tenant == self.tenant,
-                        sessions.c.token_hash == digest(token),
+                        sessions.c.token_hash == token_hash,
                     )
                 )
+        return provider_session
 
     def register_client(self, client_id, token, owner, project_ids, scopes):
         if (

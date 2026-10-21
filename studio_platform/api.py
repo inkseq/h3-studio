@@ -705,9 +705,20 @@ def create_app(
 
     @app.post("/api/auth/logout")
     def logout(request: Request):
-        auth.logout(request.cookies.get(COOKIE))
-        response = JSONResponse({"ok": True})
+        provider_session = auth.logout(request.cookies.get(COOKIE))
+        value = {"ok": True}
+        logout_url = (
+            app.state.workos_auth.logout_url(provider_session)
+            if provider_session
+            else None
+        )
+        if logout_url is not None:
+            value["logout_url"] = logout_url
+        response = JSONResponse(value)
         response.delete_cookie(COOKIE, path="/")
+        if logout_url is not None:
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["Referrer-Policy"] = "no-referrer"
         return response
 
     @app.get("/v1/capabilities")
