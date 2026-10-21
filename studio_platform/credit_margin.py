@@ -40,11 +40,8 @@ def exposure(rows):
             return {"invoice_pending_microusd": amount}
     if any(value is not None and not _money(value) for value in actuals):
         return None
-    return {
-        "unconfirmed_microusd": max(
-            [amount, *[value for value in actuals if value is not None]]
-        )
-    }
+    uncertain = max([amount, *[value for value in actuals if value is not None]])
+    return {"unconfirmed_microusd": uncertain} if uncertain else None
 
 
 def report(connection, tenant, now):

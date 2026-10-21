@@ -556,6 +556,39 @@ class CreditOnlyTests(LedgerCase):
             ),
             {"actual_microusd": 0},
         )
+        reserved = {
+            "amount_microusd": 0,
+            "state": "reserved",
+            "actual_cost_microusd": 0,
+        }
+        settled = {**reserved, "state": "settled"}
+        self.assertIsNone(exposure([reserved]))
+        self.assertIsNone(exposure([reserved, settled]))
+
+    def test_ambiguous_zero_cost_layers_remain_unknown_in_admin_report(self):
+        job = self.captured_job(cost=0)
+        self.now += 10
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(budget_reservations)
+                .where(budget_reservations.c.reference_id == job["id"])
+                .values(amount_microusd=0)
+            )
+            connection.execute(
+                update(budget_reservations)
+                .where(
+                    budget_reservations.c.reference_id == job["id"],
+                    budget_reservations.c.account_id == "owner-budget",
+                )
+                .values(state="reserved")
+            )
+        with self.repo.engine.connect() as connection:
+            value = report(connection, self.scope.tenant_id, self.now)
+        self.assertEqual(value["unknown_cost_jobs"], 1)
+        self.assertEqual(value["status"], "unknown")
+        self.assertIsNone(value["actual_microusd"])
+        self.assertIsNone(value["exposure_microusd"])
+        self.assertIsNone(value["margin"])
 
 
 class CreditAdmissionSchemaTests(unittest.TestCase):
