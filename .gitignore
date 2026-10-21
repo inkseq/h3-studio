@@ -670,6 +670,7 @@ inventory.json
 !studio_platform/credit_schema.py
 !studio_platform/credits.py
 !studio_platform/credits_routes.py
+!studio_platform/generation_budget_binding.py
 !studio_platform/credits_pricing.py
 !studio_platform/migrations/versions/v20261019_0004_customer_credits.py
 !tests/test_credit_admission.py

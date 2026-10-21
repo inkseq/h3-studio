@@ -157,6 +157,37 @@ class ExecutionPolicyTests(unittest.TestCase):
     def evaluate(self):
         return self.policies.evaluate(self.compiled, self.scope, self.fingerprint)
 
+    def test_missing_binding_has_distinct_read_only_diagnostic_then_zero_budget_refusal(
+        self,
+    ):
+        from sqlalchemy import delete, select
+        from studio_platform.repository import budget_accounts
+
+        account_id = "test-owner:sixnine:superdan"
+        with self.repo.transaction() as connection:
+            connection.execute(
+                delete(budget_accounts).where(budget_accounts.c.id == account_id)
+            )
+        for _ in range(2):
+            result = self.evaluate()
+            self.assertEqual(
+                result.execution["budget_error_code"],
+                "generation_budget_binding_missing",
+            )
+            self.assertFalse(result.execution["enabled"])
+        with self.repo.engine.connect() as connection:
+            self.assertIsNone(
+                connection.execute(
+                    select(budget_accounts).where(budget_accounts.c.id == account_id)
+                ).first()
+            )
+        self.repo.configure_budget(
+            account_id, tenant_id="sixnine", owner_id="superdan", limit_microusd=0
+        )
+        self.assertEqual(
+            self.evaluate().execution["budget_error_code"], "budget_exceeded"
+        )
+
     def test_enabled_exact_policy_preserves_controls_and_separates_cost(self):
         result = self.evaluate()
         self.assertTrue(result.execution["enabled"])

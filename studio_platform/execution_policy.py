@@ -836,7 +836,10 @@ class ExecutionPolicies:
                 )
                 break
             except (NotFound, ValueError):
-                blockers.append("当前项目的生成预算未配置，请联系管理员。")
+                base["budget_error_code"] = "generation_budget_binding_missing"
+                blockers.append(
+                    "当前账户的生成预算尚未关联，请联系管理员完成账户配置。"
+                )
                 break
         approval, cold_latest_start, member_warm, demand = None, None, False, None
         private_pool = False
