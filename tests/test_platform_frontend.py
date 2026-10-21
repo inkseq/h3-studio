@@ -93,7 +93,14 @@ class FrontendTests(unittest.TestCase):
 
     def test_known_html_routes_fall_back_only_before_first_publication(self):
         self.assertTrue(
-            {"/library", "/library/", "/trash", "/trash/"}.issubset(HTML_ROUTES)
+            {
+                "/library",
+                "/library/",
+                "/trash",
+                "/trash/",
+                "/connect/telegram",
+                "/connect/telegram/",
+            }.issubset(HTML_ROUTES)
         )
         for route in sorted(HTML_ROUTES):
             with self.subTest(route=route):
