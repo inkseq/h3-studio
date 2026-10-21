@@ -608,6 +608,9 @@ class MigrationArtifacts(unittest.TestCase):
             'c848dde8bf1d49044743ae1f497a148e50b84409',
             '6e6fe5ee14e82983161f7f2bf15cbfd6e8eb54f2',
             'b5902a1cf9bf2b32fe2de7ea35ca1cc7bbde3524',
+            '842aab11c9068281c39c17a999f25191d4a181e6',
+            '935bd72d03ed46e2599d75ab6ddbc7923a86c111',
+            '751378aad82e1a6d045e638090466b99d76c2015',
         }
         self.assertEqual(
             set(maintenance.RETAINED_DSTACK_HELPER_PAIRS), expected_commits
@@ -630,6 +633,26 @@ class MigrationArtifacts(unittest.TestCase):
             (
                 'a4d0c782ab523b30c7f4db0b958b785480e17bb5ac0578edb93c47055d80c080',
                 '0d8db5801395b3ecbf3ceea9109c187fb9e39f1de08473694c9ed45df0a23534',
+            ),
+        )
+        for commit in (
+            '935bd72d03ed46e2599d75ab6ddbc7923a86c111',
+            '751378aad82e1a6d045e638090466b99d76c2015',
+        ):
+            self.assertEqual(
+                maintenance.RETAINED_DSTACK_HELPER_PAIRS[commit],
+                (
+                    '710f94d4311fd86f52e49b376b2c6c179d58860ae8ea3f7f72b95ceba25bae44',
+                    '82721d55e00ad3226b1a0c617ce4a143c48d7145427f7a45cd049f584c27c3aa',
+                ),
+            )
+        self.assertEqual(
+            maintenance.RETAINED_DSTACK_HELPER_PAIRS[
+                '842aab11c9068281c39c17a999f25191d4a181e6'
+            ],
+            (
+                'c6336387d0b17138ba5ea4e02ab200c87128cf054595bae50c85ad3b27763fc6',
+                'fba8d75a6845fe2fe7c78ea120747797b2f57ec80e0c6bc4861a0f6bfda54790',
             ),
         )
         trusted_path = (
@@ -681,6 +704,36 @@ class MigrationArtifacts(unittest.TestCase):
                 ):
                     maintenance.installed_checker(self.artifact)
                 importer.assert_not_called()
+
+    def test_recovery_helper_pairs_reject_unknown_commits_and_cross_pairing(self):
+        pairs = maintenance.RETAINED_DSTACK_HELPER_PAIRS
+        original = '842aab11c9068281c39c17a999f25191d4a181e6'
+        current = '935bd72d03ed46e2599d75ab6ddbc7923a86c111'
+        previous = '751378aad82e1a6d045e638090466b99d76c2015'
+        for commit, pair in (
+            ('f' * 40, pairs[original]),
+            ('f' * 40, pairs[current]),
+            (original, pairs[current]),
+            (current, pairs[original]),
+            (previous, pairs[original]),
+        ):
+            (self.artifact / maintenance.MANIFEST).write_text(
+                json.dumps({'commit': commit, 'dstack': {}})
+            )
+            with (
+                patch.object(release, 'regular'),
+                patch.object(
+                    release, 'checksum', side_effect=['a' * 64, 'b' * 64, *pair]
+                ),
+                patch.object(
+                    maintenance.importlib.util, 'spec_from_file_location'
+                ) as importer,
+                self.assertRaisesRegex(
+                    release.ReleaseError, 'helpers_need_reviewed_update'
+                ),
+            ):
+                maintenance.installed_checker(self.artifact)
+            importer.assert_not_called()
 
     def test_publication_is_conditional_immutable_and_never_self_approves(self):
         class S3:
