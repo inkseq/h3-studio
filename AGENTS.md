@@ -19,7 +19,7 @@ Read this entry, the assigned issue's latest owner comments/claims and affected 
 | 1 | APIs/additive schema/non-money features | Affected tests, staging self-check; one short issue comment with changes and staging SHA. |
 | 2 | Money/GPU/queue/DBOS/auth/isolation/deletion | Safety tests, non-author safety review, relevant staging acceptance checklist and Claude sign-off. Evidence links. |
 
-Classify behavior, not filenames. Run affected checks once per finished slice, not per edit. Merge small PRs continuously; unfinished features stay flagged. CI auto-deploys staging. Production promotes the same accepted artifact bytes, without rebuild, on Tuesday/Friday. Tier2 needs Claude sign-off. Issues close on promotion, not merge. Continue the next independent staged milestone without approval waits.
+Classify behavior, not filenames. Run affected checks once per finished slice, not per edit. Merge small PRs continuously; unfinished features stay flagged. CI auto-deploys staging. Production promotes the same accepted artifact bytes, without rebuild, as soon as accepted (any day, CR47). Tier2 needs Claude sign-off. Issues close on promotion, not merge. Continue the next independent staged milestone without approval waits.
 
 Current order (CR42/43): promote staging batch -> #353 prod backfill -> GPU demand start <=2 (CR43; staging cold-start soak first) -> go-live checklist issue -> frontend repo merge into `yingxu` -> #347 editor. No new epics before M1.
 
