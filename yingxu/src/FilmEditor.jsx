@@ -25,6 +25,7 @@ import {
 import FilmAudioLane, { timeScale } from './FilmAudioLane.jsx';
 import TrimBar from './TrimBar.jsx';
 import { CloudSaveStatus } from './CloudAutosave.jsx';
+import { cloudController } from './cloud-controller.js';
 import './film-editor.css';
 
 const SIZES = { '9:16': [720, 1280], '16:9': [1280, 720], '1:1': [960, 960], '4:3': [960, 720] };
@@ -621,7 +622,11 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
           )}
           <footer className="film-editor-foot muted">
             <span>{t('editor.exportHint')}</span>
-            {excluded.length > 0 && <span>{t('editor.excludedPending')}</span>}
+            {/* Once the server exports in editor order without left-out shots (#347), say nothing. */}
+            {excluded.length > 0 &&
+              !cloudController.getState().capabilities?.story_film?.film_cuts && (
+                <span>{t('editor.excludedPending')}</span>
+              )}
           </footer>
         </>
       )}
