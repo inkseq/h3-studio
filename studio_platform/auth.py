@@ -107,10 +107,15 @@ WORKOS_PRIVATE_PROJECT = "__authkit"
 WORKOS_SESSION_KIND = "authkit_session"
 WORKOS_SESSION_FIELDS = {"sid", "subject", "client_id", "access_expires_at"}
 _DUMMY = bcrypt.hashpw(secrets.token_bytes(32), bcrypt.gensalt(rounds=12))
+_PROVIDER_CHECK = object()
 
 
 class AuthenticationError(Exception):
     pass
+
+
+class SessionUnavailable(AuthenticationError):
+    """A bounded provider check failed; no provider exception data is exposed."""
 
 
 class LoginLimited(AuthenticationError):
@@ -184,6 +189,7 @@ class Auth:
         self.session_seconds = session_seconds
         self.clock = clock
         self.staging_qa = staging_qa is True and mode == "password"
+        self.session_checker = None
         with engine.begin() as connection:
             if engine.dialect.name == "postgresql":
                 connection.exec_driver_sql(
@@ -346,6 +352,7 @@ class Auth:
                 raise LoginLimited(max(1, int(start + 300 - now)))
 
     def login(self, username, password, source="local"):
+        captured_epoch = self.capture_epoch()
         self.reserve_login(source)
         if self.mode == "local-test":
             if username not in USERS:
@@ -383,7 +390,13 @@ class Auth:
         token = secrets.token_urlsafe(32)
         now = self.clock()
         with self.engine.begin() as conn:
-            from .identity import account_identity
+            if self.engine.dialect.name == "sqlite":
+                conn.exec_driver_sql("BEGIN IMMEDIATE")
+            from .identity import account_identity, lock_account_gate
+            from .session_authority import assert_epoch
+
+            lock_account_gate(conn)
+            assert_epoch(conn, self.tenant, username, captured_epoch)
 
             identity = account_identity(conn, self.tenant, username)
             if identity is not None and identity["status"] != "active":
@@ -502,7 +515,15 @@ class Auth:
             documents.c.document_id == digest(owner + "\0" + token_hash),
         )
 
-    def issue_workos_session(self, owner, workos_user_id, *, provider_session=None):
+    def capture_epoch(self):
+        from .session_authority import epoch
+
+        with self.engine.connect() as connection:
+            return epoch(connection, self.tenant)
+
+    def issue_workos_session(
+        self, owner, workos_user_id, *, provider_session=None, captured_epoch=None
+    ):
         """Trusted verified-SDK callback only, after its canonical upsert commits."""
         if not isinstance(workos_user_id, str) or not 1 <= len(workos_user_id) <= 200:
             raise AuthenticationError("WorkOS 登录身份不可用")
@@ -516,6 +537,16 @@ class Auth:
         with self.engine.begin() as connection:
             if self.engine.dialect.name == "sqlite":
                 connection.exec_driver_sql("BEGIN IMMEDIATE")
+            from .identity import lock_account_gate
+            from .session_authority import assert_epoch
+
+            lock_account_gate(connection)
+            assert_epoch(
+                connection,
+                self.tenant,
+                owner,
+                captured_epoch if captured_epoch is not None else 0,
+            )
             row = self._grant_account(connection, owner, "workos", 0.0, lock=True)
             if row is None or row["workos_user_id"] != workos_user_id:
                 raise AuthenticationError("WorkOS 登录身份已改变，请重新登录")
@@ -552,12 +583,28 @@ class Auth:
                 )
         return token
 
-    def session(self, token):
+    def session(self, token, *, verify_provider=True):
         if not isinstance(token, str) or not TOKEN.fullmatch(token):
             return None
-        return self._session_hash(digest(token), renew=True)
+        return self._session_hash(
+            digest(token), renew=True, verify_provider=verify_provider
+        )
 
-    def _session_hash(self, token_hash, *, renew=False):
+    def _session_hash(self, token_hash, *, renew=False, verify_provider=True):
+        principal = self._local_session_hash(
+            token_hash,
+            renew=renew,
+            require_provider=verify_provider and self.session_checker is not None,
+        )
+        if principal is _PROVIDER_CHECK:
+            # The first local read has CLOSED its connection before checking
+            # AuthKit. Password sessions keep their original one-read path.
+            if not self.session_checker(token_hash):
+                return None
+            return self._local_session_hash(token_hash, renew=renew)
+        return principal
+
+    def _local_session_hash(self, token_hash, *, renew=False, require_provider=False):
         now = self.clock()
         with self.engine.begin() as conn:
             row = (
@@ -574,6 +621,8 @@ class Auth:
             )
             if not row:
                 return None
+            if require_provider and row["auth_mode"] == "workos":
+                return _PROVIDER_CHECK
             if (
                 self._grant_account(
                     conn,

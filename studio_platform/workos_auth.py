@@ -296,6 +296,8 @@ class WorkOSAuth:
                         namespace, documents.c.document_id.in_(expired)
                     )
                 )
+            from .session_authority import epoch
+
             connection.execute(
                 insert(documents).values(
                     tenant_id=self.settings.tenant_id,
@@ -312,6 +314,7 @@ class WorkOSAuth:
                         "purpose": "link" if link else "signin",
                         "return_to": destination,
                         "legacy_session_hash": principal.session_hash if link else None,
+                        "auth_epoch": epoch(connection, self.settings.tenant_id),
                     },
                     updated_at=now,
                 )
@@ -642,9 +645,25 @@ class WorkOSAuth:
         row = self._upsert(identity, transaction, principal)
         try:
             token = self.auth.issue_workos_session(
-                row["owner"], identity["subject"], provider_session=provider_session
+                row["owner"],
+                identity["subject"],
+                provider_session=provider_session,
+                captured_epoch=transaction.get("auth_epoch", 0),
             )
         except AuthenticationError:
+            from .account_sessions import AccountSessions
+
+            # The verified provider exchange can finish after revoke-all's
+            # cutoff. Keep its exact SID in that SAME original operation even
+            # when the first provider inventory has already completed.
+            try:
+                AccountSessions(
+                    self.repo, self.auth, self.settings, self
+                ).rejected_flow(
+                    row["owner"], transaction.get("auth_epoch", 0), provider_session
+                )
+            except Exception:
+                raise WorkOSError("workos_provider_unavailable", 503) from None
             # A suspension may commit between canonical upsert and issuance.
             # Keep that refusal finite and never expose internal exception text.
             raise WorkOSError("account_unavailable", 403) from None

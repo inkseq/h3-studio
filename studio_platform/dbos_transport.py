@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import stat
 import threading
@@ -195,6 +196,45 @@ class GenerationTransport:
             {"event_id": event_id},
             topic="ledger",
             idempotency_key="stripe-event-" + event_id,
+        )
+
+    def enqueue_account_operation(
+        self, connection, tenant, operation_id, *, resume_event=None
+    ):
+        from .account_sessions import WORKFLOW as ACCOUNT_WORKFLOW
+        from .workflow_schema import assert_execution_allowed
+
+        assert_execution_allowed(connection)
+        identifier(tenant)
+        if not isinstance(operation_id, str) or not re.fullmatch(
+            r"[0-9a-f-]{36}", operation_id
+        ):
+            raise ValueError("account_operation_invalid")
+        if resume_event is not None and (
+            not isinstance(resume_event, str)
+            or re.fullmatch(r"[0-9a-f]{64}", resume_event) is None
+        ):
+            raise ValueError("account_operation_event_invalid")
+        base = (
+            "inkseq-account-"
+            + hashlib.sha256((tenant + "\0" + operation_id).encode()).hexdigest()
+        )
+        # Always enqueue a deterministic epoch for this exact verified event.
+        # An active workflow can become terminal between a status read and a
+        # send, losing a wake. Native enqueue uniqueness avoids that race while
+        # every epoch still reads the SAME account-operation business journal.
+        ident = base + "/" + resume_event if resume_event is not None else base
+        self.client.enqueue_in_transaction(
+            connection,
+            {
+                "workflow_name": ACCOUNT_WORKFLOW,
+                "queue_name": QUEUE,
+                "workflow_id": ident,
+                "app_version": VERSION,
+                "application_name": APPLICATION,
+            },
+            tenant,
+            operation_id,
         )
 
     def film_status(self, connection, tenant, owner, project, run_id):
@@ -613,6 +653,9 @@ class DurableExecutor:
             from .payments_workflows import register_payment_workflows
 
             register_payment_workflows(DBOS, self.repo, self.settings)
+            from .account_workflows import register_account_workflows
+
+            register_account_workflows(DBOS, self.repo, self.settings)
             if self.film_setup is not None:
                 self.film_setup(DBOS)
             DBOS.launch()
