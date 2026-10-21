@@ -1072,3 +1072,32 @@ body.sb-resizing-y video {
 .dock.mini .timeline-scrub {
   display: none;
 }
+/* "To sort" items in the asset library: picture on top, text and actions below, so the
+   row stays readable in a narrow sidebar (owner, 2026-10-22). */
+.inbox .inrow {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+.inbox .inrow .tile {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+}
+.inbox .inrow-body .clip {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.inbox .inrow-body select {
+  width: 100%;
+}
+.inbox .inrow-body .row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.inbox .inrow-body .row > button {
+  flex: 1 1 auto;
+  white-space: nowrap;
+}

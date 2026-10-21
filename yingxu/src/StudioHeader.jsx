@@ -60,8 +60,9 @@ export default function StudioHeader({
     };
   }, []);
   const links = [
-    ['works', '/', 'v2.works', LayoutGrid],
+    // Quick Create (chat) is the main way in; Works holds the finished stories (owner, 2026-10-22).
     ['quick', '/quick-chat', 'nav.quickCreate', MessageSquare],
+    ['works', '/', 'v2.works', LayoutGrid],
     ['library', '/library', 'library.title', Images],
     ...(access?.gpus || active === 'operator' ? [['operator', '/operator', 'v2.gpus', Cpu]] : []),
     ['settings', '/settings', 'settings.title', Settings2],
@@ -69,7 +70,7 @@ export default function StudioHeader({
   // Port of prototype pages.jsx/AppHeader. Only navigation and account data differ.
   return (
     <header className="hbar">
-      <a className="logo" href="/">
+      <a className="logo" href={account ? '/quick-chat' : '/'}>
         <InkMark size={26} variant={dailyInkMark()} />
         <span>{t('app.name')}</span>
       </a>

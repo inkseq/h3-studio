@@ -1,73 +1,24 @@
-import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { createCloudClient } from './cloud-client.js';
 import { createLibraryController, libraryKey } from './library-commands.js';
-import { TrashMenu, useTrash } from './UniversalTrash.jsx';
+import { useTrash } from './UniversalTrash.jsx';
 import { ChatDialog } from './QuickChatControls.jsx';
-import MediaLibraryUpload from './MediaLibraryUpload.jsx';
 import { store } from './store.js';
 import { cloudController as cloud } from './cloud-controller.js';
-import {
-  UserRound,
-  MapPin,
-  Box,
-  Files,
-  Image as ImageIcon,
-  Film,
-  Music,
-  SlidersHorizontal,
-  X,
-} from 'lucide-react';
-import StudioHeader from './StudioHeader.jsx';
+import { uploadFile } from './media.js';
+import { uploadLibraryFiles } from './media-operations.js';
+import { applyStoryboardAction } from './storyboard-actions.js';
 import LibraryView from './v2/LibraryView.jsx';
+import {
+  FloatingPanel,
+  InlineName,
+  ReferencePicker,
+  TagEditor,
+  displayName,
+  managedRow,
+} from './v2/LibraryParts.jsx';
 import { useThumbnailSource } from './use-thumbnail-source.js';
-const TYPE_ICONS = {
-  character: UserRound,
-  location: MapPin,
-  prop: Box,
-  file: Files,
-  image: ImageIcon,
-  video: Film,
-  audio: Music,
-};
-function LibraryPanel({ detail, title, onClose, children }) {
-  const { t } = useI18n(),
-    [mobile, setMobile] = useState(
-      () => typeof window !== 'undefined' && window.matchMedia('(max-width:760px)').matches,
-    );
-  useEffect(() => {
-    const q = window.matchMedia('(max-width:760px)'),
-      update = () => setMobile(q.matches);
-    q.addEventListener('change', update);
-    return () => q.removeEventListener('change', update);
-  }, []);
-  useEffect(() => {
-    if (!detail || mobile) return;
-    const escape = (e) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', escape);
-    return () => window.removeEventListener('keydown', escape);
-  }, [detail, mobile, onClose]);
-  return detail && !mobile ? (
-    <aside className="libp-detail" aria-label={title}>
-      <header>
-        <strong>{title}</strong>
-        <button onClick={onClose} aria-label={t('trash.close')}>
-          <X size={16} />
-        </button>
-      </header>
-      {children}
-    </aside>
-  ) : (
-    <ChatDialog title={title} onClose={onClose} className={detail ? 'library-detail-dialog' : ''}>
-      {children}
-    </ChatDialog>
-  );
-}
 const copy = (value) => structuredClone(value),
   link = (project, entity) =>
     '/?' + new URLSearchParams({ project, ...(entity ? { entity } : {}) });
@@ -150,7 +101,6 @@ export default function Library({ account, active = true }) {
   useEffect(() => {
     if (active) document.title = t('library.title') + ' · Inkseq';
   }, [active, t]);
-  const workspace = useSyncExternalStore(store.subscribe, store.getState, store.getState);
   const api = useMemo(() => {
     const c = createCloudClient();
     c.setAccount(account);
@@ -166,10 +116,9 @@ export default function Library({ account, active = true }) {
       }),
     [api, account],
   );
-  const [showUpload, setShowUpload] = useState(false),
-    [filters, setFilters] = useState({
+  const [filters, setFilters] = useState({
       project_id: '',
-      type: 'image',
+      type: 'file',
       work: '',
       tag: '',
       q: '',
@@ -186,13 +135,29 @@ export default function Library({ account, active = true }) {
     [message, setMessage] = useState(''),
     [imported, setImported] = useState(null),
     [dialog, setDialog] = useState(null),
-    [revision, setRevision] = useState(0);
+    [revision, setRevision] = useState(0),
+    [mobile, setMobile] = useState(
+      () =>
+        typeof window !== 'undefined' &&
+        typeof window.matchMedia === 'function' &&
+        window.matchMedia('(max-width:760px)').matches,
+    );
   const epoch = useRef(0),
-    dialogEpoch = useRef(0);
+    dialogEpoch = useRef(0),
+    // Latest saved version per story, so a second quick edit does not reuse a stale one.
+    versions = useRef({});
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const q = window.matchMedia('(max-width:760px)'),
+      update = () => setMobile(q.matches);
+    q.addEventListener('change', update);
+    return () => q.removeEventListener('change', update);
+  }, []);
   // Effects can reconnect while the cached page keeps its hook state. Restore
   // the owner fence on setup as well as render; cleanup must retire only its owner.
   useEffect(() => {
     identity.current = account;
+    versions.current = {};
     return () => {
       if (identity.current === account) identity.current = null;
       epoch.current++;
@@ -209,7 +174,13 @@ export default function Library({ account, active = true }) {
     account,
     ...Object.entries(filters).filter(([key]) => key !== 'type'),
   ]);
-  const errorText = (e) => t(e?.message?.startsWith('library.') ? e.message : 'library.failed');
+  // A rejected request (4xx, e.g. an image that is too small) explains itself; show that.
+  const errorText = (e) =>
+    e?.message?.startsWith('library.')
+      ? t(e.message)
+      : e?.status >= 400 && e.status < 500 && e.status !== 409 && e.message
+        ? e.message
+        : t('library.failed');
   async function load(append = false) {
     const n = ++epoch.current,
       owner = account;
@@ -286,7 +257,9 @@ export default function Library({ account, active = true }) {
       throw Error('library.localDraft');
     return s;
   }
-  async function run(fn) {
+  // `keep` leaves the open card panel in place (quick edits); otherwise a finished
+  // action closes whatever dialog started it.
+  async function run(fn, { keep = false } = {}) {
     if (busy) return;
     const owner = account;
     setBusy(true);
@@ -306,12 +279,12 @@ export default function Library({ account, active = true }) {
             entity: result.entity_ids?.[result.source?.id],
           });
         setMessage(
-          result?.state === 'opened'
-            ? ''
-            : t(result?.state === 'completed' ? 'library.copied' : 'library.saved'),
+          result?.message ?? t(result?.state === 'completed' ? 'library.copied' : 'library.saved'),
         );
-        setDialog(null);
-        dialogEpoch.current++;
+        if (!keep) {
+          setDialog(null);
+          dialogEpoch.current++;
+        }
       }
       return result;
     } catch (e) {
@@ -321,16 +294,13 @@ export default function Library({ account, active = true }) {
     }
   }
   async function actions(items, ops) {
-    if (
-      !items.length ||
-      new Set(items.map((x) => x.target.project_id)).size !== 1 ||
-      new Set(items.map((x) => x.project_version)).size !== 1
-    )
-      throw Error('library.changed');
-    const pid = items[0].target.project_id,
-      before = guardDraft(pid),
-      body = { expected_version: items[0].project_version, actions: ops };
+    const pid = items[0]?.target.project_id;
+    if (!pid || items.some((x) => x.target.project_id !== pid)) throw Error('library.changed');
+    const before = guardDraft(pid),
+      expected = Math.max(...items.map((x) => x.project_version), versions.current[pid] || 0),
+      body = { expected_version: expected, actions: ops };
     const result = await controller.actions(pid, body);
+    versions.current[pid] = result.version;
     const live = store.getState();
     if (
       identity.current === account &&
@@ -347,33 +317,121 @@ export default function Library({ account, active = true }) {
       });
     return result;
   }
+  // Bulk edits may span stories: one versioned request per story.
+  async function actionsPerStory(items, opsFor) {
+    const groups = new Map();
+    for (const item of items)
+      groups.set(item.target.project_id, [...(groups.get(item.target.project_id) || []), item]);
+    let last;
+    for (const group of groups.values()) last = await actions(group, opsFor(group));
+    return last;
+  }
+  const ref = (row) => ({ kind: row.target.kind, id: row.target.id });
+  // Uploads and new characters are edits of a story document: open it here (no navigation),
+  // change it, and save it straight away, so nothing waits on a separate "save" button.
+  async function editStory(projectId, change) {
+    let s = store.getState();
+    if (s.workspace.mode === 'cloud' && s.workspace.dirty) {
+      await cloud.save();
+      s = store.getState();
+    }
+    if (s.workspace.dirty) throw Error('library.localDraft');
+    if (!(s.workspace.mode === 'cloud' && s.project.id === projectId)) await cloud.open(projectId);
+    const receipt = await change();
+    const record = await cloud.save();
+    if (record?.version) versions.current[projectId] = record.version;
+    return receipt;
+  }
+  const uploadFiles = (files, projectId) =>
+    run(async () => {
+      const added = await editStory(projectId, () =>
+        uploadLibraryFiles({ store, files, upload: uploadFile }),
+      );
+      return { state: 'saved', message: t('library.uploaded', { count: added.length }) };
+    });
+  const newProfile = (ptype, name) => {
+    let receipt;
+    const ok = store.editProject((p) => {
+      receipt = applyStoryboardAction(p, { type: 'newProfile', ptype, name });
+      return receipt !== false;
+    });
+    if (!ok || !receipt?.id) throw Error('library.failed');
+    return receipt.id;
+  };
+  const createProfile = (ptype, name, projectId) =>
+    run(async () => {
+      await editStory(projectId, () => newProfile(ptype, name));
+      if (filters.type !== ptype) setFilters((f) => ({ ...f, type: ptype }));
+      return { state: 'saved', message: t('library.created', { name }) };
+    });
+  const fileInto = (items, profile) =>
+    run(
+      async () => {
+        await actions(items, [
+          { op: 'library.file', profile_id: profile.target.id, targets: items.map(ref) },
+        ]);
+        setSelected([]);
+        return { state: 'saved', message: t('library.referenceDone', { name: profile.title }) };
+      },
+      { keep: true },
+    );
+  const createReference = (items, ptype, name) =>
+    run(
+      async () => {
+        const pid = items[0].target.project_id;
+        const id = await editStory(pid, () => newProfile(ptype, name));
+        await actions(items, [{ op: 'library.file', profile_id: id, targets: items.map(ref) }]);
+        setSelected([]);
+        return { state: 'saved', message: t('library.referenceDone', { name }) };
+      },
+      { keep: true },
+    );
+  const rename = (row, title) =>
+    run(
+      async () => {
+        await actions([row], [{ op: 'library.rename', target: ref(row), title }]);
+        setDialog((d) =>
+          d?.kind === 'detail' && libraryKey(d.row.target) === libraryKey(row.target)
+            ? { ...d, row: { ...d.row, title } }
+            : d,
+        );
+        return { state: 'saved', message: '' };
+      },
+      { keep: true },
+    );
+  const setTags = (items, tagsFor) =>
+    run(
+      async () => {
+        await actionsPerStory(items, (group) =>
+          group.map((row) => ({ op: 'library.tag', targets: [ref(row)], tags: tagsFor(row) })),
+        );
+        setDialog((d) => {
+          const row =
+            d?.kind === 'detail' &&
+            items.find((x) => libraryKey(x.target) === libraryKey(d.row.target));
+          return row ? { ...d, row: { ...d.row, tags: tagsFor(row) } } : d;
+        });
+        return { state: 'saved', message: '' };
+      },
+      { keep: true },
+    );
+  async function loadProfiles(projectId) {
+    const profiles = [];
+    let offset = 0;
+    do {
+      const value = await controller.list({ project_id: projectId, type: 'profile' }, offset);
+      profiles.push(...value.items);
+      offset = value.next_offset;
+    } while (offset !== null);
+    return profiles;
+  }
   async function detail(row) {
     const n = ++dialogEpoch.current;
     setDialog({ kind: 'detail', row });
     try {
       const value = await controller.usage(row.target);
       if (n === dialogEpoch.current && identity.current === account)
-        setDialog({ kind: 'detail', row: value });
-    } catch (e) {
-      if (n === dialogEpoch.current) setError(errorText(e));
-    }
-  }
-  async function fileDialog(items) {
-    const n = ++dialogEpoch.current;
-    setDialog({ kind: 'file', items, profiles: [], profile: '', variant: '' });
-    try {
-      const profiles = [];
-      let offset = 0;
-      do {
-        const value = await controller.list(
-          { project_id: items[0].target.project_id, type: 'profile' },
-          offset,
-        );
-        profiles.push(...value.items);
-        offset = value.next_offset;
-      } while (offset !== null);
-      if (n === dialogEpoch.current && identity.current === account)
-        setDialog({ kind: 'file', items, profiles, profile: '', variant: '' });
+        setDialog((d) => (d?.kind === 'detail' ? { kind: 'detail', row: value } : d));
     } catch (e) {
       if (n === dialogEpoch.current) setError(errorText(e));
     }
@@ -396,16 +454,21 @@ export default function Library({ account, active = true }) {
     dialogEpoch.current++;
     setDialog({ kind: 'import', row: copy(row), destination: '', target: null });
   }
-  const dismiss = () => {
-    if (!busy) {
+  const dismiss = useMemo(
+    () => () => {
       dialogEpoch.current++;
       setDialog(null);
-    }
-  };
+    },
+    [],
+  );
+  const openKey = dialog?.kind === 'detail' ? libraryKey(dialog.row.target) : null;
+  const anchor = useMemo(
+    () => () =>
+      openKey ? document.querySelector(`[data-lib-key="${CSS.escape(openKey)}"]`) : null,
+    [openKey],
+  );
   if (!account)
     return <LibraryView account={account} filters={filters} setFilters={setFilters} next={null} />;
-  const canEdit = !!filters.project_id && currentRows.length > 0,
-    canFile = canEdit && currentRows.every((r) => ['image', 'video', 'audio'].includes(r.type));
   const feedback = (
     <>
       {error && (
@@ -414,6 +477,11 @@ export default function Library({ account, active = true }) {
           <button disabled={loading || busy} onClick={() => load()}>
             {t('library.refresh')}
           </button>
+        </p>
+      )}
+      {busy && !error && (
+        <p role="status" className="muted">
+          {t('library.working')}
         </p>
       )}
       {message && <p role="status">{message}</p>}
@@ -433,51 +501,88 @@ export default function Library({ account, active = true }) {
       )}
     </>
   );
-  const uploadPanel = (
-    <section className="card-box">
-      <label className="field">
-        <span>{t('library.source')}</span>
-        <select
-          value={filters.project_id}
-          onChange={(e) => setFilters({ ...filters, project_id: e.target.value })}
-        >
-          <option value="">{t('library.choose')}</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.title}
-            </option>
+  const allTags = [...new Set(rows.flatMap((r) => r.tags || []))];
+  const detailBody = (row) => {
+    const isFile = ['image', 'video', 'audio'].includes(row.type),
+      managed = managedRow(row);
+    return (
+      <>
+        <h3 className="lib-float-title">
+          <InlineName
+            value={isFile ? displayName(row, t) : row.title}
+            disabled={locked || managed}
+            onSave={(title) => rename(row, title)}
+          />
+        </h3>
+        <LibraryMedia key={libraryKey(row.target)} row={row} api={api} detail />
+        <small className="muted">
+          {t('trash.kind.' + row.type)} · {row.source_project_title || row.project_title}
+        </small>
+        {managed && <p className="muted lib-managed">{t('library.managedHint')}</p>}
+        <div className="field" hidden={managed}>
+          <span>{t('library.tagHeading')}</span>
+          <TagEditor
+            tags={row.tags}
+            suggestions={allTags}
+            disabled={locked}
+            onChange={(tags) => setTags([row], () => tags)}
+          />
+        </div>
+        {isFile && !managed && (
+          <ReferencePicker
+            items={[row]}
+            disabled={locked}
+            loadProfiles={loadProfiles}
+            onFile={fileInto}
+            onCreate={createReference}
+          />
+        )}
+        <div className="libp-uses">
+          <b>{t('library.usage')}</b>
+          {(row.usage || []).map((u) => (
+            <a
+              className="use-shot"
+              key={u.project_id + ':' + u.shot_id}
+              href={link(u.project_id, u.shot_id)}
+            >
+              {t('library.shot')}
+            </a>
           ))}
-        </select>
-      </label>
-      <p>{t('library.uploadHelp')}</p>
-      {!filters.project_id ? (
-        <p>{t('library.oneStory')}</p>
-      ) : workspace.workspace.mode === 'cloud' && workspace.project.id === filters.project_id ? (
-        <>
-          <MediaLibraryUpload />
+          {!row.usage?.length && <small className="muted">{t('library.unused')}</small>}
+        </div>
+        <div className="libp-actions">
+          {!managed && (
+            <a
+              className="small"
+              href={link(
+                row.target.project_id,
+                row.target.kind === 'entity' ? row.target.id : null,
+              )}
+            >
+              {t('library.edit')}
+            </a>
+          )}
           <button
-            disabled={locked || !workspace.workspace.dirty}
-            onClick={() => run(() => cloud.save())}
+            className={'small ' + (managed ? 'primary' : 'ghost')}
+            disabled={locked}
+            onClick={() => importDialog(row)}
           >
-            {t('library.uploadSave')}
+            {t('library.import')}
           </button>
-        </>
-      ) : (
-        <button
-          disabled={locked}
-          onClick={() =>
-            run(async () => {
-              if (store.getState().workspace.dirty) throw Error('library.localDraft');
-              await cloud.open(filters.project_id);
-              return { state: 'opened' };
-            })
-          }
-        >
-          {t('library.uploadOpen')}
-        </button>
-      )}
-    </section>
-  );
+          <button
+            className="small ghost danger"
+            disabled={locked}
+            onClick={() => {
+              dismiss();
+              trash.request('trash', [row.target]);
+            }}
+          >
+            {t('trash.move')}
+          </button>
+        </div>
+      </>
+    );
+  };
   return (
     <LibraryView
       account={account}
@@ -494,15 +599,13 @@ export default function Library({ account, active = true }) {
       next={next}
       onMore={() => load(true)}
       onRefresh={() => load()}
-      onUpload={() => setShowUpload((v) => !v)}
-      showUpload={showUpload}
-      uploadPanel={uploadPanel}
-      onTags={() => {
-        if (canEdit) setDialog({ kind: 'tags', items: copy(currentRows), value: '' });
-      }}
-      onFile={() => {
-        if (canFile) fileDialog(copy(currentRows));
-      }}
+      onUploadFiles={uploadFiles}
+      onCreateProfile={createProfile}
+      onRename={rename}
+      onAddTags={(items, add) => setTags(items, (row) => [...new Set([...row.tags, ...add])])}
+      loadProfiles={loadProfiles}
+      onFileInto={fileInto}
+      onCreateReference={createReference}
       onDelete={() => {
         if (currentRows.length)
           trash.request(
@@ -511,235 +614,68 @@ export default function Library({ account, active = true }) {
           );
       }}
       onDetail={detail}
-      openKey={dialog?.kind === 'detail' ? libraryKey(dialog.row.target) : null}
+      openKey={openKey}
       renderMedia={(row) => <LibraryMedia row={row} api={api} />}
-      feedback={!dialog && feedback}
+      feedback={(dialog?.kind !== 'import' || mobile) && feedback}
     >
-      {dialog && (
-        <LibraryPanel
-          detail={dialog.kind === 'detail'}
-          title={t(
-            'library.' +
-              {
-                detail: 'detail',
-                tags: 'applyTags',
-                rename: 'rename',
-                file: 'fileInto',
-                import: 'import',
-              }[dialog.kind],
-          )}
-          onClose={dismiss}
-        >
+      {dialog?.kind === 'detail' &&
+        (mobile ? (
+          <ChatDialog
+            title={t('library.detail')}
+            onClose={dismiss}
+            className="library-detail-dialog"
+          >
+            {detailBody(dialog.row)}
+          </ChatDialog>
+        ) : (
+          <FloatingPanel anchor={anchor} label={t('library.detail')} onClose={dismiss}>
+            {detailBody(dialog.row)}
+          </FloatingPanel>
+        ))}
+      {dialog?.kind === 'import' && (
+        <ChatDialog title={t('library.import')} onClose={() => busy || dismiss()}>
           {feedback}
-          {dialog.kind === 'detail' ? (
-            <>
-              <LibraryMedia key={libraryKey(dialog.row.target)} row={dialog.row} api={api} detail />
-              <label className="field">
-                <span>{t('library.name')}</span>
-                <div className="library-name-edit">
-                  <input readOnly value={dialog.row.title} />
-                  {filters.project_id && (
-                    <button
-                      className="small"
-                      disabled={locked}
-                      onClick={() =>
-                        setDialog({
-                          kind: 'rename',
-                          items: [copy(dialog.row)],
-                          value: dialog.row.title,
-                        })
-                      }
-                    >
-                      {t('library.rename')}
-                    </button>
-                  )}
-                </div>
-              </label>
-              <div className="field">
-                <span>{t('library.tagHeading')}</span>
-                <div className="libp-tags">
-                  {dialog.row.tags.map((tag) => (
-                    <span key={tag} className="tagchip on">
-                      {tag}
-                    </span>
-                  ))}
-                  {filters.project_id && (
-                    <button
-                      className="small ghost"
-                      disabled={locked}
-                      onClick={() =>
-                        setDialog({
-                          kind: 'tags',
-                          items: [copy(dialog.row)],
-                          value: dialog.row.tags.join(', '),
-                        })
-                      }
-                    >
-                      {t('library.applyTags')}
-                    </button>
-                  )}
-                </div>
-              </div>
-              <small className="muted">
-                {t('trash.kind.' + dialog.row.type)} · {t('library.source')}:{' '}
-                {dialog.row.source_project_title || dialog.row.project_title}
-              </small>
-              <div className="libp-uses">
-                <b>{t('library.usage')}</b>
-                {dialog.row.usage.map((u) => (
-                  <a
-                    className="use-shot"
-                    key={u.project_id + ':' + u.shot_id}
-                    href={link(u.project_id, u.shot_id)}
-                  >
-                    {t('library.shot')}
-                  </a>
+          <p>{displayName(dialog.row, t)}</p>
+          <label className="field">
+            <span>{t('library.destination')}</span>
+            <select
+              disabled={locked}
+              value={dialog.destination}
+              onChange={(e) => chooseDestination(e.target.value)}
+            >
+              <option value="">{t('library.choose')}</option>
+              {projects
+                .filter((p) => p.id !== dialog.row.target.project_id)
+                .map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.title}
+                  </option>
                 ))}
-                {!dialog.row.usage.length && <small className="muted">{t('library.unused')}</small>}
-              </div>
-              <p className="muted library-usage-note">{t('library.usageNote')}</p>
-              <div className="libp-actions">
-                <button
-                  className="small"
-                  disabled={locked}
-                  onClick={() => importDialog(dialog.row)}
-                >
-                  {t('library.import')}
-                </button>
-                <a
-                  className="small"
-                  href={link(
-                    dialog.row.target.project_id,
-                    dialog.row.target.kind === 'entity' ? dialog.row.target.id : null,
-                  )}
-                >
-                  {t('library.edit')}
-                </a>
-              </div>
-            </>
-          ) : ['tags', 'rename'].includes(dialog.kind) ? (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
+            </select>
+          </label>
+          <div className="dialog-actions">
+            <button disabled={busy} onClick={dismiss}>
+              {t('library.cancel')}
+            </button>
+            <button
+              className="primary"
+              disabled={locked || !dialog.target}
+              onClick={() => {
                 const d = copy(dialog);
-                run(() =>
-                  actions(
-                    d.items,
-                    d.kind === 'tags'
-                      ? [
-                          {
-                            op: 'library.tag',
-                            targets: d.items.map((r) => ({ kind: r.target.kind, id: r.target.id })),
-                            tags: [
-                              ...new Set(
-                                d.value
-                                  .split(',')
-                                  .map((s) => s.trim())
-                                  .filter(Boolean),
-                              ),
-                            ],
-                          },
-                        ]
-                      : [
-                          {
-                            op: 'library.rename',
-                            target: { kind: d.items[0].target.kind, id: d.items[0].target.id },
-                            title: d.value,
-                          },
-                        ],
-                  ),
-                );
+                run(() => {
+                  guardDraft(d.destination);
+                  return controller.startImport({
+                    source: { ...d.row.target, expected_version: d.row.project_version },
+                    target_project_id: d.destination,
+                    expected_project_version: d.target.version,
+                  });
+                });
               }}
             >
-              <label>
-                {t(dialog.kind === 'tags' ? 'library.tags' : 'library.name')}
-                <input
-                  value={dialog.value}
-                  disabled={locked}
-                  onChange={(e) => setDialog({ ...dialog, value: e.target.value })}
-                />
-              </label>
-              <button disabled={locked || (dialog.kind === 'rename' && !dialog.value.trim())}>
-                {t('library.save')}
-              </button>
-            </form>
-          ) : dialog.kind === 'file' ? (
-            <>
-              <label>
-                {t('library.chooseProfile')}
-                <select
-                  disabled={locked}
-                  value={dialog.profile}
-                  onChange={(e) => setDialog({ ...dialog, profile: e.target.value })}
-                >
-                  <option value="">{t('library.chooseProfile')}</option>
-                  {dialog.profiles.map((p) => (
-                    <option key={p.target.id} value={p.target.id}>
-                      {p.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                disabled={locked || !dialog.profile}
-                onClick={() => {
-                  const d = copy(dialog);
-                  run(() =>
-                    actions(d.items, [
-                      {
-                        op: 'library.file',
-                        profile_id: d.profile,
-                        targets: d.items.map((r) => ({ kind: r.target.kind, id: r.target.id })),
-                      },
-                    ]),
-                  );
-                }}
-              >
-                {t('library.fileInto')}
-              </button>
-            </>
-          ) : (
-            <>
-              <p>{dialog.row.title}</p>
-              <label>
-                {t('library.destination')}
-                <select
-                  disabled={locked}
-                  value={dialog.destination}
-                  onChange={(e) => chooseDestination(e.target.value)}
-                >
-                  <option value="">{t('library.choose')}</option>
-                  {projects
-                    .filter((p) => p.id !== dialog.row.target.project_id)
-                    .map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.title}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <button
-                disabled={locked || !dialog.target}
-                onClick={() => {
-                  const d = copy(dialog);
-                  run(() => {
-                    guardDraft(d.destination);
-                    return controller.startImport({
-                      source: { ...d.row.target, expected_version: d.row.project_version },
-                      target_project_id: d.destination,
-                      expected_project_version: d.target.version,
-                    });
-                  });
-                }}
-              >
-                {t('library.copy')}
-              </button>
-            </>
-          )}
-          <button disabled={busy} onClick={dismiss}>
-            {t('library.close')}
-          </button>
-        </LibraryPanel>
+              {t('library.copy')}
+            </button>
+          </div>
+        </ChatDialog>
       )}
     </LibraryView>
   );
