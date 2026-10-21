@@ -10,15 +10,56 @@ ROLE_CHECK = "budget_role IN ('accounting', 'enforced')"
 
 
 def normalize_check(value):
-    compact = re.sub(
-        r"\s+|[()]|::character varying|::text\[\]|::text", "", str(value)
-    ).lower()
-    if compact in {
-        "budget_rolein'accounting','enforced'",
-        "budget_role=anyarray['accounting','enforced']",
-    }:
+    # Compare finite SQLite / pg_get_constraintdef forms. Quoted tokens remain
+    # byte-exact: casts, spaces, parentheses and case INSIDE a literal matter.
+    tokens = sql_tokens(str(value))
+    forms = {sql_tokens(ROLE_CHECK)}
+    for column in ("budget_role", "(budget_role)", "(budget_role)::text"):
+        for cast in ("", "::text", "::character varying"):
+            array = f"ARRAY['accounting'{cast}, 'enforced'{cast}]"
+            for operand in (array, f"({array})::text[]"):
+                expression = f"{column} = ANY ({operand})"
+                for wrappers in range(3):
+                    forms.add(sql_tokens("(" * wrappers + expression + ")" * wrappers))
+    for wrappers in range(1, 3):
+        forms.add(sql_tokens("(" * wrappers + ROLE_CHECK + ")" * wrappers))
+    if tokens is not None and tokens in forms:
         return [("budget_role", "in", "accounting,enforced")]
     return None
+
+
+def sql_tokens(value):
+    """Whitespace only separates tokens; never rewrite a quoted token."""
+    tokens, end = [], 0
+    pattern = r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"|::|[A-Za-z_][A-Za-z_0-9]*|[0-9]+|[()[\],=><.]"
+    for match in re.finditer(pattern, value):
+        if value[end : match.start()].strip():
+            return None
+        token = match.group()
+        tokens.append(token if token[0] in "'\"" else token.lower())
+        end = match.end()
+    return tuple(tokens) if not value[end:].strip() else None
+
+
+def sqlite_check(sql):
+    """Extract exactly one named CHECK from CREATE SQL, preserving literals."""
+    tokens = sql_tokens(sql)
+    if tokens is None:
+        return False
+    prefix = ("constraint", "ck_budget_reservation_role", "check")
+    starts = [
+        index + 3
+        for index in range(len(tokens) - 3)
+        if tokens[index : index + 3] == prefix
+    ]
+    if len(starts) != 1 or tokens[starts[0]] != "(":
+        return False
+    start, depth = starts[0], 0
+    for index in range(start, len(tokens)):
+        depth += (tokens[index] == "(") - (tokens[index] == ")")
+        if depth == 0:
+            return normalize_check(" ".join(tokens[start + 1 : index])) is not None
+    return False
 
 
 def extend(metadata):

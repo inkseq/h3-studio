@@ -61,6 +61,13 @@ cohort. Unknown/conflicting cost or price evidence remains unknown. Zero
 exposure or nonpositive captured value makes margin and `below_30_percent`
 undefined. The 30% diagnostic never admits, refuses or caps a task.
 
+The admin report reuses the existing budget read snapshot (PostgreSQL
+REPEATABLE READ / SQLite read transaction) for its captures, price revisions and
+cost rows. Missing reservation/actual-cost evidence, including an estimated-zero
+CPU job, remains unknown; a zero reserve or zero pending-invoice estimate cannot
+prove actual zero. Only an original settled/released row with actual zero is
+reported as known zero cost.
+
 ## Schema and rollback boundary
 
 007 adds only original `platform_budget_reservations.budget_role VARCHAR(20)

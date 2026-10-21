@@ -14,12 +14,12 @@ def _money(value):
     return type(value) is int and value >= 0
 
 
-def exposure(rows, estimate):
+def exposure(rows):
     """One original job, even when owner/shared layers repeat its cost."""
     if not rows:
-        return (
-            {"unconfirmed_microusd": estimate} if estimate else {"actual_microusd": 0}
-        )
+        # A quote, including an included CPU estimate of zero, is not an
+        # invoice or authoritative actual-cost record.
+        return None
     if any(not _money(row["amount_microusd"]) for row in rows):
         return None
     actuals = [row["actual_cost_microusd"] for row in rows]
@@ -32,6 +32,8 @@ def exposure(rows, estimate):
     ):
         return {"actual_microusd": actuals[0]}
     if all(value is None for value in actuals):
+        if amount == 0:
+            return None
         if states == {"reserved"}:
             return {"reserved_microusd": amount}
         if states == {"invoice_pending"}:
@@ -131,7 +133,7 @@ def report(connection, tenant, now):
     )
     unknown = 0
     for job in cohort:
-        part = exposure(grouped[job["id"]], job["estimated_cost_microusd"])
+        part = exposure(grouped[job["id"]])
         if part is None:
             unknown += 1
         else:
@@ -159,6 +161,7 @@ def report(connection, tenant, now):
         ),
         "captured_value_microusd": float(value) if valuation_known else None,
         **costs,
+        "actual_microusd": None if unknown else costs["actual_microusd"],
         "exposure_microusd": total,
         "unknown_cost_jobs": unknown,
         "margin": float(margin) if margin is not None else None,

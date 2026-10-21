@@ -231,7 +231,7 @@ class CreditAPI:
         from .credits import _aggregate_integer
         from .payments_routes import current_packs
 
-        with self.repo.engine.connect() as connection:
+        with self.repo._budget_read() as connection:
             self._actor(connection, principal)
             value = current(connection, self.settings.tenant_id)
             captured = connection.execute(

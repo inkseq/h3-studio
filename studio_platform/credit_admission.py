@@ -92,17 +92,14 @@ def sqlite_revision(db, *, published=False):
     sql = db.execute(
         "SELECT sql FROM sqlite_master WHERE name='platform_budget_reservations'"
     ).fetchone()
-    from .migrations.versions.v20261022_0007_credit_admission import ROLE_CHECK
-    import re
+    from .migrations.versions.v20261022_0007_credit_admission import sqlite_check
 
-    compact = lambda value: re.sub(r"\s+", "", value).lower()
     if (
         marker != CREDIT_ADMISSION_REVISION
         and not (published and marker is None)
         or tuple(row[1:]) != ("budget_role", "VARCHAR(20)", 1, "'enforced'", 0)
         or sql is None
-        or compact("CONSTRAINT ck_budget_reservation_role CHECK (" + ROLE_CHECK + ")")
-        not in compact(sql[0])
+        or not sqlite_check(sql[0])
     ):
         raise BackupError("credit_admission_schema_requires_review")
     return CREDIT_ADMISSION_REVISION

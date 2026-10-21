@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Table,
     create_engine,
+    delete,
     insert,
     select,
     text,
@@ -492,9 +493,73 @@ class CreditOnlyTests(LedgerCase):
         self.assertEqual(value["status"], "unknown")
         self.assertIsNone(value["captured_value_microusd"])
 
+    def test_missing_cost_rows_never_infer_actual_from_zero_or_positive_quote(self):
+        job = self.captured_job(cost=0, shared=False)
+        self.now += 10
+        with self.repo.transaction() as connection:
+            connection.execute(
+                delete(budget_reservations).where(
+                    budget_reservations.c.reference_id == job["id"]
+                )
+            )
+        for estimate in (0, 100_000):
+            with self.subTest(estimate=estimate):
+                with self.repo.transaction() as connection:
+                    connection.execute(
+                        update(jobs)
+                        .where(jobs.c.id == job["id"])
+                        .values(estimated_cost_microusd=estimate)
+                    )
+                with self.repo.engine.connect() as connection:
+                    value = report(connection, self.scope.tenant_id, self.now)
+                self.assertEqual(value["unknown_cost_jobs"], 1)
+                self.assertEqual(value["status"], "unknown")
+                self.assertIsNone(value["actual_microusd"])
+                self.assertIsNone(value["exposure_microusd"])
+                self.assertIsNone(value["margin"])
+
+    def test_zero_cpu_cost_requires_original_settled_evidence(self):
+        from studio_platform.credit_margin import exposure
+
+        self.assertIsNone(exposure([]))
+        self.assertIsNone(
+            exposure(
+                [
+                    {
+                        "amount_microusd": 0,
+                        "state": "reserved",
+                        "actual_cost_microusd": None,
+                    }
+                ]
+            )
+        )
+        self.assertIsNone(
+            exposure(
+                [
+                    {
+                        "amount_microusd": 0,
+                        "state": "invoice_pending",
+                        "actual_cost_microusd": None,
+                    }
+                ]
+            )
+        )
+        self.assertEqual(
+            exposure(
+                [
+                    {
+                        "amount_microusd": 0,
+                        "state": "settled",
+                        "actual_cost_microusd": 0,
+                    }
+                ]
+            ),
+            {"actual_microusd": 0},
+        )
+
 
 class CreditAdmissionSchemaTests(unittest.TestCase):
-    def family(self, engine, revision):
+    def family(self, engine, revision, *, role_check=None):
         from studio_platform.schema_baseline import frozen_metadata
         from studio_platform.identity_schema import metadata as identity
         from studio_platform.payment_schema import frozen_metadata as payment_metadata
@@ -505,6 +570,12 @@ class CreditAdmissionSchemaTests(unittest.TestCase):
         baseline = frozen_metadata()
         if revision == CREDIT_ADMISSION_REVISION:
             extend(baseline)
+            if role_check is not None:
+                for constraint in baseline.tables[
+                    "platform_budget_reservations"
+                ].constraints:
+                    if constraint.name == "ck_budget_reservation_role":
+                        constraint.sqltext = text(role_check)
         baseline.create_all(engine)
         identity.create_all(engine)
         credit_metadata.create_all(engine)
@@ -595,6 +666,89 @@ class CreditAdmissionSchemaTests(unittest.TestCase):
                 )
         finally:
             engine.dispose()
+
+    def test_role_check_accepts_only_finite_sqlite_and_postgres_grammars(self):
+        from studio_platform.migrations.versions.v20261022_0007_credit_admission import (
+            normalize_check,
+        )
+
+        positive = (
+            "budget_role IN ('accounting', 'enforced')",
+            "(budget_role IN ('accounting','enforced'))",
+            "((budget_role)::text = ANY ((ARRAY['accounting'::character varying, 'enforced'::character varying])::text[]))",
+            "(budget_role = ANY (ARRAY['accounting'::text, 'enforced'::text]))",
+        )
+        for sql in positive:
+            with self.subTest(sql=sql):
+                self.assertIsNotNone(normalize_check(sql))
+        for literal in (
+            "acc::textounting",
+            "acc::character varyingounting",
+            "acc(ounting",
+            "acc ounting",
+            "ACCOUNTING",
+            "account''ing",
+        ):
+            for sql in (
+                f"budget_role IN ('{literal}', 'enforced')",
+                f"((budget_role)::text = ANY ((ARRAY['{literal}'::character varying, 'enforced'::character varying])::text[]))",
+            ):
+                with self.subTest(sql=sql):
+                    self.assertIsNone(normalize_check(sql))
+        for sql in (
+            "budget_role IN (('accounting','enforced'))",
+            "budget_role IN ('accounting','enforced') OR 1=1",
+            "budget_role IN ('accounting','enforced'))",
+            "budget_role = ANY (ARRAY['accounting'::text::text,'enforced'::text])",
+        ):
+            with self.subTest(sql=sql):
+                self.assertIsNone(normalize_check(sql))
+
+    def test_sqlite_constraint_text_in_literals_or_comments_is_not_authority(self):
+        from studio_platform.migrations.versions.v20261022_0007_credit_admission import (
+            sqlite_check,
+        )
+
+        quoted = "CREATE TABLE t (note TEXT DEFAULT 'CONSTRAINT ck_budget_reservation_role CHECK (budget_role IN (''accounting'', ''enforced''))', budget_role VARCHAR(20))"
+        comment = "CREATE TABLE t (budget_role VARCHAR(20)) /* CONSTRAINT ck_budget_reservation_role CHECK (budget_role IN ('accounting', 'enforced')) */"
+        line_comment = "CREATE TABLE t (budget_role VARCHAR(20)) -- CONSTRAINT ck_budget_reservation_role CHECK (budget_role IN ('accounting', 'enforced'))"
+        for sql in (quoted, comment, line_comment):
+            with self.subTest(sql=sql):
+                self.assertFalse(sqlite_check(sql))
+
+    def test_sqlite_backup_literal_drift_refused_with_and_without_marker(self):
+        from studio_platform.backup import BackupError, _check_db
+
+        for literal in ("acc ounting", "ACCOUNTING", "acc::textounting"):
+            engine = create_engine("sqlite://")
+            try:
+                self.family(
+                    engine,
+                    CREDIT_ADMISSION_REVISION,
+                    role_check=f"budget_role IN ('{literal}', 'enforced')",
+                )
+                with (
+                    engine.connect() as connection,
+                    self.assertRaisesRegex(
+                        credits.CreditError, "schema_requires_review"
+                    ),
+                ):
+                    credit_admission.ready(connection)
+                raw = engine.raw_connection()
+                try:
+                    with self.assertRaisesRegex(
+                        BackupError, "credit_admission_schema_requires_review"
+                    ):
+                        _check_db(raw.driver_connection)
+                    raw.driver_connection.execute("DROP TABLE alembic_version")
+                    with self.assertRaisesRegex(
+                        BackupError, "credit_admission_schema_requires_review"
+                    ):
+                        _check_db(raw.driver_connection, published=True)
+                finally:
+                    raw.close()
+            finally:
+                engine.dispose()
 
 
 @unittest.skipUnless(
