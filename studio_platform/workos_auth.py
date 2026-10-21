@@ -2,16 +2,26 @@
 
 import base64
 from contextlib import contextmanager
+from functools import lru_cache
 import hmac
 import json
 import re
 import secrets
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 import uuid
 
 from sqlalchemy import and_, delete, func, insert, select, update
 
-from .auth import AuthenticationError, Principal, accounts, digest, sessions
+from .auth import (
+    AuthenticationError,
+    Principal,
+    WORKOS_PRIVATE_OWNER,
+    WORKOS_PRIVATE_PROJECT,
+    _workos_session_shape,
+    accounts,
+    digest,
+    sessions,
+)
 from .identity import lock_account_gate
 from .identity_schema import IdentitySchemaError, users, validate_connection
 from .repository import documents
@@ -21,9 +31,10 @@ from .workos_config import load_credentials
 STATE_COOKIE = "__Host-inkseq-workos"
 STATE_SECONDS = 600
 STATE_CLEANUP_LIMIT = 100
-CONTROL_OWNER = "__authkit"
-CONTROL_PROJECT = "__authkit"
+CONTROL_OWNER = WORKOS_PRIVATE_OWNER
+CONTROL_PROJECT = WORKOS_PRIVATE_PROJECT
 STATE_KIND = "authkit_state"
+WORKOS_ISSUER = "https://api.workos.com"
 TOKEN = re.compile(r"[A-Za-z0-9_-]{43,128}")
 MESSAGES = {
     "workos_not_configured": "Hosted sign-in is unavailable.",
@@ -114,6 +125,21 @@ def _client(config):
         base_url="https://api.workos.com",
         request_timeout=15,
         max_retries=0,
+        jwt_issuer=WORKOS_ISSUER,
+    )
+
+
+@lru_cache(maxsize=16)
+def _jwks(client_id):
+    from jwt import PyJWKClient
+
+    # Only the validated configured client selects this fixed public key URL.
+    # PyJWT ignores token jku/x5u; its key-set cache expires after five minutes.
+    return PyJWKClient(
+        WORKOS_ISSUER + "/sso/jwks/" + client_id,
+        cache_jwk_set=True,
+        lifespan=300,
+        timeout=10,
     )
 
 
@@ -219,7 +245,11 @@ class WorkOSAuth:
             raise WorkOSError("workos_link_session_changed", 409)
         return principal.owner
 
-    def start(self, *, origin, return_to="/", link=False, principal=None):
+    def start(
+        self, *, origin, return_to="/", link=False, principal=None, screen_hint=None
+    ):
+        if screen_hint is not None and screen_hint not in ("sign-up", "sign-in"):
+            raise WorkOSError("workos_state_invalid")
         destination, config = return_path(return_to), self.config()
         with self.sdk(config) as client:
             pair = client.pkce.generate()
@@ -230,6 +260,7 @@ class WorkOSAuth:
                 state=state,
                 code_challenge=pair.code_challenge,
                 code_challenge_method="S256",
+                **({"screen_hint": screen_hint} if screen_hint is not None else {}),
             )
         binding = secrets.token_urlsafe(32)
         with self.repo.transaction() as connection:
@@ -490,6 +521,92 @@ class WorkOSAuth:
                     )
             return row
 
+    def _provider_session(self, result, identity, config):
+        """Verify only the token returned by our successful server-side exchange."""
+        import jwt
+
+        try:
+            token = getattr(result, "access_token", None)
+            if not isinstance(token, str) or not 1 <= len(token) <= 8192:
+                raise ValueError()
+            header = jwt.get_unverified_header(token)
+            if header.get("alg") != "RS256":
+                raise ValueError()
+            key = _jwks(config["client_id"]).get_signing_key_from_jwt(token)
+            claims = jwt.decode(
+                token,
+                key.key,
+                algorithms=["RS256"],
+                issuer=WORKOS_ISSUER,
+                options={
+                    "require": ["iss", "sub", "client_id", "sid", "iat", "exp"],
+                    "verify_aud": False,
+                    "verify_exp": False,
+                    "verify_iat": False,
+                    "verify_nbf": False,
+                },
+            )
+            now = self.auth.clock()
+            # AuthKit session tokens document client_id, not a required aud.
+            # The pinned SDK also disables implicit aud checks. If present,
+            # accept only this exact configured client as the audience.
+            if (
+                claims["sub"] != identity["subject"]
+                or claims["client_id"] != config["client_id"]
+                or "aud" in claims
+                and claims["aud"] not in (config["client_id"], [config["client_id"]])
+                or type(claims["iat"]) is not int
+                or type(claims["exp"]) is not int
+                or not 0 <= claims["iat"] <= now < claims["exp"]
+                or "nbf" in claims
+                and (type(claims["nbf"]) is not int or claims["nbf"] > now)
+            ):
+                raise ValueError()
+            value = {
+                "sid": claims["sid"],
+                "subject": claims["sub"],
+                "client_id": claims["client_id"],
+                "access_expires_at": claims["exp"],
+            }
+            if not _workos_session_shape(value):
+                raise ValueError()
+            return value
+        except Exception:
+            raise WorkOSError("workos_provider_unavailable", 503) from None
+
+    def logout_url(self, provider_session):
+        """Best-effort navigation after local revocation has already committed."""
+        try:
+            if not _workos_session_shape(provider_session):
+                return None
+            origin = getattr(self.settings, "public_origin", None)
+            if origin not in {"https://staging.inkseq.com", "https://inkseq.com"}:
+                return None
+            config = self.config()
+            if config["client_id"] != provider_session["client_id"]:
+                return None
+            with self.sdk(config) as client:
+                url = client.user_management.get_logout_url(
+                    session_id=provider_session["sid"], return_to=origin + "/"
+                )
+            parsed = urlsplit(url)
+            if (
+                parsed.scheme != "https"
+                or parsed.netloc != "api.workos.com"
+                or parsed.path != "/user_management/sessions/logout"
+                or parsed.fragment
+                or parse_qs(parsed.query, keep_blank_values=True)
+                != {
+                    "session_id": [provider_session["sid"]],
+                    "return_to": [origin + "/"],
+                }
+            ):
+                return None
+            return url
+        except Exception:
+            # Missing/reconfigured provider state cannot undo local logout.
+            return None
+
     def callback(self, *, code, state, cookie, origin, principal=None, cancelled=False):
         config = self.config()
         transaction, verifier = self._consume(
@@ -512,9 +629,12 @@ class WorkOSAuth:
                 code=code, code_verifier=verifier
             )
         identity = self._provider_user(getattr(result, "user", None))
+        provider_session = self._provider_session(result, identity, config)
         row = self._upsert(identity, transaction, principal)
         try:
-            token = self.auth.issue_workos_session(row["owner"], identity["subject"])
+            token = self.auth.issue_workos_session(
+                row["owner"], identity["subject"], provider_session=provider_session
+            )
         except AuthenticationError:
             # A suspension may commit between canonical upsert and issuance.
             # Keep that refusal finite and never expose internal exception text.

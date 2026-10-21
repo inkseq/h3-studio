@@ -44,9 +44,17 @@ def register_routes(app, *, service=None):
     @app.get("/api/auth/workos/start")
     def start(request: Request):
         query = request.query_params
-        if any(
-            len(query.getlist(key)) > 1 for key in ("return_to", "link")
-        ) or query.get("link", "0") not in {"0", "1"}:
+        if (
+            any(
+                len(query.getlist(key)) > 1
+                for key in ("return_to", "link", "screen_hint")
+            )
+            or query.get("link", "0") not in {"0", "1"}
+            or (
+                "screen_hint" in query
+                and query["screen_hint"] not in {"sign-up", "sign-in"}
+            )
+        ):
             raise WorkOSError("workos_state_invalid")
         link = query.get("link") == "1"
         if link and request.headers.get("sec-fetch-site") == "cross-site":
@@ -69,6 +77,7 @@ def register_routes(app, *, service=None):
             return_to=query.get("return_to", "/"),
             link=link,
             principal=request.state.principal,
+            screen_hint=query.get("screen_hint"),
         )
         result = RedirectResponse(
             value["url"],
