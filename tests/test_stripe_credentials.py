@@ -107,7 +107,6 @@ class StripeHydrationTests(unittest.TestCase):
                     INKSEQ_GENERATION_QUEUE='dbos',
                     INKSEQ_STRIPE_MODE=mode,
                     INKSEQ_STRIPE_CONFIG_FILE='/run/sixnine-secrets/stripe',
-                    PUBLIC_ORIGIN='https://staging.inkseq.com',
                 )
                 self.assertEqual(maintenance.settings_document(value), value)
             for mode in ('off', 'live'):
@@ -116,7 +115,6 @@ class StripeHydrationTests(unittest.TestCase):
                     INKSEQ_GENERATION_QUEUE='dbos',
                     INKSEQ_STRIPE_MODE=mode,
                     INKSEQ_STRIPE_CONFIG_FILE='/run/sixnine-secrets/stripe',
-                    PUBLIC_ORIGIN='https://inkseq.com',
                 )
                 self.assertEqual(maintenance.settings_document(value), value)
             for changes in (
@@ -128,11 +126,6 @@ class StripeHydrationTests(unittest.TestCase):
                 },
                 {
                     'INKSEQ_DEPLOYMENT_TARGET': 'staging',
-                    'INKSEQ_STRIPE_CONFIG_FILE': '/run/sixnine-secrets/stripe',
-                },
-                {
-                    'INKSEQ_DEPLOYMENT_TARGET': 'production',
-                    'INKSEQ_GENERATION_QUEUE': 'dbos',
                     'INKSEQ_STRIPE_CONFIG_FILE': '/run/sixnine-secrets/stripe',
                 },
             ):
@@ -272,7 +265,6 @@ class StripeHydrationTests(unittest.TestCase):
                                 'environment': {
                                     'INKSEQ_DEPLOYMENT_TARGET': 'staging',
                                     'INKSEQ_GENERATION_QUEUE': 'dbos',
-                                    'PUBLIC_ORIGIN': 'https://staging.inkseq.com',
                                     **changes,
                                 }
                             }
@@ -294,7 +286,6 @@ class StripeHydrationTests(unittest.TestCase):
                 for mode in ('off', 'live'):
                     configure(
                         INKSEQ_DEPLOYMENT_TARGET='production',
-                        PUBLIC_ORIGIN='https://inkseq.com',
                         INKSEQ_STRIPE_MODE=mode,
                         INKSEQ_STRIPE_CONFIG_FILE='/run/sixnine-secrets/stripe',
                     )
@@ -305,6 +296,14 @@ class StripeHydrationTests(unittest.TestCase):
                     {'INKSEQ_STRIPE_MODE': 'test'},
                     {'INKSEQ_STRIPE_MODE': 'live'},
                     {'INKSEQ_STRIPE_CONFIG_FILE': '/run/sixnine-secrets/workos'},
+                    {
+                        'INKSEQ_STRIPE_CONFIG_FILE': '/run/sixnine-secrets/stripe',
+                        'PUBLIC_ORIGIN': 'https://staging.inkseq.com',
+                    },
+                    {
+                        'INKSEQ_STRIPE_CONFIG_FILE': '/run/sixnine-secrets/stripe',
+                        'PUBLIC_ORIGIN_ALIASES': 'https://untrusted.example',
+                    },
                     {
                         'INKSEQ_STRIPE_CONFIG_FILE': '/run/sixnine-secrets/stripe',
                         'INKSEQ_DEPLOYMENT_TARGET': 'production',

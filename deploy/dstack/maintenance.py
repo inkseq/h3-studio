@@ -418,8 +418,10 @@ def settings_document(value):
         and (
             not stripe_file
             and stripe_mode == 'off'
-            or env.get('PUBLIC_ORIGIN') == deployment_target.environment(env)['origin']
-            and env.get('INKSEQ_GENERATION_QUEUE', 'postgres') == 'dbos'
+            # Protected paths do not carry an origin override: the sealed
+            # deployment target selects it. Validate the rendered app origin
+            # separately in check_migration_deploy and runtime hydration.
+            or env.get('INKSEQ_GENERATION_QUEUE', 'postgres') == 'dbos'
         ),
         'migration_stripe_configuration_invalid',
     )

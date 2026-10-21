@@ -232,10 +232,6 @@ def stripe_requested(*, target, root=Path('/srv/sixnine')):
         selected = deployment_target.environment(environment)
         requested = environment.get('INKSEQ_STRIPE_CONFIG_FILE', '')
         mode = environment.get('INKSEQ_STRIPE_MODE', 'off')
-        aliases = set(
-            filter(None, environment.get('PUBLIC_ORIGIN_ALIASES', '').split(','))
-        )
-        allowed_aliases = set(filter(None, selected['aliases'].split(',')))
         if (
             selected['name'] != target
             or mode not in {'off', 'test', 'live'}
@@ -247,9 +243,7 @@ def stripe_requested(*, target, root=Path('/srv/sixnine')):
             or mode == 'live'
             and target != 'production'
             or requested
-            and environment.get('PUBLIC_ORIGIN') != selected['origin']
-            or requested
-            and not aliases <= allowed_aliases
+            and any(name in environment for name in ('PUBLIC_ORIGIN', 'PUBLIC_ORIGIN_ALIASES'))
             or requested
             and environment.get('INKSEQ_GENERATION_QUEUE', 'postgres') != 'dbos'
         ):
