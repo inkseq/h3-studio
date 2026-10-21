@@ -227,6 +227,7 @@ class CreditAPI:
             return value
 
     def admin_prices(self, principal):
+        from .credit_margin import report
         from .credits import _aggregate_integer
         from .payments_routes import current_packs
 
@@ -250,6 +251,7 @@ class CreditAPI:
                 "report_30d": {
                     "captured_credits": _aggregate_integer(captured),
                     "provider_cost_usd": None,
+                    "credit_cost_margin": report(connection, self.settings.tenant_id, self.repo.clock()),
                 },
             }
 

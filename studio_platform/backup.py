@@ -8,7 +8,7 @@ never exported. Recovery is an isolated, disabled copy, not automatic failover.
 from __future__ import annotations
 
 from .asset_objects import ASSET_OBJECT_ROLES
-from .schema_version import PAYMENT_REVISION, PAYMENT_REVISIONS
+from .schema_version import PAYMENT_REVISION, PAYMENT_REVISIONS, CREDIT_ADMISSION_REVISION
 
 import csv
 from contextlib import closing
@@ -80,6 +80,15 @@ def _schemas(
     from .credit_schema import metadata as credits
     from .payment_schema import frozen_metadata as payment_metadata
 
+    if payment_revision == CREDIT_ADMISSION_REVISION:
+        from sqlalchemy import MetaData
+        from .migrations.versions.v20261022_0007_credit_admission import extend
+
+        original = metadata
+        metadata = MetaData()
+        for table in original.tables.values():
+            table.to_metadata(metadata)
+        extend(metadata)
     payments = payment_metadata(revision=payment_revision)
 
     return (
@@ -219,7 +228,10 @@ def _check_db(db, *, published=False):
     objects = dict(
         db.execute("SELECT name,type FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'")
     )
-    tables = _tables()
+    from .credit_admission import sqlite_revision as admission_revision
+
+    admission = admission_revision(db, published=published)
+    tables = _tables(payment_revision=admission or PAYMENT_REVISION)
     allowed_names = set(tables) | (
         set() if published else AUTH_TABLES | {"alembic_version"}
     )
@@ -344,7 +356,9 @@ def _export_business_db(snapshot, destination):
     identity_present = present_tables(existing)
     credits_present = credit_present(existing)
     payments_present = payment_present(existing)
-    payment_revision = sqlite_revision(snapshot) or PAYMENT_REVISION
+    from .credit_admission import sqlite_revision as admission_revision
+
+    payment_revision = admission_revision(snapshot) or sqlite_revision(snapshot) or PAYMENT_REVISION
     _create_business_schema(
         destination,
         include_identity=identity_present,

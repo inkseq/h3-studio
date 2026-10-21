@@ -1660,6 +1660,17 @@ class Repository:
             spending_settings_version=spending_settings_version,
         )
         account_ids = sorted(set(account_ids))
+        role_map = {}
+        if reference_type == "job":
+            from .credit_admission import validate
+
+            job = connection.execute(select(jobs).where(
+                jobs.c.id == reference_id, self._scope(jobs, scope),
+            )).mappings().first()
+            # Legacy/manual accounting references can predate a job row. They
+            # retain enforced USD admission; absence can never confer a role.
+            if job is not None:
+                role_map = validate(connection, scope, job, account_ids)
         if amount and not account_ids:
             raise BudgetExceeded("budget_not_configured")
         for account_id in account_ids:
@@ -1677,7 +1688,7 @@ class Repository:
                 )
             ):
                 raise NotFound("budget_not_found")
-            if row["spent_microusd"] + row[
+            if role_map.get(account_id) != "accounting" and row["spent_microusd"] + row[
                 "reserved_microusd"
             ] + amount > effective_budget_limit(row):
                 raise BudgetExceeded("budget_exceeded")
@@ -1686,9 +1697,10 @@ class Repository:
                 .where(budget_accounts.c.id == account_id)
                 .values(reserved_microusd=budget_accounts.c.reserved_microusd + amount)
             )
+            reservation_id = str(uuid.uuid4())
             connection.execute(
                 insert(budget_reservations).values(
-                    id=str(uuid.uuid4()),
+                    id=reservation_id,
                     account_id=account_id,
                     reference_type=reference_type,
                     reference_id=reference_id,
@@ -1697,6 +1709,11 @@ class Repository:
                     created_at=self.clock(),
                 )
             )
+            if role_map:
+                from .credit_admission import store_role
+
+                store_role(connection, reservation_id, role_map[account_id])
+        return role_map
 
     def _settle(self, connection, reference_type, reference_id, actual_cost):
         actual_cost = money(actual_cost)
@@ -2122,7 +2139,7 @@ class Repository:
                 )
                 connection.execute(insert(jobs).values(**row))
                 if initial_status in ("queued", "waiting_capacity"):
-                    self._reserve(
+                    role_map = self._reserve(
                         connection,
                         scope,
                         budget_account_ids,
@@ -2135,7 +2152,10 @@ class Repository:
                     )
                     from .credits import hold as hold_credits
 
-                    hold_credits(connection, self, scope, row, spending_actor)
+                    held = hold_credits(connection, self, scope, row, spending_actor)
+                    from .credit_admission import require_hold
+
+                    require_hold(connection, scope, row, held, role_map)
                 if initial_status == "waiting_capacity":
                     from .capacity import admit_waiter
 
@@ -2227,7 +2247,7 @@ class Repository:
                 plan["request"],
                 scope=scope,
             )
-            self._reserve(
+            role_map = self._reserve(
                 connection,
                 scope,
                 budget_account_ids,
@@ -2240,7 +2260,10 @@ class Repository:
             )
             from .credits import hold as hold_credits
 
-            hold_credits(connection, self, scope, job, spending_actor)
+            held = hold_credits(connection, self, scope, job, spending_actor)
+            from .credit_admission import require_hold
+
+            require_hold(connection, scope, job, held, role_map)
             status = (
                 "waiting_capacity"
                 if plan["execution_plan"].get("admission_state") == "waiting_capacity"

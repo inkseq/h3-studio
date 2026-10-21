@@ -23,7 +23,7 @@ from sqlalchemy.schema import CreateTable
 
 from .migrations.versions import v20261020_0005_stripe_payments as frozen
 from .migrations.versions import v20261021_0006_stripe_live_mode as live_frozen
-from .schema_version import LIVE_PAYMENT_REVISION, PAYMENT_REVISIONS
+from .schema_version import LIVE_PAYMENT_REVISION, LIVE_PAYMENT_REVISIONS, PAYMENT_REVISIONS
 
 PAYMENT_REVISION = frozen.revision
 
@@ -40,7 +40,7 @@ def frozen_metadata(*, revision=PAYMENT_REVISION):
     collector = _Collector()
     if revision == PAYMENT_REVISION:
         frozen.build(collector)
-    elif revision == LIVE_PAYMENT_REVISION:
+    elif revision in LIVE_PAYMENT_REVISIONS:
         live_frozen.build(collector)
     else:
         raise PaymentSchemaError("payment_schema_revision_requires_review")
@@ -120,7 +120,7 @@ def recognized_revision(connection, *, schema=None):
     except SchemaVersionError:
         raise PaymentSchemaError("payment_schema_revision_requires_review") from None
     revision = (
-        LIVE_PAYMENT_REVISION if marker == LIVE_PAYMENT_REVISION else PAYMENT_REVISION
+        LIVE_PAYMENT_REVISION if marker in LIVE_PAYMENT_REVISIONS else PAYMENT_REVISION
     )
     expected_metadata = frozen_metadata(revision=revision)
     if connection.dialect.name == "postgresql":
@@ -237,7 +237,7 @@ def sqlite_revision(db, *, published=False):
     # disabled/archive reader may recognize an exact unrecorded 006 shape.
     revisions = (
         [LIVE_PAYMENT_REVISION]
-        if marker == LIVE_PAYMENT_REVISION
+        if marker in LIVE_PAYMENT_REVISIONS
         else [PAYMENT_REVISION, LIVE_PAYMENT_REVISION]
         if marker is None and published is True
         else [PAYMENT_REVISION]
@@ -306,7 +306,7 @@ def ready(connection, *, schema=None):
         return False
     if not present or not (identity_tables | credit_tables) <= names:
         raise PaymentSchemaError("payment_schema_partial_family_requires_review")
-    if revisions[0] == LIVE_PAYMENT_REVISION:
+    if revisions[0] in LIVE_PAYMENT_REVISIONS:
         # The rollback bridge must not authorize a mixed/partial future family.
         # 005 keeps its existing bounded hot path and test-only writer behavior.
         validate_connection(connection, schema=schema)

@@ -736,3 +736,10 @@ inventory.json
 !studio_platform/quality_views.py
 !studio_platform/quality_http.py
 !studio_platform/assistant_models.py
+
+# Credit-only customer admission; no runtime fixtures or policy data.
+!studio_platform/credit_admission.py
+!studio_platform/credit_margin.py
+!studio_platform/migrations/versions/v20261022_0007_credit_admission.py
+!tests/test_credit_only_admission.py
+!docs/CREDIT-ONLY-ADMISSION.md

@@ -448,12 +448,14 @@ def hold(connection, repo, scope, job, spending_actor=None):
     if (
         type(frozen) is not dict
         or type(frozen.get("version")) is not int
-        or frozen["version"] != 1
+        or frozen["version"] not in (1, 2)
         or frozen.get("enforced") is not True
         or not isinstance(frozen.get("price_revision"), str)
         or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", frozen["price_revision"])
     ):
         raise CreditError("credit_quote_required")
+    if frozen["version"] == 2 and policy["active_revision"] != frozen["price_revision"]:
+        raise CreditError("credit_policy_changed_repreflight", 409)
     amount = _integer(frozen.get("credits"))
     user = _user(connection, scope.tenant_id, scope.owner_id)
     if user["status"] != "active" or frozen.get("user_id") != user["id"]:

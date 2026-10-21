@@ -111,7 +111,7 @@ class GenerationRead:
         # User-relevant admission, never operator approval/budget identities.
         from .credits_pricing import public_quote
 
-        return {
+        value = {
             "admission_state": execution.get(
                 "admission_state", "queued" if execution.get("enabled") else "blocked"
             ),
@@ -140,6 +140,13 @@ class GenerationRead:
                 else {}
             ),
         }
+        frozen = execution.get("credit_quote", {})
+        if isinstance(frozen, dict) and frozen.get("version") == 2:
+            value["budget_rows"] = [
+                {key: row[key] for key in ("scope", "budget_role")}
+                for row in frozen["budget_rows"]
+            ]
+        return value
 
     @staticmethod
     def artifact(record):

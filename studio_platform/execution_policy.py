@@ -813,6 +813,24 @@ class ExecutionPolicies:
         account_ids = [
             value.format(**scope.__dict__) for value in policy["budget_accounts"]
         ]
+        # Determine customer admission before checking the USD allowance. The
+        # selected protected policy supplies IDs; neither request nor PAT can
+        # select roles. First admission recomputes this under ledger locks.
+        from .credits_pricing import quote as credit_quote
+
+        with self.repo.engine.connect() as connection:
+            frozen_credit = credit_quote(
+                connection, scope.tenant_id, scope.owner_id, compiled,
+                execution={**base, "budget_account_ids": account_ids},
+            )
+        role_map = {}
+        if frozen_credit is not None:
+            base["credit_quote"] = frozen_credit
+            if frozen_credit.get("version") == 2:
+                role_map = {
+                    row["account_id"]: row["budget_role"]
+                    for row in frozen_credit["budget_rows"]
+                }
         for account_id in account_ids:
             try:
                 identifier(account_id)
@@ -825,7 +843,7 @@ class ExecutionPolicies:
                     and account["project_id"] != scope.project_id
                 ):
                     raise NotFound("budget_not_found")
-                if account["spent_microusd"] + account["reserved_microusd"] + quote[
+                if role_map.get(account_id) != "accounting" and account["spent_microusd"] + account["reserved_microusd"] + quote[
                     "cost_microusd"
                 ] > effective_budget_limit(account):
                     raise BudgetExceeded("budget_exceeded")
