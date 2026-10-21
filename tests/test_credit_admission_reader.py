@@ -553,9 +553,7 @@ class CreditAdmissionReaderPostgresTests(unittest.TestCase):
                     root = Path(temp)
                     url = root / "synthetic-local-url"
                     url.write_text(
-                        self.engine.url.set(password="synthetic").render_as_string(
-                            hide_password=False
-                        ),
+                        self.engine.url.render_as_string(hide_password=False),
                         encoding="utf-8",
                     )
                     url.chmod(0o600)
@@ -588,9 +586,7 @@ class CreditAdmissionReaderPostgresTests(unittest.TestCase):
             root = Path(temp)
             url = root / "synthetic-local-url"
             url.write_text(
-                self.engine.url.set(password="synthetic").render_as_string(
-                    hide_password=False
-                ),
+                self.engine.url.render_as_string(hide_password=False),
                 encoding="utf-8",
             )
             url.chmod(0o600)
