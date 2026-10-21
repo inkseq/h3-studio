@@ -14,6 +14,7 @@ from .auth import AuthenticationError, Principal
 from .http_limits import AGENT_CONNECT_BODY_BYTES
 
 EXCHANGE_PATH = "/v1/agent-connect/exchange"
+PREVIEW_PATH = "/v1/agent-connect/grant-preview"
 HELPER_PATH = "/for-agents/connect.py"
 MANIFEST_PATH = "/for-agents/connect-manifest.json"
 PUBLIC_GET_PATHS = frozenset({HELPER_PATH, MANIFEST_PATH})
@@ -38,6 +39,46 @@ CONNECTION_VERIFICATION_CHECKLIST = (
     "Verify owner revocation separately without deleting drafts, accepted jobs or assets; connection does not authorize a particular paid task.",
 )
 CONNECTION_VERIFICATION_LIMITS = "These are implementation requirements and verification steps, not per-machine test results. Fake OS tests do not prove native store access or live external onboarding; actual OS access and frontend/production publication require separate evidence."
+
+
+def unique_fields(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError('duplicate_connection_field')
+        value[key] = item
+    return value
+
+
+class GrantPreviewPrivacyMiddleware:
+    """Keep even outer admission/guard errors private on the one preview route."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope['type'] != 'http' or scope.get('path') != PREVIEW_PATH:
+            return await self.app(scope, receive, send)
+
+        async def private_send(message):
+            if message['type'] == 'http.response.start':
+                message = dict(message)
+                message['headers'] = [
+                    (key, value)
+                    for key, value in message.get('headers', [])
+                    if key.lower()
+                    not in {
+                        b'cache-control',
+                        b'referrer-policy',
+                        b'x-authenticated-account',
+                    }
+                ] + [
+                    (b'cache-control', b'no-store'),
+                    (b'referrer-policy', b'no-referrer'),
+                ]
+            await send(message)
+
+        return await self.app(scope, receive, private_send)
 
 
 def helper_manifest(raw=None):
@@ -105,7 +146,7 @@ def register_routes(app, *, service=None):
         if len(data) > MAX_BODY_BYTES:
             raise ConnectError("connection_body_too_large", 413)
         try:
-            value = json.loads(data)
+            value = json.loads(data, object_pairs_hook=unique_fields)
         except (ValueError, UnicodeError):
             raise ConnectError("connection_body_invalid", 422) from None
         if (
@@ -187,6 +228,8 @@ def register_routes(app, *, service=None):
                 "daily_limit_credits",
                 "scope",
                 "permission",
+                "client",
+                "telegram_nonce",
             },
             required={"authorization_profile_id", "authorization_profile_version"},
         )
@@ -205,6 +248,8 @@ def register_routes(app, *, service=None):
                 daily_limit_credits=value.get("daily_limit_credits"),
                 scope=value.get("scope"),
                 permission=value.get("permission"),
+                client=value.get("client"),
+                telegram_nonce=value.get("telegram_nonce"),
             )
         except AuthenticationError:
             raise ConnectError("connection_login_required", 401) from None
@@ -277,6 +322,26 @@ def register_routes(app, *, service=None):
         except AuthenticationError:
             raise ConnectError("connection_login_required", 401) from None
 
+    @app.post(PREVIEW_PATH)
+    async def grant_preview(request: Request):
+        expected_origin = source_guard(request)
+        if request.url.query:
+            raise ConnectError('connection_fields_invalid', 422)
+        value = await body(request, allowed={'code'}, required={'code'})
+        result = await run_in_threadpool(
+            service.preview,
+            code=value['code'],
+            origin=expected_origin,
+            source=request.client.host if request.client else 'unknown',
+        )
+        return JSONResponse(
+            result,
+            headers={
+                'Cache-Control': 'no-store',
+                'Referrer-Policy': 'no-referrer',
+            },
+        )
+
     @app.post(EXCHANGE_PATH)
     async def exchange(request: Request):
         expected_origin = source_guard(request)
@@ -289,6 +354,8 @@ def register_routes(app, *, service=None):
                 "key_prefix",
                 "expected_authorization_fingerprint",
                 "recovery_verifier",
+                "telegram_user",
+                "telegram_nonce",
             },
             required={
                 "code",
