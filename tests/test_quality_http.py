@@ -344,6 +344,128 @@ class QualityHTTPTests(unittest.TestCase):
         )
         return value
 
+    def test_actual_render_plan_post_projects_creator_without_changing_saved_plan(self):
+        from dataclasses import replace
+        from studio_platform.generation_services import GenerationRead
+        from test_platform_render_plans import BODY, story
+
+        repo = self.app.state.repository
+        policies = self.app.state.generation_planning.policies
+        project = story()
+        project["entities"][2]["data"]["seconds"] = 9
+        asset = {
+            "status": "ready",
+            "kind": "video",
+            "metadata": {"source_duration": 9},
+            "original": {
+                "key": "owners/synthetic/assets/clip.mp4",
+                "sha256": "a" * 64,
+                "size_bytes": 1234,
+                "content_type": "video/mp4",
+            },
+        }
+        for owner in ("superdan", "supervan"):
+            repo.put_document(
+                Scope(self.settings.tenant_id, owner, "__projects", "fixture"),
+                "project",
+                project["id"],
+                project,
+            )
+
+        unchanged = None
+        with (
+            mock.patch.object(
+                policies, "settings", replace(policies.settings, render_enabled=True)
+            ),
+            mock.patch.object(
+                policies.control, "pool_status", return_value={"ready": 1, "busy": 0}
+            ),
+            mock.patch.object(self.app.state.assets, "get", return_value=asset),
+        ):
+            # Real auth, actual POST route, compiler, persistence and installed
+            # HTTP projection. Only media/capacity reads are synthetic seams.
+            for role in ("user", "admin", "machine"):
+                with self.subTest(role=role):
+                    owner = self._identity(role)
+                    response = self.client.post("/v1/render-plans", json=BODY)
+                    self.assertEqual(response.status_code, 201, response.text)
+                    shown = response.json()
+                    self.assertEqual(shown["status"], "ready", shown)
+                    self.assertFalse(shown["simulation"])
+                    self.assertEqual(shown["blockers"], [])
+                    self.assertTrue(shown["execution"]["enabled"])
+                    self.assertEqual(shown["output_spec"]["frame_count"], 216)
+                    self.assertEqual(shown["timeline"]["duration"], 9)
+                    self.assertEqual(shown["estimate"]["cost_microusd"], 0)
+                    stored = repo.get_plan(
+                        Scope(self.settings.tenant_id, owner, "story-one"),
+                        shown["plan_id"],
+                    )
+                    frozen = copy.deepcopy(stored)
+                    self.assertEqual(shown["request_hash"], stored["request_hash"])
+                    self.assertEqual(
+                        stored["request_hash"], request_hash(stored["request"])
+                    )
+                    self.assertEqual(
+                        stored["plan_hash"], request_hash(stored["execution_plan"])
+                    )
+                    self.assertEqual(
+                        shown["output_spec"], stored["request"]["output_spec"]
+                    )
+                    self.assertEqual(stored["execution_plan"]["backend"], "cpu-render")
+                    self.assertEqual(
+                        stored["execution_plan"]["configuration_id"], "cpu-render-v3"
+                    )
+                    if role == "admin":
+                        self.assertEqual(
+                            shown["execution"],
+                            GenerationRead.execution(stored["execution_plan"]),
+                        )
+                        self.assertEqual(shown["execution"]["backend"], "cpu-render")
+                    else:
+
+                        def check_public(value):
+                            if isinstance(value, dict):
+                                self.assertFalse(
+                                    {
+                                        "backend",
+                                        "configuration_id",
+                                        "model",
+                                        "model_id",
+                                        "provider",
+                                    }
+                                    & value.keys()
+                                )
+                                for item in value.values():
+                                    check_public(item)
+                            elif isinstance(value, list):
+                                for item in value:
+                                    check_public(item)
+
+                        check_public(shown)
+                    visible = {
+                        key: shown[key]
+                        for key in ("output_spec", "timeline", "estimate")
+                    }
+                    if unchanged is None:
+                        unchanged = visible
+                    self.assertEqual(visible, unchanged)
+                    self.assertEqual(
+                        repo.get_plan(
+                            Scope(self.settings.tenant_id, owner, "story-one"),
+                            shown["plan_id"],
+                        ),
+                        frozen,
+                    )
+            self._identity("anonymous")
+            count = self._plan_count()
+            self.assertEqual(
+                self.client.post("/v1/render-plans", json=BODY).status_code, 401
+            )
+            self.assertEqual(self._plan_count(), count)
+        with repo.engine.connect() as connection:
+            self.assertEqual(list(connection.execute(select(jobs.c.id))), [])
+
     def _version_project(self):
         self._identity("user")
         response = self.client.post("/v1/projects", json={"project": fixture.project()})
