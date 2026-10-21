@@ -157,6 +157,29 @@ CPU state根默认8 GiB逻辑容量上限：在复制输入前持久预留每个
 
 ## 明确启动与验收
 
+### Render v5 deployment and legacy recovery (#408)
+
+The normal DBOS controller uses `DurableExecutor.__enter__` →
+`DurableSlots.add_render_slots`, which registers every distinct value from
+`render_plans.CONFIGURATIONS` when the existing render flag is enabled. After
+the ordinary same-image deployment, it registers `dbos-cpu-render-v5` beside
+the retained v1/v2/v3 configurations; render v4 still maps to `cpu-render-v3`.
+No extra service, queue, CPU host or simultaneous render capacity is added.
+All these registrations share the existing in-process `_cpu_operation` mutex
+and inherited POSIX `cpu-render-operation.lock` fence.
+
+Each job keeps its exact configuration. A v3 worker cannot claim a v5 job,
+and a v5 worker cannot claim an accepted v1–v4 job. Old accepted jobs retain
+their requests, hashes, attempts, recovery evidence and original drain paths.
+Standalone CLI defaults remain v3; v5 there requires explicit
+`--contract-version 5`. The deployed DBOS controller does not use that CLI.
+
+The API capability list describes supported v5 fields. Preflight separately
+checks the exact configuration's live pool readiness before enabling work.
+Staging acceptance must observe the registered v5 worker and an actual new
+v5 plan being claimed/completed through that path; a direct CPU fixture alone
+does not establish deployment readiness or staging acceptance.
+
 CLI只在`SIXNINE_RENDER_ENABLED=1`且提供`--enabled`时工作；API与worker需要同一数据库、同一受控store配置。示意命令中的目录和主机ID必须由部署者明确选择：
 
 CLI默认`--contract-version 3`。升级时旧v1/v2 worker应先收完原计划/未知提交再退役；若需要用新二进制恢复历史队列，可另行显式启动`--contract-version 1`或`2`的旧任务收尾进程，使用原正确身份与受控工作目录。各版本工作槽仍按configuration精确匹配，不能把任一类型的队列改写成另一版本；运行/收集期间的状态和费用证据不丢弃。
