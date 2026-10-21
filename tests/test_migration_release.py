@@ -615,6 +615,7 @@ class MigrationArtifacts(unittest.TestCase):
             '5165403eb95966962f659168a50ad239d595c360',
             'e3a852fe013300dcb468d6f5a9875e183e1109be',
             '57043af14df1e1db3f1711a33ed172f762fb022d',
+            '3d6355caafdbb8dca6648cdd9b3a04fd9b6dafe8',
         }
         self.assertEqual(
             set(maintenance.RETAINED_DSTACK_HELPER_PAIRS), expected_commits
@@ -664,6 +665,7 @@ class MigrationArtifacts(unittest.TestCase):
         for commit in (
             'e3a852fe013300dcb468d6f5a9875e183e1109be',
             '57043af14df1e1db3f1711a33ed172f762fb022d',
+            '3d6355caafdbb8dca6648cdd9b3a04fd9b6dafe8',
         ):
             self.assertEqual(
                 maintenance.RETAINED_DSTACK_HELPER_PAIRS[commit],
@@ -731,6 +733,7 @@ class MigrationArtifacts(unittest.TestCase):
         paired = '57043af14df1e1db3f1711a33ed172f762fb022d'
         production = '498e073113564881a621189c8bb312315d2f4d9b'
         rollback = '5165403eb95966962f659168a50ad239d595c360'
+        staging = '3d6355caafdbb8dca6648cdd9b3a04fd9b6dafe8'
         for commit, pair in (
             ('f' * 40, pairs[original]),
             ('f' * 40, pairs[current]),
@@ -742,6 +745,7 @@ class MigrationArtifacts(unittest.TestCase):
             (paired, pairs[rollback]),
             (production, pairs[promoted]),
             (rollback, pairs[paired]),
+            (staging, pairs[production]),
         ):
             (self.artifact / maintenance.MANIFEST).write_text(
                 json.dumps({'commit': commit, 'dstack': {}})
