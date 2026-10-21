@@ -23,7 +23,7 @@ from tools import provision_staging_qa as tool
 from test_platform_repository import LedgerCase
 
 EXISTING_PASSWORD = "ExistingStagingFixturePassword_OnlyForOfflineTests"
-QA_PASSWORDS = {"qa-admin": "A" * 48, "qa-user": "B" * 48}
+QA_PASSWORDS = {"qa-admin": "A" * 48, "qa-user": "B" * 48, "qa-credit": "C" * 48}
 EXISTING_HASH = bcrypt.hashpw(
     EXISTING_PASSWORD.encode(), bcrypt.gensalt(rounds=12)
 ).decode()
@@ -37,6 +37,14 @@ def body(*, grant=False):
         ],
         "grant_test_credits": grant,
     }
+
+
+def credit_body(*, grant=False):
+    value = body(grant=grant)
+    value["accounts"].append(
+        {"username": "qa-credit", "role": "user", "password": QA_PASSWORDS["qa-credit"]}
+    )
+    return value
 
 
 class StagingQATests(LedgerCase):
@@ -172,6 +180,92 @@ class StagingQATests(LedgerCase):
         self.assertEqual(stored, self.rows(accounts))
         self.assertNotIn(QA_PASSWORDS["qa-admin"], json.dumps(first))
         self.assertNotIn("password", json.dumps(self.rows(admin_audit)))
+
+    def test_credit_extension_preserves_original_identities_credentials_and_budgets(
+        self,
+    ):
+        from studio_platform.repository import budget_accounts
+
+        self.service.provision(self.admin, body())
+        original_users = self.rows(users)
+        original_accounts = self.rows(accounts)
+        original_budgets = self.rows(budget_accounts)
+        first = self.service.provision(self.admin, credit_body())
+        self.assertIsNone(first["credit_grant"])
+        self.assertEqual(
+            [row["username"] for row in first["accounts"] if row["created"]],
+            ["qa-credit"],
+        )
+        self.assertEqual(
+            [row for row in self.rows(users) if row["owner"] != "qa-credit"],
+            original_users,
+        )
+        self.assertEqual(
+            [row for row in self.rows(accounts) if row["username"] != "qa-credit"],
+            original_accounts,
+        )
+        self.assertEqual(self.rows(budget_accounts), original_budgets)
+        all_users, all_credentials = self.rows(users), self.rows(accounts)
+        replay = self.service.provision(self.admin, credit_body())
+        self.assertFalse(any(row["created"] for row in replay["accounts"]))
+        self.service.provision(self.admin, body())  # Legacy clients remain valid.
+        self.assertEqual(self.rows(users), all_users)
+        self.assertEqual(self.rows(accounts), all_credentials)
+        audit = self.rows(admin_audit)
+        self.assertEqual(len(audit), 3)
+        self.assertTrue(audit[-1]["after"]["is_test"])
+        self.assertEqual(audit[-1]["after"]["username"], "qa-credit")
+        self.assertNotIn(QA_PASSWORDS["qa-credit"], json.dumps(first))
+
+    def test_credit_extension_failure_never_changes_original_pair(self):
+        self.service.provision(self.admin, body())
+        before = (self.rows(users), self.rows(accounts), self.rows(admin_audit))
+        with patch.object(
+            self.service, "_audit", side_effect=RuntimeError("offline audit refusal")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "offline audit refusal"):
+                self.service.provision(self.admin, credit_body())
+        self.assertEqual(
+            (self.rows(users), self.rows(accounts), self.rows(admin_audit)), before
+        )
+        for request in (
+            {**credit_body(), "grant_test_credits": True},
+            {**body(), "accounts": credit_body()["accounts"][1:]},
+        ):
+            with patch.object(
+                self.repo,
+                "transaction",
+                side_effect=AssertionError("No DB for invalid set/grant"),
+            ):
+                with self.assertRaisesRegex(
+                    StagingQAError, "staging_qa_request_invalid"
+                ):
+                    self.service.provision(self.admin, request)
+        self.assertEqual(
+            (self.rows(users), self.rows(accounts), self.rows(admin_audit)), before
+        )
+
+    def test_credit_password_identity_is_exact_staging_only(self):
+        self.service.provision(self.admin, credit_body())
+        staging = Auth(
+            self.repo.engine,
+            tenant=self.scope.tenant_id,
+            staging_qa=True,
+            clock=lambda: self.now,
+        )
+        token = staging.login(
+            "qa-credit", QA_PASSWORDS["qa-credit"], source="credit-proof"
+        )
+        self.assertEqual(staging.session(token).owner, "qa-credit")
+        self.assertEqual(staging.session(token).role, "user")
+        self.assertIsNone(self.auth.session(token))
+        with self.assertRaises(AuthenticationError):
+            self.auth.login("qa-credit", QA_PASSWORDS["qa-credit"], source="production")
+        for name in ("qa-credit-other", "qa-credit-20261022", "credit"):
+            with self.assertRaises(AuthenticationError):
+                staging.login(name, QA_PASSWORDS["qa-credit"], source=name)
+        with self.assertRaisesRegex(ValueError, "Unsupported account"):
+            staging.set_password("qa-credit", "NeverRotateThisFixture")
 
     def test_audit_failure_rolls_back_both_identity_and_password_rows(self):
         with patch.object(
@@ -331,6 +425,69 @@ class StagingQATests(LedgerCase):
 
 
 class LocalProvisionTests(unittest.TestCase):
+    def test_finite_extension_is_memory_only_preserves_old_values_and_reuses_third(
+        self,
+    ):
+        value = {"base_url": ORIGIN, "accounts": body()["accounts"]}
+        before = json.dumps(value, sort_keys=True)
+        token = Mock(return_value=QA_PASSWORDS["qa-credit"])
+        with patch(
+            "os.open", side_effect=AssertionError("No file access in preparation")
+        ):
+            extended = tool.credit_fixture_accounts(value, token=token)
+            replay = tool.credit_fixture_accounts(
+                extended, token=Mock(side_effect=AssertionError("No rotation"))
+            )
+        self.assertEqual(json.dumps(value, sort_keys=True), before)
+        self.assertEqual(extended["accounts"][:2], value["accounts"])
+        self.assertEqual(extended, replay)
+        token.assert_called_once_with(36)
+        self.assertEqual(tool._validate(value), value)
+        self.assertEqual(tool._validate(extended), extended)
+        for records in (
+            extended["accounts"][1:],
+            [extended["accounts"][0], extended["accounts"][2]],
+            extended["accounts"] + [extended["accounts"][2]],
+        ):
+            with self.assertRaisesRegex(tool.ProvisionError, "qa_private_file_invalid"):
+                tool._validate({"base_url": ORIGIN, "accounts": records})
+        bad = json.loads(json.dumps(extended))
+        bad["accounts"][2]["username"] = "qa-credit-20261022"
+        with self.assertRaisesRegex(tool.ProvisionError, "qa_private_file_invalid"):
+            tool._validate(bad)
+
+    def test_three_name_transport_never_grants_or_falls_back_to_bootstrap(self):
+        value = {"base_url": ORIGIN, "accounts": credit_body()["accounts"]}
+        client = Mock()
+        bootstrap = Mock(side_effect=AssertionError("No new authority"))
+        with self.assertRaisesRegex(tool.ProvisionError, "qa_request_invalid"):
+            tool.provision(
+                value, grant_test_credits=True, client=client, read_bootstrap=bootstrap
+            )
+        client.post.assert_not_called()
+        client.post.side_effect = [Mock(status_code=401), Mock(status_code=200)]
+        with self.assertRaisesRegex(tool.ProvisionError, "qa_admin_login_failed"):
+            tool.provision(value, client=client, read_bootstrap=bootstrap)
+        bootstrap.assert_not_called()
+        self.assertEqual(
+            [call.args[0] for call in client.post.call_args_list],
+            ["/api/auth/login", "/api/auth/logout"],
+        )
+        response = Mock(status_code=200)
+        response.json.return_value = {"accounts": [], "credit_grant": None}
+        client = Mock()
+        client.post.side_effect = [
+            Mock(status_code=200),
+            response,
+            Mock(status_code=200),
+        ]
+        result = tool.provision(value, client=client, read_bootstrap=bootstrap)
+        self.assertEqual(result["accounts"], ["qa-admin", "qa-credit", "qa-user"])
+        self.assertFalse(
+            client.post.call_args_list[1].kwargs["json"]["grant_test_credits"]
+        )
+        self.assertNotIn("password", json.dumps(result))
+
     def test_settings_target_defaults_to_production_and_needs_exact_staging_pair(self):
         with patch.dict(os.environ, {"PUBLIC_ORIGIN": ORIGIN}, clear=True):
             settings = Settings.from_environment()

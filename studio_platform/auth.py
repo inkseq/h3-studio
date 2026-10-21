@@ -442,7 +442,11 @@ class Auth:
         return source == "workos" or source == self.mode
 
     def _password_owner(self, owner):
-        return owner in USERS or self.staging_qa and owner in {"qa-admin", "qa-user"}
+        return (
+            owner in USERS
+            or self.staging_qa
+            and owner in {"qa-admin", "qa-user", "qa-credit"}
+        )
 
     def _grant_account(
         self, connection, owner, source, version, *, lock=False, check_identity=True

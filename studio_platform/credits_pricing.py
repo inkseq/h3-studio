@@ -223,8 +223,11 @@ def admin_margin_estimate(price, catalog):
 def public_quote(execution):
     value = execution.get("credit_quote")
     if not isinstance(value, dict) or value.get("enforced") is not True:
-        return {}
-    return {key: value[key] for key in ("credits", "price_revision", "breakdown")}
+        return {"admission": "usd"}
+    return {
+        **{key: value[key] for key in ("credits", "price_revision", "breakdown")},
+        "admission": "credits" if value.get("version") == 2 else "usd",
+    }
 
 
 def aggregate_quotes(plans, *, complete=True):
@@ -241,6 +244,9 @@ def aggregate_quotes(plans, *, complete=True):
     )
     revisions = sorted({plan["price_revision"] for plan in quoted})
     return {
+        "admission": "credits"
+        if all(plan.get("admission") == "credits" for plan in quoted)
+        else "usd",
         "credits": sum(plan["credits"] for plan in quoted) if known else None,
         "price_revision": revisions[0] if len(revisions) == 1 else None,
         "price_revisions": revisions,
@@ -327,7 +333,7 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
     rate = 0 if render else price["rates"][tier]
     amount = math.ceil(Fraction(rate * frames, fps))
     seconds = frames / fps
-    return {
+    result = {
         "version": 1,
         "enforced": True,
         "user_id": user.id,
@@ -349,10 +355,19 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
             }
         ],
     }
+    from .credit_admission import ready, roles
+
+    if ready(connection):
+        result.update(
+            version=2,
+            admission="credits",
+            budget_rows=roles(connection, tenant, owner, execution or {}),
+        )
+    return result
 
 
 def hide_dollar_estimate(execution, principal):
-    return bool(public_quote(execution)) and (
+    return "credits" in public_quote(execution) and (
         principal is None or principal.machine or principal.role != "admin"
     )
 

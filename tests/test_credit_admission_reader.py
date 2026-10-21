@@ -1,7 +1,6 @@
 """Pure 006/007 readers and exact business rows; no live adoption or policy."""
 
-from contextlib import closing, redirect_stderr
-import io
+from contextlib import closing
 import os
 from pathlib import Path
 import sqlite3
@@ -186,22 +185,18 @@ class CreditAdmissionReaderTests(unittest.TestCase):
                 finally:
                     engine.dispose()
 
-    def test_reader_release_has_no_adopter_and_upgrade_always_refuses(self):
+    def test_writer_upgrade_requires_explicit_guard_and_downgrade_refuses(self):
         from studio_platform import schema_baseline
         from studio_platform.migrations.versions import (
             v20261022_0007_credit_admission as preview,
         )
 
-        self.assertFalse(hasattr(schema_baseline, "adopt_credit_admission"))
-        with self.assertRaisesRegex(RuntimeError, "reader_only_release"):
-            preview.upgrade()
+        self.assertTrue(callable(schema_baseline.adopt_credit_admission))
+        with patch("alembic.context.is_offline_mode", return_value=True):
+            with self.assertRaisesRegex(RuntimeError, "verified_adoption_required"):
+                preview.upgrade()
         with self.assertRaisesRegex(RuntimeError, "destructive_downgrade"):
             preview.downgrade()
-        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
-            schema_baseline.main(
-                ["adopt-credit-admission", "--expected-fingerprint", "a" * 64]
-            )
-        self.assertEqual(raised.exception.code, 2)
 
     def test_inconsistent_marker_type_default_and_nullability_are_refused(self):
         from studio_platform.backup import BackupError, _check_db

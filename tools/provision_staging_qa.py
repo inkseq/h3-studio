@@ -19,7 +19,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from studio_platform.staging_qa import ORIGIN, PASSWORD, QA_ROLES, unique_pairs
+from studio_platform.staging_qa import (
+    DEFAULT_QA_NAMES,
+    ORIGIN,
+    PASSWORD,
+    QA_NAME_SETS,
+    QA_ROLES,
+    unique_pairs,
+)
 
 ACCOUNTS_FILE = Path(
     "C:/Users/danmo/Desktop/inference/h3-studio/.local/staging-qa-accounts.json"
@@ -226,7 +233,7 @@ def _validate(value):
         or set(value) != {"base_url", "accounts"}
         or value["base_url"] != ORIGIN
         or type(value["accounts"]) is not list
-        or len(value["accounts"]) != 2
+        or len(value["accounts"]) not in (2, 3)
     ):
         raise ProvisionError("qa_private_file_invalid")
     found = set()
@@ -243,7 +250,28 @@ def _validate(value):
         ):
             raise ProvisionError("qa_private_file_invalid")
         found.add(row["username"])
+    if frozenset(found) not in QA_NAME_SETS:
+        raise ProvisionError("qa_private_file_invalid")
     return value
+
+
+def credit_fixture_accounts(value, *, token=secrets.token_urlsafe):
+    """Prepare exactly one extension in memory; never publish credentials.
+
+    A separately reviewed operator must publish only to the canonical private
+    JSON. This helper does not touch a file, log, reset or rotate old material.
+    """
+    value = _validate(value)
+    result = {
+        "base_url": value["base_url"],
+        "accounts": [dict(row) for row in value["accounts"]],
+    }
+    if any(row["username"] == "qa-credit" for row in result["accounts"]):
+        return result
+    result["accounts"].append(
+        {"username": "qa-credit", "password": token(36), "role": "user"}
+    )
+    return _validate(result)
 
 
 def local_accounts(path=ACCOUNTS_FILE, *, token=secrets.token_urlsafe):
@@ -278,8 +306,12 @@ def local_accounts(path=ACCOUNTS_FILE, *, token=secrets.token_urlsafe):
                 {
                     "base_url": ORIGIN,
                     "accounts": [
-                        {"username": username, "password": token(36), "role": role}
-                        for username, role in QA_ROLES.items()
+                        {
+                            "username": username,
+                            "password": token(36),
+                            "role": QA_ROLES[username],
+                        }
+                        for username in DEFAULT_QA_NAMES
                     ],
                 }
             )
@@ -324,6 +356,9 @@ def provision(
     value = _validate(value)
     if type(grant_test_credits) is not bool:
         raise ProvisionError("qa_request_invalid")
+    names = {row["username"] for row in value["accounts"]}
+    if "qa-credit" in names and grant_test_credits:
+        raise ProvisionError("qa_request_invalid")
     for name in ("httpx", "httpcore"):
         logging.getLogger(name).setLevel(logging.CRITICAL)
     owns = client is None
@@ -344,7 +379,7 @@ def provision(
             "/api/auth/login",
             json={"username": "qa-admin", "password": account["password"]},
         )
-        if response.status_code == 401:
+        if response.status_code == 401 and "qa-credit" not in names:
             password = read_bootstrap()
             try:
                 response = client.post(
@@ -369,7 +404,7 @@ def provision(
             raise ProvisionError("qa_response_invalid")
         return {
             "status": "staging_qa_provisioned",
-            "accounts": sorted(QA_ROLES),
+            "accounts": sorted(names),
             "credit_grant_requested": grant_test_credits,
         }
     finally:

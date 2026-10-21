@@ -15,7 +15,9 @@ from .identity_admin import AdminError, IdentityAdmin
 from .identity_schema import admin_audit, users
 
 ORIGIN = "https://staging.inkseq.com"
-QA_ROLES = {"qa-admin": "admin", "qa-user": "user"}
+QA_ROLES = {"qa-admin": "admin", "qa-user": "user", "qa-credit": "user"}
+DEFAULT_QA_NAMES = ("qa-admin", "qa-user")
+QA_NAME_SETS = (frozenset(DEFAULT_QA_NAMES), frozenset(QA_ROLES))
 PASSWORD = re.compile(r"[A-Za-z0-9_-]{43,64}\Z")
 GRANT_KEY = "staging-qa-user-initial-credits-v1"
 GRANT_REASON = "Owner-authorized staging QA acceptance credits"
@@ -75,7 +77,7 @@ class StagingQA:
             or set(body) != {"accounts", "grant_test_credits"}
             or type(body["grant_test_credits"]) is not bool
             or type(body["accounts"]) is not list
-            or len(body["accounts"]) != 2
+            or len(body["accounts"]) not in (2, 3)
         ):
             raise StagingQAError("staging_qa_request_invalid", 422)
         supplied = {}
@@ -92,6 +94,10 @@ class StagingQA:
             ):
                 raise StagingQAError("staging_qa_request_invalid", 422)
             supplied[row["username"]] = row
+        if frozenset(supplied) not in QA_NAME_SETS or (
+            "qa-credit" in supplied and body["grant_test_credits"]
+        ):
+            raise StagingQAError("staging_qa_request_invalid", 422)
         with self.repo.transaction() as connection:
             lock_account_gate(connection, exclusive=True)
             try:
@@ -105,7 +111,8 @@ class StagingQA:
                     raise StagingQAError("staging_qa_credits_not_ready", 503)
             result, canonical = [], {}
             now = self.repo.clock()
-            for username, role in QA_ROLES.items():
+            for username in sorted(supplied):
+                role = QA_ROLES[username]
                 user = (
                     connection.execute(
                         select(users)

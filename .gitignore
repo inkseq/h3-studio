@@ -742,3 +742,8 @@ inventory.json
 !studio_platform/migrations/versions/v20261022_0007_credit_admission.py
 !tests/test_credit_admission_reader.py
 !docs/CREDIT-ADMISSION-READER.md
+
+# Credit-only admission writer and focused regression coverage.
+!studio_platform/credit_margin.py
+!tests/test_credit_only_admission.py
+!docs/CREDIT-ONLY-ADMISSION.md

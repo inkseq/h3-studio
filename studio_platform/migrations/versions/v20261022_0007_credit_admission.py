@@ -1,4 +1,4 @@
-"""Reader-only preview of one additive role on original reservation rows."""
+"""One additive role on original reservation rows; guarded adoption only."""
 
 import re
 import sqlalchemy as sa
@@ -84,7 +84,27 @@ def extend(metadata):
 
 
 def upgrade():
-    raise RuntimeError("credit_admission_reader_only_release")
+    from alembic import context, op
+
+    if (
+        context.is_offline_mode()
+        or context.config.attributes.get("verified_credit_admission_mode") is not True
+        or op.get_bind().dialect.name != "postgresql"
+        or not op.get_bind().in_transaction()
+    ):
+        raise RuntimeError("credit_admission_verified_adoption_required")
+    op.add_column(
+        "platform_budget_reservations",
+        sa.Column(
+            "budget_role",
+            sa.String(20),
+            nullable=False,
+            server_default="enforced",
+        ),
+    )
+    op.create_check_constraint(
+        "ck_budget_reservation_role", "platform_budget_reservations", ROLE_CHECK
+    )
 
 
 def downgrade():

@@ -1,6 +1,6 @@
-"""Read-only recognition of the preview 007 reservation shape; no adoption."""
+"""Trusted roles on original reservations; strict readers and no startup DDL."""
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, select, text
 
 from .schema_version import CREDIT_ADMISSION_REVISION, read_schema_version
 
@@ -69,3 +69,122 @@ def sqlite_revision(db, *, published=False):
     ):
         raise BackupError("credit_admission_schema_requires_review")
     return CREDIT_ADMISSION_REVISION
+
+
+def roles(connection, tenant, owner, execution):
+    """Only selected, canonical owner rows can become accounting rows."""
+    from .credits import CreditError
+    from .repository import budget_accounts
+
+    identifiers = execution.get("budget_account_ids", [])
+    if (
+        not isinstance(identifiers, (list, tuple))
+        or any(not isinstance(item, str) for item in identifiers)
+        or len(set(identifiers)) != len(identifiers)
+    ):
+        raise CreditError("credit_quote_invalid", 409)
+    result = []
+    for identifier in sorted(identifiers):
+        row = (
+            connection.execute(
+                select(budget_accounts).where(budget_accounts.c.id == identifier)
+            )
+            .mappings()
+            .first()
+        )
+        if (
+            row is None
+            or row["tenant_id"] != tenant
+            or row["owner_id"] not in {None, owner}
+        ):
+            raise CreditError("credit_quote_invalid", 409)
+        owner_row = row["owner_id"] == owner and row["project_id"] is None
+        result.append(
+            {
+                "account_id": identifier,
+                "scope": "owner"
+                if owner_row
+                else "project"
+                if row["project_id"] is not None
+                else "shared",
+                "budget_role": "accounting" if owner_row else "enforced",
+            }
+        )
+    return result
+
+
+def validate(connection, scope, job, account_ids):
+    """Recompute before first admission; accepted/idempotent jobs bypass this."""
+    from .credits import CreditError, credit_policy
+    from .credits_pricing import quote
+
+    frozen = job["execution_plan"].get("credit_quote")
+    adopted = ready(connection)
+    if not adopted:
+        if isinstance(frozen, dict) and frozen.get("version") == 2:
+            raise CreditError("credit_admission_schema_required", 409)
+        return {}
+    enabled = credit_policy(connection, scope.tenant_id)["enabled"]
+    if not enabled and not frozen:
+        return {}
+    if (
+        not enabled
+        or not isinstance(frozen, dict)
+        or frozen.get("version") != 2
+        or type(frozen.get("version")) is not int
+        or frozen.get("admission") != "credits"
+        or sorted(account_ids)
+        != sorted(job["execution_plan"].get("budget_account_ids", []))
+    ):
+        raise CreditError("credit_policy_changed_repreflight", 409)
+    current = quote(
+        connection,
+        scope.tenant_id,
+        scope.owner_id,
+        job["request"],
+        execution=job["execution_plan"],
+    )
+    if current != frozen:
+        raise CreditError("credit_policy_changed_repreflight", 409)
+    return {row["account_id"]: row["budget_role"] for row in frozen["budget_rows"]}
+
+
+def store_role(connection, reservation_id, role):
+    if role not in {"accounting", "enforced"}:
+        raise ValueError("invalid_budget_role")
+    # The baseline Table deliberately stays 006-compatible. The adopted-only
+    # column is written on the SAME inserted row, inside the SAME transaction.
+    connection.execute(
+        text("UPDATE platform_budget_reservations SET budget_role=:role WHERE id=:id"),
+        {"role": role, "id": reservation_id},
+    )
+
+
+def require_hold(connection, scope, job, held, role_map):
+    from .credits import CreditError
+    from .credit_schema import entries
+
+    frozen = job["execution_plan"].get("credit_quote")
+    if not role_map and (not isinstance(frozen, dict) or frozen.get("version") != 2):
+        return
+    row = (
+        connection.execute(
+            select(entries).where(
+                entries.c.tenant == scope.tenant_id,
+                entries.c.idempotency_key == "job:" + job["id"] + ":hold",
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if (
+        held is None
+        or row is None
+        or row["kind"] != "hold"
+        or row["user_id"] != frozen["user_id"]
+        or row["reference_type"] != "job"
+        or row["reference_id"] != job["id"]
+        or row["held_delta"] != frozen["credits"]
+        or row["price_revision"] != frozen["price_revision"]
+    ):
+        raise CreditError("credit_policy_changed_repreflight", 409)
