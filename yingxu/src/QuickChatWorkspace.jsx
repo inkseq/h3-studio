@@ -135,7 +135,7 @@ function settingsForMode(capabilities, current, mode) {
     },
   };
 }
-function Login({ onClose, onDone }) {
+export function Login({ onClose, onDone }) {
   const { t, locale } = useI18n();
   const c = useCloud(),
     [username, setUsername] = useState(''),

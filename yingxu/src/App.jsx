@@ -1333,6 +1333,11 @@ function AppContent() {
     ),
     '/trash': ({ active }) => <UniversalTrash active={active} />,
     '/pricing': () => <PricingPage account={account} />,
+    '/connect/telegram': ({ active }) => (
+      <React.Suspense fallback={<InkLoader label={t('telegram.pageTitle')} />}>
+        <ConnectTelegramPage account={account} active={active} />
+      </React.Suspense>
+    ),
     '/terms': () => <LegalPage account={account} doc="terms" />,
     '/privacy': () => <LegalPage account={account} doc="privacy" />,
     '/content': () => <LegalPage account={account} doc="content" />,
@@ -1372,6 +1377,7 @@ function AppContent() {
   );
 }
 
+const ConnectTelegramPage = React.lazy(() => import('./ConnectTelegramPage.jsx'));
 export default function App() {
   const account = useCloud().account;
   return (

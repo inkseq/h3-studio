@@ -1,5 +1,20 @@
 export const assistantCatalogs = {
   en: {
+    'telegram.target': 'Connect to',
+    'telegram.agentTab': 'AI assistant',
+    'telegram.tab': 'Telegram',
+    'telegram.explain':
+      'Link the Inkseq Telegram bot to this account. It saves stories to your Works and uses your credits within the daily cap you set. You can disconnect it here at any time.',
+    'telegram.connect': 'Connect Telegram',
+    'telegram.ready': 'Open Telegram to finish',
+    'telegram.scan':
+      'On your phone, scan this code with the camera. On this device, use the button.',
+    'telegram.open': 'Open Telegram',
+    'telegram.qr': 'QR code that opens the Inkseq bot',
+    'telegram.expires': 'This link works once, until {date}.',
+    'telegram.private': 'It carries a one-time code, not a password. Do not share it.',
+    'telegram.badCode': 'This code cannot be used as a Telegram link. Create a new connection.',
+    'telegram.pageTitle': 'Connect Telegram',
     'assistants.reloadCap': 'Discard draft and reload cap',
     'assistants.usageUnlimited': 'Today, spent and reserved: {amount} · no daily cap',
     'assistants.dateUnavailable': 'Date outside display range',
@@ -111,6 +126,20 @@ export const assistantCatalogs = {
     'assistants.new': 'Connect an assistant',
   },
   zh: {
+    'telegram.target': '连接到',
+    'telegram.agentTab': 'AI 助手',
+    'telegram.tab': 'Telegram',
+    'telegram.explain':
+      '把映序的 Telegram 机器人连到这个账号。它会把故事存进你的作品，在你设的每日上限内用你的积分。随时可以在这里断开。',
+    'telegram.connect': '连接 Telegram',
+    'telegram.ready': '打开 Telegram 完成连接',
+    'telegram.scan': '用手机相机扫这个码；在这台设备上就点按钮。',
+    'telegram.open': '打开 Telegram',
+    'telegram.qr': '打开映序机器人的二维码',
+    'telegram.expires': '这个链接只能用一次，{date} 前有效。',
+    'telegram.private': '里面是一次性连接码，不是密码。请不要发给别人。',
+    'telegram.badCode': '这个连接码不能用作 Telegram 链接，请重新创建连接。',
+    'telegram.pageTitle': '连接 Telegram',
     'assistants.reloadCap': '放弃草稿并重读额度',
     'assistants.usageUnlimited': '今日已用与预留：{amount} · 不设每日上限',
     'assistants.dateUnavailable': '日期超出显示范围',

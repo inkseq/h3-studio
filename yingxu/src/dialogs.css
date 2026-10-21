@@ -152,3 +152,55 @@ select optgroup {
 :root dialog.qc-dialog .hosted-sign-in > button.hosted-sign-in-legacy {
   margin-inline: auto;
 }
+
+/* Telegram linking (h3-studio#382): QR beside the steps on desktop; phones get the button only. */
+.assistant-target {
+  margin-bottom: 10px;
+}
+.telegram-link-body {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.telegram-qr {
+  width: 168px;
+  height: 168px;
+  padding: 6px;
+  border-radius: 10px;
+  background: #fff;
+}
+.telegram-qr svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.telegram-steps {
+  display: grid;
+  gap: 8px;
+  max-width: 340px;
+}
+.telegram-steps .button {
+  width: fit-content;
+}
+@media (pointer: coarse) and (max-width: 760px) {
+  .telegram-qr {
+    display: none;
+  }
+}
+.connect-telegram-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+.telegram-steps a.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+  text-decoration: none;
+}
