@@ -44,6 +44,8 @@ HTML_ROUTES = frozenset(
         "/privacy/",
         "/content",
         "/content/",
+        "/connect/telegram",
+        "/connect/telegram/",
     }
 )
 STATIC_CACHE_SCOPE_KEY = "sixnine.frontend_cache"
