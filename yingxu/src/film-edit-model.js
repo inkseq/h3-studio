@@ -5,7 +5,7 @@
  * cut, in order. Absent means every shot (today's behaviour). */
 import { chapterShots } from './storyboard-domain.js';
 import { children } from './store.js';
-import { applyVideoRange, cutFps, videoBinding, videoCut } from './video-cut-model.js';
+import { applyVideoRange, cutFps, rateOf, videoBinding, videoCut } from './video-cut-model.js';
 
 const find = (project, id) => project.entities.find((e) => e.id === id);
 const sourceSeconds = (asset) =>
@@ -40,6 +40,9 @@ export function editorClips(project, chapterId) {
         sourceSeconds: sourceSeconds(video),
         startFrame,
         frames,
+        // Source frames the clip uses (more than `frames` when slowed down).
+        sourceFrames: cut.rate ? cut.aligned.frames : frames,
+        rate: rateOf(shot.data.selectedVideoRange),
         included: inCut,
         // A clip without a usable video still holds its slot so timing matches export.
         playable: !!video?.data.fileId && !video.data.missingFile,
@@ -54,15 +57,32 @@ export function editorClips(project, chapterId) {
 export const cutFrames = (clips) =>
   clips.filter((clip) => clip.included).reduce((sum, clip) => sum + clip.frames, 0);
 
-function writeInclusion(project, chapterId, included) {
-  const all = chapterShots(project, chapterId).map((shot) => shot.id),
-    keep = all.filter((id) => included.has(id)),
-    cuts = { ...(project.journey?.filmCuts || {}) };
-  if (keep.length === all.length) delete cuts[chapterId];
-  else cuts[chapterId] = { shotIds: keep };
+// filmCuts[chapterId] holds shotIds (inclusion) and clip_sound_crossfade_s; each is kept
+// when the other changes, and the entry disappears only when both are at their default.
+function writeCut(project, chapterId, patch) {
+  const cuts = { ...(project.journey?.filmCuts || {}) },
+    entry = { ...(cuts[chapterId] || {}), ...patch };
+  for (const key of Object.keys(entry)) if (entry[key] === undefined) delete entry[key];
+  if (Object.keys(entry).length) cuts[chapterId] = entry;
+  else delete cuts[chapterId];
   project.journey = { ...(project.journey || {}) };
   if (Object.keys(cuts).length) project.journey.filmCuts = cuts;
   else delete project.journey.filmCuts;
+}
+
+function writeInclusion(project, chapterId, included) {
+  const all = chapterShots(project, chapterId).map((shot) => shot.id),
+    keep = all.filter((id) => included.has(id));
+  writeCut(project, chapterId, { shotIds: keep.length === all.length ? undefined : keep });
+}
+
+export const CROSSFADES = [0, 0.25, 0.5, 1];
+/** Seconds of sound blending at each boundary between clips' own sound (render v5). */
+export const clipSoundCrossfade = (project, chapterId) =>
+  project.journey?.filmCuts?.[chapterId]?.clip_sound_crossfade_s ?? 0.5;
+export function setClipSoundCrossfade(project, chapterId, value) {
+  if (!CROSSFADES.includes(value)) throw Error('editor.crossfadeInvalid');
+  writeCut(project, chapterId, { clip_sound_crossfade_s: value });
 }
 
 /** Move one shot to a new position in the chapter's flat order. Mutates `project`. */
@@ -84,7 +104,8 @@ export function moveShot(project, chapterId, shotId, toIndex) {
       .forEach((shot, index) => {
         shot.order = index + 1;
       });
-  if (project.journey?.filmCuts?.[chapterId]) writeInclusion(project, chapterId, included);
+  if (Array.isArray(project.journey?.filmCuts?.[chapterId]?.shotIds))
+    writeInclusion(project, chapterId, included);
 }
 
 /** Put a shot in or out of the cut. The shot itself is always kept. Mutates `project`. */
@@ -101,7 +122,9 @@ export function trimClip(project, shotId, start, end, sourceDuration) {
   const shot = find(project, shotId),
     asset = find(project, shot?.data.selectedAssetId);
   if (!asset || asset.type !== 'video') throw Error('editor.noVideoError');
-  const range = { ...videoBinding(asset), start, end };
+  const old = shot.data.selectedVideoRange,
+    range = { ...videoBinding(asset), start, end };
+  if (old && 'playback_rate' in old) range.playback_rate = old.playback_rate;
   return applyVideoRange(project, shotId, range, {
     duration: sourceDuration,
     useRangeDuration: true,
@@ -110,3 +133,20 @@ export function trimClip(project, shotId, start, end, sourceDuration) {
 
 /** Snap seconds to the 24 fps grid the exporter uses. */
 export const snap = (seconds) => Math.round(seconds * cutFps) / cutFps;
+
+/** Change a clip's speed. The first change pins the span the clip plays now, so the clip keeps
+ * its content and its length becomes that span divided by the rate. Mutates `project`. */
+export function setClipSpeed(project, shotId, rate, sourceDuration) {
+  const shot = find(project, shotId),
+    asset = find(project, shot?.data.selectedAssetId);
+  if (!asset || asset.type !== 'video') throw Error('editor.noVideoError');
+  const cut = videoCut(shot, asset, sourceDuration);
+  if (cut.issue) throw Error(cut.issue);
+  const range = {
+    ...videoBinding(asset),
+    start: cut.sourceStart,
+    end: cut.sourceEnd,
+    playback_rate: rate,
+  };
+  return applyVideoRange(project, shotId, range, { duration: sourceDuration });
+}

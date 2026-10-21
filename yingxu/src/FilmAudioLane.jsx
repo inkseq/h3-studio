@@ -101,6 +101,8 @@ function Block({ block, x, selected, onSelect, onMove, onTrim, pxPerSecond }) {
   );
 }
 
+const FADES = [0, 0.5, 1, 2, 3, 5];
+
 /** The sound lane under the clips, plus add/upload and the selected track's controls. */
 export default function FilmAudioLane({
   part,
@@ -118,6 +120,8 @@ export default function FilmAudioLane({
   onTrim,
   onSet,
   onRemove,
+  fadeMax = 0,
+  onFade,
 }) {
   const { t } = useI18n();
   const [menu, setMenu] = useState(false),
@@ -225,6 +229,7 @@ export default function FilmAudioLane({
         <div className="film-audio-controls">
           <b>{current.title}</b>
           {current.generated && <small className="muted">{t('editor.followsClip')}</small>}
+          {current.detached && <small className="muted">{t('editor.detachedTrack')}</small>}
           <label>
             {t('editor.volume')}
             <input
@@ -237,6 +242,23 @@ export default function FilmAudioLane({
             />
             <span className="muted">{Math.round((current.track.gain ?? 0.7) * 100)}%</span>
           </label>
+          {fadeMax > 0 &&
+            ['in', 'out'].map((side) => (
+              <label key={side}>
+                {t(side === 'in' ? 'editor.fadeIn' : 'editor.fadeOut')}
+                <select
+                  value={current.track[side === 'in' ? 'fade_in_s' : 'fade_out_s'] || 0}
+                  disabled={busy}
+                  onChange={(e) => onFade(current.track.id, side, Number(e.target.value))}
+                >
+                  {FADES.filter((value) => value <= fadeMax).map((value) => (
+                    <option key={value} value={value}>
+                      {value ? t('editor.seconds', { value }) : t('editor.crossfadeOff')}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
           <button
             type="button"
             className="small"

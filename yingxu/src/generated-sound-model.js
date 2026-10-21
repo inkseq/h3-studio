@@ -78,6 +78,18 @@ export function generatedTrackState(project, track, { ignoreReview = false } = {
   const shot = find(project, track.shotId),
     video = find(project, binding.videoEntityId),
     audio = find(project, track.assetId || track.audioId);
+  // A detached clip sound (#408) keeps its own range and place; only its source is checked.
+  if (track.detached) {
+    if (
+      !flac(audio) ||
+      audio.data.cloudArtifactId !== binding.audioArtifactId ||
+      audio.data.sourceJobId !== binding.jobId ||
+      audio.data.fileId !== track.fileId ||
+      audio.data.missingFile
+    )
+      return fail('生成声音的原文件或同任务绑定已改变，需重新核对、解除关联或静音。');
+    return { track, issue: '' };
+  }
   if (
     !shot ||
     shot.data.selectedAssetId !== binding.videoEntityId ||
