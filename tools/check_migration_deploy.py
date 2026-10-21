@@ -87,30 +87,53 @@ def validate_workos(document):
 
 
 def validate_stripe(document, *, target='production'):
-    """Only API and the existing DBOS consumer receive a staging test config."""
+    """Only API and the existing DBOS consumer receive the target's Stripe mode."""
     services, secrets = document['services'], document.get('secrets', {})
     app_env = services['app'].get('environment', {})
     selected = app_env.get('INKSEQ_STRIPE_CONFIG_FILE', '')
     mode = app_env.get('INKSEQ_STRIPE_MODE', 'off')
-    require(selected in {'', '/run/secrets/stripe'} and mode in {'off', 'test'}
-            and (mode != 'test' or bool(selected)), 'migration_stripe_configuration_invalid')
-    require(not selected and mode == 'off' or target == 'staging',
-            'migration_stripe_production_forbidden')
+    require(
+        selected in {'', '/run/secrets/stripe'}
+        and mode in {'off', 'test', 'live'}
+        and (mode == 'off' or bool(selected)),
+        'migration_stripe_configuration_invalid',
+    )
+    require(
+        (mode != 'test' or target == 'staging')
+        and (mode != 'live' or target == 'production'),
+        'migration_stripe_mode_target_invalid',
+    )
+    identity = deployment_target.profile(target)
     for name, service in services.items():
         environment = service.get('environment', {})
         if name in {'app', 'controller'}:
-            require(environment.get('INKSEQ_STRIPE_CONFIG_FILE', '') == selected
-                    and environment.get('INKSEQ_STRIPE_MODE', 'off') == mode,
-                    'migration_stripe_configuration_split')
+            require(
+                environment.get('INKSEQ_STRIPE_CONFIG_FILE', '') == selected
+                and environment.get('INKSEQ_STRIPE_MODE', 'off') == mode,
+                'migration_stripe_configuration_split',
+            )
             if selected:
-                require(environment.get('INKSEQ_DEPLOYMENT_TARGET') == 'staging'
-                        and environment.get('PUBLIC_ORIGIN') == 'https://staging.inkseq.com'
-                        and not environment.get('PUBLIC_ORIGIN_ALIASES')
-                        and environment.get('INKSEQ_GENERATION_QUEUE', 'postgres') == 'dbos',
-                        'migration_stripe_target_invalid')
+                aliases = set(
+                    filter(
+                        None, environment.get('PUBLIC_ORIGIN_ALIASES', '').split(',')
+                    )
+                )
+                allowed_aliases = set(filter(None, identity['aliases'].split(',')))
+                require(
+                    environment.get('INKSEQ_DEPLOYMENT_TARGET') == target
+                    and environment.get('PUBLIC_ORIGIN') == identity['origin']
+                    and aliases <= allowed_aliases
+                    and environment.get('INKSEQ_GENERATION_QUEUE', 'postgres')
+                    == 'dbos',
+                    'migration_stripe_target_invalid',
+                )
         else:
-            require(not {'INKSEQ_STRIPE_CONFIG_FILE', 'INKSEQ_STRIPE_MODE'} & set(environment)
-                    and 'stripe' not in secret_names(service), 'migration_stripe_outside_business')
+            require(
+                not {'INKSEQ_STRIPE_CONFIG_FILE', 'INKSEQ_STRIPE_MODE'}
+                & set(environment)
+                and 'stripe' not in secret_names(service),
+                'migration_stripe_outside_business',
+            )
     configured = secrets.get('stripe')
     if configured is None:
         require(not selected, 'migration_stripe_configuration_invalid')

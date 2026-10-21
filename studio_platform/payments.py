@@ -1,4 +1,4 @@
-"""Original test purchases and verified-event money transitions.
+"""Original account/mode-bound purchases and verified-event money transitions.
 
 No Stripe SDK, network, secret loading, startup DDL or alternate queue lives
 here. The hosted-Checkout adapter verifies/signature-normalizes provider data;
@@ -18,7 +18,14 @@ from sqlalchemy import insert, or_, select, update
 from .auth import Principal
 from .identity import lock_account_gate
 from .identity_schema import admin_audit, users
-from .payment_schema import PaymentSchemaError, events, payments, ready
+from .payment_schema import (
+    LIVE_PAYMENT_REVISION,
+    PaymentSchemaError,
+    events,
+    payments,
+    ready,
+    recognized_revision,
+)
 from .repository import request_hash
 
 EVENT_TYPES = frozenset(
@@ -58,6 +65,8 @@ MAX_INTEGER = (1 << 63) - 1
 CHECKOUT_REPLAY_SECONDS = 23 * 3600
 DEFER_SECONDS = 24 * 3600
 STAGING = "https://staging.inkseq.com"
+PRODUCTION = "https://inkseq.com"
+LIVE_ALIASES = frozenset({"https://sixnine.art", "https://www.sixnine.art"})
 _ID = re.compile(r"[A-Za-z0-9_-]{1,200}\Z")
 _KEY = re.compile(r"[A-Za-z0-9_.:-]{1,200}\Z")
 
@@ -143,13 +152,13 @@ def _pack(value):
     return copy.deepcopy(value)
 
 
-def _object(value):
+def _object(value, *, livemode=False):
     _require(type(value) is dict and set(value) <= OBJECT_FIELDS)
     for key in ("payment_id", "user_id"):
         if key in value:
             _uuid(value[key])
     prefixes = {
-        "session_id": "cs_test_",
+        "session_id": "cs_live_" if livemode else "cs_test_",
         "payment_intent_id": "pi_",
         "charge_id": "ch_",
         "dispute_id": "dp_",
@@ -185,10 +194,10 @@ def _context(value, *, event=False):
         {"id", "type", "created"} if event else set()
     )
     _require(type(value) is dict and set(value) == fields)
-    _require(value["livemode"] is False, "payment_live_mode_forbidden", 403)
+    _require(type(value["livemode"]) is bool)
     _require(_identifier(value["account_scope"]).startswith("acct_"))
     result = copy.deepcopy(value)
-    result["object"] = _object(value["object"])
+    result["object"] = _object(value["object"], livemode=value["livemode"])
     if event:
         _require(_identifier(value["id"]).startswith("evt_"))
         _require(
@@ -204,15 +213,28 @@ class PaymentCore:
     def __init__(self, repo, settings, *, terms_check=None):
         self.repo, self.settings, self.terms_check = repo, settings, terms_check
 
-    def _enabled(self, connection):
-        if (
-            getattr(self.settings, "deployment_target", "production") != "staging"
-            or self.settings.public_origin != STAGING
-            or self.settings.public_origin_aliases
+    def _enabled(self, connection, *, livemode=None):
+        live = getattr(self.settings, "deployment_target", "production") == "production"
+        if (livemode is not None and livemode is not live) or (
+            live
+            and (
+                self.settings.public_origin != PRODUCTION
+                or not set(self.settings.public_origin_aliases) <= LIVE_ALIASES
+            )
+            or not live
+            and (
+                self.settings.deployment_target != "staging"
+                or self.settings.public_origin != STAGING
+                or self.settings.public_origin_aliases
+            )
         ):
             raise PaymentError("payment_test_environment_required", 503)
         try:
-            if not ready(connection):
+            if (
+                not ready(connection)
+                or live
+                and recognized_revision(connection) != LIVE_PAYMENT_REVISION
+            ):
                 raise PaymentError("payment_schema_not_ready", 503)
         except PaymentSchemaError:
             raise PaymentError("payment_schema_not_ready", 503) from None
@@ -260,6 +282,7 @@ class PaymentCore:
             "amount_cents": row["amount_cents"],
             "currency": row["currency"],
             "account_scope": row["account_scope"],
+            "livemode": bool(row["livemode"]),
             "request_fingerprint": row["request_fingerprint"],
             "stripe_checkout_session_id": row["stripe_checkout_session_id"],
             "checkout_url": row["checkout_url"],
@@ -281,19 +304,24 @@ class PaymentCore:
                 actor_user_id=actor,
                 target_user_id=row["user_id"],
                 action=action,
-                reason="Verified Stripe test payment",
+                reason="Verified Stripe live payment"
+                if row["livemode"]
+                else "Verified Stripe test payment",
                 before={},
                 after={
                     "actor": "Stripe",
                     "target": row["user_id"],
                     "payment_id": row["id"],
+                    "livemode": bool(row["livemode"]),
                     **after,
                 },
                 created_at=now,
             )
         )
 
-    def begin_checkout(self, principal, pack, idempotency_key, *, account_scope):
+    def begin_checkout(
+        self, principal, pack, idempotency_key, *, account_scope, livemode=False
+    ):
         if not isinstance(principal, Principal) or principal.machine:
             raise PaymentError("payment_human_required", 403)
         _require(
@@ -301,10 +329,17 @@ class PaymentCore:
             "payment_idempotency_key_invalid",
         )
         _require(_identifier(account_scope).startswith("acct_"))
+        _require(type(livemode) is bool)
+        _require(
+            getattr(self.settings, "stripe_mode", "test")
+            == ("live" if livemode else "test"),
+            "payment_purchases_disabled",
+            503,
+        )
         pack = _pack(pack)
         with self.repo.transaction() as connection:
             lock_account_gate(connection)
-            self._enabled(connection)
+            self._enabled(connection, livemode=livemode)
             user = self._user(connection, principal.owner, active=True)
             prior = (
                 connection.execute(
@@ -324,7 +359,8 @@ class PaymentCore:
                 row = dict(prior)
                 _require(
                     row["pack_id"] == pack["id"]
-                    and row["account_scope"] == account_scope,
+                    and row["account_scope"] == account_scope
+                    and row["livemode"] == int(livemode),
                     "payment_idempotency_conflict",
                     409,
                 )
@@ -357,13 +393,14 @@ class PaymentCore:
                     amount_cents=pack["amount_cents"],
                     currency=pack["currency"],
                     account_scope=account_scope,
-                    livemode=0,
+                    livemode=int(livemode),
                     idempotency_key=idempotency_key,
                     request_fingerprint=request_hash(
                         {
                             "user_id": user["id"],
                             "pack": pack,
                             "account_scope": account_scope,
+                            "livemode": livemode,
                             "terms": terms,
                         }
                     ),
@@ -450,11 +487,12 @@ class PaymentCore:
         value = _context(session)
         with self.repo.transaction() as connection:
             lock_account_gate(connection)
-            self._enabled(connection)
+            self._enabled(connection, livemode=value["livemode"])
             initial = self._payment(connection, payment_id)
             _require(
                 initial["request_fingerprint"] == request_fingerprint
-                and initial["account_scope"] == value["account_scope"],
+                and initial["account_scope"] == value["account_scope"]
+                and initial["livemode"] == int(value["livemode"]),
                 "payment_original_mismatch",
                 409,
             )
@@ -488,6 +526,7 @@ class PaymentCore:
             lock_account_gate(connection)
             self._enabled(connection)
             row = self._payment(connection, _uuid(payment_id))
+            self._enabled(connection, livemode=bool(row["livemode"]))
             _require(
                 row["request_fingerprint"] == request_fingerprint,
                 "payment_original_mismatch",
@@ -511,6 +550,7 @@ class PaymentCore:
             lock_account_gate(connection)
             self._enabled(connection)
             row = self._payment(connection, _uuid(payment_id))
+            self._enabled(connection, livemode=bool(row["livemode"]))
             _require(
                 row["request_fingerprint"] == request_fingerprint,
                 "payment_original_mismatch",
@@ -534,7 +574,7 @@ class PaymentCore:
         fingerprint = request_hash(value)
         with self.repo.transaction() as connection:
             lock_account_gate(connection)
-            self._enabled(connection)
+            self._enabled(connection, livemode=value["livemode"])
             transport = self.repo.generation_transport
             if transport is None or not callable(
                 getattr(transport, "payment_event", None)
@@ -551,7 +591,7 @@ class PaymentCore:
                     event_id=value["id"],
                     tenant=self.settings.tenant_id,
                     account_scope=value["account_scope"],
-                    livemode=0,
+                    livemode=int(value["livemode"]),
                     type=value["type"],
                     verified_payload=value,
                     fingerprint=fingerprint,
@@ -604,7 +644,7 @@ class PaymentCore:
             **({"wait_seconds": 10} if state == "deferred" else {}),
         }
 
-    def _find_payment(self, connection, obj, scope):
+    def _find_payment(self, connection, obj, scope, livemode):
         columns = {
             "payment_id": payments.c.id,
             "session_id": payments.c.stripe_checkout_session_id,
@@ -623,6 +663,7 @@ class PaymentCore:
                 .where(
                     payments.c.tenant == self.settings.tenant_id,
                     payments.c.account_scope == scope,
+                    payments.c.livemode == int(livemode),
                     or_(*selectors),
                 )
                 .limit(2)
@@ -671,7 +712,7 @@ class PaymentCore:
                 idempotency_key="stripe-refund:"
                 + request_hash({"payment_id": row["id"], "target": refund_target}),
                 now=self.repo.clock(),
-                origin="stripe-test",
+                origin="stripe-live" if row["livemode"] else "stripe-test",
                 receipt_url=row["receipt_url"],
             )
         return actual
@@ -691,6 +732,7 @@ class PaymentCore:
             )
             if event is None:
                 raise PaymentError("payment_event_not_found", 404)
+            self._enabled(connection, livemode=bool(event["livemode"]))
             return (
                 None
                 if event["status"] in {"processed", "review"}
@@ -714,6 +756,7 @@ class PaymentCore:
             )
             if event is None:
                 raise PaymentError("payment_event_not_found", 404)
+            self._enabled(connection, livemode=bool(event["livemode"]))
             if event["status"] in {"processed", "review"}:
                 return {"event_id": event_id, "state": event["status"], "done": True}
             return self._finish_event(
@@ -742,9 +785,16 @@ class PaymentCore:
             )
             if event is None:
                 raise PaymentError("payment_event_not_found", 404)
+            self._enabled(connection, livemode=bool(event["livemode"]))
             if event["status"] in {"processed", "review"}:
                 return {"event_id": event_id, "state": event["status"], "done": True}
             value = _context(event["verified_payload"], event=True)
+            _require(
+                value["account_scope"] == event["account_scope"]
+                and int(value["livemode"]) == event["livemode"],
+                "payment_event_conflict",
+                409,
+            )
             if proof is not None:
                 resolved = _context(proof, event=True)
                 _require(
@@ -768,7 +818,9 @@ class PaymentCore:
                 value = resolved
             obj = value["object"]
             try:
-                original = self._find_payment(connection, obj, value["account_scope"])
+                original = self._find_payment(
+                    connection, obj, value["account_scope"], value["livemode"]
+                )
                 if original is None:
                     return self._finish_event(
                         connection,
@@ -854,7 +906,7 @@ class PaymentCore:
                         kind="purchase",
                         reference_type="payment",
                         reference_id=row["id"],
-                        origin="stripe-test",
+                        origin="stripe-live" if row["livemode"] else "stripe-test",
                         receipt_url=row["receipt_url"],
                     )
                     row["paid_at"] = now

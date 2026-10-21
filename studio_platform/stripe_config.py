@@ -1,4 +1,4 @@
-"""Protected, test-only Stripe configuration; never load ambient credentials."""
+"""Protected, explicitly mode-bound Stripe credentials; no ambient credentials."""
 
 from dataclasses import dataclass, field
 import json
@@ -11,9 +11,12 @@ import stat
 @dataclass(frozen=True, repr=False)
 class StripeConfig:
     account_id: str
-    publishable_key: str = field(repr=False)
+    publishable_key: str | None = field(repr=False)
     secret_key: str = field(repr=False)
     webhook_secret: str | None = field(default=None, repr=False)
+    mode: str = "test"
+    webhook_endpoint_id: str | None = None
+    version: int = 1
 
 
 def validate_credentials(value):
@@ -24,25 +27,49 @@ def validate_credentials(value):
         "secret_key",
         "webhook_secret",
     }
+    if type(value) is not dict or type(value.get("version")) is not int:
+        raise ValueError("stripe_configuration_invalid")
+    live = value["version"] == 2
+    if live:
+        fields |= {"mode", "webhook_endpoint_id"}
     if (
-        type(value) is not dict
-        or set(value) != fields
-        or type(value["version"]) is not int
-        or value["version"] != 1
+        set(value) != fields
+        or value["version"] not in {1, 2}
+        or live
+        and value["mode"] != "live"
         or not isinstance(value["account_id"], str)
         or not re.fullmatch(r"acct_[A-Za-z0-9]{6,80}", value["account_id"])
-        or not isinstance(value["publishable_key"], str)
-        or not re.fullmatch(r"pk_test_[A-Za-z0-9]{20,240}", value["publishable_key"])
+        or not (live and value["publishable_key"] is None)
+        and (
+            not isinstance(value["publishable_key"], str)
+            or not re.fullmatch(
+                r"pk_" + ("live" if live else "test") + r"_[A-Za-z0-9]{20,240}",
+                value["publishable_key"],
+            )
+        )
         or not isinstance(value["secret_key"], str)
-        or not re.fullmatch(r"sk_test_[A-Za-z0-9]{20,240}", value["secret_key"])
+        or not re.fullmatch(
+            r"(?:sk_live_|rk_live_)[A-Za-z0-9]{20,240}"
+            if live
+            else r"sk_test_[A-Za-z0-9]{20,240}",
+            value["secret_key"],
+        )
         or value["webhook_secret"] is not None
         and (
             not isinstance(value["webhook_secret"], str)
             or not re.fullmatch(r"whsec_[A-Za-z0-9]{20,240}", value["webhook_secret"])
         )
+        or live
+        and value["webhook_endpoint_id"] is not None
+        and (
+            not isinstance(value["webhook_endpoint_id"], str)
+            or not re.fullmatch(r"we_[A-Za-z0-9]{6,200}", value["webhook_endpoint_id"])
+        )
+        or live
+        and (value["webhook_secret"] is None) != (value["webhook_endpoint_id"] is None)
     ):
         raise ValueError("stripe_configuration_invalid")
-    return StripeConfig(**{key: value[key] for key in fields - {"version"}})
+    return StripeConfig(**value)
 
 
 def _unique(pairs):

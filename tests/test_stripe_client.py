@@ -137,6 +137,175 @@ class StripeClientTests(unittest.TestCase):
         self.assertEqual(gateway.verify_event(*self.signed())["id"], "evt_original")
         self.factory.assert_not_called()
 
+    def live_gateway(self, *, mode="live"):
+        live = {
+            **CONFIG,
+            "version": 2,
+            "mode": "live",
+            "account_id": "acct_liveaccount",
+            "publishable_key": None,
+            "secret_key": "rk_live_" + "l" * 32,
+            "webhook_endpoint_id": "we_liveendpoint",
+        }
+        self.path.write_text(json.dumps(live))
+        self.live_config = live
+        settings = replace(
+            self.settings,
+            deployment_target="production",
+            public_origin="https://inkseq.com",
+            public_origin_aliases=("https://sixnine.art", "https://www.sixnine.art"),
+            stripe_mode=mode,
+        )
+        return StripeGateway(settings, client_factory=self.factory)
+
+    def live_session(self, **changes):
+        return session(
+            id="cs_live_original",
+            livemode=True,
+            url="https://checkout.stripe.com/c/pay/cs_live_original#opaque",
+            **changes,
+        )
+
+    def live_payment(self):
+        return {**payment(), "account_scope": "acct_liveaccount", "livemode": True}
+
+    def test_live_hosted_checkout_is_exact_mode_account_and_canonical_origin_bound(
+        self,
+    ):
+        gateway = self.live_gateway()
+        self.client.v1.prices.retrieve.return_value["livemode"] = True
+        self.client.v1.checkout.sessions.create.return_value = self.live_session()
+        result = gateway.checkout(self.live_payment(), idempotency_key="original-live")
+        self.assertIs(result["livemode"], True)
+        self.assertEqual(result["account_scope"], "acct_liveaccount")
+        params = self.client.v1.checkout.sessions.create.call_args.kwargs["params"]
+        self.assertEqual(
+            params["success_url"],
+            "https://inkseq.com/settings?tab=credits&paid={CHECKOUT_SESSION_ID}",
+        )
+        self.assertEqual(
+            params["cancel_url"], "https://inkseq.com/settings?tab=credits"
+        )
+        self.client.reset_mock()
+        for changed in (
+            {"account_scope": "acct_other"},
+            {"livemode": False},
+            {"livemode": 1},
+        ):
+            with (
+                self.subTest(changed=changed),
+                self.assertRaisesRegex(StripeGatewayError, "configuration_invalid"),
+            ):
+                gateway.checkout(
+                    {**self.live_payment(), **changed}, idempotency_key="cross-context"
+                )
+        self.client.v1.checkout.sessions.create.assert_not_called()
+        self.client.v1.prices.retrieve.return_value["livemode"] = False
+        with self.assertRaisesRegex(StripeGatewayError, "price_mismatch"):
+            gateway.checkout(self.live_payment(), idempotency_key="wrong-price-mode")
+
+    def test_live_off_preserves_signed_events_and_refuses_cross_mode_objects(self):
+        gateway = self.live_gateway(mode="off")
+        with self.assertRaisesRegex(StripeGatewayError, "billing_unavailable"):
+            gateway.checkout(self.live_payment(), idempotency_key="off")
+        verified = gateway.verify_event(
+            *self.signed(self.live_session(), livemode=True, account="acct_liveaccount")
+        )
+        self.assertIs(verified["livemode"], True)
+        self.assertEqual(gateway.resolve_event(verified), verified)
+        for obj, changes in (
+            (self.live_session(), {"livemode": False}),
+            (session(), {"livemode": True}),
+            (self.live_session(), {"livemode": True, "account": "acct_otheraccount"}),
+        ):
+            with (
+                self.subTest(changes=changes),
+                self.assertRaisesRegex(StripeGatewayError, "event_invalid"),
+            ):
+                gateway.verify_event(*self.signed(obj, **changes))
+        with self.assertRaisesRegex(StripeGatewayError, "configuration_invalid"):
+            gateway.resolve_event({**verified, "livemode": False})
+        self.client.v1.checkout.sessions.create.assert_not_called()
+
+    def test_live_key_never_enables_staging_and_test_key_never_enables_production(self):
+        gateway = self.live_gateway(mode="off")
+        for changes in (
+            {
+                "deployment_target": "staging",
+                "public_origin": "https://staging.inkseq.com",
+                "public_origin_aliases": (),
+            },
+            {"public_origin": "https://www.inkseq.com", "public_origin_aliases": ()},
+            {"public_origin_aliases": ("https://untrusted.example",)},
+        ):
+            with (
+                self.subTest(changes=changes),
+                self.assertRaisesRegex(StripeGatewayError, "billing_unavailable"),
+            ):
+                StripeGateway(
+                    replace(gateway.settings, **changes), client_factory=self.factory
+                ).configuration()
+        self.path.write_text(json.dumps(CONFIG))
+        with self.assertRaisesRegex(StripeGatewayError, "billing_unavailable"):
+            gateway.configuration()
+        self.factory.assert_not_called()
+
+    def test_live_dispute_charge_proof_refuses_test_mode_provider_charge(self):
+        gateway = self.live_gateway(mode="off")
+        dispute = {
+            "object": "dispute",
+            "id": "dp_original",
+            "livemode": True,
+            "charge": "ch_original",
+        }
+        verified = gateway.verify_event(
+            *self.signed(dispute, kind="charge.dispute.created", livemode=True)
+        )
+        self.client.v1.charges.retrieve.return_value = {
+            "object": "charge",
+            "id": "ch_original",
+            "livemode": False,
+            "amount": 500,
+            "currency": "usd",
+            "payment_intent": "pi_original",
+        }
+        with self.assertRaisesRegex(StripeGatewayError, "event_invalid"):
+            gateway.resolve_event(verified)
+        self.client.v1.charges.retrieve.return_value["livemode"] = True
+        self.assertEqual(gateway.resolve_event(verified)["object"]["amount_cents"], 500)
+
+    def test_readonly_configuration_can_inspect_inert_live_but_never_bypass_checkout_webhook(
+        self,
+    ):
+        gateway = self.live_gateway()
+        self.path.write_text(
+            json.dumps(
+                {
+                    **self.live_config,
+                    "webhook_secret": None,
+                    "webhook_endpoint_id": None,
+                }
+            )
+        )
+        config = gateway.configuration(require_webhook=False)
+        self.assertEqual(config.mode, "live")
+        self.assertIsNone(config.webhook_secret)
+        for kwargs in ({}, {"for_checkout": True, "require_webhook": False}):
+            with (
+                self.subTest(kwargs=kwargs),
+                self.assertRaisesRegex(StripeGatewayError, "webhook_unavailable"),
+            ):
+                gateway.configuration(**kwargs)
+        # The status exception does not relax production origin/mode restrictions.
+        unsafe = replace(
+            gateway.settings,
+            stripe_mode="off",
+            public_origin="https://staging.inkseq.com",
+        )
+        with self.assertRaisesRegex(StripeGatewayError, "billing_unavailable"):
+            StripeGateway(unsafe).configuration(require_webhook=False)
+        self.factory.assert_not_called()
+
     def test_managed_checkout_uses_original_price_key_and_supported_parameters_only(
         self,
     ):

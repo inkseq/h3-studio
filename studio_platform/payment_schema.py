@@ -22,6 +22,8 @@ from sqlalchemy.dialects.sqlite import dialect as sqlite_dialect
 from sqlalchemy.schema import CreateTable
 
 from .migrations.versions import v20261020_0005_stripe_payments as frozen
+from .migrations.versions import v20261021_0006_stripe_live_mode as live_frozen
+from .schema_version import LIVE_PAYMENT_REVISION, PAYMENT_REVISIONS
 
 PAYMENT_REVISION = frozen.revision
 
@@ -34,9 +36,14 @@ class _Collector:
         return Table(name, self.metadata, *columns, **kwargs)
 
 
-def frozen_metadata():
+def frozen_metadata(*, revision=PAYMENT_REVISION):
     collector = _Collector()
-    frozen.build(collector)
+    if revision == PAYMENT_REVISION:
+        frozen.build(collector)
+    elif revision == LIVE_PAYMENT_REVISION:
+        live_frozen.build(collector)
+    else:
+        raise PaymentSchemaError("payment_schema_revision_requires_review")
     return collector.metadata
 
 
@@ -72,6 +79,8 @@ def normalize_check(value):
             part = part.replace(cast, "")
         parts[index] = part
     compact = "".join(parts)
+    if compact in {"livemodein0,1", "livemode=anyarray[0,1]"}:
+        return [("livemode", "in", "0,1")]
     for choices in (
         "'created','paid','failed','expired','refunded','disputed'",
         "'received','processed','deferred','review'",
@@ -99,11 +108,21 @@ def _kind(value, dialect):
     )
 
 
-def validate_connection(connection, *, schema=None):
+def recognized_revision(connection, *, schema=None):
     """Verify precisely the optional family without Alembic or business reads."""
     inspector = inspect(connection)
     if not present_tables(inspector.get_table_names(schema=schema)):
-        return False
+        return None
+    from .schema_version import SchemaVersionError, read_schema_version
+
+    try:
+        marker = read_schema_version(connection, schema=schema)
+    except SchemaVersionError:
+        raise PaymentSchemaError("payment_schema_revision_requires_review") from None
+    revision = (
+        LIVE_PAYMENT_REVISION if marker == LIVE_PAYMENT_REVISION else PAYMENT_REVISION
+    )
+    expected_metadata = frozen_metadata(revision=revision)
     if connection.dialect.name == "postgresql":
         unsafe = connection.execute(
             text("""
@@ -125,7 +144,7 @@ def validate_connection(connection, *, schema=None):
         ).first()
         if unsafe:
             raise PaymentSchemaError("payment_schema_shape_requires_review")
-    for name, table in metadata.tables.items():
+    for name, table in expected_metadata.tables.items():
         columns = inspector.get_columns(name, schema=schema)
         actual = {
             column["name"]: (
@@ -159,10 +178,8 @@ def validate_connection(connection, *, schema=None):
             if isinstance(constraint, UniqueConstraint)
         )
         try:
-            checks = sorted(
-                normalize_check(row["sqltext"])
-                for row in inspector.get_check_constraints(name, schema=schema)
-            )
+            check_rows = inspector.get_check_constraints(name, schema=schema)
+            checks = sorted(normalize_check(row["sqltext"]) for row in check_rows)
             expected_checks = sorted(
                 normalize_check(constraint.sqltext)
                 for constraint in table.constraints
@@ -182,6 +199,16 @@ def validate_connection(connection, *, schema=None):
             != list(table.primary_key.columns.keys())
             or unique != expected_unique
             or checks != expected_checks
+            or revision == LIVE_PAYMENT_REVISION
+            and sorted(
+                (row.get("name") or "", normalize_check(row["sqltext"]))
+                for row in check_rows
+            )
+            != sorted(
+                (constraint.name, normalize_check(constraint.sqltext))
+                for constraint in table.constraints
+                if isinstance(constraint, CheckConstraint)
+            )
             or inspector.get_foreign_keys(name, schema=schema)
             or any(
                 not row.get("duplicates_constraint")
@@ -189,18 +216,46 @@ def validate_connection(connection, *, schema=None):
             )
         ):
             raise PaymentSchemaError("payment_schema_shape_requires_review")
-    return True
+    return revision
 
 
-def validate_sqlite(db):
+def validate_connection(connection, *, schema=None):
+    return recognized_revision(connection, schema=schema) is not None
+
+
+def sqlite_revision(db, *, published=False):
     rows = dict(db.execute("SELECT name,sql FROM sqlite_master WHERE type='table'"))
     if not present_tables(rows):
-        return False
+        return None
+    from .schema_version import SchemaVersionError, read_sqlite_schema_version
+
+    try:
+        marker = read_sqlite_schema_version(db)
+    except SchemaVersionError:
+        raise PaymentSchemaError("payment_schema_revision_requires_review") from None
+    # Business-only backups deliberately omit the marker. Only that explicit
+    # disabled/archive reader may recognize an exact unrecorded 006 shape.
+    revisions = (
+        [LIVE_PAYMENT_REVISION]
+        if marker == LIVE_PAYMENT_REVISION
+        else [PAYMENT_REVISION, LIVE_PAYMENT_REVISION]
+        if marker is None and published is True
+        else [PAYMENT_REVISION]
+    )
     normalize = lambda value: re.sub(r"\s+", " ", value).strip()
-    for name, table in metadata.tables.items():
-        expected = str(CreateTable(table).compile(dialect=sqlite_dialect()))
-        if normalize(rows[name]) != normalize(expected):
-            raise PaymentSchemaError("payment_schema_shape_requires_review")
+    matches = []
+    for revision in revisions:
+        expected_metadata = frozen_metadata(revision=revision)
+        if all(
+            normalize(rows[name])
+            == normalize(str(CreateTable(table).compile(dialect=sqlite_dialect())))
+            for name, table in expected_metadata.tables.items()
+        ):
+            matches.append((revision, expected_metadata))
+    if len(matches) != 1:
+        raise PaymentSchemaError("payment_schema_shape_requires_review")
+    revision, expected_metadata = matches[0]
+    for name, table in expected_metadata.tables.items():
         expected_unique = {tuple(table.primary_key.columns.keys())}
         expected_unique.update(
             tuple(constraint.columns.keys())
@@ -219,7 +274,11 @@ def validate_sqlite(db):
             )
         if actual_unique != expected_unique:
             raise PaymentSchemaError("payment_schema_shape_requires_review")
-    return True
+    return revision
+
+
+def validate_sqlite(db, *, published=False):
+    return sqlite_revision(db, published=published) is not None
 
 
 def ready(connection, *, schema=None):
@@ -243,8 +302,12 @@ def ready(connection, *, schema=None):
         raise PaymentSchemaError("payment_schema_revision_requires_review") from None
     if len(revisions) != 1 or revisions[0] not in KNOWN_REVISIONS:
         raise PaymentSchemaError("payment_schema_revision_requires_review")
-    if revisions[0] != PAYMENT_REVISION:
+    if revisions[0] not in PAYMENT_REVISIONS:
         return False
     if not present or not (identity_tables | credit_tables) <= names:
         raise PaymentSchemaError("payment_schema_partial_family_requires_review")
+    if revisions[0] == LIVE_PAYMENT_REVISION:
+        # The rollback bridge must not authorize a mixed/partial future family.
+        # 005 keeps its existing bounded hot path and test-only writer behavior.
+        validate_connection(connection, schema=schema)
     return True

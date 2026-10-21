@@ -8,6 +8,7 @@ never exported. Recovery is an isolated, disabled copy, not automatic failover.
 from __future__ import annotations
 
 from .asset_objects import ASSET_OBJECT_ROLES
+from .schema_version import PAYMENT_REVISION, PAYMENT_REVISIONS
 
 import csv
 from contextlib import closing
@@ -56,7 +57,13 @@ class BackupError(Exception):
     """Stable code only; never attach DB URLs, subprocess output, or secrets."""
 
 
-def _schemas(*, include_identity=True, include_credits=True, include_payments=True):
+def _schemas(
+    *,
+    include_identity=True,
+    include_credits=True,
+    include_payments=True,
+    payment_revision=PAYMENT_REVISION,
+):
     # Register the same additive business tables as the application, without
     # constructing services or creating/migrating a source schema.
     from . import operator_capacity, capacity_market, dstack_workspace
@@ -71,7 +78,9 @@ def _schemas(*, include_identity=True, include_credits=True, include_payments=Tr
     from .project_activity import metadata as project_activity
     from .identity_schema import metadata as identity
     from .credit_schema import metadata as credits
-    from .payment_schema import metadata as payments
+    from .payment_schema import frozen_metadata as payment_metadata
+
+    payments = payment_metadata(revision=payment_revision)
 
     return (
         (
@@ -91,13 +100,20 @@ def _schemas(*, include_identity=True, include_credits=True, include_payments=Tr
     )
 
 
-def _tables(*, include_identity=True, include_credits=True, include_payments=True):
+def _tables(
+    *,
+    include_identity=True,
+    include_credits=True,
+    include_payments=True,
+    payment_revision=PAYMENT_REVISION,
+):
     return {
         table.name: table
         for schema in _schemas(
             include_identity=include_identity,
             include_credits=include_credits,
             include_payments=include_payments,
+            payment_revision=payment_revision,
         )
         for table in schema.sorted_tables
     }
@@ -224,7 +240,7 @@ def _check_db(db, *, published=False):
     from .payment_schema import PaymentSchemaError, validate_sqlite as payment_sqlite
 
     try:
-        payments_present = payment_sqlite(db)
+        payments_present = payment_sqlite(db, published=published)
     except PaymentSchemaError as error:
         raise BackupError(str(error)) from None
     if (credits_present or payments_present) and not identity_present:
@@ -242,7 +258,7 @@ def _check_db(db, *, published=False):
     if "alembic_version" in actual_tables:
         from .schema_version import (
             CREDIT_REVISIONS,
-            PAYMENT_REVISION,
+            PAYMENT_REVISIONS,
             IDENTITY_REVISIONS,
             SchemaVersionError,
             read_sqlite_schema_version,
@@ -256,7 +272,7 @@ def _check_db(db, *, published=False):
             raise BackupError("identity_schema_partial_family_requires_review")
         if revision in CREDIT_REVISIONS and not credits_present:
             raise BackupError('credit_schema_partial_family_requires_review')
-        if revision == PAYMENT_REVISION and not payments_present:
+        if revision in PAYMENT_REVISIONS and not payments_present:
             raise BackupError('payment_schema_partial_family_requires_review')
     for name in actual_tables & set(tables):
         columns = [row[1] for row in db.execute('PRAGMA table_info("' + name + '")')]
@@ -297,6 +313,7 @@ def _create_business_schema(
     include_identity=False,
     include_credits=False,
     include_payments=False,
+    payment_revision=PAYMENT_REVISION,
 ):
     # Called only for a new private output/restoration file. Never migrates a
     # source DB; creates missing current-version tables with safe empty defaults.
@@ -307,6 +324,7 @@ def _create_business_schema(
                 include_identity=include_identity,
                 include_credits=include_credits,
                 include_payments=include_payments,
+                payment_revision=payment_revision,
             ):
                 schema.create_all(connection)
     finally:
@@ -320,17 +338,19 @@ def _export_business_db(snapshot, destination):
     # source auth pages never reach any output file (not even a temporary DB).
     from .identity_schema import present_tables
     from .credit_schema import present_tables as credit_present
-    from .payment_schema import present_tables as payment_present
+    from .payment_schema import present_tables as payment_present, sqlite_revision
 
     existing = _check_db(snapshot)
     identity_present = present_tables(existing)
     credits_present = credit_present(existing)
     payments_present = payment_present(existing)
+    payment_revision = sqlite_revision(snapshot) or PAYMENT_REVISION
     _create_business_schema(
         destination,
         include_identity=identity_present,
         include_credits=credits_present,
         include_payments=payments_present,
+        payment_revision=payment_revision,
     )
     target = sqlite3.connect(destination)
     counts = {}
@@ -339,6 +359,7 @@ def _export_business_db(snapshot, destination):
             include_identity=identity_present,
             include_credits=credits_present,
             include_payments=payments_present,
+            payment_revision=payment_revision,
         ).items():
             if name not in existing:
                 counts[name] = 0
@@ -828,7 +849,7 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
             )
             from .schema_version import (
                 CREDIT_REVISIONS,
-                PAYMENT_REVISION,
+                PAYMENT_REVISIONS,
                 IDENTITY_REVISIONS,
             )
 
@@ -838,6 +859,9 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
                 raise BackupError(str(error)) from None
             try:
                 payments_present = payment_valid(source, schema=schema)
+                payment_revision = (
+                    revision if revision in PAYMENT_REVISIONS else PAYMENT_REVISION
+                )
             except PaymentSchemaError as error:
                 raise BackupError(str(error)) from None
 
@@ -849,18 +873,20 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
                 revision in CREDIT_REVISIONS or payments_present
             ) and not credits_present:
                 raise BackupError('credit_schema_partial_family_requires_review')
-            if revision == PAYMENT_REVISION and not payments_present:
+            if revision in PAYMENT_REVISIONS and not payments_present:
                 raise BackupError('payment_schema_partial_family_requires_review')
             _create_business_schema(
                 destination,
                 include_identity=identity_present,
                 include_credits=credits_present,
                 include_payments=payments_present,
+                payment_revision=payment_revision or PAYMENT_REVISION,
             )
             trusted = _tables(
                 include_identity=identity_present,
                 include_credits=credits_present,
                 include_payments=payments_present,
+                payment_revision=payment_revision or PAYMENT_REVISION,
             )
             columns = {}
             for name, column in source.execute(
@@ -1786,7 +1812,7 @@ def dump_postgres(
             )
             from .schema_version import (
                 CREDIT_REVISIONS,
-                PAYMENT_REVISION,
+                PAYMENT_REVISIONS,
                 IDENTITY_REVISIONS,
                 WORKFLOW_REVISIONS,
                 read_schema_version,
@@ -1807,7 +1833,7 @@ def dump_postgres(
                 revision in CREDIT_REVISIONS or payments_present
             ) and not credits_present:
                 raise BackupError('credit_schema_partial_family_requires_review')
-            if revision == PAYMENT_REVISION and not payments_present:
+            if revision in PAYMENT_REVISIONS and not payments_present:
                 raise BackupError('payment_schema_partial_family_requires_review')
             command += [
                 "--table=" + schema + "." + name
