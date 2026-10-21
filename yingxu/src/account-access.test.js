@@ -4,6 +4,7 @@ import {
   accessFrom,
   hostedSignInEnabled,
   hostedSignInUrl,
+  providerLogoutUrl,
   readAccess,
   resetAccess,
 } from './account-access.js';
@@ -124,4 +125,26 @@ test('people see a name or email, never an internal WorkOS user id', async () =>
     'My account',
   );
   assert.equal(accountLabel('superdan', null, 'My account'), 'superdan');
+});
+
+test('hosted sign-in carries the sign-up/sign-in screen hint, and provider logout is https only (#395)', () => {
+  assert.equal(
+    hostedSignInUrl('/quick-chat', 'sign-up'),
+    '/api/auth/workos/start?return_to=%2Fquick-chat&screen_hint=sign-up',
+  );
+  assert.equal(
+    hostedSignInUrl('/', 'sign-in'),
+    '/api/auth/workos/start?return_to=%2F&screen_hint=sign-in',
+  );
+  assert.equal(hostedSignInUrl('//evil', 'admin'), '/api/auth/workos/start?return_to=%2F');
+  assert.equal(
+    providerLogoutUrl({
+      ok: true,
+      logout_url: 'https://api.workos.com/user_management/sessions/logout?session_id=s',
+    }),
+    'https://api.workos.com/user_management/sessions/logout?session_id=s',
+  );
+  assert.equal(providerLogoutUrl({ ok: true }), null);
+  assert.equal(providerLogoutUrl({ logout_url: 'javascript:alert(1)' }), null);
+  assert.equal(providerLogoutUrl({ logout_url: 'http://example.com' }), null);
 });

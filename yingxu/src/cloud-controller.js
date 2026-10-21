@@ -1,3 +1,4 @@
+import { providerLogoutUrl } from './account-access.js';
 import { videoCacheIdentity, clearVideoCache } from './video-cache-client.js';
 import { storyboardCommandStore, verifyStoryboardReceipt } from './storyboard-commands.js';
 import { boundVideoRange, videoBinding } from './video-cut-model.js';
@@ -1959,10 +1960,12 @@ export function createCloudController({
     logout: () =>
       action(async () => {
         void clearVideoCache().catch(() => {});
-        await api.logout();
+        const result = await api.logout();
         rememberVisit({ mode: 'local' });
         replaceIdentity(null, '已退出。云草稿仍按原账户保留，本机作品已恢复。');
         announceSession();
+        const providerLogout = providerLogoutUrl(result);
+        if (providerLogout && typeof window !== 'undefined') window.location.assign(providerLogout);
       }),
     leave() {
       epoch++;

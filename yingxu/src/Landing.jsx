@@ -60,8 +60,11 @@ export default function Landing() {
   }, [active, t]);
   const c = useCloud();
   // Creating needs an account: hosted sign-in (email or Google) when enabled, else the dialog.
-  const start = () =>
-    hostedSignInEnabled(c.auth) ? window.location.assign(hostedSignInUrl('/')) : setLogin(true);
+  // "Get started" opens the sign-up screen, "Log in" the sign-in screen (#395).
+  const start = (hint = 'sign-up') =>
+    hostedSignInEnabled(c.auth)
+      ? window.location.assign(hostedSignInUrl('/quick-chat', hint))
+      : setLogin(true);
   const steps = [
     [PenLine, 'landing.step1Title', 'landing.step1Body'],
     [Clapperboard, 'landing.step2Title', 'landing.step2Body'],
@@ -91,10 +94,10 @@ export default function Landing() {
           {t('landing.pricing')}
         </a>
         <LanguageSwitcher />
-        <button type="button" className="landing-link" onClick={start}>
+        <button type="button" className="landing-link" onClick={() => start('sign-in')}>
           {t('landing.signIn')}
         </button>
-        <button type="button" className="primary small landing-bar-start" onClick={start}>
+        <button type="button" className="primary small landing-bar-start" onClick={() => start()}>
           {t('landing.start')}
         </button>
       </header>
@@ -104,7 +107,7 @@ export default function Landing() {
             <h1>{t('landing.title')}</h1>
             <p className="landing-lede">{t('landing.lede')}</p>
             <div className="landing-ctas">
-              <button type="button" className="primary landing-big" onClick={start}>
+              <button type="button" className="primary landing-big" onClick={() => start()}>
                 {t('landing.start')}
                 <ArrowRight size={18} />
               </button>
@@ -144,7 +147,7 @@ export default function Landing() {
         </section>
         <section className="landing-final">
           <h2>{t('landing.finalTitle')}</h2>
-          <button type="button" className="primary landing-big" onClick={start}>
+          <button type="button" className="primary landing-big" onClick={() => start()}>
             {t('landing.start')}
             <ArrowRight size={18} />
           </button>

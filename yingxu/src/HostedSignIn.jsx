@@ -16,7 +16,7 @@ export default function HostedSignIn({ auth }) {
       <button
         type="button"
         className="primary keep-label hosted-sign-in-main"
-        onClick={() => window.location.assign(hostedSignInUrl(here()))}
+        onClick={() => window.location.assign(hostedSignInUrl(here(), 'sign-in'))}
       >
         <LogIn size={17} aria-hidden="true" />
         {t('signIn.hosted')}
