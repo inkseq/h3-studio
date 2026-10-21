@@ -143,6 +143,7 @@ export default function SpendingSettings({ account }) {
   const [busy, setBusy] = useState(false),
     [notice, setNotice] = useState(''),
     [error, setError] = useState(''),
+    [everywhere, setEverywhere] = useState(false),
     epoch = useRef(0);
   const load = async () => {
     if (!account) {
@@ -376,14 +377,41 @@ export default function SpendingSettings({ account }) {
                   </div>
                 )}
                 <VideoCacheSettings account={account} />
-                <button
-                  className="ghost danger"
-                  disabled={busy}
-                  onClick={() => void cloud.logout().catch((failure) => setError(failure.message))}
-                >
-                  <LogOut size={15} />
-                  {t('operator.status117')}
-                </button>
+                <div className="row tight account-signout">
+                  <button
+                    className="ghost danger"
+                    disabled={busy}
+                    onClick={() =>
+                      void cloud.logout().catch((failure) => setError(failure.message))
+                    }
+                  >
+                    <LogOut size={15} />
+                    {t('operator.status117')}
+                  </button>
+                  {everywhere ? (
+                    <>
+                      <small className="muted">{t('account.signOutEverywhereConfirm')}</small>
+                      <button
+                        className="danger"
+                        disabled={busy}
+                        onClick={() =>
+                          void cloud
+                            .logoutEverywhere()
+                            .catch((failure) => setError(failure.message))
+                        }
+                      >
+                        {t('account.signOutEverywhereYes')}
+                      </button>
+                      <button className="ghost" onClick={() => setEverywhere(false)}>
+                        {t('library.cancel')}
+                      </button>
+                    </>
+                  ) : (
+                    <button className="ghost" disabled={busy} onClick={() => setEverywhere(true)}>
+                      {t('account.signOutEverywhere')}
+                    </button>
+                  )}
+                </div>
               </>
             )}
           </div>
