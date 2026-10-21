@@ -2354,12 +2354,26 @@ function Segment({ seg, selected, onPick }) {
   const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { state } = useStore();
   const status = shotStatus(seg.shot, queuePositions(state.shots)[seg.shot.id], locale);
+  // Drag a segment onto another to reorder the story; a plain click still opens the shot.
+  const drag = useDraggable({ id: 'seg:' + seg.shot.id }),
+    drop = useDroppable({ id: 'segto:' + seg.shot.id });
   return (
     <button
       type="button"
+      ref={(node) => {
+        drag.setNodeRef(node);
+        drop.setNodeRef(node);
+      }}
+      {...drag.attributes}
+      {...drag.listeners}
       aria-label={tr('storyboard.detail71') + seg.shot.title}
       style={{ flexGrow: seg.dur, flexBasis: 0 }}
-      className={'tseg' + (selected ? ' selected' : '')}
+      className={
+        'tseg' +
+        (selected ? ' selected' : '') +
+        (drag.isDragging ? ' dragging' : '') +
+        (drop.isOver && !drag.isDragging ? ' drop-target' : '')
+      }
       onClick={() => onPick(seg)}
       title={status.label}
     >

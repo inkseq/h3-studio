@@ -937,6 +937,16 @@ input[type='radio'] {
 .tseg.selected {
   box-shadow: inset 0 0 0 2px var(--accent);
 }
+.tseg {
+  touch-action: none;
+}
+.tseg.dragging {
+  opacity: 0.4;
+}
+.tseg.drop-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
 .tseg-title {
   position: absolute;
   left: 6px;

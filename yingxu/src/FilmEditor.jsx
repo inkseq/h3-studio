@@ -5,7 +5,18 @@ import { AbsoluteFill, Html5Video, Sequence } from 'remotion';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Check, CloudUpload, Eye, EyeOff, GripVertical, Mic, X } from 'lucide-react';
+import {
+  Check,
+  CloudUpload,
+  Eye,
+  EyeOff,
+  GripVertical,
+  Mic,
+  Pause,
+  Play,
+  Scissors,
+  X,
+} from 'lucide-react';
 import { store } from './store.js';
 import { cloudController as cloud } from './cloud-controller.js';
 import { useStoryboardMediaUrl } from './StoryboardMedia.jsx';
@@ -137,7 +148,192 @@ function TrimHandle({ side, disabled, title, onDrag, onDone }) {
   );
 }
 
-function ClipCard({ clip, duration, active, busy, onSeek, onToggle, onTrim }) {
+const pct = (value, total) => (total > 0 ? (value / total) * 100 : 0) + '%';
+const sec = (value) => value.toFixed(2);
+
+// A large single-clip trimmer: the whole source on one wide bar with start/end handles,
+// its own video, and frame-accurate keys. Nothing is written until Apply.
+function ClipTrimmer({ clip, url, source, onApply, onCancel }) {
+  const { t } = useI18n();
+  const video = useRef(null),
+    bar = useRef(null),
+    box = useRef(null);
+  const [probed, setProbed] = useState(null);
+  const total = Number.isFinite(source) ? source : probed;
+  const [range, setRange] = useState([
+    clip.startFrame / cutFps,
+    (clip.startFrame + clip.frames) / cutFps,
+  ]);
+  const [now, setNow] = useState(range[0]),
+    [playing, setPlaying] = useState(false);
+  const [inPoint, outPoint] = range,
+    frame = 1 / cutFps;
+  React.useEffect(() => box.current?.focus(), []);
+  const clampIn = (value) => (old) => [Math.min(Math.max(0, snap(value)), old[1] - frame), old[1]];
+  const clampOut = (value) => (old) => [
+    old[0],
+    Math.max(old[0] + frame, Math.min(total ?? value, snap(value))),
+  ];
+  const seekTo = (value) => {
+    const v = Math.min(Math.max(0, value), total ?? value);
+    if (video.current) video.current.currentTime = v;
+    setNow(v);
+  };
+  const at = (clientX) => {
+    const r = bar.current.getBoundingClientRect();
+    return snap(Math.min(1, Math.max(0, (clientX - r.left) / r.width)) * (total || 0));
+  };
+  const dragHandle = (side) => (event) => {
+    if (!total) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const el = event.currentTarget;
+    el.setPointerCapture(event.pointerId);
+    video.current?.pause();
+    const move = (e) => {
+      const v = at(e.clientX);
+      setRange(side === 'in' ? clampIn(v) : clampOut(v));
+      seekTo(v);
+    };
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  };
+  const toggle = () => {
+    const node = video.current;
+    if (!node) return;
+    if (!node.paused) return node.pause();
+    if (node.currentTime < inPoint || node.currentTime >= outPoint - frame / 2)
+      node.currentTime = inPoint;
+    node.play().catch(() => {});
+  };
+  const onKey = (event) => {
+    if (event.target.closest('button')) return;
+    const key = event.key.toLowerCase();
+    if (key === ' ') toggle();
+    else if (key === 'i') setRange(clampIn(now));
+    else if (key === 'o') setRange(clampOut(now));
+    else if (key === 'arrowleft') seekTo(snap(now - frame));
+    else if (key === 'arrowright') seekTo(snap(now + frame));
+    else return;
+    event.preventDefault();
+  };
+  return (
+    <div className="clip-trimmer" ref={box} tabIndex={-1} onKeyDown={onKey}>
+      <div className="clip-trimmer-head">
+        <b>{t('editor.trimTitle', { title: clip.index + 1 + '. ' + clip.title })}</b>
+        <small className="muted">{t('editor.trimKeys')}</small>
+      </div>
+      <div className="clip-trimmer-video">
+        <video
+          ref={video}
+          src={url}
+          preload="auto"
+          playsInline
+          onClick={toggle}
+          onLoadedMetadata={(event) => {
+            setProbed(event.currentTarget.duration);
+            event.currentTarget.currentTime = inPoint;
+          }}
+          onPlay={() => setPlaying(true)}
+          onPause={() => setPlaying(false)}
+          onTimeUpdate={(event) => {
+            const node = event.currentTarget;
+            setNow(node.currentTime);
+            if (!node.paused && node.currentTime >= outPoint) {
+              node.pause();
+              node.currentTime = outPoint;
+            }
+          }}
+        />
+      </div>
+      <div
+        className={'clip-trimmer-bar' + (total ? '' : ' off')}
+        ref={bar}
+        onPointerDown={(event) => total && seekTo(at(event.clientX))}
+      >
+        <span className="clip-trimmer-cut" style={{ left: 0, width: pct(inPoint, total) }} />
+        <span className="clip-trimmer-cut" style={{ left: pct(outPoint, total), right: 0 }} />
+        <span
+          className="clip-trimmer-keep"
+          style={{ left: pct(inPoint, total), width: pct(outPoint - inPoint, total) }}
+        />
+        <span className="clip-trimmer-playhead" style={{ left: pct(now, total) }} />
+        {['in', 'out'].map((side) => (
+          <span
+            key={side}
+            role="slider"
+            tabIndex={0}
+            aria-label={t(side === 'in' ? 'editor.trimHandleIn' : 'editor.trimHandleOut')}
+            aria-valuemin={0}
+            aria-valuemax={total || 0}
+            aria-valuenow={side === 'in' ? inPoint : outPoint}
+            className={'clip-trimmer-handle ' + side}
+            style={{ left: pct(side === 'in' ? inPoint : outPoint, total) }}
+            onPointerDown={dragHandle(side)}
+            onKeyDown={(event) => {
+              const step =
+                event.key === 'ArrowLeft' ? -frame : event.key === 'ArrowRight' ? frame : 0;
+              if (!step) return;
+              event.preventDefault();
+              event.stopPropagation();
+              const v = (side === 'in' ? inPoint : outPoint) + step;
+              setRange(side === 'in' ? clampIn(v) : clampOut(v));
+              seekTo(v);
+            }}
+          />
+        ))}
+      </div>
+      <p className="clip-trimmer-times muted">
+        {total
+          ? t('editor.trimTimes', {
+              in: sec(inPoint),
+              out: sec(outPoint),
+              len: sec(outPoint - inPoint),
+              total: sec(total),
+            })
+          : t('editor.loading')}
+      </p>
+      <div className="clip-trimmer-actions">
+        <button className="small" disabled={!total} onClick={toggle}>
+          {playing ? <Pause size={14} /> : <Play size={14} />}
+          {t(playing ? 'editor.pause' : 'editor.playRange')}
+        </button>
+        <button className="small" disabled={!total} onClick={() => setRange(clampIn(now))}>
+          [ {t('editor.setIn')}
+        </button>
+        <button className="small" disabled={!total} onClick={() => setRange(clampOut(now))}>
+          {t('editor.setOut')} ]
+        </button>
+        <button
+          className="small ghost"
+          disabled={!total}
+          onClick={() => setRange([0, snap(total)])}
+        >
+          {t('editor.wholeClip')}
+        </button>
+        <span className="clip-trimmer-spacer" />
+        <button className="small ghost" onClick={onCancel}>
+          {t('editor.cancel')}
+        </button>
+        <button
+          className="small primary"
+          disabled={!total}
+          onClick={() => onApply(inPoint, outPoint, total)}
+        >
+          {t('editor.apply')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ClipCard({ clip, duration, active, busy, onSeek, onToggle, onTrim, onFineTrim }) {
   const { t } = useI18n();
   const sortable = useSortable({ id: clip.id, disabled: busy });
   const [drag, setDrag] = useState({ side: null, dx: 0 });
@@ -168,6 +364,8 @@ function ClipCard({ clip, duration, active, busy, onSeek, onToggle, onTrim }) {
         transform: CSS.Translate.toString(sortable.transform),
         transition: sortable.transition,
       }}
+      {...sortable.attributes}
+      {...sortable.listeners}
     >
       <TrimHandle
         side="start"
@@ -182,7 +380,7 @@ function ClipCard({ clip, duration, active, busy, onSeek, onToggle, onTrim }) {
       />
       {clip.asset && <ClipThumb asset={clip.asset} />}
       <button type="button" className="film-clip-body" onClick={() => onSeek(clip)}>
-        <span className="film-clip-grip" {...sortable.attributes} {...sortable.listeners}>
+        <span className="film-clip-grip" aria-hidden="true">
           <GripVertical size={13} />
         </span>
         <b>
@@ -202,6 +400,16 @@ function ClipCard({ clip, duration, active, busy, onSeek, onToggle, onTrim }) {
         onClick={() => onToggle(clip)}
       >
         {clip.included ? <Eye size={13} /> : <EyeOff size={13} />}
+      </button>
+      <button
+        type="button"
+        className="film-clip-scissors"
+        disabled={busy || !clip.playable}
+        title={clip.playable ? t('editor.trim') : t('editor.trimNeedsVideo')}
+        aria-label={t('editor.trim')}
+        onClick={() => onFineTrim(clip)}
+      >
+        <Scissors size={13} />
       </button>
       <TrimHandle
         side="end"
@@ -229,8 +437,10 @@ export default function FilmEditor({ chapterId, onClose }) {
   const [sources, setSources] = useState({}),
     [durations, setDurations] = useState({}),
     [error, setError] = useState(''),
-    [current, setCurrent] = useState(null);
+    [current, setCurrent] = useState(null),
+    [trimming, setTrimming] = useState(null);
   const player = useRef(null);
+  const trimTarget = clips.find((clip) => clip.id === trimming && clip.playable);
   // The overlay owns scrolling while open; the storyboard behind it must not move.
   React.useEffect(() => {
     const old = document.body.style.overflow;
@@ -371,18 +581,34 @@ export default function FilmEditor({ chapterId, onClose }) {
         <p className="film-editor-empty">{t('editor.empty')}</p>
       ) : (
         <>
-          <div className="film-editor-stage">
-            <Player
-              ref={player}
-              component={Cut}
-              inputProps={{ clips: included, sources, cues: captions ? cues : [] }}
-              durationInFrames={Math.max(1, total)}
-              fps={cutFps}
-              compositionWidth={width}
-              compositionHeight={height}
-              controls
-              style={{ width: '100%', height: '100%' }}
-            />
+          <div className={'film-editor-stage' + (trimTarget ? ' trimming' : '')}>
+            {trimTarget && sources[trimTarget.asset.id] ? (
+              <ClipTrimmer
+                key={trimTarget.id}
+                clip={trimTarget}
+                url={sources[trimTarget.asset.id]}
+                source={trimTarget.sourceSeconds ?? durations[trimTarget.asset.id]}
+                onCancel={() => setTrimming(null)}
+                onApply={(start, end, source) => {
+                  edit((p) => trimClip(p, trimTarget.id, start, end, source));
+                  setTrimming(null);
+                }}
+              />
+            ) : trimTarget ? (
+              <p className="muted">{t('editor.loading')}</p>
+            ) : (
+              <Player
+                ref={player}
+                component={Cut}
+                inputProps={{ clips: included, sources, cues: captions ? cues : [] }}
+                durationInFrames={Math.max(1, total)}
+                fps={cutFps}
+                compositionWidth={width}
+                compositionHeight={height}
+                controls
+                style={{ width: '100%', height: '100%' }}
+              />
+            )}
           </div>
           <p className="film-editor-hint muted">{t('editor.dragHint')}</p>
           {error && (
@@ -417,6 +643,11 @@ export default function FilmEditor({ chapterId, onClose }) {
                       onTrim={(c, start, end, source) =>
                         edit((p) => trimClip(p, c.id, start, end, source))
                       }
+                      onFineTrim={(c) => {
+                        player.current?.pause();
+                        setCurrent(c.id);
+                        setTrimming(c.id);
+                      }}
                     />
                   ))}
                 </div>
