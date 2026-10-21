@@ -850,6 +850,64 @@ def adopt_payments(connection, *, expected_fingerprint):
     return dict(state='adopted_payments', before=before, after=after)
 
 
+def adopt_payment_live(connection, *, expected_fingerprint, tenant_id):
+    """Widen only the two frozen payment mode checks, with purchasing OFF.
+
+    The host operator holds release.lock and verifies both approved rollback
+    readers before calling this explicit path. Stripe mode is checked by the
+    CLI before connecting; the persisted charging policy is checked under the
+    original account/migration locks. No payment, event or credit row changes.
+    """
+    from .credits import CreditError, credit_policy
+    from .identity import lock_account_gate
+    from .payment_schema import PaymentSchemaError, recognized_revision
+
+    if (
+        not connection.in_transaction()
+        or connection.dialect.name != 'postgresql'
+        or not isinstance(expected_fingerprint, str)
+        or not re.fullmatch(r'[a-f0-9]{64}', expected_fingerprint)
+        or not isinstance(tenant_id, str)
+        or not 1 <= len(tenant_id) <= 200
+    ):
+        raise BaselineError('payment_live_adoption_requires_verified_transaction')
+    connection.exec_driver_sql("SET LOCAL lock_timeout = '5s'")
+    connection.exec_driver_sql("SET LOCAL statement_timeout = '30s'")
+    lock_account_gate(connection, exclusive=True)
+    connection.exec_driver_sql('SELECT pg_advisory_xact_lock(685939796868749721)')
+    before = compare_schema(connection)
+    if before['schema_fingerprint'] != expected_fingerprint:
+        raise BaselineError('schema_snapshot_changed')
+    if not before['matches'] or before['recorded_revision'] not in PAYMENT_REVISIONS:
+        raise BaselineError('payment_live_adoption_requires_adopted_payments')
+    try:
+        charging = credit_policy(connection, tenant_id)
+    except CreditError:
+        raise BaselineError('payment_live_adoption_credit_policy_unavailable') from None
+    if charging['enabled']:
+        raise BaselineError('payment_live_adoption_requires_charging_off')
+    if before['recorded_revision'] == LIVE_PAYMENT_REVISION:
+        return dict(state='already_adopted', before=before, after=before)
+    from alembic import command
+
+    config = alembic_config()
+    config.attributes.update(
+        verified_baseline_connection=connection,
+        verified_baseline_mode='upgrade',
+        verified_payment_live_mode=True,
+    )
+    command.upgrade(config, LIVE_PAYMENT_REVISION)
+    try:
+        if recognized_revision(connection) != LIVE_PAYMENT_REVISION:
+            raise BaselineError('payment_live_adoption_verification_failed')
+    except PaymentSchemaError as error:
+        raise BaselineError(str(error)) from None
+    after = compare_schema(connection)
+    if not after['matches'] or after['recorded_revision'] != LIVE_PAYMENT_REVISION:
+        raise BaselineError('payment_live_adoption_verification_failed')
+    return dict(state='adopted_payment_live', before=before, after=after)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Schema-only baseline verification and guarded adoption"
@@ -888,6 +946,11 @@ def main(argv=None):
         help='Add empty test-payment tables with payments OFF after both reader images are verified under release.lock',
     )
     payments.add_argument('--expected-fingerprint', required=True)
+    live = commands.add_parser(
+        'adopt-payment-live',
+        help='Adopt exact live-mode checks with Stripe/charging OFF after both approved reader images are verified under release.lock',
+    )
+    live.add_argument('--expected-fingerprint', required=True)
     args = parser.parse_args(argv)
     engine = None
     try:
@@ -901,6 +964,12 @@ def main(argv=None):
             # Reader A has no payment routes or mode setting; absence is OFF.
             if getattr(settings, 'stripe_mode', 'off') != 'off':
                 raise BaselineError('payment_adoption_requires_payments_off')
+        if args.command == 'adopt-payment-live':
+            from .settings import Settings
+
+            settings = Settings.from_environment()
+            if getattr(settings, 'stripe_mode', None) != 'off':
+                raise BaselineError('payment_live_adoption_requires_payments_off')
         from .settings import database_url_from_environment
 
         url = database_url_from_environment()
@@ -941,6 +1010,12 @@ def main(argv=None):
                 result = adopt_payments(
                     connection, expected_fingerprint=args.expected_fingerprint
                 )
+            elif args.command == 'adopt-payment-live':
+                result = adopt_payment_live(
+                    connection,
+                    expected_fingerprint=args.expected_fingerprint,
+                    tenant_id=settings.tenant_id,
+                )
             else:
                 result = adopt_baseline(
                     connection, expected_fingerprint=args.expected_fingerprint
@@ -955,6 +1030,7 @@ def main(argv=None):
                 'adopt-identity',
                 'adopt-credits',
                 'adopt-payments',
+                'adopt-payment-live',
             }
             or result["matches"]
             else 1

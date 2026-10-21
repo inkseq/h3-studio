@@ -2,13 +2,14 @@
 
 from contextlib import closing
 import hashlib
+import json
 import os
 from pathlib import Path
 import sqlite3
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from sqlalchemy import CheckConstraint, create_engine, event, inspect, select
 from sqlalchemy.exc import IntegrityError
@@ -24,6 +25,7 @@ from studio_platform.migrations.versions import (
 from studio_platform.schema_baseline import (
     BaselineError,
     adopt_credits,
+    adopt_payment_live,
     adopt_payments,
     compare_schema,
     frozen_metadata,
@@ -634,6 +636,86 @@ class PaymentReaderTests(unittest.TestCase):
                 main(['adopt-payments', '--expected-fingerprint', '0' * 64]), 1
             )
 
+    def test_live_adoption_requires_explicit_postgres_transaction_and_fingerprint(self):
+        for transaction, dialect, fingerprint in (
+            (False, 'postgresql', 'a' * 64),
+            (True, 'sqlite', 'a' * 64),
+            (True, 'postgresql', None),
+            (True, 'postgresql', 123),
+            (True, 'postgresql', 'A' * 64),
+            (True, 'postgresql', 'a' * 63),
+        ):
+            connection = Mock(
+                dialect=SimpleNamespace(name=dialect),
+                in_transaction=Mock(return_value=transaction),
+            )
+            with self.subTest(
+                transaction=transaction, dialect=dialect, fingerprint=fingerprint
+            ):
+                with self.assertRaisesRegex(
+                    BaselineError, 'payment_live_adoption_requires_verified_transaction'
+                ):
+                    adopt_payment_live(
+                        connection,
+                        expected_fingerprint=fingerprint,
+                        tenant_id='sixnine',
+                    )
+                connection.exec_driver_sql.assert_not_called()
+
+    def test_live_adoption_requires_charging_off_even_when006_is_already_adopted(self):
+        before = {
+            'schema_fingerprint': 'a' * 64,
+            'matches': True,
+            'recorded_revision': LIVE_PAYMENT_REVISION,
+        }
+        connection = Mock(
+            dialect=SimpleNamespace(name='postgresql'),
+            in_transaction=Mock(return_value=True),
+        )
+        with (
+            patch('studio_platform.identity.lock_account_gate') as gate,
+            patch(
+                'studio_platform.schema_baseline.compare_schema', return_value=before
+            ),
+            patch(
+                'studio_platform.credits.credit_policy', return_value={'enabled': True}
+            ) as policy,
+            patch('alembic.command.upgrade') as upgrade,
+        ):
+            with self.assertRaisesRegex(
+                BaselineError, 'payment_live_adoption_requires_charging_off'
+            ):
+                adopt_payment_live(
+                    connection, expected_fingerprint='a' * 64, tenant_id='sixnine'
+                )
+            gate.assert_called_once_with(connection, exclusive=True)
+            policy.assert_called_once_with(connection, 'sixnine')
+            upgrade.assert_not_called()
+
+    def test_live_adoption_cli_refuses_enabled_or_unknown_mode_before_connecting(self):
+        from studio_platform.schema_baseline import main
+
+        for mode in ('test', 'live', None):
+            with (
+                self.subTest(mode=mode),
+                patch(
+                    'studio_platform.settings.Settings.from_environment',
+                    return_value=SimpleNamespace(stripe_mode=mode),
+                ),
+                patch('studio_platform.settings.database_url_from_environment') as url,
+                patch('studio_platform.schema_baseline.create_engine') as engine,
+                patch('sys.stderr') as stderr,
+            ):
+                self.assertEqual(
+                    main(['adopt-payment-live', '--expected-fingerprint', 'a' * 64]), 1
+                )
+                url.assert_not_called()
+                engine.assert_not_called()
+                self.assertIn(
+                    'payment_live_adoption_requires_payments_off',
+                    ''.join(call.args[0] for call in stderr.write.call_args_list),
+                )
+
 
 @unittest.skipUnless(
     os.environ.get('PLATFORM_TEST_DATABASE_URL'),
@@ -723,6 +805,159 @@ class PaymentAdoptionPostgresTests(unittest.TestCase):
                 payment.PaymentSchemaError, 'shape_requires_review'
             ):
                 payment.validate_connection(connection)
+
+    def live_adoption(self, connection, fingerprint=None):
+        return adopt_payment_live(
+            connection,
+            expected_fingerprint=fingerprint
+            or compare_schema(connection)['schema_fingerprint'],
+            tenant_id='sixnine',
+        )
+
+    def seed_original_payments(self):
+        from studio_platform.repository import budget_accounts
+
+        with self.engine.begin() as connection:
+            self.run_adoption(connection)
+            fixtures.seed(connection)
+            seed_payment(connection)
+            connection.execute(
+                budget_accounts.insert().values(
+                    id='original-usd-budget',
+                    tenant_id='sixnine',
+                    owner_id='supervan',
+                    limit_microusd=1000000,
+                    reserved_microusd=123,
+                    spent_microusd=456,
+                )
+            )
+
+    @staticmethod
+    def original_rows(connection):
+        from studio_platform.repository import budget_accounts, documents
+
+        tables = [
+            *credit.metadata.sorted_tables,
+            *payment.metadata.sorted_tables,
+            identity.users,
+            budget_accounts,
+            documents,
+        ]
+        return {
+            table.name: sorted(
+                json.dumps(dict(row), sort_keys=True)
+                for row in connection.execute(select(table)).mappings()
+            )
+            for table in tables
+        }
+
+    def test_live_adoption_and_repeat_preserve_original_money_and_obligation_rows(self):
+        self.seed_original_payments()
+        with self.engine.begin() as connection:
+            before = self.original_rows(connection)
+            result = self.live_adoption(connection)
+            self.assertEqual(result['state'], 'adopted_payment_live')
+            self.assertEqual(
+                result['after']['recorded_revision'], LIVE_PAYMENT_REVISION
+            )
+            self.assertEqual(
+                payment.recognized_revision(connection), LIVE_PAYMENT_REVISION
+            )
+            self.assertEqual(self.original_rows(connection), before)
+            with patch('alembic.command.upgrade') as upgrade:
+                self.assertEqual(
+                    self.live_adoption(connection)['state'], 'already_adopted'
+                )
+                upgrade.assert_not_called()
+            self.assertEqual(self.original_rows(connection), before)
+            self.assertTrue(payment.ready(connection))
+            self.assertTrue(credit.ready(connection))
+            connection.execute(payment.payments.update().values(livemode=1))
+            connection.execute(payment.events.update().values(livemode=1))
+        with self.engine.connect() as connection:
+            self.assertEqual(connection.scalar(select(payment.payments.c.livemode)), 1)
+            self.assertEqual(connection.scalar(select(payment.events.c.livemode)), 1)
+
+    def test_live_adoption_post_check_failure_rolls_back_mode_constraints_and_marker(
+        self,
+    ):
+        self.seed_original_payments()
+        with self.engine.connect() as connection:
+            original = self.original_rows(connection)
+            before = compare_schema(connection)
+        with (
+            self.assertRaisesRegex(
+                BaselineError, 'payment_live_adoption_verification_failed'
+            ),
+            self.engine.begin() as connection,
+            patch(
+                'studio_platform.schema_baseline.compare_schema',
+                side_effect=[before, {**before, 'matches': False}],
+            ),
+        ):
+            self.live_adoption(connection, before['schema_fingerprint'])
+        with self.engine.connect() as connection:
+            self.assertEqual(payment.recognized_revision(connection), PAYMENT_REVISION)
+            self.assertEqual(
+                compare_schema(connection)['recorded_revision'], PAYMENT_REVISION
+            )
+            self.assertEqual(self.original_rows(connection), original)
+
+    def test_live_adoption_refuses_missing005_stale_fingerprint_and_shape_drift(self):
+        with self.engine.begin() as connection:
+            with self.assertRaisesRegex(BaselineError, 'requires_adopted_payments'):
+                self.live_adoption(connection)
+            self.run_adoption(connection)
+            with self.assertRaisesRegex(BaselineError, 'schema_snapshot_changed'):
+                self.live_adoption(connection, '0' * 64)
+            fingerprint = compare_schema(connection)['schema_fingerprint']
+            connection.exec_driver_sql(
+                'CREATE INDEX unsafe_payment_index ON platform_payments (status) WHERE paid_at IS NOT NULL'
+            )
+            with self.assertRaises(BaselineError):
+                self.live_adoption(connection, fingerprint)
+            self.assertEqual(
+                connection.exec_driver_sql(
+                    'SELECT version_num FROM alembic_version'
+                ).scalar_one(),
+                PAYMENT_REVISION,
+            )
+
+    def test_live_adoption_refuses_enabled_or_invalid_persisted_charging_policy(self):
+        from studio_platform.credits import (
+            POLICY_ID,
+            POLICY_KIND,
+            POLICY_OWNER,
+            POLICY_PROJECT,
+        )
+        from studio_platform.repository import documents
+
+        self.seed_original_payments()
+        with self.engine.begin() as connection:
+            connection.execute(
+                documents.insert().values(
+                    tenant_id='sixnine',
+                    owner_id=POLICY_OWNER,
+                    project_id=POLICY_PROJECT,
+                    kind=POLICY_KIND,
+                    document_id=POLICY_ID,
+                    version=1,
+                    updated_at=1.0,
+                    payload={'enabled': True, 'active_revision': 'initial'},
+                )
+            )
+            before = self.original_rows(connection)
+            with self.assertRaisesRegex(BaselineError, 'requires_charging_off'):
+                self.live_adoption(connection)
+            self.assertEqual(self.original_rows(connection), before)
+            connection.execute(documents.update().values(payload={'enabled': 'false'}))
+            before = self.original_rows(connection)
+            with self.assertRaisesRegex(BaselineError, 'credit_policy_unavailable'):
+                self.live_adoption(connection)
+            self.assertEqual(self.original_rows(connection), before)
+            self.assertEqual(
+                compare_schema(connection)['recorded_revision'], PAYMENT_REVISION
+            )
 
 
 if __name__ == '__main__':

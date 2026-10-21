@@ -657,5 +657,217 @@ class RehearsalReadinessTests(unittest.TestCase):
                 self.assertEqual(source.read_bytes(), b'original-dump')
 
 
+class PaymentLiveRehearsalTests(unittest.TestCase):
+    def plan(self):
+        return offline_rehearsal.commands(
+            COMMIT, 'postgres@sha256:' + 'f' * 64, 'd' * 32
+        )
+
+    def schema(self, revision):
+        return {
+            'matches': True,
+            'recorded_revision': revision,
+            'schema_fingerprint': ('5' if revision.endswith('0005') else '6') * 64,
+        }
+
+    def test_payment_commands_keep_the_copy_offline_and_use_immutable_images(self):
+        for snapshot in (False, True):
+            args = offline_rehearsal.payment_command(
+                self.plan(), COMMIT, 'sha256:' + 'b' * 64, 'check', snapshot=snapshot
+            )
+            self.assertEqual(args[args.index('--network') + 1], 'none')
+            self.assertEqual(args[args.index('--pull') + 1], 'never')
+            self.assertIn('INKSEQ_STRIPE_MODE=off', args)
+            self.assertIn('sha256:' + 'b' * 64, args)
+            self.assertNotIn('sixnine-platform:' + COMMIT, args)
+            self.assertNotIn('init-db', args)
+            self.assertNotIn('--publish', args)
+            self.assertFalse(any('/run/sixnine-secrets' in s for s in args))
+            self.assertTrue(
+                all('readonly' in s for s in args if s.startswith('type=volume'))
+            )
+        self.assertIn('SET TRANSACTION READ ONLY', offline_rehearsal.PAYMENT_ROWS)
+        compile(offline_rehearsal.PAYMENT_ROWS, '<copy-row-digests>', 'exec')
+
+    def exercise(self, *, changed_rows=False, reader_mismatch=False):
+        before, after = self.schema('20261020_0005'), self.schema('20261021_0006')
+        rows = {
+            'tenant_id': 'sixnine',
+            'charging_enabled': False,
+            'tables': {
+                'platform_payments': {'rows': 3, 'sha256': 'a' * 64},
+                'platform_documents': {'rows': 5, 'sha256': 'b' * 64},
+            },
+        }
+        readers = {'b' * 40: 'sha256:' + 'b' * 64, 'c' * 40: 'sha256:' + 'c' * 64}
+        final = copy.deepcopy(rows)
+        if changed_rows:
+            final['tables']['platform_payments']['sha256'] = 'f' * 64
+        checks = [before, after, after, {**after, 'matches': not reader_mismatch}]
+        responses = [
+            checks[0],
+            rows,
+            {'state': 'adopted_payment_live'},
+            checks[1],
+            {'state': 'already_adopted'},
+            checks[2],
+            checks[3],
+            final,
+        ]
+        command = Mock(side_effect=[json.dumps(v) for v in responses])
+        with patch.object(offline_rehearsal.release, 'command', command):
+            result = offline_rehearsal.payment_copy(
+                self.plan(), COMMIT, 'sha256:' + 'a' * 64, readers, {}
+            )
+        return result, command
+
+    def test_exact_adoption_noop_and_both_readers_preserve_original_rows(self):
+        result, command = self.exercise()
+        self.assertEqual(result['after_revision'], '20261021_0006')
+        self.assertEqual(result['repeat'], 'already_adopted')
+        self.assertEqual(
+            result['business_rows']['tables']['platform_payments']['rows'], 3
+        )
+        calls = [call.args[0] for call in command.call_args_list]
+        self.assertEqual(
+            calls[5][-5:],
+            [
+                'sha256:' + 'b' * 64,
+                'python',
+                '-m',
+                'studio_platform.schema_baseline',
+                'check',
+            ],
+        )
+        self.assertEqual(
+            calls[6][-5:],
+            [
+                'sha256:' + 'c' * 64,
+                'python',
+                '-m',
+                'studio_platform.schema_baseline',
+                'check',
+            ],
+        )
+        self.assertEqual(calls[2][-1], '5' * 64)
+        self.assertEqual(calls[4][-1], '6' * 64)
+
+    def test_changed_business_rows_or_incompatible_reader_refuse(self):
+        for kwargs, reason in (
+            ({'changed_rows': True}, 'rehearsal_payment_original_rows_changed'),
+            ({'reader_mismatch': True}, 'rehearsal_payment_schema_unrecognized'),
+        ):
+            with (
+                self.subTest(kwargs=kwargs),
+                self.assertRaisesRegex(
+                    offline_rehearsal.release.ReleaseError, '^' + reason + '$'
+                ),
+            ):
+                self.exercise(**kwargs)
+
+    def test_already_006_copy_cannot_replace_the_original_upgrade_proof(self):
+        with patch.object(
+            offline_rehearsal.release,
+            'command',
+            return_value=json.dumps(self.schema('20261021_0006')),
+        ) as command:
+            with self.assertRaisesRegex(
+                offline_rehearsal.release.ReleaseError,
+                '^rehearsal_payment_requires_original_005_copy$',
+            ):
+                offline_rehearsal.payment_copy(
+                    self.plan(),
+                    COMMIT,
+                    'sha256:' + 'a' * 64,
+                    {'b' * 40: 'sha256:' + 'b' * 64, 'c' * 40: 'sha256:' + 'c' * 64},
+                    {},
+                )
+        self.assertEqual(command.call_count, 1)
+
+    @unittest.skipIf(
+        os.name == 'nt', 'Unix protected metadata is exercised in Linux CI'
+    )
+    def test_failed_payment_copy_retains_intent_dump_and_exact_resources(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / 'rehearsal/incoming/production.dump'
+            source.parent.mkdir(parents=True, mode=0o700)
+            source.parent.parent.chmod(0o700)
+            source.write_bytes(b'original-private-copy')
+            source.chmod(0o600)
+            image = 'sha256:' + 'a' * 64
+            calls = []
+            regular = offline_rehearsal.release.regular
+
+            def command(args, **kwargs):
+                calls.append(args)
+                return (
+                    json.dumps([{'Id': image}])
+                    if args[:2] == ['image', 'inspect']
+                    else ''
+                )
+
+            with (
+                # This orchestration fixture is owned by the test runner, not
+                # root; file/permission guard behavior has separate tests.
+                patch.object(offline_rehearsal.release, 'protected_directory'),
+                patch.object(
+                    offline_rehearsal.release,
+                    'regular',
+                    side_effect=lambda path, **kw: regular(
+                        path, maximum=kw.get('maximum')
+                    ),
+                ),
+                patch.object(
+                    offline_rehearsal.deployment_target,
+                    'host',
+                    return_value={'name': 'staging'},
+                ),
+                patch.object(
+                    offline_rehearsal.release, 'approved_manifest'
+                ) as approved,
+                patch.object(
+                    offline_rehearsal.release,
+                    'manifest',
+                    side_effect=lambda _p, c: {'image': 'sixnine-platform:' + c},
+                ),
+                patch.object(
+                    offline_rehearsal.release,
+                    'validate_image_archive',
+                    return_value=(image,),
+                ),
+                patch.object(
+                    offline_rehearsal.release,
+                    'deployment_environment',
+                    return_value={
+                        'SIXNINE_POSTGRES_IMAGE': 'postgres@sha256:' + 'f' * 64
+                    },
+                ),
+                patch.object(offline_rehearsal.release, 'command', side_effect=command),
+                patch.object(offline_rehearsal.release, 'sync_directory'),
+                patch.object(offline_rehearsal, 'restore_copy') as restore,
+                patch.object(
+                    offline_rehearsal,
+                    'payment_copy',
+                    side_effect=offline_rehearsal.release.ReleaseError('copy_failed'),
+                ),
+                self.assertRaisesRegex(
+                    offline_rehearsal.release.ReleaseError, '^copy_failed$'
+                ),
+            ):
+                offline_rehearsal._run(
+                    COMMIT, root=root, payment_readers=['b' * 40, 'c' * 40]
+                )
+            intent = json.loads(
+                (root / ('rehearsal/payment-live-' + COMMIT + '.json')).read_text()
+            )
+            self.assertEqual(source.read_bytes(), b'original-private-copy')
+            self.assertEqual(set(intent['payment_reader_images']), {'b' * 40, 'c' * 40})
+            self.assertEqual(approved.call_count, 3)
+            restore.assert_called_once()
+            self.assertFalse(any(args[0] in {'rm', 'volume'} for args in calls))
+            self.assertFalse(any('init-db' in args for args in calls))
+
+
 if __name__ == '__main__':
     unittest.main()
