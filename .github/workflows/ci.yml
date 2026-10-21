@@ -134,7 +134,9 @@ jobs:
             requirements.dispatch.lock.txt
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '22.23.4'
+      - name: Check Node security patch and bundled trust
+        run: node deploy/tls/check_node_trust.mjs
       - name: Identify signed media package cache
         id: media-cache
         run: python tools/ci_media_tools.py cache-key >> "$GITHUB_OUTPUT"
@@ -199,7 +201,9 @@ jobs:
             requirements.dispatch.lock.txt
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '22.23.4'
+      - name: Check Node security patch and bundled trust
+        run: node deploy/tls/check_node_trust.mjs
       - name: Identify signed media package cache
         id: media-cache
         run: python tools/ci_media_tools.py cache-key >> "$GITHUB_OUTPUT"
@@ -274,9 +278,11 @@ jobs:
           python-version: '3.12'
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '22.23.4'
           cache: npm
           cache-dependency-path: yingxu/package-lock.json
+      - name: Check Node security patch and bundled trust
+        run: node deploy/tls/check_node_trust.mjs
       - name: Verify source-only Yingxu release snapshot
         run: python tools/sync_yingxu_source.py --verify-snapshot
       - run: npm ci --ignore-scripts

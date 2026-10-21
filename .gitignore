@@ -33,6 +33,7 @@ inventory.json
 !tests/fixtures/
 !tests/fixtures/targon_execution_policies.json
 !tests/fixtures/h3-ref-bf16-workflow.json
+!tests/fixtures/emsign-ecc-g3.pem
 !tools/
 !tools/ci_media_tools.py
 !tools/ci_test_shards.py
@@ -40,6 +41,10 @@ inventory.json
 !tools/check_aws_release_account.py
 !tools/h3_pro6000_pilot_runtime.py
 !deploy/
+!deploy/tls/
+!deploy/tls/check_trust.py
+!deploy/tls/check_node_trust.mjs
+!deploy/tls/requirements.dstack.lock.txt
 !.github/
 !.github/workflows/
 !.github/workflows/ci.yml

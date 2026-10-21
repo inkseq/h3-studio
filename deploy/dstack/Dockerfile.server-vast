@@ -3,6 +3,17 @@ ARG DSTACK_SERVER_IMAGE=dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a039
 FROM ${DSTACK_SERVER_IMAGE}
 ARG SOURCE_COMMIT
 LABEL org.opencontainers.image.revision=${SOURCE_COMMIT} role=sixnine-dstack
+COPY deploy/tls/check_trust.py deploy/tls/requirements.dstack.lock.txt /opt/inkseq/tls/
+# Debian13 and this separate uv-managed Python environment have independent CAs.
+# Only ca-certificates and Certifi change; preserve dstack/provider versions.
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --only-upgrade --no-remove --no-install-recommends ca-certificates=20250419+deb13u1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt uv pip install \
+       --python /root/.local/share/uv/tools/dstack/bin/python \
+       --no-deps --require-hashes --only-binary :all: \
+       -r /opt/inkseq/tls/requirements.dstack.lock.txt \
+    && /root/.local/share/uv/tools/dstack/bin/python /opt/inkseq/tls/check_trust.py
 COPY deploy/dstack/native_vast_safety.py deploy/dstack/patch_native_vast.py deploy/dstack/native-vast-provenance.json /opt/sixnine/native-vast/
 RUN /root/.local/share/uv/tools/dstack/bin/python /opt/sixnine/native-vast/patch_native_vast.py \
     --site-packages /root/.local/share/uv/tools/dstack/lib/python3.11/site-packages \

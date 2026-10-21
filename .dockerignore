@@ -27,6 +27,11 @@
 !studio_platform/runtime_hosts/*.py
 !deploy/
 deploy/*
+!deploy/tls/
+deploy/tls/*
+!deploy/tls/check_trust.py
+!deploy/tls/check_node_trust.mjs
+!deploy/tls/requirements.dstack.lock.txt
 !deploy/wangp/
 deploy/wangp/*
 !deploy/wangp/profiles/

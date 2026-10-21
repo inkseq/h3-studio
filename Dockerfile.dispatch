@@ -8,7 +8,8 @@ USER root
 RUN printf '%s\n' "$PLATFORM_IMAGE" > /app/inkseq-controller-image
 COPY requirements.dispatch.lock.txt /app/requirements.dispatch.lock.txt
 RUN python -m pip install --no-cache-dir --require-hashes -r /app/requirements.dispatch.lock.txt \
-    && python -m pip check
+    && python -m pip check \
+    && python /opt/inkseq/tls/check_trust.py
 USER 10001:10001
 # A protected compose sets the exact controller or per-slot worker role.
 CMD ["python", "-m", "studio_platform.postgres_dispatch", "--help"]
