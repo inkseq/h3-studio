@@ -32,8 +32,7 @@ function audible(project) {
 }
 
 /** Tracks with their timeline placement (seconds) and display title. */
-export function audioBlocks(project, chapterId) {
-  const timeline = chapterTimeline(project, chapterId);
+export function audioBlocks(project, chapterId, timeline = chapterTimeline(project, chapterId)) {
   return (project.journey?.soundTracks?.[chapterId] || []).map((track) => {
     const asset = project.entities.find((e) => e.id === (track.assetId || track.audioId));
     const shot = track.generatedFrom ? timeline.find((s) => s.id === track.shotId) : null;
@@ -103,11 +102,17 @@ export function moveTrack(project, chapterId, trackId, start) {
 }
 
 /** Trim a music/voice track by `delta` seconds at one edge; the audio stays in place. */
-export function trimTrack(project, chapterId, trackId, side, delta) {
+export function trimTrack(
+  project,
+  chapterId,
+  trackId,
+  side,
+  delta,
+  timeline = chapterTimeline(project, chapterId),
+) {
   const track = findTrack(project, chapterId, trackId);
   if (track.generatedFrom) throw Error('editor.audioFollowsClip');
-  const timeline = chapterTimeline(project, chapterId),
-    placement = trackPlacement(track, timeline);
+  const placement = trackPlacement(track, timeline);
   if (!placement) throw Error('editor.audioMissing');
   const duration = Number.isFinite(track.duration) ? track.duration : track.end;
   if (side === 'start') {

@@ -1,24 +1,36 @@
-/* Film editor (#347): full-screen overlay with preview, one clip track and a voices lane. */
+/* Film editor (#347): preview on top, the selected clip's trim bar, then a timeline with a
+   ruler, the picture track and the sound lane sharing one scale and one playhead. */
 .film-editor {
   position: fixed;
   inset: 0;
-  z-index: 60;
+  z-index: 90;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
-  gap: 10px;
-  padding: 14px 18px 16px;
+  grid-template-rows: auto minmax(160px, 1fr) auto auto auto auto auto auto auto;
+  gap: 8px;
+  padding: 12px 18px 14px;
   background: var(--bg);
   color: var(--ink);
+  overflow: auto;
 }
 .film-editor-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
+}
+.film-editor-head > div:first-child {
+  min-width: 0;
+  margin-inline-end: auto;
 }
 .film-editor-head h2 {
   margin: 0;
   font-size: 17px;
+}
+.film-editor-captions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
 }
 .film-editor-stage {
   min-height: 0;
@@ -32,128 +44,197 @@
   align-self: center;
   justify-self: center;
 }
-.film-editor-hint {
+/* Selected clip: small source view + always-visible trim bar. */
+.film-inspector {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-2, var(--line));
+  border-radius: 12px;
+  background: var(--surface);
+}
+.film-inspector-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.film-inspector-head b {
+  margin-inline-end: auto;
+  font-size: 13px;
+}
+.film-inspector-head button,
+.film-excluded button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.film-inspector-head button.on {
+  color: #74adff;
+}
+.film-inspector-body {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+.film-source {
+  aspect-ratio: 16 / 9;
+  display: grid;
+  place-items: center;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 11px;
+}
+.film-source video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.film-inspector-empty {
   margin: 0;
   font-size: 12px;
 }
-.film-editor-tracks {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 8px;
-  min-width: 0;
-}
-/* Only the clip track scrolls sideways; the voices lane and labels stay in view. */
-.film-editor-tracks > .film-track:first-child {
-  overflow-x: auto;
-  padding-bottom: 6px;
-  overscroll-behavior-x: contain;
-}
-.film-track {
+/* Timeline */
+.film-zoom {
   display: flex;
-  gap: 4px;
-  min-height: 64px;
-  align-items: stretch;
-}
-.film-clip {
-  position: relative;
-  flex: none;
-  display: flex;
-  min-width: 88px;
-  border: 1px solid var(--line-2, var(--line));
-  border-radius: 10px;
-  background: var(--surface-2, var(--surface));
-  overflow: hidden;
-}
-.film-clip.active {
-  border-color: var(--accent);
-}
-.film-clip.excluded {
-  opacity: 0.45;
-  border-style: dashed;
-}
-.film-clip.dragging {
-  z-index: 2;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-}
-.film-clip-body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: flex-start;
-  gap: 2px;
-  padding: 6px 26px 6px 14px;
-  border: 0;
-  background: none;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.film-clip-body b,
-.film-clip-body small {
-  display: block;
-}
-.film-clip-body b {
-  font-size: 12px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.film-clip-body small {
-  font-size: 11px;
-  color: var(--muted);
-}
-.film-clip-grip {
-  position: absolute;
-  top: 4px;
-  left: 50%;
-  transform: translateX(-50%);
-  color: var(--muted);
-  cursor: grab;
-  touch-action: none;
-  line-height: 0;
-}
-.film-clip-toggle {
-  position: absolute;
-  right: 12px;
-  bottom: 6px;
-  padding: 2px;
-  border: 0;
-  background: none;
-  color: var(--muted);
-  cursor: pointer;
-}
-.film-trim {
-  flex: none;
-  width: 10px;
-  background: var(--accent);
-  opacity: 0.55;
-  cursor: ew-resize;
-  touch-action: none;
-}
-.film-trim:hover {
-  opacity: 1;
-}
-.film-trim.off {
-  background: var(--line-2, var(--line));
-  cursor: not-allowed;
-}
-.film-track-voices {
-  min-height: 40px;
   align-items: center;
   gap: 10px;
-  padding: 0 10px;
-  border: 1px dashed var(--line-2, var(--line));
-  border-radius: 10px;
-  color: var(--muted);
   font-size: 12px;
 }
-.film-track-label {
+.film-zoom-spacer {
+  flex: 1;
+}
+.film-zoom label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-weight: 600;
+  color: var(--muted);
+}
+.film-zoom input[type='range'] {
+  width: 140px;
+  accent-color: var(--accent);
+}
+.film-timeline {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 12px 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  overscroll-behavior-x: contain;
+}
+.film-timeline-inner {
+  position: relative;
+  display: grid;
+  gap: 6px;
+  padding-top: 2px;
+}
+.film-ruler {
+  position: relative;
+  height: 22px;
+  border-bottom: 1px solid var(--line-2, var(--line));
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+}
+.film-tick {
+  position: absolute;
+  bottom: 3px;
+  padding-left: 3px;
+  border-left: 1px solid var(--line-2, var(--line));
+  font-size: 10px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.film-vtrack {
+  display: flex;
+  height: 54px;
+}
+.film-tclip {
+  position: relative;
+  flex: none;
+  height: 100%;
+  border-radius: 6px;
+  background: var(--surface-2, var(--surface));
+  box-shadow: inset 0 0 0 1px var(--line-2, var(--line));
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.film-tclip.empty {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--surface-2, var(--surface)) 0 6px,
+    var(--surface) 6px 12px
+  );
+}
+.film-tclip.playing {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.film-tclip.selected {
+  box-shadow: inset 0 0 0 2px var(--accent);
+  z-index: 1;
+}
+.film-tclip.dragging {
+  z-index: 3;
+  opacity: 0.85;
+  cursor: grabbing;
+}
+.film-tclip .film-clip-thumb {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.55;
+  pointer-events: none;
+}
+.film-tclip-label {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 4px;
+  display: flex;
+  gap: 5px;
+  align-items: baseline;
+  font-size: 11px;
+  color: #fff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  white-space: nowrap;
+  overflow: hidden;
+  pointer-events: none;
+}
+.film-tclip-label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.film-tclip-sound {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  color: #74adff;
+}
+.film-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--ink);
+  pointer-events: none;
+  z-index: 4;
+}
+.film-excluded {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.film-excluded button.on {
+  outline: 2px solid var(--accent);
 }
 .film-editor-foot {
   display: flex;
@@ -161,249 +242,57 @@
   gap: 4px 16px;
   font-size: 12px;
 }
+.film-audio-whole {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.spin {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.autosave-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--muted);
+  border: 0;
+  background: none;
+  padding: 0;
+}
+.autosave-status.warn {
+  color: var(--warn, #f3b65a);
+}
+button.autosave-status {
+  cursor: pointer;
+  text-decoration: underline;
+}
 @media (max-width: 760px) {
   .film-editor {
     padding: 10px;
-    grid-template-rows: auto minmax(180px, 1fr) auto auto auto;
+    grid-template-rows: auto minmax(180px, 40vh) auto auto auto auto auto auto auto;
   }
-}
-
-.film-clip-thumb {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  opacity: 0.35;
-  pointer-events: none;
-}
-.film-clip-body,
-.film-clip-toggle,
-.film-trim {
-  position: relative;
-  z-index: 1;
-}
-.film-clip-toggle {
-  position: absolute;
-}
-.film-editor-head > div:first-child {
-  min-width: 0;
-}
-.film-editor-captions {
-  display: flex;
-  margin-top: 4px;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.film-editor-head {
-  gap: 10px;
-}
-.film-editor-head > button.primary {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  white-space: nowrap;
-}
-.film-editor-saved {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  white-space: nowrap;
-}
-/* Fingers need wider trim handles than a mouse. */
-@media (pointer: coarse) {
-  .film-trim {
-    width: 20px;
+  .film-inspector-body {
+    grid-template-columns: minmax(0, 1fr);
   }
-  .film-clip {
-    min-width: 120px;
+  .film-source {
+    max-width: 220px;
   }
-  .film-clip-grip {
-    padding: 4px 10px;
-  }
-}
-.film-editor-head > div:first-child {
-  margin-inline-end: auto;
-}
-
-/* Fine trim: one clip on a wide bar, shown in place of the preview. */
-.film-editor-stage.trimming {
-  display: block;
-  background: transparent;
-  overflow: auto;
-}
-.clip-trimmer {
-  width: 100%;
-  height: 100%;
-  grid-template-columns: minmax(0, 1fr);
-  display: grid;
-  grid-template-rows: auto minmax(120px, 1fr) auto auto auto;
-  gap: 10px;
-  outline: none;
-}
-.clip-trimmer-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 14px;
-}
-.clip-trimmer-head small {
-  font-size: 11px;
-}
-.clip-trimmer-video {
-  min-height: 0;
-  display: grid;
-  place-items: center;
-  background: #000;
-  border-radius: var(--r, 12px);
-  overflow: hidden;
-}
-.clip-trimmer-video video {
-  max-width: 100%;
-  max-height: 100%;
-  cursor: pointer;
-}
-.clip-trimmer-bar {
-  position: relative;
-  height: 44px;
-  margin: 0 12px;
-  border-radius: 8px;
-  background: var(--surface-2, var(--surface));
-  cursor: pointer;
-  touch-action: none;
-}
-.clip-trimmer-bar.off {
-  cursor: default;
-}
-.clip-trimmer-cut,
-.clip-trimmer-keep {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  pointer-events: none;
-}
-.clip-trimmer-cut {
-  background: repeating-linear-gradient(
-    135deg,
-    rgba(0, 0, 0, 0.45) 0 6px,
-    rgba(0, 0, 0, 0.25) 6px 12px
-  );
-}
-.clip-trimmer-keep {
-  border-top: 2px solid var(--accent);
-  border-bottom: 2px solid var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-}
-.clip-trimmer-playhead {
-  position: absolute;
-  top: -4px;
-  bottom: -4px;
-  width: 2px;
-  margin-left: -1px;
-  background: var(--ink);
-  pointer-events: none;
-}
-.clip-trimmer-handle {
-  position: absolute;
-  top: -6px;
-  bottom: -6px;
-  width: 14px;
-  margin-left: -7px;
-  border-radius: 4px;
-  background: var(--accent);
-  cursor: ew-resize;
-  touch-action: none;
-  z-index: 1;
-}
-.clip-trimmer-handle::after {
-  content: '';
-  position: absolute;
-  inset: 12px 4px;
-  border-left: 2px solid rgba(0, 0, 0, 0.45);
-  border-right: 2px solid rgba(0, 0, 0, 0.45);
-}
-.clip-trimmer-handle:focus-visible {
-  outline: 2px solid var(--ink);
-  outline-offset: 2px;
-}
-.clip-trimmer-times {
-  margin: 0;
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-.clip-trimmer-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-.clip-trimmer-actions button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.clip-trimmer-spacer {
-  flex: 1;
-}
-/* The whole clip card is the drag handle; a short move starts the drag, a tap still clicks. */
-.film-clip {
-  cursor: grab;
-  touch-action: none;
-  user-select: none;
-}
-.film-clip.dragging {
-  cursor: grabbing;
-}
-.film-clip-scissors {
-  position: absolute;
-  right: 32px;
-  bottom: 6px;
-  z-index: 1;
-  padding: 2px;
-  border: 0;
-  background: none;
-  color: var(--muted);
-  cursor: pointer;
-}
-.film-clip-scissors:hover:not(:disabled),
-.film-clip-toggle:hover:not(:disabled) {
-  color: var(--ink);
-}
-.film-clip-scissors:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
-}
-@media (pointer: coarse) {
-  .clip-trimmer-handle {
-    width: 24px;
-    margin-left: -12px;
-  }
-  .clip-trimmer-bar {
-    height: 52px;
-  }
-}
-@media (max-width: 760px) {
-  .clip-trimmer-head small,
-  .clip-trimmer-spacer {
+  .film-zoom small {
     display: none;
   }
 }
 
 /* Sound lane (#408): blocks share the clip track's scale and scroll with it. */
-.film-tracks-scroll {
-  overflow-x: auto;
-  padding-bottom: 6px;
-  overscroll-behavior-x: contain;
-}
-.film-editor-tracks > .film-tracks-scroll > .film-track:first-child {
-  overflow: visible;
-  width: max-content;
-  min-width: 100%;
-}
 .film-audio-lane {
   position: relative;
   min-width: 100%;
@@ -532,24 +421,6 @@
 .film-audio-controls input[type='range'] {
   width: 120px;
   accent-color: var(--accent);
-}
-.film-clip-sound {
-  position: absolute;
-  right: 52px;
-  bottom: 6px;
-  z-index: 1;
-  padding: 2px;
-  border: 0;
-  background: none;
-  color: var(--muted);
-  cursor: pointer;
-}
-.film-clip-sound.on {
-  color: #74adff;
-}
-.film-clip-sound:disabled {
-  opacity: 0.35;
-  cursor: not-allowed;
 }
 @media (pointer: coarse) {
   .film-audio-trim {

@@ -389,6 +389,8 @@ function editedLabel(value, locale = 'zh') {
 }
 function StoryLocation({ mode }) {
   const { t, locale } = useI18n();
+  // Stories live in the cloud by default; only browser-only ones need a label (owner, 2026-10-21).
+  if (mode === 'cloud') return null;
   return (
     <span className={'badge ' + mode}>
       {mode === 'cloud' ? <Cloud size={12} /> : <HardDrive size={12} />}{' '}

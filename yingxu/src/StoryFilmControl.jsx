@@ -13,6 +13,13 @@ import {
   filmTerminal,
 } from './story-film.js';
 import { FilmRunView, filmProblem } from './StoryFilmView.jsx';
+import { store } from './store.js';
+import { storyShots } from './storyboard-domain.js';
+import {
+  chapterForShot,
+  generatedAudioOption,
+  upsertGeneratedSound,
+} from './generated-sound-model.js';
 import './v2/story-film.css';
 
 function browserStorage() {
@@ -32,6 +39,51 @@ function browserStorage() {
       throw Error('film.pendingCorrupt');
     },
   };
+}
+
+// How the whole film should sound (owner, 2026-10-21). "Each clip's own sound" adds every
+// shot's generated sound track that exists; "As set in the editor" keeps the chapter tracks;
+// "Silent" exports no sound. The choice is saved in the story like any other edit.
+function FilmSoundChoice({ disabled }) {
+  const { t } = useI18n();
+  const project = useSyncExternalStore(store.subscribe, () => store.getState().project);
+  const mode = project.journey?.sound?.mode;
+  const tracks = Object.values(project.journey?.soundTracks || {}).flat();
+  const value = mode === 'silent' ? 'silent' : tracks.length ? 'editor' : mode ? 'editor' : '';
+  const choose = (next) =>
+    store.editProject((p) => {
+      p.journey ||= {};
+      if (next === 'silent') {
+        p.journey.sound = { ...(p.journey.sound || {}), mode: 'silent' };
+        return;
+      }
+      if (next === 'clips')
+        for (const shot of storyShots(p)) {
+          if (generatedAudioOption(p, shot.id).issue) continue;
+          const chapterId = chapterForShot(p, shot.id),
+            existing = (p.journey.soundTracks?.[chapterId] || []).find(
+              (track) => track.generatedFrom && track.shotId === shot.id,
+            );
+          if (existing) existing.muted = false;
+          else upsertGeneratedSound(p, shot.id);
+        }
+      p.journey.sound = { ...(p.journey.sound || {}), mode: 'mixed' };
+    });
+  return (
+    <label>
+      {t('film.sound')}
+      <select
+        value={value}
+        disabled={disabled}
+        onChange={(event) => event.target.value && choose(event.target.value)}
+      >
+        {!value && <option value="">{t('film.soundChoose')}</option>}
+        <option value="clips">{t('film.soundClips')}</option>
+        <option value="editor">{t('film.soundEditor')}</option>
+        <option value="silent">{t('film.soundSilent')}</option>
+      </select>
+    </label>
+  );
 }
 
 export default function StoryFilmControl({
@@ -237,6 +289,7 @@ export default function StoryFilmControl({
                   <option value="720P">720P</option>
                 </select>
               </label>
+              <FilmSoundChoice disabled={!newAllowed} />
               <label className="film-check">
                 <input
                   type="checkbox"
