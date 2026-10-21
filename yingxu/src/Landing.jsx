@@ -151,7 +151,14 @@ export default function Landing() {
         </section>
       </main>
       <PublicFooter />
-      {login && <Login onClose={() => setLogin(false)} onDone={() => setLogin(false)} />}
+      {login && (
+        <Login
+          title={t('landing.signInTitle')}
+          lead={t('landing.signInLead')}
+          onClose={() => setLogin(false)}
+          onDone={() => setLogin(false)}
+        />
+      )}
     </div>
   );
 }

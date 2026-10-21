@@ -135,14 +135,17 @@ function settingsForMode(capabilities, current, mode) {
     },
   };
 }
-export function Login({ onClose, onDone }) {
+export function Login({ onClose, onDone, title, lead }) {
   const { t, locale } = useI18n();
   const c = useCloud(),
     [username, setUsername] = useState(''),
     [password, setPassword] = useState(''),
     [error, setError] = useState('');
   return (
-    <ChatDialog title={c.account ? t('workspace.copy89') : t('workspace.copy90')} onClose={onClose}>
+    <ChatDialog
+      title={c.account ? t('workspace.copy89') : title || t('workspace.copy90')}
+      onClose={onClose}
+    >
       {c.account ? (
         <>
           <p>
@@ -168,7 +171,7 @@ export function Login({ onClose, onDone }) {
             }
           }}
         >
-          <p>{t('workspace.copy119')}</p>
+          <p>{lead ?? t('workspace.copy119')}</p>
           <HostedSignIn auth={c.auth} />
           <label className="qc-field">
             {t('workspace.copy3')}
