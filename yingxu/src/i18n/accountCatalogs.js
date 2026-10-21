@@ -1,6 +1,10 @@
 export const accountCatalogs = {
   en: {
     'account.myAccount': 'My account',
+    'account.signOutEverywhere': 'Sign out of all devices',
+    'account.signOutEverywhereConfirm':
+      'This signs you out on every browser and phone, this one included.',
+    'account.signOutEverywhereYes': 'Sign out everywhere',
     'account.hostedSignIn':
       'Signs in with Google, GitHub or email. Manage sign-in methods on the sign-in page.',
     'account.copy1': 'My stories',
@@ -351,6 +355,9 @@ export const accountCatalogs = {
   },
   zh: {
     'account.myAccount': '我的账号',
+    'account.signOutEverywhere': '退出所有设备',
+    'account.signOutEverywhereConfirm': '所有浏览器和手机上的登录都会退出，包括这一台。',
+    'account.signOutEverywhereYes': '全部退出',
     'account.hostedSignIn': '通过 Google、GitHub 或邮箱登录，登录方式在登录页面管理。',
     'account.copy1': '我的故事',
     'account.copy2': '新建故事',

@@ -1967,6 +1967,14 @@ export function createCloudController({
         const providerLogout = providerLogoutUrl(result);
         if (providerLogout && typeof window !== 'undefined') window.location.assign(providerLogout);
       }),
+    logoutEverywhere: () =>
+      action(async () => {
+        void clearVideoCache().catch(() => {});
+        await api.revokeAllSessions('sessions-' + uid());
+        rememberVisit({ mode: 'local' });
+        replaceIdentity(null, '已在所有设备退出。云草稿仍按原账户保留。');
+        announceSession();
+      }),
     leave() {
       epoch++;
       projectOpenRequest++;

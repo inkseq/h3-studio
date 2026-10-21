@@ -402,6 +402,9 @@ export function createCloudClient({
         key,
       }),
     generationAvailability: () => request('/v1/generation-availability'),
+    // Ends every browser session of this account, this one included (#415).
+    revokeAllSessions: (key) =>
+      request('/api/auth/sessions/revoke-all', { method: 'POST', body: {}, key }),
     changePassword: (old_password, new_password) =>
       request('/v1/auth/password', { method: 'POST', body: { old_password, new_password } }),
     apiKeys: () => request('/v1/api-keys'),
