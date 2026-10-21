@@ -229,3 +229,166 @@
 .film-editor-head > div:first-child {
   margin-inline-end: auto;
 }
+
+/* Fine trim: one clip on a wide bar, shown in place of the preview. */
+.film-editor-stage.trimming {
+  display: block;
+  background: transparent;
+  overflow: auto;
+}
+.clip-trimmer {
+  width: 100%;
+  height: 100%;
+  grid-template-columns: minmax(0, 1fr);
+  display: grid;
+  grid-template-rows: auto minmax(120px, 1fr) auto auto auto;
+  gap: 10px;
+  outline: none;
+}
+.clip-trimmer-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+}
+.clip-trimmer-head small {
+  font-size: 11px;
+}
+.clip-trimmer-video {
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  background: #000;
+  border-radius: var(--r, 12px);
+  overflow: hidden;
+}
+.clip-trimmer-video video {
+  max-width: 100%;
+  max-height: 100%;
+  cursor: pointer;
+}
+.clip-trimmer-bar {
+  position: relative;
+  height: 44px;
+  margin: 0 12px;
+  border-radius: 8px;
+  background: var(--surface-2, var(--surface));
+  cursor: pointer;
+  touch-action: none;
+}
+.clip-trimmer-bar.off {
+  cursor: default;
+}
+.clip-trimmer-cut,
+.clip-trimmer-keep {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+.clip-trimmer-cut {
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(0, 0, 0, 0.45) 0 6px,
+    rgba(0, 0, 0, 0.25) 6px 12px
+  );
+}
+.clip-trimmer-keep {
+  border-top: 2px solid var(--accent);
+  border-bottom: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.clip-trimmer-playhead {
+  position: absolute;
+  top: -4px;
+  bottom: -4px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--ink);
+  pointer-events: none;
+}
+.clip-trimmer-handle {
+  position: absolute;
+  top: -6px;
+  bottom: -6px;
+  width: 14px;
+  margin-left: -7px;
+  border-radius: 4px;
+  background: var(--accent);
+  cursor: ew-resize;
+  touch-action: none;
+  z-index: 1;
+}
+.clip-trimmer-handle::after {
+  content: '';
+  position: absolute;
+  inset: 12px 4px;
+  border-left: 2px solid rgba(0, 0, 0, 0.45);
+  border-right: 2px solid rgba(0, 0, 0, 0.45);
+}
+.clip-trimmer-handle:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+.clip-trimmer-times {
+  margin: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.clip-trimmer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.clip-trimmer-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.clip-trimmer-spacer {
+  flex: 1;
+}
+/* The whole clip card is the drag handle; a short move starts the drag, a tap still clicks. */
+.film-clip {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.film-clip.dragging {
+  cursor: grabbing;
+}
+.film-clip-scissors {
+  position: absolute;
+  right: 32px;
+  bottom: 6px;
+  z-index: 1;
+  padding: 2px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.film-clip-scissors:hover:not(:disabled),
+.film-clip-toggle:hover:not(:disabled) {
+  color: var(--ink);
+}
+.film-clip-scissors:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+@media (pointer: coarse) {
+  .clip-trimmer-handle {
+    width: 24px;
+    margin-left: -12px;
+  }
+  .clip-trimmer-bar {
+    height: 52px;
+  }
+}
+@media (max-width: 760px) {
+  .clip-trimmer-head small,
+  .clip-trimmer-spacer {
+    display: none;
+  }
+}
