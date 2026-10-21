@@ -29,6 +29,11 @@ def owner_reference_gate(connection, tenant, owner):
         # BEGIN IMMEDIATE. Do not start a second physical transaction.
         if not connection.connection.driver_connection.in_transaction:
             connection.exec_driver_sql("BEGIN IMMEDIATE")
+    from .account_deletion import assert_writable
+
+    # The marker is checked INSIDE the existing owner fence: an earlier
+    # authenticated request cannot resume a content write after confirmation.
+    assert_writable(connection, tenant, owner)
 
 
 def _objects(connection):

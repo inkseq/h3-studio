@@ -618,10 +618,13 @@ def register_generation_workflow(DBOS, slots):
 class DurableExecutor:
     """One existing-controller executor. Shutdown leaves native work untouched."""
 
-    def __init__(self, repo, settings, work_dir, *, film_setup=None):
+    def __init__(
+        self, repo, settings, work_dir, *, film_setup=None, account_services=None
+    ):
         self.repo, self.settings = repo, settings
         self.slots = DurableSlots(repo, settings, work_dir)
         self.film_setup = film_setup
+        self.account_services = account_services
         self._DBOS = None
 
     def __enter__(self):
@@ -655,7 +658,19 @@ class DurableExecutor:
             register_payment_workflows(DBOS, self.repo, self.settings)
             from .account_workflows import register_account_workflows
 
-            register_account_workflows(DBOS, self.repo, self.settings)
+            register_account_workflows(
+                DBOS,
+                self.repo,
+                self.settings,
+                **(
+                    {
+                        "sessions": self.account_services[0],
+                        "deletion": self.account_services[1],
+                    }
+                    if self.account_services is not None
+                    else {}
+                ),
+            )
             if self.film_setup is not None:
                 self.film_setup(DBOS)
             DBOS.launch()

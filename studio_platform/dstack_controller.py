@@ -1244,7 +1244,14 @@ def main(argv=None):
                 register_film_workflows(DBOS, film_service, principal_for)
 
             durable_executor = DurableExecutor(
-                repo, settings, work_dir, film_setup=film_setup
+                repo,
+                settings,
+                work_dir,
+                film_setup=film_setup,
+                account_services=(
+                    film_app.state.account_sessions,
+                    film_app.state.account_deletion,
+                ),
             ).__enter__()
             processes = durable_executor.slots
             durable_executor.import_pending()

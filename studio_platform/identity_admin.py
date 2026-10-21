@@ -358,6 +358,9 @@ class IdentityAdmin:
             after = {name: body.get(name, target[name]) for name in before}
             changed = before != after
             if changed:
+                from .account_deletion import assert_writable
+
+                assert_writable(connection, self.settings.tenant_id, target["owner"])
                 if before == {"role": "admin", "status": "active"} and after != before:
                     active_admins = connection.execute(
                         select(func.count())

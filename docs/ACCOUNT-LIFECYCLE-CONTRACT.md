@@ -55,8 +55,79 @@ the WorkOS security widget and provider outage.
 
 ## Deletion boundary (#415 slice B)
 
-Deletion implementation and staging acceptance follow slice A. Production
-deletion remains disabled. Existing accounts, profiles, assets, accepted work
-and financial rows are not removed by slice A. Owner/lawyer retention wording,
-field-level de-identification and backup-restore tombstone coverage are
-separate prerequisites before any production deletion enable.
+Production deletion is unconditionally disabled. Staging also defaults OFF;
+the operator must explicitly set `INKSEQ_ACCOUNT_DELETION_TEST_OWNERS` to the
+canonical `u_<32hex>` owners of at most twenty proven disposable fixtures.
+The environment must be staging at exactly `https://staging.inkseq.com`, with
+no origin aliases. `qa-admin`, `qa-user`, admins, operators and legacy owner
+accounts remain nondeletable, regardless of configuration. No credential or
+disposable user is created by these routes. `/api/auth/me.features.account_deletion`
+is true only for an eligible authenticated human; the capability check is
+read-only and does not create previews.
+
+- `POST /v1/account/deletion/preview`, exact `{}`: returns
+  `{preview_id,expires_at,can_delete,blockers,removed,retained,retention_policy,production_enabled}`.
+  Blockers are finite `{code,count}` objects; summaries expose counts, never
+  object keys, email, provider IDs or other owners' project names.
+- `POST /v1/account/deletion`, exact `{preview_id,confirmed:true}` and required
+  `Idempotency-Key`: returns `202 {operation_id,state:"pending"}` after durable
+  acceptance, and clears the requesting cookie. Both responses are no-store.
+  The ten-minute preview binds canonical user, browser session, policy and a
+  source fingerprint. A stale source/expired/foreign preview refuses with
+  `409/account_deletion_preview_changed`; blockers give
+  `409/account_deletion_blocked`; protected accounts give403 and disabled
+  environments give `403/account_deletion_not_enabled` before database work.
+  An operation UUID is not a public progress or recovery credential. After
+  suspension, ordinary login and old cookies no longer authenticate; durable
+  worker/audit records preserve the original result, without another deletion.
+
+Confirmation takes existing account/reference gates, rechecks jobs, unknown
+upstream work, leases, live/unknown machines, reservations, credit holds,
+unresolved Checkout/events/disputes, paid-credit balances, imports/film runs
+and storage receipts. It never cancels jobs, stops machines, grants/releases
+money or fabricates settlement to clear a blocker. It atomically suspends the
+same canonical user, advances the login cutoff, revokes local sessions, PATs,
+service clients and Agent Connect grants, writes exact media tombstones and
+enqueues one original operation in the existing DBOS application/queue.
+Acceptance and completion each retain one audit row with the original UUID.
+
+The existing owner-reference gate checks the private owner/operation fence
+inside its existing lock. A request authenticated before confirmation cannot
+write after the fence. Only server-side cleanup context bound to the exact
+tenant, owner and original operation can bypass that write fence; no request
+parameter/header grants this authority. Other owners and normal reads remain
+unaffected. Admin role/status changes cannot reactivate a fenced account.
+
+The existing OS operation lock serializes concurrent transport epochs for
+that original operation; the existing per-object cleanup rechecks storage
+binding, bytes/hash and exact key, journals an unknown delete response, and
+confirms genuine absence. Shared or unknown media is retained. The provider
+phase freezes the original WorkOS subject/client, journals before DELETE,
+then confirms original-ID absence. It performs network IO outside database
+transactions. Outages/unknown results remain pending on the same journal;
+they never switch identities or declare completion. Disabling staging's
+fixture allowlist stops future turns rather than broadening authority.
+
+Finalization rechecks late financial blockers, uses the existing purge quota
+release, redacts owner authoring/Quick Create content with existing execution
+redaction rules, and replaces profile fields with a suspended opaque tombstone.
+The canonical user UUID, original payment/credit/budget entries and idempotency
+keys remain. Signed late payment/refund handling still resolves that UUID;
+a new same-email WorkOS identity receives a fresh UUID/owner. Completed
+account journals can prove expected missing backup objects only through their
+matching original markers, tombstones, storage identities and byte hashes;
+pending, ambiguous, shared or mismatched evidence remains UNKNOWN.
+
+This is disposable staging workflow evidence, **not full production
+anonymization or legal acceptance**. Production enable requires all of:
+1. Owner/lawyer approval of entity-specific retention wording and paid-credit
+   treatment; the seven-year financial retention text is a DRAFT proposal.
+2. Field-by-field review of retained immutable payment/event/credit inputs,
+   upload/write receipts, Agent grant capsules and technical audit IDs.
+3. Backup/R2 version expiry and restore-tombstone enforcement that cannot
+   recreate deleted profiles or re-enable revoked credentials.
+4. Independent safety review and actual disposable staging phase/recovery
+   acceptance, including the provider boundary, before any production flag.
+
+No production data deletion, hosted provider action, LIVE purchase/refund or
+GPU action is authorized by the local implementation or its offline fixtures.

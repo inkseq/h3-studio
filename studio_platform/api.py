@@ -711,8 +711,9 @@ def create_app(
             "credits": credit_summary,
             "scopes": list(principal.scopes),
             "features": {
+                "account_deletion": app.state.account_deletion.capability(principal),
                 "storyboard_workspace": not principal.machine
-                and principal.owner in settings.storyboard_owners
+                and principal.owner in settings.storyboard_owners,
             },
             "operator_capacity": {
                 name: operator
@@ -1588,6 +1589,9 @@ def create_app(
     from .account_session_routes import register_routes as register_session_routes
 
     register_session_routes(app)
+    from .account_deletion_routes import register_routes as register_deletion_routes
+
+    register_deletion_routes(app)
     from .credits_routes import register_routes as register_credit_routes
 
     register_credit_routes(app)

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import ipaddress
 import os
+import re
 from pathlib import Path
 import stat
 from urllib.parse import urlsplit
@@ -129,8 +130,18 @@ class Settings:
     stripe_mode: str = "off"
     title_use_central: bool = False
     public_origin_aliases: tuple[str, ...] = ()
+    account_deletion_test_owners: tuple[str, ...] = ()
 
     def __post_init__(self):
+        if (
+            not isinstance(self.account_deletion_test_owners, tuple)
+            or len(self.account_deletion_test_owners) > 20
+            or any(
+                not isinstance(owner, str) or not re.fullmatch(r"u_[0-9a-f]{32}", owner)
+                for owner in self.account_deletion_test_owners
+            )
+        ):
+            raise ValueError("Invalid disposable account deletion fixtures")
         if self.deployment_target not in {"production", "staging"}:
             raise ValueError("Unsupported deployment target")
         if self.stripe_mode not in {"off", "test", "live"}:
@@ -365,6 +376,14 @@ class Settings:
             database_url=database_url_from_environment(),
             public_origin=public_origin_from_environment(),
             deployment_target=os.environ.get("INKSEQ_DEPLOYMENT_TARGET", "production"),
+            account_deletion_test_owners=tuple(
+                filter(
+                    None,
+                    os.environ.get("INKSEQ_ACCOUNT_DELETION_TEST_OWNERS", "").split(
+                        ","
+                    ),
+                )
+            ),
             public_origin_aliases=tuple(os.environ["PUBLIC_ORIGIN_ALIASES"].split(","))
             if os.environ.get("PUBLIC_ORIGIN_ALIASES")
             else (),
