@@ -14,7 +14,7 @@ import { PublicFooter } from './PublicPages.jsx';
 import { Login } from './QuickChatWorkspace.jsx';
 import { navigateApp } from './app-navigation.js';
 import { usePageActive } from './AppRouteCache.jsx';
-import { useI18n } from './i18n/I18nProvider.jsx';
+import { LanguageSwitcher, useI18n } from './i18n/I18nProvider.jsx';
 import { useCloud } from './CloudStudio.jsx';
 import { hostedSignInEnabled, hostedSignInUrl } from './account-access.js';
 import './landing.css';
@@ -52,7 +52,7 @@ function DemoBoard() {
 }
 
 export default function Landing() {
-  const { t, locale, setLocale } = useI18n();
+  const { t } = useI18n();
   const active = usePageActive(),
     [login, setLogin] = useState(false);
   useEffect(() => {
@@ -90,14 +90,8 @@ export default function Landing() {
         >
           {t('landing.pricing')}
         </a>
-        <button
-          type="button"
-          className="ghost small"
-          onClick={() => setLocale(locale === 'zh' ? 'en' : 'zh')}
-        >
-          {locale === 'zh' ? 'EN' : '中'}
-        </button>
-        <button type="button" className="small" onClick={start}>
+        <LanguageSwitcher />
+        <button type="button" className="landing-link" onClick={start}>
           {t('landing.signIn')}
         </button>
         <button type="button" className="primary small landing-bar-start" onClick={start}>
@@ -113,9 +107,6 @@ export default function Landing() {
               <button type="button" className="primary landing-big" onClick={start}>
                 {t('landing.start')}
                 <ArrowRight size={18} />
-              </button>
-              <button type="button" className="ghost landing-big" onClick={start}>
-                {t('landing.signIn')}
               </button>
             </div>
             <small className="muted">{t('landing.noAccount')}</small>

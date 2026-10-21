@@ -30,6 +30,10 @@
   flex: 1;
 }
 .landing-link {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: inherit;
   color: var(--ink-2);
   font-size: 14px;
   text-decoration: none;
@@ -261,7 +265,7 @@
     gap: 6px;
   }
   .landing-bar .logo span,
-  .landing-link {
+  a.landing-link {
     display: none;
   }
   .landing-lede {
@@ -270,5 +274,45 @@
   .landing-ctas .landing-big {
     flex: 1;
     justify-content: center;
+  }
+}
+
+/* Top bar: every item shares one height and type size so the row reads as one line. */
+.landing-bar {
+  gap: 4px;
+}
+.landing-bar .landing-link,
+.landing-bar .language-switch,
+.landing-bar .landing-bar-start {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  box-shadow: none;
+}
+.landing-bar .language-switch {
+  background: transparent;
+  color: var(--ink-2);
+}
+.landing-bar .landing-link:hover,
+.landing-bar .language-switch:hover {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+.landing-bar .landing-bar-start {
+  margin-left: 6px;
+  padding: 0 16px;
+  font-weight: 600;
+}
+@media (max-width: 520px) {
+  .landing-bar a.landing-link {
+    display: none;
   }
 }

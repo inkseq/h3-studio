@@ -2,8 +2,8 @@ export const landingCatalogs = {
   en: {
     'landing.pageTitle': 'Inkseq · From one line to a short film',
     'landing.pricing': 'Pricing',
-    'landing.signIn': 'Sign in',
-    'landing.start': 'Sign up and start',
+    'landing.signIn': 'Log in',
+    'landing.start': 'Get started',
     'landing.title': 'From one line to a short film',
     'landing.lede':
       'Write your story. Inkseq breaks it into a storyboard, generates each shot, and cuts them into a film you can export.',
@@ -36,7 +36,7 @@ export const landingCatalogs = {
     'landing.pageTitle': '映序 · 一句话，变成一部短片',
     'landing.pricing': '价格',
     'landing.signIn': '登录',
-    'landing.start': '注册并开始',
+    'landing.start': '开始使用',
     'landing.title': '一句话，变成一部短片',
     'landing.lede': '写下你的故事，映序帮你拆成分镜、生成每个镜头，再剪成可以导出的成片。',
     'landing.noAccount': '用邮箱或 Google 账号注册，作品都保存在你的账户里。',
