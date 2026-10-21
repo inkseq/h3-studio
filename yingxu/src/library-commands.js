@@ -155,6 +155,17 @@ export function createLibraryController({
       } catch (error) {
         guard();
         const proof = error.detail?.detail || error.detail;
+        // Quick-create workspaces are managed by the service; it refuses library edits there
+        // before changing anything, so the request is settled, not pending.
+        if (
+          op.kind === 'actions' &&
+          error.status === 409 &&
+          proof === 'quick_chat_managed_resource'
+        ) {
+          same(op);
+          storage.removeItem(name);
+          throw Error('library.managed');
+        }
         if (
           ((op.kind === 'actions' &&
             proof?.code === 'document_version_conflict' &&

@@ -301,3 +301,290 @@ body.libp-resizing {
     display: none;
   }
 }
+
+/* Asset library redesign (owner, 2026-10-22): menus under their buttons, edits in place,
+   a details panel beside the clicked card. */
+.lib-pop {
+  position: relative;
+}
+.lib-pop > summary {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  padding: 7px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-weight: 600;
+}
+.lib-pop > summary::-webkit-details-marker {
+  display: none;
+}
+.lib-pop > summary.small {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.lib-pop > summary.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+}
+.lib-pop > summary.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.lib-pop-panel {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 280px;
+  max-width: calc(100vw - 32px);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.35);
+  font-weight: 400;
+}
+.lib-upload .lib-pop-panel {
+  left: auto;
+  right: 0;
+  width: 320px;
+}
+.lib-pop-panel .field,
+.lib-pop-panel form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lib-pop-panel form {
+  gap: 10px;
+}
+.lib-pop-panel p {
+  margin: 0;
+  font-size: 12px;
+}
+.lib-pop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  overflow: auto;
+}
+.lib-pop-list > button {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: flex-start;
+  background: transparent;
+  border-color: transparent;
+  text-align: left;
+}
+.lib-pop-list > button:hover {
+  background: var(--surface-3);
+}
+.lib-pop-new {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.lib-pop-new input {
+  flex: 1 1 140px;
+  min-width: 0;
+}
+.libp-bulk .lib-pop-new {
+  border-top: 0;
+  padding-top: 0;
+  flex-wrap: nowrap;
+}
+.lib-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 18px 12px;
+  border: 1px dashed var(--line-2);
+  border-radius: 8px;
+  text-align: center;
+  font-size: 13px;
+}
+.lib-drop small {
+  font-size: 11px;
+}
+.linkish {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.libp-main.is-dropping {
+  position: relative;
+  outline: 2px dashed var(--accent);
+  outline-offset: -8px;
+}
+.libp-main.is-dropping::after {
+  content: attr(data-drop-label);
+  position: fixed;
+  left: 50%;
+  bottom: 32px;
+  transform: translateX(-50%);
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 50;
+}
+
+/* Name on the card: click to rename in place. */
+.lib-inline-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: text;
+}
+.lib-inline-label svg {
+  flex: none;
+  opacity: 0;
+  color: var(--muted);
+}
+.lib-inline-label:hover svg,
+.lib-inline-label:focus-visible svg {
+  opacity: 1;
+}
+.lib-inline-label:disabled {
+  cursor: inherit;
+}
+.lib-inline-label:disabled svg {
+  display: none;
+}
+.lib-inline-name {
+  width: 100%;
+  font: inherit;
+  padding: 2px 6px;
+}
+.libp-tile .libp-name {
+  display: block;
+  min-width: 0;
+}
+.libp-tile .libp-check {
+  opacity: 0;
+}
+.libp-tile:hover .libp-check,
+.libp-tile.selecting .libp-check,
+.libp-tile.picked .libp-check {
+  opacity: 1;
+}
+
+/* Tags as chips with an add field. */
+.lib-tag-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.lib-tag-editor .tagchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.lib-tag-editor .tagchip .x {
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+}
+.lib-tag-editor input {
+  flex: 1 1 90px;
+  min-width: 90px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+/* Details beside the clicked card. */
+.lib-float {
+  position: fixed;
+  z-index: 30;
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 80px);
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgb(0 0 0 / 0.4);
+}
+.lib-float-close {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 4px;
+  background: none;
+  border: 0;
+  color: var(--muted);
+}
+.lib-float-title {
+  margin: 0 28px 0 0;
+  font-size: 16px;
+  min-width: 0;
+}
+.lib-float .library-media {
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: var(--surface);
+}
+.lib-float .field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lib-float .field > span {
+  font-size: 12px;
+  color: var(--muted);
+}
+.lib-float .lib-pop > summary {
+  width: 100%;
+  justify-content: center;
+}
+.lib-float .lib-pop-panel {
+  position: static;
+  width: 100%;
+  margin-top: 6px;
+  box-shadow: none;
+}
+.lib-float .libp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.libp-pcard.open {
+  border-color: var(--ink);
+}

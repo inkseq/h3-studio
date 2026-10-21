@@ -94,7 +94,7 @@ const mod = new Module(filename);
 mod.filename = filename;
 mod.paths = Module._nodeModulePaths(directory);
 mod._compile(built.outputFiles[0].text, filename);
-test('library sidebar renders every authorized category total, with a usable Inbox, independent of the selected page size', () => {
+test('library sidebar renders every authorized category total independent of the selected page size, with no separate Inbox', () => {
   const prior = globalThis.localStorage;
   globalThis.localStorage = { getItem: () => null };
   try {
@@ -108,9 +108,10 @@ test('library sidebar renders every authorized category total, with a usable Inb
         next: 100,
       }),
     );
-    for (const number of Object.values(counts))
-      assert.match(html, new RegExp('>' + number + '</small>'));
-    assert.match(html, />Inbox<\/span><small[^>]*>17<\/small><\/button>/);
+    // "To sort" was dropped (owner, 2026-10-22): files are set as references from the card.
+    for (const [key, number] of Object.entries(counts))
+      if (key !== 'inbox') assert.match(html, new RegExp('>' + number + '</small>'));
+    assert.doesNotMatch(html, />Inbox</);
     assert.doesNotMatch(html, /—|inboxUnavailable/);
   } finally {
     if (prior === undefined) delete globalThis.localStorage;
