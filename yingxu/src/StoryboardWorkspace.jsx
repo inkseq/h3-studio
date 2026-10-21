@@ -468,8 +468,25 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
         onToggle={() => setLibraryCollapsed((value) => !value)}
       />
       {!libraryCollapsed && <StoryboardSplitter panel={library} label={t('storyboard.copy17')} />}
-      <div className="col" ref={column}>
-        <main className="main" ref={main}>
+      <div
+        className={'col' + (selected && !expanded ? ' with-drawer' : '')}
+        ref={column}
+        style={selected && !expanded ? { '--drawer-w': drawer.size + 'px' } : undefined}
+      >
+        <main
+          className="main"
+          ref={main}
+          onClick={(event) => {
+            // A click on empty storyboard space closes the shot panel, like most editors.
+            if (
+              selected &&
+              !event.target.closest(
+                'button, a, input, textarea, select, label, [role="button"], [role="menu"], .card, .chapter-head, .sb-chapter-head',
+              )
+            )
+              setSelected(null);
+          }}
+        >
           <div className="chapter-head">
             <div className="row tight chapter-summary">
               <button

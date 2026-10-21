@@ -810,3 +810,13 @@ body.sb-resizing-y video {
   flex: 0 0 116px;
   min-width: 0;
 }
+
+/* On wide screens the shot panel takes its own space instead of covering the board and dock. */
+@media (min-width: 1100px) {
+  .layout.A .col.with-drawer {
+    padding-right: var(--drawer-w, 440px);
+  }
+  .layout.A .col.with-drawer ~ .drawer {
+    box-shadow: none;
+  }
+}
