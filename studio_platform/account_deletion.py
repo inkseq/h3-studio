@@ -43,6 +43,7 @@ from .session_authority import read, write, advance
 
 CONTEXT = ContextVar("original_account_cleanup", default=None)
 PREVIEW_SECONDS = 600
+WORKFLOW = "inkseq.account.deletion.v1"
 RETENTION = {
     "status": "draft",
     "financial_years": 7,
@@ -734,7 +735,7 @@ class AccountDeletion:
             if self.repo.generation_transport is None:
                 raise DeletionError("account_deletion_worker_unavailable", 503)
             self.repo.generation_transport.enqueue_account_operation(
-                conn, self.tenant, ident
+                conn, self.tenant, ident, kind="deletion"
             )
             self._audit(conn, user["id"], ident, "account_deletion_requested", now)
         return {"operation_id": ident, "state": "pending"}
@@ -816,6 +817,16 @@ class AccountDeletion:
                 )
                 return True
             if getattr(identity, "id", None) != provider["subject"]:
+                raise DeletionError("account_deletion_provider_changed")
+            if provider["state"] == "requested":
+                self._save(
+                    ident,
+                    lambda value: value.update(
+                        error_code="account_deletion_provider_delete_unconfirmed"
+                    ),
+                )
+                return False
+            if provider["state"] != "unrequested":
                 raise DeletionError("account_deletion_provider_changed")
             self._save(
                 ident,

@@ -199,11 +199,15 @@ class GenerationTransport:
         )
 
     def enqueue_account_operation(
-        self, connection, tenant, operation_id, *, resume_event=None
+        self, connection, tenant, operation_id, *, resume_event=None, kind="sessions"
     ):
         from .account_sessions import WORKFLOW as ACCOUNT_WORKFLOW
         from .workflow_schema import assert_execution_allowed
 
+        if kind not in {"sessions", "deletion"}:
+            raise ValueError("account_operation_kind_invalid")
+        if kind == "deletion":
+            from .account_deletion import WORKFLOW as ACCOUNT_WORKFLOW
         assert_execution_allowed(connection)
         identifier(tenant)
         if not isinstance(operation_id, str) or not re.fullmatch(
@@ -216,9 +220,8 @@ class GenerationTransport:
         ):
             raise ValueError("account_operation_event_invalid")
         base = (
-            "inkseq-account-"
-            + hashlib.sha256((tenant + "\0" + operation_id).encode()).hexdigest()
-        )
+            "inkseq-account-delete-" if kind == "deletion" else "inkseq-account-"
+        ) + hashlib.sha256((tenant + "\0" + operation_id).encode()).hexdigest()
         # Always enqueue a deterministic epoch for this exact verified event.
         # An active workflow can become terminal between a status read and a
         # send, losing a wake. Native enqueue uniqueness avoids that race while

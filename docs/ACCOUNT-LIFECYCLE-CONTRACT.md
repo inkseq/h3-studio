@@ -108,6 +108,21 @@ transactions. Outages/unknown results remain pending on the same journal;
 they never switch identities or declare completion. Disabling staging's
 fixture allowlist stops future turns rather than broadening authority.
 
+After a DELETE was requested, a still-present original user remains
+`account_deletion_provider_delete_unconfirmed`; the worker never automatically
+POSTs another DELETE, including after process reconstruction. Only confirmed
+original-ID absence advances that phase.
+
+Deletion has the additive `inkseq.account.deletion.v1` workflow and
+`inkseq.account.deletion-turn.v1` step in the **same existing DBOS app/queue**.
+The session workflow/step/ID remain unchanged. A rollback to an A-only binary
+does not understand deletion: pinned DBOS may claim it as PENDING, then raises
+unknown-function before recording a terminal outcome. It cannot use the
+session handler to declare deletion complete. Pending deletion therefore
+requires restoring a matching worker for that same original workflow ID;
+rolling back a disposable deletion mid-flight is not a claim of completed
+cleanup or automatic old-binary recovery.
+
 Finalization rechecks late financial blockers, uses the existing purge quota
 release, redacts owner authoring/Quick Create content with existing execution
 redaction rules, and replaces profile fields with a suspended opaque tombstone.

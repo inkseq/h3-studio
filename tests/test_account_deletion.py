@@ -1,13 +1,15 @@
 """Disposable offline deletion safety; never production or a real provider."""
 
 import io
+import asyncio
+import importlib.util
 import secrets
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 import uuid
 
 from PIL import Image
@@ -170,7 +172,9 @@ class AccountDeletionTests(LedgerCase):
         )
         self.enqueues = []
         self.repo.generation_transport = SimpleNamespace(
-            enqueue_account_operation=lambda *args: self.enqueues.append(args[1:]),
+            enqueue_account_operation=lambda *args, **kwargs: self.enqueues.append(
+                args[1:]
+            ),
             job_event=lambda *args, **kwargs: None,
             close=lambda: None,
         )
@@ -355,6 +359,33 @@ class AccountDeletionTests(LedgerCase):
         self.finish(ident)
         self.assertEqual(len([v for v in self.provider.calls if v[0] == "delete"]), 1)
 
+    def test_unknown_provider_delete_ack_with_user_still_present_never_reposts(self):
+        ident = self.confirm()["operation_id"]
+        self.service.turn(self.scope.tenant_id, ident)
+        with patch.object(
+            self.provider,
+            "delete_user",
+            side_effect=RuntimeError("PRIVATE unknown response"),
+        ) as delete_user:
+            self.assertFalse(self.service.turn(self.scope.tenant_id, ident)["done"])
+            self.service = AccountDeletion(
+                self.repo,
+                self.auth,
+                self.settings,
+                self.workos,
+                self.app.state.quick_chat,
+            )
+            for _ in range(2):
+                self.assertFalse(self.service.turn(self.scope.tenant_id, ident)["done"])
+            self.assertEqual(delete_user.call_count, 1)
+        record = self.row(ident)
+        self.assertEqual(record["payload"]["provider"]["state"], "requested")
+        self.assertEqual(
+            record["payload"]["error_code"],
+            "account_deletion_provider_delete_unconfirmed",
+        )
+        self.assertEqual(record["id"], ident)
+
     def test_default_disabled_aliased_origin_and_machine_refuse(self):
         self.assertTrue(self.service.capability(self.principal))
         for changes in (
@@ -420,9 +451,9 @@ class AccountDeletionTests(LedgerCase):
         self.assertNotIn("private@example.test", str(rows))
 
     def test_enqueue_failure_rolls_back_suspension_fence_revocation_and_audit(self):
-        self.repo.generation_transport.enqueue_account_operation = lambda *args: (
-            _ for _ in ()
-        ).throw(RuntimeError("offline"))
+        self.repo.generation_transport.enqueue_account_operation = (
+            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("offline"))
+        )
         with self.assertRaises(RuntimeError):
             self.confirm()
         with self.repo.engine.connect() as conn:
@@ -959,6 +990,122 @@ class AccountDeletionTests(LedgerCase):
             self.assertIn("Max-Age=0", result.headers["set-cookie"])
             self.assertEqual(result.headers["cache-control"], "no-store")
         self.assertEqual(self.provider.calls, [])
+
+    def test_versioned_deletion_route_preserves_original_session_workflow_identity(
+        self,
+    ):
+        from studio_platform.dbos_transport import GenerationTransport, QUEUE
+        from studio_platform.account_sessions import WORKFLOW as SESSION_WORKFLOW
+        from studio_platform.account_deletion import WORKFLOW as DELETION_WORKFLOW
+
+        calls = []
+        transport = object.__new__(GenerationTransport)
+        transport.client = SimpleNamespace(
+            enqueue_in_transaction=lambda *args: calls.append(args)
+        )
+        ident = str(uuid.uuid4())
+        connection = Mock()
+        with patch("studio_platform.workflow_schema.assert_execution_allowed"):
+            transport.enqueue_account_operation(connection, self.scope.tenant_id, ident)
+            transport.enqueue_account_operation(
+                connection, self.scope.tenant_id, ident, kind="deletion"
+            )
+            with self.assertRaisesRegex(ValueError, "account_operation_kind_invalid"):
+                transport.enqueue_account_operation(
+                    connection, self.scope.tenant_id, ident, kind="foreign"
+                )
+        self.assertEqual(
+            [r[1]["workflow_name"] for r in calls],
+            [SESSION_WORKFLOW, DELETION_WORKFLOW],
+        )
+        self.assertEqual({r[1]["queue_name"] for r in calls}, {QUEUE})
+        self.assertTrue(calls[0][1]["workflow_id"].startswith("inkseq-account-"))
+        self.assertTrue(calls[1][1]["workflow_id"].startswith("inkseq-account-delete-"))
+        self.assertNotEqual(calls[0][1]["workflow_id"], calls[1][1]["workflow_id"])
+        connection.execute.assert_not_called()
+
+    def test_unknown_deletion_never_falls_back_to_session_or_claims_completed(self):
+        from studio_platform.account_workflows import register_account_workflows
+
+        functions, steps = {}, {}
+
+        class Runtime:
+            @staticmethod
+            def step(**kwargs):
+                def decorate(function):
+                    steps[kwargs["name"]] = function
+                    return function
+
+                return decorate
+
+            @staticmethod
+            def workflow(**kwargs):
+                def decorate(function):
+                    functions[kwargs["name"]] = function
+                    return function
+
+                return decorate
+
+            @staticmethod
+            async def recv_async(*args, **kwargs):
+                raise InterruptedError("offline durable wait")
+
+        sessions = SimpleNamespace(
+            turn=Mock(return_value={"done": True, "state": "completed"})
+        )
+        deletion = SimpleNamespace(turn=Mock(return_value=None))
+        register_account_workflows(
+            Runtime, self.repo, self.settings, sessions=sessions, deletion=deletion
+        )
+        self.assertEqual(
+            set(steps),
+            {"inkseq.account.lifecycle-turn.v1", "inkseq.account.deletion-turn.v1"},
+        )
+        self.assertEqual(
+            set(functions),
+            {"inkseq.account.lifecycle.v1", "inkseq.account.deletion.v1"},
+        )
+        self.assertEqual(
+            asyncio.run(
+                functions["inkseq.account.lifecycle.v1"](
+                    self.scope.tenant_id, "session"
+                )
+            )["state"],
+            "completed",
+        )
+        with self.assertRaises(InterruptedError):
+            asyncio.run(
+                functions["inkseq.account.deletion.v1"](self.scope.tenant_id, "unknown")
+            )
+        self.assertEqual(sessions.turn.call_count, 1)
+
+    @unittest.skipUnless(
+        importlib.util.find_spec("dbos"),
+        "Pinned DBOS SDK is exercised by the workflow CI runtime",
+    )
+    def test_pinned_sdk_unknown_workflow_dispatch_does_not_write_terminal_outcome(self):
+        from dbos import _core
+        from dbos._error import DBOSWorkflowFunctionNotFoundError
+
+        runtime = SimpleNamespace(
+            _registry=SimpleNamespace(workflow_info_map={}),
+            _sys_db=Mock(),
+            _serializer=Mock(),
+        )
+        status = {
+            "workflow_uuid": "original-deletion",
+            "name": "inkseq.account.deletion.v1",
+            "inputs": "offline",
+            "serialization": None,
+        }
+        with (
+            patch.object(
+                _core, "deserialize_args", return_value={"args": (), "kwargs": {}}
+            ),
+            self.assertRaises(DBOSWorkflowFunctionNotFoundError),
+        ):
+            _core.execute_dequeued_workflow(runtime, status, "original-owner-xid")
+        runtime._sys_db.update_workflow_outcome.assert_not_called()
 
 
 if __name__ == "__main__":
