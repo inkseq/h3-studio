@@ -29,7 +29,7 @@ from starlette.concurrency import run_in_threadpool
 from .assets import AssetService, AssetNotFound
 from .media_renditions import public_renditions, RENDITIONS
 from .upload_route import AssetUploadRoute
-from .auth import Auth, AuthenticationError, LoginLimited
+from .auth import Auth, AuthenticationError, LoginLimited, SessionUnavailable
 from .identity import is_admin, public_identity, require_admin
 from .capabilities import VERSION, capabilities, version_matches
 from .media import MediaError, MediaBusy
@@ -421,8 +421,23 @@ def create_app(
                     return JSONResponse({"detail": "服务身份无效"}, status_code=401)
             else:
                 principal = await run_in_threadpool(
-                    auth.session, request.cookies.get(COOKIE)
+                    auth.session,
+                    request.cookies.get(COOKIE),
+                    # A provider outage or legacy missing SID must never
+                    # prevent the holder revoking their own local sessions.
+                    # These two endpoints grant no other account authority.
+                    verify_provider=request.url.path
+                    not in {"/api/auth/logout", "/api/auth/sessions/revoke-all"},
                 )
+        except SessionUnavailable:
+            return JSONResponse(
+                {
+                    "detail": "Session verification is temporarily unavailable.",
+                    "code": "session_provider_unavailable",
+                },
+                status_code=503,
+                headers={"Cache-Control": "no-store", "Retry-After": "3"},
+            )
         except SQLAlchemyError:
             # Middleware runs outside FastAPI's endpoint exception handlers.
             # Connection errors must not escape with a DSN or bound token hash.
@@ -1561,6 +1576,9 @@ def create_app(
     from .workos_routes import register_routes as register_workos_routes
 
     register_workos_routes(app)
+    from .account_session_routes import register_routes as register_session_routes
+
+    register_session_routes(app)
     from .credits_routes import register_routes as register_credit_routes
 
     register_credit_routes(app)

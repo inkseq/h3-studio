@@ -296,6 +296,8 @@ class WorkOSAuth:
                         namespace, documents.c.document_id.in_(expired)
                     )
                 )
+            from .session_authority import epoch
+
             connection.execute(
                 insert(documents).values(
                     tenant_id=self.settings.tenant_id,
@@ -312,6 +314,7 @@ class WorkOSAuth:
                         "purpose": "link" if link else "signin",
                         "return_to": destination,
                         "legacy_session_hash": principal.session_hash if link else None,
+                        "auth_epoch": epoch(connection, self.settings.tenant_id),
                     },
                     updated_at=now,
                 )
@@ -642,7 +645,10 @@ class WorkOSAuth:
         row = self._upsert(identity, transaction, principal)
         try:
             token = self.auth.issue_workos_session(
-                row["owner"], identity["subject"], provider_session=provider_session
+                row["owner"],
+                identity["subject"],
+                provider_session=provider_session,
+                captured_epoch=transaction.get("auth_epoch", 0),
             )
         except AuthenticationError:
             # A suspension may commit between canonical upsert and issuance.

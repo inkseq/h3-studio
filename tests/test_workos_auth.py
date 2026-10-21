@@ -1,6 +1,7 @@
 """Offline AuthKit/PKCE, account isolation and browser callback acceptance."""
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -136,6 +137,22 @@ class FakeProvider:
             self.logout_override
             or "https://api.workos.com/user_management/sessions/logout?"
             + urlencode({"session_id": session_id, "return_to": return_to})
+        )
+
+    def list_sessions(self, subject, *, limit, after, order):
+        return SimpleNamespace(
+            data=[
+                SimpleNamespace(
+                    id="session_" + str(i).zfill(26),
+                    user_id=subject,
+                    status="active",
+                    ended_at=None,
+                    created_at=datetime.fromtimestamp(self.clock(), timezone.utc),
+                    expires_at=datetime.fromtimestamp(self.clock() + 900, timezone.utc),
+                )
+                for i in range(1, len(self.auth_calls) + 1)
+            ],
+            list_metadata=SimpleNamespace(after=None),
         )
 
     def create_token(self, *, user_id, scopes):
@@ -510,6 +527,20 @@ class WorkOSAuthTests(LedgerCase):
             self.finish(value, state)
         self.assertIsNone(self.row("superdan")["workos_user_id"])
         self.assertEqual(self.count_users(), 2)
+
+    def test_revoke_cutoff_refuses_original_inflight_callback_and_allows_fresh_start(
+        self,
+    ):
+        from studio_platform.account_sessions import AccountSessions
+
+        original = self.hosted()
+        value, state = self.start()
+        revoker = AccountSessions(self.repo, self.auth, self.settings, self.service)
+        revoker.revoke_all(self.auth.session(original), {}, "old-flow")
+        with self.assertRaisesRegex(WorkOSError, "account_unavailable"):
+            self.finish(value, state)
+        self.assertIsNone(self.auth.session(original))
+        self.assertIsNotNone(self.auth.session(self.hosted()))
 
     def test_explicit_legacy_link_preserves_owner_admin_and_refuses_subject_rebind(
         self,

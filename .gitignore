@@ -70,6 +70,11 @@ inventory.json
 !tests/test_identity_admin.py
 !tests/test_identity_adoption.py
 !studio_platform/auth.py
+!studio_platform/session_authority.py
+!studio_platform/account_sessions.py
+!studio_platform/account_session_routes.py
+!studio_platform/account_workflows.py
+!docs/ACCOUNT-LIFECYCLE-CONTRACT.md
 !studio_platform/capabilities.py
 !studio_platform/generation_draft.py
 !docs/FREESTYLE-AGENT.zh-CN.md
