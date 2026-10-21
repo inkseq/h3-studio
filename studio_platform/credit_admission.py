@@ -110,6 +110,12 @@ def roles(connection, tenant, owner, execution):
                 "budget_role": "accounting" if owner_row else "enforced",
             }
         )
+    if sum(row["scope"] == "owner" for row in result) > 1:
+        raise CreditError(
+            "credit_budget_binding_requires_review",
+            409,
+            detail="The generation budget binding needs administrator review.",
+        )
     return result
 
 
@@ -130,9 +136,7 @@ def validate(connection, scope, job, account_ids):
     if (
         not enabled
         or not isinstance(frozen, dict)
-        or frozen.get("version") != 2
         or type(frozen.get("version")) is not int
-        or frozen.get("admission") != "credits"
         or sorted(account_ids)
         != sorted(job["execution_plan"].get("budget_account_ids", []))
     ):
@@ -145,6 +149,21 @@ def validate(connection, scope, job, account_ids):
         execution=job["execution_plan"],
     )
     if current != frozen:
+        raise CreditError("credit_policy_changed_repreflight", 409)
+    # Included work remains an ordinary USD admission. A zero credit hold is
+    # never evidence authorizing an accounting-only USD exemption.
+    if (
+        frozen["version"] == 1
+        and type(frozen.get("credits")) is int
+        and frozen["credits"] == 0
+    ):
+        return {}
+    if (
+        frozen["version"] != 2
+        or frozen.get("admission") != "credits"
+        or type(frozen.get("credits")) is not int
+        or frozen["credits"] <= 0
+    ):
         raise CreditError("credit_policy_changed_repreflight", 409)
     return {row["account_id"]: row["budget_role"] for row in frozen["budget_rows"]}
 
@@ -167,6 +186,12 @@ def require_hold(connection, scope, job, held, role_map):
     frozen = job["execution_plan"].get("credit_quote")
     if not role_map and (not isinstance(frozen, dict) or frozen.get("version") != 2):
         return
+    if "accounting" in role_map.values() and (
+        not isinstance(frozen, dict)
+        or type(frozen.get("credits")) is not int
+        or frozen["credits"] <= 0
+    ):
+        raise CreditError("credit_policy_changed_repreflight", 409)
     row = (
         connection.execute(
             select(entries).where(
@@ -185,6 +210,8 @@ def require_hold(connection, scope, job, held, role_map):
         or row["reference_type"] != "job"
         or row["reference_id"] != job["id"]
         or row["held_delta"] != frozen["credits"]
+        or "accounting" in role_map.values()
+        and (type(row["held_delta"]) is not int or row["held_delta"] <= 0)
         or row["price_revision"] != frozen["price_revision"]
     ):
         raise CreditError("credit_policy_changed_repreflight", 409)

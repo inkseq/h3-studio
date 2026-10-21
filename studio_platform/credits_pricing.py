@@ -357,7 +357,7 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
     }
     from .credit_admission import ready, roles
 
-    if ready(connection):
+    if ready(connection) and amount > 0:
         result.update(
             version=2,
             admission="credits",

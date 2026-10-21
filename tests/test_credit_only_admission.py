@@ -29,6 +29,7 @@ from studio_platform.credit_schema import metadata as credit_metadata, prices, e
 from studio_platform.identity_schema import users, admin_audit
 from studio_platform.repository import (
     BudgetExceeded,
+    Conflict,
     budget_accounts,
     budget_reservations,
     documents,
@@ -246,6 +247,167 @@ class CreditOnlyTests(LedgerCase):
         with self.assertRaisesRegex(credits.CreditError, "repreflight"):
             self.admit(self.plan(), account_ids=())
         self.assert_empty()
+
+    def cpu_plan(self):
+        from studio_platform.render_plans import RECIPE
+
+        compiled = {"recipe_id": RECIPE, "output_spec": {"frame_count": 24, "fps": 24}}
+        execution = {
+            "pool": "cpu-render",
+            "backend": "cpu-render",
+            "expected_runtime_s": 5,
+            "budget_account_ids": ["owner-budget"],
+        }
+        with self.repo.engine.connect() as connection:
+            execution["credit_quote"] = credits_pricing.quote(
+                connection,
+                self.scope.tenant_id,
+                self.scope.owner_id,
+                compiled,
+                execution=execution,
+            )
+        return self.repo.create_plan(
+            self.scope,
+            compiled,
+            execution,
+            expires_at=self.now + 1000,
+            estimated_cost_microusd=100_000,
+        )
+
+    def test_included_cpu_zero_quote_keeps_usd_cap_and_original_enforced_row(self):
+        plan = self.cpu_plan()
+        frozen = plan["execution_plan"]["credit_quote"]
+        self.assertEqual((frozen["version"], frozen["credits"]), (1, 0))
+        self.assertNotIn("budget_rows", frozen)
+        self.assertEqual(
+            credits_pricing.public_quote(plan["execution_plan"])["admission"], "usd"
+        )
+        with self.assertRaises(BudgetExceeded):
+            self.admit(plan)
+        self.assert_empty()
+        self.repo.configure_budget(
+            "owner-budget",
+            tenant_id=self.scope.tenant_id,
+            owner_id=self.scope.owner_id,
+            limit_microusd=100_000,
+        )
+        job = self.admit(plan)
+        with self.repo.engine.connect() as connection:
+            role = connection.execute(
+                text(
+                    "SELECT budget_role FROM platform_budget_reservations WHERE reference_id=:job"
+                ),
+                {"job": job["id"]},
+            ).scalar_one()
+        self.assertEqual(role, "enforced")
+        self.assertEqual(
+            self.repo.get_budget("owner-budget")["reserved_microusd"], 100_000
+        )
+
+    def test_zero_quote_tamper_off_and_reprice_refuse_without_exposure(self):
+        for change in (
+            lambda execution: execution["credit_quote"].update(
+                version=2,
+                admission="credits",
+                budget_rows=[
+                    {
+                        "account_id": "owner-budget",
+                        "scope": "owner",
+                        "budget_role": "accounting",
+                    }
+                ],
+            ),
+            lambda execution: execution["credit_quote"].update(credits=False),
+        ):
+            plan = self.cpu_plan()
+            saved = copy.deepcopy(plan["execution_plan"])
+            change(saved)
+            tampered = self.repo.create_plan(
+                self.scope,
+                plan["request"],
+                saved,
+                expires_at=self.now + 1000,
+                estimated_cost_microusd=100_000,
+            )
+            with self.assertRaisesRegex(credits.CreditError, "repreflight"):
+                self.admit(tampered)
+        plan = self.cpu_plan()
+        self.policy(enabled=False)
+        with self.assertRaisesRegex((credits.CreditError, Conflict), "repreflight"):
+            self.admit(plan)
+        self.policy()
+        plan = self.cpu_plan()
+        with self.repo.transaction() as connection:
+            connection.execute(
+                insert(prices).values(
+                    tenant=self.scope.tenant_id,
+                    revision="price-2",
+                    rates=credits_pricing.DEFAULT_RATES,
+                    configuration=credits_pricing.DEFAULT_CONFIGURATION,
+                    published_by=self.user_id,
+                    published_at=self.now + 1,
+                )
+            )
+        self.policy(active_revision="price-2")
+        with self.assertRaisesRegex((credits.CreditError, Conflict), "repreflight"):
+            self.admit(plan)
+        self.assert_empty()
+
+    def test_zero_hold_after_role_decision_rolls_back_usd_exposure_and_job(self):
+        original = credits.hold
+
+        def zero_hold(connection, repo, scope, job, spending_actor=None):
+            job["execution_plan"]["credit_quote"]["credits"] = 0
+            return original(connection, repo, scope, job, spending_actor=spending_actor)
+
+        with patch("studio_platform.credits.hold", side_effect=zero_hold):
+            with self.assertRaisesRegex(credits.CreditError, "repreflight"):
+                self.admit(self.plan())
+        self.assert_empty()
+
+    def test_ambiguous_owner_binding_refuses_preflight_and_first_admission(self):
+        plan = self.plan()
+        self.repo.configure_budget(
+            "second-owner-budget",
+            tenant_id=self.scope.tenant_id,
+            owner_id=self.scope.owner_id,
+            limit_microusd=0,
+        )
+        ids = ("owner-budget", "second-owner-budget")
+        with self.assertRaisesRegex(
+            credits.CreditError, "credit_budget_binding_requires_review"
+        ) as raised:
+            self.plan(account_ids=ids)
+        self.assertEqual(raised.exception.status, 409)
+        self.assertNotIn("second-owner-budget", raised.exception.detail)
+        # Original preflight is immutable; a changed protected selection cannot
+        # authorize a second accounting row during admission either.
+        with self.assertRaisesRegex(credits.CreditError, "repreflight"):
+            self.admit(plan, account_ids=ids)
+        forged = copy.deepcopy(plan["execution_plan"])
+        forged["budget_account_ids"] = list(ids)
+        forged["credit_quote"]["budget_rows"].append(
+            {
+                "account_id": "second-owner-budget",
+                "scope": "owner",
+                "budget_role": "accounting",
+            }
+        )
+        forged_plan = self.repo.create_plan(
+            self.scope,
+            plan["request"],
+            forged,
+            expires_at=self.now + 1000,
+            estimated_cost_microusd=100_000,
+        )
+        with self.assertRaisesRegex(
+            credits.CreditError, "credit_budget_binding_requires_review"
+        ):
+            self.admit(forged_plan, account_ids=ids)
+        self.assert_empty()
+        self.assertEqual(
+            self.repo.get_budget("second-owner-budget")["reserved_microusd"], 0
+        )
 
     def test_shared_usd_cap_and_manual_instance_cap_stay_enforced(self):
         self.repo.configure_budget(

@@ -12,7 +12,19 @@ owner-only account is `accounting`; shared/project rows are `enforced`. Requests
 and PATs cannot select either field. Actual canonical row scope and the current
 immutable price are recomputed before first admission, in the original ledger
 transaction and lock order. Missing/stale/modified version-2 data requires a new
-preflight. New unaccepted version-1 plans require re-preflight after 007.
+preflight. New unaccepted positive-price version-1 plans require re-preflight
+after007; included zero-credit quotes retain the exception described below.
+
+The exemption requires a strictly positive integer original hold. Included
+zero-credit CPU work stays a freshly recomputed v1/USD quote and all its USD
+rows remain enforced; stale/OFF/repriced or modified zero quotes still refuse.
+For positive credit admission, more than one selected owner-only row is ambiguous and fails409
+`credit_budget_binding_requires_review`, with an administrator-review detail
+and no protected IDs. Exactly one candidate means the actual immutable
+customer-scoped row selected by the protected generation policy, not a generic
+account-purpose assertion. A policy deliberately selecting a single manual
+owner row as its generation binding remains a protected-configuration review
+boundary; this code adds no purpose registry or inference from audit records.
 
 Every original USD reservation keeps its full amount, job/account/reference
 identity and normal settlement. Only the accounting row's USD allowance check
