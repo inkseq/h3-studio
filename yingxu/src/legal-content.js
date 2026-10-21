@@ -7,7 +7,8 @@
 export const LEGAL_STATUS = 'draft';
 export const SUPPORT_EMAIL = 'support@inkseq.com';
 // Operator details from the Australian Business Register (owner, 2026-10-21).
-export const OPERATOR = { name: 'Dan Mo', abn: '68 442 632 833', state: 'Victoria' };
+// The public name only (owner, 2026-10-21): no personal name or ABN on the site.
+export const OPERATOR = { name: 'Inkseq', state: 'Victoria' };
 
 export const LEGAL = {
   terms: {
@@ -17,7 +18,7 @@ export const LEGAL = {
       blocks: [
         [
           'p',
-          'These terms are an agreement between you and Dan Mo, a sole trader trading as Inkseq (ABN 68 442 632 833, Victoria, Australia) ("we", "us"), for the Inkseq video creation studio at inkseq.com, its API and its AI assistant connections (together, "the service"). By creating an account or using the service you agree to them.',
+          'These terms are an agreement between you and Inkseq, a registered business in Victoria, Australia ("we", "us"), for the Inkseq video creation studio at inkseq.com, its API and its AI assistant connections (together, "the service"). By creating an account or using the service you agree to them.',
         ],
         ['h', '1. Your account'],
         [
@@ -92,7 +93,7 @@ export const LEGAL = {
       blocks: [
         [
           'p',
-          '本条款是你与 Dan Mo（个体经营者，以映序 Inkseq 名义经营，ABN 68 442 632 833，澳大利亚维多利亚州；下称「我们」）之间关于 inkseq.com 视频创作工作台、API 以及 AI 助手连接（合称「本服务」）的协议。创建账号或使用本服务，即表示你同意本条款。',
+          '本条款是你与映序 Inkseq（澳大利亚维多利亚州注册商号；下称「我们」）之间关于 inkseq.com 视频创作工作台、API 以及 AI 助手连接（合称「本服务」）的协议。创建账号或使用本服务，即表示你同意本条款。',
         ],
         ['h', '1. 你的账号'],
         [
@@ -170,7 +171,7 @@ export const LEGAL = {
       blocks: [
         [
           'p',
-          'Inkseq is operated by Dan Mo, a sole trader in Victoria, Australia (ABN 68 442 632 833). This policy explains what personal information Inkseq collects, why, who processes it for us, and the choices you have. We collect only what we need to run the service.',
+          'Inkseq is a registered business in Victoria, Australia. This policy explains what personal information Inkseq collects, why, who processes it for us, and the choices you have. We collect only what we need to run the service.',
         ],
         ['h', 'What we collect'],
         [
@@ -247,7 +248,7 @@ export const LEGAL = {
       blocks: [
         [
           'p',
-          '映序（Inkseq）由 Dan Mo 以个体经营者身份在澳大利亚维多利亚州运营（ABN 68 442 632 833）。本政策说明映序收集哪些个人信息、为什么收集、由谁替我们处理，以及你有哪些选择。我们只收集运行服务所需的信息。',
+          '映序（Inkseq）是在澳大利亚维多利亚州注册的商号。本政策说明映序收集哪些个人信息、为什么收集、由谁替我们处理，以及你有哪些选择。我们只收集运行服务所需的信息。',
         ],
         ['h', '我们收集什么'],
         [

@@ -95,6 +95,8 @@ test('dirty draft opens inline and choosing cloud durably preserves the original
   await h.cloud.open(h.a.id);
   h.store.updateProject({ logline: 'Unsynced original' });
   h.cloud.leave();
+  // Another device saved meanwhile, so the draft no longer continues the cloud version.
+  h.records.get(h.a.id).version += 1;
   assert.equal(await h.cloud.open(h.a.id), false);
   assert.equal(h.cloud.getState().projectOpen.status, 'draft');
   assert.equal(h.store.getState().workspace.mode, 'local');
@@ -152,9 +154,11 @@ test('opening and reopening a job-bearing cloud story without edits stays clean,
   await h.cloud.refresh();
   assert.equal(h.store.getState().workspace.dirty, true);
   h.cloud.leave();
-  assert.equal(await h.cloud.open(h.a.id), false);
-  assert.equal(h.cloud.getState().projectOpen.status, 'draft');
-  assert.equal(h.store.getCloudDraft('alice', h.a.id).project.logline, 'An actual author edit');
+  // The cloud version is unchanged, so the draft simply continues (autosave then saves it).
+  assert.equal(await h.cloud.open(h.a.id), true);
+  assert.equal(h.cloud.getState().draftOffer, null);
+  assert.equal(h.store.exportProject().logline, 'An actual author edit');
+  assert.equal(h.store.getState().workspace.dirty, true);
   h.cloud.destroy();
 });
 
@@ -314,9 +318,8 @@ test('every accepted project open carries its checked identity to URL navigation
   await h.cloud.open(h.a.id);
   h.store.updateProject({ logline: 'My draft' });
   h.cloud.leave();
-  assert.equal(await h.cloud.open(h.a.id), false);
-  assert.equal(h.opened.length, 1);
-  await h.cloud.open(h.a.id, { restoreDraft: true });
+  // An unchanged cloud version continues the draft directly.
+  assert.equal(await h.cloud.open(h.a.id), true);
   assert.deepEqual(h.opened, [
     { account: 'alice', projectId: h.a.id },
     { account: 'alice', projectId: h.a.id },
