@@ -204,6 +204,42 @@ class AgentConnectAppTests(LedgerCase):
         self.assertEqual(anon.get("/v1/agent-connect/exchange").status_code, 401)
         self.assertEqual(self.machine(grant).get("/api/auth/me").status_code, 200)
 
+    def test_only_exact_post_preview_is_anonymous_and_stream_bounded(self):
+        anon = TestClient(self.app, base_url=self.origin)
+        self.addCleanup(anon.close)
+        path = '/v1/agent-connect/grant-preview'
+        result = anon.post(path, json={'code': 'sxc_' + 'x' * 43})
+        self.assertEqual(result.status_code, 404)
+        self.assertEqual(result.headers['cache-control'], 'no-store')
+        self.assertEqual(anon.get(path).status_code, 401)
+        self.assertEqual(anon.post(path + '/extra', json={}).status_code, 401)
+        oversized = anon.post(
+            path,
+            content=iter([b'{"code":"', b'x' * 8192, b'"}']),
+            headers={'Content-Type': 'application/json'},
+        )
+        self.assertEqual(oversized.status_code, 413)
+
+    def test_preview_privacy_covers_logged_in_and_early_guard_responses(self):
+        path = '/v1/agent-connect/grant-preview'
+        responses = [
+            self.client.post(path, json={'code': 'sxc_' + 'x' * 43}),
+            self.client.post(
+                path,
+                content=b'{}',
+                headers={'Content-Type': 'application/json', 'Content-Length': '8193'},
+            ),
+            self.client.post(path, json={}, headers={'Origin': 'https://evil.example'}),
+        ]
+        self.assertEqual(
+            [response.status_code for response in responses], [404, 413, 403]
+        )
+        for response in responses:
+            self.assertNotIn('x-authenticated-account', response.headers)
+            self.assertNotIn('superdan', response.text)
+            self.assertEqual(response.headers['cache-control'], 'no-store')
+            self.assertEqual(response.headers['referrer-policy'], 'no-referrer')
+
 
 if __name__ == "__main__":
     unittest.main()

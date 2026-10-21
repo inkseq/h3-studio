@@ -65,6 +65,8 @@ VERIFIER = re.compile(r"^[A-Za-z0-9_-]{43,128}$")
 HEX = re.compile(r"^[0-9a-f]{64}$")
 PREFIX = re.compile(r"^sxp_[A-Za-z0-9_-]{8}$")
 CONNECTION_ID = re.compile(r"^connection-[0-9a-f]{32}$")
+TELEGRAM_USER_ID = re.compile(r"^[1-9][0-9]{0,18}$")
+TELEGRAM_USERNAME = re.compile(r"^[A-Za-z0-9_]{1,32}$")
 metadata = MetaData()
 connections = Table(
     "platform_agent_connections",
@@ -248,6 +250,8 @@ class AgentConnect(AgentManagementMixin):
         daily_limit_credits=None,
         scope=None,
         permission=None,
+        client=None,
+        telegram_nonce=None,
     ):
         from .repository import money
 
@@ -259,6 +263,14 @@ class AgentConnect(AgentManagementMixin):
             raise ConnectError("connection_daily_limit_invalid", 422) from None
         if not isinstance(name, str) or not 1 <= len(name.strip()) <= 80:
             raise ConnectError("connection_name_invalid", 422)
+        if client is not None and client != "telegram":
+            raise ConnectError("connection_client_invalid", 422)
+        if telegram_nonce is not None and (
+            client != "telegram"
+            or not isinstance(telegram_nonce, str)
+            or not VERIFIER.fullmatch(telegram_nonce)
+        ):
+            raise ConnectError("connection_telegram_nonce_invalid", 422)
         if (
             authorization_profile_id != PROFILE_ID
             or type(authorization_profile_version) is not int
@@ -286,6 +298,10 @@ class AgentConnect(AgentManagementMixin):
             request_value["daily_limit_credits"] = daily_limit_credits
         if scope is not None or permission is not None:
             request_value.update(scope=scope, permission=permission)
+        if client is not None:
+            request_value["client"] = client
+        if telegram_nonce is not None:
+            request_value["telegram_nonce_hash"] = digest(telegram_nonce)
         request_hash = digest(
             json.dumps(request_value, sort_keys=True, separators=(",", ":"))
         )
@@ -338,7 +354,12 @@ class AgentConnect(AgentManagementMixin):
             connection_id = "connection-" + uuid.uuid4().hex
             authorization = {
                 "origin": origin,
-                "owner": principal.owner,
+                # Preview is anonymous. Telegram grants expose an opaque grant
+                # subject rather than a browser account's username/email. All
+                # authority and persisted PAT ownership still use row.owner.
+                "owner": "account-" + uuid.uuid4().hex
+                if client == "telegram"
+                else principal.owner,
                 "tenant": self.tenant,
                 "connection_id": connection_id,
                 "profile_id": PROFILE_ID,
@@ -360,6 +381,10 @@ class AgentConnect(AgentManagementMixin):
                 authorization["daily_limit_microusd"] = daily_limit_microusd
             if daily_limit_credits is not None:
                 authorization["daily_limit_credits"] = daily_limit_credits
+            if client is not None:
+                authorization["client"] = client
+            if telegram_nonce is not None:
+                authorization["telegram_nonce_hash"] = digest(telegram_nonce)
             encoded = json.dumps(authorization, sort_keys=True, separators=(",", ":"))
             row = dict(
                 tenant=self.tenant,
@@ -428,6 +453,8 @@ class AgentConnect(AgentManagementMixin):
             paused=False,
             state_version=0,
         )
+        if authorization.get("client") == "telegram":
+            result["client"] = "telegram"
         if key:
             result["key"] = self.auth.public_key(key)
         return result
@@ -436,7 +463,7 @@ class AgentConnect(AgentManagementMixin):
         """Keep legacy exchange independent of a provider-accounting database."""
         from .credits import credit_policy
 
-        value = self._public(row, key)
+        value = self._telegram_public(conn, row, self._public(row, key))
         return (
             self._management_public(conn, row, value)
             if credit_policy(conn, self.tenant)['enabled']
@@ -483,10 +510,23 @@ class AgentConnect(AgentManagementMixin):
         return self._management_public(
             conn,
             row,
-            self._public(
-                dict(row), dict(key) if key else None, unavailable=unavailable
+            self._telegram_public(
+                conn,
+                row,
+                self._public(
+                    dict(row), dict(key) if key else None, unavailable=unavailable
+                ),
             ),
         )
+
+    def _telegram_public(self, conn, row, value):
+        if value.get("client") != "telegram":
+            return value
+        from .agent_management import read_doc
+
+        state = read_doc(conn, self.tenant, row["owner"], "connection_state", row["id"])
+        claim = state["payload"].get("claimed_telegram_user") if state else None
+        return {**value, "claimed_telegram_user": claim}
 
     def list(self, principal, *, limit=50, offset=0):
         if (
@@ -541,6 +581,125 @@ class AgentConnect(AgentManagementMixin):
             if not row:
                 raise ConnectError("connection_not_found", 404)
             return self._public_current(conn, row)
+
+    def preview(self, *, code, origin, source):
+        """Inspect an unconsumed Telegram grant without issuing a credential.
+
+        The short-lived code is a bearer secret. Only frozen authorization is
+        returned, never browser identity, mutable owner usage, or key metadata.
+        """
+        self.reserve_exchange(source, code=code)
+        origin = self.origin(origin)
+        if not isinstance(code, str) or not CODE.fullmatch(code):
+            raise ConnectError("connection_not_found", 404)
+        with self.engine.begin() as conn:
+            self._begin(conn)
+            initial = (
+                conn.execute(
+                    select(connections).where(
+                        connections.c.tenant == self.tenant,
+                        connections.c.code_hash == digest(code),
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if (
+                initial is None
+                or json.loads(initial["authorization"]).get("client") != "telegram"
+            ):
+                raise ConnectError("connection_not_found", 404)
+            self._account(
+                conn,
+                initial["owner"],
+                initial["password_version"],
+                auth_mode=initial["auth_mode"],
+                lock=True,
+            )
+            row = (
+                conn.execute(
+                    select(connections)
+                    .where(
+                        connections.c.tenant == self.tenant,
+                        connections.c.id == initial["id"],
+                    )
+                    .with_for_update()
+                )
+                .mappings()
+                .one()
+            )
+            authorization = json.loads(row["authorization"])
+            if authorization["origin"] != origin:
+                raise ConnectError("connection_authorization_mismatch", 409)
+            if row["revoked_at"] is not None or row["claimed_at"] is not None:
+                raise ConnectError("connection_unavailable", 410)
+            if row["expires_at"] <= self.clock():
+                raise ConnectError("connection_expired", 403)
+            if not conn.execute(
+                select(sessions.c.token_hash).where(
+                    sessions.c.tenant == self.tenant,
+                    sessions.c.token_hash == row["session_hash"],
+                    sessions.c.username == row["owner"],
+                    sessions.c.auth_mode == row["auth_mode"],
+                    sessions.c.password_version == row["password_version"],
+                    sessions.c.expires > self.clock(),
+                )
+            ).first():
+                raise ConnectError("connection_authority_changed", 410)
+            return {
+                "connection_id": row["id"],
+                "authorization": authorization,
+                "authorization_fingerprint": row["authorization_fingerprint"],
+            }
+
+    @staticmethod
+    def _telegram_claim(authorization, telegram_user, telegram_nonce):
+        if authorization.get("client") != "telegram":
+            if telegram_user is not None or telegram_nonce is not None:
+                raise ConnectError("connection_client_mismatch", 409)
+            return None
+        if (
+            not isinstance(telegram_user, dict)
+            or set(telegram_user) - {"id", "username", "display_name"}
+            or not isinstance(telegram_user.get("id"), str)
+            or not TELEGRAM_USER_ID.fullmatch(telegram_user["id"])
+            or int(telegram_user["id"]) > 9223372036854775807
+        ):
+            raise ConnectError("connection_telegram_user_invalid", 422)
+        username, display_name = (
+            telegram_user.get("username"),
+            telegram_user.get("display_name"),
+        )
+        if (
+            username is not None
+            and (
+                not isinstance(username, str)
+                or not TELEGRAM_USERNAME.fullmatch(username)
+            )
+            or display_name is not None
+            and (
+                not isinstance(display_name, str)
+                or not 1 <= len(display_name) <= 160
+                or any(ord(char) < 32 or ord(char) == 127 for char in display_name)
+            )
+        ):
+            raise ConnectError("connection_telegram_user_invalid", 422)
+        nonce_hash = authorization.get("telegram_nonce_hash")
+        if nonce_hash is not None:
+            if (
+                not isinstance(telegram_nonce, str)
+                or not VERIFIER.fullmatch(telegram_nonce)
+                or not hmac.compare_digest(nonce_hash, digest(telegram_nonce))
+            ):
+                raise ConnectError("connection_telegram_nonce_mismatch", 409)
+        elif telegram_nonce is not None:
+            raise ConnectError("connection_telegram_nonce_mismatch", 409)
+        # This is an unverified client claim, not a Telegram login assertion.
+        return {
+            "id": telegram_user["id"],
+            "username": username,
+            "display_name": display_name,
+        }
 
     def reserve_exchange(self, source, *, code=None):
         if not isinstance(source, str) or not 1 <= len(source) <= 512:
@@ -613,6 +772,8 @@ class AgentConnect(AgentManagementMixin):
         expected_authorization_fingerprint,
         origin,
         recovery_verifier=None,
+        telegram_user=None,
+        telegram_nonce=None,
     ):
         self.reserve_exchange(source, code=code)
         origin = self.origin(origin)
@@ -678,8 +839,31 @@ class AgentConnect(AgentManagementMixin):
                     row["auth_mode"]
                 ):
                     raise ConnectError("connection_unavailable", 410)
+                telegram_claim = self._telegram_claim(
+                    authorization, telegram_user, telegram_nonce
+                )
                 now = self.clock()
                 if row["claimed_at"] is not None:
+                    if telegram_claim is not None:
+                        from .agent_management import read_doc
+
+                        state = read_doc(
+                            conn,
+                            self.tenant,
+                            row["owner"],
+                            "connection_state",
+                            row["id"],
+                        )
+                        original_claim = (
+                            state["payload"].get("claimed_telegram_user")
+                            if state
+                            else None
+                        )
+                        if (
+                            not original_claim
+                            or original_claim.get("id") != telegram_claim["id"]
+                        ):
+                            raise ConnectError("connection_telegram_user_mismatch", 409)
                     if (
                         recovery_verifier is None
                         or row["recovery_until"] <= now
@@ -833,6 +1017,24 @@ class AgentConnect(AgentManagementMixin):
                             )
                         )
                 row = dict(row) | claimed
+                if telegram_claim is not None:
+                    from .agent_management import put_doc, read_doc
+
+                    state = read_doc(
+                        conn, self.tenant, row["owner"], "connection_state", row["id"]
+                    )
+                    put_doc(
+                        conn,
+                        self.tenant,
+                        row["owner"],
+                        "connection_state",
+                        row["id"],
+                        {
+                            **(state["payload"] if state else {}),
+                            "claimed_telegram_user": telegram_claim,
+                        },
+                        now,
+                    )
                 self._emit(conn, row, "exchanged")
                 return {
                     "connection": self._public_grant(conn, row, key),

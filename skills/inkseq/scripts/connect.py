@@ -43,6 +43,10 @@ MAX_RESPONSE_BYTES = 1024 * 1024
 ID = re.compile(r"^connection-[0-9a-f]{32}$")
 HEX = re.compile(r"^[0-9a-f]{64}$")
 CODE = re.compile(r"^sxc_[A-Za-z0-9_-]{43}$")
+TELEGRAM_NONCE = re.compile(r"^[A-Za-z0-9_-]{43,128}$")
+TELEGRAM_ID = re.compile(r"^[1-9][0-9]{0,18}$")
+TELEGRAM_USERNAME = re.compile(r"^[A-Za-z0-9_]{1,32}$")
+TELEGRAM_ACCOUNT = re.compile(r"^account-[0-9a-f]{32}$")
 _MACOS_INTERACTION_LOCK = threading.RLock()
 
 
@@ -56,6 +60,27 @@ def canonical(value):
 
 def digest(value):
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def telegram_context(user, nonce):
+    """Validate optional bot-held context without authenticating a Telegram user."""
+    if user is None and nonce is None:
+        return None
+    if (not isinstance(user, dict) or set(user) - {"id", "username", "display_name"}
+            or not isinstance(user.get("id"), str) or not TELEGRAM_ID.fullmatch(user["id"])
+            or int(user["id"]) > 2**63 - 1):
+        raise HelperError("connection_telegram_user_invalid")
+    username, display_name = user.get("username"), user.get("display_name")
+    if (username is not None and (not isinstance(username, str) or not TELEGRAM_USERNAME.fullmatch(username))
+            or display_name is not None and (not isinstance(display_name, str) or not 1 <= len(display_name) <= 160
+                or any(ord(char) < 32 or ord(char) == 127 for char in display_name))):
+        raise HelperError("connection_telegram_user_invalid")
+    if nonce is not None and (not isinstance(nonce, str) or not TELEGRAM_NONCE.fullmatch(nonce)):
+        raise HelperError("connection_telegram_nonce_invalid")
+    value = {"telegram_user": {"id": user["id"], "username": username, "display_name": display_name}}
+    if nonce is not None:
+        value["telegram_nonce"] = nonce
+    return value
 
 
 def checked_origin(value):
@@ -173,7 +198,9 @@ class JsonHTTP:
                 code = None
             allowed = {"connection_not_exchanged", "connection_expired", "connection_consumed",
                 "connection_unavailable", "connection_authority_changed", "connection_exchange_limited",
-                "connection_authorization_mismatch", "connection_key_conflict", "too_many_active_keys"}
+                "connection_authorization_mismatch", "connection_key_conflict", "too_many_active_keys",
+                "connection_client_invalid", "connection_telegram_nonce_invalid", "connection_telegram_nonce_mismatch",
+                "connection_telegram_user_invalid", "connection_telegram_user_mismatch"}
             raise HelperError(code if code in allowed else "http_request_failed") from None
         except (URLError, TimeoutError, OSError):
             raise HelperError("network_result_unknown") from None
@@ -521,7 +548,8 @@ class SecureStore:
     @staticmethod
     def _preserve_record(existing, incoming):
         if existing and (existing.get("expected") != incoming.get("expected")
-                or existing.get("api_key") != incoming.get("api_key")):
+                or existing.get("api_key") != incoming.get("api_key")
+                or existing.get("telegram_context") != incoming.get("telegram_context")):
             raise HelperError("saved_authorization_mismatch")
         return existing if existing and existing.get("status") == "connected" and incoming.get("status") != "connected" else incoming
 
@@ -744,20 +772,26 @@ class AgentClient:
             "key_id": state["key_id"], "expires_at": state["expires_at"], "online_verified": True}
 
     def connect(self, *, code, connection_id, owner, tenant, fingerprint,
-                profile_id="creator-full", profile_version=1):
+                profile_id="creator-full", profile_version=1, telegram_user=None, telegram_nonce=None):
         if not isinstance(code, str) or not CODE.fullmatch(code) or not HEX.fullmatch(fingerprint or ""):
             raise HelperError("invalid_connection_instruction")
         if not ID.fullmatch(connection_id or "") or not isinstance(owner, str) or not isinstance(tenant, str):
+            raise HelperError("invalid_connection_instruction")
+        context = telegram_context(telegram_user, telegram_nonce)
+        if context is not None and not TELEGRAM_ACCOUNT.fullmatch(owner):
             raise HelperError("invalid_connection_instruction")
         existing = self.store.load(self.origin, connection_id)
         expected = {"origin": self.origin, "connection_id": connection_id, "owner": owner, "tenant": tenant,
                     "profile_id": profile_id, "profile_version": profile_version, "fingerprint": fingerprint}
         if existing:
-            if existing.get("expected") != expected:
+            if (existing.get("expected") != expected
+                    or context is not None and existing.get("telegram_context") != context):
                 raise HelperError("saved_authorization_mismatch")
             return self.resume(connection_id)
         state = {"protocol": PROTOCOL, "status": "pending", "expected": expected,
             "code": code, "api_key": "sxp_" + secrets.token_urlsafe(32), "verifier": secrets.token_urlsafe(32)}
+        if context is not None:
+            state["telegram_context"] = context
         self.store.save(self.origin, connection_id, state)
         return self._exchange(state, recovery=False)
 
@@ -766,6 +800,14 @@ class AgentClient:
         body = {"code": state["code"], "client_challenge": digest(state["verifier"]),
             "token_hash": digest(state["api_key"]), "key_prefix": state["api_key"][:12],
             "expected_authorization_fingerprint": expected["fingerprint"]}
+        context = state.get("telegram_context")
+        if context is not None:
+            if not isinstance(context, dict) or set(context) - {"telegram_user", "telegram_nonce"}:
+                raise HelperError("saved_authorization_mismatch")
+            checked = telegram_context(context.get("telegram_user"), context.get("telegram_nonce"))
+            if checked != context or not TELEGRAM_ACCOUNT.fullmatch(expected["owner"]):
+                raise HelperError("saved_authorization_mismatch")
+            body.update(context)
         if recovery:
             body["recovery_verifier"] = state["verifier"]
         try:
@@ -777,7 +819,17 @@ class AgentClient:
         connection = result.get("connection", {})
         authorization = connection.get("authorization", {})
         key = result.get("key", {})
+        claim = connection.get("claimed_telegram_user")
+        telegram_matches = (
+            authorization.get("client") != "telegram" and "telegram_nonce_hash" not in authorization
+            if context is None else
+            authorization.get("client") == "telegram" and connection.get("client") == "telegram"
+            and isinstance(claim, dict) and claim.get("id") == context["telegram_user"]["id"]
+            and (authorization.get("telegram_nonce_hash") == digest(context["telegram_nonce"])
+                if "telegram_nonce" in context else "telegram_nonce_hash" not in authorization)
+        ) if isinstance(authorization, dict) else False
         if (not isinstance(authorization, dict) or digest(canonical(authorization)) != expected["fingerprint"]
+                or not telegram_matches
                 or connection.get("authorization_fingerprint") != expected["fingerprint"]
                 or any(authorization.get(k) != v for k, v in expected.items() if k != "fingerprint")
                 or connection.get("id") != expected["connection_id"] or key.get("id") != connection.get("key_id")
