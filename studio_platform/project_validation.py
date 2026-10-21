@@ -94,11 +94,19 @@ def validate_project(project, max_bytes=8 * 1024 * 1024):
         for track in tracks:
             if not isinstance(track, dict):
                 raise ValueError("声音轨道格式无效")
+            from .render_timing import number, validate_track_fields
+
+            validate_track_fields(track)
             if "needsReview" in track and type(track["needsReview"]) is not bool:
                 raise ValueError("声音待确认标记无效")
             if track.get("generatedFrom") is not None:
                 validate_generated_audio_binding(track["generatedFrom"])
-                if (
+                if track.get("detached") is True:
+                    if track.get("shotId") != "" or not number(
+                        track.get("offset", 0), 0, 3600
+                    ):
+                        raise ValueError("分离原声必须使用独立绝对起点")
+                elif (
                     not isinstance(track.get("shotId"), str)
                     or not ID.fullmatch(track["shotId"])
                     or type(track.get("offset", 0)) not in (int, float)
@@ -242,14 +250,25 @@ def validate_project(project, max_bytes=8 * 1024 * 1024):
                 e["type"] != "shot"
                 or not isinstance(selected, dict)
                 or set(selected)
-                != {
-                    "assetId",
-                    "fileId",
-                    "cloudAssetId",
-                    "cloudArtifactId",
-                    "start",
-                    "end",
-                }
+                not in (
+                    {
+                        "assetId",
+                        "fileId",
+                        "cloudAssetId",
+                        "cloudArtifactId",
+                        "start",
+                        "end",
+                    },
+                    {
+                        "assetId",
+                        "fileId",
+                        "cloudAssetId",
+                        "cloudArtifactId",
+                        "start",
+                        "end",
+                        "playback_rate",
+                    },
+                )
                 or not isinstance(selected.get("assetId"), str)
                 or not ID.fullmatch(selected["assetId"])
                 or any(
@@ -266,6 +285,11 @@ def validate_project(project, max_bytes=8 * 1024 * 1024):
                     for k in ("start", "end")
                 )
                 or selected["end"] <= selected["start"]
+                or "playback_rate" in selected
+                and (
+                    type(selected["playback_rate"]) not in (int, float)
+                    or selected["playback_rate"] not in (0.5, 0.75, 1, 1.25, 1.5, 2)
+                )
             ):
                 raise ValueError("已采用视频的选段格式无效")
             # Media replacement/deletion may leave a stale recoverable edit.

@@ -760,7 +760,11 @@ def create_app(
             "transitions": False,
             "source_trim": True,
             "generated_audio": True,
-            "render_contract_version": 3,
+            "render_contract_version": 5,
+            "playback_rates": [0.5, 0.75, 1, 1.25, 1.5, 2],
+            "detached_generated_audio": True,
+            "audio_fades_max_s": 5,
+            "clip_sound_crossfade_values_s": [0, 0.25, 0.5, 1],
         }
         return result
 

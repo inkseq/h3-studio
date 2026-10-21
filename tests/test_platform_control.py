@@ -197,7 +197,7 @@ class ControlTests(LedgerCase):
     def test_cpu_render_wire_versions_route_to_exact_separate_configurations(self):
         self.repo.configure_capacity()
         specs, rows = {}, {}
-        for version in (1, 2, 3):
+        for version in (1, 2, 3, 5):
             specs[version] = WorkerSpec(
                 "cpu-v" + str(version),
                 "cpu-render",
@@ -231,20 +231,20 @@ class ControlTests(LedgerCase):
             rows[version] = self.repo.create_job(
                 self.scope, plan["id"], "cpu-version-" + str(version)
             )
-        for version in (1, 2, 3):
-            for other in (1, 2, 3):
+        for version in (1, 2, 3, 5):
+            for other in (1, 2, 3, 5):
                 self.assertEqual(
                     self.control.matches(
                         self.control.get("cpu-v" + str(version)), rows[other]
                     ),
                     version == other,
                 )
-        for version in (1, 2, 3):
+        for version in (1, 2, 3, 5):
             claimed = self.control.claim(specs[version].worker_id, "cpu-render")
             self.assertEqual(claimed.job["id"], rows[version]["id"])
         self.assertEqual(self.control.capacity(), {"instances": 0, "physical_gpus": 0})
 
-    def test_cpu_render_configuration_allows_only_three_explicit_validated_versions(
+    def test_cpu_render_configuration_allows_only_explicit_validated_versions(
         self,
     ):
         for configuration in (

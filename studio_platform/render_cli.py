@@ -40,9 +40,9 @@ def main(argv=None):
     parser.add_argument(
         "--contract-version",
         type=int,
-        choices=(1, 2, 3),
+        choices=(1, 2, 3, 5),
         default=3,
-        help="3 for current caption-capable plans; 1/2 only for an explicitly separate legacy drain worker",
+        help="5 for speed/detach/fades; 1/2/3 remain explicitly separate legacy workers",
     )
     parser.add_argument(
         "--subtitle-font-profile",

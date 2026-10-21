@@ -17,6 +17,7 @@ CONFIGURATIONS = {
     2: "cpu-render-v2",
     3: CONFIGURATION,
     4: CONFIGURATION,
+    5: "cpu-render-v5",
 }
 DIMENSIONS = {
     "480P": {
@@ -56,6 +57,13 @@ def configuration_for(compiled):
         or version not in CONFIGURATIONS
         or version == 4
         and compiled.get("client_ref", {}).get("chapter_id") != "film-export"
+        or version == 5
+        and compiled.get("request", {}).get("render", {}).get("stage")
+        != (
+            "film_concat"
+            if compiled.get("client_ref", {}).get("chapter_id") == "film-export"
+            else "chapter"
+        )
     ):
         raise ValueError("粗剪执行契约版本不受支持")
     return CONFIGURATIONS[version]
@@ -151,15 +159,25 @@ def ordered_chapter(project, chapter_id):
             cut = cuts[chapter_id]
             if (
                 not isinstance(cut, dict)
-                or set(cut) != {"shotIds"}
-                or not isinstance(cut["shotIds"], list)
-                or any(not isinstance(ident, str) for ident in cut["shotIds"])
+                or not cut
+                or set(cut) - {"shotIds", "clip_sound_crossfade_s"}
+                or "shotIds" in cut
+                and (
+                    not isinstance(cut["shotIds"], list)
+                    or any(not isinstance(ident, str) for ident in cut["shotIds"])
+                )
+                or "clip_sound_crossfade_s" in cut
+                and (
+                    type(cut["clip_sound_crossfade_s"]) not in (int, float)
+                    or cut["clip_sound_crossfade_s"] not in (0, 0.25, 0.5, 1)
+                )
             ):
                 raise ValueError("film_cut_invalid")
-            included = set(cut["shotIds"])
-            shots = [shot for shot in shots if shot["id"] in included]
-            if not shots:
-                raise ValueError("film_cut_empty")
+            if "shotIds" in cut:
+                included = set(cut["shotIds"])
+                shots = [shot for shot in shots if shot["id"] in included]
+                if not shots:
+                    raise ValueError("film_cut_empty")
     return chapter, scenes, shots
 
 
@@ -188,7 +206,9 @@ def chapter_tracks(project, chapter_id):
     ]
 
 
-def render_source_hash(project, chapter_id, *, burn_subtitles=False):
+def render_source_hash(
+    project, chapter_id, *, burn_subtitles=False, contract_version=None
+):
     chapter, scenes, shots = ordered_chapter(project, chapter_id)
     journey = project.get("journey", {})
     tracks = chapter_tracks(project, chapter_id)
@@ -209,6 +229,10 @@ def render_source_hash(project, chapter_id, *, burn_subtitles=False):
         "tracks": tracks,
         "aspect": journey.get("brief", {}).get("aspect", "9:16"),
     }
+    from .render_timing import crossfade, enabled
+
+    if contract_version != 3 and enabled(project, chapter_id, shots):
+        value["render_v5"] = {"clip_sound_crossfade_s": crossfade(project, chapter_id)}
     if burn_subtitles:
         value["captions"] = {
             "preset": CAPTION_PRESET,
@@ -217,7 +241,7 @@ def render_source_hash(project, chapter_id, *, burn_subtitles=False):
     return request_hash(value)
 
 
-def compile_render(body, project, source_resolver):
+def compile_render(body, project, source_resolver, *, contract_version=None):
     """Resolver returns owner/project-checked immutable source and decode metadata."""
     if not isinstance(body, dict) or set(body) - {
         "client_ref",
@@ -250,6 +274,28 @@ def compile_render(body, project, source_resolver):
         raise ValueError("粗剪支持480P/720P与16:9、9:16、1:1、4:3、3:4")
     width, height = DIMENSIONS[resolution][aspect]
     chapter, scenes, shots = ordered_chapter(project, ref["chapter_id"])
+    from .render_timing import enabled
+
+    if contract_version not in (None, 3, 5):
+        raise ValueError("粗剪执行契约版本不受支持")
+    if (
+        contract_version == 5
+        or contract_version is None
+        and enabled(project, chapter["id"], shots)
+    ):
+        from .render_plans_v5 import compile_chapter
+
+        return compile_chapter(
+            body,
+            project,
+            source_resolver,
+            chapter,
+            shots,
+            width,
+            height,
+            aspect,
+            resolution,
+        )
     lookup = {e["id"]: e for e in project["entities"]}
     blockers, warnings, sources, render_shots, display_shots = [], [], {}, [], []
     if not 1 <= len(shots) <= 50:
@@ -346,7 +392,9 @@ def compile_render(body, project, source_resolver):
     subtitles, display_subtitles = None, None
     if burn_subtitles:
         subtitles, display_subtitles, caption_blockers, caption_warnings = (
-            compile_subtitles(project, chapter["id"], shots[:50], cursor)
+            compile_subtitles(
+                project, chapter["id"], shots[:50], cursor, render_version=3
+            )
         )
         blockers.extend(caption_blockers)
         warnings.extend(caption_warnings)
@@ -543,7 +591,10 @@ def compile_render(body, project, source_resolver):
         },
         "simulation": simulation,
         "server_source_hash": render_source_hash(
-            project, ref["chapter_id"], burn_subtitles=burn_subtitles
+            project,
+            ref["chapter_id"],
+            burn_subtitles=burn_subtitles,
+            contract_version=3,
         ),
     }
     return (
@@ -568,8 +619,9 @@ def validate_render_source(project, compiled):
         return compiled["server_source_hash"] == render_source_hash(
             project,
             compiled["client_ref"]["chapter_id"],
-            burn_subtitles=render.get("version") == 3
+            burn_subtitles=render.get("version") in (3, 5)
             and render.get("subtitles") is not None,
+            contract_version=5 if render.get("version") == 5 else 3,
         )
     except (KeyError, TypeError, NotFound):
         return False
@@ -584,6 +636,9 @@ def compile_film_export(project_id, run_id, chapters):
     if not isinstance(chapters, list) or not 1 <= len(chapters) <= 50:
         raise ValueError("film_chapter_count_limit")
     sources, shots, tracks, frames = {}, [], [], 0
+    version = (
+        5 if any(chapter.get("render_version") == 5 for chapter in chapters) else 4
+    )
     shape = chapters[0]["output_spec"]
     for index, chapter in enumerate(chapters):
         output = chapter["output_spec"]
@@ -604,6 +659,8 @@ def compile_film_export(project_id, run_id, chapters):
                 "source_start_frame": 0,
             }
         )
+        if version == 5:
+            shots[-1].update(source_frames=output["frame_count"], playback_rate=1)
         if chapter.get("audio") is not None:
             audio_id = "chapter-audio-" + str(index)
             sources[audio_id] = chapter["audio"]
@@ -616,6 +673,21 @@ def compile_film_export(project_id, run_id, chapters):
                     "gain": 1,
                 }
             )
+            if version == 5:
+                from .render_timing import frame_sample
+
+                tracks[-1] = {
+                    "source_id": audio_id,
+                    "timeline_start_sample": frame_sample(frames),
+                    "source_start_sample": 0,
+                    "source_end_sample": frame_sample(output["frame_count"]),
+                    "output_samples": frame_sample(frames + output["frame_count"])
+                    - frame_sample(frames),
+                    "playback_rate": 1,
+                    "gain": 1,
+                    "fade_in_samples": 0,
+                    "fade_out_samples": 0,
+                }
         frames += output["frame_count"]
     if frames > 14400 or len(tracks) > 32:
         raise ValueError("film_export_size_limit")
@@ -628,7 +700,8 @@ def compile_film_export(project_id, run_id, chapters):
             "generate_audio": bool(tracks),
             "export_crf": 18,
             "render": {
-                "version": 4,
+                "version": version,
+                **({"stage": "film_concat"} if version == 5 else {}),
                 "shots": shots,
                 "audio_tracks": tracks,
                 "subtitles": None,

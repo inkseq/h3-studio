@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 from contextlib import contextmanager
+from fractions import Fraction
 import json
 import math
 import os
@@ -64,6 +65,27 @@ def _number(value, minimum, maximum):
     )
 
 
+def _film_concat(render):
+    return render["version"] == 4 or (
+        render["version"] == 5 and render.get("stage") == "film_concat"
+    )
+
+
+def _audio_tracks(render):
+    """Keep accepted legacy payloads intact; v5 freezes integer sample bounds."""
+    if render["version"] != 5:
+        return render["audio_tracks"]
+    return [
+        {
+            **track,
+            "timeline_start": track["timeline_start_sample"] / 32000,
+            "source_start": track["source_start_sample"] / 32000,
+            "source_end": track["source_end_sample"] / 32000,
+        }
+        for track in render["audio_tracks"]
+    ]
+
+
 def validate_subtitles(value, frames):
     """The renderer does not trust a previously compiled subtitle payload."""
     try:
@@ -99,18 +121,27 @@ def validate_render_request(
     _require(
         isinstance(render, dict)
         and type(render.get("version")) is int
-        and render["version"] in (1, 2, 3, 4),
+        and render["version"] in (1, 2, 3, 4, 5),
         "invalid_render_version",
     )
     _require(
         set(render)
         == {"version", "shots", "audio_tracks"}
-        | ({"subtitles"} if render["version"] >= 3 else set()),
+        | ({"subtitles"} if render["version"] >= 3 else set())
+        | ({"stage"} if render["version"] == 5 else set()),
         "invalid_render_version",
     )
     shots, tracks = render["shots"], render["audio_tracks"]
     _require(
-        render["version"] != 4 or render.get("subtitles") is None,
+        render["version"] != 5
+        or (
+            isinstance(render["stage"], str)
+            and render["stage"] in {"chapter", "film_concat"}
+        ),
+        "invalid_render_stage",
+    )
+    _require(
+        not _film_concat(render) or render.get("subtitles") is None,
         "film_export_captions_must_be_in_chapters",
     )
     _require(
@@ -133,8 +164,10 @@ def validate_render_request(
     )
     used, frames = {}, 0
     for shot in shots:
-        fields = {"shot_id", "source_id", "frames"} | (
-            {"source_start_frame"} if render["version"] >= 2 else set()
+        fields = (
+            {"shot_id", "source_id", "frames"}
+            | ({"source_start_frame"} if render["version"] >= 2 else set())
+            | ({"source_frames", "playback_rate"} if render["version"] == 5 else set())
         )
         _require(isinstance(shot, dict) and set(shot) == fields, "invalid_render_shot")
         _require(
@@ -151,15 +184,33 @@ def validate_render_request(
             "invalid_render_shot_frames",
         )
         first = shot.get("source_start_frame", 0)
+        source_frames = shot.get("source_frames", shot["frames"])
         _require(
             type(first) is int
             and 0 <= first < 86400
-            and first + shot["frames"] <= 86400,
+            and type(source_frames) is int
+            and 1 <= source_frames <= 86400
+            and first + source_frames <= 86400,
             "invalid_render_source_start_frame",
         )
         _require(
-            render["version"] != 4 or first == 0, "film_export_chapter_range_invalid"
+            not _film_concat(render) or first == 0,
+            "film_export_chapter_range_invalid",
         )
+        if render["version"] == 5:
+            rate = shot["playback_rate"]
+            _require(
+                type(rate) in (int, float) and rate in (0.5, 0.75, 1, 1.25, 1.5, 2),
+                "invalid_render_playback_rate",
+            )
+            ratio = Fraction(str(rate))
+            _require(
+                shot["frames"]
+                == (2 * source_frames * ratio.denominator + ratio.numerator)
+                // (2 * ratio.numerator)
+                and (not _film_concat(render) or rate == 1),
+                "render_playback_frames_mismatch",
+            )
         frames += shot["frames"]
         used[shot["source_id"]] = "video"
     _require(
@@ -184,12 +235,66 @@ def validate_render_request(
         "render_output_controls_mismatch",
     )
     for track in tracks:
+        if render["version"] == 5:
+            _require(
+                isinstance(track, dict)
+                and set(track)
+                == {
+                    "source_id",
+                    "timeline_start_sample",
+                    "source_start_sample",
+                    "source_end_sample",
+                    "output_samples",
+                    "playback_rate",
+                    "gain",
+                    "fade_in_samples",
+                    "fade_out_samples",
+                },
+                "invalid_render_audio_track",
+            )
+            _require(
+                all(
+                    type(track[name]) is int and 0 <= track[name] <= 3600 * 32000
+                    for name in (
+                        "timeline_start_sample",
+                        "source_start_sample",
+                        "source_end_sample",
+                        "output_samples",
+                        "fade_in_samples",
+                        "fade_out_samples",
+                    )
+                )
+                and type(track["playback_rate"]) in (int, float)
+                and track["playback_rate"] in (0.5, 0.75, 1, 1.25, 1.5, 2)
+                and track["source_end_sample"] > track["source_start_sample"]
+                and track["output_samples"] > 0
+                and track["timeline_start_sample"] + track["output_samples"]
+                <= (frames * 32000 + 12) // 24
+                and max(track["fade_in_samples"], track["fade_out_samples"])
+                <= 5 * 32000
+                and track["fade_in_samples"] + track["fade_out_samples"]
+                <= track["output_samples"]
+                and abs(
+                    track["output_samples"]
+                    - (track["source_end_sample"] - track["source_start_sample"])
+                    / track["playback_rate"]
+                )
+                <= math.ceil(32000 / 24)
+                and (
+                    not _film_concat(render)
+                    or track["playback_rate"] == 1
+                    and track["fade_in_samples"] == track["fade_out_samples"] == 0
+                ),
+                "render_audio_range_limit",
+            )
+            continue
         _require(
             isinstance(track, dict)
             and set(track)
             == {"source_id", "timeline_start", "source_start", "source_end", "gain"},
             "invalid_render_audio_track",
         )
+    for track in _audio_tracks(render):
         key = track["source_id"]
         _require(
             isinstance(key, str)
@@ -202,7 +307,12 @@ def validate_render_request(
             and _number(track["source_end"], 0, 3600)
             and track["source_end"] > track["source_start"]
             and _number(track["timeline_start"], 0, duration)
-            and track["timeline_start"] + track["source_end"] - track["source_start"]
+            and track["timeline_start"]
+            + (
+                track["output_samples"] / 32000
+                if render["version"] == 5
+                else track["source_end"] - track["source_start"]
+            )
             <= duration + 1 / 32000
             and _number(track["gain"], 0, 1),
             "render_audio_range_limit",
@@ -683,9 +793,7 @@ class CPURenderBackend:
                         ),
                         "render_source_dimensions_limit",
                     )
-                    if payload["request"]["render"]["version"] == 4:
-                        from fractions import Fraction
-
+                    if _film_concat(payload["request"]["render"]):
                         _require(
                             streams[0].get("codec_name") == "h264"
                             and streams[0].get("width") == shape["width"]
@@ -707,10 +815,14 @@ class CPURenderBackend:
             for shot in payload["request"]["render"]["shots"]:
                 _require(
                     state["inputs"][shot["source_id"]]["duration"] + 0.001
-                    >= (shot.get("source_start_frame", 0) + shot["frames"]) / 24,
+                    >= (
+                        shot.get("source_start_frame", 0)
+                        + shot.get("source_frames", shot["frames"])
+                    )
+                    / 24,
                     "render_source_video_too_short",
                 )
-                if payload["request"]["render"]["version"] == 4:
+                if _film_concat(payload["request"]["render"]):
                     metadata = media.probe(
                         self._path(
                             directory, state["inputs"][shot["source_id"]]["filename"]
@@ -725,7 +837,7 @@ class CPURenderBackend:
                         int(stream.get("nb_frames", 0)) == shot["frames"],
                         "film_export_chapter_frames_mismatch",
                     )
-            for track in payload["request"]["render"]["audio_tracks"]:
+            for track in _audio_tracks(payload["request"]["render"]):
                 actual_duration = state["inputs"][track["source_id"]]["duration"]
                 enough = (
                     round(actual_duration * 32000) >= round(track["source_end"] * 32000)
@@ -910,7 +1022,7 @@ class CPURenderBackend:
                 and _digest(path) == source["object"]["sha256"],
                 "render_source_changed",
             )
-        if shape["simulation"] and render["version"] != 4:
+        if shape["simulation"] and not _film_concat(render):
             from PIL import Image, ImageDraw, ImageFont
 
             marker = Image.new("RGBA", (width, height), (0, 0, 0, 0))
@@ -924,7 +1036,7 @@ class CPURenderBackend:
             source = self._path(
                 directory, state["inputs"][shot["source_id"]]["filename"]
             )
-            if render["version"] == 4:
+            if _film_concat(render):
                 # The completed chapter is already normalized and captioned.
                 # Copy its bitstream at concat; never rebuild a finished chapter.
                 clips.append(source)
@@ -936,13 +1048,71 @@ class CPURenderBackend:
                 continue
             output = self._path(directory, f"clip-{index:03d}.mp4")
             first = shot.get("source_start_frame", 0)
+            source_frames = shot.get("source_frames", shot["frames"])
+            if render["version"] == 5:
+                # Prove the unretimed decoded trim before any rounding pad.
+                # A timestamp/header claim alone cannot hide missing frames.
+                proof = self._path(directory, f"source-{index:03d}.framemd5")
+                self._run_process(
+                    [
+                        *media.input_options(source),
+                        "-i",
+                        source,
+                        "-map",
+                        "0:v:0",
+                        "-an",
+                        "-vf",
+                        f"setpts=PTS-STARTPTS,fps=24,"
+                        f"trim=start_frame={first}:end_frame={first + source_frames},"
+                        "setpts=PTS-STARTPTS",
+                        "-f",
+                        "framemd5",
+                        proof,
+                    ],
+                    directory,
+                    tag,
+                    heartbeat,
+                    deadline,
+                    proof,
+                )
+                _require(
+                    proof.stat().st_size <= 4096 + source_frames * 256,
+                    "render_source_frame_proof_limit",
+                )
+                count = 0
+                with proof.open("r", encoding="ascii") as stream:
+                    for line in stream:
+                        if line.startswith("#"):
+                            continue
+                        fields = [field.strip() for field in line.split(",")]
+                        _require(
+                            len(fields) == 6
+                            and fields[0] == "0"
+                            and fields[1] == fields[2] == str(count)
+                            and fields[3] == "1"
+                            and re.fullmatch(r"[0-9a-f]{32}", fields[5]),
+                            "render_source_frame_proof_invalid",
+                        )
+                        count += 1
+                        _require(
+                            count <= source_frames, "render_source_frame_proof_invalid"
+                        )
+                _require(count == source_frames, "render_source_video_too_short")
+            retime = (
+                # Two bounded source-tail frames cover CFR half-up rounding,
+                # even M=1 at2x; -frames:v still emits exactly the frozen N.
+                "tpad=stop_mode=clone:stop=2,"
+                f"setpts=(PTS-STARTPTS)/{shot['playback_rate']:.9f},fps=24,"
+                if render["version"] == 5
+                else "setpts=PTS-STARTPTS,"
+            )
             # Normalize the source timeline and frame rate before choosing the
             # exact frame interval. This works independently of GOP seek points
             # and includes no user-written FFmpeg expression. Trimming precedes
             # scaling, so discarded frames are not needlessly resized.
             filters = (
-                f"setpts=PTS-STARTPTS,fps=24,trim=start_frame={first}:end_frame={first + shot['frames']},"
-                f"setpts=PTS-STARTPTS,scale={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2,"
+                f"setpts=PTS-STARTPTS,fps=24,trim=start_frame={first}:end_frame={first + source_frames},"
+                f"{retime}scale={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2,"
                 f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1"
             )
             args = [*media.input_options(source), "-i", source]
@@ -1088,7 +1258,7 @@ class CPURenderBackend:
         final = self._path(directory, "result.mp4")
         if shape["audio"]:
             args, filters, labels = [], [], []
-            for index, track in enumerate(render["audio_tracks"]):
+            for index, track in enumerate(_audio_tracks(render)):
                 source = self._path(
                     directory, state["inputs"][track["source_id"]]["filename"]
                 )
@@ -1146,8 +1316,23 @@ class CPURenderBackend:
                     if render["version"] >= 2
                     else f"atrim=start={track['source_start']:.9f}:end={track['source_end']:.9f},asetpts=PTS-STARTPTS,aresample=32000,aformat=channel_layouts=stereo,"
                 )
+                processing = ""
+                if render["version"] == 5:
+                    output_samples = track["output_samples"]
+                    processing = (
+                        f"atempo={track['playback_rate']:.9f},"
+                        f"apad=whole_len={output_samples},atrim=end_sample={output_samples},"
+                        "asetpts=PTS-STARTPTS,"
+                    )
+                    if track["fade_in_samples"]:
+                        processing += f"afade=t=in:ss=0:ns={track['fade_in_samples']},"
+                    if track["fade_out_samples"]:
+                        processing += (
+                            f"afade=t=out:ss={output_samples - track['fade_out_samples']}:"
+                            f"ns={track['fade_out_samples']},"
+                        )
                 filters.append(
-                    f"[{index}:a:0]{trim}volume={track['gain']:.9f},"
+                    f"[{index}:a:0]{trim}volume={track['gain']:.9f},{processing}"
                     f"adelay={round(track['timeline_start'] * 32000)}S:all=1,apad=whole_dur={duration:.9f}[{label}]"
                 )
                 labels.append(f"[{label}]")

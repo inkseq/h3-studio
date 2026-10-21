@@ -87,6 +87,70 @@ class FilmTests(unittest.TestCase):
     def raw(self, run_id):
         return self.repo.get_document(self.scope, KIND, run_id)['payload']
 
+    def test_v5_preflight_freezes_timing_crossfade_without_generation(self):
+        project = copy.deepcopy(self.project)
+        project['entities'][2]['data']['selectedVideoRange'] = {
+            'assetId': 'clip',
+            'fileId': 'local-clip',
+            'cloudAssetId': 'asset-one',
+            'cloudArtifactId': None,
+            'start': 0,
+            'end': 2,
+            'playback_rate': 0.5,
+        }
+        project['journey']['filmCuts'] = {'chapter-one': {'clip_sound_crossfade_s': 1}}
+        self.repo.put_document(
+            Scope('tenant', 'owner', '__projects'),
+            'project',
+            'story-one',
+            project,
+            expected_version=1,
+        )
+        self.app.state.storyboard_versions = SimpleNamespace(
+            preflight=Mock(side_effect=AssertionError('Speed edit must not generate'))
+        )
+        preview = self.service.preflight(
+            self.principal, 'story-one', {'expected_version': 2}, 'speed-only'
+        )
+        saved = self.raw(preview['id'])
+        self.assertEqual(saved['render_contract_version'], 5)
+        self.assertEqual(saved['chapters'][0]['clip_sound_crossfade_s'], 1)
+        self.assertEqual(saved['counts']['generate'], 0)
+        self.assertEqual(
+            self.service.preflight(
+                self.principal, 'story-one', {'expected_version': 2}, 'speed-only'
+            ),
+            preview,
+        )
+        self.app.state.storyboard_versions.preflight.assert_not_called()
+
+    def test_stale_speed_binding_never_becomes_an_implicit_paid_generation(self):
+        project = copy.deepcopy(self.project)
+        project['entities'][2]['data']['selectedVideoRange'] = {
+            'assetId': 'clip',
+            'fileId': 'wrong-file',
+            'cloudAssetId': 'asset-one',
+            'cloudArtifactId': None,
+            'start': 0,
+            'end': 2,
+            'playback_rate': 2,
+        }
+        self.repo.put_document(
+            Scope('tenant', 'owner', '__projects'),
+            'project',
+            'story-one',
+            project,
+            expected_version=1,
+        )
+        self.app.state.storyboard_versions = SimpleNamespace(
+            preflight=Mock(side_effect=AssertionError('No paid regeneration'))
+        )
+        with self.assertRaisesRegex(Conflict, 'film_speed_source_requires_review'):
+            self.service.preflight(
+                self.principal, 'story-one', {'expected_version': 2}, 'stale-speed'
+            )
+        self.app.state.storyboard_versions.preflight.assert_not_called()
+
     def test_film_cut_excludes_missing_shot_before_generation_quote_or_hold(self):
         project = copy.deepcopy(self.project)
         missing = copy.deepcopy(project['entities'][2])
