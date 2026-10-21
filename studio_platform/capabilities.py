@@ -349,6 +349,8 @@ def capabilities(settings):
         "capabilities_version": VERSION,
         "story_film": {
             "enabled": settings.generation_queue == "dbos" and settings.render_enabled,
+            "film_cuts": settings.generation_queue == "dbos"
+            and settings.render_enabled,
             "workflow_version": "inkseq-film-v1",
             "preflight": "/v1/projects/{project_id}/films/preflights",
             "submit": "/v1/projects/{project_id}/films",

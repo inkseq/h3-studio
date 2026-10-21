@@ -36,6 +36,32 @@ API负责登录用户、项目/章节/素材权限与来源快照；客户端不
 
 示例为结构说明，摘要/大小不是可运行素材。API还可存client_ref、server_source_hash、simulation、render_blockers等业务元信息。`sources` 必须恰好等于本时间线上使用的来源集合；source ID只参与字典查找，绝不成为磁盘文件名。视频支持MP4/MOV；独立音频支持WAV/FLAC/MP3。`object`可附带受控存储ObjectInfo的provider、etag、version_id。
 
+## Film editor inclusion (#347)
+
+`journey.filmCuts[chapterId] = {"shotIds": ["shot-a", "shot-b"]}` is optional
+inclusion membership, not a second order store. With no chapter override, all
+shots remain included. The canonical scene.order/shot.order hierarchy controls
+order; duplicates coalesce and unknown, missing or foreign-chapter IDs are
+ignored. A malformed present override raises `film_cut_invalid`; an empty
+effective selection raises `film_cut_empty` (HTTP422) before generation planning,
+quotes or holds. Excluded Story entities remain editable and are never selected
+as missing footage for Film generation.
+
+One `ordered_chapter` selector feeds rough-cut compilation, source hashing,
+captions and Film's frozen chapter shot IDs. Existing source-bound trims and
+caption confirmation remain required. Tracks anchored to a known omitted shot
+are skipped before resolving their audio, including its generated FLAC; the same
+filtered tracks feed compilation, source hashes and caption confirmation.
+Independent music/voice stays included; unknown or foreign anchors retain the
+existing refusal. Accepted historical Film headers keep
+their original chapter shot_ids even if an old filmCuts draft was ignored at
+acceptance; only the transient render copy receives that frozen membership.
+No accepted Story snapshot, task, attempt or ledger is rewritten.
+
+`/v1/capabilities.story_film.film_cuts` is true only with the enabled DBOS/CPU
+Film path. It is also visible to non-admin users; it does not promise a currently
+ready worker or waive normal preflight/confirmation and spending checks.
+
 ## 画面与声音语义
 
 - 镜头数组顺序就是输出顺序；v2从`source_start_frame/24`秒开始，截取`frames/24`秒。历史v1没有入点字段，仍从0开始。原视频先规范化时间起点和24fps，再按准确帧号裁剪；没有使用容易受关键帧位置影响的流复制裁剪。源短则拒绝，不补尾帧、不循环、不慢放填时长。实际源时长与输出帧数均重新核对。

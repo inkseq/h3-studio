@@ -142,13 +142,56 @@ def ordered_chapter(project, chapter_id):
             key=lambda e: e["order"],
         )
     ]
+    journey = project.get("journey", {})
+    if "filmCuts" in journey:
+        cuts = journey["filmCuts"]
+        if not isinstance(cuts, dict):
+            raise ValueError("film_cut_invalid")
+        if chapter_id in cuts:
+            cut = cuts[chapter_id]
+            if (
+                not isinstance(cut, dict)
+                or set(cut) != {"shotIds"}
+                or not isinstance(cut["shotIds"], list)
+                or any(not isinstance(ident, str) for ident in cut["shotIds"])
+            ):
+                raise ValueError("film_cut_invalid")
+            included = set(cut["shotIds"])
+            shots = [shot for shot in shots if shot["id"] in included]
+            if not shots:
+                raise ValueError("film_cut_empty")
     return chapter, scenes, shots
+
+
+def chapter_tracks(project, chapter_id):
+    """Exclude tracks anchored to known omitted shots, never forgive stale IDs."""
+    _, scenes, shots = ordered_chapter(project, chapter_id)
+    tracks = project.get("journey", {}).get("soundTracks", {}).get(chapter_id, [])
+    if not isinstance(tracks, list):
+        return tracks
+    scene_ids, included = {s["id"] for s in scenes}, {s["id"] for s in shots}
+    excluded = {
+        e["id"]
+        for e in project["entities"]
+        if e["type"] == "shot"
+        and e.get("parentId") in scene_ids
+        and e["id"] not in included
+    }
+    return [
+        track
+        for track in tracks
+        if not (
+            isinstance(track, dict)
+            and isinstance(track.get("shotId"), str)
+            and track["shotId"] in excluded
+        )
+    ]
 
 
 def render_source_hash(project, chapter_id, *, burn_subtitles=False):
     chapter, scenes, shots = ordered_chapter(project, chapter_id)
     journey = project.get("journey", {})
-    tracks = journey.get("soundTracks", {}).get(chapter_id, [])
+    tracks = chapter_tracks(project, chapter_id)
     source_ids = {s.get("data", {}).get("selectedAssetId") for s in shots}
     if isinstance(tracks, list):
         source_ids.update(
@@ -309,7 +352,7 @@ def compile_render(body, project, source_resolver):
         warnings.extend(caption_warnings)
     journey = project.get("journey", {})
     mode = journey.get("sound", {}).get("mode")
-    tracks = journey.get("soundTracks", {}).get(ref["chapter_id"], [])
+    tracks = chapter_tracks(project, ref["chapter_id"])
     audio_tracks, display_tracks, generated_shots = [], [], set()
     shots_by_id = {s["shot_id"]: s for s in render_shots}
     if not isinstance(mode, str) or mode not in {

@@ -183,9 +183,17 @@ def accepted_policy_admission(connection, repo, scope, plan, key):
         return False
 
 
-def frozen_story(project, results):
+def frozen_story(project, results, *, chapters=None):
     """Apply an exact run's chosen results to a COPY, never the editable Story."""
     value = copy.deepcopy(project)
+    if chapters is not None:
+        # The original accepted header owns inclusion. Older receipts may have
+        # ignored an authoring filmCuts draft: never reinterpret that work after
+        # a release. Only this transient copy receives the frozen membership.
+        value.setdefault("journey", {})["filmCuts"] = {
+            chapter["chapter_id"]: {"shotIds": list(chapter["shot_ids"])}
+            for chapter in chapters
+        }
     entities = {item["id"]: item for item in value["entities"]}
     for shot_id, result in results.items():
         shot = entities[shot_id]
@@ -1101,7 +1109,8 @@ class FilmRuns:
                 run_id,
                 lambda current: current.update(results=results, phase="chapters"),
             )
-        project = frozen_story(value["project"], results)
+        authoring = frozen_story(value["project"], {}, chapters=value["chapters"])
+        project = frozen_story(authoring, results)
         for chapter in value["chapters"]:
             if not chapter["plan_id"]:
                 options = {
@@ -1130,11 +1139,11 @@ class FilmRuns:
                     # Consent belongs to the accepted authoring snapshot. Only
                     # this run's selected media changes in the render copy;
                     # never manufacture a new confirmation for those results.
-                    original_shots = ordered_chapter(
-                        value["project"], chapter["chapter_id"]
-                    )[2]
+                    original_shots = ordered_chapter(authoring, chapter["chapter_id"])[
+                        2
+                    ]
                     subtitles, _, caption_blockers, _ = compile_subtitles(
-                        value["project"],
+                        authoring,
                         chapter["chapter_id"],
                         original_shots,
                         compiled["output_spec"]["frame_count"],
