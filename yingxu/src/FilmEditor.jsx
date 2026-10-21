@@ -426,7 +426,7 @@ function ClipCard({ clip, duration, active, busy, onSeek, onToggle, onTrim, onFi
   );
 }
 
-export default function FilmEditor({ chapterId, onClose }) {
+export default function FilmEditor({ chapterId, initialTrim = null, onClose }) {
   const { t } = useI18n();
   const s = useSyncExternalStore(store.subscribe, store.getState, store.getState),
     project = s.project;
@@ -438,7 +438,7 @@ export default function FilmEditor({ chapterId, onClose }) {
     [durations, setDurations] = useState({}),
     [error, setError] = useState(''),
     [current, setCurrent] = useState(null),
-    [trimming, setTrimming] = useState(null);
+    [trimming, setTrimming] = useState(initialTrim);
   const player = useRef(null);
   const trimTarget = clips.find((clip) => clip.id === trimming && clip.playable);
   // The overlay owns scrolling while open; the storyboard behind it must not move.
