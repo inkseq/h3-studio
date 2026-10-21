@@ -536,10 +536,20 @@ class WorkOSAuthTests(LedgerCase):
         original = self.hosted()
         value, state = self.start()
         revoker = AccountSessions(self.repo, self.auth, self.settings, self.service)
-        revoker.revoke_all(self.auth.session(original), {}, "old-flow")
+        operation = revoker.revoke_all(self.auth.session(original), {}, "old-flow")
         with self.assertRaisesRegex(WorkOSError, "account_unavailable"):
             self.finish(value, state)
         self.assertIsNone(self.auth.session(original))
+        from studio_platform.session_authority import read
+
+        with self.repo.engine.connect() as connection:
+            saved = read(
+                connection,
+                self.scope.tenant_id,
+                "revocation",
+                operation["operation_id"],
+            )
+        self.assertIn("session_" + str(2).zfill(26), saved["provider_sessions"])
         self.assertIsNotNone(self.auth.session(self.hosted()))
 
     def test_explicit_legacy_link_preserves_owner_admin_and_refuses_subject_rebind(

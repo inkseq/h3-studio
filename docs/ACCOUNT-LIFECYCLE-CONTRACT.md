@@ -27,6 +27,15 @@ issuance checks the account's revoke cutoff under the account gate. An older
 in-flight flow is refused even if it finishes after revocation. Fresh sign-ins
 and unrelated accounts remain usable.
 
+If that older verified exchange nevertheless creates a provider SID after the
+cutoff, its exact verified subject/client/SID is attached to the same original
+revocation journal. It resumes that operation, including after the first
+transport completed; no unrelated post-cutoff sessions are swept up. An
+active SDK workflow receives a wake; a terminal SDK workflow receives a
+deterministic transport epoch for the same business operation. A scan may mark
+only the original SID set it covered: a concurrent appended SID cannot be
+mistaken for an already absent session.
+
 Hosted browser use requires its verified #395 SID binding and a successful
 provider check no older than 60 seconds. Checks use manual bounded pagination,
 validate subject/SID/status/expiry and configured client, and run without an

@@ -651,6 +651,19 @@ class WorkOSAuth:
                 captured_epoch=transaction.get("auth_epoch", 0),
             )
         except AuthenticationError:
+            from .account_sessions import AccountSessions
+
+            # The verified provider exchange can finish after revoke-all's
+            # cutoff. Keep its exact SID in that SAME original operation even
+            # when the first provider inventory has already completed.
+            try:
+                AccountSessions(
+                    self.repo, self.auth, self.settings, self
+                ).rejected_flow(
+                    row["owner"], transaction.get("auth_epoch", 0), provider_session
+                )
+            except Exception:
+                raise WorkOSError("workos_provider_unavailable", 503) from None
             # A suspension may commit between canonical upsert and issuance.
             # Keep that refusal finite and never expose internal exception text.
             raise WorkOSError("account_unavailable", 403) from None

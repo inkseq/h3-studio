@@ -198,7 +198,9 @@ class GenerationTransport:
             idempotency_key="stripe-event-" + event_id,
         )
 
-    def enqueue_account_operation(self, connection, tenant, operation_id):
+    def enqueue_account_operation(
+        self, connection, tenant, operation_id, *, resume_event=None
+    ):
         from .account_sessions import WORKFLOW as ACCOUNT_WORKFLOW
         from .workflow_schema import assert_execution_allowed
 
@@ -208,13 +210,56 @@ class GenerationTransport:
             r"[0-9a-f-]{36}", operation_id
         ):
             raise ValueError("account_operation_invalid")
+        if resume_event is not None and (
+            not isinstance(resume_event, str)
+            or re.fullmatch(r"[0-9a-f]{64}", resume_event) is None
+        ):
+            raise ValueError("account_operation_event_invalid")
+        base = (
+            "inkseq-account-"
+            + hashlib.sha256((tenant + "\0" + operation_id).encode()).hexdigest()
+        )
+        ident = base
+        if resume_event is not None:
+            active = (
+                connection.execute(
+                    text(
+                        "SELECT workflow_uuid FROM inkseq_workflows.workflow_status "
+                        "WHERE (workflow_uuid=:id OR workflow_uuid LIKE :prefix) "
+                        "AND application_name=:application AND application_version=:version AND name=:name "
+                        "AND status IN ('PENDING','ENQUEUED','DELAYED') LIMIT 2"
+                    ),
+                    {
+                        "id": base,
+                        "prefix": base + "/%",
+                        "application": APPLICATION,
+                        "version": VERSION,
+                        "name": ACCOUNT_WORKFLOW,
+                    },
+                )
+                .scalars()
+                .all()
+            )
+            if len(active) > 1:
+                raise Conflict("account_operation_workflow_ambiguous")
+            if active:
+                self.client.send_in_transaction(
+                    connection,
+                    active[0],
+                    {"operation_id": operation_id},
+                    topic="account_changed",
+                    idempotency_key=resume_event,
+                )
+                return
+            # A new SDK epoch resumes the SAME business journal after its
+            # terminal transport, only for this explicit verified-flow event.
+            ident = base + "/" + resume_event
         self.client.enqueue_in_transaction(
             connection,
             {
                 "workflow_name": ACCOUNT_WORKFLOW,
                 "queue_name": QUEUE,
-                "workflow_id": "inkseq-account-"
-                + hashlib.sha256((tenant + "\0" + operation_id).encode()).hexdigest(),
+                "workflow_id": ident,
                 "app_version": VERSION,
                 "application_name": APPLICATION,
             },

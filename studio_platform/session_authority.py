@@ -56,9 +56,16 @@ def assert_epoch(connection, tenant, owner, captured):
         raise AuthenticationError("The sign-in changed. Please sign in again.")
 
 
-def advance(connection, tenant, owner, now):
+def advance(connection, tenant, owner, now, *, operation_id=None):
     """Caller holds the exclusive account gate before any session locks."""
     value = epoch(connection, tenant) + 1
     write(connection, tenant, "epoch", "current", {"value": value}, now)
-    write(connection, tenant, "cutoff", owner, {"epoch": value}, now)
+    write(
+        connection,
+        tenant,
+        "cutoff",
+        owner,
+        {"epoch": value, "operation_id": operation_id},
+        now,
+    )
     return value

@@ -461,6 +461,134 @@ class AccountSessionTests(LedgerCase):
         self.assertEqual(options["workflow_name"], "inkseq.account.lifecycle.v1")
         self.assertEqual((tenant, operation_id), (self.scope.tenant_id, ident))
 
+    def late_binding(self, sid):
+        return {
+            "sid": sid,
+            "subject": self.subject,
+            "client_id": self.provider.client_id,
+            "access_expires_at": int(self.now) + 900,
+        }
+
+    def test_verified_rejected_late_sid_reopens_same_completed_operation_once(self):
+        token = self.hosted()
+        captured = self.auth.capture_epoch()
+        operation = self.operation(token)
+        ident = operation["operation_id"]
+        self.service.turn(self.scope.tenant_id, ident)
+        self.service.turn(self.scope.tenant_id, ident)
+        self.assertEqual(self.saved(ident)["state"], "completed")
+        self.now += 1
+        late = "session_" + "L" * 24
+        fresh = "session_" + "F" * 24
+        self.provider.add(late, self.subject, created=self.now)
+        self.provider.add(fresh, self.subject, created=self.now)
+        calls = []
+        self.repo.generation_transport = SimpleNamespace(
+            enqueue_account_operation=lambda *args, **kwargs: calls.append(
+                (args[1:], kwargs)
+            )
+        )
+        try:
+            self.assertTrue(
+                self.service.rejected_flow("creator", captured, self.late_binding(late))
+            )
+            self.assertTrue(
+                self.service.rejected_flow("creator", captured, self.late_binding(late))
+            )
+        finally:
+            self.repo.generation_transport = None
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][0], (self.scope.tenant_id, ident))
+        self.assertEqual(self.saved(ident)["state"], "pending")
+        self.service.turn(self.scope.tenant_id, ident)
+        self.service.turn(self.scope.tenant_id, ident)
+        self.assertEqual(self.saved(ident)["state"], "completed")
+        self.assertEqual(self.provider.revokes.count(late), 1)
+        self.assertIn(fresh, self.provider.active)
+
+    def test_late_append_between_scan_and_observation_is_never_false_absence(self):
+        token = self.hosted()
+        captured = self.auth.capture_epoch()
+        result = self.operation(token)
+        ident = result["operation_id"]
+        self.service.turn(self.scope.tenant_id, ident)
+        original = self.service._save
+        late = "session_" + "L" * 24
+        appended = []
+
+        def race(operation_id, change):
+            if change.__name__ == "observed" and not appended:
+                appended.append(True)
+                self.now += 1
+                self.provider.add(late, self.subject, created=self.now)
+                self.assertTrue(
+                    self.service.rejected_flow(
+                        "creator", captured, self.late_binding(late)
+                    )
+                )
+            return original(operation_id, change)
+
+        with patch.object(self.service, "_save", side_effect=race):
+            self.assertFalse(self.service.turn(self.scope.tenant_id, ident)["done"])
+        self.assertEqual(self.saved(ident)["provider_sessions"][late], "unrequested")
+        self.service.turn(self.scope.tenant_id, ident)
+        self.service.turn(self.scope.tenant_id, ident)
+        self.assertEqual(self.saved(ident)["state"], "completed")
+
+    def test_unverified_or_foreign_late_binding_never_modifies_original_operation(self):
+        token = self.hosted()
+        captured = self.auth.capture_epoch()
+        ident = self.operation(token)["operation_id"]
+        original = self.saved(ident)
+        binding = self.late_binding("session_" + "L" * 24)
+        for owner, epoch, value in (
+            ("supervan", captured, binding),
+            ("creator", captured + 1, binding),
+            ("creator", captured, {**binding, "subject": "user_" + "Z" * 24}),
+            ("creator", captured, {**binding, "client_id": "client_" + "Z" * 24}),
+            ("creator", captured, {**binding, "sid": "invalid"}),
+        ):
+            self.assertFalse(self.service.rejected_flow(owner, epoch, value))
+        self.assertEqual(self.saved(ident), original)
+
+    def test_transport_resume_wakes_active_or_deterministically_resumes_terminal(self):
+        from studio_platform.dbos_transport import GenerationTransport
+        from studio_platform.repository import request_hash
+
+        calls = []
+        active = []
+        transport = object.__new__(GenerationTransport)
+        transport.client = SimpleNamespace(
+            enqueue_in_transaction=lambda *args: calls.append(("enqueue", args)),
+            send_in_transaction=lambda *args, **kwargs: calls.append(
+                ("send", args, kwargs)
+            ),
+        )
+        connection = SimpleNamespace(
+            execute=lambda *args: SimpleNamespace(
+                scalars=lambda: SimpleNamespace(all=lambda: active)
+            )
+        )
+        ident = str(uuid.uuid4())
+        event = request_hash({"verified_sid": "offline"})
+        with patch("studio_platform.workflow_schema.assert_execution_allowed"):
+            transport.enqueue_account_operation(
+                connection, self.scope.tenant_id, ident, resume_event=event
+            )
+            transport.enqueue_account_operation(
+                connection, self.scope.tenant_id, ident, resume_event=event
+            )
+            first = calls[0][1][1]["workflow_id"]
+            self.assertEqual(calls[1][1][1]["workflow_id"], first)
+            self.assertTrue(first.endswith("/" + event))
+            active.append(first)
+            transport.enqueue_account_operation(
+                connection, self.scope.tenant_id, ident, resume_event=event
+            )
+        self.assertEqual(calls[2][0], "send")
+        self.assertEqual(calls[2][1][1], first)
+        self.assertEqual(calls[2][2]["topic"], "account_changed")
+
 
 if __name__ == "__main__":
     unittest.main()

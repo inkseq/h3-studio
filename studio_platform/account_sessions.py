@@ -259,7 +259,9 @@ class AccountSessions:
                 "owner": principal.owner,
                 "user_id": identity["id"],
                 "subject": identity["workos_user_id"],
-                "epoch": advance(conn, self.tenant, principal.owner, now),
+                "epoch": advance(
+                    conn, self.tenant, principal.owner, now, operation_id=ident
+                ),
                 "cutoff": now,
                 "state": "pending" if identity["workos_user_id"] else "completed",
                 "cursor": None,
@@ -312,6 +314,56 @@ class AccountSessions:
                 result["logout_url"] = url
         return result
 
+    def rejected_flow(self, owner, captured_epoch, binding):
+        """Trusted verified callback only; attach one exact SID, no provider I/O."""
+        if not _workos_session_shape(binding) or type(captured_epoch) is not int:
+            return False
+        with self.repo.transaction() as conn:
+            lock_account_gate(conn, exclusive=True)
+            cutoff = read(conn, self.tenant, "cutoff", owner)
+            if (
+                cutoff is None
+                or captured_epoch >= cutoff["epoch"]
+                or not cutoff.get("operation_id")
+            ):
+                return False
+            ident = cutoff["operation_id"]
+            value = deepcopy(read(conn, self.tenant, "revocation", ident))
+            identity = (
+                conn.execute(
+                    select(users).where(
+                        users.c.tenant == self.tenant, users.c.owner == owner
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if (
+                value is None
+                or identity is None
+                or value["owner"] != owner
+                or value["user_id"] != identity["id"]
+                or value["epoch"] != cutoff["epoch"]
+                or value["subject"] != binding["subject"]
+                or identity["workos_user_id"] != binding["subject"]
+                or value["client_id"] != binding["client_id"]
+            ):
+                return False
+            sid = binding["sid"]
+            if sid in value["provider_sessions"]:
+                return True  # Exact callback replay cannot create another intent.
+            value["provider_sessions"][sid] = "unrequested"
+            value.update(state="pending", error_code=None)
+            write(conn, self.tenant, "revocation", ident, value, self.auth.clock())
+            if self.repo.generation_transport is not None:
+                self.repo.generation_transport.enqueue_account_operation(
+                    conn,
+                    self.tenant,
+                    ident,
+                    resume_event=request_hash({"rejected_verified_sid": sid}),
+                )
+        return True
+
     def _save(self, ident, change):
         with self.repo.transaction() as conn:
             lock_account_gate(conn, exclusive=True)
@@ -354,6 +406,7 @@ class AccountSessions:
             if cursor is not None or config["client_id"] != value["client_id"]:
                 raise SessionUnavailable()
             remaining = [sid for sid in value["provider_sessions"] if sid in live]
+            covered = set(value["provider_sessions"])
             for sid in remaining[:10]:
                 self._save(
                     ident,
@@ -368,10 +421,15 @@ class AccountSessions:
                     pass  # Retain original requested SID; next turn proves outcome.
 
             def observed(current):
-                for sid in current["provider_sessions"]:
+                # A verified rejected callback may append a late SID while this
+                # network scan was in progress. That SID is not absence proof.
+                for sid in covered:
                     if sid not in live:
                         current["provider_sessions"][sid] = "revoked"
-                if not remaining:
+                if all(
+                    state == "revoked"
+                    for state in current["provider_sessions"].values()
+                ):
                     current.update(
                         state="completed",
                         completed_at=self.auth.clock(),
