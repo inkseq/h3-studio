@@ -170,3 +170,7 @@ Owner explicitly orders stopping staging test Vast instance56923906 (physical ma
 ## CR-20261021-46 — wake after a Claude review wait
 
 When this session actually stops awaiting Claude review or acceptance, schedule one same-thread30-minute review-check heartbeat. Read the original issue's latest comments/labels and continue the already-authorized work when review arrives. On receiving new work or resuming implementation, pause that check first; enable it again at the next real review wait. Reuse the existing check instead of stacking automations. No review outcome expands spending or production authority. Source: direct owner instruction2026-10-21 Australia/Sydney.
+
+## CR-20261021-47 — promote as soon as accepted
+
+Owner (direct chat 2026-10-21, "为啥周五发布？尽快啊"): drop the Tuesday/Friday production window. Promote the identical accepted artifact bytes as soon as Claude has signed off, any day, through the existing promotion path, rollback target and checks. Applies now to #193: promote accepted `498e073` and staged frontend `d6806b8`, then perform the audited CR43 production activation. Everything else is unchanged: no rebuild, Tier2 sign-off, rollback evidence, and owner approval for live money, credentials and new infrastructure. Source: direct owner chat 2026-10-21.
