@@ -571,6 +571,10 @@ export function createCloudController({
       throw error;
     }
     const draft = store.getCloudDraft(me, id);
+    // With autosave (owner, 2026-10-21) an unsynced draft whose base is still the cloud
+    // version is simply continued and saved; only a draft based on an older version asks.
+    if (draft?.dirty && draft.serverVersion === record.version && !discardDraft && !keepDraft)
+      restoreDraft = true;
     if (draft?.dirty && !restoreDraft && !discardDraft && !keepDraft) {
       emit({
         projectOpen: { projectId: id, account: me, status: 'draft' },

@@ -113,19 +113,16 @@ test('same authenticated owner sees an explicit resume offer after reload withou
   assert.equal(h.storage.getItem('yingxu-studio-v4'), before);
   c.destroy();
 });
-test('resuming a dirty draft requires the existing explicit choice and preserves unsaved text', async () => {
+test('resuming a dirty draft on an unchanged cloud version continues it and keeps unsaved text', async () => {
   const h = await opened();
   h.store.updateProject({ logline: '未云同步的新文字' });
-  const before = h.storage.getItem('yingxu-cloud-draft-v1:supervan:resume-project');
   h.controller.destroy();
   const refreshed = createStore({ storage: h.storage }),
     c = h.controllerFor(refreshed);
   await c.initialize();
-  assert.equal(await c.resume(), false);
-  assert.equal(refreshed.getState().workspace.mode, 'local');
-  assert.equal(c.getState().draftOffer.draft.project.logline, '未云同步的新文字');
-  assert.equal(h.storage.getItem('yingxu-cloud-draft-v1:supervan:resume-project'), before);
-  assert.equal(await c.open(h.remote.id, { restoreDraft: true }), true);
+  assert.equal(await c.resume(), true);
+  assert.equal(c.getState().draftOffer, null);
+  assert.equal(refreshed.getState().workspace.mode, 'cloud');
   assert.equal(refreshed.getState().project.logline, '未云同步的新文字');
   assert.equal(refreshed.getState().workspace.dirty, true);
   c.destroy();
