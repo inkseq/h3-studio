@@ -133,6 +133,39 @@ class Linker:
         self._save(links)
         return links[str(int(chat_id))]
 
+    def fields_from_code(self, code, *, http=None):
+        """Deep-link payload → exchange fields via the grant preview (#382).
+
+        Returns None while the backend does not offer the preview yet, so the
+        bot can fall back to the pasted instruction.
+        """
+        if not CODE_RE.fullmatch(code or ""):
+            raise LinkError("invalid_code")
+        import httpx  # the helper itself is standard-library only
+
+        for origin in sorted(self.allowed_origins):
+            try:
+                response = (http or httpx).get(
+                    origin + "/v1/agent-connect/grant-preview",
+                    params={"code": code}, timeout=15, follow_redirects=False,
+                )  # fmt: skip
+            except Exception:
+                continue
+            if response.status_code in (404, 405):
+                return None  # not deployed yet
+            if response.status_code != 200:
+                raise LinkError({410: "connection_consumed", 403: "connection_expired"}
+                                .get(response.status_code, "preview_failed"))  # fmt: skip
+            preview = response.json()
+            authorization = preview.get("authorization") or {}
+            text = code + "\n" + json.dumps({
+                "connection_id": preview.get("connection_id"),
+                "authorization_fingerprint": preview.get("authorization_fingerprint"),
+                "authorization": authorization,
+            })  # fmt: skip
+            return parse_instruction(text)
+        return None
+
     def unlink(self, chat_id):
         links = self._links()
         removed = links.pop(str(int(chat_id)), None)

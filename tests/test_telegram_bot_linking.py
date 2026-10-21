@@ -167,6 +167,43 @@ class LinkingTest(unittest.TestCase):
         self.assertIn("过期", api.sent[-1]["text"])
         self.assertIsNone(self.linker.get(OWNER))
 
+    def test_deep_link_uses_grant_preview_or_falls_back(self):
+        class Response:
+            def __init__(self, status, body=None):
+                self.status_code, self._body = status, body
+
+            def json(self):
+                return self._body
+
+        preview = {"connection_id": CONNECTION, "authorization": self.authorization,
+                   "authorization_fingerprint": self.fingerprint}  # fmt: skip
+        live = type(
+            "Http", (), {"get": staticmethod(lambda *a, **k: Response(200, preview))}
+        )
+        fields = self.linker.fields_from_code(CODE, http=live)
+        self.assertEqual(
+            (fields["code"], fields["fingerprint"]), (CODE, self.fingerprint)
+        )
+        missing = type("Http", (), {"get": staticmethod(lambda *a, **k: Response(404))})
+        self.assertIsNone(self.linker.fields_from_code(CODE, http=missing))
+
+        api = FakeAPI(self.root)
+        deleted = []
+        api.delete_message = lambda chat, message: deleted.append(message)
+        self.linker.fields_from_code = lambda code: None  # backend preview not deployed
+        bot = Bot(api, DemoAdapter(self.root / "demo"), Store(self.root / "state"), [OWNER],
+                  self.root / "media", linker=self.linker)  # fmt: skip
+        update = private(OWNER, text=f"/start l_{CODE}")
+        update["message"]["message_id"] = 7
+        bot.handle(update)
+        self.assertEqual(deleted, [7])
+        self.assertIn("一键绑定还差", api.sent[-1]["text"])
+        self.linker.fields_from_code = lambda code: parse_instruction(
+            instruction(self.authorization, self.fingerprint)
+        )
+        bot.handle(private(OWNER, text=f"/start l_{CODE}"))
+        self.assertIn("绑定好了：qa-user", api.sent[-1]["text"])
+
     def test_other_origins_are_refused(self):
         bad = dict(self.authorization, origin="https://evil.example")
         fields = parse_instruction(instruction(bad, self.fingerprint))

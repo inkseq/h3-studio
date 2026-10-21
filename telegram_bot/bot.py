@@ -421,20 +421,29 @@ class Bot:
         self.api.send_message(
             chat_id,
             "绑定后，bot 做的片子会存进你自己的 Inkseq 作品，用你自己的积分。\n\n"
-            "1. 点下面的按钮打开 Inkseq 并登录\n"
-            "2. 右上角头像 → 「Connect AI / 连接 AI」→ 新建连接（可以设每天最多花多少）\n"
-            "3. 把页面上显示的那一整段内容复制，发给我\n\n"
-            "那段内容 10 分钟内有效、只能用一次；我收到后会马上删掉那条消息。",
-            [[("🔗 打开 Inkseq", "url:" + origin + "/")]],
+            "点下面的按钮 → 登录 Inkseq → 确认授权（可以设每天最多花多少积分）→ 自动回到这里。\n"
+            "授权 10 分钟内有效、只能用一次；随时可以在网站「AI 助手」里暂停或撤销。",
+            [[("🔗 登录并绑定", "url:" + origin + "/connect/telegram")]],
         )
 
-    def _link_deep(self, chat_id, payload):
-        """`/start l_<code>`: needs the grant preview the backend is adding (#382)."""
+    def _link_deep(self, chat_id, code):
+        """`/start l_<code>` from the website's Telegram button or QR (#382)."""
         self._delete_current_message(chat_id)
-        self.api.send_message(
-            chat_id,
-            "一键绑定还在上线中。先用这个办法：发 /link，按步骤把网站上的那段内容复制给我。",
-        )
+        if not self.linker:
+            self.api.send_message(chat_id, "这个版本还不能绑定账号。")
+            return
+        self._action(chat_id, "typing")
+        try:
+            fields = self.linker.fields_from_code(code)
+        except LinkError as error:
+            return self._link_failed(chat_id, error)
+        if not fields:
+            self.api.send_message(
+                chat_id,
+                "一键绑定还差网站后台的一步。先这样：在网站「AI 助手」里新建连接，把页面上那一整段内容复制发给我。",
+            )
+            return
+        self._do_link(chat_id, fields)
 
     def _link_from_text(self, chat_id, text):
         self._delete_current_message(chat_id)  # the one-time code should not stay in chat
@@ -446,17 +455,22 @@ class Bot:
             self.api.send_message(chat_id, "这段内容不完整。请把网站上显示的那一整段（含代码和下面的信息）都复制过来。")
             return
         self._action(chat_id, "typing")
+        self._do_link(chat_id, fields)
+
+    def _link_failed(self, chat_id, error):
+        reasons = {
+            "connection_expired": "这个绑定已经过期了（10 分钟有效），在网站上重新点一次「连接 Telegram」。",
+            "connection_consumed": "这个绑定已经用过了，在网站上重新点一次「连接 Telegram」。",
+            "origin_not_allowed": "这个网站地址不对，请用 Inkseq 官网上的连接。",
+        }
+        self.fb.record("error", chat_id, "link", step=str(error))
+        self.api.send_message(chat_id, reasons.get(str(error), "绑定没成功，在网站上重新连接一次再试。"))
+
+    def _do_link(self, chat_id, fields):
         try:
             link = self.linker.link(chat_id, fields)
         except LinkError as error:
-            reasons = {
-                "connection_expired": "这段内容已经过期了（10 分钟有效），在网站上新建一个再发我。",
-                "connection_consumed": "这段内容已经用过了，在网站上新建一个再发我。",
-                "origin_not_allowed": "这个网站地址不对，请用 Inkseq 官网上的连接。",
-            }
-            self.fb.record("error", chat_id, "link", step=str(error))
-            self.api.send_message(chat_id, reasons.get(str(error), "绑定没成功，在网站上新建一个连接再试一次。"))
-            return
+            return self._link_failed(chat_id, error)
         if self.router:
             self.router.forget(chat_id)
         self.api.send_message(
@@ -539,13 +553,13 @@ class Bot:
         self._collecting(chat_id, state)
 
     def _text(self, chat_id, text):
+        command = text.split()[0].split("@")[0].lower() if text.startswith("/") else ""
+        payload = text.split()[1] if command == "/start" and len(text.split()) > 1 else ""
+        if payload.startswith("l_"):
+            return self._link_deep(chat_id, payload[2:])  # one-tap link from the website
         if contains_code(text):
             return self._link_from_text(chat_id, text)  # never reaches drafts or feedback
-        command = text.split()[0].split("@")[0].lower() if text.startswith("/") else ""
         if command == "/start":
-            payload = text.split()[1] if len(text.split()) > 1 else ""
-            if payload.startswith("l_"):
-                return self._link_deep(chat_id, payload[2:])
             self.api.send_message(chat_id, WELCOME)
             return
         if command == "/link":
