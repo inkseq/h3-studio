@@ -38,6 +38,8 @@ from .schema_version import (
     PAYMENT_REVISION,
     PAYMENT_REVISIONS,
     LIVE_PAYMENT_REVISION,
+    LIVE_PAYMENT_REVISIONS,
+    CREDIT_ADMISSION_REVISION,
     IDENTITY_REVISION,
     IDENTITY_REVISIONS,
     WORKFLOW_REVISIONS,
@@ -95,7 +97,7 @@ def _default(value):
         return "'unknown'"
     if value in {"0", "'0'", "'0'::integer"}:
         return "0"
-    for literal in ("user", "active"):
+    for literal in ("user", "active", "enforced"):
         if value in {"'" + literal + "'", "'" + literal + "'::character varying"}:
             return "'" + literal + "'"
     return value
@@ -106,6 +108,13 @@ def _check(value):
     # PG deparses each term inside parentheses. Reject every other grammar
     # instead of stripping semantically meaningful parentheses/quotes in SQL.
     value = str(value)
+    from .migrations.versions.v20261022_0007_credit_admission import (
+        normalize_check as role_check,
+    )
+
+    role = role_check(value)
+    if role is not None:
+        return role
     from .identity_schema import IdentitySchemaError, normalize_check
 
     try:
@@ -394,8 +403,13 @@ def reflected_signature(connection, *, schema=None):
 
 
 def compare_schema(connection, *, schema=None):
-    expected = metadata_signature(frozen_metadata(), connection.dialect)
+    expected_metadata = frozen_metadata()
     actual, version = reflected_signature(connection, schema=schema)
+    if version == CREDIT_ADMISSION_REVISION:
+        from .migrations.versions.v20261022_0007_credit_admission import extend
+
+        extend(expected_metadata)
+    expected = metadata_signature(expected_metadata, connection.dialect)
     from .identity_schema import (
         IdentitySchemaError,
         frozen_metadata as identity_metadata,
@@ -434,10 +448,10 @@ def compare_schema(connection, *, schema=None):
     if payments_present or version in PAYMENT_REVISIONS:
         payment_revision = (
             LIVE_PAYMENT_REVISION
-            if version == LIVE_PAYMENT_REVISION
+            if version in LIVE_PAYMENT_REVISIONS
             else PAYMENT_REVISION
         )
-        if payments_present and version == LIVE_PAYMENT_REVISION:
+        if payments_present and version in LIVE_PAYMENT_REVISIONS:
             try:
                 payment_valid(connection, schema=schema)
             except PaymentSchemaError as error:
@@ -886,7 +900,7 @@ def adopt_payment_live(connection, *, expected_fingerprint, tenant_id):
         raise BaselineError('payment_live_adoption_credit_policy_unavailable') from None
     if charging['enabled']:
         raise BaselineError('payment_live_adoption_requires_charging_off')
-    if before['recorded_revision'] == LIVE_PAYMENT_REVISION:
+    if before['recorded_revision'] in LIVE_PAYMENT_REVISIONS:
         return dict(state='already_adopted', before=before, after=before)
     from alembic import command
 
