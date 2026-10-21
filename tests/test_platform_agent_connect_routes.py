@@ -194,6 +194,132 @@ class AgentConnectRoutesTests(unittest.TestCase):
         self.assertIsNone(second["code"])
         self.assertFalse(second["code_available"])
 
+    def telegram_grant(self, nonce=None):
+        body = {
+            'name': 'Telegram',
+            'client': 'telegram',
+            'authorization_profile_id': PROFILE_ID,
+            'authorization_profile_version': PROFILE_VERSION,
+        }
+        if nonce is not None:
+            body['telegram_nonce'] = nonce
+        response = self.client.post(
+            '/v1/account/agent-connections',
+            json=body,
+            headers={'Origin': self.origin, 'Idempotency-Key': secrets.token_hex(12)},
+        )
+        self.assertEqual(response.status_code, 201)
+        return response.json()
+
+    def test_telegram_post_preview_claim_list_pause_and_revoke(self):
+        from studio_platform.schema_registry import platform_metadata
+
+        platform_metadata().create_all(self.repo.engine)
+        nonce = secrets.token_urlsafe(32)
+        grant = self.telegram_grant(nonce)
+        anon = TestClient(self.app, base_url=self.origin)
+        self.addCleanup(anon.close)
+        preview = anon.post(
+            '/v1/agent-connect/grant-preview', json={'code': grant['code']}
+        )
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(
+            set(preview.json()),
+            {'connection_id', 'authorization', 'authorization_fingerprint'},
+        )
+        self.assertEqual(preview.headers['cache-control'], 'no-store')
+        self.assertEqual(preview.headers['referrer-policy'], 'no-referrer')
+        for private in (nonce, grant['code'], 'superdan'):
+            self.assertNotIn(private, preview.text)
+        self.assertEqual(
+            preview.json()['authorization']['telegram_nonce_hash'], digest(nonce)
+        )
+        token, verifier, body = self.material(grant)
+        body.update(
+            telegram_nonce=nonce,
+            telegram_user={
+                'id': '1234567',
+                'username': 'qa_telegram',
+                'display_name': 'QA',
+            },
+        )
+        wrong = anon.post(
+            '/v1/agent-connect/exchange',
+            json={**body, 'telegram_nonce': secrets.token_urlsafe(32)},
+        )
+        self.assertEqual(wrong.status_code, 409)
+        self.assertIsNone(self.auth.bearer(token))
+        self.assertEqual(
+            self.client.get(
+                '/v1/account/agent-connections/' + grant['connection']['id']
+            ).json()['status'],
+            'pending',
+        )
+        result = anon.post('/v1/agent-connect/exchange', json=body)
+        self.assertEqual(result.status_code, 200)
+        self.assertNotIn(token, result.text)
+        self.assertEqual(
+            anon.post(
+                '/v1/agent-connect/grant-preview', json={'code': grant['code']}
+            ).status_code,
+            410,
+        )
+        recovery = anon.post(
+            '/v1/agent-connect/exchange', json={**body, 'recovery_verifier': verifier}
+        )
+        self.assertEqual(recovery.status_code, 200)
+        self.assertTrue(recovery.json()['recovered'])
+        row = self.client.get('/v1/account/agent-connections').json()['connections'][0]
+        self.assertEqual(row['client'], 'telegram')
+        self.assertEqual(row['claimed_telegram_user']['id'], '1234567')
+        paused = self.client.patch(
+            '/v1/account/agent-connections/' + row['id'],
+            json={'expected_version': row['state_version'], 'paused': True},
+            headers={'Origin': self.origin, 'Idempotency-Key': 'telegram-pause'},
+        )
+        self.assertEqual(paused.status_code, 200)
+        self.assertEqual(
+            paused.json()['claimed_telegram_user'], row['claimed_telegram_user']
+        )
+        self.assertIsNone(self.auth.bearer(token))
+        revoked = self.client.delete(
+            '/v1/account/agent-connections/' + row['id'],
+            headers={'Origin': self.origin},
+        )
+        self.assertEqual(revoked.status_code, 200)
+
+    def test_preview_rejects_query_get_duplicate_extra_and_cross_site(self):
+        grant = self.telegram_grant()
+        anon = TestClient(self.app, base_url=self.origin)
+        self.addCleanup(anon.close)
+        path = '/v1/agent-connect/grant-preview'
+        self.assertIn(anon.get(path).status_code, (401, 405))
+        for content in (
+            {'code': grant['code'], 'owner': 'supervan'},
+            {'code': 'sxc_' + 'x' * 43},
+        ):
+            response = anon.post(path, json=content)
+            self.assertIn(response.status_code, (404, 422))
+            self.assertNotIn(grant['code'], response.text)
+        response = anon.post(
+            path,
+            content='{"code":"first","code":"second"}',
+            headers={'Content-Type': 'application/json'},
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            anon.post(path + '?extra=value', json={'code': grant['code']}).status_code,
+            422,
+        )
+        self.assertEqual(
+            anon.post(
+                path,
+                json={'code': grant['code']},
+                headers={'Origin': 'https://evil.example'},
+            ).status_code,
+            403,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

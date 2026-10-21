@@ -699,6 +699,7 @@ inventory.json
 !tests/test_payments_app.py
 !docs/BILLING-TEST-MODE.md
 !tests/test_stripe_credentials.py
+!tests/test_platform_agent_connect_helper_telegram.py
 !studio_platform/content_policy.py
 !studio_platform/content_routes.py
 !tests/test_content_policy.py

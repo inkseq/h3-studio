@@ -18,11 +18,52 @@ On macOS, the helper binds reads and writes to the same existing default user Ke
 
 The same-origin digest manifest lists these storage requirements and a connection verification checklist; it does not certify access to an OS store on the user's machine. Keep save-before-exchange, same-material recovery and the original authorization binding on every supported OS. A platform-specific test with a fake native interface does not establish actual Keychain access, interaction behavior or live external onboarding; those require separate native and release evidence.
 
-The only anonymous write is `POST /v1/agent-connect/exchange`, bounded to an 8 KiB JSON body, with exact fields, cross-site checks and source/known-connection rate limits. It accepts the short-lived code, the token digest/prefix, verifier challenge and expected authorization fingerprint. It never accepts or returns the raw PAT. Account and connection locking atomically consume the grant and insert a normal existing `platform_personal_api_keys` record. PostgreSQL and SQLite use their respective locking mechanisms; there is no parallel authentication authority.
+The only anonymous credential-issuing write is `POST /v1/agent-connect/exchange`; Telegram grant preview uses a separate read-only POST described below. Both accept at most an 8 KiB JSON body, with exact fields, cross-site checks and shared source/known-connection rate limits. Exchange accepts the short-lived code, the token digest/prefix, verifier challenge and expected authorization fingerprint. It never accepts or returns the raw PAT. Account and connection locking atomically consume the grant and insert a normal existing `platform_personal_api_keys` record. PostgreSQL and SQLite use their respective locking mechanisms; there is no parallel authentication authority.
 
 A lost exchange response is recovered with the original local token/verifier within the grant’s recovery window (five minutes by default) after the first claim. Recovery returns the same key metadata; it cannot create another key or extend expiry. A response lost before the first claim permits retrying only the same saved material. Expired, revoked, changed-account, changed-origin or changed-fingerprint authority fails closed. Logout invalidates an unconsumed browser grant; an already-issued PAT retains the existing PAT lifecycle. Password/account changes and explicit revocation invalidate access. Revoke leaves drafts, accepted jobs and assets intact.
 
 The helper has no redirect-following credential path and prints safe connection/account metadata. Codes are read through a hidden prompt or stdin, never CLI arguments. Permanent keys, recovery material and signed URLs must not be put in chat, URLs, ordinary documents or logs. The API/media helper loads a connection with `--connection ID`; it refuses mixed credential sources. Manual process-environment PAT and already-configured internal Registry use remain explicit advanced fallbacks.
+
+## Telegram linking (#382)
+
+Browser issuance may add `client: "telegram"` and an optional `telegram_nonce`
+of 43–128 URL-safe characters. Only its SHA-256 is stored, as frozen
+`authorization.telegram_nonce_hash`; `authorization.client` is also fingerprinted.
+Telegram authorization uses an opaque per-grant `account-<UUID hex>` subject in
+`authorization.owner`, never the browser username or email. Actual PAT ownership
+and account isolation remain bound to the existing private connection row.
+Omitting these fields preserves ordinary Agent authorization and fingerprints.
+
+Anonymous `POST /v1/agent-connect/grant-preview` accepts exactly `{"code":"sxc_…"}`.
+GET and query-string codes are not supported. A successful response has exactly
+`connection_id`, `authorization`, and `authorization_fingerprint`: no browser
+identity, owner usage, key metadata, or credential. Preview neither consumes the
+code nor creates a key. Every preview response, including errors, uses
+`Cache-Control: no-store` and `Referrer-Policy: no-referrer`. Unknown/malformed or
+non-Telegram codes return 404; expired codes 403; consumed/revoked or invalidated
+authority 410; origin mismatch 409. Preview and exchange share limits of 10
+requests per source and 20 per known connection per five-minute window; 429
+includes `Retry-After`. Codes remain short-lived bearer secrets, not public IDs.
+
+Telegram exchange adds `telegram_user: {id, username?, display_name?}` and the
+original raw `telegram_nonce` when the grant is nonce-bound. ID is a positive
+decimal string no greater than `2^63-1`; username is nullable or 1–32 ASCII
+letters/digits/underscores; display name is nullable or 1–160 characters without
+control characters. The first atomic claim stores
+`connection.claimed_telegram_user` with ID, nullable profile fields and
+`claimed_at`. This is an unverified client claim, not Telegram authentication or
+additional account authority. Recovery requires the same ID, nonce binding and
+original token/verifier; changed profile names do not replace the original claim.
+
+The bot must bind a bot-first nonce to its initiating private-chat user and check
+that mapping before exchange. A website-first grant has no such nonce binding:
+its first claimant presents the one-time code, and the owner can inspect the
+claimed user, pause or revoke through existing connection controls. The public
+helper's optional Python-only `telegram_user`/`telegram_nonce` context is saved
+in the existing protected credential store before exchange and retained for
+exact retries; resume never needs to preview an already consumed code. It checks
+the full frozen authorization, nonce hash and returned claimed ID. No raw PAT,
+nonce, verifier, or code is included in its public connection result.
 
 ## Same creation objects for Agent and browser
 
