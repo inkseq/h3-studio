@@ -39,6 +39,14 @@ def make_adapter(config, home):
     """demo (default), llm (Gemini plans, local demo film) or staging (QA story)."""
     if config.get("adapter", "demo") == "demo":
         return DemoAdapter(home / "work")
+    if config["adapter"] == "accounts":
+        # Linked chats use their own Inkseq account; unlinked chats plan in chat only.
+        from .accounts import AccountRouter
+        from .linking import Linker
+
+        base = make_adapter({"adapter": "llm", "llm": config["llm"]}, home)
+        linker = Linker(home / "accounts", config["accounts"]["origins"])
+        return AccountRouter(linker, base, base.llm, home / "work")
     if config["adapter"] == "llm":
         from .llm_adapter import ORIGIN as GEMINI, GeminiClient, LlmAdapter
 
@@ -84,8 +92,10 @@ def main(argv=None):
     api.set_commands(COMMANDS)
     logging.info("running as @%s for %d allowlisted user(s), %s adapter",
                  me.get("username"), len(allowed), config.get("adapter", "demo"))  # fmt: skip
-    bot = Bot(api, make_adapter(config, home), Store(home / "state"), allowed,
-              home / "media", feedback=FeedbackLog(home / "feedback.jsonl"))  # fmt: skip
+    adapter = make_adapter(config, home)
+    bot = Bot(api, adapter, Store(home / "state"), allowed, home / "media",
+              feedback=FeedbackLog(home / "feedback.jsonl"),
+              linker=getattr(adapter, "linker", None))  # fmt: skip
     bot.poll_forever()
 
 

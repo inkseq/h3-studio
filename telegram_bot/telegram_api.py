@@ -89,6 +89,9 @@ class TelegramAPI:
             data["reply_markup"] = keyboard(buttons)
         return self.call("editMessageText", data)
 
+    def delete_message(self, chat_id, message_id):
+        return self.call("deleteMessage", {"chat_id": chat_id, "message_id": message_id})
+
     def send_chat_action(self, chat_id, action="typing"):
         return self.call("sendChatAction", {"chat_id": chat_id, "action": action})
 

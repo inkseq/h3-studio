@@ -21,6 +21,7 @@ import time
 
 from .adapter import MODES, Film, Storyboard
 from .render import clock
+from .linking import LinkError, contains_code, parse_instruction
 from .telegram_api import TelegramError
 
 log = logging.getLogger("telegram_bot")
@@ -58,6 +59,7 @@ COMMANDS = [
     ("status", "现在做到哪一步"),
     ("budget", "积分和花费"),
     ("idea", "提建议 / 哪里不好用"),
+    ("link", "绑定我的 Inkseq 账号"),
     ("help", "怎么用"),
 ]
 HELP = (
@@ -197,7 +199,7 @@ def number_rows(prefix, count, per_row=6, label="{}"):
 
 class Bot:
     def __init__(self, api, adapter, store, allowed_ids, media_dir, clock=time.time,
-                 feedback=None):
+                 feedback=None, linker=None):
         if not allowed_ids:
             raise ValueError("allowlist is empty; refusing to run")
         self.api, self.adapter, self.store = api, adapter, store
@@ -205,6 +207,8 @@ class Bot:
         self.media_dir = Path(media_dir)
         self.clock = clock
         self.fb = feedback or _NoFeedback()
+        self.linker = linker
+        self.router = adapter if hasattr(adapter, "for_chat") else None
         self.ignored = 0
         self._waiting = set()  # chats whose photos/text may still be arriving
         if hasattr(adapter, "on_saved"):
@@ -229,6 +233,7 @@ class Bot:
             if not self._allowed(query.get("from"), chat):
                 self.ignored += 1
                 return
+            self._route(chat["id"])
             try:
                 return self._callback(chat["id"], query)
             except Exception as error:
@@ -239,6 +244,8 @@ class Bot:
             self.ignored += 1
             return
         chat_id = message["chat"]["id"]
+        self._route(chat_id)
+        self._message_id = message.get("message_id")
         try:
             image = self._image_of(message)
             if image:
@@ -389,6 +396,95 @@ class Bot:
         except Exception:
             pass
 
+    # ---- account linking ------------------------------------------------------
+
+    def _route(self, chat_id):
+        """Linked chats use their own account's adapter; others the default."""
+        if self.router:
+            self.adapter = self.router.for_chat(chat_id)
+
+    def _account_line(self, chat_id):
+        link = self.linker.get(chat_id) if self.linker else None
+        if link:
+            return f"账号：已绑定 {link['owner']}（片子存进你自己的作品里）"
+        return "账号：未绑定（发 /link 绑定后，片子会存进你的 Inkseq 作品）"
+
+    def _link_help(self, chat_id):
+        if not self.linker:
+            self.api.send_message(chat_id, "这个版本还不能绑定账号。")
+            return
+        link = self.linker.get(chat_id)
+        if link:
+            self.api.send_message(chat_id, f"已经绑定了 {link['owner']}。要换账号先发 /unlink。")
+            return
+        origin = sorted(self.linker.allowed_origins)[0]
+        self.api.send_message(
+            chat_id,
+            "绑定后，bot 做的片子会存进你自己的 Inkseq 作品，用你自己的积分。\n\n"
+            "1. 点下面的按钮打开 Inkseq 并登录\n"
+            "2. 右上角头像 → 「Connect AI / 连接 AI」→ 新建连接（可以设每天最多花多少）\n"
+            "3. 把页面上显示的那一整段内容复制，发给我\n\n"
+            "那段内容 10 分钟内有效、只能用一次；我收到后会马上删掉那条消息。",
+            [[("🔗 打开 Inkseq", "url:" + origin + "/")]],
+        )
+
+    def _link_deep(self, chat_id, payload):
+        """`/start l_<code>`: needs the grant preview the backend is adding (#382)."""
+        self._delete_current_message(chat_id)
+        self.api.send_message(
+            chat_id,
+            "一键绑定还在上线中。先用这个办法：发 /link，按步骤把网站上的那段内容复制给我。",
+        )
+
+    def _link_from_text(self, chat_id, text):
+        self._delete_current_message(chat_id)  # the one-time code should not stay in chat
+        if not self.linker:
+            self.api.send_message(chat_id, "这个版本还不能绑定账号。")
+            return
+        fields = parse_instruction(text)
+        if not fields:
+            self.api.send_message(chat_id, "这段内容不完整。请把网站上显示的那一整段（含代码和下面的信息）都复制过来。")
+            return
+        self._action(chat_id, "typing")
+        try:
+            link = self.linker.link(chat_id, fields)
+        except LinkError as error:
+            reasons = {
+                "connection_expired": "这段内容已经过期了（10 分钟有效），在网站上新建一个再发我。",
+                "connection_consumed": "这段内容已经用过了，在网站上新建一个再发我。",
+                "origin_not_allowed": "这个网站地址不对，请用 Inkseq 官网上的连接。",
+            }
+            self.fb.record("error", chat_id, "link", step=str(error))
+            self.api.send_message(chat_id, reasons.get(str(error), "绑定没成功，在网站上新建一个连接再试一次。"))
+            return
+        if self.router:
+            self.router.forget(chat_id)
+        self.api.send_message(
+            chat_id,
+            f"✅ 绑定好了：{link['owner']}\n之后做的片子会存进你的作品，用你的积分。"
+            "\n随时可以在网站「连接 AI」里暂停或撤销；发 /unlink 解除这台 bot 的绑定。",
+        )
+
+    def _unlink(self, chat_id):
+        removed = self.linker.unlink(chat_id) if self.linker else None
+        if self.router:
+            self.router.forget(chat_id)
+        if not removed:
+            self.api.send_message(chat_id, "现在没有绑定账号。")
+            return
+        self.api.send_message(
+            chat_id,
+            "已解除绑定。为了安全，也请在网站「连接 AI」里把这个连接撤销；撤销不会删掉已经做好的片子。",
+        )
+
+    def _delete_current_message(self, chat_id):
+        message_id = getattr(self, "_message_id", None)
+        if message_id:
+            try:
+                self.api.delete_message(chat_id, message_id)
+            except (TelegramError, AttributeError):
+                pass
+
     def _idea(self, chat_id, state, text):
         self.store.save(chat_id, state)
         row = self.fb.record("idea", chat_id, text, phase=state["phase"])
@@ -443,10 +539,19 @@ class Bot:
         self._collecting(chat_id, state)
 
     def _text(self, chat_id, text):
+        if contains_code(text):
+            return self._link_from_text(chat_id, text)  # never reaches drafts or feedback
         command = text.split()[0].split("@")[0].lower() if text.startswith("/") else ""
         if command == "/start":
+            payload = text.split()[1] if len(text.split()) > 1 else ""
+            if payload.startswith("l_"):
+                return self._link_deep(chat_id, payload[2:])
             self.api.send_message(chat_id, WELCOME)
             return
+        if command == "/link":
+            return self._link_help(chat_id)
+        if command == "/unlink":
+            return self._unlink(chat_id)
         if command == "/help":
             self.api.send_message(chat_id, HELP)
             return
@@ -703,6 +808,7 @@ class Bot:
             if self.clock() - last < QUIET_SECONDS:
                 continue
             self._waiting.discard(chat_id)
+            self._route(chat_id)
             state["last_input"] = None
             self.store.save(chat_id, state)
             if len(state["photos"]) < MIN_PHOTOS and state["photos"]:
@@ -808,7 +914,8 @@ class Bot:
                 chat_id, "片子已经做好了。要改就说「第8秒……」，要做新的发 /new。"
             )
         if command == "/status":
-            lines = [f"现在：{PHASES[phase]}", f"照片：{len(state['photos'])} 张"]
+            lines = [f"现在：{PHASES[phase]}", f"照片：{len(state['photos'])} 张",
+                     self._account_line(chat_id)]  # fmt: skip
             if state["board"]:
                 board = self._board(state)
                 lines.append(f"片子：{board.title}，{len(board.cards)} 段，{clock(board.duration)}")

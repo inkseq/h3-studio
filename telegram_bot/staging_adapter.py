@@ -33,21 +33,31 @@ class StudioError(Exception):
 
 
 class StudioClient:
-    """Cookie session as a staging QA user; the password stays in memory."""
+    """Either a staging QA cookie session or a linked owner's PAT (Bearer).
 
-    def __init__(self, base_url, username, password, *, transport=None):
+    The password or key stays in memory and is never logged or repr'd.
+    """
+
+    def __init__(self, base_url, username=None, password=None, *, token=None,
+                 transport=None):  # fmt: skip
         if base_url != STAGING:
             raise ValueError("staging only")
+        if not token and not (username and password):
+            raise ValueError("a QA login or a linked key is required")
         self.base_url = base_url
         self._username, self._password = username, password
+        headers = {"Origin": base_url}
+        if token:
+            headers["Authorization"] = "Bearer " + token
+        self._token = bool(token)
         self._client = httpx.Client(
             base_url=base_url,
-            headers={"Origin": base_url},
+            headers=headers,
             timeout=httpx.Timeout(60, connect=15),
             follow_redirects=False,
             transport=transport,
         )
-        self._signed_in = False
+        self._signed_in = self._token
 
     def __repr__(self):
         return f"StudioClient({self.base_url}, <session hidden>)"
@@ -70,7 +80,7 @@ class StudioClient:
                 response = self._client.request(method, path, headers=headers, **kwargs)
             except httpx.HTTPError as error:
                 raise StudioError(step, 0, type(error).__name__) from None
-            if response.status_code == 401 and attempt == 1:
+            if response.status_code == 401 and attempt == 1 and not self._token:
                 self._login()
                 continue
             break
