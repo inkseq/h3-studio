@@ -59,6 +59,8 @@ from .render_plans import RECIPE as RENDER_RECIPE, compile_render
 from .agent_discovery import PUBLIC_PATHS as AGENT_PUBLIC_PATHS, DISCOVERY_LINK
 from .agent_connect_routes import (
     EXCHANGE_PATH,
+    PREVIEW_PATH,
+    GrantPreviewPrivacyMiddleware,
     register_routes as register_agent_connect_routes,
 )
 from .frontend import FRONTEND_CONTRACT, STATIC_CACHE_SCOPE_KEY, is_public_frontend
@@ -503,7 +505,10 @@ def create_app(
         public_discovery = (
             request.method in {"GET", "HEAD"} and request.url.path in AGENT_PUBLIC_PATHS
         )
-        public_exchange = request.method == "POST" and request.url.path == EXCHANGE_PATH
+        public_exchange = request.method == "POST" and request.url.path in {
+            EXCHANGE_PATH,
+            PREVIEW_PATH,
+        }
         if (
             request.url.path not in public_paths
             and not public_frontend
@@ -1580,4 +1585,5 @@ def create_app(
     from .quality_http import install as install_quality_views
 
     install_quality_views(app)
+    app.add_middleware(GrantPreviewPrivacyMiddleware)
     return app

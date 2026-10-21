@@ -182,3 +182,7 @@ Amends CR46 after the #193 promotion was held for "the Friday window" although t
 - Every wake first reads origin/main `AGENTS.md` and `workflow/owner-changes.md`, then the claimed issues' latest comments and labels. If a new owner decision or review removes the blocker, resume the authorized work immediately.
 - The wake prompt must not restate rules, dates or windows. It points to the files above. Remove any hard-coded rule from existing wake prompts.
 Other CR46 limits are unchanged: one heartbeat, no stacking, no new spending or production authority. Source: direct owner chat 2026-10-21.
+
+## CR-20261021-49 — Telegram linking reuses Agent Connect
+
+Owner assigns the #382 backend addition after the existing frontend and bot work: grant preview and exchange with bot-first nonce binding and an owner-visible claimed Telegram user. Reuse existing Agent Connect grants, PATs, connection controls, scopes and budgets; no new login authority. Claude approved the small extension in [review6307080701](https://github.com/inkseq/h3-studio/issues/382#issuecomment-6307080701): preview takes the code in a POST body, never a query string; expose no owner username/email; preserve exact legacy fingerprints and one-use, same-material recovery. Claimed Telegram identity is unverified metadata, inspectable and revocable by the original owner. Independent security review and Claude staging acceptance precede production promotion. Source: direct owner request2026-10-21 and the linked review.
