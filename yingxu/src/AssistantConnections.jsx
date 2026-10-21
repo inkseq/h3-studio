@@ -1,3 +1,7 @@
+import TelegramLink from './TelegramLink.jsx';
+
+// Daily credit cap suggested for a new Telegram link; USD caps (admins) start uncapped.
+const TELEGRAM_DEFAULT_CAP = '200';
 import { microsToDollars } from './money.js';
 import SpendingBreakdown from './SpendingBreakdown.jsx';
 import { Bot } from 'lucide-react';
@@ -37,6 +41,7 @@ export default function AssistantConnections({
   onLogin,
   embedded = false,
   active = true,
+  telegram = false,
 }) {
   // Users never see dollars (#304): spending caps show in credits, or in USD to admins only.
   const access = useAccess(account),
@@ -59,9 +64,10 @@ export default function AssistantConnections({
     [operation, setOperation] = useState({}),
     [created, setCreated] = useState(null),
     [scope, setScope] = useState(sessionId ? 'session' : projectId ? 'story' : 'all'),
-    [permission, setPermission] = useState('organise'),
-    [cap, setCap] = useState('0'),
-    [name, setName] = useState('Codex'),
+    [permission, setPermission] = useState(telegram ? 'generate' : 'organise'),
+    [cap, setCap] = useState(telegram ? (creditMode ? TELEGRAM_DEFAULT_CAP : '0') : '0'),
+    [name, setName] = useState(telegram ? 'Telegram' : 'Codex'),
+    [target, setTarget] = useState(telegram ? 'telegram' : 'agent'),
     [error, setError] = useState(''),
     [notice, setNotice] = useState(''),
     [loading, setLoading] = useState(false),
@@ -81,6 +87,11 @@ export default function AssistantConnections({
     );
   const permissionLabel = (value) =>
     t('assistants.' + (['organise', 'generate'].includes(value) ? value : 'legacyPermission'));
+  // Credit mode is known only after /v1/credits loads; then suggest the Telegram cap once.
+  useEffect(() => {
+    if (target === 'telegram' && creditMode)
+      setCap((old) => (old === '0' ? TELEGRAM_DEFAULT_CAP : old));
+  }, [target, creditMode]);
   const codeAvailable = created?.code && created.connection.expires_at * 1000 > now;
   async function refresh() {
     const at = epoch.current,
@@ -117,9 +128,10 @@ export default function AssistantConnections({
     connectionsCursor.current = undefined;
     activitySequence.current++;
     setCreated(null);
-    setName('Codex');
-    setCap('0');
-    setPermission('organise');
+    // The bot makes films, so a Telegram link defaults to generate with a modest daily cap.
+    setName(target === 'telegram' ? 'Telegram' : 'Codex');
+    setCap(target === 'telegram' ? (creditMode ? TELEGRAM_DEFAULT_CAP : '0') : '0');
+    setPermission(target === 'telegram' ? 'generate' : 'organise');
     setSettings(null);
     setSettingsDraft(null);
     setActivity(null);
@@ -203,7 +215,7 @@ export default function AssistantConnections({
         name: name.trim(),
         authorization_profile_id: profile.id,
         authorization_profile_version: profile.version,
-        scope: assistantScope(scope, { sessionId, projectId }),
+        scope: assistantScope(target === 'telegram' ? 'all' : scope, { sessionId, projectId }),
         permission,
         ...(creditMode
           ? { daily_limit_credits: capCredits(cap) }
@@ -344,17 +356,48 @@ export default function AssistantConnections({
           )}
           {!codeAvailable ? (
             <form onSubmit={issue}>
+              {!telegram && (
+                <div
+                  className="seg assistant-target"
+                  role="group"
+                  aria-label={t('telegram.target')}
+                >
+                  {['agent', 'telegram'].map((value) => (
+                    <button
+                      type="button"
+                      key={value}
+                      className={target === value ? 'on' : ''}
+                      aria-pressed={target === value}
+                      onClick={() => {
+                        setTarget(value);
+                        setName(value === 'telegram' ? 'Telegram' : 'Codex');
+                        setPermission(value === 'telegram' ? 'generate' : 'organise');
+                        setCap(
+                          value === 'telegram' ? (creditMode ? TELEGRAM_DEFAULT_CAP : '0') : '0',
+                        );
+                      }}
+                    >
+                      {t(value === 'telegram' ? 'telegram.tab' : 'telegram.agentTab')}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {target === 'telegram' && <p className="muted">{t('telegram.explain')}</p>}
               <fieldset disabled={busy || !profile}>
                 <legend>{t('assistants.scope')}</legend>
-                <select
-                  aria-label={t('assistants.scope')}
-                  value={scope}
-                  onChange={(e) => setScope(e.target.value)}
-                >
-                  {sessionId && <option value="session">{t('assistants.session')}</option>}
-                  {projectId && <option value="story">{t('assistants.story')}</option>}
-                  <option value="all">{t('assistants.all')}</option>
-                </select>
+                {target === 'telegram' ? (
+                  <p>{t('assistants.all')}</p>
+                ) : (
+                  <select
+                    aria-label={t('assistants.scope')}
+                    value={scope}
+                    onChange={(e) => setScope(e.target.value)}
+                  >
+                    {sessionId && <option value="session">{t('assistants.session')}</option>}
+                    {projectId && <option value="story">{t('assistants.story')}</option>}
+                    <option value="all">{t('assistants.all')}</option>
+                  </select>
+                )}
                 <label>
                   {t('assistants.name')}
                   <input
@@ -385,10 +428,17 @@ export default function AssistantConnections({
                   </>
                 )}
                 <button className="primary" disabled={!name.trim()}>
-                  {t('assistants.connect')}
+                  {t(target === 'telegram' ? 'telegram.connect' : 'assistants.connect')}
                 </button>
               </fieldset>
             </form>
+          ) : target === 'telegram' ? (
+            <TelegramLink
+              code={created.code}
+              expiresAt={connection.expires_at}
+              autoOpen={telegram}
+              onHide={() => setCreated(null)}
+            />
           ) : (
             <article>
               <h3>{t('assistants.waiting')}</h3>
