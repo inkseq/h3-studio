@@ -87,6 +87,196 @@ class FilmTests(unittest.TestCase):
     def raw(self, run_id):
         return self.repo.get_document(self.scope, KIND, run_id)['payload']
 
+    def test_film_cut_excludes_missing_shot_before_generation_quote_or_hold(self):
+        project = copy.deepcopy(self.project)
+        missing = copy.deepcopy(project['entities'][2])
+        missing.update(id='excluded-missing', order=-1)
+        missing['data'].pop('selectedAssetId')
+        project['entities'].append(missing)
+        project['journey']['filmCuts'] = {'chapter-one': {'shotIds': ['shot-one']}}
+        self.repo.put_document(
+            Scope('tenant', 'owner', '__projects'),
+            'project',
+            'story-one',
+            project,
+            expected_version=1,
+        )
+        planning = Mock(side_effect=AssertionError('Excluded shot must not be planned'))
+        self.app.state.storyboard_versions = SimpleNamespace(preflight=planning)
+        resolver = Mock(wraps=self.app.state.resolve_render_source)
+        self.app.state.resolve_render_source = resolver
+        with patch.object(
+            self.repo, 'create_plan', side_effect=AssertionError('No quote or plan')
+        ):
+            preview = self.service.preflight(
+                self.principal, 'story-one', {'expected_version': 2}, 'cut'
+            )
+        self.assertEqual(preview['counts']['shots'], 1)
+        self.assertEqual(preview['counts']['generate'], 0)
+        self.assertEqual(
+            self.raw(preview['id'])['chapters'][0]['shot_ids'], ['shot-one']
+        )
+        self.assertEqual(self.raw(preview['id'])['project'], project)
+        self.assertEqual(resolver.call_count, 1)
+        planning.assert_not_called()
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(connection.execute(select(plans)).all(), [])
+            self.assertEqual(connection.execute(select(jobs)).all(), [])
+            self.assertEqual(connection.execute(select(budget_reservations)).all(), [])
+        project['entities'][2]['data'].pop('selectedAssetId')
+        self.repo.put_document(
+            Scope('tenant', 'owner', '__projects'),
+            'project',
+            'story-one',
+            project,
+            expected_version=2,
+        )
+        planning.side_effect = StopIteration('Inspect included generation only')
+        with self.assertRaises(StopIteration):
+            self.service.preflight(
+                self.principal, 'story-one', {'expected_version': 3}, 'included-missing'
+            )
+        self.assertEqual(planning.call_args.args[2]['shot_ids'], ['shot-one'])
+
+    def test_effectively_empty_cut_refuses_before_plans_or_receipt(self):
+        self.project['entities'][2]['data'].pop('selectedAssetId')
+        self.project['journey']['filmCuts'] = {'chapter-one': {'shotIds': ['unknown']}}
+        self.repo.put_document(
+            Scope('tenant', 'owner', '__projects'),
+            'project',
+            'story-one',
+            self.project,
+            expected_version=1,
+        )
+        self.app.state.storyboard_versions = SimpleNamespace(
+            preflight=Mock(side_effect=AssertionError('No generation'))
+        )
+        with patch.object(
+            self.repo, 'create_plan', side_effect=AssertionError('No plan')
+        ):
+            with self.assertRaisesRegex(ValueError, '^film_cut_empty$'):
+                self.service.preflight(
+                    self.principal, 'story-one', {'expected_version': 2}, 'empty-cut'
+                )
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(connection.execute(select(plans)).all(), [])
+            self.assertEqual(
+                connection.execute(
+                    select(documents).where(documents.c.kind == KIND)
+                ).all(),
+                [],
+            )
+
+    def test_old_accepted_cut_keeps_original_shots_trim_and_caption_basis(self):
+        from studio_platform.caption_server import caption_signature
+        from studio_platform.render_plans import ordered_chapter, render_source_hash
+
+        project = copy.deepcopy(self.project)
+        second = copy.deepcopy(project['entities'][2])
+        second.update(id='second', order=1)
+        project['entities'].append(second)
+        first = project['entities'][2]
+        first['data']['selectedVideoRange'] = {
+            'assetId': 'clip',
+            'fileId': 'local-clip',
+            'cloudAssetId': 'asset-one',
+            'cloudArtifactId': None,
+            'start': 1,
+            'end': 3,
+        }
+        audio = copy.deepcopy(project['entities'][3])
+        audio.update(id='voice', type='audio', data={'fileId': 'local-voice'})
+        project['entities'].append(audio)
+        project['journey']['sound']['mode'] = 'mixed'
+        project['journey']['soundTracks']['chapter-one'] = [
+            {
+                'assetId': 'voice',
+                'fileId': 'local-voice',
+                'shotId': 'shot-one',
+                'start': 0,
+                'end': 1,
+                'offset': 0,
+                'gain': 0.7,
+            }
+        ]
+        cues = [{'id': 'original', 'start': 0, 'end': 1, 'text': 'Original accepted'}]
+        project['journey']['captionTracks'] = {'chapter-one': {'cues': cues}}
+        project['journey']['captionTracks']['chapter-one']['confirmedSnapshot'] = (
+            caption_signature(
+                project, 'chapter-one', ordered_chapter(project, 'chapter-one')[2]
+            )
+        )
+        old_ordered = copy.deepcopy(project)
+        project['journey']['filmCuts'] = {'chapter-one': {'shotIds': ['second']}}
+        self.repo.put_document(
+            Scope('tenant', 'owner', '__projects'),
+            'project',
+            'story-one',
+            project,
+            expected_version=1,
+        )
+
+        def legacy_selector(value, chapter_id):
+            legacy = copy.deepcopy(value)
+            legacy['journey'].pop('filmCuts', None)
+            return ordered_chapter(legacy, chapter_id)
+
+        with (
+            patch(
+                'studio_platform.film_runs.ordered_chapter', side_effect=legacy_selector
+            ),
+            patch(
+                'studio_platform.render_plans.chapter_tracks',
+                side_effect=lambda value, chapter_id: value['journey'][
+                    'soundTracks'
+                ].get(chapter_id, []),
+            ),
+        ):
+            preview = self.service.preflight(
+                self.principal,
+                'story-one',
+                {'expected_version': 2, 'burn_subtitles': True},
+                'historical-cut',
+            )
+        self.service._mutate(
+            self.principal,
+            'story-one',
+            preview['id'],
+            lambda value: value.update(accepted_at=self.repo.clock(), phase='chapters'),
+        )
+        original = self.raw(preview['id'])
+        captured = []
+
+        def inspect_plan(_principal, _value, _label, compiled, blockers):
+            self.assertEqual(blockers, [])
+            captured.append(compiled)
+            raise StopIteration('Stop before planning')
+
+        with (
+            patch.object(self.service, '_render_plan', side_effect=inspect_plan),
+            patch.object(
+                self.repo, 'create_plan', side_effect=AssertionError('No new quote')
+            ),
+        ):
+            with self.assertRaises(StopIteration):
+                self.service.turn(self.principal, 'story-one', preview['id'])
+        self.assertEqual(self.raw(preview['id']), original)
+        shots = captured[0]['request']['render']['shots']
+        self.assertEqual([row['shot_id'] for row in shots], ['shot-one', 'second'])
+        self.assertEqual([row['source_start_frame'] for row in shots], [24, 0])
+        self.assertEqual(captured[0]['output_spec']['frame_count'], 96)
+        self.assertEqual(
+            captured[0]['request']['render']['subtitles']['cues'][0]['text'],
+            'Original accepted',
+        )
+        self.assertEqual(
+            captured[0]['request']['render']['audio_tracks'][0]['source_id'], 'voice'
+        )
+        self.assertEqual(
+            captured[0]['server_source_hash'],
+            render_source_hash(old_ordered, 'chapter-one', burn_subtitles=True),
+        )
+
     def test_missing_sound_plan_refuses_before_generation_or_receipt_writes(self):
         planning = Mock(side_effect=AssertionError('No generation planning allowed'))
         self.app.state.storyboard_versions = SimpleNamespace(preflight=planning)

@@ -14,6 +14,7 @@ import test_platform_api as api_fixtures
 from studio_platform.api import create_app
 from studio_platform.render_plans import (
     compile_render,
+    ordered_chapter,
     render_source_hash,
     configuration_for,
 )
@@ -67,6 +68,102 @@ def source(entity, kind):
 
 
 class RenderPlanTests(unittest.TestCase):
+    def test_film_cut_capability_only_for_enabled_film_path_and_visible_to_users(self):
+        from dataclasses import replace
+        from studio_platform.auth import Principal
+        from studio_platform.capabilities import capabilities
+        from studio_platform.quality_views import capabilities as public_capabilities
+
+        with tempfile.TemporaryDirectory() as directory:
+            settings = Settings(
+                Path(directory),
+                database_url="postgresql+psycopg://fixture@127.0.0.1/sixnine_test",
+                generation_queue="dbos",
+                render_enabled=True,
+            )
+            raw = capabilities(settings)
+            self.assertIs(raw["story_film"]["film_cuts"], True)
+            self.assertIs(
+                public_capabilities(
+                    raw, Principal("creator", "browser"), settings=settings
+                )["story_film"]["film_cuts"],
+                True,
+            )
+            for disabled in (
+                replace(settings, render_enabled=False),
+                replace(settings, generation_queue="postgres"),
+            ):
+                self.assertIs(capabilities(disabled)["story_film"]["film_cuts"], False)
+
+    def test_film_cut_membership_uses_canonical_order_and_never_reads_excluded_media(
+        self,
+    ):
+        p = story()
+        original = p["entities"][2]
+        earlier = copy.deepcopy(original)
+        earlier.update(id="earlier", order=-1)
+        excluded = copy.deepcopy(original)
+        excluded.update(id="excluded", order=-2)
+        excluded["data"] = {"seconds": 2, "selectedAssetId": "unreadable"}
+        foreign = copy.deepcopy(original)
+        foreign.update(id="foreign", parentId="another-scene")
+        p["entities"].extend([earlier, excluded, foreign])
+        p["journey"]["filmCuts"] = {
+            "chapter-one": {
+                "shotIds": ["shot-one", "missing", "foreign", "earlier", "earlier"]
+            }
+        }
+        resolved = []
+
+        def resolve(entity, kind):
+            resolved.append(entity["id"])
+            self.assertEqual(entity["id"], "clip")
+            return source(entity, kind)
+
+        compiled, timeline, blockers, _ = compile_render(BODY, p, resolve)
+        self.assertEqual(blockers, [])
+        self.assertEqual(
+            [row["shot_id"] for row in compiled["request"]["render"]["shots"]],
+            ["earlier", "shot-one"],
+        )
+        self.assertEqual(
+            [row["shot_id"] for row in timeline["shots"]], ["earlier", "shot-one"]
+        )
+        self.assertEqual(resolved, ["clip"])
+        before = render_source_hash(p, "chapter-one")
+        excluded["data"]["selectedAssetId"] = "different-unreadable"
+        self.assertEqual(render_source_hash(p, "chapter-one"), before)
+        p["journey"]["filmCuts"]["chapter-one"]["shotIds"] = ["shot-one"]
+        self.assertNotEqual(render_source_hash(p, "chapter-one"), before)
+
+    def test_invalid_or_empty_film_cut_refuses_before_source_resolution(self):
+        for cut, code in (
+            (None, "film_cut_invalid"),
+            ({}, "film_cut_invalid"),
+            ({"shotIds": None}, "film_cut_invalid"),
+            ({"shotIds": [1]}, "film_cut_invalid"),
+            ({"shotIds": [], "extra": True}, "film_cut_invalid"),
+            ({"shotIds": []}, "film_cut_empty"),
+            ({"shotIds": ["unknown"]}, "film_cut_empty"),
+        ):
+            with self.subTest(cut=cut):
+                p = story()
+                p["journey"]["filmCuts"] = {"chapter-one": cut}
+                with (
+                    self.assertRaisesRegex(ValueError, "^" + code + "$"),
+                    patch(
+                        "studio_platform.render_plans.video_range",
+                        side_effect=AssertionError("No source use"),
+                    ),
+                ):
+                    compile_render(
+                        BODY, p, lambda *_: self.fail("No source resolution")
+                    )
+        p = story()
+        p["journey"]["filmCuts"] = []
+        with self.assertRaisesRegex(ValueError, "film_cut_invalid"):
+            ordered_chapter(p, "chapter-one")
+
     def selected_range(self, project, start=1, end=4):
         value = {
             "assetId": "clip",
@@ -372,6 +469,18 @@ class RenderApiTests(unittest.TestCase):
         result = self.client.post("/v1/render-plans", json=BODY)
         self.assertEqual(result.status_code, 201, result.text)
         return result.json()
+
+    def test_empty_cut_http_refuses_without_creating_a_plan(self):
+        from sqlalchemy import select
+        from studio_platform.repository import plans
+
+        self.project["journey"]["filmCuts"] = {"chapter-one": {"shotIds": []}}
+        self.save(2)
+        response = self.client.post("/v1/render-plans", json=BODY)
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["detail"], "film_cut_empty")
+        with self.app.state.repository.engine.connect() as connection:
+            self.assertEqual(connection.execute(select(plans)).all(), [])
 
     def test_local_source_real_decode_and_idempotent_consent(self):
         plan = self.plan()

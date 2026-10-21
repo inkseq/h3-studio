@@ -57,6 +57,25 @@ class CaptionPlanTests(unittest.TestCase):
     def burn(self, project):
         return compile_render({**BODY, "burn_subtitles": True}, project, source)
 
+    def test_film_cut_change_requires_confirmation_of_the_included_caption_basis(self):
+        value = self.draft()
+        second = copy.deepcopy(value["entities"][2])
+        second.update(id="second", order=1)
+        value["entities"].append(second)
+        self.reconfirm(value)
+        original = copy.deepcopy(value["journey"]["captionTracks"])
+        value["journey"]["filmCuts"] = {"chapter-one": {"shotIds": ["shot-one"]}}
+        self.assertTrue(self.burn(value)[2])
+        self.assertEqual(value["journey"]["captionTracks"], original)
+        self.reconfirm(value)
+        compiled, _, blockers, _ = self.burn(value)
+        self.assertEqual(blockers, [])
+        self.assertEqual(compiled["output_spec"]["frame_count"], 48)
+        self.assertEqual(
+            [row["shot_id"] for row in compiled["request"]["render"]["shots"]],
+            ["shot-one"],
+        )
+
     def reconfirm(self, value):
         value["journey"]["captionTracks"]["chapter-one"]["confirmedSnapshot"] = (
             caption_signature(

@@ -300,6 +300,124 @@ class RenderTests(unittest.TestCase):
             self.assertLess(color[0], 20)
             self.assertLess(color[1], 20)
 
+    def test_shared_film_selector_real_order_nonzero_trim_and_exclusion(self):
+        from studio_platform.render_plans import compile_render
+        from test_platform_render_plans import BODY, story
+
+        self.video("tail", "red", seconds=1, audio=False)
+        self.video("excluded", "lime", seconds=1, audio=False)
+        path = self.root / "marked.mp4"
+        args = ["ffmpeg", "-v", "error", "-nostdin"]
+        for color in ("yellow", "blue"):
+            args += ["-f", "lavfi", "-i", f"color=c={color}:s=320x256:r=24:d=1"]
+        args += [
+            "-filter_complex",
+            "[0:v][1:v]concat=n=2:v=1:a=0[v]",
+            "-map",
+            "[v]",
+            "-an",
+            "-c:v",
+            "libx264",
+            "-threads",
+            "2",
+            "-pix_fmt",
+            "yuv420p",
+            str(path),
+        ]
+        subprocess.run(args, check=True, capture_output=True, timeout=20)
+        with path.open("rb") as stream:
+            info = self.store.write_new(
+                "owner", "marked", stream, filename=path.name, content_type="video/mp4"
+            )
+        self.sources["marked"] = {
+            "kind": "video",
+            "object": asdict(info),
+            "simulation": False,
+        }
+        project = story()
+        shot, clip = project["entities"][2], project["entities"][-1]
+        clip.update(id="marked", data={"fileId": "local-marked"})
+        shot.update(order=2)
+        shot["data"].update(
+            selectedAssetId="marked",
+            seconds=0.5,
+            selectedVideoRange={
+                "assetId": "marked",
+                "fileId": "local-marked",
+                "cloudAssetId": None,
+                "cloudArtifactId": None,
+                "start": 1,
+                "end": 1.5,
+            },
+        )
+        for ident, order, seconds in (("tail", 1, 0.25), ("excluded", 0, 0.5)):
+            entity = copy.deepcopy(clip)
+            entity.update(id=ident, data={"fileId": "local-" + ident})
+            additional = copy.deepcopy(shot)
+            additional.update(id="shot-" + ident, order=order)
+            additional["data"] = {"selectedAssetId": ident, "seconds": seconds}
+            project["entities"].extend([entity, additional])
+        # Membership order deliberately disagrees: canonical order must win.
+        project["journey"]["filmCuts"] = {
+            "chapter-one": {"shotIds": ["shot-one", "shot-tail"]}
+        }
+        resolved = []
+
+        def resolve(entity, kind):
+            resolved.append(entity["id"])
+            self.assertNotEqual(entity["id"], "excluded")
+            return {
+                **self.sources[entity["id"]],
+                "duration": 2 if entity["id"] == "marked" else 1,
+            }
+
+        compiled, _, blockers, _ = compile_render(
+            {**BODY, "aspect": "1:1"}, project, resolve
+        )
+        self.assertEqual(blockers, [])
+        self.assertEqual(resolved, ["tail", "marked"])
+        self.assertEqual(
+            [
+                item["source_start_frame"]
+                for item in compiled["request"]["render"]["shots"]
+            ],
+            [0, 24],
+        )
+        result = self.execute(
+            {"id": "film-cut-job", "owner_id": "owner", "request": compiled}, "film-cut"
+        )
+        video = next(
+            s
+            for s in media.probe(result["video"])["streams"]
+            if s["codec_type"] == "video"
+        )
+        self.assertEqual((video["nb_frames"], video["avg_frame_rate"]), ("18", "24/1"))
+        decoded = subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-i",
+                str(result["video"]),
+                "-vf",
+                "crop=2:2:238:238,scale=1:1",
+                "-pix_fmt",
+                "rgb24",
+                "-f",
+                "rawvideo",
+                "-",
+            ],
+            check=True,
+            capture_output=True,
+            timeout=20,
+        ).stdout
+        self.assertEqual(len(decoded), 18 * 3)
+        for frame in range(18):
+            red, green, blue = decoded[frame * 3 : frame * 3 + 3]
+            self.assertLess(green, 25)  # Neither excluded green nor trimmed yellow.
+            self.assertGreater(red if frame < 6 else blue, 200)
+            self.assertLess(blue if frame < 6 else red, 25)
+
     def test_v2_source_start_validation_and_actual_tail_limit(self):
         original = self.job(
             shots=[

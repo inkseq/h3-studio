@@ -41,8 +41,10 @@ def caption_signature(project, chapter_id, shots):
             )
         basis.append(item)
     journey = project.get("journey", {})
+    from .render_plans import chapter_tracks
+
     audio = []
-    for track in journey.get("soundTracks", {}).get(chapter_id, []):
+    for track in chapter_tracks(project, chapter_id):
         asset_id = track.get("assetId") or track.get("audioId") or None
         asset = entities.get(asset_id)
         item = {

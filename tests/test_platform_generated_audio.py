@@ -67,6 +67,81 @@ def trusted_source(entity, kind):
 
 
 class GeneratedAudioTests(unittest.TestCase):
+    def test_known_excluded_missing_generated_audio_is_not_resolved_or_hashed(self):
+        from studio_platform.caption_server import caption_signature
+        from studio_platform.render_plans import ordered_chapter
+
+        p, track = generated_story()
+        included = copy.deepcopy(p["entities"][2])
+        included.update(id="included", order=1)
+        p["entities"].append(included)
+        p["journey"]["filmCuts"] = {"chapter-one": {"shotIds": ["included"]}}
+        voice = next(entity for entity in p["entities"] if entity["id"] == "voice")
+        voice["data"]["missingFile"] = True
+        music = copy.deepcopy(voice)
+        music.update(id="music", title="Independent music")
+        music["data"] = {"fileId": "local-music"}
+        p["entities"].append(music)
+        p["journey"]["soundTracks"]["chapter-one"].append(
+            {
+                "assetId": "music",
+                "fileId": "local-music",
+                "shotId": "",
+                "start": 0,
+                "end": 2,
+                "offset": 0,
+                "gain": 0.5,
+            }
+        )
+        calls = []
+
+        def resolver(entity, kind):
+            calls.append(entity["id"])
+            self.assertNotEqual(entity["id"], "voice")
+            return trusted_source(entity, kind)
+
+        compiled, _, blockers, _ = compile_render(BODY, p, resolver)
+        self.assertFalse(blockers)
+        self.assertEqual(set(calls), {"clip", "music"})
+        self.assertEqual(set(compiled["sources"]), {"clip", "music"})
+        self.assertEqual(
+            [
+                row["assetId"]
+                for row in caption_signature(
+                    p, "chapter-one", ordered_chapter(p, "chapter-one")[2]
+                )["audio"]
+            ],
+            ["music"],
+        )
+        before = render_source_hash(p, "chapter-one", burn_subtitles=True)
+        track["generatedFrom"] = {"unread": "changed"}
+        voice["data"]["fileId"] = "different-excluded-audio"
+        self.assertEqual(
+            render_source_hash(p, "chapter-one", burn_subtitles=True), before
+        )
+        foreign_chapter = {**copy.deepcopy(p["entities"][0]), "id": "foreign-chapter"}
+        foreign_scene = {
+            **copy.deepcopy(p["entities"][1]),
+            "id": "foreign-scene",
+            "parentId": "foreign-chapter",
+        }
+        p["entities"].extend(
+            [
+                foreign_chapter,
+                foreign_scene,
+                {
+                    **copy.deepcopy(included),
+                    "id": "foreign",
+                    "parentId": "foreign-scene",
+                },
+            ]
+        )
+        for anchor in ("unknown", "foreign"):
+            with self.subTest(anchor=anchor):
+                track["shotId"] = anchor
+                track.pop("generatedFrom", None)
+                self.assertTrue(compile_render(BODY, p, trusted_source)[2])
+
     def test_same_job_flac_follows_live_cut_instead_of_projected_audio_fields(self):
         p, track = generated_story()
         shot = p["entities"][2]
