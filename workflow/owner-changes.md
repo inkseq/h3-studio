@@ -174,3 +174,11 @@ When this session actually stops awaiting Claude review or acceptance, schedule 
 ## CR-20261021-47 — promote as soon as accepted
 
 Owner (direct chat 2026-10-21, "为啥周五发布？尽快啊"): drop the Tuesday/Friday production window. Promote the identical accepted artifact bytes as soon as Claude has signed off, any day, through the existing promotion path, rollback target and checks. Applies now to #193: promote accepted `498e073` and staged frontend `d6806b8`, then perform the audited CR43 production activation. Everything else is unchanged: no rebuild, Tier2 sign-off, rollback evidence, and owner approval for live money, credentials and new infrastructure. Source: direct owner chat 2026-10-21.
+
+## CR-20261021-48 — the wake heartbeat covers every wait and re-reads the rules
+
+Amends CR46 after the #193 promotion was held for "the Friday window" although the owner had removed it (CR47). The heartbeat had been paused because the session was waiting on a date, not on Claude, and its prompt hard-coded the old Tuesday/Friday rule.
+- Keep the single 30-minute same-thread heartbeat on whenever the `Waiting on:` line names anyone or anything other than this session: Claude, the owner, CI, a deploy, a date or an external provider. Pause it only while actively working, and re-enable it at the next wait.
+- Every wake first reads origin/main `AGENTS.md` and `workflow/owner-changes.md`, then the claimed issues' latest comments and labels. If a new owner decision or review removes the blocker, resume the authorized work immediately.
+- The wake prompt must not restate rules, dates or windows. It points to the files above. Remove any hard-coded rule from existing wake prompts.
+Other CR46 limits are unchanged: one heartbeat, no stacking, no new spending or production authority. Source: direct owner chat 2026-10-21.
