@@ -219,41 +219,11 @@ class GenerationTransport:
             "inkseq-account-"
             + hashlib.sha256((tenant + "\0" + operation_id).encode()).hexdigest()
         )
-        ident = base
-        if resume_event is not None:
-            active = (
-                connection.execute(
-                    text(
-                        "SELECT workflow_uuid FROM inkseq_workflows.workflow_status "
-                        "WHERE (workflow_uuid=:id OR workflow_uuid LIKE :prefix) "
-                        "AND application_name=:application AND application_version=:version AND name=:name "
-                        "AND status IN ('PENDING','ENQUEUED','DELAYED') LIMIT 2"
-                    ),
-                    {
-                        "id": base,
-                        "prefix": base + "/%",
-                        "application": APPLICATION,
-                        "version": VERSION,
-                        "name": ACCOUNT_WORKFLOW,
-                    },
-                )
-                .scalars()
-                .all()
-            )
-            if len(active) > 1:
-                raise Conflict("account_operation_workflow_ambiguous")
-            if active:
-                self.client.send_in_transaction(
-                    connection,
-                    active[0],
-                    {"operation_id": operation_id},
-                    topic="account_changed",
-                    idempotency_key=resume_event,
-                )
-                return
-            # A new SDK epoch resumes the SAME business journal after its
-            # terminal transport, only for this explicit verified-flow event.
-            ident = base + "/" + resume_event
+        # Always enqueue a deterministic epoch for this exact verified event.
+        # An active workflow can become terminal between a status read and a
+        # send, losing a wake. Native enqueue uniqueness avoids that race while
+        # every epoch still reads the SAME account-operation business journal.
+        ident = base + "/" + resume_event if resume_event is not None else base
         self.client.enqueue_in_transaction(
             connection,
             {

@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+import threading
 import unittest
 from unittest.mock import patch
 import uuid
@@ -551,43 +552,61 @@ class AccountSessionTests(LedgerCase):
             self.assertFalse(self.service.rejected_flow(owner, epoch, value))
         self.assertEqual(self.saved(ident), original)
 
-    def test_transport_resume_wakes_active_or_deterministically_resumes_terminal(self):
+    def test_transport_resume_cannot_lose_wake_as_original_becomes_terminal(self):
         from studio_platform.dbos_transport import GenerationTransport
         from studio_platform.repository import request_hash
 
         calls = []
-        active = []
         transport = object.__new__(GenerationTransport)
         transport.client = SimpleNamespace(
-            enqueue_in_transaction=lambda *args: calls.append(("enqueue", args)),
-            send_in_transaction=lambda *args, **kwargs: calls.append(
-                ("send", args, kwargs)
-            ),
+            enqueue_in_transaction=lambda *args: calls.append(args)
         )
-        connection = SimpleNamespace(
-            execute=lambda *args: SimpleNamespace(
-                scalars=lambda: SimpleNamespace(all=lambda: active)
-            )
-        )
+
+        def no_racy_status_query(*args):
+            self.fail("resume_must_not_select_then_send_to_original")
+
+        connection = SimpleNamespace(execute=no_racy_status_query)
         ident = str(uuid.uuid4())
         event = request_hash({"verified_sid": "offline"})
         with patch("studio_platform.workflow_schema.assert_execution_allowed"):
-            transport.enqueue_account_operation(
-                connection, self.scope.tenant_id, ident, resume_event=event
-            )
-            transport.enqueue_account_operation(
-                connection, self.scope.tenant_id, ident, resume_event=event
-            )
-            first = calls[0][1][1]["workflow_id"]
-            self.assertEqual(calls[1][1][1]["workflow_id"], first)
-            self.assertTrue(first.endswith("/" + event))
-            active.append(first)
-            transport.enqueue_account_operation(
-                connection, self.scope.tenant_id, ident, resume_event=event
-            )
-        self.assertEqual(calls[2][0], "send")
-        self.assertEqual(calls[2][1][1], first)
-        self.assertEqual(calls[2][2]["topic"], "account_changed")
+            # Whether the old SDK workflow is PENDING or commits SUCCESS at
+            # this boundary, a new deterministic epoch is durably enqueued.
+            for _ in range(3):
+                transport.enqueue_account_operation(
+                    connection, self.scope.tenant_id, ident, resume_event=event
+                )
+        self.assertEqual(len({call[1]["workflow_id"] for call in calls}), 1)
+        self.assertTrue(calls[0][1]["workflow_id"].endswith("/" + event))
+        self.assertEqual([call[3] for call in calls], [ident] * 3)
+
+    def test_concurrent_original_and_resume_only_revoke_exact_frozen_sids(self):
+        token = self.hosted()
+        ident = self.operation(token)["operation_id"]
+        original_ids = set(self.saved(ident)["provider_sessions"])
+        self.now += 1
+        fresh = "session_" + "N" * 24
+        self.provider.add(fresh, self.subject, created=self.now)
+        barrier = threading.Barrier(2)
+        revoke = self.provider.revoke_session
+
+        def concurrent_revoke(*, session_id):
+            barrier.wait(timeout=5)
+            revoke(session_id=session_id)
+
+        with patch.object(
+            self.provider, "revoke_session", side_effect=concurrent_revoke
+        ):
+            with ThreadPoolExecutor(2) as pool:
+                results = list(
+                    pool.map(
+                        lambda _: self.service.turn(self.scope.tenant_id, ident),
+                        range(2),
+                    )
+                )
+        self.assertTrue(all(not result["done"] for result in results))
+        self.assertEqual(set(self.provider.revokes), original_ids)
+        self.assertIn(fresh, self.provider.active)
+        self.assertTrue(self.service.turn(self.scope.tenant_id, ident)["done"])
 
 
 if __name__ == "__main__":
