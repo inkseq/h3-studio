@@ -255,7 +255,7 @@ class MigrationDeployTests(unittest.TestCase):
         ):
             validate(broken)
 
-    def test_stripe_opt_in_is_staging_only_and_shared_with_existing_dbos_consumer(self):
+    def test_stripe_opt_in_is_mode_bound_and_shared_with_existing_dbos_consumer(self):
         services = self.document['services']
         for name in ('app', 'controller'):
             self.assertEqual(services[name]['environment']['INKSEQ_STRIPE_MODE'], 'off')
@@ -363,9 +363,24 @@ class MigrationDeployTests(unittest.TestCase):
             )
         production['secrets']['stripe']['file'] = '/run/sixnine-secrets/stripe'
         with self.assertRaisesRegex(
-            ValueError, '^migration_stripe_production_forbidden$'
+            ValueError, '^migration_stripe_mode_target_invalid$'
         ):
             validate(production)
+        for mode in ('off', 'live'):
+            for name in ('app', 'controller'):
+                production['services'][name]['environment'].update(
+                    INKSEQ_STRIPE_MODE=mode, INKSEQ_GENERATION_QUEUE='dbos'
+                )
+            validate(production)
+        broken = copy.deepcopy(production)
+        for name in ('app', 'controller'):
+            broken['services'][name]['environment']['PUBLIC_ORIGIN_ALIASES'] = (
+                'https://untrusted.example'
+            )
+        with self.assertRaisesRegex(ValueError, '^migration_stripe_target_invalid$'):
+            from tools.check_migration_deploy import validate_stripe
+
+            validate_stripe(broken, target='production')
 
     def test_public_origin_and_proxy_only_phase_are_closed_and_consistent(self):
         self.assertEqual(

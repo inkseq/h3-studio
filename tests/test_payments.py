@@ -15,7 +15,13 @@ from studio_platform import credits
 from studio_platform.auth import Principal
 from studio_platform.credit_schema import entries
 from studio_platform.identity_schema import admin_audit, users
-from studio_platform.payment_schema import events, metadata, payments
+from studio_platform.payment_schema import (
+    LIVE_PAYMENT_REVISION,
+    events,
+    frozen_metadata,
+    metadata,
+    payments,
+)
 from studio_platform.payments import PaymentCore, PaymentError, STAGING
 from studio_platform.payments_workflows import register_payment_workflows
 from studio_platform.repository import outbox
@@ -392,10 +398,137 @@ class PaymentTests(fixtures.CreditTests):
             self.assertEqual(result["state"], "review")
         live = self.event(payment)
         live["livemode"] = True
-        with self.assertRaisesRegex(PaymentError, "live_mode_forbidden"):
+        live["object"]["session_id"] = "cs_live_original"
+        with self.assertRaisesRegex(PaymentError, "test_environment_required"):
             self.core.receive_event(live)
         self.assertEqual(self.rows(entries), [])
         self.assertIsNone(self.rows(payments)[0]["paid_at"])
+
+    def enable_live_fixture(self):
+        # An adopted, exact 006 schema is separate from the frozen 005 family.
+        metadata.drop_all(self.repo.engine)
+        frozen_metadata(revision=LIVE_PAYMENT_REVISION).create_all(self.repo.engine)
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(self.version).values(version_num=LIVE_PAYMENT_REVISION)
+            )
+        self.settings.deployment_target = "production"
+        self.settings.public_origin = "https://inkseq.com"
+        self.settings.stripe_mode = "live"
+
+    def live_purchase(self, key="live-original"):
+        return self.core.begin_checkout(
+            self.principal,
+            self.pack,
+            key,
+            account_scope="acct_live_original",
+            livemode=True,
+        )
+
+    def live_event(self, payment, **changes):
+        event = self.event(payment, **changes)
+        event.update(livemode=True, account_scope="acct_live_original")
+        event["object"]["session_id"] = "cs_live_" + payment["payment"]["id"].replace(
+            "-", ""
+        )
+        return event
+
+    def test_live_writer_requires_adopted_006_not_existing_test_schema(self):
+        self.settings.deployment_target = "production"
+        self.settings.public_origin = "https://inkseq.com"
+        self.settings.stripe_mode = "live"
+        with self.assertRaisesRegex(PaymentError, "schema_not_ready"):
+            self.live_purchase()
+        self.assertEqual(self.rows(payments), [])
+        self.enable_live_fixture()
+        original = self.live_purchase()
+        self.assertIs(original["payment"]["livemode"], True)
+        self.assertEqual(self.rows(payments)[0]["livemode"], 1)
+        self.assertEqual(original, self.live_purchase())
+        with self.assertRaisesRegex(PaymentError, "purchases_disabled"):
+            self.core.begin_checkout(
+                self.principal,
+                self.pack,
+                "cross-mode",
+                account_scope="acct_live_original",
+            )
+
+    def test_live_off_retains_signed_obligation_and_refund_without_duplicate_credit(
+        self,
+    ):
+        self.enable_live_fixture()
+        original = self.live_purchase()
+        event = self.live_event(original)
+        self.settings.stripe_mode = "off"
+        with self.assertRaisesRegex(PaymentError, "purchases_disabled"):
+            self.live_purchase("new-while-off")
+        self.process(event)
+        self.process(event)
+        self.assertEqual(self.balance()["balance"], 500)
+        self.assertEqual(self.rows(entries)[0]["origin"], "stripe-live")
+        self.process(
+            self.live_event(original, kind="charge.refunded", amount_refunded=250)
+        )
+        self.assertEqual(self.balance()["balance"], 250)
+        self.assertEqual(len(self.rows(payments)), 1)
+        self.assertTrue(all(row["livemode"] == 1 for row in self.rows(events)))
+        self.assertTrue(
+            all(row["origin"] == "stripe-live" for row in self.rows(entries))
+        )
+
+    def test_live_context_rejects_test_binding_and_foreign_account_without_ledger_effects(
+        self,
+    ):
+        self.enable_live_fixture()
+        original = self.live_purchase()
+        session = {
+            key: value
+            for key, value in self.live_event(original).items()
+            if key in {"account_scope", "livemode", "object"}
+        }
+        session["object"].update(
+            checkout_url="https://checkout.stripe.com/c/pay/original",
+            expires_at=self.now + 3600,
+        )
+        wrong_account = copy.deepcopy(session)
+        wrong_account["account_scope"] = "acct_other"
+        with self.assertRaisesRegex(PaymentError, "original_mismatch"):
+            self.core.bind_checkout(
+                original["payment"]["id"],
+                original["payment"]["request_fingerprint"],
+                wrong_account,
+            )
+        wrong_mode = copy.deepcopy(session)
+        wrong_mode["livemode"] = False
+        wrong_mode["object"]["session_id"] = "cs_test_original"
+        with self.assertRaisesRegex(PaymentError, "test_environment_required"):
+            self.core.bind_checkout(
+                original["payment"]["id"],
+                original["payment"]["request_fingerprint"],
+                wrong_mode,
+            )
+        foreign = self.live_event(original)
+        foreign["account_scope"] = "acct_other"
+        self.assertEqual(self.process(foreign)["state"], "deferred")
+        self.assertEqual(self.rows(entries), [])
+        self.assertIsNone(self.rows(payments)[0]["stripe_checkout_session_id"])
+        bound = self.core.bind_checkout(
+            original["payment"]["id"],
+            original["payment"]["request_fingerprint"],
+            session,
+        )
+        self.assertIs(bound["livemode"], True)
+        self.assertEqual(
+            bound["stripe_checkout_session_id"], session["object"]["session_id"]
+        )
+        replaced = copy.deepcopy(session)
+        replaced["object"]["session_id"] = "cs_live_different"
+        with self.assertRaisesRegex(PaymentError, "original_mismatch"):
+            self.core.bind_checkout(
+                original["payment"]["id"],
+                original["payment"]["request_fingerprint"],
+                replaced,
+            )
 
     def test_dispute_blocks_new_purchases_and_late_creation_cannot_reopen_won_dispute(
         self,

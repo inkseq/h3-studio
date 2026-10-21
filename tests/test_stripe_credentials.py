@@ -1,4 +1,4 @@
-"""Test-only Stripe host hydration; synthetic secrets and no cloud calls."""
+"""Mode-isolated Stripe host hydration; synthetic secrets and no cloud calls."""
 
 import contextlib
 import io
@@ -12,6 +12,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from deploy.platform import runtime_secrets_aws as runtime
+from studio_platform.stripe_config import load_credentials, validate_credentials
 
 FAKE = {
     'version': 1,
@@ -23,6 +24,59 @@ FAKE = {
 
 
 class StripeHydrationTests(unittest.TestCase):
+    def test_exact_v1_remains_test_and_v2_is_explicitly_live(self):
+        old = validate_credentials(FAKE)
+        self.assertEqual(
+            (old.version, old.mode, old.webhook_endpoint_id), (1, 'test', None)
+        )
+        live = {
+            **FAKE,
+            'version': 2,
+            'mode': 'live',
+            'secret_key': 'rk_live_' + 'r' * 32,
+            'publishable_key': None,
+            'webhook_secret': None,
+            'webhook_endpoint_id': None,
+        }
+        for prefix in ('rk_live_', 'sk_live_'):
+            candidate = {**live, 'secret_key': prefix + 'r' * 32}
+            config = validate_credentials(candidate)
+            self.assertEqual((config.version, config.mode), (2, 'live'))
+            self.assertIsNone(config.publishable_key)
+            self.assertNotIn(candidate['secret_key'], repr(config))
+        configured = {
+            **live,
+            'publishable_key': 'pk_live_' + 'p' * 32,
+            'webhook_secret': 'whsec_' + 'w' * 32,
+            'webhook_endpoint_id': 'we_Synthetic123',
+        }
+        self.assertEqual(
+            validate_credentials(configured).webhook_endpoint_id, 'we_Synthetic123'
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'stripe'
+            path.write_text(json.dumps(configured), encoding='utf-8')
+            path.chmod(0o600)
+            self.assertEqual(load_credentials(path), validate_credentials(configured))
+        for candidate in (
+            {**FAKE, 'mode': 'test'},
+            {**FAKE, 'version': True},
+            {**live, 'version': 1},
+            {**live, 'mode': 'test'},
+            {**live, 'secret_key': FAKE['secret_key']},
+            {**live, 'publishable_key': FAKE['publishable_key']},
+            {**live, 'webhook_secret': 'whsec_' + 'w' * 32},
+            {**live, 'webhook_endpoint_id': 'we_Synthetic123'},
+            {**configured, 'webhook_endpoint_id': 'we_bad\nvalue'},
+            {key: value for key, value in live.items() if key != 'mode'},
+            {**live, 'enabled': True},
+        ):
+            with (
+                self.subTest(fields=sorted(candidate)),
+                self.assertRaisesRegex(ValueError, '^stripe_configuration_invalid$'),
+            ):
+                validate_credentials(candidate)
+
     @unittest.skipIf(os.name == 'nt', 'The fixed runtime paths target Linux hosts')
     def test_maintenance_settings_keep_legacy_off_and_reject_unsafe_opt_in(self):
         from test_migration_release import maintenance
@@ -55,6 +109,14 @@ class StripeHydrationTests(unittest.TestCase):
                     INKSEQ_STRIPE_CONFIG_FILE='/run/sixnine-secrets/stripe',
                 )
                 self.assertEqual(maintenance.settings_document(value), value)
+            for mode in ('off', 'live'):
+                value = candidate(
+                    INKSEQ_DEPLOYMENT_TARGET='production',
+                    INKSEQ_GENERATION_QUEUE='dbos',
+                    INKSEQ_STRIPE_MODE=mode,
+                    INKSEQ_STRIPE_CONFIG_FILE='/run/sixnine-secrets/stripe',
+                )
+                self.assertEqual(maintenance.settings_document(value), value)
             for changes in (
                 {'INKSEQ_STRIPE_MODE': 'test'},
                 {'INKSEQ_STRIPE_MODE': 'live'},
@@ -64,11 +126,6 @@ class StripeHydrationTests(unittest.TestCase):
                 },
                 {
                     'INKSEQ_DEPLOYMENT_TARGET': 'staging',
-                    'INKSEQ_STRIPE_CONFIG_FILE': '/run/sixnine-secrets/stripe',
-                },
-                {
-                    'INKSEQ_DEPLOYMENT_TARGET': 'production',
-                    'INKSEQ_GENERATION_QUEUE': 'dbos',
                     'INKSEQ_STRIPE_CONFIG_FILE': '/run/sixnine-secrets/stripe',
                 },
             ):
@@ -120,9 +177,36 @@ class StripeHydrationTests(unittest.TestCase):
         api.create_secret.assert_not_called()
         self.assertEqual(output.getvalue() + errors.getvalue(), '')
         api.reset_mock()
-        with self.assertRaisesRegex(RuntimeError, 'requires staging'):
+        with self.assertRaisesRegex(RuntimeError, 'unavailable or invalid'):
             runtime.hydrate_stripe(api, target='production')
-        api.get_secret_value.assert_not_called()
+        api.get_secret_value.assert_called_once_with(
+            SecretId='/sixnine/platform/stripe'
+        )
+
+    def test_production_live_hydration_and_cross_mode_rejection(self):
+        live = {
+            **FAKE,
+            'version': 2,
+            'mode': 'live',
+            'secret_key': 'rk_live_' + 'r' * 32,
+            'publishable_key': None,
+            'webhook_secret': None,
+            'webhook_endpoint_id': None,
+        }
+        api = Mock()
+        api.get_secret_value.return_value = {'SecretString': json.dumps(live)}
+        with patch.object(runtime, 'write_runtime') as write:
+            runtime.hydrate_stripe(api, target='production')
+        api.get_secret_value.assert_called_once_with(
+            SecretId='/sixnine/platform/stripe'
+        )
+        self.assertEqual(json.loads(write.call_args.args[1]), live)
+        with patch.object(runtime, 'write_runtime') as write:
+            with self.assertRaisesRegex(RuntimeError, 'unavailable or invalid'):
+                runtime.hydrate_stripe(api, target='staging')
+            write.assert_not_called()
+        api.create_secret.assert_not_called()
+        api.put_secret_value.assert_not_called()
 
     def test_invalid_or_unavailable_secret_preserves_the_bound_inode(self):
         api = Mock()
@@ -199,10 +283,27 @@ class StripeHydrationTests(unittest.TestCase):
                     self.assertTrue(
                         runtime.stripe_requested(target='staging', root=root)
                     )
+                for mode in ('off', 'live'):
+                    configure(
+                        INKSEQ_DEPLOYMENT_TARGET='production',
+                        INKSEQ_STRIPE_MODE=mode,
+                        INKSEQ_STRIPE_CONFIG_FILE='/run/sixnine-secrets/stripe',
+                    )
+                    self.assertTrue(
+                        runtime.stripe_requested(target='production', root=root)
+                    )
                 for changes in (
                     {'INKSEQ_STRIPE_MODE': 'test'},
                     {'INKSEQ_STRIPE_MODE': 'live'},
                     {'INKSEQ_STRIPE_CONFIG_FILE': '/run/sixnine-secrets/workos'},
+                    {
+                        'INKSEQ_STRIPE_CONFIG_FILE': '/run/sixnine-secrets/stripe',
+                        'PUBLIC_ORIGIN': 'https://staging.inkseq.com',
+                    },
+                    {
+                        'INKSEQ_STRIPE_CONFIG_FILE': '/run/sixnine-secrets/stripe',
+                        'PUBLIC_ORIGIN_ALIASES': 'https://untrusted.example',
+                    },
                     {
                         'INKSEQ_STRIPE_CONFIG_FILE': '/run/sixnine-secrets/stripe',
                         'INKSEQ_DEPLOYMENT_TARGET': 'production',

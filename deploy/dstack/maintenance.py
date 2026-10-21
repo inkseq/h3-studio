@@ -403,13 +403,28 @@ def settings_document(value):
         'migration_workos_configuration_path_invalid')
     stripe_file = env.get('INKSEQ_STRIPE_CONFIG_FILE', '')
     stripe_mode = env.get('INKSEQ_STRIPE_MODE', 'off')
-    release.require(stripe_file in {'', '/run/sixnine-secrets/stripe'}
-        and stripe_mode in {'off', 'test'}
-        and (stripe_mode != 'test' or bool(stripe_file))
-        and (not stripe_file and stripe_mode == 'off'
+    release.require(
+        stripe_file in {'', '/run/sixnine-secrets/stripe'}
+        and stripe_mode in {'off', 'test', 'live'}
+        and (stripe_mode == 'off' or bool(stripe_file))
+        and (
+            stripe_mode != 'test'
             or deployment_target.environment(env)['name'] == 'staging'
-            and env.get('INKSEQ_GENERATION_QUEUE', 'postgres') == 'dbos'),
-        'migration_stripe_configuration_invalid')
+        )
+        and (
+            stripe_mode != 'live'
+            or deployment_target.environment(env)['name'] == 'production'
+        )
+        and (
+            not stripe_file
+            and stripe_mode == 'off'
+            # Protected paths do not carry an origin override: the sealed
+            # deployment target selects it. Validate the rendered app origin
+            # separately in check_migration_deploy and runtime hydration.
+            or env.get('INKSEQ_GENERATION_QUEUE', 'postgres') == 'dbos'
+        ),
+        'migration_stripe_configuration_invalid',
+    )
     queue = env.get('INKSEQ_GENERATION_QUEUE', 'postgres')
     film = env.get('INKSEQ_FILM_ENABLED', '0')
     release.require(queue in {'postgres','dbos'} and film in {'0','1'}

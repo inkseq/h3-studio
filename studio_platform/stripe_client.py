@@ -1,4 +1,4 @@
-"""Pinned Stripe test client and bounded provider DTOs, without ledger writes."""
+"""Pinned, account/mode-bound Stripe client and bounded provider DTOs."""
 
 import math
 import logging
@@ -10,6 +10,8 @@ from .stripe_config import load_credentials
 
 API_VERSION = "2026-09-30.endive"
 ORIGIN = "https://staging.inkseq.com"
+LIVE_ORIGIN = "https://inkseq.com"
+LIVE_ALIASES = frozenset({"https://sixnine.art", "https://www.sixnine.art"})
 EVENT_TYPES = frozenset(
     {
         "checkout.session.completed",
@@ -137,14 +139,16 @@ def _currency_amount(obj, result, *, session=False):
         result["currency"] = currency
 
 
-def _session(obj):
+def _session(obj, *, livemode=False):
     if (
         _get(obj, "object") != "checkout.session"
-        or _get(obj, "livemode") is not False
+        or _get(obj, "livemode") is not livemode
         or _get(obj, "mode") != "payment"
     ):
         raise StripeGatewayError("billing_event_invalid", 400)
-    result = {"session_id": _id(_get(obj, "id"), "cs_test_")}
+    result = {
+        "session_id": _id(_get(obj, "id"), "cs_live_" if livemode else "cs_test_")
+    }
     _metadata(obj, result)
     _currency_amount(obj, result, session=True)
     pi = _get(obj, "payment_intent")
@@ -166,8 +170,8 @@ def _session(obj):
     return result
 
 
-def _charge(obj):
-    if _get(obj, "object") != "charge" or _get(obj, "livemode") is not False:
+def _charge(obj, *, livemode=False):
+    if _get(obj, "object") != "charge" or _get(obj, "livemode") is not livemode:
         raise StripeGatewayError("billing_event_invalid", 400)
     result = {"charge_id": _id(_get(obj, "id"), "ch_")}
     _metadata(obj, result)
@@ -205,30 +209,50 @@ class StripeGateway:
         self.settings = settings
         self.client_factory = client_factory or _default_client
 
-    def configuration(self, *, for_checkout=False):
-        if (
-            getattr(self.settings, "stripe_mode", "off") not in {"off", "test"}
-            or for_checkout
-            and getattr(self.settings, "stripe_mode", "off") != "test"
-            or self.settings.deployment_target != "staging"
-            or self.settings.public_origin != ORIGIN
-            or self.settings.public_origin_aliases
-        ):
-            raise StripeGatewayError("billing_unavailable")
+    def configuration(self, *, for_checkout=False, require_webhook=True):
         try:
             config = load_credentials(self.settings.stripe_config_file)
         except ValueError:
             raise StripeGatewayError("billing_configuration_invalid") from None
         if config is None:
             raise StripeGatewayError("billing_unavailable")
-        if config.webhook_secret is None:
+        configured_mode = getattr(self.settings, "stripe_mode", "off")
+        live = config.mode == "live"
+        if (
+            config.mode not in {"test", "live"}
+            or configured_mode not in {"off", config.mode}
+            or for_checkout
+            and configured_mode != config.mode
+            or live
+            and (
+                config.version != 2
+                or self.settings.deployment_target != "production"
+                or self.settings.public_origin != LIVE_ORIGIN
+                or not set(self.settings.public_origin_aliases) <= LIVE_ALIASES
+            )
+            or not live
+            and (
+                config.version != 1
+                or self.settings.deployment_target != "staging"
+                or self.settings.public_origin != ORIGIN
+                or self.settings.public_origin_aliases
+            )
+        ):
+            raise StripeGatewayError("billing_unavailable")
+        if (require_webhook or for_checkout) and (
+            config.webhook_secret is None or live and config.webhook_endpoint_id is None
+        ):
             raise StripeGatewayError("billing_webhook_unavailable")
         return config
 
     def checkout(self, payment, *, idempotency_key):
         """Call only with the core's persisted original payment and Stripe key."""
         config = self.configuration(for_checkout=True)
-        if payment["account_scope"] != config.account_id:
+        live = config.mode == "live"
+        if (
+            payment["account_scope"] != config.account_id
+            or payment.get("livemode", False) is not live
+        ):
             raise StripeGatewayError("billing_configuration_invalid")
         client = self.client_factory(config)
         import stripe
@@ -238,7 +262,7 @@ class StripeGateway:
             if (
                 _get(price, "id") != payment["price_id"]
                 or _get(price, "active") is not True
-                or _get(price, "livemode") is not False
+                or _get(price, "livemode") is not live
                 or _get(price, "type") != "one_time"
                 or _get(price, "unit_amount") != payment["amount_cents"]
                 or _get(price, "currency") != payment["currency"]
@@ -258,9 +282,9 @@ class StripeGateway:
                 "client_reference_id": payment["user_id"],
                 "metadata": metadata,
                 "payment_intent_data": {"metadata": metadata},
-                "success_url": ORIGIN
+                "success_url": self.settings.public_origin
                 + "/settings?tab=credits&paid={CHECKOUT_SESSION_ID}",
-                "cancel_url": ORIGIN + "/settings?tab=credits",
+                "cancel_url": self.settings.public_origin + "/settings?tab=credits",
             }
             try:
                 session = client.v1.checkout.sessions.create(
@@ -270,7 +294,7 @@ class StripeGateway:
                 raise StripeGatewayError(
                     "billing_checkout_unknown", unknown=True
                 ) from None
-            result = _session(session)
+            result = _session(session, livemode=live)
             result["price_id"] = payment["price_id"]
             if not result.get("checkout_url"):
                 raise StripeGatewayError(
@@ -278,7 +302,7 @@ class StripeGateway:
                 )
             return {
                 "account_scope": config.account_id,
-                "livemode": False,
+                "livemode": live,
                 "object": result,
             }
         except stripe.StripeError:
@@ -289,6 +313,7 @@ class StripeGateway:
     def verify_event(self, raw, signature):
         """No HTTP or persistence. Signature validation precedes normalization."""
         config = self.configuration()
+        live = config.mode == "live"
         if (
             not isinstance(raw, bytes)
             or not 1 <= len(raw) <= MAX_BODY
@@ -305,7 +330,7 @@ class StripeGateway:
         except (stripe.SignatureVerificationError, ValueError, UnicodeError):
             raise StripeGatewayError("billing_signature_invalid", 400) from None
         if (
-            _get(event, "livemode") is not False
+            _get(event, "livemode") is not live
             or _get(event, "api_version") != API_VERSION
             or _get(event, "account") not in (None, config.account_id)
         ):
@@ -315,11 +340,11 @@ class StripeGateway:
             return None
         obj = _get(_get(event, "data", {}), "object", {})
         if kind.startswith("checkout.session."):
-            value = _session(obj)
+            value = _session(obj, livemode=live)
         elif kind == "charge.refunded":
-            value = _charge(obj)
+            value = _charge(obj, livemode=live)
         else:
-            if _get(obj, "object") != "dispute" or _get(obj, "livemode") is not False:
+            if _get(obj, "object") != "dispute" or _get(obj, "livemode") is not live:
                 raise StripeGatewayError("billing_event_invalid", 400)
             charge = _get(obj, "charge")
             value = {
@@ -345,7 +370,7 @@ class StripeGateway:
             "id": _id(_get(event, "id"), "evt_"),
             "type": kind,
             "created": created,
-            "livemode": False,
+            "livemode": live,
             "account_scope": config.account_id,
             "object": value,
         }
@@ -353,9 +378,10 @@ class StripeGateway:
     def resolve_event(self, verified):
         """Existing DBOS worker calls this outside ledger transactions, never webhook."""
         config = self.configuration()
+        live = config.mode == "live"
         if (
             verified["account_scope"] != config.account_id
-            or verified["livemode"] is not False
+            or verified["livemode"] is not live
         ):
             raise StripeGatewayError("billing_configuration_invalid")
         value = dict(verified["object"])
@@ -376,7 +402,7 @@ class StripeGateway:
                         ]
                     },
                 )
-                resolved = _session(session)
+                resolved = _session(session, livemode=live)
                 line_items = _get(session, "line_items", {})
                 items = _get(line_items, "data", [])
                 if (
@@ -388,7 +414,7 @@ class StripeGateway:
                     raise StripeGatewayError("billing_provider_response_invalid", 502)
                 price = _get(items[0], "price", {})
                 if (
-                    _get(price, "livemode") is not False
+                    _get(price, "livemode") is not live
                     or _get(price, "currency") != "usd"
                     or _get(price, "tax_behavior") != "inclusive"
                 ):
@@ -397,7 +423,7 @@ class StripeGateway:
                 pi = _get(session, "payment_intent")
                 charge = _get(pi, "latest_charge") if not isinstance(pi, str) else None
                 if charge is not None and not isinstance(charge, str):
-                    charge_values = _charge(charge)
+                    charge_values = _charge(charge, livemode=live)
                     resolved.update(
                         {
                             key: charge_values[key]
@@ -414,7 +440,9 @@ class StripeGateway:
                     raise StripeGatewayError("billing_provider_response_invalid", 502)
                 value = resolved
             elif verified["type"].startswith("charge.dispute."):
-                charge = _charge(client.v1.charges.retrieve(value["charge_id"]))
+                charge = _charge(
+                    client.v1.charges.retrieve(value["charge_id"]), livemode=live
+                )
                 if charge["charge_id"] != value["charge_id"]:
                     raise StripeGatewayError("billing_provider_response_invalid", 502)
                 value = {**charge, **value}

@@ -232,11 +232,21 @@ def stripe_requested(*, target, root=Path('/srv/sixnine')):
         selected = deployment_target.environment(environment)
         requested = environment.get('INKSEQ_STRIPE_CONFIG_FILE', '')
         mode = environment.get('INKSEQ_STRIPE_MODE', 'off')
-        if (selected['name'] != target or mode not in {'off', 'test'}
-                or requested not in {'', '/run/sixnine-secrets/stripe'}
-                or mode == 'test' and not requested
-                or (requested or mode != 'off') and target != 'staging'
-                or requested and environment.get('INKSEQ_GENERATION_QUEUE', 'postgres') != 'dbos'):
+        if (
+            selected['name'] != target
+            or mode not in {'off', 'test', 'live'}
+            or requested not in {'', '/run/sixnine-secrets/stripe'}
+            or mode != 'off'
+            and not requested
+            or mode == 'test'
+            and target != 'staging'
+            or mode == 'live'
+            and target != 'production'
+            or requested
+            and any(name in environment for name in ('PUBLIC_ORIGIN', 'PUBLIC_ORIGIN_ALIASES'))
+            or requested
+            and environment.get('INKSEQ_GENERATION_QUEUE', 'postgres') != 'dbos'
+        ):
             raise ValueError()
     except (KeyError, TypeError, ValueError, UnicodeError):
         raise RuntimeError('Stripe rollout configuration is invalid') from None
@@ -244,9 +254,9 @@ def stripe_requested(*, target, root=Path('/srv/sixnine')):
 
 
 def hydrate_stripe(api, *, target='production'):
-    """Read an explicitly configured staging test credential, never initialize it."""
-    if target != 'staging':
-        raise RuntimeError('Stripe managed configuration requires staging')
+    """Hydrate only the credential mode belonging to the selected environment."""
+    if target not in {'staging', 'production'}:
+        raise RuntimeError('Stripe managed configuration target is invalid')
     from studio_platform.stripe_config import validate_credentials, _unique
     name = deployment_target.profile(target)['secret_root'] + '/stripe'
     try:
@@ -255,7 +265,9 @@ def hydrate_stripe(api, *, target='production'):
         if not isinstance(raw, str) or len(raw) > 4096:
             raise ValueError()
         payload = json.loads(raw, object_pairs_hook=_unique)
-        validate_credentials(payload)
+        config = validate_credentials(payload)
+        if config.mode != ('live' if target == 'production' else 'test'):
+            raise ValueError()
     except Exception:
         # Never replace the existing mounted inode with an invalid/fallback key.
         raise RuntimeError('Stripe managed configuration is unavailable or invalid') from None

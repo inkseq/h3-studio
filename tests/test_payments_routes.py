@@ -69,7 +69,7 @@ class PaymentRouteTests(LedgerCase):
         self.user = Principal("supervan", "browser:supervan")
         self.core, self.gateway = Mock(), Mock()
         self.gateway.configuration.return_value = SimpleNamespace(
-            account_id="acct_testaccount"
+            account_id="acct_testaccount", mode="test"
         )
         self.terms = Mock(
             return_value={"version": "reviewed-fixture-v1", "accepted_at": self.now}
@@ -207,6 +207,7 @@ class PaymentRouteTests(LedgerCase):
             {**PACK, "revision": saved["revision"]},
             "buy",
             account_scope="acct_testaccount",
+            livemode=False,
         )
         self.gateway.checkout.assert_called_once_with(
             self.core.begin_checkout.return_value["payment"],
@@ -255,6 +256,7 @@ class PaymentRouteTests(LedgerCase):
             **{
                 **vars(self.settings),
                 "stripe_config_file": path,
+                "stripe_mode": "test",
                 "deployment_target": "staging",
                 "public_origin": "https://staging.inkseq.com",
                 "public_origin_aliases": (),
@@ -301,6 +303,7 @@ class PaymentRouteTests(LedgerCase):
         settings = SimpleNamespace(
             **{
                 **vars(self.settings),
+                "stripe_mode": "test",
                 "deployment_target": "staging",
                 "public_origin": "https://staging.inkseq.com",
                 "public_origin_aliases": (),
@@ -447,6 +450,7 @@ class PaymentRouteTests(LedgerCase):
             **{
                 **vars(self.settings),
                 "stripe_config_file": path,
+                "stripe_mode": "test",
                 "deployment_target": "staging",
                 "public_origin": "https://staging.inkseq.com",
                 "public_origin_aliases": (),

@@ -1,7 +1,10 @@
 # Staging credit purchases
 
-Stripe integration is test-only, defaults OFF, and refuses production. Public
+This document describes the isolated Stripe TEST integration on staging; TEST
+credentials cannot be used on production. Purchasing defaults OFF and public
 packs default to an empty list. No startup schema changes or outbound calls run.
+Production LIVE preparation and its separate gates are documented in
+[STRIPE-LIVE-READINESS.md](STRIPE-LIVE-READINESS.md).
 Revision005 must be adopted under the reader/backup procedure in
 [SCHEMA-MIGRATIONS.md](SCHEMA-MIGRATIONS.md) before processing any payment.
 

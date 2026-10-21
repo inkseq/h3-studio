@@ -1,6 +1,7 @@
 """Exact payment reader/adoption tests; no Stripe, credentials or cloud calls."""
 
 from contextlib import closing
+import hashlib
 import os
 from pathlib import Path
 import sqlite3
@@ -9,7 +10,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from sqlalchemy import create_engine, event, inspect, select
+from sqlalchemy import CheckConstraint, create_engine, event, inspect, select
 from sqlalchemy.exc import IntegrityError
 
 from studio_platform import credit_schema as credit
@@ -17,12 +18,16 @@ from studio_platform import identity_schema as identity
 from studio_platform import payment_schema as payment
 from studio_platform.backup import BackupError, _export_business_db
 from studio_platform.migrations.versions import v20261020_0005_stripe_payments as frozen
+from studio_platform.migrations.versions import (
+    v20261021_0006_stripe_live_mode as live_frozen,
+)
 from studio_platform.schema_baseline import (
     BaselineError,
     adopt_credits,
     adopt_payments,
     compare_schema,
     frozen_metadata,
+    metadata_signature,
 )
 from studio_platform.schema_registry import platform_metadata
 from studio_platform.schema_version import (
@@ -30,6 +35,8 @@ from studio_platform.schema_version import (
     CREDIT_REVISIONS,
     IDENTITY_REVISIONS,
     PAYMENT_REVISION,
+    LIVE_PAYMENT_REVISION,
+    PAYMENT_REVISIONS,
     WORKFLOW_REVISIONS,
 )
 import test_credit_schema as fixtures
@@ -37,7 +44,7 @@ import test_credit_schema as fixtures
 PAYMENT_ID = '33333333-3333-4333-8333-333333333333'
 
 
-def seed_payment(connection):
+def seed_payment(connection, *, livemode=0):
     values = dict(
         id=PAYMENT_ID,
         tenant='sixnine',
@@ -50,7 +57,7 @@ def seed_payment(connection):
         amount_cents=500,
         currency='usd',
         account_scope='test-account-original',
-        livemode=0,
+        livemode=livemode,
         idempotency_key='original-checkout',
         request_fingerprint='a' * 64,
         terms_version='terms-original',
@@ -80,7 +87,7 @@ def seed_payment(connection):
             event_id='evt_original',
             tenant='sixnine',
             account_scope=values['account_scope'],
-            livemode=0,
+            livemode=livemode,
             type='charge.refunded',
             verified_payload={'id': 'ch_original', 'amount_refunded': 200},
             fingerprint='b' * 64,
@@ -101,11 +108,224 @@ class PaymentReaderTests(unittest.TestCase):
         self.addCleanup(self.engine.dispose)
         frozen_metadata().create_all(self.engine)
 
-    def family(self, *, payments=True):
+    def family(self, *, payments=True, revision=PAYMENT_REVISION):
         identity.metadata.create_all(self.engine)
         credit.metadata.create_all(self.engine)
         if payments:
-            payment.metadata.create_all(self.engine)
+            payment.frozen_metadata(revision=revision).create_all(self.engine)
+
+    def test006_exact_reader_does_not_change005_or_import_payment_sdks(self):
+        self.assertEqual(
+            hashlib.sha256(
+                Path(frozen.__file__).read_bytes().replace(b'\r\n', b'\n')
+            ).hexdigest(),
+            'e95c8a4bbbcaaecad0c93875c2e2e29714a320e602df9605b7429eb9e9be1fda',
+        )
+        before = metadata_signature(payment.frozen_metadata(), self.engine.dialect)
+        after = metadata_signature(
+            payment.frozen_metadata(revision=LIVE_PAYMENT_REVISION),
+            self.engine.dialect,
+        )
+        for name in payment.TABLE_NAMES:
+            before_checks = before[name].pop('checks')
+            after_checks = after[name].pop('checks')
+            self.assertEqual(
+                [
+                    check
+                    for check in before_checks
+                    if check != payment.normalize_check('livemode = 0')
+                ],
+                [
+                    check
+                    for check in after_checks
+                    if check != payment.normalize_check(live_frozen.MODE_CHECK)
+                ],
+            )
+        self.assertEqual(before, after)
+        self.family(revision=LIVE_PAYMENT_REVISION)
+        fixtures.marker(self.engine, LIVE_PAYMENT_REVISION)
+        statements = []
+        event.listen(
+            self.engine,
+            'before_cursor_execute',
+            lambda _c, _s, sql, *_: statements.append(sql),
+        )
+        with (
+            self.engine.connect() as connection,
+            patch.dict('sys.modules', {'alembic': None, 'dbos': None, 'stripe': None}),
+        ):
+            self.assertTrue(payment.ready(connection))
+            self.assertEqual(
+                payment.recognized_revision(connection), LIVE_PAYMENT_REVISION
+            )
+            self.assertEqual(
+                payment.sqlite_revision(connection.connection.driver_connection),
+                LIVE_PAYMENT_REVISION,
+            )
+            self.assertTrue(compare_schema(connection)['matches'])
+            self.assertTrue(credit.ready(connection))
+        self.assertFalse(
+            any(
+                sql.lstrip()
+                .upper()
+                .startswith(('CREATE', 'ALTER', 'INSERT', 'UPDATE', 'DELETE', 'DROP'))
+                for sql in statements
+            )
+        )
+        self.assertIn(LIVE_PAYMENT_REVISION, PAYMENT_REVISIONS)
+        for revisions in (CREDIT_REVISIONS, IDENTITY_REVISIONS, WORKFLOW_REVISIONS):
+            self.assertIn(LIVE_PAYMENT_REVISION, revisions)
+        self.assertEqual(
+            payment.metadata.tables['platform_payments'].c.livemode.type.python_type,
+            int,
+        )
+        self.assertIn(
+            'livemode = 0',
+            [
+                str(c.sqltext)
+                for c in payment.payments.constraints
+                if isinstance(c, CheckConstraint)
+            ],
+        )
+
+    def test006_requires_matching_marker_and_both_exact_tables(self):
+        for marker, change in (
+            (None, None),
+            (PAYMENT_REVISION, None),
+            (LIVE_PAYMENT_REVISION, 'mixed'),
+            (LIVE_PAYMENT_REVISION, 'missing_bound'),
+            (LIVE_PAYMENT_REVISION, 'renamed_bound'),
+            (LIVE_PAYMENT_REVISION, 'swapped_names'),
+            ('20261021_0007', None),
+        ):
+            with self.subTest(marker=marker, change=change):
+                engine = create_engine('sqlite://')
+                self.addCleanup(engine.dispose)
+                live = payment.frozen_metadata(revision=LIVE_PAYMENT_REVISION)
+                if change == 'mixed':
+                    live.tables['platform_payments'].create(engine)
+                    payment.events.create(engine)
+                else:
+                    table = live.tables['platform_payments']
+                    constraint = next(
+                        c
+                        for c in table.constraints
+                        if c.name == 'ck_platform_payments_mode'
+                    )
+                    if change == 'missing_bound':
+                        table.constraints.remove(constraint)
+                    elif change == 'renamed_bound':
+                        constraint.name = 'unknown_mode_constraint'
+                    elif change == 'swapped_names':
+                        status = next(
+                            c
+                            for c in table.constraints
+                            if c.name == 'ck_platform_payments_status'
+                        )
+                        constraint.name, status.name = status.name, constraint.name
+                    live.create_all(engine)
+                if marker:
+                    fixtures.marker(engine, marker)
+                with engine.connect() as connection:
+                    for validator, target in (
+                        (payment.validate_connection, connection),
+                        (
+                            payment.validate_sqlite,
+                            connection.connection.driver_connection,
+                        ),
+                    ):
+                        with self.assertRaises(payment.PaymentSchemaError):
+                            validator(target)
+
+    def test006_rejects005_shape_and_missing_family_but_does_not_rewrite_marker(self):
+        self.family()
+        fixtures.marker(self.engine, LIVE_PAYMENT_REVISION)
+        with self.engine.connect() as connection:
+            with self.assertRaisesRegex(
+                payment.PaymentSchemaError, 'shape_requires_review'
+            ):
+                payment.ready(connection)
+            with self.assertRaisesRegex(BaselineError, 'shape_requires_review'):
+                compare_schema(connection)
+        payment.events.drop(self.engine)
+        with self.engine.connect() as connection:
+            with self.assertRaisesRegex(payment.PaymentSchemaError, 'partial_family'):
+                payment.validate_connection(connection)
+            self.assertEqual(
+                connection.exec_driver_sql(
+                    'SELECT version_num FROM alembic_version'
+                ).scalar_one(),
+                LIVE_PAYMENT_REVISION,
+            )
+
+    def test006_keeps_original_refund_bounds_and_accepts_only_integer_modes_zero_one(
+        self,
+    ):
+        self.family(revision=LIVE_PAYMENT_REVISION)
+        fixtures.marker(self.engine, LIVE_PAYMENT_REVISION)
+        with self.engine.begin() as connection:
+            seed_payment(connection, livemode=1)
+        for updates in (
+            {'livemode': -1},
+            {'livemode': 0.5},
+            {'livemode': 2},
+            {'refunded_cents': 501},
+            {'unmet_credits': 49},
+            {'clawed_back_credits': 201},
+            {'dispute_open': 2},
+        ):
+            with self.assertRaises(IntegrityError), self.engine.begin() as connection:
+                connection.execute(payment.payments.update().values(**updates))
+        for mode in (-1, 0.5, 2):
+            with self.assertRaises(IntegrityError), self.engine.begin() as connection:
+                connection.execute(payment.events.update().values(livemode=mode))
+        with self.engine.connect() as connection:
+            self.assertEqual(
+                connection.execute(select(payment.payments.c.livemode)).scalar_one(), 1
+            )
+            self.assertEqual(
+                connection.execute(select(payment.events.c.livemode)).scalar_one(), 1
+            )
+
+    def test006_definition_cannot_adopt_without_verified_postgres_transaction(self):
+        for bind, verified in (
+            (
+                SimpleNamespace(
+                    dialect=SimpleNamespace(name='postgresql'),
+                    in_transaction=lambda: True,
+                ),
+                False,
+            ),
+            (
+                SimpleNamespace(
+                    dialect=SimpleNamespace(name='sqlite'), in_transaction=lambda: True
+                ),
+                True,
+            ),
+            (
+                SimpleNamespace(
+                    dialect=SimpleNamespace(name='postgresql'),
+                    in_transaction=lambda: False,
+                ),
+                True,
+            ),
+        ):
+            with (
+                patch('alembic.context.is_offline_mode', return_value=False),
+                patch('alembic.context.config', create=True) as config,
+                patch('alembic.op.get_bind', return_value=bind),
+                patch('alembic.op.drop_constraint') as drop,
+                patch('alembic.op.create_check_constraint') as create,
+            ):
+                config.attributes = {'verified_payment_live_mode': verified}
+                with self.assertRaisesRegex(
+                    RuntimeError, 'live_verified_adoption_required'
+                ):
+                    live_frozen.upgrade()
+                drop.assert_not_called()
+                create.assert_not_called()
+        with self.assertRaisesRegex(RuntimeError, 'destructive_downgrade'):
+            live_frozen.downgrade()
 
     def test_readers_are_optional_inert_and_do_not_import_sdk_or_alembic(self):
         statements = []
@@ -196,9 +416,10 @@ class PaymentReaderTests(unittest.TestCase):
         from studio_platform.backup import backup_local, restore_local, verify_local
         from studio_platform.storage import LocalObjectStore
 
-        for present in (False, True):
+        for revision in (CREDIT_REVISION, PAYMENT_REVISION, LIVE_PAYMENT_REVISION):
+            present = revision in PAYMENT_REVISIONS
             with (
-                self.subTest(present=present),
+                self.subTest(revision=revision),
                 tempfile.TemporaryDirectory() as directory,
             ):
                 engine = create_engine('sqlite://')
@@ -207,14 +428,14 @@ class PaymentReaderTests(unittest.TestCase):
                 identity.metadata.create_all(engine)
                 credit.metadata.create_all(engine)
                 if present:
-                    payment.metadata.create_all(engine)
-                fixtures.marker(
-                    engine, PAYMENT_REVISION if present else CREDIT_REVISION
-                )
+                    payment.frozen_metadata(revision=revision).create_all(engine)
+                fixtures.marker(engine, revision)
                 with engine.begin() as connection:
                     fixtures.seed(connection)
                     if present:
-                        seed_payment(connection)
+                        seed_payment(
+                            connection, livemode=int(revision == LIVE_PAYMENT_REVISION)
+                        )
                 root = Path(directory)
                 source = root / 'source.sqlite3'
                 with (
@@ -235,7 +456,10 @@ class PaymentReaderTests(unittest.TestCase):
                     root / 'restored/platform.sqlite3',
                 ):
                     with closing(sqlite3.connect(path)) as db:
-                        self.assertEqual(payment.validate_sqlite(db), present)
+                        self.assertEqual(
+                            payment.validate_sqlite(db, published=path != source),
+                            present,
+                        )
                         self.assertTrue(credit.validate_sqlite(db))
                         self.assertEqual(
                             db.execute(
@@ -244,6 +468,12 @@ class PaymentReaderTests(unittest.TestCase):
                             (100, 20),
                         )
                         if present:
+                            self.assertEqual(
+                                db.execute(
+                                    'SELECT livemode FROM platform_payments'
+                                ).fetchone(),
+                                (int(revision == LIVE_PAYMENT_REVISION),),
+                            )
                             self.assertEqual(
                                 db.execute(
                                     'SELECT paid_at,refunded_cents,refund_credits,clawed_back_credits,unmet_credits FROM platform_payments'

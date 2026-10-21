@@ -36,6 +36,8 @@ from .schema_version import (
     CREDIT_REVISION,
     CREDIT_REVISIONS,
     PAYMENT_REVISION,
+    PAYMENT_REVISIONS,
+    LIVE_PAYMENT_REVISION,
     IDENTITY_REVISION,
     IDENTITY_REVISIONS,
     WORKFLOW_REVISIONS,
@@ -418,6 +420,7 @@ def compare_schema(connection, *, schema=None):
         PaymentSchemaError,
         frozen_metadata as payment_metadata,
         present_tables as payment_present_tables,
+        validate_connection as payment_valid,
     )
 
     try:
@@ -428,8 +431,22 @@ def compare_schema(connection, *, schema=None):
         expected.update(metadata_signature(identity_metadata(), connection.dialect))
     if credits_present or version in CREDIT_REVISIONS or payments_present:
         expected.update(metadata_signature(credit_metadata(), connection.dialect))
-    if payments_present or version == PAYMENT_REVISION:
-        expected.update(metadata_signature(payment_metadata(), connection.dialect))
+    if payments_present or version in PAYMENT_REVISIONS:
+        payment_revision = (
+            LIVE_PAYMENT_REVISION
+            if version == LIVE_PAYMENT_REVISION
+            else PAYMENT_REVISION
+        )
+        if payments_present and version == LIVE_PAYMENT_REVISION:
+            try:
+                payment_valid(connection, schema=schema)
+            except PaymentSchemaError as error:
+                raise BaselineError(str(error)) from None
+        expected.update(
+            metadata_signature(
+                payment_metadata(revision=payment_revision), connection.dialect
+            )
+        )
     differences = []
     for name in sorted(expected.keys() | actual.keys()):
         if name not in actual:
@@ -810,7 +827,7 @@ def adopt_payments(connection, *, expected_fingerprint):
         raise BaselineError('schema_snapshot_changed')
     if not before['matches'] or before['recorded_revision'] not in CREDIT_REVISIONS:
         raise BaselineError('payment_adoption_requires_adopted_credits')
-    if before['recorded_revision'] == PAYMENT_REVISION:
+    if before['recorded_revision'] in PAYMENT_REVISIONS:
         return dict(state='already_adopted', before=before, after=before)
     if TABLE_NAMES & set(inspect(connection).get_table_names()):
         raise BaselineError('payment_unrecorded_family_requires_review')

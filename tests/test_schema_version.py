@@ -17,6 +17,7 @@ from studio_platform.backup import (
 from studio_platform.schema_version import (
     BASELINE_REVISION,
     WORKFLOW_REVISION,
+    LIVE_PAYMENT_REVISION,
     SchemaVersionError,
     read_schema_version,
     read_sqlite_schema_version,
@@ -117,6 +118,19 @@ class SchemaVersionTests(LedgerCase):
                 self.assertEqual(
                     read_sqlite_schema_version(connection.connection.driver_connection),
                     WORKFLOW_REVISION,
+                )
+
+    def test006_marker_is_known_without_importing_adoption_or_stripe(self):
+        self.marker(revision=LIVE_PAYMENT_REVISION)
+        with (
+            self.repo.engine.connect() as connection,
+            patch.dict('sys.modules', {'alembic': None, 'stripe': None}),
+        ):
+            self.assertEqual(read_schema_version(connection), LIVE_PAYMENT_REVISION)
+            if self.bootstrap is None:
+                self.assertEqual(
+                    read_sqlite_schema_version(connection.connection.driver_connection),
+                    LIVE_PAYMENT_REVISION,
                 )
 
     def test_extra_marker_column_is_not_a_looser_whitelist(self):

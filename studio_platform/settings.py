@@ -133,7 +133,7 @@ class Settings:
     def __post_init__(self):
         if self.deployment_target not in {"production", "staging"}:
             raise ValueError("Unsupported deployment target")
-        if self.stripe_mode not in {"off", "test"}:
+        if self.stripe_mode not in {"off", "test", "live"}:
             raise ValueError("Unsupported Stripe mode")
         if self.stripe_config_file is not None:
             path = Path(self.stripe_config_file)
@@ -149,6 +149,14 @@ class Settings:
             raise ValueError(
                 "Stripe test mode requires its isolated staging configuration"
             )
+        if self.stripe_mode == "live" and (
+            self.deployment_target != "production"
+            or self.public_origin != "https://inkseq.com"
+            or not set(self.public_origin_aliases)
+            <= {"https://sixnine.art", "https://www.sixnine.art"}
+            or self.stripe_config_file is None
+        ):
+            raise ValueError("Stripe live mode requires its production configuration")
         if self.generation_queue not in {"postgres", "dbos"}:
             raise ValueError("Unsupported generation queue")
         if self.generation_queue == "dbos" and not self.database_url.startswith(

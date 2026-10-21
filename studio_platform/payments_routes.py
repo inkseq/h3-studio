@@ -6,7 +6,7 @@ import uuid
 
 from fastapi import Header, Query, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import and_, insert, select, update
+from sqlalchemy import and_, func, insert, select, update
 
 from .auth import Principal
 from .identity import account_identity, lock_account_gate
@@ -188,6 +188,68 @@ class PaymentAPI:
             self._user(connection, principal, admin=True)
             return self._packs(connection)
 
+    def admin_status(self, principal):
+        """Read protected readiness without any provider call or payment mutation."""
+        from .credits import credit_policy
+        from .payment_schema import (
+            PaymentSchemaError,
+            events,
+            ready,
+            recognized_revision,
+        )
+        from .schema_version import LIVE_PAYMENT_REVISION
+
+        with self.repo.engine.connect() as connection:
+            self._user(connection, principal, admin=True)
+            charging = credit_policy(connection, self.settings.tenant_id)['enabled']
+            try:
+                config = self.gateway.configuration(require_webhook=False)
+            except StripeGatewayError as error:
+                if error.code not in {
+                    'billing_unavailable',
+                    'billing_configuration_invalid',
+                    'billing_webhook_unavailable',
+                }:
+                    raise
+                config, reason = None, error.code
+            else:
+                reason = None
+            try:
+                schema_ready = ready(connection) and (
+                    config is None
+                    or config.mode != 'live'
+                    or recognized_revision(connection) == LIVE_PAYMENT_REVISION
+                )
+            except PaymentSchemaError:
+                schema_ready = False
+            last_event = None
+            if config is not None and schema_ready:
+                last_event = connection.scalar(
+                    select(func.max(events.c.received_at)).where(
+                        events.c.tenant == self.settings.tenant_id,
+                        events.c.account_scope == config.account_id,
+                        events.c.livemode == int(config.mode == 'live'),
+                    )
+                )
+            endpoint = config.webhook_endpoint_id if config else None
+            webhook = bool(config and config.webhook_secret)
+            return {
+                'configured_mode': config.mode if config else None,
+                'checkout_enabled': bool(
+                    config
+                    and webhook
+                    and schema_ready
+                    and self.settings.stripe_mode == config.mode
+                ),
+                'credit_charging_enabled': charging,
+                'webhook_endpoint_id': endpoint,
+                'webhook_configured': webhook,
+                'registration_basis': 'protected_configuration' if endpoint else None,
+                'last_signed_event_at': last_event,
+                'schema_ready': schema_ready,
+                'reason_code': reason,
+            }
+
     def set_packs(self, principal, body, *, key):
         _key(key)
         if type(body) is not dict or set(body) != {
@@ -343,6 +405,7 @@ class PaymentAPI:
             pack,
             key,
             account_scope=config.account_id,
+            livemode=config.mode == 'live',
         )
         payment = prepared["payment"]
         if not prepared["dispatch"]:
@@ -491,6 +554,10 @@ def register_routes(
     @app.get("/v1/admin/billing/packs")
     def admin_packs(request: Request):
         return response(service.admin_packs(principal_resolver(request)))
+
+    @app.get("/v1/admin/billing/status")
+    def admin_status(request: Request):
+        return response(service.admin_status(principal_resolver(request)))
 
     @app.post("/v1/admin/billing/packs")
     def save_packs(
