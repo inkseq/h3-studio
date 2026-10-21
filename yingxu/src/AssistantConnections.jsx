@@ -1,4 +1,4 @@
-import TelegramLink from './TelegramLink.jsx';
+import TelegramLink, { telegramUserLabel, validTelegramNonce } from './TelegramLink.jsx';
 
 // Daily credit cap suggested for a new Telegram link; USD caps (admins) start uncapped.
 const TELEGRAM_DEFAULT_CAP = '200';
@@ -42,6 +42,7 @@ export default function AssistantConnections({
   embedded = false,
   active = true,
   telegram = false,
+  telegramNonce = null,
 }) {
   // Users never see dollars (#304): spending caps show in credits, or in USD to admins only.
   const access = useAccess(account),
@@ -217,6 +218,11 @@ export default function AssistantConnections({
         authorization_profile_version: profile.version,
         scope: assistantScope(target === 'telegram' ? 'all' : scope, { sessionId, projectId }),
         permission,
+        // Telegram grants say so; the bot-first page also binds the bot's one-time nonce (#382).
+        ...(target === 'telegram' ? { client: 'telegram' } : {}),
+        ...(target === 'telegram' && validTelegramNonce(telegramNonce)
+          ? { telegram_nonce: telegramNonce }
+          : {}),
         ...(creditMode
           ? { daily_limit_credits: capCredits(cap) }
           : { daily_limit_microusd: capMicros(cap) }),
@@ -666,6 +672,11 @@ function ConnectionRow({
         })}{' '}
         · {t('assistants.shortId', { id: row.id.slice(-8) })}
       </p>
+      {row.claimed_telegram_user && (
+        <p className="assistant-connection-claimed">
+          {t('telegram.claimedBy', { name: telegramUserLabel(row.claimed_telegram_user) })}
+        </p>
+      )}
       <p>
         {scopeLabel(row.scope)} · {permissionLabel(row.permission)}
       </p>
