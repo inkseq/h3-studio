@@ -406,8 +406,14 @@ def compare_schema(connection, *, schema=None):
     expected_metadata = frozen_metadata()
     actual, version = reflected_signature(connection, schema=schema)
     if version == CREDIT_ADMISSION_REVISION:
+        from .credit_admission import ready as admission_ready
+        from .credits import CreditError
         from .migrations.versions.v20261022_0007_credit_admission import extend
 
+        try:
+            admission_ready(connection, schema=schema)
+        except CreditError as error:
+            raise BaselineError(error.code) from None
         extend(expected_metadata)
     expected = metadata_signature(expected_metadata, connection.dialect)
     from .identity_schema import (

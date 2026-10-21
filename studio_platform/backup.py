@@ -11,6 +11,7 @@ from .asset_objects import ASSET_OBJECT_ROLES
 from .schema_version import (
     PAYMENT_REVISION,
     PAYMENT_REVISIONS,
+    LIVE_PAYMENT_REVISION,
     CREDIT_ADMISSION_REVISION,
 )
 
@@ -253,12 +254,22 @@ def _check_db(db, *, published=False):
         credits_present = credit_sqlite(db)
     except CreditSchemaError as error:
         raise BackupError(str(error)) from None
-    from .payment_schema import PaymentSchemaError, validate_sqlite as payment_sqlite
+    from .payment_schema import (
+        PaymentSchemaError,
+        sqlite_revision as payment_sqlite_revision,
+    )
 
     try:
-        payments_present = payment_sqlite(db, published=published)
+        payment_revision = payment_sqlite_revision(db, published=published)
+        payments_present = payment_revision is not None
     except PaymentSchemaError as error:
         raise BackupError(str(error)) from None
+    if admission and (
+        not identity_present
+        or not credits_present
+        or payment_revision != LIVE_PAYMENT_REVISION
+    ):
+        raise BackupError("credit_admission_schema_partial_family_requires_review")
     if (credits_present or payments_present) and not identity_present:
         raise BackupError('identity_schema_partial_family_requires_review')
     if payments_present and not credits_present:

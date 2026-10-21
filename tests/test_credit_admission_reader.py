@@ -297,6 +297,44 @@ class CreditAdmissionReaderTests(unittest.TestCase):
             with self.subTest(sql=sql):
                 self.assertFalse(sqlite_check(sql))
 
+    def test_published007_requires_complete_frozen006_payment_family(self):
+        from studio_platform.backup import (
+            BackupError,
+            _check_db,
+            _create_business_schema,
+        )
+
+        for identity, credit, payment, revision in (
+            (False, False, False, CREDIT_ADMISSION_REVISION),
+            (True, False, False, CREDIT_ADMISSION_REVISION),
+            (True, True, False, CREDIT_ADMISSION_REVISION),
+            (True, True, True, "20261020_0005"),
+        ):
+            with (
+                self.subTest(
+                    identity=identity, credit=credit, payment=payment, revision=revision
+                ),
+                tempfile.TemporaryDirectory() as temp,
+            ):
+                path = Path(temp) / "published.sqlite3"
+                _create_business_schema(
+                    path,
+                    include_identity=identity,
+                    include_credits=credit,
+                    include_payments=payment,
+                    payment_revision=revision,
+                )
+                with closing(sqlite3.connect(path)) as db:
+                    if revision != CREDIT_ADMISSION_REVISION:
+                        db.execute(
+                            "ALTER TABLE platform_budget_reservations ADD COLUMN budget_role VARCHAR(20) NOT NULL DEFAULT 'enforced' CONSTRAINT ck_budget_reservation_role CHECK (budget_role IN ('accounting', 'enforced'))"
+                        )
+                    with self.assertRaisesRegex(
+                        BackupError,
+                        "credit_admission_schema_partial_family_requires_review",
+                    ):
+                        _check_db(db, published=True)
+
     def test_sqlite_backup_literal_drift_refused_with_and_without_marker(self):
         from studio_platform.backup import BackupError, _check_db
 
@@ -464,21 +502,39 @@ class CreditAdmissionReaderPostgresTests(unittest.TestCase):
             _export_postgres_business_db,
             dump_postgres,
         )
+        from studio_platform.schema_baseline import BaselineError, compare_schema
 
         self.preview007()
-        for check in (
-            "CHECK (budget_role IN ('ACCOUNTING', 'enforced'))",
-            "CHECK (budget_role IN ('accounting', 'enforced')) NOT VALID",
+        previous = "ck_budget_reservation_role"
+        for name, check in (
+            (
+                "ck_budget_reservation_role",
+                "CHECK (budget_role IN ('ACCOUNTING', 'enforced'))",
+            ),
+            (
+                "ck_budget_reservation_role",
+                "CHECK (budget_role IN ('accounting', 'enforced')) NOT VALID",
+            ),
+            ("renamed_role_check", "CHECK (budget_role IN ('accounting', 'enforced'))"),
         ):
             with self.subTest(check=check):
                 with self.engine.begin() as connection:
                     connection.exec_driver_sql(
-                        "ALTER TABLE platform_budget_reservations DROP CONSTRAINT ck_budget_reservation_role"
+                        "ALTER TABLE platform_budget_reservations DROP CONSTRAINT "
+                        + previous
                     )
                     connection.exec_driver_sql(
-                        "ALTER TABLE platform_budget_reservations ADD CONSTRAINT ck_budget_reservation_role "
+                        "ALTER TABLE platform_budget_reservations ADD CONSTRAINT "
+                        + name
+                        + " "
                         + check
                     )
+                previous = name
+                with (
+                    self.engine.connect() as connection,
+                    self.assertRaises(BaselineError),
+                ):
+                    compare_schema(connection)
                 with (
                     self.engine.connect() as connection,
                     self.assertRaisesRegex(
