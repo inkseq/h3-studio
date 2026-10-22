@@ -19,8 +19,6 @@ from .repository import (
     request_hash,
 )
 
-HARD_MAX_MACHINES = 2
-MAX_HOURLY_PRICE = 850000
 DERIVED_PROFILE_FIELDS = {"model_id", "manifest_digest", "recipe_id"}
 
 
@@ -60,7 +58,7 @@ def demand_configuration(config, *, now):
     if any(
         p.get("mode") not in {"fl", "ref"}
         or type(p.get("max_price_microusd")) is not int
-        or not 0 < p["max_price_microusd"] <= MAX_HOURLY_PRICE
+        or p["max_price_microusd"] <= 0
         for p in profiles
     ):
         return None
@@ -523,6 +521,7 @@ def summary(service, connection, now):
         and row['payload'].get('reason_code') == DOWNLOAD_RETRY_LIMIT
         for job, _ in work
     )
+    machine_limit, _ = service.machine_limits(connection, for_demand=True)
     reason = (
         "disabled"
         if not runtime["enabled"]
@@ -537,12 +536,12 @@ def summary(service, connection, now):
         else DOWNLOAD_RETRY_LIMIT
         if retry_limited
         else "machine_limit"
-        if running + starting >= HARD_MAX_MACHINES
+        if running + starting >= machine_limit
         else None
     )
     return {
         **runtime,
-        "hard_max_machines": HARD_MAX_MACHINES,
+        "hard_max_machines": machine_limit,
         "running_machines": running,
         "starting_machines": starting,
         "uncertain_machines": uncertain,

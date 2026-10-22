@@ -167,7 +167,6 @@ def _write(connection, row, payload, now):
 
 def _claim(service):
     from .dstack_demand import (
-        HARD_MAX_MACHINES,
         _nodes,
         demand_configuration,
         eligible_jobs,
@@ -327,10 +326,12 @@ def _claim(service):
                 )
                 _write(connection, row, payload, now)
                 return _result('blocked', 'allocation_uncertain'), None
-            if usage['instances'] >= min(
-                HARD_MAX_MACHINES, service.policy['max_instances']
-            ) or usage['physical_gpus'] >= min(
-                HARD_MAX_MACHINES, service.policy['max_physical_gpus']
+            max_instances, max_gpus = service.machine_limits(
+                connection, for_demand=True
+            )
+            if (
+                usage['instances'] >= max_instances
+                or usage['physical_gpus'] >= max_gpus
             ):
                 return _result('blocked', 'capacity_limit'), None
             action = 'start' if payload.get('preview_id') else 'plan'
@@ -376,6 +377,8 @@ def _finish(service, claim, **changes):
 def _reason(error):
     code = getattr(error, 'code', None) or (error.args[0] if error.args else '')
     code = code if isinstance(code, str) else ''
+    if code in {'tenant_daily_limit_reached', 'tenant_daily_usage_unconfirmed'}:
+        return code
     if code in {'dstack_capacity_limit_exceeded', 'global_capacity_exceeded'}:
         return 'capacity_limit'
     if 'budget' in code or 'spend' in code or 'limit_reached' in code:

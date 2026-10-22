@@ -261,6 +261,10 @@ def create_app(
             code,
             repo.clock(),
         )
+        if code in {"tenant_daily_limit_reached", "tenant_daily_usage_unconfirmed"}:
+            return JSONResponse(
+                {"code": code}, status_code=429, headers={"Cache-Control": "no-store"}
+            )
         if code in {
             "user_daily_limit_reached",
             "connection_daily_limit_reached",

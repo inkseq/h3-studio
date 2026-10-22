@@ -1589,8 +1589,8 @@ class DstackOperator:
             ),
         )
 
-    def _expected_runtime(self, profile):
-        """Use the original protected execution quote, never an HTTP estimate."""
+    def _execution_check(self, profile, now=None):
+        """One read-only policy check shared by catalog and original admission."""
         from .execution_profiles import selected_policy
         from .execution_policy import authority_current, reservation_for_duration
 
@@ -1600,44 +1600,61 @@ class DstackOperator:
                 profile_id=profile["runtime_profile_id"],
                 recipe_id=profile["recipe_id"],
             )
-            now = self.repo.clock()
-            require(
-                policy
-                and policy["enabled"] is True
-                and policy["backend"] == "wangp-worker"
+            now = self.repo.clock() if now is None else now
+            if policy is None:
+                return None, "execution_policy_missing"
+            if policy["enabled"] is not True:
+                return None, "execution_policy_disabled"
+            if not (
+                policy["backend"] == "wangp-worker"
                 and policy.get("dispatch_backend") == "hatchet-v1"
                 and policy["pool"] == profile["pool"]
                 and policy["configuration_id"] == profile["configuration_id"]
                 and policy["model_id"] == profile["model_id"]
                 and policy["engine_manifest_digest"] == profile["manifest_digest"]
-                and policy["qualification"]["status"]
-                in {"accepted", "runtime_required"}
-                and authority_current(policy, now),
-                "dstack_execution_policy_unconfirmed",
-            )
+            ):
+                return None, "execution_policy_binding_mismatch"
+            if policy["qualification"]["status"] not in {
+                "accepted",
+                "runtime_required",
+            }:
+                return None, "execution_policy_unqualified"
+            if not authority_current(policy, now):
+                return None, (
+                    "execution_policy_not_yet_valid"
+                    if policy["qualification"]["verified_at"] > now
+                    else "execution_policy_expired"
+                )
             duration = reservation_for_duration(
                 policy, policy["envelope"]["max_duration_seconds"]
             )["expected_runtime_s"]
-            require(
-                _finite(duration) and 0 < duration <= 86400,
-                "dstack_execution_runtime_unconfirmed",
-            )
-            return duration
-        except (KeyError, TypeError, ValueError) as error:
-            if isinstance(error, OperatorError):
-                raise
-            raise OperatorError("dstack_execution_policy_unconfirmed") from None
+            if not (_finite(duration) and 0 < duration <= 86400):
+                return None, "execution_runtime_unconfirmed"
+            return duration, None
+        except (KeyError, TypeError, ValueError):
+            return None, "execution_policy_invalid"
+
+    def _expected_runtime(self, profile):
+        """Use the original protected execution quote, never an HTTP estimate."""
+        duration, reason = self._execution_check(profile)
+        require(
+            reason is None,
+            "dstack_execution_runtime_unconfirmed"
+            if reason == "execution_runtime_unconfirmed"
+            else "dstack_execution_policy_unconfirmed",
+        )
+        return duration
 
     def _admin_limits(self, connection=None):
-        from .spending_limits import ADMIN_OWNER, read_settings, admin_defaults
+        from .spending_limits import admin_defaults
+        from .capacity_settings import read_policy
 
         if connection is None:
             with self.repo.engine.connect() as connection:
                 return self._admin_limits(connection)
-        return read_settings(
+        return read_policy(
             connection,
             self.settings.tenant_id,
-            ADMIN_OWNER,
             admin_defaults=admin_defaults(self),
         )
 
@@ -1756,6 +1773,8 @@ class DstackOperator:
         fields = (
             "id",
             "runtime_profile_id",
+            "configuration_id",
+            "recipe_id",
             "model_id",
             "mode",
             "pool",
@@ -1773,16 +1792,25 @@ class DstackOperator:
         with self.repo.engine.connect() as connection:
             prices = OperatorPrices(self.repo, self.settings)
             profiles = []
+            observed_at = self.repo.clock()
             for profile in self.profiles.values():
                 if profile["owner_id"] != owner:
                     continue
                 price, _, _ = prices.read(connection, profile)
+                reason = None
+                if self.policy.get("lifecycle_version") == 2:
+                    _, reason = self._execution_check(profile, observed_at)
                 profiles.append(
                     {
                         **{key: copy.deepcopy(profile[key]) for key in fields},
                         "max_price_microusd": price["max_price_microusd"],
                         "price_ceiling_microusd": price["price_ceiling_microusd"],
                         "price_policy_snapshot": price["snapshot"],
+                        "execution_eligibility": {
+                            "status": "confirmed" if reason is None else "blocked",
+                            "reason_code": reason,
+                            "observed_at": observed_at,
+                        },
                     }
                 )
         # New starts follow the configured authoring default; retained profiles
@@ -1806,6 +1834,7 @@ class DstackOperator:
         with self.repo.engine.connect() as connection:
             return {
                 "operator": {"account": owner, "admin": True},
+                "expected_settings_version": self._admin_limits(connection)["version"],
                 "profiles": [
                     prices.read(connection, profile)[0]
                     for profile in self.profiles.values()
@@ -1818,8 +1847,22 @@ class DstackOperator:
         profile = self.profiles.get(profile_id)
         require(profile is not None, "dstack_profile_not_found", 404)
         from .operator_prices import OperatorPrices
+        from .spending_limits import admin_defaults
 
-        return OperatorPrices(self.repo, self.settings).update(profile, body, principal)
+        return OperatorPrices(
+            self.repo, self.settings, admin_defaults=admin_defaults(self)
+        ).update(profile, body, principal)
+
+    def preview_price(self, principal, profile_id, body):
+        self.authorize_admin(principal)
+        profile = self.profiles.get(profile_id)
+        require(profile is not None, "dstack_profile_not_found", 404)
+        from .operator_prices import OperatorPrices
+        from .spending_limits import admin_defaults
+
+        return OperatorPrices(
+            self.repo, self.settings, admin_defaults=admin_defaults(self)
+        ).preview(profile, body)
 
     def preview(self, principal, body):
         owner = self.authorize(principal)
@@ -1858,7 +1901,11 @@ class DstackOperator:
             "dstack_profile_not_found",
             404,
         )
-        from .operator_prices import OperatorPrices
+        from .operator_prices import (
+            OperatorPrices,
+            mode_price_ceiling,
+            enforce_price_limit,
+        )
 
         prices = OperatorPrices(self.repo, self.settings)
         with self.repo.engine.connect() as connection:
@@ -1866,16 +1913,28 @@ class DstackOperator:
             admin_limits = self._admin_limits(connection)
         chosen_price = body.get("max_price_microusd", price["max_price_microusd"])
         require(
-            _integer(chosen_price) and chosen_price <= price["price_ceiling_microusd"],
+            _integer(chosen_price),
             "dstack_price_ceiling_exceeded",
             422,
         )
-        if self.policy.get("demand_start"):
-            require(chosen_price <= 850000, "dstack_price_ceiling_exceeded", 422)
-        require(
-            chosen_price <= admin_limits["value"]["max_hourly_price_microusd"],
+        enforce_price_limit(
+            chosen_price,
+            price["price_ceiling_microusd"],
+            "profile",
+            "dstack_price_ceiling_exceeded",
+        )
+        if admin_limits["adopted"] or self.policy.get("demand_start"):
+            enforce_price_limit(
+                chosen_price,
+                mode_price_ceiling(profile, admin_limits),
+                "mode",
+                "dstack_price_ceiling_exceeded",
+            )
+        enforce_price_limit(
+            chosen_price,
+            admin_limits["value"]["max_hourly_price_microusd"],
+            "admin",
             "admin_hourly_price_limit_reached",
-            422,
         )
         profile = copy.deepcopy(profile)
         profile["max_price_microusd"] = chosen_price
@@ -2156,13 +2215,31 @@ class DstackOperator:
             fresh_seconds=self.policy["observation_fresh_seconds"],
         )
 
+    def machine_limits(self, connection, *, for_demand=False):
+        from .capacity_settings import DEFAULTS
+
+        settings = self._admin_limits(connection)
+        if settings["adopted"]:
+            maximum = settings["value"]["max_machines"]
+            return maximum, maximum
+        # Old environments are not adopted by deploying a reader. Preserve the
+        # old protected configuration until the explicit audited settings write.
+        maximum = (
+            DEFAULTS["max_machines"]
+            if for_demand or self.policy.get("demand_start")
+            else 128
+        )
+        return (
+            min(maximum, self.policy["max_instances"]),
+            min(maximum, self.policy["max_physical_gpus"]),
+        )
+
     def _limits(self, connection, hourly):
         usage = self._live_capacity_usage(connection)
-        hard_max = 2 if self.policy.get("demand_start") else 128
+        max_instances, max_gpus = self.machine_limits(connection)
         require(
-            usage["instances"] + 1 <= min(hard_max, self.policy["max_instances"])
-            and usage["physical_gpus"] + 1
-            <= min(hard_max, self.policy["max_physical_gpus"]),
+            usage["instances"] + 1 <= max_instances
+            and usage["physical_gpus"] + 1 <= max_gpus,
             "dstack_capacity_limit_exceeded",
         )
         require(
@@ -2345,11 +2422,48 @@ class DstackOperator:
                     key = (provider, resource_key[len(backend) + 1 :])
                     resources[key] = max(resources.get(key, 0), count)
                     break
-        return {
+        result = {
             "resources": resources,
             "instances": len(resources),
             "physical_gpus": sum(resources.values()),
         }
+        original = matching[0]["payload"]
+        snapshot = original.get("capacity_policy_snapshot")
+        if (
+            snapshot is not None
+            and original.get("request", {}).get("lifecycle_version") == 2
+            and binding.get("lifecycle_version") == 2
+        ):
+            from .capacity_settings import validate_snapshot
+
+            validate_snapshot(snapshot)
+            intent = intents[matching[0]["intent_id"]]
+            require(
+                type(original["request"]["lifecycle_version"]) is int
+                and type(binding["lifecycle_version"]) is int
+                and type(original.get("lifecycle", {}).get("version")) is int
+                and original["lifecycle"]["version"] == 2
+                and original.get("hard_deadline") is None
+                and intent["hard_deadline"] is None
+                and intent["physical_gpus"] == intent["slots"] == 1
+                and spec.worker_id
+                == "dstack-" + matching[0]["intent_id"].replace("-", "")
+                and resources.get((spec.provider, spec.instance_id)) == 1,
+                "dstack_registration_admission_invalid",
+            )
+            # This fulfills an original one-GPU admission, not a newly paid
+            # capacity grant under today's possibly lower settings.
+            result["capacity_admission"] = {
+                "capacity_backend": BACKEND_MARKER,
+                "lifecycle_version": 2,
+                "intent_id": intent["id"],
+                "worker_id": spec.worker_id,
+                "provider": spec.provider,
+                "instance_id": spec.instance_id,
+                "pool": spec.pool,
+                "capacity_policy_snapshot": copy.deepcopy(snapshot),
+            }
+        return result
 
     def start(self, principal, body, key):
         owner = self.authorize(principal)
@@ -2475,6 +2589,17 @@ class DstackOperator:
                     < guard_limit(guard),
                     limit_reason(guard),
                 )
+            from .supplier_spending import admit as admit_supplier_spending
+
+            capacity_snapshot = admit_supplier_spending(
+                connection,
+                self.settings.tenant_id,
+                now,
+                additional_microusd=value["reservation_microusd"],
+                reference_type="instance",
+                test_task=guard is not None,
+                policy=self._admin_limits(connection),
+            )
             usage = self._limits(connection, profile["max_price_microusd"])
             original = value["request"]
             host_selection = original.get("host_selection")
@@ -2568,6 +2693,18 @@ class DstackOperator:
                 continuing=continuing,
                 capacity_usage=usage,
                 active_instance_ids=usage["active_instance_ids"],
+                capacity_policy_snapshot=capacity_snapshot if continuing else None,
+                capacity_provenance={
+                    "capacity_backend": BACKEND_MARKER,
+                    "lifecycle_version": 2,
+                    "tenant_id": scope.tenant_id,
+                    "owner_id": scope.owner_id,
+                    "project_id": scope.project_id,
+                    "pool": profile["pool"],
+                    "provider": PROVIDERS[profile["backend"]],
+                }
+                if continuing and capacity_snapshot is not None
+                else None,
             )
             request = self._capacity_request(
                 profile,
@@ -2627,6 +2764,8 @@ class DstackOperator:
             }
             if demand is not None:
                 payload["demand_start"] = copy.deepcopy(demand)
+            if capacity_snapshot is not None:
+                payload["capacity_policy_snapshot"] = copy.deepcopy(capacity_snapshot)
             if continuing:
                 payload["lifecycle"] = copy.deepcopy(value["lifecycle"])
                 payload["hold_until"] = payload["lifecycle"]["hold_until"]

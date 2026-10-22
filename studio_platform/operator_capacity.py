@@ -274,8 +274,9 @@ ACTIVE_COMMANDS = {"accepted", "running", "waiting", "unknown"}
 
 
 class OperatorError(ValueError):
-    def __init__(self, code, status=409):
+    def __init__(self, code, status=409, *, details=None):
         self.code, self.status = code, status
+        self.details = details
         super().__init__(code)
 
 

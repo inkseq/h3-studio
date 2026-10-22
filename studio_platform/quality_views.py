@@ -42,6 +42,7 @@ PRIVATE_SELECTION = frozenset(
         "runtime_manifest_hash",
         "engine_manifest_digest",
         "backend",
+        "capacity_policy_snapshot",
         "pool",
         "worker_id",
         "source",

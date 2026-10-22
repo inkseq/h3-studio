@@ -337,7 +337,103 @@ def budget_reason(
             limits = read_settings(
                 connection, node["payload"]["tenant_id"], ADMIN_OWNER
             )
-            if limits["version"]:
+            # New admissions freeze their accepted guard. Changing the admin
+            # policy must not shorten an already running test rental. Legacy
+            # nodes preserve their original behavior until explicitly adopted.
+            snapshot = node["payload"].get("capacity_policy_snapshot")
+            if snapshot is not None:
+                from .capacity_settings import validate_snapshot
+
+                validate_snapshot(snapshot)
+            elif "capacity_policy_version" in limits["value"]:
+                from .capacity_settings import POLICY_VERSION, validate_snapshot
+                from .operator_capacity import operator_commands
+                from .repository import outbox, request_hash
+                from .spending_limits import validate_settings
+
+                if (
+                    type(limits["value"]["capacity_policy_version"]) is not int
+                    or limits["value"]["capacity_policy_version"] != POLICY_VERSION
+                ):
+                    raise ValueError("dstack_test_legacy_adoption_unconfirmed")
+                tenant = node["payload"]["tenant_id"]
+                transitions = []
+                for row in connection.execute(
+                    select(outbox).where(
+                        outbox.c.event_type == "spending.settings_updated",
+                        outbox.c.payload["tenant_id"].as_string() == tenant,
+                        outbox.c.payload["owner_id"].as_string() == ADMIN_OWNER,
+                    )
+                ).mappings():
+                    event = row["payload"]
+                    old, new = event["old"], event["new"]
+                    if (
+                        "capacity_policy_version" not in old["value"]
+                        and "capacity_policy_version" in new["value"]
+                    ):
+                        transitions.append((row, old, new))
+                if len(transitions) != 1:
+                    raise ValueError("dstack_test_legacy_adoption_unconfirmed")
+                adoption, old, new = transitions[0]
+                event, at = adoption["payload"], adoption["created_at"]
+                command = (
+                    connection.execute(
+                        select(operator_commands).where(
+                            operator_commands.c.id == node["command_id"]
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+                if command is None:
+                    raise ValueError("dstack_test_legacy_adoption_unconfirmed")
+                if not (
+                    event["tenant_id"] == tenant
+                    and event["owner_id"] == ADMIN_OWNER
+                    and adoption["aggregate_id"] == ADMIN_OWNER
+                    and type(limits["version"]) is int
+                    and type(old["version"]) is int
+                    and old["version"] >= 0
+                    and type(new["version"]) is int
+                    and new["version"] == old["version"] + 1 <= limits["version"]
+                    and isinstance(event.get("actor_id"), str)
+                    and 1 <= len(event["actor_id"]) <= 200
+                    and isinstance(event.get("reason"), str)
+                    and 1 <= len(event["reason"]) <= 500
+                    and event["reason"].strip()
+                    and finite(at)
+                    and at <= now
+                    and finite(intent["created_at"])
+                    and finite(command["created_at"])
+                    and 0 <= intent["created_at"] <= at
+                    and 0 <= command["created_at"] <= at
+                    and node["intent_id"] == intent["id"]
+                    and command["kind"] == "dstack_start"
+                    and command["payload"]["node_id"] == intent["id"]
+                    and intent["intent_key"]
+                    == "dstack:" + command["payload"]["preview_id"]
+                    and node["payload"]["request"]["intent_id"] == intent["id"]
+                    and command["actor"]
+                    == "dstack:"
+                    + request_hash(
+                        {"tenant_id": tenant, "owner_id": node["payload"]["owner_id"]}
+                    )
+                ):
+                    raise ValueError("dstack_test_legacy_adoption_unconfirmed")
+                validate_snapshot(
+                    {
+                        "settings_version": new["version"],
+                        "capacity_policy_version": POLICY_VERSION,
+                        "value": new["value"],
+                    }
+                )
+                # This is the one pre-adoption effective cap, not a later edit
+                # and not the possibly higher template frozen in the old node.
+                limits = {
+                    "version": old["version"],
+                    "value": validate_settings(old["value"], admin=True),
+                }
+            if limits["version"] and snapshot is None:
                 key = (
                     "task_limit_microusd"
                     if guard["version"] == 2
