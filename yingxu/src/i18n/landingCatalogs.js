@@ -66,3 +66,16 @@ export const landingCatalogs = {
     'landing.demoLabel': '映序里的一页分镜',
   },
 };
+
+// Sign-in feedback on the landing page (#395).
+Object.assign(landingCatalogs.en, {
+  'landing.opening': 'Opening sign-in…',
+  'landing.errorRateLimited':
+    'Too many sign-in attempts from this network. Please wait a few minutes, then try once more.',
+  'landing.errorSignIn': "Sign-in didn't finish. Please try again.",
+});
+Object.assign(landingCatalogs.zh, {
+  'landing.opening': '正在打开登录页…',
+  'landing.errorRateLimited': '这个网络的登录尝试太多了，请等几分钟再试一次。',
+  'landing.errorSignIn': '登录没有完成，请再试一次。',
+});
