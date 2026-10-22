@@ -51,6 +51,7 @@ import {
 const ChapterRoughCut = React.lazy(() => import('./ChapterRoughCut.jsx'));
 const Freestyle = React.lazy(() => import('./Freestyle.jsx'));
 const StoryChat = React.lazy(() => import('./StoryChat.jsx'));
+const QuickCreateEntry = React.lazy(() => import('./QuickCreateEntry.jsx'));
 import OperatorConsole from './P4OperatorConsole.jsx';
 import QuickChatWorkspace from './QuickChatWorkspace.jsx';
 import { navigateWorkspace } from './workspace-navigation.js';
@@ -1339,12 +1340,21 @@ function AppContent() {
     ),
     '/quick-chat': ({ active, location: page }) => (
       <React.Suspense fallback={<InkLoader label={t('loading.quickCreate')} />}>
-        {/* Chat-first Quick Create preview (#422): sample replies until the server exists. */}
-        {new URLSearchParams(page.search).get('story') === 'preview' ? (
-          <StoryChat account={account} />
-        ) : (
-          <QuickChatWorkspace active={active} />
-        )}
+        {/* ?story=preview: sample replies. ?mode=direct: the original Quick Create.
+            Otherwise the chat story builder when the server has it on (#422). */}
+        {(() => {
+          const params = new URLSearchParams(page.search);
+          const story = params.get('story');
+          if (story === 'preview') return <StoryChat account={account} />;
+          if (params.get('mode') === 'direct') return <QuickChatWorkspace active={active} />;
+          return (
+            <QuickCreateEntry
+              account={account}
+              story={story}
+              direct={<QuickChatWorkspace active={active} />}
+            />
+          );
+        })()}
       </React.Suspense>
     ),
     '/freestyle': ({ active }) => (
