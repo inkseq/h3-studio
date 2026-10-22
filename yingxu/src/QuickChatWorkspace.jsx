@@ -1026,6 +1026,7 @@ export default function QuickChatWorkspace() {
       if (stagedRef.current.length) await uploadFiles();
       await persistNextSettings();
       await controller.turn(text, model, mode, { createCard: mode === 'none', draft });
+      changePrompt('');
       setDraftSettings(null);
       textarea.current?.focus();
     });
@@ -1971,7 +1972,7 @@ export default function QuickChatWorkspace() {
                   </span>
                 ) : (
                   <button className="ghost small" disabled={busy || !recipe} onClick={openControls}>
-                    {t('workspace.status30')}
+                    {t(c.account ? 'quickView.loadingSettings' : 'workspace.status30')}
                   </button>
                 )}
                 <button
