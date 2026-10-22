@@ -129,6 +129,9 @@ class Settings:
     stripe_config_file: Path | None = None
     stripe_mode: str = "off"
     title_use_central: bool = False
+    # Chat-first story building (#422): on in staging unless INKSEQ_STORY_CHAT=0; elsewhere
+    # only with INKSEQ_STORY_CHAT=1. It reuses the title text credential.
+    story_chat_enabled: bool = False
     public_origin_aliases: tuple[str, ...] = ()
     account_deletion_test_owners: tuple[str, ...] = ()
 
@@ -458,4 +461,9 @@ class Settings:
             else None,
             stripe_mode=os.environ.get("INKSEQ_STRIPE_MODE", "off"),
             title_use_central=os.environ.get("SIXNINE_TITLE_USE_CENTRAL", "0") == "1",
+            story_chat_enabled=os.environ.get("INKSEQ_STORY_CHAT") == "1"
+            or (
+                os.environ.get("INKSEQ_STORY_CHAT") != "0"
+                and os.environ.get("INKSEQ_DEPLOYMENT_TARGET") == "staging"
+            ),
         )

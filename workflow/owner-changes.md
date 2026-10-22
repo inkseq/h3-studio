@@ -248,6 +248,19 @@ gates. Old rows remain readable without adoption. Implement A then B/C/D, markin
 unimplemented scheduling controls explicitly pending. Staging verification and
 Claude acceptance precede any production activation; no new tables or services.
 
+## CR-20261023-54 — Claude builds the story-chat backend (#422)
+
+Owner, direct chat 2026-10-23: "后端还要他设计嘛 你不行嘛" → "好的". Lane exception to
+#328 for [#422](https://github.com/inkseq/h3-studio/issues/422) phase 2 only: Claude
+authors the story-chat backend (`studio_platform/story_chat*.py`, its tests, one route
+registration and one setting); Codex performs the non-author review. Codex's other lanes
+and queue are unchanged. Tier 1: no new table, queue, worker, provider, credential or
+money path. A story chat is an ordinary project edited through the existing
+`Guided.mutate`; its transcript lives in `journey.storyChat`. The model reuses the
+existing title text credential and only proposes generation, which the user confirms
+through the existing generation routes. On in staging by default; production requires
+`INKSEQ_STORY_CHAT=1` after Claude/Codex acceptance.
+
 ## CR-20261023-55 — story-card image credits reuse the customer ledger
 
 Owner requests implementation of [#463](https://github.com/inkseq/h3-studio/issues/463),

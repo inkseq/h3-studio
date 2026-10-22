@@ -642,6 +642,9 @@ inventory.json
 !skills/inkseq/reference/recovery.md
 !studio_platform/storyboard_versions.py
 !tests/test_storyboard_versions.py
+!studio_platform/story_chat.py
+!studio_platform/story_chat_routes.py
+!tests/test_story_chat.py
 
 !studio_platform/universal_trash.py
 !tests/test_universal_trash.py
