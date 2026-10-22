@@ -51,6 +51,15 @@ function DemoBoard() {
   );
 }
 
+const RETRY_KEY = 'inkseq.signinRetryAt';
+function retryAllowed() {
+  try {
+    return Date.now() - Number(sessionStorage.getItem(RETRY_KEY) || 0) > 120000;
+  } catch {
+    return false;
+  }
+}
+
 export default function Landing() {
   const { t } = useI18n();
   const active = usePageActive(),
@@ -75,11 +84,28 @@ export default function Landing() {
     window.location.assign(hostedSignInUrl('/quick-chat', hint));
   };
   // A sign-in that did not finish comes back here with ?signin_error=<code>.
-  const signinError = useMemo(() => {
-    const code = new URLSearchParams(window.location.search).get('signin_error');
-    if (!code) return '';
-    return code === 'rate_limited' ? t('landing.errorRateLimited') : t('landing.errorSignIn');
-  }, [t]);
+  const code = useMemo(
+    () => new URLSearchParams(window.location.search).get('signin_error') || '',
+    [],
+  );
+  // state_invalid usually means the sign-in page sat open past its 10-minute window while the
+  // person finished signing up; their hosted session is already there, so one quiet retry
+  // completes it. Only once per two minutes, so a real failure still shows its message.
+  const [retrying, setRetrying] = useState(() => code === 'state_invalid' && retryAllowed());
+  useEffect(() => {
+    if (!retrying || !c.auth) return;
+    if (!hostedSignInEnabled(c.auth)) return setRetrying(false);
+    try {
+      sessionStorage.setItem(RETRY_KEY, String(Date.now()));
+    } catch {}
+    window.location.replace(hostedSignInUrl('/quick-chat', 'sign-in'));
+  }, [retrying, c.auth]);
+  const signinError =
+    !code || retrying
+      ? ''
+      : code === 'rate_limited'
+        ? t('landing.errorRateLimited')
+        : t('landing.errorSignIn');
   const steps = [
     [PenLine, 'landing.step1Title', 'landing.step1Body'],
     [Clapperboard, 'landing.step2Title', 'landing.step2Body'],
