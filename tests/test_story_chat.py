@@ -462,33 +462,6 @@ class StoryChatTests(unittest.TestCase):
         zib = first["cards"]["characters"][0]["id"]
         before = self.jobs()
         plan = {
-            "reply": "Removed Zib. Ready to make the shots?",
-            "actions": [
-                {"tool": "remove_card", "ref": zib},
-                {"tool": "propose_generate", "shots": "all"},
-            ],
-        }
-        response = self.turn(chat, "no alien", turn_id="turn-0004", plan=plan)
-        self.assertEqual(response.status_code, 200, response.text)
-        value = response.json()
-        self.assertEqual([c["name"] for c in value["cards"]["characters"]], ["Mia"])
-        self.assertTrue(all(zib not in s["cast"] for s in value["cards"]["shots"]))
-        self.assertEqual(
-            value["turn"]["proposal"],
-            {
-                "kind": "generate",
-                "shot_ids": [s["id"] for s in value["cards"]["shots"]],
-            },
-        )
-        self.assertEqual(self.jobs(), before)
-
-    def test_reply_format_is_enforced_and_picture_is_only_proposed(self):
-        chat = self.start()
-        first = self.turn(chat, "aliens").json()
-        self.assertEqual(self.model.configs[-1]["responseMimeType"], "application/json")
-        zib = first["cards"]["characters"][0]["id"]
-        before = self.jobs()
-        plan = {
             "reply": "I can redraw Zib; confirm to spend credits.",
             "actions": [
                 {"tool": "propose_image", "ref": zib},

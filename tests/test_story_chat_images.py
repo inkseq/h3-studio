@@ -158,9 +158,11 @@ class StoryChatImageTests(unittest.TestCase):
 
     def test_card_deleted_during_drawing_is_refused(self):
         zib = self.story["cards"]["characters"][0]["id"]
-        version = self.story["version"]
 
         def delete():
+            version = self.client.get(
+                "/v1/projects/" + self.story["project_id"]
+            ).json()["version"]
             shots = [s for s in self.story["cards"]["shots"] if zib in s["cast"]]
             actions = [
                 {
@@ -233,6 +235,143 @@ class StoryChatImageTests(unittest.TestCase):
                 ("hold", "story_chat_image:pic-bill-003"),
             ],
         )
+
+    def test_same_request_during_drawing_never_calls_the_provider_twice(self):
+        zib = self.story["cards"]["characters"][0]["id"]
+        inner = {}
+
+        def overlap():
+            inner["response"] = self.draw(zib)
+
+        self.images.during = overlap
+        first = self.draw(zib)
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(inner["response"].status_code, 409)
+        self.assertEqual(
+            inner["response"].json()["detail"]["code"], "story_chat_image_in_progress"
+        )
+        self.assertEqual(len(self.images.calls), 1)
+
+    def test_unknown_outcome_is_never_resubmitted(self):
+        zib = self.story["cards"]["characters"][0]["id"]
+        self.images.fail = ImageError("image_upstream_timeout", 504)
+        self.assertEqual(self.draw(zib).status_code, 504)
+        self.images.fail = None
+        again = self.draw(zib)
+        self.assertEqual(again.status_code, 409)
+        self.assertEqual(again.json()["detail"]["code"], "story_chat_image_in_progress")
+        self.assertEqual(len(self.images.calls), 1)
+
+    def test_whole_project_save_does_not_erase_replay_proof(self):
+        zib = self.story["cards"]["characters"][0]["id"]
+        first = self.draw(zib).json()
+        current = self.client.get("/v1/projects/" + self.story["project_id"]).json()
+        project = current["project"]
+        project["journey"]["storyChat"]["images"] = {}
+        project["journey"]["storyChat"].pop("imageRequests", None)
+        saved = self.client.put(
+            "/v1/projects/" + self.story["project_id"],
+            json={"project": project, "expected_version": current["version"]},
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        again = self.draw(zib)
+        self.assertEqual(again.status_code, 200, again.text)
+        self.assertEqual(again.json()["image"], first["image"])
+        self.assertEqual(len(self.images.calls), 1)
+
+    def test_card_shows_the_selected_variant_it_was_drawn_into(self):
+        zib = self.story["cards"]["characters"][0]["id"]
+        current = self.client.get("/v1/projects/" + self.story["project_id"]).json()
+        card = next(e for e in current["project"]["entities"] if e["id"] == zib)
+        old = next(
+            e
+            for e in current["project"]["entities"]
+            if e["type"] == "character" and e["id"] != zib
+        )
+        looks = [
+            {
+                "id": "main",
+                "name": "Old",
+                "description": "",
+                "gallery": {},
+                "imageIds": [],
+                "version": 1,
+            },
+            {
+                "id": "alt",
+                "name": "Alt",
+                "description": "",
+                "gallery": {},
+                "imageIds": [],
+                "version": 1,
+            },
+        ]
+        self.assertTrue(card and old)
+        r = self.client.post(
+            f"/v1/projects/{self.story['project_id']}/actions",
+            json={
+                "expected_version": current["version"],
+                "actions": [
+                    {
+                        "op": "entity.update",
+                        "entity_id": zib,
+                        "patch": {"data": {"looks": looks, "defaultLookId": "alt"}},
+                    }
+                ],
+            },
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        self.draw(zib, "pic-main-0001")  # goes into the selected "alt" look
+        self.client.post(
+            f"/v1/projects/{self.story['project_id']}/actions",
+            json={
+                "expected_version": self.client.get(
+                    "/v1/projects/" + self.story["project_id"]
+                ).json()["version"],
+                "actions": [
+                    {
+                        "op": "entity.update",
+                        "entity_id": zib,
+                        "patch": {
+                            "data": {
+                                "looks": [
+                                    {**looks[0], "imageIds": ["image-pic-main-0001"]},
+                                    {**looks[1], "imageIds": ["image-pic-main-0001"]},
+                                ]
+                            }
+                        },
+                    }
+                ],
+            },
+        )
+        value = self.draw(zib, "pic-alt-00002").json()
+        shown = next(c for c in value["cards"]["characters"] if c["id"] == zib)
+        self.assertEqual(shown["image_entity_id"], "image-pic-alt-00002")
+
+    def test_malformed_story_marker_is_left_out_of_the_list(self):
+        r = self.client.post(
+            "/v1/projects", json={"title": "Odd", "id": "project-odd-marker-01"}
+        )
+        self.assertEqual(r.status_code, 201, r.text)
+        for marker in ("garbage", {"x": 1}, True):
+            current = self.client.get("/v1/projects/project-odd-marker-01").json()
+            r = self.client.post(
+                "/v1/projects/project-odd-marker-01/actions",
+                json={
+                    "expected_version": current["version"],
+                    "actions": [
+                        {
+                            "op": "journey.update",
+                            "patch": {"storyChat": {"version": marker}},
+                        }
+                    ],
+                },
+            )
+            self.assertEqual(r.status_code, 200, r.text)
+            listed = self.client.get("/v1/story-chats")
+            self.assertEqual(listed.status_code, 200, listed.text)
+            ids = [c["project_id"] for c in listed.json()["story_chats"]]
+            self.assertEqual(ids, [self.story["project_id"]])
 
     def test_prompt_and_attach_shapes(self):
         project = self.project()

@@ -314,32 +314,59 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                 return None
             return card
 
+        from sqlalchemy import select
+
         from .credits import CreditError
+        from .guided import receipts
         from .story_chat_images import RELEASE_REASON, input_hash
 
         def credit_fail(error):
             _fail(error.code, error.status, **getattr(error, "data", {}))
 
+        start_key = "story-chat-image-start-" + request_id
+        attach_key = "story-chat-image-" + request_id
+
+        def receipt(key):
+            # Immutable edit receipts survive a later whole-project save; the editable
+            # journey map alone is never proof that a request did or did not run.
+            with app.state.repository.engine.connect() as connection:
+                return connection.execute(
+                    select(receipts.c.response).where(
+                        receipts.c.tenant == settings.tenant_id,
+                        receipts.c.owner == principal.owner,
+                        receipts.c.actor == principal.actor_id,
+                        receipts.c.project_id == project_id,
+                        receipts.c.key == key,
+                    )
+                ).scalar_one_or_none()
+
+        def recorded_image(response):
+            try:
+                return response["project"]["journey"]["storyChat"]["images"][request_id]
+            except (KeyError, TypeError):
+                return None
+
         row = read(principal, project_id, "projects:write")
         card = card_in(row["payload"])
-        recorded = chat_of(row["payload"]).get("images", {}).get(request_id)
-        if card is None and not recorded:
+        started, attached = receipt(start_key), receipt(attach_key)
+        if card is None and attached is None:
             _fail("story_chat_card_missing", 404, ref=card_id)
         reference = "story_chat_image:" + request_id
         scope = app.state.scope(principal, project_id)
+        source = started["project"] if isinstance(started, dict) else row["payload"]
+        source_card = card_in(source) or card or {}
         binding = {
             "tenant": scope.tenant_id,
             "owner": scope.owner_id,
             "project_id": project_id,
             "card_id": card_id,
             "request_id": request_id,
-            "input_hash": input_hash(row["payload"], card or {}, instruction)
-            if card
-            else "0" * 64,
+            # Bound to the material as the original request started, not as edited since.
+            "input_hash": input_hash(source, source_card, instruction),
             "actor_id": scope.actor_id,
         }
 
-        def finish():
+        def finish(response):
             # Charge only once the picture is durably on the card (attachment receipt).
             if held is not None:
                 try:
@@ -347,32 +374,29 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                 except CreditError as error:
                     credit_fail(error)
             current = read(principal, project_id)
-            return {
-                **view(current),
-                "image": chat_of(current["payload"])["images"][request_id],
-            }
+            return {**view(current), "image": recorded_image(response)}
 
         try:
             held = charges.hold(scope, reference, binding)
         except CreditError as error:
             credit_fail(error)
-        if recorded:
+        if attached is not None:
             # A replay of a delivered picture never draws again; it settles the original hold.
-            return finish()
+            return finish(attached)
         if held is not None and not held["created"]:
             if held["terminal"] is not None:
-                if held["terminal"]["kind"] == "capture":
-                    return finish()
                 _fail("story_chat_image_released", 409)
-            if held["attachment"] is not None:
-                return finish()
-            # Someone (another tab, a double click) is drawing this picture right now.
+            # Another request owns this open hold: it may be drawing right now. Never
+            # draw again and never release a hold this request did not create.
             _fail("story_chat_image_in_progress", 409)
-        if holder["image"] is None:
-            holder["image"] = configured_image_client(settings)
+        if started is not None:
+            # Running now (another tab, a double click) or an unknown outcome such as an
+            # upstream timeout: never resubmit the same request to the provider.
+            _fail("story_chat_image_in_progress", 409)
 
         def release(reason):
-            if held is None:
+            # Only the request that created the hold may release it.
+            if held is None or not held["created"]:
                 return
             try:
                 charges.release(scope, reference, binding, reason)
@@ -381,8 +405,60 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                 pass
 
         if holder["image"] is None:
+            holder["image"] = configured_image_client(settings)
+        if holder["image"] is None:
             release("provider_failed")
             _fail("assistant_unavailable", 503)
+        # Fence the request durably BEFORE the provider call: whoever commits this keyed
+        # receipt first owns the request; everyone else sees it in progress.
+        fenced = False
+        for _attempt in range(2):
+            chat_now = chat_of(row["payload"])
+            try:
+                app.state.guided.mutate(
+                    principal,
+                    project_id,
+                    {
+                        "expected_version": row["version"],
+                        "actions": [
+                            {
+                                "op": "journey.update",
+                                "patch": {
+                                    "storyChat": {
+                                        **chat_now,
+                                        "imageRequests": {
+                                            **chat_now.get("imageRequests", {}),
+                                            request_id: {
+                                                "card_id": card_id,
+                                                "at": now_iso(),
+                                            },
+                                        },
+                                    }
+                                },
+                            }
+                        ],
+                    },
+                    start_key,
+                )
+                fenced = True
+                break
+            except Conflict as error:
+                if str(error) != "document_version_conflict" or receipt(start_key):
+                    break  # another request committed the fence first
+                row = read(principal, project_id, "projects:write")
+                card = card_in(row["payload"])
+                if card is None:
+                    release("card_missing")
+                    _fail(
+                        "story_chat_card_missing",
+                        409,
+                        ref=card_id,
+                        nothing_charged=True,
+                    )
+        if not fenced:
+            # Lost the race or could not fence: never call the provider on a guess.
+            release("version_conflict")
+            _fail("story_chat_image_in_progress", 409)
         try:
             mime, data = holder["image"].generate(
                 prompt_for(row["payload"], card, instruction), ASPECT[card["type"]]
@@ -409,14 +485,10 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                 _fail(error.code, error.status, nothing_charged=True)
             raise
         image_id = "image-" + request_id
-        attached = False
         for _attempt in range(3):
             row = read(principal, project_id, "projects:write")
             project = row["payload"]
             chat = chat_of(project)
-            if chat.get("images", {}).get(request_id):
-                attached = True
-                break
             current = card_in(project)
             if current is None:
                 release("card_missing")
@@ -431,7 +503,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             value = copy.deepcopy(chat)
             value["images"] = {**value.get("images", {}), request_id: record}
             try:
-                app.state.guided.mutate(
+                response = app.state.guided.mutate(
                     principal,
                     project_id,
                     {
@@ -442,17 +514,15 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                         + [{"op": "journey.update", "patch": {"storyChat": value}}],
                     },
                     # The immutable edit receipt is the attachment proof capture verifies.
-                    "story-chat-image-" + request_id,
+                    attach_key,
                 )
-                attached = True
-                break
             except Conflict as error:
                 if str(error) != "document_version_conflict":
-                    raise
+                    _fail("story_chat_image_outcome_unconfirmed", 502)
+                continue
             except Exception:
                 # Unknown commit outcome: never release blindly; a replay reads the receipt.
                 _fail("story_chat_image_outcome_unconfirmed", 502)
-        if attached:
-            return finish()
+            return finish(response)
         release("version_conflict")
         _fail("document_version_conflict", 409, nothing_charged=True)

@@ -1125,10 +1125,20 @@ class Repository:
             # Story chats (#422): projects carrying journey.storyChat, newest first.
             if kind != "project":
                 raise ValueError("invalid_document_summary")
-            statement = statement.where(
-                documents.c.payload[("journey", "storyChat", "version")].as_integer()
-                == 1
-            )
+            marker = documents.c.payload[("journey", "storyChat", "version")]
+            # Typed, cast-free predicates: a malformed legacy marker (string, object,
+            # bool) is simply not a story chat and must never raise in SQL.
+            if self.engine.dialect.name == "postgresql":
+                typed = and_(
+                    func.json_typeof(marker) == "number", marker.as_string() == "1"
+                )
+            else:
+                typed = and_(
+                    func.json_type(documents.c.payload, "$.journey.storyChat.version")
+                    == "integer",
+                    marker.as_integer() == 1,
+                )
+            statement = statement.where(typed)
             order = (documents.c.updated_at.desc(), documents.c.document_id)
         with self.engine.connect() as connection:
             values = [

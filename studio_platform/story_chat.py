@@ -158,14 +158,15 @@ def shots_of(project, chat):
 
 def _image(entity):
     data = entity.get("data", {})
-    looks = data.get("looks") or []
-    for look in looks:
-        if isinstance(look, dict) and look.get("imageIds"):
-            return look["imageIds"][0]
-    versions = data.get("versions") or []
-    for version in versions:
-        if isinstance(version, dict) and version.get("imageIds"):
-            return version["imageIds"][0]
+    for field, default in (
+        ("looks", "defaultLookId"),
+        ("versions", "defaultVersionId"),
+    ):
+        variants = [v for v in data.get(field) or [] if isinstance(v, dict)]
+        selected = [v for v in variants if v.get("id") == data.get(default)]
+        for variant in selected + variants:
+            if variant.get("imageIds"):
+                return variant["imageIds"][0]
     if data.get("imageIds"):
         return data["imageIds"][0]
     gallery = data.get("gallery") or []
