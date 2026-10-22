@@ -140,6 +140,13 @@ function Consequences({ preview }) {
               price: money(item.hourly_microusd),
             });
             break;
+          case 'mode_ceiling_above_machine_ceiling':
+            text = t('capacity.c.' + item.code, {
+              mode: t('capacity.mode.' + item.mode),
+              modePrice: money(item.mode_hourly_microusd),
+              machinePrice: money(item.machine_hourly_microusd),
+            });
+            break;
           case 'setting_next_admission_only':
           case 'control_pending_implementation': {
             // Pending controls get their own line; do not list them twice.
@@ -155,9 +162,10 @@ function Consequences({ preview }) {
           default:
             text = t('capacity.c.unknown', { code: item.code });
         }
+        const warn = short || item.code === 'mode_ceiling_above_machine_ceiling';
         return (
-          <li key={index} className={short ? 'bad' : ''}>
-            {short && <AlertTriangle size={14} aria-hidden="true" />}
+          <li key={index} className={warn ? 'bad' : ''}>
+            {warn && <AlertTriangle size={14} aria-hidden="true" />}
             {text}
           </li>
         );

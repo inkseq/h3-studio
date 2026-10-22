@@ -79,6 +79,8 @@ export const capacityCatalogs = {
     'capacity.c.fleet_allows_combination':
       '{machines} machines fit within the combined hourly cap (at most {required} per hour together).',
     'capacity.c.mode_price_ceiling': '{mode} machines: at most {price} per hour.',
+    'capacity.c.mode_ceiling_above_machine_ceiling':
+      '{mode} machines are allowed {modePrice} per hour, but “Any one machine” caps them at {machinePrice}. Raise that cap if {mode} should really use {modePrice}.',
     'capacity.c.setting_next_admission_only': 'Applies from the next start: {fields}.',
     'capacity.c.control_pending_implementation': 'Recorded but not used yet: {fields}.',
     'capacity.c.unknown': 'Server note: {code}',
@@ -181,6 +183,8 @@ export const capacityCatalogs = {
     'capacity.c.fleet_allows_combination':
       '{machines} 台机器都能开，合计每小时最多 {required}，在合计上限之内。',
     'capacity.c.mode_price_ceiling': '{mode}机器：每小时最多 {price}。',
+    'capacity.c.mode_ceiling_above_machine_ceiling':
+      '{mode}机器允许每小时 {modePrice}，但“单台机器每小时上限”把它压在 {machinePrice}。要让{mode}真的用到 {modePrice}，请提高单台上限。',
     'capacity.c.setting_next_admission_only': '从下一次开机/任务开始生效：{fields}。',
     'capacity.c.control_pending_implementation': '已记录但暂未使用：{fields}。',
     'capacity.c.unknown': '服务器提示：{code}',
