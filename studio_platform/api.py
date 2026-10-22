@@ -51,6 +51,7 @@ from .http_limits import (
     RequestAdmission,
     RequestAdmissionMiddleware,
     admission_rejected,
+    hosted_error_redirect,
     is_asset_upload,
     body_limit,
 )
@@ -412,7 +413,7 @@ def create_app(
         authorization = request.headers.get("authorization", "")
         lease = request.scope[ADMISSION_SCOPE_KEY]
         if not lease.acquire("authentication"):
-            return admission_rejected()
+            return admission_rejected(request.scope)
         try:
             if authorization:
                 if authorization.startswith("Bearer "):
@@ -435,6 +436,11 @@ def create_app(
                         auth.session, request.cookies.get(COOKIE)
                     )
         except SessionUnavailable:
+            redirect = hosted_error_redirect(
+                request.scope, "provider_unavailable", retry_after=3
+            )
+            if redirect is not None:
+                return redirect
             return JSONResponse(
                 {
                     "detail": "Session verification is temporarily unavailable.",
@@ -446,6 +452,11 @@ def create_app(
         except SQLAlchemyError:
             # Middleware runs outside FastAPI's endpoint exception handlers.
             # Connection errors must not escape with a DSN or bound token hash.
+            redirect = hosted_error_redirect(
+                request.scope, "provider_unavailable", retry_after=3
+            )
+            if redirect is not None:
+                return redirect
             return JSONResponse(
                 {"detail": "身份服务暂时不可用，请稍后重试"},
                 status_code=503,
@@ -554,7 +565,7 @@ def create_app(
                     headers={"Cache-Control": "no-store"},
                 )
         if principal and not lease.acquire("owner", principal.owner):
-            return admission_rejected()
+            return admission_rejected(request.scope)
         downloading = (
             principal is not None
             and request.method in {"GET", "HEAD"}

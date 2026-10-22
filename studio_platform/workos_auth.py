@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from functools import lru_cache
 import hmac
 import json
+import logging
 import re
 import secrets
 from urllib.parse import parse_qs, unquote, urlsplit
@@ -34,7 +35,20 @@ STATE_CLEANUP_LIMIT = 100
 CONTROL_OWNER = WORKOS_PRIVATE_OWNER
 CONTROL_PROJECT = WORKOS_PRIVATE_PROJECT
 STATE_KIND = "authkit_state"
-WORKOS_ISSUER = "https://api.workos.com"
+WORKOS_API_ORIGIN = "https://api.workos.com"
+WORKOS_ISSUER = WORKOS_API_ORIGIN + "/"
+LOGGER = logging.getLogger(__name__)
+CALLBACK_FAILURE_PHASES = frozenset(
+    {
+        "exchange",
+        "provider_shape",
+        "jwt_issuer",
+        "jwt_claims",
+        "jwks",
+        "rejected_flow",
+        "upsert",
+    }
+)
 TOKEN = re.compile(r"[A-Za-z0-9_-]{43,128}")
 MESSAGES = {
     "workos_not_configured": "Hosted sign-in is unavailable.",
@@ -60,6 +74,31 @@ class WorkOSError(Exception):
         self.code, self.status = code, status
         self.detail = MESSAGES[code]
         super().__init__(code)
+
+
+def _issuers(client_id):
+    # Both forms are documented by WorkOS. Only our configured client may
+    # select the client-specific issuer; no token field selects a URL.
+    return (WORKOS_ISSUER, WORKOS_API_ORIGIN + "/user_management/" + client_id)
+
+
+def _callback_diagnostic(phase):
+    # Never attach an exception, provider response or request data to this log.
+    if phase not in CALLBACK_FAILURE_PHASES:
+        raise ValueError("Invalid callback diagnostic phase")
+    LOGGER.warning("workos_callback_failed phase=%s", phase)
+
+
+@contextmanager
+def _callback_phase(phase):
+    try:
+        yield
+    except WorkOSError:
+        _callback_diagnostic(phase)
+        raise
+    except Exception:
+        _callback_diagnostic(phase)
+        raise WorkOSError("workos_provider_unavailable", 503) from None
 
 
 def return_path(value):
@@ -123,10 +162,10 @@ def _client(config):
     return WorkOSClient(
         api_key=config["api_key"],
         client_id=config["client_id"],
-        base_url="https://api.workos.com",
+        base_url=WORKOS_API_ORIGIN,
         request_timeout=15,
         max_retries=0,
-        jwt_issuer=WORKOS_ISSUER,
+        jwt_issuer=_issuers(config["client_id"]),
     )
 
 
@@ -137,7 +176,7 @@ def _jwks(client_id):
     # Only the validated configured client selects this fixed public key URL.
     # PyJWT ignores token jku/x5u; its key-set cache expires after five minutes.
     return PyJWKClient(
-        WORKOS_ISSUER + "/sso/jwks/" + client_id,
+        WORKOS_API_ORIGIN + "/sso/jwks/" + client_id,
         cache_jwk_set=True,
         lifespan=300,
         timeout=10,
@@ -555,6 +594,7 @@ class WorkOSAuth:
         """Verify only the token returned by our successful server-side exchange."""
         import jwt
 
+        phase = "jwt_claims"
         try:
             token = getattr(result, "access_token", None)
             if not isinstance(token, str) or not 1 <= len(token) <= 8192:
@@ -562,14 +602,16 @@ class WorkOSAuth:
             header = jwt.get_unverified_header(token)
             if header.get("alg") != "RS256":
                 raise ValueError()
+            phase = "jwks"
             key = _jwks(config["client_id"]).get_signing_key_from_jwt(token)
+            phase = "jwt_claims"
             claims = jwt.decode(
                 token,
                 key.key,
                 algorithms=["RS256"],
-                issuer=WORKOS_ISSUER,
+                issuer=_issuers(config["client_id"]),
                 options={
-                    "require": ["iss", "sub", "client_id", "sid", "iat", "exp"],
+                    "require": ["iss", "sub", "sid", "iat", "exp"],
                     "verify_aud": False,
                     "verify_exp": False,
                     "verify_iat": False,
@@ -577,12 +619,14 @@ class WorkOSAuth:
                 },
             )
             now = self.auth.clock()
-            # AuthKit session tokens document client_id, not a required aud.
-            # The pinned SDK also disables implicit aud checks. If present,
-            # accept only this exact configured client as the audience.
+            # This token came only from our successful server-side exchange
+            # and is verified with the configured client's fixed JWKS. WorkOS
+            # does not require client_id/aud in every documented session token;
+            # when present, both must identify only that configured client.
             if (
                 claims["sub"] != identity["subject"]
-                or claims["client_id"] != config["client_id"]
+                or "client_id" in claims
+                and claims["client_id"] != config["client_id"]
                 or "aud" in claims
                 and claims["aud"] not in (config["client_id"], [config["client_id"]])
                 or type(claims["iat"]) is not int
@@ -595,13 +639,20 @@ class WorkOSAuth:
             value = {
                 "sid": claims["sid"],
                 "subject": claims["sub"],
-                "client_id": claims["client_id"],
+                "client_id": config["client_id"],
                 "access_expires_at": claims["exp"],
             }
             if not _workos_session_shape(value):
                 raise ValueError()
             return value
+        except jwt.InvalidIssuerError:
+            _callback_diagnostic("jwt_issuer")
+            raise WorkOSError("workos_provider_unavailable", 503) from None
+        except jwt.MissingRequiredClaimError as error:
+            _callback_diagnostic("jwt_issuer" if error.claim == "iss" else "jwt_claims")
+            raise WorkOSError("workos_provider_unavailable", 503) from None
         except Exception:
+            _callback_diagnostic(phase)
             raise WorkOSError("workos_provider_unavailable", 503) from None
 
     def logout_url(self, provider_session):
@@ -654,13 +705,16 @@ class WorkOSAuth:
             or any(ord(c) < 33 for c in code)
         ):
             raise WorkOSError("workos_state_invalid")
-        with self.sdk(config) as client:
-            result = client.user_management.authenticate_with_code(
-                code=code, code_verifier=verifier
-            )
-        identity = self._provider_user(getattr(result, "user", None))
+        with _callback_phase("exchange"):
+            with self.sdk(config) as client:
+                result = client.user_management.authenticate_with_code(
+                    code=code, code_verifier=verifier
+                )
+        with _callback_phase("provider_shape"):
+            identity = self._provider_user(getattr(result, "user", None))
         provider_session = self._provider_session(result, identity, config)
-        row = self._upsert(identity, transaction, principal)
+        with _callback_phase("upsert"):
+            row = self._upsert(identity, transaction, principal)
         try:
             token = self.auth.issue_workos_session(
                 row["owner"],
@@ -674,17 +728,22 @@ class WorkOSAuth:
             # The verified provider exchange can finish after revoke-all's
             # cutoff. Keep its exact SID in that SAME original operation even
             # when the first provider inventory has already completed.
-            try:
+            with _callback_phase("rejected_flow"):
                 AccountSessions(
                     self.repo, self.auth, self.settings, self
                 ).rejected_flow(
                     row["owner"], transaction.get("auth_epoch", 0), provider_session
                 )
-            except Exception:
-                raise WorkOSError("workos_provider_unavailable", 503) from None
+            _callback_diagnostic("rejected_flow")
             # A suspension may commit between canonical upsert and issuance.
             # Keep that refusal finite and never expose internal exception text.
             raise WorkOSError("account_unavailable", 403) from None
+        except WorkOSError:
+            _callback_diagnostic("upsert")
+            raise
+        except Exception:
+            _callback_diagnostic("upsert")
+            raise WorkOSError("workos_provider_unavailable", 503) from None
         return {"token": token, "return_to": transaction["return_to"]}
 
     def _account(self, connection, principal, *, lock=False):

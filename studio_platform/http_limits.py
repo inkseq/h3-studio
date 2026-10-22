@@ -6,7 +6,7 @@ from collections import Counter
 import threading
 import re
 from starlette.exceptions import HTTPException
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, RedirectResponse
 
 
 ADMISSION_SCOPE_KEY = "sixnine.request_admission"
@@ -119,7 +119,44 @@ class RequestLease:
             self.held.clear()
 
 
-def admission_rejected():
+def hosted_error_redirect(scope, code, *, retry_after=None):
+    """A fixed landing page for failed hosted browser navigation only."""
+    if (
+        not scope
+        or scope.get("method") != "GET"
+        or scope.get("path")
+        not in {
+            "/api/auth/workos/start",
+            "/api/auth/workos/callback",
+        }
+    ):
+        return None
+    headers = {key.lower(): value.lower() for key, value in scope.get("headers", [])}
+    if headers.get(
+        b"sec-fetch-mode"
+    ) != b"navigate" and b"text/html" not in headers.get(b"accept", b""):
+        return None
+    if code not in {
+        "rate_limited",
+        "state_invalid",
+        "provider_unavailable",
+        "account_deleted",
+        "account_unavailable",
+        "cancelled",
+    }:
+        raise ValueError("invalid_hosted_error_code")
+    response_headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+    if retry_after is not None:
+        response_headers["Retry-After"] = str(retry_after)
+    return RedirectResponse(
+        "/?signin_error=" + code, status_code=302, headers=response_headers
+    )
+
+
+def admission_rejected(scope=None):
+    redirect = hosted_error_redirect(scope, "rate_limited", retry_after=3)
+    if redirect is not None:
+        return redirect
     return JSONResponse(
         {
             "detail": "同时处理的请求已达到上限，请稍后重试",
@@ -196,7 +233,7 @@ class RequestAdmissionMiddleware:
             if accepted and scope.get("path") == "/api/auth/login":
                 accepted = lease.acquire("login")
             if not accepted:
-                return await admission_rejected()(scope, receive, bounded_send)
+                return await admission_rejected(scope)(scope, receive, bounded_send)
             if download:
                 deadline = asyncio.timeout(self.download_seconds)
                 try:
