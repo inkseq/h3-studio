@@ -21,7 +21,6 @@ except ImportError:
 REGION = "ap-southeast-1"
 DATABASE = "/sixnine/platform/database"
 ACCOUNTS = "/sixnine/platform/bootstrap-accounts"
-GOOGLE_TITLES = "/sixnine/platform/google-titles"
 ROOT = Path("/run/sixnine-secrets")
 
 
@@ -107,10 +106,11 @@ def hydrate_titles(api, *, target='production'):
     # Unlike DB credentials, optional title config may be disabled/rotated at an
     # app restart. Atomic replacement preserves any existing mounted inode.
     from studio_platform.google_title_config import validate_config, unique_pairs
+    # Validate the closed host target before the optional-config fallback. Never
+    # let staging read production's key, including on a missing/denied secret.
+    source = deployment_target.profile(target)['secret_root'] + '/google-titles'
     try:
-        if target == 'staging':
-            raise RuntimeError('Staging title integration remains disabled')
-        response = api.get_secret_value(SecretId=GOOGLE_TITLES)
+        response = api.get_secret_value(SecretId=source)
         payload = json.loads(response["SecretString"], object_pairs_hook=unique_pairs)
         validate_config(payload)
     except Exception:

@@ -276,3 +276,28 @@ Claude retains the image route/UI and its duplicate-provider-call fencing; Codex
 the money primitive. No automatic stale-hold release, production activation or real
 provider call follows from this implementation. Separate integrated staging acceptance
 and Claude sign-off remain required before charged images become usable.
+
+## CR-20261023-56 — staged title-key hydration and gated story-chat launch
+
+Owner decisions relayed on [#422](https://github.com/inkseq/h3-studio/issues/422)
+in [6353525309](https://github.com/inkseq/h3-studio/issues/422#issuecomment-6353525309)
+and [6353528761](https://github.com/inkseq/h3-studio/issues/422#issuecomment-6353528761)
+authorize copying the existing central `gemini--user-supplied` configuration to
+staging's existing protected title-secret path, not a new provider credential or
+account. Claude approved the small target-scoped hydrator in
+[6353640343](https://github.com/inkseq/h3-studio/issues/422#issuecomment-6353640343).
+Staging reads only `/sixnine/staging/google-titles`, with no production fallback;
+production's source stays unchanged. Preserve atomic runtime replacement and
+disabled optional-config behavior. Host-helper installation and app configuration
+are separately reviewed, receipt-bound steps; app recreation requires zero
+nonterminal work. A config read is not a real-model acceptance.
+
+Production story chat may be enabled only after Claude's explicit real-model
+staging acceptance, using the identical accepted platform/frontend tuple and a
+retained rollback target. The accepted tuple must include the admin picture
+switch from PR466, verified OFF; do not enable production before that switch is
+present. Set `INKSEQ_STORY_CHAT=1` and reuse the existing title mount/config path
+through the guarded rollout flow. Preserve billing, Checkout and auth activation
+state. Image-price publication and charging remain separate CR55 decisions;
+neither this change nor deployment enables them. Prepare production now, execute
+only after the staged sign-off, and refuse state/identity drift before writes.

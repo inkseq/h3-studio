@@ -85,11 +85,16 @@ permitted for a public deployment. Default local previews remain disabled.
 
 Production uses `SIXNINE_TITLE_CONFIG_FILE=/run/secrets/google_titles`.
 The protected host loader reads `/sixnine/platform/google-titles` in AWS Secrets
-Manager and hydrates a root-owned, group-10001, mode-0440 file in `/run` tmpfs;
+Manager for production, or `/sixnine/staging/google-titles` for the closed staging
+target, and hydrates a root-owned, group-10001, mode-0440 file in `/run` tmpfs;
 only the app mounts it. No API key enters an environment variable, frontend
 bundle, connection instruction, repository or public guide. The host installs
 the dependency-free `studio_platform/google_title_config.py` beside the existing
 `runtime_secrets_aws.py`; hydration needs no model SDK or HTTP dependency.
+Staging never falls back to the production source. Invalid deployment targets
+are rejected before reads or writes. Each target needs an explicitly installed
+protected helper and its own authorized managed-secret source; deploying the app
+alone does not update an already installed host helper or enable story chat.
 
 The optional source has a disabled sentinel `{"enabled":false}`. Missing,
 denied or malformed upstream configuration disables naming for the next app
