@@ -304,14 +304,14 @@ export default function LibraryView({
                 </button>
               </span>
             )}
-            <div className="spacer" />
             <input
-              className="lib-search"
+              className="lib-search lib-search-left"
               aria-label={t('library.search')}
               placeholder={t('library.search')}
               value={filters.q || ''}
               onChange={(e) => change({ q: e.target.value })}
             />
+            <div className="spacer" />
             {profile ? (
               <CreateProfileMenu
                 key={filters.type}

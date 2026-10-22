@@ -5,6 +5,7 @@ import {
   hostedSignInEnabled,
   hostedSignInUrl,
   providerLogoutUrl,
+  readAccessFor,
   readAccess,
   resetAccess,
 } from './account-access.js';
@@ -83,7 +84,7 @@ test('machine principals (agent keys) never get GPU or admin navigation', () => 
   );
 });
 
-test('one cached read per page load; errors fall back to no access', async () => {
+test('one cached read per page load; errors fall back to no access and are retried', async () => {
   resetAccess();
   let calls = 0;
   const failing = () => {
@@ -101,8 +102,9 @@ test('one cached read per page load; errors fall back to no access', async () =>
     gpus: false,
     admin: false,
   });
+  // A failed read (offline, or 429 when the page asks several times) is not cached.
   await readAccess(failing);
-  assert.equal(calls, 1);
+  assert.equal(calls, 2);
   resetAccess();
   const ok = () =>
     Promise.resolve({
@@ -110,6 +112,15 @@ test('one cached read per page load; errors fall back to no access', async () =>
       json: () => Promise.resolve({ username: 'a', operator_capacity: { view: true } }),
     });
   assert.equal((await readAccess(ok)).gpus, true);
+  // A successful read is shared by every later caller for the same account.
+  let okCalls = 0;
+  const counted = () => (okCalls++, ok());
+  resetAccess();
+  await readAccessFor('a', counted);
+  await readAccessFor('a', counted);
+  assert.equal(okCalls, 1);
+  await readAccessFor('b', counted);
+  assert.equal(okCalls, 2);
   resetAccess();
 });
 
