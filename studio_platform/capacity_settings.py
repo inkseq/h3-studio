@@ -17,7 +17,7 @@ DEFAULTS = {
     "tenant_daily_warning_fraction": 0.8,
     "fleet_hourly_limit_microusd": 3_000_000,
     "mode_hourly_ceiling_microusd": {"ref": 1_500_000, "fl": 850_000, "other": 850_000},
-    "max_hourly_price_microusd": 1_000_000,
+    "max_hourly_price_microusd": 1_500_000,
     "max_machines": 2,
     "idle_shutdown_seconds": 600,
     "max_runtime_seconds": 7200,
@@ -305,6 +305,16 @@ def consequences(value, changed_fields, profile_snapshots=None):
     result.extend(
         {"code": "mode_price_ceiling", "mode": mode, "hourly_microusd": caps[mode]}
         for mode in sorted(caps)
+    )
+    result.extend(
+        {
+            "code": "mode_ceiling_above_machine_ceiling",
+            "mode": mode,
+            "mode_hourly_microusd": caps[mode],
+            "machine_hourly_microusd": value["max_hourly_price_microusd"],
+        }
+        for mode in sorted(caps)
+        if caps[mode] > value["max_hourly_price_microusd"]
     )
     result.append(
         {"code": "setting_next_admission_only", "fields": sorted(changed_fields)}
