@@ -928,6 +928,69 @@ def adopt_payment_live(connection, *, expected_fingerprint, tenant_id):
     return dict(state='adopted_payment_live', before=before, after=after)
 
 
+def adopt_credit_admission(connection, *, expected_fingerprint, tenant_id):
+    """Explicit 006->007 only; host release.lock proves both reader images.
+
+    No source/CI action invokes this. Stripe OFF is checked by the CLI before
+    connecting; persisted charging and quiescence are checked under the same
+    account/migration locks as the older guarded adoptions.
+    """
+    from .credits import credit_policy
+    from .identity import lock_account_gate
+    from .repository import jobs
+    from sqlalchemy import or_
+
+    if (
+        not connection.in_transaction()
+        or connection.dialect.name != 'postgresql'
+        or not re.fullmatch(r'[a-f0-9]{64}', expected_fingerprint or '')
+        or not isinstance(tenant_id, str)
+        or not 1 <= len(tenant_id) <= 200
+    ):
+        raise BaselineError('credit_admission_adoption_requires_verified_transaction')
+    connection.exec_driver_sql("SET LOCAL lock_timeout = '5s'")
+    connection.exec_driver_sql("SET LOCAL statement_timeout = '30s'")
+    lock_account_gate(connection, exclusive=True)
+    connection.exec_driver_sql('SELECT pg_advisory_xact_lock(685939796868749721)')
+    before = compare_schema(connection)
+    if before['schema_fingerprint'] != expected_fingerprint:
+        raise BaselineError('schema_snapshot_changed')
+    if (
+        not before['matches']
+        or before['recorded_revision'] not in LIVE_PAYMENT_REVISIONS
+    ):
+        raise BaselineError('credit_admission_adoption_requires_adopted006')
+    if credit_policy(connection, tenant_id)['enabled']:
+        raise BaselineError('credit_admission_adoption_requires_charging_off')
+    if connection.execute(
+        select(jobs.c.id)
+        .where(
+            or_(
+                jobs.c.status.not_in(('succeeded', 'failed', 'cancelled')),
+                jobs.c.lease_worker_id.is_not(None),
+                jobs.c.lease_expires_at.is_not(None),
+            )
+        )
+        .limit(1)
+    ).first():
+        raise BaselineError('credit_admission_adoption_requires_quiescence')
+    if before['recorded_revision'] == CREDIT_ADMISSION_REVISION:
+        return dict(state='already_adopted', before=before, after=before)
+    from alembic import command
+
+    config = alembic_config()
+    config.attributes.update(
+        verified_baseline_connection=connection,
+        verified_baseline_mode='upgrade',
+        verified_credit_admission_mode=True,
+    )
+    command.upgrade(config, CREDIT_ADMISSION_REVISION)
+    after = compare_schema(connection)
+    if not after['matches'] or after['recorded_revision'] != CREDIT_ADMISSION_REVISION:
+        raise BaselineError('credit_admission_adoption_verification_failed')
+    return dict(state='adopted_credit_admission', before=before, after=after)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Schema-only baseline verification and guarded adoption"
@@ -971,6 +1034,11 @@ def main(argv=None):
         help='Adopt exact live-mode checks with Stripe/charging OFF after both approved reader images are verified under release.lock',
     )
     live.add_argument('--expected-fingerprint', required=True)
+    admission = commands.add_parser(
+        'adopt-credit-admission',
+        help='Adopt reservation roles with charging/Stripe OFF, quiescent jobs and both approved readers verified under release.lock',
+    )
+    admission.add_argument('--expected-fingerprint', required=True)
     args = parser.parse_args(argv)
     engine = None
     try:
@@ -990,6 +1058,12 @@ def main(argv=None):
             settings = Settings.from_environment()
             if getattr(settings, 'stripe_mode', None) != 'off':
                 raise BaselineError('payment_live_adoption_requires_payments_off')
+        if args.command == 'adopt-credit-admission':
+            from .settings import Settings
+
+            settings = Settings.from_environment()
+            if getattr(settings, 'stripe_mode', None) != 'off':
+                raise BaselineError('credit_admission_adoption_requires_payments_off')
         from .settings import database_url_from_environment
 
         url = database_url_from_environment()
@@ -1036,6 +1110,12 @@ def main(argv=None):
                     expected_fingerprint=args.expected_fingerprint,
                     tenant_id=settings.tenant_id,
                 )
+            elif args.command == 'adopt-credit-admission':
+                result = adopt_credit_admission(
+                    connection,
+                    expected_fingerprint=args.expected_fingerprint,
+                    tenant_id=settings.tenant_id,
+                )
             else:
                 result = adopt_baseline(
                     connection, expected_fingerprint=args.expected_fingerprint
@@ -1051,6 +1131,7 @@ def main(argv=None):
                 'adopt-credits',
                 'adopt-payments',
                 'adopt-payment-live',
+                'adopt-credit-admission',
             }
             or result["matches"]
             else 1

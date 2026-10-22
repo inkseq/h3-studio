@@ -374,6 +374,7 @@ class GenerationServicesTests(ledger.LedgerCase):
         self.assertEqual(
             public,
             {
+                "admission": "usd",
                 "admission_state": "waiting_capacity",
                 "enabled": True,
                 "quote_known": True,
