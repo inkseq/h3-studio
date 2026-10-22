@@ -227,6 +227,7 @@ class CreditAPI:
             return value
 
     def admin_prices(self, principal):
+        from .credits_pricing import RECOMMENDED_IMAGE_CREDITS
         from .credit_margin import report
         from .credits import _aggregate_integer
         from .payments_routes import current_packs
@@ -245,6 +246,8 @@ class CreditAPI:
                 "revision": value["revision"],
                 "rates": value["rates"],
                 **value["configuration"],
+                "image_credits": value["configuration"].get("image_credits"),
+                "recommended_image_credits": RECOMMENDED_IMAGE_CREDITS,
                 "margin_estimate": admin_margin_estimate(
                     value, current_packs(connection, self.settings.tenant_id)
                 ),
@@ -297,6 +300,7 @@ class CreditAPI:
                 "rates",
                 "cost_multiplier",
                 "welcome_credits",
+                "image_credits",
                 "fee_rate",
                 "reason",
             }
@@ -327,7 +331,12 @@ class CreditAPI:
                     **copy.deepcopy(old["configuration"]),
                     **{
                         key: body[key]
-                        for key in ("cost_multiplier", "welcome_credits", "fee_rate")
+                        for key in (
+                            "cost_multiplier",
+                            "welcome_credits",
+                            "fee_rate",
+                            "image_credits",
+                        )
                         if key in body
                     },
                 }
