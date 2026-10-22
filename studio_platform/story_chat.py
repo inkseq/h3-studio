@@ -166,12 +166,19 @@ def _image(entity):
 def cards(project, chat):
     """Compact, UI-shaped view of the story's cards; entity IDs are the card IDs."""
 
+    lookup = {e["id"]: e for e in project["entities"]}
+
     def profile(entity):
+        image = _image(entity)
+        path = (lookup.get(image) or {}).get("data", {}).get("cloudContentPath")
         return {
             "id": entity["id"],
             "name": entity.get("title", ""),
             "text": entity.get("description", ""),
-            "image_entity_id": _image(entity),
+            "image_entity_id": image,
+            "image_url": path
+            if isinstance(path, str) and path.startswith("/v1/assets/")
+            else None,
             "version": entity["version"],
         }
 
@@ -262,6 +269,41 @@ def _digest(value):
     ).hexdigest()
 
 
+def profile_data(kind):
+    """The same empty profile shapes the Works storyboard editor creates."""
+    if kind == "character":
+        return {
+            "looks": [
+                {
+                    "id": "main",
+                    "name": "默认造型",
+                    "description": "",
+                    "gallery": {},
+                    "imageIds": [],
+                    "version": 1,
+                }
+            ],
+            "defaultLookId": "main",
+            "voices": [],
+            "mainVoiceId": "",
+        }
+    if kind == "location":
+        return {
+            "versions": [
+                {
+                    "id": "main",
+                    "name": "默认",
+                    "description": "",
+                    "imageIds": [],
+                    "version": 1,
+                }
+            ],
+            "defaultVersionId": "main",
+            "ambient": None,
+        }
+    return {"imageIds": []}
+
+
 def snapshot(project):
     """Content digests of what the model saw, to detect a concurrent edit of the same card.
 
@@ -341,7 +383,7 @@ def apply_plan(project, chat, plan):
                     "parentId": None,
                     "title": name,
                     "description": text,
-                    "data": {},
+                    "data": profile_data(kind),
                 }
                 actions.append({"op": "entity.create", "entity": entity})
                 lookup[ident] = {**entity, "version": 1}

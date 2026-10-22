@@ -96,6 +96,8 @@ def create_app(
     title_generator=None,
     dstack_operator=None,
     story_chat_client=None,
+    story_chat_image_client=None,
+    story_chat_billing=None,
 ):
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     repo = repository or Repository(settings.database_url)
@@ -1554,7 +1556,12 @@ def create_app(
     register_guided_routes(app)
     from .story_chat_routes import register_story_chat_routes
 
-    register_story_chat_routes(app, client=story_chat_client)
+    register_story_chat_routes(
+        app,
+        client=story_chat_client,
+        image_client=story_chat_image_client,
+        billing=story_chat_billing,
+    )
     from .storyboard_versions import register_routes as register_storyboard_routes
 
     register_storyboard_routes(app)

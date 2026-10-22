@@ -52,10 +52,15 @@ def _fail(code, status, **detail):
     raise HTTPException(status, {"code": code, **detail})
 
 
-def register_story_chat_routes(app, *, client=None):
+def register_story_chat_routes(app, *, client=None, image_client=None, billing=None):
     settings = app.state.settings
     enabled = settings.story_chat_enabled
-    holder = {"client": client}
+    holder = {"client": client, "image": image_client}
+    from .story_chat_images import NoBilling
+
+    # Replaced by the credit service charge once it exists (#422); until then pictures
+    # are refused while credit charging is on, never given away.
+    charges = billing or NoBilling(app)
 
     def model_client():
         if holder["client"] is None:
@@ -234,3 +239,128 @@ def register_story_chat_routes(app, *, client=None):
             row = read(principal, project_id)
             return answer(row, stored_turn(chat_of(row["payload"]), turn_id))
         _fail("document_version_conflict", 409, nothing_written=True)
+
+    @app.post("/v1/story-chats/{project_id}/images")
+    def story_chat_image(project_id: str, request: Request, body: dict):
+        import copy
+        import io
+
+        from .story_chat import now_iso
+        from .story_chat_images import (
+            ASPECT,
+            KINDS,
+            REQUEST_ID,
+            ImageError,
+            attach_actions,
+            configured_image_client,
+            prompt_for,
+        )
+
+        principal = principal_of(request)
+        if (
+            not isinstance(body, dict)
+            or not {"request_id", "card_id"} <= set(body)
+            or set(body) - {"request_id", "card_id", "instruction"}
+        ):
+            _fail("story_chat_invalid", 422, field="body")
+        request_id, card_id = body["request_id"], body["card_id"]
+        instruction = body.get("instruction", "")
+        if not isinstance(request_id, str) or not REQUEST_ID.fullmatch(request_id):
+            _fail("story_chat_invalid", 422, field="request_id")
+        if (
+            not isinstance(card_id, str)
+            or not isinstance(instruction, str)
+            or len(instruction) > 1000
+        ):
+            _fail("story_chat_invalid", 422, field="card_id")
+
+        def card_in(project):
+            card = next((e for e in project["entities"] if e["id"] == card_id), None)
+            if (
+                card is None
+                or card["type"] not in KINDS
+                or card["parentId"] is not None
+            ):
+                return None
+            return card
+
+        row = read(principal, project_id, "projects:write")
+        done = chat_of(row["payload"]).get("images", {}).get(request_id)
+        if done:
+            # A replayed request returns the stored result and never draws or charges again.
+            return {**view(row), "image": done}
+        card = card_in(row["payload"])
+        if card is None:
+            _fail("story_chat_card_missing", 404, ref=card_id)
+        if holder["image"] is None:
+            holder["image"] = configured_image_client(settings)
+        if holder["image"] is None:
+            _fail("assistant_unavailable", 503)
+        reference = "story_chat_image:" + request_id
+        try:
+            charges.hold(principal, reference)
+        except ImageError as error:
+            _fail(error.code, error.status, **error.detail)
+        record = None
+        try:
+            mime, data = holder["image"].generate(
+                prompt_for(row["payload"], card, instruction), ASPECT[card["type"]]
+            )
+            suffix = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}[
+                mime
+            ]
+            asset = app.state.assets.upload(
+                principal.owner,
+                project_id,
+                io.BytesIO(data),
+                "story-picture" + suffix,
+                client_asset_id="story-chat-image:" + request_id,
+            )
+            if asset.get("status") != "ready":
+                raise ImageError("image_store_failed", 502)
+            image_id = "image-" + request_id
+            for _attempt in range(3):
+                row = read(principal, project_id, "projects:write")
+                project = row["payload"]
+                chat = chat_of(project)
+                record = chat.get("images", {}).get(request_id)
+                if record:
+                    break
+                current = card_in(project)
+                if current is None:
+                    raise ImageError("story_chat_card_missing", 409, ref=card_id)
+                record = {
+                    "card_id": card_id,
+                    "asset_id": asset["asset_id"],
+                    "entity_id": image_id,
+                    "at": now_iso(),
+                }
+                value = copy.deepcopy(chat)
+                value["images"] = {**value.get("images", {}), request_id: record}
+                try:
+                    app.state.guided.mutate(
+                        principal,
+                        project_id,
+                        {
+                            "expected_version": row["version"],
+                            "actions": attach_actions(
+                                project, current, asset["asset_id"], image_id
+                            )
+                            + [{"op": "journey.update", "patch": {"storyChat": value}}],
+                        },
+                    )
+                    break
+                except Conflict as error:
+                    if str(error) != "document_version_conflict":
+                        raise
+                    record = None
+            if record is None:
+                raise ImageError("document_version_conflict", 409)
+        except Exception as error:
+            # Nothing reached the card: return the held credits. Google's cost stays ours.
+            charges.release(principal, reference, type(error).__name__)
+            if isinstance(error, ImageError):
+                _fail(error.code, error.status, nothing_charged=True, **error.detail)
+            raise
+        charges.capture(principal, reference)
+        return {**view(read(principal, project_id)), "image": record}

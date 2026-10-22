@@ -645,6 +645,8 @@ inventory.json
 !studio_platform/story_chat.py
 !studio_platform/story_chat_routes.py
 !tests/test_story_chat.py
+!studio_platform/story_chat_images.py
+!tests/test_story_chat_images.py
 
 !studio_platform/universal_trash.py
 !tests/test_universal_trash.py
