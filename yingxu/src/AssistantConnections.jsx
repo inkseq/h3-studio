@@ -65,7 +65,7 @@ export default function AssistantConnections({
     [operation, setOperation] = useState({}),
     [created, setCreated] = useState(null),
     [scope, setScope] = useState(sessionId ? 'session' : projectId ? 'story' : 'all'),
-    [permission, setPermission] = useState(telegram ? 'generate' : 'organise'),
+    [permission, setPermission] = useState('generate'),
     [cap, setCap] = useState(telegram ? (creditMode ? TELEGRAM_DEFAULT_CAP : '0') : '0'),
     [name, setName] = useState(telegram ? 'Telegram' : 'Codex'),
     [target, setTarget] = useState(telegram ? 'telegram' : 'agent'),
@@ -132,7 +132,7 @@ export default function AssistantConnections({
     // The bot makes films, so a Telegram link defaults to generate with a modest daily cap.
     setName(target === 'telegram' ? 'Telegram' : 'Codex');
     setCap(target === 'telegram' ? (creditMode ? TELEGRAM_DEFAULT_CAP : '0') : '0');
-    setPermission(target === 'telegram' ? 'generate' : 'organise');
+    setPermission('generate');
     setSettings(null);
     setSettingsDraft(null);
     setActivity(null);
@@ -377,7 +377,7 @@ export default function AssistantConnections({
                       onClick={() => {
                         setTarget(value);
                         setName(value === 'telegram' ? 'Telegram' : 'Codex');
-                        setPermission(value === 'telegram' ? 'generate' : 'organise');
+                        setPermission('generate');
                         setCap(
                           value === 'telegram' ? (creditMode ? TELEGRAM_DEFAULT_CAP : '0') : '0',
                         );
@@ -413,13 +413,8 @@ export default function AssistantConnections({
                     required
                   />
                 </label>
-                <label>
-                  {t('assistants.permission')}
-                  <select value={permission} onChange={(e) => setPermission(e.target.value)}>
-                    <option value="organise">{t('assistants.organise')}</option>
-                    <option value="generate">{t('assistants.generate')}</option>
-                  </select>
-                </label>
+                {/* Assistants are connected to create; view-only was never used (owner, 2026-10-22).
+                    Paid work stays bounded by the daily cap below and per-job confirmation. */}
                 {money && (
                   <>
                     <label>
