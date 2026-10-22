@@ -14,6 +14,7 @@ import copy
 import re
 
 import httpx
+from sqlalchemy import select
 
 from .google_chat import ORIGIN, ChatError
 
@@ -226,6 +227,33 @@ class ServiceCreditBilling:
                 return image_price(connection, tenant)
             except Exception:
                 return None
+
+    def has_hold(self, scope, reference):
+        """Read-only: does the ledger already hold credits for this request?"""
+        from . import credits
+        from .credit_schema import entries
+        from .service_credits import REFERENCE_TYPE
+
+        repo = self.app.state.repository
+        with repo.engine.connect() as connection:
+            if not credits._ready(connection):
+                return False
+            try:
+                user = credits._user(connection, scope.tenant_id, scope.owner_id)
+            except credits.CreditError:
+                return False
+            return (
+                connection.execute(
+                    select(entries.c.id).where(
+                        entries.c.tenant == scope.tenant_id,
+                        entries.c.user_id == user["id"],
+                        entries.c.reference_type == REFERENCE_TYPE,
+                        entries.c.reference_id == reference,
+                        entries.c.kind == "hold",
+                    )
+                ).first()
+                is not None
+            )
 
     def hold(self, scope, reference, binding):
         return self._run("service_hold", scope, reference, binding=binding)

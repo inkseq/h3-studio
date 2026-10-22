@@ -87,6 +87,9 @@ class Billing:
         terminal = {"kind": prior} if prior in ("capture", "release") else None
         return {"created": False, "terminal": terminal, "attachment": None}
 
+    def has_hold(self, scope, reference):
+        return reference in self.state
+
     def capture(self, scope, reference, binding):
         self.events.append(("capture", reference))
         self.state[reference] = "capture"

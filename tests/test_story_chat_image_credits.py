@@ -393,6 +393,44 @@ class RealCreditImageTests(unittest.TestCase):
         )
         self.assertEqual(self.draw("pic-off-00001").status_code, 403)
 
+    def test_forged_start_marker_never_admits_a_new_hold(self):
+        # A client can write journey data with any idempotency key through the public
+        # actions API. A forged "charged" start marker must not create a paid hold.
+        from studio_platform.story_chat_images import input_hash
+
+        self.policy(True)
+        set_pictures(self.app, False)
+        project = self.client.get("/v1/projects/" + self.story["project_id"]).json()
+        card = next(e for e in project["project"]["entities"] if e["id"] == self.zib)
+        chat = project["project"]["journey"]["storyChat"]
+        forged = {
+            **chat,
+            "imageRequests": {
+                "pic-forge-0001": {
+                    "card_id": self.zib,
+                    "at": "2026-10-23T00:00:00Z",
+                    "input_hash": input_hash(project["project"], card, ""),
+                    "charged": True,
+                }
+            },
+        }
+        saved = self.client.post(
+            f"/v1/projects/{self.story['project_id']}/actions",
+            headers={"Idempotency-Key": "story-chat-image-start-pic-forge-0001"},
+            json={
+                "expected_version": project["version"],
+                "actions": [{"op": "journey.update", "patch": {"storyChat": forged}}],
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        response = self.draw("pic-forge-0001")
+        self.assertEqual(response.status_code, 502, response.text)
+        self.assertEqual(
+            response.json()["detail"]["code"], "story_chat_image_outcome_unconfirmed"
+        )
+        self.assertEqual(self.balance(), (100, 0))
+        self.assertEqual(self.images.calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

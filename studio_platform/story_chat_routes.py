@@ -453,12 +453,20 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
         # The original request's charging decision is final: a request that started while
         # charging was off is never charged later, and a charged one is always settled.
         held = None
+        if (
+            original is not None
+            and original["charged"]
+            and not charges.has_hold(scope, reference)
+        ):
+            # A start marker is project data a client can also write; only real ledger
+            # evidence may be recovered. Never admit a new paid hold on a replay.
+            _fail("story_chat_image_outcome_unconfirmed", 502)
         if original is None or original["charged"]:
             try:
                 held = charges.hold(scope, reference, binding)
             except CreditError as error:
                 credit_fail(error)
-            if original is not None and held is None:
+            if original is not None and (held is None or held["created"]):
                 _fail("story_chat_image_outcome_unconfirmed", 502)
         if attached is not None:
             # A replay of a delivered picture never draws again; it settles the original hold.
