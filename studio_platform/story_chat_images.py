@@ -175,31 +175,68 @@ def attach_actions(project, card, asset_id, image_entity_id):
     ]
 
 
-class NoBilling:
-    """Until the credit service charge exists: free only while charging is off."""
+RELEASE_REASON = {
+    "image_upstream_timeout": "provider_timeout_possible_output",
+    "story_chat_card_missing": "card_missing",
+    "document_version_conflict": "version_conflict",
+    "image_store_failed": "store_failed",
+}
+
+
+def input_hash(project, card, instruction):
+    """What a picture was drawn from; a replay with different material conflicts."""
+    import hashlib
+    import json
+
+    style = (project.get("journey", {}).get("storyboard") or {}).get("style", "")
+    value = {
+        "name": " ".join(str(card.get("title", "")).split()),
+        "description": " ".join(str(card.get("description", "")).split()),
+        "style": " ".join(str(style).split()),
+        "instruction": " ".join(str(instruction).split()),
+    }
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, ensure_ascii=False).encode()
+    ).hexdigest()
+
+
+class ServiceCreditBilling:
+    """The audited story-image credit primitive (#463/#464): hold, capture, release.
+
+    Each call runs in its own short repository transaction; none is held across the
+    Google call. While customer charging is off, hold returns None and nothing moves.
+    """
 
     def __init__(self, app):
         self.app = app
 
-    def _enabled(self, principal):
-        from .credits import credit_policy
+    def _run(self, name, *args, **kwargs):
+        from . import service_credits
+
+        repo = self.app.state.repository
+        with repo.transaction() as connection:
+            return getattr(service_credits, name)(connection, repo, *args, **kwargs)
+
+    def price(self, tenant):
+        from .credits_pricing import image_price
 
         repo = self.app.state.repository
         with repo.engine.connect() as connection:
-            return credit_policy(connection, self.app.state.settings.tenant_id)[
-                "enabled"
-            ]
+            try:
+                return image_price(connection, tenant)
+            except Exception:
+                return None
 
-    def hold(self, principal, reference_id):
-        if self._enabled(principal):
-            raise ImageError("image_billing_unavailable", 503)
-        return None
+    def hold(self, scope, reference, binding):
+        return self._run("service_hold", scope, reference, binding=binding)
 
-    def capture(self, principal, reference_id):
-        return None
+    def capture(self, scope, reference, binding):
+        return self._run("service_capture", scope, reference, binding=binding)
 
-    def release(self, principal, reference_id, reason):
-        return None
+    def release(self, scope, reference, binding, reason):
+        return self._run(
+            "service_release", scope, reference, binding=binding, reason=reason
+        )
 
 
 __all__ = [
@@ -210,7 +247,9 @@ __all__ = [
     "ImageError",
     "ChatError",
     "GeminiImageClient",
-    "NoBilling",
+    "ServiceCreditBilling",
+    "RELEASE_REASON",
+    "input_hash",
     "attach_actions",
     "configured_image_client",
     "prompt_for",

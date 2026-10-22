@@ -36,17 +36,29 @@ class FakeImages:
 
 
 class Billing:
+    """Records the credit calls; mimics the primitive's replay results."""
+
     def __init__(self):
-        self.events = []
+        self.events, self.state = [], {}
 
-    def hold(self, principal, reference):
+    def hold(self, scope, reference, binding):
+        assert binding["request_id"] == reference.split(":", 1)[1]
+        assert len(binding["input_hash"]) == 64
         self.events.append(("hold", reference))
+        prior = self.state.get(reference)
+        if prior is None:
+            self.state[reference] = "open"
+            return {"created": True, "terminal": None, "attachment": None}
+        terminal = {"kind": prior} if prior in ("capture", "release") else None
+        return {"created": False, "terminal": terminal, "attachment": None}
 
-    def capture(self, principal, reference):
+    def capture(self, scope, reference, binding):
         self.events.append(("capture", reference))
+        self.state[reference] = "capture"
 
-    def release(self, principal, reference, reason):
-        self.events.append(("release", reference))
+    def release(self, scope, reference, binding, reason):
+        self.events.append(("release", reference, reason))
+        self.state[reference] = "release"
 
 
 class StoryChatImageTests(unittest.TestCase):
@@ -169,14 +181,15 @@ class StoryChatImageTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409, response.text)
         self.assertEqual(response.json()["detail"]["code"], "story_chat_card_missing")
 
-    def test_charging_on_without_the_service_charge_refuses_before_drawing(self):
+    def test_charging_on_but_not_payable_refuses_before_drawing(self):
+        # Charging on without a ready ledger or image price fails closed: no picture is
+        # drawn for free and Google is never called.
         zib = self.story["cards"]["characters"][0]["id"]
         with patch(
             "studio_platform.credits.credit_policy", return_value={"enabled": True}
         ):
             response = self.draw(zib)
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json()["detail"]["code"], "image_billing_unavailable")
+        self.assertEqual(response.status_code, 503, response.text)
         self.assertEqual(self.images.calls, [])
 
     def test_billing_hook_holds_then_captures_or_releases(self):
@@ -198,15 +211,26 @@ class StoryChatImageTests(unittest.TestCase):
             self.path, json={"request_id": "pic-bill-002", "card_id": zib}
         )
         self.assertEqual(failed.status_code, 422)
-        # A replay of the delivered picture moves no credits at all.
         client.post(self.path, json={"request_id": "pic-bill-001", "card_id": zib})
+        # In flight elsewhere (open hold, nothing attached): refuse, never draw twice.
+        self.billing.state["story_chat_image:pic-bill-003"] = "open"
+        busy = client.post(
+            self.path, json={"request_id": "pic-bill-003", "card_id": zib}
+        )
+        self.assertEqual(busy.status_code, 409)
+        self.assertEqual(busy.json()["detail"]["code"], "story_chat_image_in_progress")
+        self.assertEqual(len(self.images.calls), 2)
         self.assertEqual(
             self.billing.events,
             [
                 ("hold", "story_chat_image:pic-bill-001"),
                 ("capture", "story_chat_image:pic-bill-001"),
                 ("hold", "story_chat_image:pic-bill-002"),
-                ("release", "story_chat_image:pic-bill-002"),
+                ("release", "story_chat_image:pic-bill-002", "provider_failed"),
+                # A replay of the delivered picture settles idempotently; no new drawing.
+                ("hold", "story_chat_image:pic-bill-001"),
+                ("capture", "story_chat_image:pic-bill-001"),
+                ("hold", "story_chat_image:pic-bill-003"),
             ],
         )
 
