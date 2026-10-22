@@ -1589,8 +1589,8 @@ class DstackOperator:
             ),
         )
 
-    def _expected_runtime(self, profile):
-        """Use the original protected execution quote, never an HTTP estimate."""
+    def _execution_check(self, profile, now=None):
+        """One read-only policy check shared by catalog and original admission."""
         from .execution_profiles import selected_policy
         from .execution_policy import authority_current, reservation_for_duration
 
@@ -1600,33 +1600,50 @@ class DstackOperator:
                 profile_id=profile["runtime_profile_id"],
                 recipe_id=profile["recipe_id"],
             )
-            now = self.repo.clock()
-            require(
-                policy
-                and policy["enabled"] is True
-                and policy["backend"] == "wangp-worker"
+            now = self.repo.clock() if now is None else now
+            if policy is None:
+                return None, "execution_policy_missing"
+            if policy["enabled"] is not True:
+                return None, "execution_policy_disabled"
+            if not (
+                policy["backend"] == "wangp-worker"
                 and policy.get("dispatch_backend") == "hatchet-v1"
                 and policy["pool"] == profile["pool"]
                 and policy["configuration_id"] == profile["configuration_id"]
                 and policy["model_id"] == profile["model_id"]
                 and policy["engine_manifest_digest"] == profile["manifest_digest"]
-                and policy["qualification"]["status"]
-                in {"accepted", "runtime_required"}
-                and authority_current(policy, now),
-                "dstack_execution_policy_unconfirmed",
-            )
+            ):
+                return None, "execution_policy_binding_mismatch"
+            if policy["qualification"]["status"] not in {
+                "accepted",
+                "runtime_required",
+            }:
+                return None, "execution_policy_unqualified"
+            if not authority_current(policy, now):
+                return None, (
+                    "execution_policy_not_yet_valid"
+                    if policy["qualification"]["verified_at"] > now
+                    else "execution_policy_expired"
+                )
             duration = reservation_for_duration(
                 policy, policy["envelope"]["max_duration_seconds"]
             )["expected_runtime_s"]
-            require(
-                _finite(duration) and 0 < duration <= 86400,
-                "dstack_execution_runtime_unconfirmed",
-            )
-            return duration
-        except (KeyError, TypeError, ValueError) as error:
-            if isinstance(error, OperatorError):
-                raise
-            raise OperatorError("dstack_execution_policy_unconfirmed") from None
+            if not (_finite(duration) and 0 < duration <= 86400):
+                return None, "execution_runtime_unconfirmed"
+            return duration, None
+        except (KeyError, TypeError, ValueError):
+            return None, "execution_policy_invalid"
+
+    def _expected_runtime(self, profile):
+        """Use the original protected execution quote, never an HTTP estimate."""
+        duration, reason = self._execution_check(profile)
+        require(
+            reason is None,
+            "dstack_execution_runtime_unconfirmed"
+            if reason == "execution_runtime_unconfirmed"
+            else "dstack_execution_policy_unconfirmed",
+        )
+        return duration
 
     def _admin_limits(self, connection=None):
         from .spending_limits import ADMIN_OWNER, read_settings, admin_defaults
@@ -1756,6 +1773,8 @@ class DstackOperator:
         fields = (
             "id",
             "runtime_profile_id",
+            "configuration_id",
+            "recipe_id",
             "model_id",
             "mode",
             "pool",
@@ -1773,16 +1792,25 @@ class DstackOperator:
         with self.repo.engine.connect() as connection:
             prices = OperatorPrices(self.repo, self.settings)
             profiles = []
+            observed_at = self.repo.clock()
             for profile in self.profiles.values():
                 if profile["owner_id"] != owner:
                     continue
                 price, _, _ = prices.read(connection, profile)
+                reason = None
+                if self.policy.get("lifecycle_version") == 2:
+                    _, reason = self._execution_check(profile, observed_at)
                 profiles.append(
                     {
                         **{key: copy.deepcopy(profile[key]) for key in fields},
                         "max_price_microusd": price["max_price_microusd"],
                         "price_ceiling_microusd": price["price_ceiling_microusd"],
                         "price_policy_snapshot": price["snapshot"],
+                        "execution_eligibility": {
+                            "status": "confirmed" if reason is None else "blocked",
+                            "reason_code": reason,
+                            "observed_at": observed_at,
+                        },
                     }
                 )
         # New starts follow the configured authoring default; retained profiles
@@ -1858,7 +1886,7 @@ class DstackOperator:
             "dstack_profile_not_found",
             404,
         )
-        from .operator_prices import OperatorPrices
+        from .operator_prices import OperatorPrices, canonical_mode_price_ceiling
 
         prices = OperatorPrices(self.repo, self.settings)
         with self.repo.engine.connect() as connection:
@@ -1871,7 +1899,11 @@ class DstackOperator:
             422,
         )
         if self.policy.get("demand_start"):
-            require(chosen_price <= 850000, "dstack_price_ceiling_exceeded", 422)
+            require(
+                chosen_price <= canonical_mode_price_ceiling(profile["mode"]),
+                "dstack_price_ceiling_exceeded",
+                422,
+            )
         require(
             chosen_price <= admin_limits["value"]["max_hourly_price_microusd"],
             "admin_hourly_price_limit_reached",

@@ -71,6 +71,28 @@ class DemandStartTests(LedgerCase):
             if current[identity]['status'] == 'queued'
         ]
 
+    def test_ref_demand_start_uses_same_canonical_ceiling_as_manual_preview(self):
+        self.config['profiles'][0].update(mode='ref', max_price_microusd=1_500_000)
+        self.service = DstackOperator(
+            self.repo, self.settings, self.capacity, self.config
+        )
+        profile = self.service.profiles['5090-fl']
+        self.protected.update(
+            configuration_id=profile['configuration_id'],
+            model_id=profile['model_id'],
+            engine_manifest_digest=profile['manifest_digest'],
+        )
+        self.enabled()
+        self.accepted()
+        result = start_once(self.service)
+        self.assertEqual(result['state'], 'accepted')
+        self.assertEqual(len(self.client.applied), 1)
+        with self.repo.engine.connect() as connection:
+            node = connection.execute(select(operator_nodes)).mappings().one()
+        self.assertEqual(node['payload']['selection']['mode'], 'ref')
+        self.assertEqual(node['payload']['request']['max_price_microusd'], 1_500_000)
+        self.assertEqual(node['payload']['hourly_cost_microusd'], 1_500_000)
+
     def enabled(self, value=True):
         with self.repo.transaction() as connection:
             row = (

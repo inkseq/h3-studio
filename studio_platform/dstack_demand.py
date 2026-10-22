@@ -12,6 +12,7 @@ import os
 from sqlalchemy import select
 
 from .operator_capacity import operator_nodes, require
+from .operator_prices import canonical_mode_price_ceiling
 from .repository import (
     attempts,
     instance_intents,
@@ -20,7 +21,6 @@ from .repository import (
 )
 
 HARD_MAX_MACHINES = 2
-MAX_HOURLY_PRICE = 850000
 DERIVED_PROFILE_FIELDS = {"model_id", "manifest_digest", "recipe_id"}
 
 
@@ -60,7 +60,9 @@ def demand_configuration(config, *, now):
     if any(
         p.get("mode") not in {"fl", "ref"}
         or type(p.get("max_price_microusd")) is not int
-        or not 0 < p["max_price_microusd"] <= MAX_HOURLY_PRICE
+        or not 0
+        < p["max_price_microusd"]
+        <= canonical_mode_price_ceiling(p.get("mode"))
         for p in profiles
     ):
         return None

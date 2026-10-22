@@ -13,6 +13,11 @@ from .operator_capacity import operator_policy, require
 from .repository import outbox, request_hash
 
 
+def canonical_mode_price_ceiling(mode):
+    """Hard demand-path ceiling; only the protected canonical REF mode is higher."""
+    return 1_500_000 if isinstance(mode, str) and mode == "ref" else 850_000
+
+
 class OperatorPrices:
     def __init__(self, repo, settings):
         self.repo, self.settings = repo, settings
@@ -87,8 +92,15 @@ class OperatorPrices:
     def update(self, profile, body, principal):
         require(
             isinstance(body, dict)
-            and set(body)
-            == {"expected_snapshot", "max_price_microusd", "price_ceiling_microusd"}
+            and {"expected_snapshot", "max_price_microusd", "price_ceiling_microusd"}
+            <= set(body)
+            and not set(body)
+            - {
+                "expected_snapshot",
+                "max_price_microusd",
+                "price_ceiling_microusd",
+                "reason",
+            }
             and isinstance(body["expected_snapshot"], str)
             and len(body["expected_snapshot"]) == 64
             and all(
@@ -96,6 +108,14 @@ class OperatorPrices:
                 for key in ("max_price_microusd", "price_ceiling_microusd")
             )
             and body["max_price_microusd"] <= body["price_ceiling_microusd"],
+            "dstack_price_policy_invalid",
+            422,
+        )
+        require(
+            "reason" not in body
+            or isinstance(body["reason"], str)
+            and 1 <= len(body["reason"]) <= 500
+            and bool(body["reason"].strip()),
             "dstack_price_policy_invalid",
             422,
         )
@@ -141,6 +161,8 @@ class OperatorPrices:
                 "old_snapshot": old["snapshot"],
                 "new_snapshot": new["snapshot"],
             }
+            if "reason" in body:
+                audit["reason"] = body["reason"]
             connection.execute(
                 insert(outbox).values(
                     id=event_id,
@@ -178,6 +200,11 @@ class OperatorPrices:
                 "id": row["id"],
                 "created_at": row["created_at"],
                 **{key: copy.deepcopy(row["payload"][key]) for key in fields},
+                **(
+                    {"reason": row["payload"]["reason"]}
+                    if "reason" in row["payload"]
+                    else {}
+                ),
             }
             for row in rows
         ]
