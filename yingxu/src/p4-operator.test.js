@@ -15,6 +15,11 @@ import {
   initialRows,
   lifetimeBody,
   phase,
+  choiceOf,
+  defaultIdleMinutes,
+  engineVersion,
+  profileChoices,
+  sameEngineInMode,
   preparationSteps,
   preparationView,
   transferProgress,
@@ -1128,3 +1133,67 @@ function renderWithLocale(module, element) {
     else delete globalThis.localStorage;
   }
 }
+
+test('choosing "keep until" does not inherit the 10-minute idle stop (owner, 2026-10-22)', () => {
+  // datetime-local values are local time; build them the way the dialog does.
+  const local = (ms) =>
+    new Date(ms - new Date(ms).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const now = Date.now(),
+    inTwoHours = local(now + 7200000),
+    past = local(now - 3600000);
+  assert.equal(defaultIdleMinutes('until', inTwoHours, now), 120);
+  assert.equal(defaultIdleMinutes('idle', inTwoHours, now), 10);
+  assert.equal(defaultIdleMinutes('until_stopped', '', now), 10);
+  // A past or unreadable time falls back rather than producing an invalid body.
+  assert.equal(defaultIdleMinutes('until', past, now), 10);
+  assert.equal(defaultIdleMinutes('until', 'nonsense', now), 10);
+  // Both limits still reach the server, so it stops at whichever comes first.
+  const body = lifetimeBody({ keep_on: 'until', idle_minutes: 120, until: inTwoHours }, now);
+  assert.equal(body.keep_on, 'until');
+  assert.equal(body.idle_shutdown_seconds, 7200);
+  // datetime-local drops seconds, so the hold lands just under two hours.
+  assert.ok(body.hold_seconds > 7100 && body.hold_seconds <= 7200, String(body.hold_seconds));
+});
+
+test('the launch picker groups engine builds instead of showing identical rows (owner, 2026-10-22)', () => {
+  // Production showed four "Pruned-Rank8 · RTX5090 · FL2VA" rows that were engines v3-v6.
+  const make = (id, runtime, mode, gpu = ['RTX5090']) => ({
+    id,
+    runtime_profile_id: runtime,
+    model_id: gpu[0] === 'RTX5090' ? 'MiniMax-H3-Pruned-Rank8-INT8' : 'MiniMax-H3-Base-INT8',
+    backend: 'vast',
+    gpu_names: gpu,
+    mode,
+  });
+  const profiles = [
+    make('vast-29gib-fl', 'h3-pruned-total-v3', 'fl'),
+    make('vast-controls126-v6-fl', 'h3-pruned-controls-v6', 'fl'),
+    make('vast-29gib-v4-fl', 'h3-pruned-cgroups-v4', 'fl'),
+    make('vast-29gib-ref', 'h3-pruned-total-v3', 'ref'),
+    make('vast-controls126-v6-ref', 'h3-pruned-controls-v6', 'ref'),
+    make('vast-base-fl', 'h3-base-single-fl-v2', 'fl', ['RTXPRO6000S']),
+  ];
+  const choices = profileChoices(profiles);
+  assert.equal(choices.length, 2, 'one entry per model and GPU');
+  const pruned = choices.find((group) => group.gpu_names[0] === 'RTX5090');
+  // Newest engine first, so the default choice is the one with a current policy.
+  assert.deepEqual(
+    pruned.modes.get('fl').map((profile) => profile.id),
+    ['vast-controls126-v6-fl', 'vast-29gib-v4-fl', 'vast-29gib-fl'],
+  );
+  assert.equal(engineVersion(pruned.modes.get('fl')[0]), 6);
+  assert.equal(engineVersion({ runtime_profile_id: 'no-version-here' }), 0);
+  // Switching mode keeps the same engine build rather than falling back to an old one.
+  assert.equal(
+    sameEngineInMode(choices, 'vast-controls126-v6-fl', 'ref').id,
+    'vast-controls126-v6-ref',
+  );
+  // v4 has no ref build, so it falls back to the newest ref rather than an arbitrary old one.
+  assert.equal(sameEngineInMode(choices, 'vast-29gib-v4-fl', 'ref').id, 'vast-controls126-v6-ref');
+  // An exact match is preferred when it exists.
+  assert.equal(sameEngineInMode(choices, 'vast-29gib-fl', 'ref').id, 'vast-29gib-ref');
+  // A GPU with no build in that mode reports nothing, so the button can disable.
+  assert.equal(sameEngineInMode(choices, 'vast-base-fl', 'ref'), null);
+  assert.equal(choiceOf(choices, 'vast-base-fl').group.gpu_names[0], 'RTXPRO6000S');
+  assert.equal(choiceOf(choices, 'unknown-id'), null);
+});

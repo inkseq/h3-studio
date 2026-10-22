@@ -54,8 +54,21 @@ export const operatorCatalogs = {
     'operator.copy45':
       'Only loaded jobs are shown. Cancel up to 100 at once; unloaded jobs are excluded.',
     'operator.copy46': 'Administrator jobs have not loaded. Refresh to continue.',
-    'operator.copy47': 'Idle for ',
-    'operator.copy48': ' minutes, then stop',
+    'operator.copy47': 'Stop if idle for ',
+    'operator.copy48': ' minutes',
+    'operator.more.engine': 'Engine v{version}',
+    'operator.more.engineNewest': 'newest',
+    'operator.more.engineHelp':
+      'Older builds of the same model may no longer have a current run policy and will be refused at launch. Use the newest unless you are reproducing an old result.',
+    'operator.more.modeUnavailable': 'This model and GPU has no build for this mode.',
+    'operator.error.noOffers':
+      'No machine matched within your price cap. Raise the per-GPU cap, or pick another GPU.',
+    'operator.error.policyUnconfirmed':
+      'This engine build has no current run policy, so it cannot start. Pick the newest engine under the model.',
+    'operator.keepNote.idle':
+      'The machine stops after {minutes} idle minutes. Running work is never cut off.',
+    'operator.keepNote.until':
+      'Whichever comes first: the time above, or {minutes} idle minutes. Raise the idle minutes to keep it waiting longer.',
     'operator.copy49': 'Keep until ',
     'operator.copy50': 'Keep running; account spending limits still apply.',
     'operator.copy51': 'Sign in to studio',
@@ -356,6 +369,8 @@ export const operatorCatalogs = {
     'operator.display.minutes': '{value} minutes',
     'operator.display.hours': '{value} hours',
     'operator.display.mode.fl': 'FL2VA · First and last frames',
+    'operator.mode.short.fl': 'First/last frames',
+    'operator.mode.short.ref': 'Multimodal references',
     'operator.display.mode.ref': 'Ref2VA · Multimodal references',
     'operator.display.mode.both': 'FL / REF · Switchable',
     'operator.display.cost.settled': 'Settled',
@@ -459,8 +474,20 @@ export const operatorCatalogs = {
     'operator.copy44': '请选择原因',
     'operator.copy45': '仅展示已读取的任务；每次最多取消 100 个，未读取的任务不在本次操作中。',
     'operator.copy46': '管理员任务尚未读取，请刷新。',
-    'operator.copy47': '空闲 ',
-    'operator.copy48': ' 分钟后停止',
+    'operator.copy47': '空闲超过 ',
+    'operator.copy48': ' 分钟就停止',
+    'operator.more.engine': '引擎 v{version}',
+    'operator.more.engineNewest': '最新',
+    'operator.more.engineHelp':
+      '同一模型的旧引擎可能已经没有有效的运行策略，启动时会被拒绝。除非要复现旧结果，否则用最新的。',
+    'operator.more.modeUnavailable': '这个模型和显卡没有这个模式的版本。',
+    'operator.error.noOffers':
+      '在你设的价格上限内没有找到机器。可以调高每 GPU 上限，或换一种显卡。',
+    'operator.error.policyUnconfirmed':
+      '这个引擎版本没有有效的运行策略，不能启动。请在模型下面选最新的引擎。',
+    'operator.keepNote.idle': '机器空闲 {minutes} 分钟后停止；正在跑的任务不会被打断。',
+    'operator.keepNote.until':
+      '两个条件哪个先到就停：上面的时间，或空闲 {minutes} 分钟。想让它多等一会，就把空闲分钟数调大。',
     'operator.copy49': '保持至 ',
     'operator.copy50': '持续运行，账户支出上限仍有效。',
     'operator.copy51': '登录工作室',
@@ -747,6 +774,8 @@ export const operatorCatalogs = {
     'operator.display.minutes': '{value} 分钟',
     'operator.display.hours': '{value} 小时',
     'operator.display.mode.fl': 'FL2VA · 首尾帧',
+    'operator.mode.short.fl': '首尾帧',
+    'operator.mode.short.ref': '全能参考',
     'operator.display.mode.ref': 'Ref2VA · 全参考',
     'operator.display.mode.both': 'FL / REF · 可切换',
     'operator.display.cost.settled': '已结算',

@@ -325,6 +325,58 @@ export function queueLabel(queue, locale = 'zh') {
         time: elapsed(queue.rough_wait_seconds, locale),
       });
 }
+/** Engine build number from a runtime profile id (…-v6 → 6); 0 when it carries none. */
+export function engineVersion(profile) {
+  const match = /-v(\d+)(?:-|$)/.exec(profile?.runtime_profile_id || '');
+  return match ? Number(match[1]) : 0;
+}
+
+/** One entry per model + GPU + mode, newest engine first. The launch picker showed four
+ * identical-looking rows that were really engine v3…v6; only the newest has a current
+ * execution policy, so the older ones failed at launch (owner, 2026-10-22). */
+export function profileChoices(profiles = []) {
+  const groups = new Map();
+  for (const profile of profiles) {
+    const key = [profile.model_id, profile.backend, (profile.gpu_names || []).join('/')].join(
+      '\u0000',
+    );
+    const group = groups.get(key) || {
+      key,
+      model_id: profile.model_id,
+      backend: profile.backend,
+      gpu_names: profile.gpu_names || [],
+      modes: new Map(),
+    };
+    const list = group.modes.get(profile.mode) || [];
+    list.push(profile);
+    group.modes.set(profile.mode, list);
+    groups.set(key, group);
+  }
+  for (const group of groups.values())
+    for (const list of group.modes.values())
+      list.sort(
+        (a, b) => engineVersion(b) - engineVersion(a) || String(a.id).localeCompare(String(b.id)),
+      );
+  return [...groups.values()];
+}
+
+/** The group and engine list a chosen profile belongs to, for the picker's current state. */
+export function choiceOf(choices, profileId) {
+  for (const group of choices)
+    for (const [mode, list] of group.modes)
+      if (list.some((profile) => profile.id === profileId)) return { group, mode, engines: list };
+  return null;
+}
+
+/** Same model, GPU and engine build, in another mode; null when that mode has no build. */
+export function sameEngineInMode(choices, profileId, mode) {
+  const current = choiceOf(choices, profileId);
+  if (!current) return null;
+  const list = current.group.modes.get(mode) || [];
+  const version = engineVersion(current.engines.find((profile) => profile.id === profileId));
+  return list.find((profile) => engineVersion(profile) === version) || list[0] || null;
+}
+
 export function initialRows(profiles, { profileId, mode, one = false } = {}) {
   const selected =
     profiles.find((profile) => profile.id === profileId) ||
@@ -350,6 +402,13 @@ export function initialRows(profiles, { profileId, mode, one = false } = {}) {
       profile.mode === 'fl',
   );
   return fl && ref ? [make(fl), make(ref)] : [make(selected)];
+}
+/** Minutes the machine may sit idle before stopping. "Keep until" defaults to the whole hold,
+ * so choosing a time does not quietly inherit the 10-minute idle stop (owner, 2026-10-22). */
+export function defaultIdleMinutes(keep_on, until, now = Date.now()) {
+  if (keep_on !== 'until') return 10;
+  const minutes = Math.ceil((Date.parse(until) - now) / 60000);
+  return Number.isInteger(minutes) && minutes >= 1 ? Math.min(1440, minutes) : 10;
 }
 export function lifetimeBody({ keep_on = 'idle', idle_minutes = 10, until }, now = Date.now()) {
   const idle = Number(idle_minutes) * 60;
