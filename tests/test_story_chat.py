@@ -21,9 +21,10 @@ class ScriptedModel:
     def __init__(self):
         self.plans, self.calls, self.during = [], [], None
 
-    def generate(self, model, messages, instruction, max_tokens=2048):
+    def generate(self, model, messages, instruction, max_tokens=2048, json_mode=False):
         # Validate exactly as the real adapter does before any network call.
-        payload(model, messages, instruction, max_tokens)
+        body = payload(model, messages, instruction, max_tokens, json_mode)
+        self.configs = getattr(self, "configs", []) + [body["generationConfig"]]
         self.calls.append(
             {"model": model, "messages": messages, "instruction": instruction}
         )
@@ -453,6 +454,58 @@ class StoryChatTests(unittest.TestCase):
             },
         )
         self.assertEqual(self.jobs(), before)
+
+    def test_reply_format_is_enforced_and_picture_is_only_proposed(self):
+        chat = self.start()
+        first = self.turn(chat, "aliens").json()
+        self.assertEqual(self.model.configs[-1]["responseMimeType"], "application/json")
+        zib = first["cards"]["characters"][0]["id"]
+        before = self.jobs()
+        plan = {
+            "reply": "Removed Zib. Ready to make the shots?",
+            "actions": [
+                {"tool": "remove_card", "ref": zib},
+                {"tool": "propose_generate", "shots": "all"},
+            ],
+        }
+        response = self.turn(chat, "no alien", turn_id="turn-0004", plan=plan)
+        self.assertEqual(response.status_code, 200, response.text)
+        value = response.json()
+        self.assertEqual([c["name"] for c in value["cards"]["characters"]], ["Mia"])
+        self.assertTrue(all(zib not in s["cast"] for s in value["cards"]["shots"]))
+        self.assertEqual(
+            value["turn"]["proposal"],
+            {
+                "kind": "generate",
+                "shot_ids": [s["id"] for s in value["cards"]["shots"]],
+            },
+        )
+        self.assertEqual(self.jobs(), before)
+
+    def test_reply_format_is_enforced_and_picture_is_only_proposed(self):
+        chat = self.start()
+        first = self.turn(chat, "aliens").json()
+        self.assertEqual(self.model.configs[-1]["responseMimeType"], "application/json")
+        zib = first["cards"]["characters"][0]["id"]
+        before = self.jobs()
+        plan = {
+            "reply": "I can redraw Zib; confirm to spend credits.",
+            "actions": [
+                {"tool": "propose_image", "ref": zib},
+                {"tool": "propose_generate", "shots": ["all"]},
+            ],
+        }
+        value = self.turn(
+            chat, "redraw zib and make it", turn_id="turn-0020", plan=plan
+        ).json()
+        proposal = value["turn"]["proposal"]
+        self.assertEqual(proposal["picture_card_ids"], [zib])
+        self.assertEqual(len(proposal["shot_ids"]), 3)
+        self.assertEqual(self.jobs(), before)
+        project = self.client.get(f"/v1/projects/{chat['project_id']}").json()[
+            "project"
+        ]
+        self.assertFalse(any(e["type"] == "image" for e in project["entities"]))
 
     def test_model_failure_writes_nothing(self):
         chat = self.start()

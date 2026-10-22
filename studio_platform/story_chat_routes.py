@@ -181,6 +181,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                 prompt_messages(row["payload"], chat, text),
                 INSTRUCTION,
                 max_tokens=4096,
+                json_mode=True,
             )
             plan = _parse(result["text"])
         except ChatError as error:

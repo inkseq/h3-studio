@@ -65,7 +65,12 @@ actions in the same turn may reuse):
  "place":ref|null?,"props":[refs]?,"after":ref|null?}
    (new shots go at the end unless "after" names a shot; "after":null puts it first)
 {"tool":"remove_card","ref":string}
-{"tool":"propose_generate","shots":[refs] or "all"}
+{"tool":"propose_generate","shots":[refs] or ["all"]}
+{"tool":"propose_image","ref":string}
+   (only when the person asks to draw or redraw a character, place or prop picture; the
+   person confirms it and it costs credits: say they can review and confirm it, never that
+   you started or made it. You cannot
+   see existing pictures; describe the change in the card's description first if needed)
 """
 
 
@@ -336,6 +341,7 @@ def apply_plan(project, chat, plan):
     scene = chat["sceneId"]
     shots = [s["id"] for s in shots_of(project, chat)]
     removed = set()
+    pictures = []  # cards the person may confirm a picture for (advice only)
     touched = set()  # existing cards (and "project" for the title) this plan writes
 
     def resolve(ref, kinds):
@@ -501,8 +507,13 @@ def apply_plan(project, chat, plan):
             if ident in shots:
                 shots.remove(ident)
             changes.append({"kind": lookup[ident]["type"], "op": "delete", "id": ident})
+        elif tool == "propose_image":
+            ident = resolve(item.get("ref"), {"character", "location", "prop"})
+            pictures.append(ident)
         elif tool == "propose_generate":
             wanted = item.get("shots")
+            if wanted == ["all"]:
+                wanted = "all"
             ids = (
                 shots
                 if wanted == "all"
@@ -532,6 +543,15 @@ def apply_plan(project, chat, plan):
     if proposal:
         proposal["shot_ids"] = [s for s in proposal["shot_ids"] if s not in removed]
         proposal = proposal if proposal["shot_ids"] else None
+    pictures = [c for c in dict.fromkeys(pictures) if c not in removed][:4]
+    if pictures:
+        # Picture proposals ride on the same advice-only proposal field.
+        proposal = {
+            **(proposal or {"kind": "generate", "shot_ids": []}),
+            "picture_card_ids": pictures,
+        }
+        if not proposal["shot_ids"]:
+            proposal["kind"] = "image"
     return actions, changes, proposal, touched
 
 

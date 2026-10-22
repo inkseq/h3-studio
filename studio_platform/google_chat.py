@@ -38,7 +38,13 @@ def central_config():
     return load_api("gemini", profile=PROFILE)
 
 
-def payload(model, messages, instruction=DEFAULT_INSTRUCTION, max_tokens=2048):
+def payload(
+    model,
+    messages,
+    instruction=DEFAULT_INSTRUCTION,
+    max_tokens=2048,
+    json_mode=False,
+):
     if not isinstance(model, str) or model not in MODELS:
         raise ChatError("model_not_allowed", "请选择已接入的两个模型之一。", 422)
     if not isinstance(messages, list) or not 1 <= len(messages) <= 40:
@@ -78,7 +84,14 @@ def payload(model, messages, instruction=DEFAULT_INSTRUCTION, max_tokens=2048):
         contents[0]["parts"].insert(
             0, {"text": "【创作助手工作约定】\n" + instruction + "\n【用户对话】"}
         )
-    return {"contents": contents, "generationConfig": {"maxOutputTokens": max_tokens}}
+    config = {"maxOutputTokens": max_tokens}
+    if json_mode:
+        # Gemini JSON mode: the reply is guaranteed to be valid JSON; the prompt defines
+        # its shape. (A strict response schema degraded story-chat plans in real tests.)
+        if not model.startswith("gemini"):
+            raise ChatError("json_mode_not_supported", "该模型不支持JSON输出。", 422)
+        config["responseMimeType"] = "application/json"
+    return {"contents": contents, "generationConfig": config}
 
 
 class GoogleChatClient:
@@ -167,9 +180,14 @@ class GoogleChatClient:
         return result
 
     def generate(
-        self, model, messages, instruction=DEFAULT_INSTRUCTION, max_tokens=2048
+        self,
+        model,
+        messages,
+        instruction=DEFAULT_INSTRUCTION,
+        max_tokens=2048,
+        json_mode=False,
     ):
-        body = payload(model, messages, instruction, max_tokens)
+        body = payload(model, messages, instruction, max_tokens, json_mode)
         started = time.monotonic()
         data = self._request(
             "POST", "/v1beta/models/" + model + ":generateContent", body
