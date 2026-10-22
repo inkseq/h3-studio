@@ -65,7 +65,16 @@ actions in the same turn may reuse):
  "place":ref|null?,"props":[refs]?,"after":ref|null?}
    (new shots go at the end unless "after" names a shot; "after":null puts it first)
 {"tool":"remove_card","ref":string}
-{"tool":"propose_generate","shots":[refs] or "all"}
+{"tool":"propose_generate","shots":[refs] or ["all"]}
+{"tool":"propose_new_story","idea":string}
+   (when the person asks for a different, unrelated story: do NOT change this story's cards;
+   propose a new story with their idea and say it will open in a new chat. Only rework this
+   story when they clearly want to change or replace it)
+{"tool":"propose_image","ref":string}
+   (only when the person asks to draw or redraw a character, place or prop picture; the
+   person confirms it and it costs credits: say they can review and confirm it, never that
+   you started or made it. You cannot
+   see existing pictures; describe the change in the card's description first if needed)
 """
 
 
@@ -149,14 +158,15 @@ def shots_of(project, chat):
 
 def _image(entity):
     data = entity.get("data", {})
-    looks = data.get("looks") or []
-    for look in looks:
-        if isinstance(look, dict) and look.get("imageIds"):
-            return look["imageIds"][0]
-    versions = data.get("versions") or []
-    for version in versions:
-        if isinstance(version, dict) and version.get("imageIds"):
-            return version["imageIds"][0]
+    for field, default in (
+        ("looks", "defaultLookId"),
+        ("versions", "defaultVersionId"),
+    ):
+        variants = [v for v in data.get(field) or [] if isinstance(v, dict)]
+        selected = [v for v in variants if v.get("id") == data.get(default)]
+        for variant in selected + variants:
+            if variant.get("imageIds"):
+                return variant["imageIds"][0]
     if data.get("imageIds"):
         return data["imageIds"][0]
     gallery = data.get("gallery") or []
@@ -166,12 +176,19 @@ def _image(entity):
 def cards(project, chat):
     """Compact, UI-shaped view of the story's cards; entity IDs are the card IDs."""
 
+    lookup = {e["id"]: e for e in project["entities"]}
+
     def profile(entity):
+        image = _image(entity)
+        path = (lookup.get(image) or {}).get("data", {}).get("cloudContentPath")
         return {
             "id": entity["id"],
             "name": entity.get("title", ""),
             "text": entity.get("description", ""),
-            "image_entity_id": _image(entity),
+            "image_entity_id": image,
+            "image_url": path
+            if isinstance(path, str) and path.startswith("/v1/assets/")
+            else None,
             "version": entity["version"],
         }
 
@@ -262,6 +279,41 @@ def _digest(value):
     ).hexdigest()
 
 
+def profile_data(kind):
+    """The same empty profile shapes the Works storyboard editor creates."""
+    if kind == "character":
+        return {
+            "looks": [
+                {
+                    "id": "main",
+                    "name": "默认造型",
+                    "description": "",
+                    "gallery": {},
+                    "imageIds": [],
+                    "version": 1,
+                }
+            ],
+            "defaultLookId": "main",
+            "voices": [],
+            "mainVoiceId": "",
+        }
+    if kind == "location":
+        return {
+            "versions": [
+                {
+                    "id": "main",
+                    "name": "默认",
+                    "description": "",
+                    "imageIds": [],
+                    "version": 1,
+                }
+            ],
+            "defaultVersionId": "main",
+            "ambient": None,
+        }
+    return {"imageIds": []}
+
+
 def snapshot(project):
     """Content digests of what the model saw, to detect a concurrent edit of the same card.
 
@@ -294,6 +346,8 @@ def apply_plan(project, chat, plan):
     scene = chat["sceneId"]
     shots = [s["id"] for s in shots_of(project, chat)]
     removed = set()
+    pictures = []  # cards the person may confirm a picture for (advice only)
+    new_story = None  # an idea for a separate story the person may start (advice only)
     touched = set()  # existing cards (and "project" for the title) this plan writes
 
     def resolve(ref, kinds):
@@ -341,7 +395,7 @@ def apply_plan(project, chat, plan):
                     "parentId": None,
                     "title": name,
                     "description": text,
-                    "data": {},
+                    "data": profile_data(kind),
                 }
                 actions.append({"op": "entity.create", "entity": entity})
                 lookup[ident] = {**entity, "version": 1}
@@ -459,8 +513,15 @@ def apply_plan(project, chat, plan):
             if ident in shots:
                 shots.remove(ident)
             changes.append({"kind": lookup[ident]["type"], "op": "delete", "id": ident})
+        elif tool == "propose_new_story":
+            new_story = _text(item.get("idea"), 1000)
+        elif tool == "propose_image":
+            ident = resolve(item.get("ref"), {"character", "location", "prop"})
+            pictures.append(ident)
         elif tool == "propose_generate":
             wanted = item.get("shots")
+            if wanted == ["all"]:
+                wanted = "all"
             ids = (
                 shots
                 if wanted == "all"
@@ -490,6 +551,20 @@ def apply_plan(project, chat, plan):
     if proposal:
         proposal["shot_ids"] = [s for s in proposal["shot_ids"] if s not in removed]
         proposal = proposal if proposal["shot_ids"] else None
+    if new_story:
+        proposal = {
+            **(proposal or {"kind": "new_story", "shot_ids": []}),
+            "new_story": new_story,
+        }
+    pictures = [c for c in dict.fromkeys(pictures) if c not in removed][:4]
+    if pictures:
+        # Picture proposals ride on the same advice-only proposal field.
+        proposal = {
+            **(proposal or {"kind": "generate", "shot_ids": []}),
+            "picture_card_ids": pictures,
+        }
+        if not proposal["shot_ids"]:
+            proposal["kind"] = "image"
     return actions, changes, proposal, touched
 
 
