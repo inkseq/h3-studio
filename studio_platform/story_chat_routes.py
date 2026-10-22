@@ -353,16 +353,29 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             _fail("story_chat_card_missing", 404, ref=card_id)
         reference = "story_chat_image:" + request_id
         scope = app.state.scope(principal, project_id)
-        source = started["project"] if isinstance(started, dict) else row["payload"]
-        source_card = card_in(source) or card or {}
+        original = None
+        if isinstance(started, dict):
+            try:
+                original = started["project"]["journey"]["storyChat"]["imageRequests"][
+                    request_id
+                ]
+            except (KeyError, TypeError):
+                original = None
+            if (
+                not isinstance(original, dict)
+                or type(original.get("charged")) is not bool
+            ):
+                _fail("story_chat_image_outcome_unconfirmed", 502)
         binding = {
             "tenant": scope.tenant_id,
             "owner": scope.owner_id,
             "project_id": project_id,
             "card_id": card_id,
             "request_id": request_id,
-            # Bound to the material as the original request started, not as edited since.
-            "input_hash": input_hash(source, source_card, instruction),
+            # The material the original request froze; replays never re-derive it.
+            "input_hash": original["input_hash"]
+            if original
+            else input_hash(row["payload"], card or {}, instruction),
             "actor_id": scope.actor_id,
         }
 
@@ -376,10 +389,16 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             current = read(principal, project_id)
             return {**view(current), "image": recorded_image(response)}
 
-        try:
-            held = charges.hold(scope, reference, binding)
-        except CreditError as error:
-            credit_fail(error)
+        # The original request's charging decision is final: a request that started while
+        # charging was off is never charged later, and a charged one is always settled.
+        held = None
+        if original is None or original["charged"]:
+            try:
+                held = charges.hold(scope, reference, binding)
+            except CreditError as error:
+                credit_fail(error)
+            if original is not None and held is None:
+                _fail("story_chat_image_outcome_unconfirmed", 502)
         if attached is not None:
             # A replay of a delivered picture never draws again; it settles the original hold.
             return finish(attached)
@@ -431,6 +450,8 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                                             request_id: {
                                                 "card_id": card_id,
                                                 "at": now_iso(),
+                                                "input_hash": binding["input_hash"],
+                                                "charged": held is not None,
                                             },
                                         },
                                     }
@@ -453,6 +474,19 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                         "story_chat_card_missing",
                         409,
                         ref=card_id,
+                        nothing_charged=True,
+                    )
+                if (
+                    input_hash(row["payload"], card, instruction)
+                    != binding["input_hash"]
+                ):
+                    # The card changed after the price was frozen: draw nothing rather
+                    # than a picture of different material than was agreed.
+                    release("version_conflict")
+                    _fail(
+                        "story_chat_card_changed",
+                        409,
+                        cards=[card_id],
                         nothing_charged=True,
                     )
         if not fenced:
