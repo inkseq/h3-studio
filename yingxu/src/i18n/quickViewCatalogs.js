@@ -67,8 +67,9 @@ export const quickViewCatalogs = {
     'quickView.advanced': 'Advanced',
     'quickView.emptyTitle': 'What do you want to shoot?',
     'quickView.emptyHelp':
-      'Just describe the visual. The assistant will propose a shot plan before generating.',
+      'Describe one shot: what we see and what happens. You will see the settings and price before anything is generated.',
     'quickView.availableMachines': 'Available machines',
+    'quickView.loadingSettings': 'Loading settings…',
   },
   zh: {
     'quickView.backToWorks': '返回作品',
@@ -129,7 +130,9 @@ export const quickViewCatalogs = {
     'quickView.handOff': '让 AI 助手来做',
     'quickView.advanced': '高级',
     'quickView.emptyTitle': '想拍什么？',
-    'quickView.emptyHelp': '说一句画面就行。助手会先给你一个镜头方案，确认后才开始生成。',
+    'quickView.emptyHelp':
+      '描述一个镜头：画面里有什么、发生了什么。生成前会先显示设置和价格，确认后才开始。',
+    'quickView.loadingSettings': '正在读取设置…',
     'quickView.availableMachines': '可用机器',
   },
 };
