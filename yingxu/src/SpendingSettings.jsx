@@ -13,6 +13,7 @@ import StudioHeader, { useAccess, useAccountLabel } from './StudioHeader.jsx';
 import AccountPassword from './AccountPassword.jsx';
 import { CreditsPanel, useCredits } from './CreditsUI.jsx';
 import AdminConsole from './AdminConsole.jsx';
+import CapacitySettings from './CapacitySettings.jsx';
 import SkinPicker from './SkinPicker.jsx';
 import {
   UserRound,
@@ -508,7 +509,12 @@ export default function SpendingSettings({ account }) {
               active={pageActive}
               testMachines={
                 <>
-                  {adminDraft && (
+                  {/* Versioned capacity policy (#456): preview, reason, confirm. The legacy
+                      five-field form stays only for a server without the policy metadata. */}
+                  {admin.capacity_policy && (
+                    <CapacitySettings settings={admin} api={api} onSaved={() => void load()} />
+                  )}
+                  {adminDraft && !admin.capacity_policy && (
                     <form
                       className="ops-tab-panel"
                       hidden={section !== 'admin'}

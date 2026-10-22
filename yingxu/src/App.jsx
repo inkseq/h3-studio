@@ -50,6 +50,7 @@ import {
 } from 'lucide-react';
 const ChapterRoughCut = React.lazy(() => import('./ChapterRoughCut.jsx'));
 const Freestyle = React.lazy(() => import('./Freestyle.jsx'));
+const StoryChat = React.lazy(() => import('./StoryChat.jsx'));
 import OperatorConsole from './P4OperatorConsole.jsx';
 import QuickChatWorkspace from './QuickChatWorkspace.jsx';
 import { navigateWorkspace } from './workspace-navigation.js';
@@ -87,6 +88,7 @@ import { installPersistenceGuard } from './persistence-guard.js';
 import SpendingSettings from './SpendingSettings.jsx';
 import { I18nProvider, LanguageSwitcher, useI18n } from './i18n/I18nProvider.jsx';
 import AppRouteCache, { useAppLocation, usePageActive } from './AppRouteCache.jsx';
+import MaintenanceBanner from './MaintenanceBanner.jsx';
 import { installAppNavigation, navigateApp } from './app-navigation.js';
 import StoryOpenNotice, { PreservedStoryDrafts } from './StoryOpenNotice.jsx';
 import { createStoryRouteLoader, openedStoryHref } from './story-open.js';
@@ -1335,9 +1337,14 @@ function AppContent() {
         <OperatorConsole active={active} />
       </React.Suspense>
     ),
-    '/quick-chat': ({ active }) => (
+    '/quick-chat': ({ active, location: page }) => (
       <React.Suspense fallback={<InkLoader label={t('loading.quickCreate')} />}>
-        <QuickChatWorkspace active={active} />
+        {/* Chat-first Quick Create preview (#422): sample replies until the server exists. */}
+        {new URLSearchParams(page.search).get('story') === 'preview' ? (
+          <StoryChat account={account} />
+        ) : (
+          <QuickChatWorkspace active={active} />
+        )}
       </React.Suspense>
     ),
     '/freestyle': ({ active }) => (
@@ -1356,6 +1363,7 @@ function AppContent() {
     <div className="app">
       <TrashProvider account={account}>
         <PersistenceWarning key={'persistence:' + workspaceKey} />
+        <MaintenanceBanner />
         <AppRouteCache location={location} routes={routes} />
         <LowCreditsDialog />
       </TrashProvider>

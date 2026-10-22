@@ -4,7 +4,7 @@ export const adminCatalogs = {
     'admin.intro':
       'Only admins see this page. Regular users see credits only, never dollars, machines or margin.',
     'admin.users': 'Users',
-    'admin.machines': 'Test machines',
+    'admin.machines': 'Machines & limits',
     'admin.audit': 'Audit log',
     'admin.pricing': 'Pricing & margin',
     'admin.pricingError': 'Pricing could not be loaded. Try again shortly.',
@@ -53,7 +53,7 @@ export const adminCatalogs = {
   zh: {
     'admin.intro': '只有管理员能看到这一页。普通用户只看到积分，看不到美元、机器和利润。',
     'admin.users': '用户',
-    'admin.machines': '测试机',
+    'admin.machines': '机器和上限',
     'admin.audit': '操作记录',
     'admin.pricing': '定价与利润',
     'admin.pricingError': '定价暂时读取失败，请稍后再试。',
