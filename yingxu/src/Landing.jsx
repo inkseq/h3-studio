@@ -143,8 +143,8 @@ export default function Landing() {
                 disabled={opening}
                 onClick={() => start()}
               >
-                {opening ? t('landing.opening') : t('landing.start')}
-                {!opening && <ArrowRight size={18} />}
+                {t('landing.start')}
+                <ArrowRight size={18} />
               </button>
             </div>
             {hostedSignInEnabled(c.auth) && (
