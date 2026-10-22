@@ -9,7 +9,7 @@
 - Claim scope/integration owner/branch/worktree/base before edits; preserve parallel work. One issue in progress + one in review per lane. GitHub only; no task database.
 - Latest owner decisions win: record in `workflow/owner-changes.md`, relay one line for Codex; re-read it on origin/main before production writes/spend.
 - Replace, never stack labels: `needs-claude-review` (Tier2 options) / `needs-claude-acceptance` (staged). Claude's 2h pass comments, sets `accepted`/`changes-requested`, removes request label. Read new comments before tasks. End turns: `Waiting on: <who/what, #issue>`.
-- Keep one same-thread 30min watchdog enabled. First local activity lease (2h since refresh): busy exits without GitHub/rules; idle makes one read-only GitHub query, exits if none. Read current rules/issues before acting; see CR52.
+- Keep one same-thread 30min watchdog. A wake is idle: poll once regardless of stale working markers, prioritize owner handoffs, then resume unfinished CI/deploy/task receipts. Mark idle before external waits; see amended CR52.
 
 ## Delivery
 | Tier | Changes | Gate and write-up |

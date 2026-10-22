@@ -747,3 +747,12 @@ inventory.json
 !studio_platform/credit_margin.py
 !tests/test_credit_only_admission.py
 !docs/CREDIT-ONLY-ADMISSION.md
+
+# Existing-store capacity policy and supplier exposure admission (#456).
+!studio_platform/capacity_settings.py
+!studio_platform/supplier_spending.py
+!tests/test_capacity_settings.py
+!tests/test_supplier_spending.py
+!tests/test_capacity_admission.py
+!tests/test_capacity_test_continuation.py
+!docs/CAPACITY-SETTINGS.md

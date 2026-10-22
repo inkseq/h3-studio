@@ -2144,6 +2144,20 @@ class Repository:
                     attempt_no=0,
                     fence=0,
                 )
+                if initial_status in ("queued", "waiting_capacity"):
+                    from .supplier_spending import admit_job
+
+                    snapshot = admit_job(
+                        connection,
+                        scope,
+                        execution,
+                        self.clock(),
+                        estimated_cost_microusd=row["estimated_cost_microusd"],
+                        job_id=row["id"],
+                    )
+                    if snapshot is not None:
+                        execution = {**execution, "capacity_policy_snapshot": snapshot}
+                        row["execution_plan"] = execution
                 connection.execute(insert(jobs).values(**row))
                 if initial_status in ("queued", "waiting_capacity"):
                     role_map = self._reserve(
@@ -2254,6 +2268,32 @@ class Repository:
                 plan["request"],
                 scope=scope,
             )
+            snapshot = job["execution_plan"].get("capacity_policy_snapshot")
+            if snapshot is None:
+                from .supplier_spending import admit_job
+
+                snapshot = admit_job(
+                    connection,
+                    scope,
+                    execution,
+                    self.clock(),
+                    estimated_cost_microusd=job["estimated_cost_microusd"],
+                    job_id=job_id,
+                )
+            else:
+                # A previously admitted job keeps its original policy. Enqueue
+                # is not a new purchase or authority to reinterpret that hold.
+                from .capacity_settings import validate_snapshot
+
+                validate_snapshot(snapshot)
+            if snapshot is not None:
+                job = {
+                    **job,
+                    "execution_plan": {
+                        **job["execution_plan"],
+                        "capacity_policy_snapshot": snapshot,
+                    },
+                }
             role_map = self._reserve(
                 connection,
                 scope,
@@ -2283,7 +2323,11 @@ class Repository:
             connection.execute(
                 update(jobs)
                 .where(jobs.c.id == job_id)
-                .values(status=status, updated_at=self.clock())
+                .values(
+                    status=status,
+                    updated_at=self.clock(),
+                    execution_plan=job["execution_plan"],
+                )
             )
             self._emit(connection, "job." + status, job_id, {"job_id": job_id})
             return self._job(connection, job_id)
@@ -3193,6 +3237,8 @@ class Repository:
         continuing=False,
         capacity_usage=None,
         active_instance_ids=None,
+        capacity_policy_snapshot=None,
+        capacity_provenance=None,
     ):
         """Reserve an intent, NEVER create an instance. Default dry-run makes no writes."""
         identifier(pool)
@@ -3221,17 +3267,45 @@ class Repository:
             raise ValueError("invalid_instance_deadline")
         if hard_deadline is not None and hard_deadline <= self.clock():
             raise Conflict("instance_deadline_expired")
-        digest = request_hash(
-            dict(
-                physical_gpus=physical_gpus,
-                slots=slots,
-                reserved_cost_microusd=cost,
-                hard_deadline=hard_deadline,
-                budget_account_ids=sorted(set(budget_account_ids)),
-                scope=scope.__dict__,
-                provider=provider,
-            )
+        admitted_capacity = None
+        if capacity_policy_snapshot is not None or capacity_provenance is not None:
+            from .capacity_settings import validate_snapshot
+
+            admitted_capacity = validate_snapshot(capacity_policy_snapshot)
+            if (
+                not isinstance(capacity_provenance, dict)
+                or capacity_provenance
+                != {
+                    "capacity_backend": "dstack-v1",
+                    "lifecycle_version": 2,
+                    "tenant_id": scope.tenant_id,
+                    "owner_id": scope.owner_id,
+                    "project_id": scope.project_id,
+                    "pool": pool,
+                    "provider": provider,
+                }
+                or type(capacity_provenance.get("lifecycle_version")) is not int
+                or not continuing
+                or provider not in {"vast", "runpod"}
+                or physical_gpus != 1
+                or slots != 1
+            ):
+                raise ValueError("capacity_admission_provenance_invalid")
+        request = dict(
+            physical_gpus=physical_gpus,
+            slots=slots,
+            reserved_cost_microusd=cost,
+            hard_deadline=hard_deadline,
+            budget_account_ids=sorted(set(budget_account_ids)),
+            scope=scope.__dict__,
+            provider=provider,
         )
+        if admitted_capacity is not None:
+            request.update(
+                capacity_policy_snapshot=capacity_policy_snapshot,
+                capacity_provenance=capacity_provenance,
+            )
+        digest = request_hash(request)
         if dry_run:
             return {
                 "dry_run": True,
@@ -3268,6 +3342,35 @@ class Repository:
                     if existing["request_hash"] != digest:
                         raise Conflict("instance_intent_conflict")
                     return {**dict(existing), "created": False, "dry_run": False}
+                if admitted_capacity is not None:
+                    from .capacity_settings import admission_snapshot, read_policy
+
+                    if capacity_policy_snapshot != admission_snapshot(
+                        read_policy(connection, scope.tenant_id)
+                    ):
+                        raise Conflict("capacity_policy_snapshot_changed")
+                    # Adopted operating counts replace old positive numeric
+                    # ceilings, never the explicit global/pool disabled gates.
+                    if (
+                        min(
+                            global_limits["max_instances"],
+                            global_limits["max_physical_gpus"],
+                        )
+                        <= 0
+                    ):
+                        raise BudgetExceeded("global_capacity_disabled")
+                    if min(limits["max_instances"], limits["max_physical_gpus"]) <= 0:
+                        raise BudgetExceeded("pool_disabled")
+                global_max_instances = (
+                    admitted_capacity["max_machines"]
+                    if admitted_capacity is not None
+                    else global_limits["max_instances"]
+                )
+                global_max_gpus = (
+                    admitted_capacity["max_machines"]
+                    if admitted_capacity is not None
+                    else global_limits["max_physical_gpus"]
+                )
                 usage = (
                     self._global_usage(connection)
                     if capacity_usage is None
@@ -3279,9 +3382,8 @@ class Repository:
                 ):
                     raise ValueError("invalid_capacity_observation")
                 if (
-                    usage["instances"] + 1 > global_limits["max_instances"]
-                    or usage["physical_gpus"] + physical_gpus
-                    > global_limits["max_physical_gpus"]
+                    usage["instances"] + 1 > global_max_instances
+                    or usage["physical_gpus"] + physical_gpus > global_max_gpus
                 ):
                     raise BudgetExceeded("global_capacity_exceeded")
                 active = list(
@@ -3299,10 +3401,14 @@ class Repository:
                 ]
                 if active_instance_ids is not None:
                     active = [row for row in active if row["id"] in active_instance_ids]
-                if (
-                    len(active) + 1 > limits["max_instances"]
-                    or sum(r["physical_gpus"] for r in active) + physical_gpus
-                    > limits["max_physical_gpus"]
+                if len(active) + 1 > (
+                    admitted_capacity["max_machines"]
+                    if admitted_capacity is not None
+                    else limits["max_instances"]
+                ) or sum(r["physical_gpus"] for r in active) + physical_gpus > (
+                    admitted_capacity["max_machines"]
+                    if admitted_capacity is not None
+                    else limits["max_physical_gpus"]
                 ):
                     raise BudgetExceeded("instance_capacity_exceeded")
                 row = dict(
@@ -3325,11 +3431,17 @@ class Repository:
                 self._reserve(
                     connection, scope, budget_account_ids, "instance", row["id"], cost
                 )
+                event = {"intent_id": row["id"], "pool": pool}
+                if admitted_capacity is not None:
+                    event.update(
+                        capacity_policy_snapshot=capacity_policy_snapshot,
+                        capacity_provenance=capacity_provenance,
+                    )
                 self._emit(
                     connection,
                     "instance.reserved",
                     row["id"],
-                    {"intent_id": row["id"], "pool": pool},
+                    event,
                 )
                 return {**row, "created": True, "dry_run": False}
         except IntegrityError:

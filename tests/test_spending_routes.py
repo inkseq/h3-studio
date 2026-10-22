@@ -23,6 +23,7 @@ class SpendingRouteTests(unittest.TestCase):
             )
         )
         self.client = TestClient(self.app)
+        self.app.state.repository.configure_capacity()
         self.login("superdan")
 
     def tearDown(self):
@@ -145,12 +146,21 @@ class SpendingRouteTests(unittest.TestCase):
         self.assertEqual(current['test_budget_scope'], 'acceptance_task')
         self.assertEqual(current['value']['test_task_limit_microusd'], 17_000_000)
         self.assertNotIn('test_daily_limit_microusd', current['value'])
-        # Old UI payloads use the original audited route and normalize once.
+        # Legacy field spelling remains accepted, with explicit policy adoption.
+        proposed = {**legacy, 'test_daily_limit_microusd': 18_000_000}
+        preview = self.client.post(
+            path + '/preview', json={'expected_version': 1, 'value': proposed}
+        )
+        self.assertEqual(preview.status_code, 200)
+        acknowledgement = preview.json()
         result = self.client.put(
             path,
             json={
                 'expected_version': 1,
-                'value': {**legacy, 'test_daily_limit_microusd': 18_000_000},
+                'value': proposed,
+                'reason': '#456 explicit legacy task limit update',
+                'confirmation_digest': acknowledgement['confirmation_digest'],
+                'profile_snapshots': acknowledgement['profile_snapshots'],
             },
         )
         self.assertEqual(result.status_code, 200)

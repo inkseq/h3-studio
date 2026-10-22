@@ -3,13 +3,15 @@
 import copy
 from unittest.mock import patch
 
-from sqlalchemy import func, select
+from sqlalchemy import func, insert, select, update
 
 from studio_platform.auth import Principal
 from studio_platform.dstack_operator import DstackOperator, OperatorError
 from studio_platform.operator_capacity import operator_policy, operator_previews
-from studio_platform.operator_prices import canonical_mode_price_ceiling
-from studio_platform.repository import budget_accounts, outbox
+from studio_platform.operator_prices import mode_price_ceiling
+from studio_platform.capacity_settings import DEFAULTS
+from studio_platform.repository import budget_accounts, outbox, spending_settings
+from studio_platform.spending_limits import ADMIN_OWNER
 import test_dstack_operator as fixtures
 import test_platform_repository as ledger_fixtures
 
@@ -54,7 +56,7 @@ class DstackPriceTests(ledger_fixtures.LedgerCase):
                 **copy.deepcopy(template),
                 "id": "5090-" + mode,
                 "mode": mode,
-                "max_price_microusd": canonical_mode_price_ceiling(mode),
+                "max_price_microusd": DEFAULTS["mode_hourly_ceiling_microusd"][mode],
             }
             for mode in modes
         ]
@@ -158,9 +160,25 @@ class DstackPriceTests(ledger_fixtures.LedgerCase):
         before = copy.deepcopy(self.service.config)
         self.assertIsNotNone(demand_configuration(before, now=self.now))
         self.assertEqual(self.service.config, before)
-        for mode in ("fl", "REF", "ref ", "ref2va", "both", "unknown", "", None, True):
-            self.assertEqual(canonical_mode_price_ceiling(mode), 850000)
-        self.assertEqual(canonical_mode_price_ceiling("ref"), 1500000)
+        policy = {
+            "adopted": True,
+            "value": {
+                **DEFAULTS,
+                "mode_hourly_ceiling_microusd": {
+                    "fl": 700000,
+                    "ref": 1200000,
+                    "other": 600000,
+                },
+            },
+        }
+        for mode in ("REF", "ref ", "ref2va", "both", "unknown", "", None, True):
+            self.assertEqual(mode_price_ceiling({"mode": mode}, policy), 600000)
+        self.assertEqual(mode_price_ceiling({"mode": "fl"}, policy), 700000)
+        self.assertEqual(mode_price_ceiling({"mode": "ref"}, policy), 1200000)
+        self.assertEqual(
+            mode_price_ceiling({"max_price_microusd": 725000}, {"adopted": False}),
+            725000,
+        )
         for mode, cap in (("fl", 850001), ("ref", 1500001), ("unknown", 850000)):
             config = copy.deepcopy(before)
             config["profiles"] = [
@@ -169,7 +187,137 @@ class DstackPriceTests(ledger_fixtures.LedgerCase):
             config["policy"]["demand_start"]["profile_ids"] = [
                 config["profiles"][0]["id"]
             ]
-            self.assertIsNone(demand_configuration(config, now=self.now))
+            # Protected selection is structural; mutable caps apply at admission.
+            if mode == "unknown":
+                self.assertIsNone(demand_configuration(config, now=self.now))
+            else:
+                self.assertIsNotNone(demand_configuration(config, now=self.now))
+
+    def adopt_capacity(self):
+        with self.repo.transaction() as c:
+            c.execute(
+                insert(spending_settings).values(
+                    tenant_id=self.scope.tenant_id,
+                    owner_id=ADMIN_OWNER,
+                    version=1,
+                    value=copy.deepcopy(DEFAULTS),
+                    updated_at=self.now,
+                    actor_id="test-admin",
+                )
+            )
+
+    def confirmed_price_body(self):
+        body = {
+            "expected_snapshot": self.price()["snapshot"],
+            "expected_settings_version": 1,
+            "max_price_microusd": 700000,
+            "price_ceiling_microusd": 800000,
+        }
+        preview = self.service.preview_price(self.owner, "5090-fl", body)
+        self.assertEqual(preview["consequence_scope"], "selected_profile_repeated")
+        self.assertEqual(preview["profile_ids"], ["5090-fl"])
+        self.assertEqual(
+            preview["changed_fields"], ["max_price_microusd", "price_ceiling_microusd"]
+        )
+        return {
+            **body,
+            "reason": "explicit test confirmation",
+            "confirmation_digest": preview["confirmation_digest"],
+        }
+
+    def test_adopted_price_change_requires_bound_confirmation_and_reason(self):
+        self.adopt_capacity()
+        old, before = self.price(), self.repo.get_budget("owner-budget")
+        with self.assertRaisesRegex(OperatorError, "spending_confirmation_required"):
+            self.update(700000, 800000)
+        body = self.confirmed_price_body()
+        with self.assertRaisesRegex(OperatorError, "spending_confirmation_changed"):
+            self.service.update_price(
+                self.owner, "5090-fl", {**body, "max_price_microusd": 710000}
+            )
+        self.assertEqual(self.price(), old)
+        result = self.service.update_price(self.owner, "5090-fl", body)
+        self.assertTrue(result["changed"])
+        audit = self.service.admin_prices(self.owner)["audits"][0]
+        self.assertEqual(audit["confirmation"]["expected_settings_version"], 1)
+        self.assertEqual(
+            audit["confirmation"]["confirmation_digest"], body["confirmation_digest"]
+        )
+        self.assertEqual(self.repo.get_budget("owner-budget"), before)
+        self.assertEqual(self.client.applied, [])
+
+    def test_price_confirmation_rejects_changed_admin_version_and_own_price(self):
+        self.adopt_capacity()
+        body = self.confirmed_price_body()
+        with self.repo.transaction() as c:
+            c.execute(
+                update(spending_settings)
+                .where(spending_settings.c.owner_id == ADMIN_OWNER)
+                .values(version=2)
+            )
+        with self.assertRaisesRegex(OperatorError, "spending_settings_changed"):
+            self.service.update_price(self.owner, "5090-fl", body)
+        self.assertEqual(self.service.admin_prices(self.owner)["audits"], [])
+        body["expected_settings_version"] = 2
+        p = self.service.preview_price(self.owner, "5090-fl", body)
+        body["confirmation_digest"] = p["confirmation_digest"]
+        self.service.update_price(self.owner, "5090-fl", body)
+        with self.assertRaisesRegex(OperatorError, "price_policy_conflict"):
+            self.service.update_price(self.owner, "5090-fl", body)
+
+    def test_price_preview_is_admin_only_and_validates_changed_bounds(self):
+        self.adopt_capacity()
+        body = self.confirmed_price_body()
+        with self.assertRaises(OperatorError):
+            self.service.preview_price(self.other_owner, "5090-fl", body)
+        for amount in (99999, 5000001):
+            with self.assertRaisesRegex(OperatorError, "price_policy_invalid"):
+                self.service.preview_price(
+                    self.owner,
+                    "5090-fl",
+                    {
+                        **body,
+                        "max_price_microusd": amount,
+                        "price_ceiling_microusd": max(amount, 800000),
+                    },
+                )
+        self.assertEqual(self.service.admin_prices(self.owner)["audits"], [])
+
+    def test_adopted_manual_preview_uses_mode_limit_without_demand_start(self):
+        self.adopt_capacity()
+        policy = {
+            **copy.deepcopy(DEFAULTS),
+            "mode_hourly_ceiling_microusd": {
+                "fl": 700000,
+                "ref": 1200000,
+                "other": 600000,
+            },
+        }
+        with self.repo.transaction() as c:
+            c.execute(
+                update(spending_settings)
+                .where(spending_settings.c.owner_id == ADMIN_OWNER)
+                .values(value=policy)
+            )
+        self.assertFalse(self.service.policy.get("demand_start"))
+        with patch.object(
+            self.client, "plan", side_effect=AssertionError("plan forbidden")
+        ):
+            with self.assertRaisesRegex(
+                OperatorError, "price_ceiling_exceeded"
+            ) as caught:
+                self.service.preview(
+                    self.owner, {"profile_id": "5090-fl", "ttl_seconds": 900}
+                )
+            self.assertEqual(
+                caught.exception.details,
+                {
+                    "limit": "mode",
+                    "requested_microusd": 750000,
+                    "allowed_microusd": 700000,
+                },
+            )
+        self.assertEqual(self.counts(), (0, 0, 0, 0))
 
     def test_ref_manual_preview_and_existing_fleet_guard_preserve_first_machine(self):
         policies = self.continuing(("fl", "ref"))

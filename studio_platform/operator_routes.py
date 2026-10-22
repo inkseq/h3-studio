@@ -32,7 +32,11 @@ def register_routes(app, *, registry=None, service=None):
     @app.exception_handler(OperatorError)
     async def operator_error(_request, error):
         return JSONResponse(
-            {"code": error.code, "message": error.code},
+            {
+                "code": error.code,
+                "message": error.code,
+                **({"details": error.details} if error.details is not None else {}),
+            },
             status_code=error.status,
             headers={"Cache-Control": "no-store"},
         )

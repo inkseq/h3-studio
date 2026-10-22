@@ -37,6 +37,10 @@ def register_routes(app, *, service=None):
     def update_price(profile_id: str, request: Request, body: dict):
         return response(service.update_price(principal(request), profile_id, body))
 
+    @app.post(PREFIX + "/admin/prices/{profile_id}/preview")
+    def preview_price(profile_id: str, request: Request, body: dict):
+        return response(service.preview_price(principal(request), profile_id, body))
+
     @app.post(PREFIX + "/previews")
     def preview(request: Request, body: dict):
         return response(service.preview(principal(request), body))

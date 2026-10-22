@@ -11,6 +11,7 @@ from .repository import (
     Conflict,
     NotFound,
     plans,
+    outbox,
     spending_settings,
     spending_confirmations,
 )
@@ -47,6 +48,180 @@ def register_routes(app):
 
     def response(value):
         return JSONResponse(value, headers={"Cache-Control": "no-store"})
+
+    from . import capacity_settings as capacity
+
+    @app.exception_handler(capacity.CapacitySettingsError)
+    async def capacity_error(_request, error):
+        return JSONResponse(
+            {"code": error.code, "details": error.details},
+            status_code=error.status,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    def admin_stored(connection):
+        return capacity.read_policy(
+            connection,
+            settings.tenant_id,
+            admin_defaults=admin_defaults(getattr(app.state, "dstack_operator", None)),
+        )
+
+    def price_snapshots(connection):
+        from .operator_prices import OperatorPrices
+
+        service = getattr(app.state, "dstack_operator", None)
+        prices = OperatorPrices(repo, settings)
+        result = {}
+        for profile in sorted(
+            getattr(service, "profiles", {}).values(), key=lambda p: p["id"]
+        ):
+            price, _, _ = prices.read(connection, profile)
+            result[profile["id"]] = {
+                "snapshot": price["snapshot"],
+                "mode": profile["mode"],
+                "max_price_microusd": price["max_price_microusd"],
+                "price_ceiling_microusd": price["price_ceiling_microusd"],
+            }
+        return result
+
+    def capacity_body(body, *, preview=False):
+        allowed = {"expected_version", "changes", "value"}
+        if not preview:
+            allowed |= {"reason", "confirmation_digest", "profile_snapshots"}
+        if (
+            not isinstance(body, dict)
+            or set(body) - allowed
+            or type(body.get("expected_version")) is not int
+            or body["expected_version"] < 0
+            or ("changes" in body) == ("value" in body)
+        ):
+            capacity._invalid("request")
+        return capacity.normalize_changes(body.get("changes", body.get("value")))
+
+    def capacity_preview(principal, body, *, write=False):
+        changes = capacity_body(body, preview=not write)
+        with repo.transaction() as connection:
+            # Matches profile-price writes, normal starts and continuing funding.
+            repo._lock_capacity(connection)
+            lock_owner(connection, settings.tenant_id, ADMIN_OWNER)
+            old = admin_stored(connection)
+            if body["expected_version"] != old["version"]:
+                raise capacity.CapacitySettingsError(
+                    "spending_settings_changed", status=409
+                )
+            profiles = price_snapshots(connection)
+            preview = capacity.preview_change(old, changes, profiles)
+            if not write:
+                return {**preview, "capacity_policy": capacity.metadata(old)}
+            # A legacy client's unchanged echo is harmless and does not adopt.
+            unchanged = all(
+                key in old["value"] and capacity._same(value, old["value"][key])
+                for key, value in changes.items()
+            )
+            if unchanged and "confirmation_digest" not in body:
+                return {
+                    **old,
+                    "changed": False,
+                    "capacity_policy": capacity.metadata(old),
+                }
+            reason = body.get("reason")
+            if (
+                not isinstance(reason, str)
+                or not 1 <= len(reason) <= 500
+                or not reason.strip()
+            ):
+                capacity._invalid(
+                    "reason", minimum=1, maximum=500, type="nonblank_string"
+                )
+            if preview["confirmation_required"]:
+                if "confirmation_digest" not in body:
+                    raise capacity.CapacitySettingsError(
+                        "spending_confirmation_required", status=409
+                    )
+                if not capacity._same(body.get("profile_snapshots"), profiles):
+                    raise capacity.CapacitySettingsError(
+                        "dstack_price_policy_conflict", status=409
+                    )
+                if body["confirmation_digest"] != preview["confirmation_digest"]:
+                    raise capacity.CapacitySettingsError(
+                        "spending_confirmation_changed", status=409
+                    )
+            elif "confirmation_digest" in body:
+                if not capacity._same(body.get("profile_snapshots"), profiles):
+                    raise capacity.CapacitySettingsError(
+                        "dstack_price_policy_conflict", status=409
+                    )
+                if body["confirmation_digest"] != preview["confirmation_digest"]:
+                    raise capacity.CapacitySettingsError(
+                        "spending_confirmation_changed", status=409
+                    )
+            if not preview["changed_fields"]:
+                return {
+                    **old,
+                    "changed": False,
+                    "capacity_policy": capacity.metadata(old),
+                }
+            now = repo.clock()
+            new = {"version": old["version"] + 1, "value": preview["value"]}
+            values = {**new, "actor_id": principal.actor_id, "updated_at": now}
+            condition = (
+                spending_settings.c.tenant_id == settings.tenant_id,
+                spending_settings.c.owner_id == ADMIN_OWNER,
+            )
+            if old["version"]:
+                connection.execute(
+                    update(spending_settings).where(*condition).values(**values)
+                )
+            else:
+                connection.execute(
+                    insert(spending_settings).values(
+                        tenant_id=settings.tenant_id, owner_id=ADMIN_OWNER, **values
+                    )
+                )
+            repo._emit(
+                connection,
+                "spending.settings_updated",
+                ADMIN_OWNER,
+                {
+                    "tenant_id": settings.tenant_id,
+                    "owner_id": ADMIN_OWNER,
+                    "actor_id": principal.actor_id,
+                    "old": {"version": old["version"], "value": old["value"]},
+                    "new": new,
+                    "reason": reason,
+                    "changed_fields": preview["changed_fields"],
+                    "confirmation_digest": body.get("confirmation_digest"),
+                    "profile_snapshots": profiles,
+                    "consequences": preview["consequences"],
+                },
+            )
+            return {**new, "changed": True, "capacity_policy": capacity.metadata(new)}
+
+    def latest_capacity_changes(connection):
+        result = {}
+        rows = connection.execute(
+            select(outbox)
+            .where(
+                outbox.c.event_type == "spending.settings_updated",
+                outbox.c.payload["tenant_id"].as_string() == settings.tenant_id,
+                outbox.c.payload["owner_id"].as_string() == ADMIN_OWNER,
+            )
+            .order_by(outbox.c.created_at.desc(), outbox.c.id.desc())
+            .limit(1000)
+        ).mappings()
+        for row in rows:
+            event = row["payload"]
+            before, after = event["old"]["value"], event["new"]["value"]
+            for key in after:
+                if key not in result and not capacity._same(
+                    before.get(key), after[key]
+                ):
+                    result[key] = {
+                        "actor_id": event["actor_id"],
+                        "observed_at": row["created_at"],
+                        "reason": event.get("reason"),
+                    }
+        return result
 
     def owned_keys(connection, owner):
         return {
@@ -242,26 +417,30 @@ def register_routes(app):
     @app.get("/v1/operator/admin/spending-settings")
     def read_admin(request: Request):
         human(request, admin=True)
-        with repo.engine.connect() as connection:
+        from .supplier_spending import projection
+
+        with repo._budget_read() as connection:
+            stored = admin_stored(connection)
             return response(
                 {
-                    **read_settings(
-                        connection,
-                        settings.tenant_id,
-                        ADMIN_OWNER,
-                        admin_defaults=admin_defaults(
-                            getattr(app.state, "dstack_operator", None)
-                        ),
-                    ),
+                    **stored,
                     "test_budget_scope": "acceptance_task",
+                    "tenant_daily_supplier_spending": projection(
+                        connection, settings.tenant_id, repo.clock(), policy=stored
+                    ),
+                    "capacity_policy": capacity.metadata(
+                        stored, latest_capacity_changes(connection)
+                    ),
                 }
             )
 
+    @app.post("/v1/operator/admin/spending-settings/preview")
+    def preview_admin(request: Request, body: dict):
+        return response(capacity_preview(human(request, admin=True), body))
+
     @app.put("/v1/operator/admin/spending-settings")
     def update_admin(request: Request, body: dict):
-        return response(
-            update_value(human(request, admin=True), ADMIN_OWNER, body, admin=True)
-        )
+        return response(capacity_preview(human(request, admin=True), body, write=True))
 
     @app.post("/v1/account/spending-confirmations")
     def confirm(request: Request, body: dict):

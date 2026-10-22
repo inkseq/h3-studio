@@ -3,6 +3,7 @@
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 from studio_platform.api import create_app
 from studio_platform.settings import Settings
@@ -62,3 +63,28 @@ class DstackRouteTests(unittest.TestCase):
             ).status_code,
             422,
         )
+
+    def test_price_refusal_retains_finite_binding_details_without_raw_body(self):
+        from studio_platform.operator_prices import enforce_price_limit
+
+        self.login()
+
+        def reject(*args):
+            enforce_price_limit(
+                1500000, 850000, "mode", "dstack_price_ceiling_exceeded"
+            )
+
+        with patch.object(DstackOperator, "preview", side_effect=reject):
+            response = self.client.post(
+                "/v1/operator/dstack/previews", json={"profile_id": "test"}
+            )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.json()["details"],
+            {
+                "limit": "mode",
+                "requested_microusd": 1500000,
+                "allowed_microusd": 850000,
+            },
+        )
+        self.assertEqual(response.headers["cache-control"], "no-store")

@@ -1646,15 +1646,15 @@ class DstackOperator:
         return duration
 
     def _admin_limits(self, connection=None):
-        from .spending_limits import ADMIN_OWNER, read_settings, admin_defaults
+        from .spending_limits import admin_defaults
+        from .capacity_settings import read_policy
 
         if connection is None:
             with self.repo.engine.connect() as connection:
                 return self._admin_limits(connection)
-        return read_settings(
+        return read_policy(
             connection,
             self.settings.tenant_id,
-            ADMIN_OWNER,
             admin_defaults=admin_defaults(self),
         )
 
@@ -1834,6 +1834,7 @@ class DstackOperator:
         with self.repo.engine.connect() as connection:
             return {
                 "operator": {"account": owner, "admin": True},
+                "expected_settings_version": self._admin_limits(connection)["version"],
                 "profiles": [
                     prices.read(connection, profile)[0]
                     for profile in self.profiles.values()
@@ -1846,8 +1847,22 @@ class DstackOperator:
         profile = self.profiles.get(profile_id)
         require(profile is not None, "dstack_profile_not_found", 404)
         from .operator_prices import OperatorPrices
+        from .spending_limits import admin_defaults
 
-        return OperatorPrices(self.repo, self.settings).update(profile, body, principal)
+        return OperatorPrices(
+            self.repo, self.settings, admin_defaults=admin_defaults(self)
+        ).update(profile, body, principal)
+
+    def preview_price(self, principal, profile_id, body):
+        self.authorize_admin(principal)
+        profile = self.profiles.get(profile_id)
+        require(profile is not None, "dstack_profile_not_found", 404)
+        from .operator_prices import OperatorPrices
+        from .spending_limits import admin_defaults
+
+        return OperatorPrices(
+            self.repo, self.settings, admin_defaults=admin_defaults(self)
+        ).preview(profile, body)
 
     def preview(self, principal, body):
         owner = self.authorize(principal)
@@ -1886,7 +1901,11 @@ class DstackOperator:
             "dstack_profile_not_found",
             404,
         )
-        from .operator_prices import OperatorPrices, canonical_mode_price_ceiling
+        from .operator_prices import (
+            OperatorPrices,
+            mode_price_ceiling,
+            enforce_price_limit,
+        )
 
         prices = OperatorPrices(self.repo, self.settings)
         with self.repo.engine.connect() as connection:
@@ -1894,20 +1913,28 @@ class DstackOperator:
             admin_limits = self._admin_limits(connection)
         chosen_price = body.get("max_price_microusd", price["max_price_microusd"])
         require(
-            _integer(chosen_price) and chosen_price <= price["price_ceiling_microusd"],
+            _integer(chosen_price),
             "dstack_price_ceiling_exceeded",
             422,
         )
-        if self.policy.get("demand_start"):
-            require(
-                chosen_price <= canonical_mode_price_ceiling(profile["mode"]),
+        enforce_price_limit(
+            chosen_price,
+            price["price_ceiling_microusd"],
+            "profile",
+            "dstack_price_ceiling_exceeded",
+        )
+        if admin_limits["adopted"] or self.policy.get("demand_start"):
+            enforce_price_limit(
+                chosen_price,
+                mode_price_ceiling(profile, admin_limits),
+                "mode",
                 "dstack_price_ceiling_exceeded",
-                422,
             )
-        require(
-            chosen_price <= admin_limits["value"]["max_hourly_price_microusd"],
+        enforce_price_limit(
+            chosen_price,
+            admin_limits["value"]["max_hourly_price_microusd"],
+            "admin",
             "admin_hourly_price_limit_reached",
-            422,
         )
         profile = copy.deepcopy(profile)
         profile["max_price_microusd"] = chosen_price
@@ -2188,13 +2215,27 @@ class DstackOperator:
             fresh_seconds=self.policy["observation_fresh_seconds"],
         )
 
+    def machine_limits(self, connection):
+        from .capacity_settings import DEFAULTS
+
+        settings = self._admin_limits(connection)
+        if settings["adopted"]:
+            maximum = settings["value"]["max_machines"]
+            return maximum, maximum
+        # Old environments are not adopted by deploying a reader. Preserve the
+        # old protected configuration until the explicit audited settings write.
+        maximum = DEFAULTS["max_machines"] if self.policy.get("demand_start") else 128
+        return (
+            min(maximum, self.policy["max_instances"]),
+            min(maximum, self.policy["max_physical_gpus"]),
+        )
+
     def _limits(self, connection, hourly):
         usage = self._live_capacity_usage(connection)
-        hard_max = 2 if self.policy.get("demand_start") else 128
+        max_instances, max_gpus = self.machine_limits(connection)
         require(
-            usage["instances"] + 1 <= min(hard_max, self.policy["max_instances"])
-            and usage["physical_gpus"] + 1
-            <= min(hard_max, self.policy["max_physical_gpus"]),
+            usage["instances"] + 1 <= max_instances
+            and usage["physical_gpus"] + 1 <= max_gpus,
             "dstack_capacity_limit_exceeded",
         )
         require(
@@ -2377,11 +2418,48 @@ class DstackOperator:
                     key = (provider, resource_key[len(backend) + 1 :])
                     resources[key] = max(resources.get(key, 0), count)
                     break
-        return {
+        result = {
             "resources": resources,
             "instances": len(resources),
             "physical_gpus": sum(resources.values()),
         }
+        original = matching[0]["payload"]
+        snapshot = original.get("capacity_policy_snapshot")
+        if (
+            snapshot is not None
+            and original.get("request", {}).get("lifecycle_version") == 2
+            and binding.get("lifecycle_version") == 2
+        ):
+            from .capacity_settings import validate_snapshot
+
+            validate_snapshot(snapshot)
+            intent = intents[matching[0]["intent_id"]]
+            require(
+                type(original["request"]["lifecycle_version"]) is int
+                and type(binding["lifecycle_version"]) is int
+                and type(original.get("lifecycle", {}).get("version")) is int
+                and original["lifecycle"]["version"] == 2
+                and original.get("hard_deadline") is None
+                and intent["hard_deadline"] is None
+                and intent["physical_gpus"] == intent["slots"] == 1
+                and spec.worker_id
+                == "dstack-" + matching[0]["intent_id"].replace("-", "")
+                and resources.get((spec.provider, spec.instance_id)) == 1,
+                "dstack_registration_admission_invalid",
+            )
+            # This fulfills an original one-GPU admission, not a newly paid
+            # capacity grant under today's possibly lower settings.
+            result["capacity_admission"] = {
+                "capacity_backend": BACKEND_MARKER,
+                "lifecycle_version": 2,
+                "intent_id": intent["id"],
+                "worker_id": spec.worker_id,
+                "provider": spec.provider,
+                "instance_id": spec.instance_id,
+                "pool": spec.pool,
+                "capacity_policy_snapshot": copy.deepcopy(snapshot),
+            }
+        return result
 
     def start(self, principal, body, key):
         owner = self.authorize(principal)
@@ -2507,6 +2585,17 @@ class DstackOperator:
                     < guard_limit(guard),
                     limit_reason(guard),
                 )
+            from .supplier_spending import admit as admit_supplier_spending
+
+            capacity_snapshot = admit_supplier_spending(
+                connection,
+                self.settings.tenant_id,
+                now,
+                additional_microusd=value["reservation_microusd"],
+                reference_type="instance",
+                test_task=guard is not None,
+                policy=self._admin_limits(connection),
+            )
             usage = self._limits(connection, profile["max_price_microusd"])
             original = value["request"]
             host_selection = original.get("host_selection")
@@ -2600,6 +2689,18 @@ class DstackOperator:
                 continuing=continuing,
                 capacity_usage=usage,
                 active_instance_ids=usage["active_instance_ids"],
+                capacity_policy_snapshot=capacity_snapshot if continuing else None,
+                capacity_provenance={
+                    "capacity_backend": BACKEND_MARKER,
+                    "lifecycle_version": 2,
+                    "tenant_id": scope.tenant_id,
+                    "owner_id": scope.owner_id,
+                    "project_id": scope.project_id,
+                    "pool": profile["pool"],
+                    "provider": PROVIDERS[profile["backend"]],
+                }
+                if continuing and capacity_snapshot is not None
+                else None,
             )
             request = self._capacity_request(
                 profile,
@@ -2659,6 +2760,8 @@ class DstackOperator:
             }
             if demand is not None:
                 payload["demand_start"] = copy.deepcopy(demand)
+            if capacity_snapshot is not None:
+                payload["capacity_policy_snapshot"] = copy.deepcopy(capacity_snapshot)
             if continuing:
                 payload["lifecycle"] = copy.deepcopy(value["lifecycle"])
                 payload["hold_until"] = payload["lifecycle"]["hold_until"]

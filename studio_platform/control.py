@@ -513,10 +513,65 @@ class WorkerControl:
                     + proposed_count
                 )
                 instances = usage["instances"] + (0 if key in usage["resources"] else 1)
+                fulfillment = False
+                admission = usage.get("capacity_admission")
+                if admission is not None:
+                    from .capacity_settings import validate_snapshot
+                    from .repository import pool_limits
+
+                    if (
+                        not isinstance(admission, dict)
+                        or set(admission)
+                        != {
+                            "capacity_backend",
+                            "lifecycle_version",
+                            "intent_id",
+                            "worker_id",
+                            "provider",
+                            "instance_id",
+                            "pool",
+                            "capacity_policy_snapshot",
+                        }
+                        or admission["capacity_backend"] != "dstack-v1"
+                        or type(admission["lifecycle_version"]) is not int
+                        or admission["lifecycle_version"] != 2
+                        or admission["worker_id"] != spec.worker_id
+                        or admission["provider"] != spec.provider
+                        or admission["instance_id"] != spec.instance_id
+                        or admission["pool"] != spec.pool
+                        or not isinstance(admission["intent_id"], str)
+                        or not admission["intent_id"]
+                        or spec.backend != "wangp-worker"
+                        or spec.dispatch_backend != "hatchet-v1"
+                        or spec.provider not in {"vast", "runpod"}
+                        or len(spec.physical_gpu_ids) != 1
+                    ):
+                        raise ValueError("invalid_registration_capacity_admission")
+                    validate_snapshot(admission["capacity_policy_snapshot"])
+                    pool = (
+                        connection.execute(
+                            select(pool_limits).where(pool_limits.c.pool == spec.pool)
+                        )
+                        .mappings()
+                        .first()
+                    )
+                    if min(limits["max_instances"], limits["max_physical_gpus"]) <= 0:
+                        raise BudgetExceeded("global_capacity_disabled")
+                    if (
+                        pool is None
+                        or min(pool["max_instances"], pool["max_physical_gpus"]) <= 0
+                    ):
+                        raise BudgetExceeded("pool_disabled")
+                    fulfillment = (
+                        usage["resources"].get(key) == 1
+                        and proposed_count == 1
+                        and instances == usage["instances"]
+                        and gpu_total == usage["physical_gpus"]
+                    )
                 if (
                     instances > limits["max_instances"]
                     or gpu_total > limits["max_physical_gpus"]
-                ):
+                ) and not fulfillment:
                     raise BudgetExceeded("global_capacity_exceeded")
             row = dict(
                 id=spec.worker_id,
