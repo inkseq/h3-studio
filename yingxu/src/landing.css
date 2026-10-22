@@ -316,3 +316,17 @@
     display: none;
   }
 }
+
+.landing-error {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--danger, #e5484d);
+  border-radius: 10px;
+  color: var(--ink);
+  background: rgb(229 72 77 / 0.12);
+  max-width: 520px;
+}
+.landing button:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
