@@ -1,4 +1,6 @@
 import { quickViewCatalogs } from './quickViewCatalogs.js';
+import { storyChatCatalogs } from './storyChatCatalogs.js';
+import { capacityCatalogs } from './capacityCatalogs.js';
 import { filmCatalogs } from './filmCatalogs.js';
 import { editorCatalogs } from './editorCatalogs.js';
 import { landingCatalogs } from './landingCatalogs.js';
@@ -37,6 +39,8 @@ export const catalogs = {
     ...storyOpenCatalogs.en,
     ...v2Catalogs.en,
     ...quickViewCatalogs.en,
+    ...storyChatCatalogs.en,
+    ...capacityCatalogs.en,
     ...libraryCatalogs.en,
     ...trashCatalogs.en,
     ...workbenchCatalogs.en,
@@ -90,6 +94,8 @@ export const catalogs = {
     ...storyOpenCatalogs.zh,
     ...v2Catalogs.zh,
     ...quickViewCatalogs.zh,
+    ...storyChatCatalogs.zh,
+    ...capacityCatalogs.zh,
     ...libraryCatalogs.zh,
     ...trashCatalogs.zh,
     ...workbenchCatalogs.zh,
