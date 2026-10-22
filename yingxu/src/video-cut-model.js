@@ -25,6 +25,14 @@ export function outputFrames(sourceFrames, rate = 1) {
   const [num, den] = PLAYBACK_RATES[rate] || [1, 1];
   return Math.floor((2 * sourceFrames * den + num) / (2 * num));
 }
+/** A speed binding's clip length in frames, from its range alone (as the exporter derives it),
+ * or null for bindings without a speed. Holds even while the source file cannot be read. */
+export function speedFrames(range) {
+  if (!range || !('playback_rate' in range) || !(range.playback_rate in PLAYBACK_RATES))
+    return null;
+  const aligned = alignVideoRange(range.start, range.end);
+  return aligned && aligned.frames > 0 ? outputFrames(aligned.frames, range.playback_rate) : null;
+}
 export function rangeShapeIssue(range) {
   if (!range || typeof range !== 'object' || Array.isArray(range)) return '剪辑选段格式不正确。';
   const keys = Object.keys(range)
@@ -82,7 +90,7 @@ export function videoCut(
   duration = asset?.data.metadata?.duration ?? asset?.data.metadata?.duration_s,
 ) {
   const range = shot?.data.selectedVideoRange,
-    requestedFrames = Math.floor(Number(shot?.data.seconds) * cutFps + 0.5);
+    requestedFrames = speedFrames(range) ?? Math.floor(Number(shot?.data.seconds) * cutFps + 0.5);
   const fail = (issue) => ({ issue, range, requestedFrames });
   if (!asset || asset.type !== 'video' || asset.id !== shot?.data.selectedAssetId)
     return fail('先采用一段视频，再设置剪辑选段。');
