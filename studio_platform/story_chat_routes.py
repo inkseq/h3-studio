@@ -22,6 +22,7 @@ from .story_chat import (
     chat_of,
     new_story,
     prompt_messages,
+    snapshot,
     stored_turn,
     _parse,
 )
@@ -93,6 +94,11 @@ def register_story_chat_routes(app, *, client=None):
             chat_of(row["payload"])
         except StoryChatError as error:
             _fail(error.code, error.status)
+        if scope == "projects:write":
+            # Same gate as /v1/projects/{id}/actions: managed projects are not edited here.
+            from .generation_admission import reject_managed
+
+            reject_managed(row["payload"])
         return row
 
     @app.get("/v1/story-chats/config")
@@ -157,6 +163,7 @@ def register_story_chat_routes(app, *, client=None):
 
         row = read(principal, project_id, "projects:write")
         chat = chat_of(row["payload"])
+        seen, seen_version = snapshot(row["payload"]), row["version"]
         # A replayed turn returns what was stored and never calls the model twice.
         prior = stored_turn(chat, turn_id)
         if prior:
@@ -168,7 +175,7 @@ def register_story_chat_routes(app, *, client=None):
                 MODEL,
                 prompt_messages(row["payload"], chat, text),
                 INSTRUCTION,
-                max_tokens=8192,
+                max_tokens=4096,
             )
             plan = _parse(result["text"])
         except ChatError as error:
@@ -185,9 +192,21 @@ def register_story_chat_routes(app, *, client=None):
             if prior:
                 return answer(row, prior)
             try:
-                actions, changes, proposal = apply_plan(project, chat, plan)
+                actions, changes, proposal, touched = apply_plan(project, chat, plan)
             except StoryChatError as error:
                 _fail(error.code, error.status, nothing_written=True, **error.detail)
+            if version != seen_version:
+                # The person edited during the model call. Re-apply only if none of the
+                # cards this plan writes changed; never overwrite their newer edit.
+                now = snapshot(project)
+                changed = sorted(i for i in touched if now.get(i) != seen.get(i))
+                if changed:
+                    _fail(
+                        "story_chat_card_changed",
+                        409,
+                        nothing_written=True,
+                        cards=changed,
+                    )
             value = append_turn(chat, turn_id, text, plan, changes, proposal)
             try:
                 app.state.guided.mutate(

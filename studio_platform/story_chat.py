@@ -42,9 +42,12 @@ Work like a good director's assistant:
 - Character/place/prop descriptions are visual and stable (look, clothing, colours, era), so
   every shot that uses them looks consistent.
 - Never claim you generated, rendered, charged or saved anything. Video generation costs
-  credits and the person confirms it themselves: when the shots are ready, use
-  propose_generate and tell them they can confirm it.
-- Reply in the person's language. Keep replies short and friendly; no lists of the cards you
+  credits and the person confirms it themselves. Use propose_generate ONLY in a turn where
+  the person asks to make/generate the video or says the story is ready; then say they can
+  review the cost and confirm. In other turns do not mention confirming or generating;
+  instead, when the shots look complete, one chip may offer to make the video.
+- Reply in the person's interface language (given with each message) unless they clearly
+  write whole sentences in another language. Short words like "ok" do not change it. Keep replies short and friendly; no lists of the cards you
   made (the cards are shown next to the chat).
 
 Return ONLY one JSON object, no code fences:
@@ -240,6 +243,25 @@ def _parse(text):
     }
 
 
+def _seconds(value):
+    if type(value) not in (int, float):
+        value = 5
+    return min(max(value, SECONDS[0]), SECONDS[1])
+
+
+def _unique(ids):
+    if len(set(ids)) != len(ids):
+        raise StoryChatError("story_chat_plan_invalid", 502)
+    return ids
+
+
+def snapshot(project):
+    """Versions of what the model saw, to detect a concurrent edit of the same card."""
+    versions = {e["id"]: e["version"] for e in project["entities"]}
+    versions["project"] = (project.get("title"), project.get("logline", ""))
+    return versions
+
+
 def apply_plan(project, chat, plan):
     """Validate the plan against the current project and return existing actions.
 
@@ -253,6 +275,7 @@ def apply_plan(project, chat, plan):
     scene = chat["sceneId"]
     shots = [s["id"] for s in shots_of(project, chat)]
     removed = set()
+    touched = set()  # existing cards (and "project" for the title) this plan writes
 
     def resolve(ref, kinds):
         if not isinstance(ref, str) or not ref:
@@ -279,7 +302,8 @@ def apply_plan(project, chat, plan):
             if "logline" in item:
                 patch["logline"] = _text(item.get("logline"), 2000, required=False)
             actions.append({"op": "project.update", "patch": patch})
-            changes.append({"kind": "title"})
+            touched.add("project")
+            changes.append({"kind": "title", "op": "update"})
         elif tool in {"upsert_character", "upsert_place", "upsert_prop"}:
             kind = KINDS[tool.removeprefix("upsert_")]
             name = _text(item.get("name"), 160)
@@ -305,6 +329,7 @@ def apply_plan(project, chat, plan):
                 changes.append({"kind": kind, "op": "create", "id": ident})
             else:
                 ident = resolve(ref, {kind})
+                touched.add(ident)
                 actions.append(
                     {
                         "op": "entity.update",
@@ -314,45 +339,47 @@ def apply_plan(project, chat, plan):
                 )
                 changes.append({"kind": kind, "op": "update", "id": ident})
         elif tool == "upsert_shot":
-            text = _text(item.get("text"), 4000)
-            seconds = item.get("seconds", 5)
-            if (
-                type(seconds) not in (int, float)
-                or not SECONDS[0] <= seconds <= SECONDS[1]
-            ):
-                seconds = min(
-                    max(seconds if type(seconds) in (int, float) else 5, SECONDS[0]),
-                    SECONDS[1],
-                )
-            cast = [resolve(r, {"character"}) for r in item.get("cast", []) or []]
-            props = [resolve(r, {"prop"}) for r in item.get("props", []) or []]
-            place = item.get("place")
-            place = resolve(place, {"location"}) if place else None
-            if len(set(cast)) != len(cast) or len(set(props)) != len(props):
-                raise StoryChatError("story_chat_plan_invalid", 502)
             ref = item.get("ref")
-            data = {
-                "prompt": text,
-                "seconds": seconds,
-                "cast": cast,
-                "storyboard": {
-                    "version": 1,
-                    "mode": "ref",
-                    "quality": "draft",
-                    "place": {"locationId": place} if place else None,
-                    "propIds": props,
-                },
-            }
-            if isinstance(ref, str) and ref.startswith("new:") and ref not in refs:
+            creating = (
+                isinstance(ref, str) and ref.startswith("new:") and ref not in refs
+            )
+            # A new shot gets defaults; an existing shot changes only the fields given,
+            # so a text-only edit keeps its length, cast, place and props.
+            data = {}
+            if creating or "text" in item:
+                data["prompt"] = _text(item.get("text"), 4000)
+            if creating or "seconds" in item:
+                data["seconds"] = _seconds(item.get("seconds", 5))
+            if creating or "cast" in item:
+                data["cast"] = _unique(
+                    [resolve(r, {"character"}) for r in item.get("cast") or []]
+                )
+            board = {}
+            if creating or "place" in item:
+                place = item.get("place")
+                board["place"] = (
+                    {"locationId": resolve(place, {"location"})} if place else None
+                )
+            if creating or "props" in item:
+                board["propIds"] = _unique(
+                    [resolve(r, {"prop"}) for r in item.get("props") or []]
+                )
+            if creating:
                 if len(shots) >= MAX_SHOTS:
                     raise StoryChatError("story_chat_shot_limit", 422)
                 ident = new_id(ref, "shot")
+                data["storyboard"] = {
+                    "version": 1,
+                    "mode": "ref",
+                    "quality": "draft",
+                    **board,
+                }
                 entity = {
                     "id": ident,
                     "type": "shot",
                     "parentId": scene,
                     "title": "",
-                    "description": text,
+                    "description": data["prompt"],
                     "data": data,
                 }
                 actions.append({"op": "entity.create", "entity": entity})
@@ -369,21 +396,24 @@ def apply_plan(project, chat, plan):
                 changes.append({"kind": "shot", "op": "create", "id": ident})
             else:
                 ident = resolve(ref, {"shot"})
-                existing = lookup[ident].get("data", {}).get("storyboard") or {}
-                # Keep the user's explicit generation choices (mode, frames, refs).
-                data["storyboard"] = {
-                    **existing,
-                    **{k: data["storyboard"][k] for k in ("place", "propIds")},
-                    "version": 1,
-                    "mode": existing.get("mode", "ref"),
-                }
-                actions.append(
-                    {
-                        "op": "entity.update",
-                        "entity_id": ident,
-                        "patch": {"description": text, "data": data},
+                current = lookup[ident].get("data", {})
+                if board:
+                    # Keep the user's explicit generation choices (mode, frames, refs).
+                    existing = current.get("storyboard") or {}
+                    data["storyboard"] = {
+                        **existing,
+                        **board,
+                        "version": 1,
+                        "mode": existing.get("mode", "ref"),
                     }
-                )
+                patch = {"data": data} if data else {}
+                if "prompt" in data:
+                    patch["description"] = data["prompt"]
+                if patch:
+                    actions.append(
+                        {"op": "entity.update", "entity_id": ident, "patch": patch}
+                    )
+                    lookup[ident] = {**lookup[ident], "data": {**current, **data}}
                 if "after" in item:
                     after = item["after"]
                     shots.remove(ident)
@@ -393,6 +423,7 @@ def apply_plan(project, chat, plan):
                         else shots.index(resolve(after, {"shot"})) + 1
                     )
                     shots.insert(position, ident)
+                touched.add(ident)
                 changes.append({"kind": "shot", "op": "update", "id": ident})
         elif tool == "remove_card":
             ident = resolve(item.get("ref"), {"character", "location", "prop", "shot"})
@@ -400,6 +431,7 @@ def apply_plan(project, chat, plan):
                 {"op": "entity.delete", "entity_id": ident, "cascade": False}
             )
             removed.add(ident)
+            touched.add(ident)
             if ident in shots:
                 shots.remove(ident)
             changes.append({"kind": lookup[ident]["type"], "op": "delete", "id": ident})
@@ -414,39 +446,8 @@ def apply_plan(project, chat, plan):
                 proposal = {"kind": "generate", "shot_ids": list(dict.fromkeys(ids))}
         else:
             raise StoryChatError("story_chat_plan_invalid", 502)
-    # Deleting a character/place/prop must not leave a shot pointing at it.
-    for shot_id in shots:
-        if shot_id in refs.values():
-            continue
-        data = lookup[shot_id].get("data", {})
-        cast = [
-            c
-            for c in data.get("cast", [])
-            if (c if isinstance(c, str) else c.get("characterId")) not in removed
-        ]
-        board = data.get("storyboard")
-        if cast != data.get("cast", []) or (
-            board
-            and (
-                set(board.get("propIds", [])) & removed
-                or (board.get("place") or {}).get("locationId") in removed
-            )
-        ):
-            patch = {"cast": cast}
-            if board:
-                patch["storyboard"] = {
-                    **board,
-                    "propIds": [
-                        p for p in board.get("propIds", []) if p not in removed
-                    ],
-                    "place": None
-                    if (board.get("place") or {}).get("locationId") in removed
-                    else board.get("place"),
-                }
-            actions.insert(
-                len(actions),
-                {"op": "entity.update", "entity_id": shot_id, "patch": {"data": patch}},
-            )
+    # Guided.delete_entity already removes deleted cards from cast, place and props
+    # against the evolving document, so no separate cleanup patch is emitted here.
     # Shot order is explicit so Works plays them in the chat's order.
     for index, shot_id in enumerate(shots):
         current = lookup[shot_id].get("order")
@@ -458,13 +459,14 @@ def apply_plan(project, chat, plan):
                 ):
                     action["entity"]["order"] = index
         elif current != index:
+            touched.add(shot_id)
             actions.append(
                 {"op": "entity.update", "entity_id": shot_id, "patch": {"order": index}}
             )
     if proposal:
         proposal["shot_ids"] = [s for s in proposal["shot_ids"] if s not in removed]
         proposal = proposal if proposal["shot_ids"] else None
-    return actions, changes, proposal
+    return actions, changes, proposal, touched
 
 
 def prompt_messages(project, chat, text):
@@ -484,7 +486,9 @@ def prompt_messages(project, chat, text):
         "logline": project.get("logline", ""),
         "cards": cards(project, chat),
     }
+    language = "Chinese" if chat.get("language") == "zh" else "English"
     current = (
+        f"Interface language: {language}.\n"
         "Current story cards (JSON, ids are exact):\n"
         + json.dumps(state, ensure_ascii=False)[:30000]
         + "\n\nPerson says:\n"

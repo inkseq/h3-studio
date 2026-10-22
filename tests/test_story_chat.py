@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
 from studio_platform.api import create_app
-from studio_platform.google_chat import ChatError
+from studio_platform.google_chat import ChatError, payload
 from studio_platform.repository import jobs
 from studio_platform.settings import Settings
 
@@ -22,6 +22,8 @@ class ScriptedModel:
         self.plans, self.calls, self.during = [], [], None
 
     def generate(self, model, messages, instruction, max_tokens=2048):
+        # Validate exactly as the real adapter does before any network call.
+        payload(model, messages, instruction, max_tokens)
         self.calls.append(
             {"model": model, "messages": messages, "instruction": instruction}
         )
@@ -233,6 +235,114 @@ class StoryChatTests(unittest.TestCase):
         self.assertEqual(value["cards"]["characters"][0]["name"], "Zibby")
         self.assertEqual(value["cards"]["shots"][-1]["text"], "Zib waves.")
         self.assertEqual(value["version"], first["version"] + 2)
+
+    def actions(self, chat, version, actions):
+        response = self.client.post(
+            f"/v1/projects/{chat['project_id']}/actions",
+            json={"expected_version": version, "actions": actions},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def test_same_card_edited_during_the_call_is_not_overwritten(self):
+        chat = self.start()
+        first = self.turn(chat, "aliens").json()
+        zib = first["cards"]["characters"][0]["id"]
+        self.model.during = lambda: self.actions(
+            chat,
+            first["version"],
+            [
+                {
+                    "op": "entity.update",
+                    "entity_id": zib,
+                    "patch": {"title": "Mine", "description": "user"},
+                }
+            ],
+        )
+        plan = {
+            "reply": "Renamed.",
+            "actions": [
+                {
+                    "tool": "upsert_character",
+                    "ref": zib,
+                    "name": "Model",
+                    "description": "model",
+                }
+            ],
+        }
+        response = self.turn(chat, "rename", turn_id="turn-0010", plan=plan)
+        self.assertEqual(response.status_code, 409, response.text)
+        detail = response.json()["detail"]
+        self.assertEqual(detail["code"], "story_chat_card_changed")
+        self.assertEqual(detail["cards"], [zib])
+        after = self.client.get(f"/v1/story-chats/{chat['project_id']}").json()
+        self.assertEqual(after["cards"]["characters"][0]["name"], "Mine")
+        self.assertEqual(after["version"], first["version"] + 1)
+        self.assertEqual(len(after["messages"]), 2)
+
+    def test_text_only_shot_edit_keeps_length_cast_place_and_props(self):
+        chat = self.start()
+        first = self.turn(chat, "aliens").json()
+        shot = first["cards"]["shots"][2]
+        self.assertEqual((shot["seconds"], len(shot["cast"])), (6, 2))
+        plan = {
+            "reply": "Changed.",
+            "actions": [
+                {"tool": "upsert_shot", "ref": shot["id"], "text": "They hug."}
+            ],
+        }
+        value = self.turn(chat, "hug", turn_id="turn-0011", plan=plan).json()
+        after = next(s for s in value["cards"]["shots"] if s["id"] == shot["id"])
+        self.assertEqual(after["text"], "They hug.")
+        self.assertEqual(after["seconds"], 6)
+        self.assertEqual(after["cast"], shot["cast"])
+        self.assertEqual(after["place"], shot["place"])
+        self.assertEqual(after["props"], shot["props"])
+        # An explicit clear is still honoured.
+        plan = {
+            "reply": "Cleared.",
+            "actions": [
+                {"tool": "upsert_shot", "ref": shot["id"], "place": None, "cast": []}
+            ],
+        }
+        value = self.turn(chat, "empty", turn_id="turn-0012", plan=plan).json()
+        after = next(s for s in value["cards"]["shots"] if s["id"] == shot["id"])
+        self.assertEqual(
+            (after["cast"], after["place"], after["text"]), ([], None, "They hug.")
+        )
+
+    def test_rebinding_then_removing_a_character_in_one_turn_keeps_the_new_binding(
+        self,
+    ):
+        chat = self.start()
+        first = self.turn(chat, "aliens").json()
+        zib, mia = (c["id"] for c in first["cards"]["characters"])
+        shot = first["cards"]["shots"][1]
+        self.assertEqual(shot["cast"], [mia])
+        plan = {
+            "reply": "Swapped.",
+            "actions": [
+                {"tool": "upsert_shot", "ref": shot["id"], "cast": [zib]},
+                {"tool": "remove_card", "ref": mia},
+            ],
+        }
+        response = self.turn(chat, "swap", turn_id="turn-0013", plan=plan)
+        self.assertEqual(response.status_code, 200, response.text)
+        after = next(
+            s for s in response.json()["cards"]["shots"] if s["id"] == shot["id"]
+        )
+        self.assertEqual(after["cast"], [zib])
+
+    def test_managed_project_is_refused_before_the_model_is_called(self):
+        chat = self.start()
+        self.actions(
+            chat,
+            chat["version"],
+            [{"op": "journey.update", "patch": {"integration_kind": "quick_chat"}}],
+        )
+        response = self.turn(chat, "aliens", plan=None)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(self.model.calls, [])
 
     def test_card_deleted_during_the_call_refuses_without_writing(self):
         chat = self.start()
