@@ -56,6 +56,10 @@ export const operatorCatalogs = {
     'operator.copy46': 'Administrator jobs have not loaded. Refresh to continue.',
     'operator.copy47': 'Stop if idle for ',
     'operator.copy48': ' minutes',
+    'operator.fleet.others':
+      '{count} machine(s) running on other accounts: {owners}. These tiles count the whole service.',
+    'operator.fleet.load': 'Load the whole service, including other accounts',
+    'operator.fleet.view': 'View',
     'operator.more.engine': 'Engine v{version}',
     'operator.more.engineNewest': 'newest',
     'operator.more.engineHelp':
@@ -476,6 +480,9 @@ export const operatorCatalogs = {
     'operator.copy46': '管理员任务尚未读取，请刷新。',
     'operator.copy47': '空闲超过 ',
     'operator.copy48': ' 分钟就停止',
+    'operator.fleet.others': '其他账户有 {count} 台机器在运行：{owners}。上面的数字统计全站。',
+    'operator.fleet.load': '读取全站情况（含其他账户）',
+    'operator.fleet.view': '查看',
     'operator.more.engine': '引擎 v{version}',
     'operator.more.engineNewest': '最新',
     'operator.more.engineHelp':

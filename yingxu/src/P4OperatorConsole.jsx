@@ -1822,6 +1822,15 @@ export default function P4OperatorConsole() {
         <LegacyOperator />
       </React.Suspense>
     );
+  // An admin reading these tiles is deciding for the whole service: counting only their own
+  // machines showed "0 running" while another account had a machine busy (owner, 2026-10-22).
+  const adminNodes = admin ? state.adminSnapshot?.nodes || null : null,
+    adminLive = adminNodes?.filter((node) => !terminal(node)) || null,
+    fleetLive = adminLive || live,
+    othersLive = adminLive
+      ? adminLive.filter((node) => node.owner_id && node.owner_id !== c.account)
+      : [],
+    otherOwners = [...new Set(othersLive.map((node) => node.owner_id))];
   const totalHourly = live.every((node) => finite(node.hourly_cost_microusd))
     ? live.reduce((sum, node) => sum + node.hourly_cost_microusd, 0)
     : null;
@@ -1938,13 +1947,17 @@ export default function P4OperatorConsole() {
               <div>
                 <small>{t('operator.status56')}</small>
                 <b>
-                  {stale ? '—' : live.filter((node) => phase(node, locale).id === 'ready').length}
+                  {stale
+                    ? '—'
+                    : fleetLive.filter((node) => phase(node, locale).id === 'ready').length}
                 </b>
               </div>
               <div>
                 <small>{t('operator.status58')}</small>
                 <b>
-                  {stale ? '—' : live.filter((node) => phase(node, locale).id === 'running').length}
+                  {stale
+                    ? '—'
+                    : fleetLive.filter((node) => phase(node, locale).id === 'running').length}
                 </b>
               </div>
               <div>
@@ -1952,7 +1965,7 @@ export default function P4OperatorConsole() {
                 <b>
                   {stale
                     ? '—'
-                    : live.filter(
+                    : fleetLive.filter(
                         (node) =>
                           !['ready', 'running', 'stopping'].includes(phase(node, locale).id),
                       ).length}
@@ -1974,6 +1987,24 @@ export default function P4OperatorConsole() {
                 </button>
               </div>
             </div>
+            {admin && !adminNodes && (
+              <p className="p4-fleet-note muted">
+                <button className="linkish" onClick={showAdmin}>
+                  {t('operator.fleet.load')}
+                </button>
+              </p>
+            )}
+            {admin && othersLive.length > 0 && (
+              <p className="p4-fleet-note" role="status">
+                {t('operator.fleet.others', {
+                  count: othersLive.length,
+                  owners: otherOwners.join('、'),
+                })}{' '}
+                <button className="linkish" onClick={showAdmin}>
+                  {t('operator.fleet.view')}
+                </button>
+              </p>
+            )}
             {view === 'machines' && (
               <>
                 <div className="queues">
