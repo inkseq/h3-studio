@@ -526,3 +526,17 @@ test('copies start as unconfirmed drafts rather than inheriting stale confirmed 
   assert.equal(copy.data.confirmed, undefined);
   assert.ok(s.getState().project.entities.find((e) => e.id === id).data.confirmed);
 });
+
+test('a story without updatedAt stays editable after a file-presence observation (#408)', () => {
+  const { s } = fresh();
+  const noteId = s.addEntity('note', null, { title: 'observed' });
+  const p = s.exportProject();
+  delete p.updatedAt; // stories created through the API carry no updatedAt
+  assert.equal(s.replaceProject(p), true);
+  s.updateEntity(noteId, { data: { missingFile: true } }, { history: false, observation: true });
+  assert.equal(
+    'updatedAt' in s.getState().project && s.getState().project.updatedAt === undefined,
+    false,
+  );
+  assert.ok(s.addEntity('note', null, { title: 'after observation' }));
+});

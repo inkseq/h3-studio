@@ -681,7 +681,11 @@ export function createStore({ storage, now = () => Date.now(), seed = legacySeed
     // a late observation must never acknowledge or clear an actual draft.
     const cleanObservation =
       observation && state.workspace.mode === 'cloud' && !state.workspace.dirty;
-    valid.project.updatedAt = observation ? state.project.updatedAt : timestamp();
+    // An observation keeps the story's own timestamp; stories made through the API may have
+    // none, and an undefined field would make every later edit fail the plain-JSON check.
+    const updatedAt = observation ? state.project.updatedAt : timestamp();
+    if (updatedAt === undefined) delete valid.project.updatedAt;
+    else valid.project.updatedAt = updatedAt;
     if (cleanObservation) cloudSavedJSON = JSON.stringify(valid.project);
     state = { ...state, project: valid.project, notice: '' };
     if (state.selectedId && !valid.project.entities.some((e) => e.id === state.selectedId))
