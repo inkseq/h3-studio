@@ -111,7 +111,7 @@ class FakeProvider:
         if token is _DEFAULT_TOKEN:
             token = jwt.encode(
                 {
-                    "iss": "https://api.workos.com",
+                    "iss": "https://api.workos.com/",
                     "sub": self.user.id,
                     "client_id": "client_" + "A" * 24,
                     "sid": "session_" + str(len(self.auth_calls)).zfill(26),
@@ -395,7 +395,7 @@ class WorkOSAuthTests(LedgerCase):
         self.assertEqual(sum(ident.startswith("expired-") for ident in remaining), 5)
         self.assertTrue({row["document_id"] for row in preserved} <= remaining)
 
-    def test_public_start_reuses_login_rate_limit_without_creating_unbounded_state(
+    def test_public_start_has_separate_twenty_attempt_limit_without_unbounded_state(
         self,
     ):
         from fastapi.testclient import TestClient
@@ -415,7 +415,7 @@ class WorkOSAuthTests(LedgerCase):
         app.state.workos_auth.sdk_factory = self.provider.client
         app.state.auth.clock = lambda: self.now
         with TestClient(app, base_url="https://testserver") as client:
-            for _ in range(5):
+            for _ in range(20):
                 self.assertEqual(
                     client.get(
                         "/api/auth/workos/start", follow_redirects=False
@@ -433,7 +433,7 @@ class WorkOSAuthTests(LedgerCase):
                         .select_from(documents)
                         .where(documents.c.kind == STATE_KIND)
                     ).scalar_one(),
-                    5,
+                    20,
                 )
             self.now += 301
             self.assertEqual(
@@ -889,7 +889,7 @@ class WorkOSAuthTests(LedgerCase):
         value, state = self.start()
         event.listen(self.repo.engine, "before_cursor_execute", fail_sidecar)
         try:
-            with self.assertRaisesRegex(RuntimeError, "offline sidecar insert failure"):
+            with self.assertRaisesRegex(WorkOSError, "workos_provider_unavailable"):
                 self.finish(value, state)
         finally:
             event.remove(self.repo.engine, "before_cursor_execute", fail_sidecar)

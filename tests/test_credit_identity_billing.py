@@ -167,9 +167,11 @@ class CreditIdentityBillingTests(unittest.TestCase):
             side_effect=credits.CreditError("synthetic_welcome_refusal"),
         ):
             with self.assertRaisesRegex(
-                credits.CreditError, "synthetic_welcome_refusal"
-            ):
+                WorkOSError, "workos_provider_unavailable"
+            ) as failure:
                 fixture.finish(value, state)
+        self.assertEqual(failure.exception.status, 503)
+        self.assertNotIn("synthetic_welcome_refusal", str(failure.exception))
         self.assertEqual(fixture.count_users(), 2)
         self.assertEqual(self.rows(fixture, entries), [])
         self.assertEqual(self.rows(fixture, accounts), [])
@@ -317,8 +319,12 @@ class CreditIdentityBillingTests(unittest.TestCase):
             )
         original_sessions = self.rows(fixture, sessions)
         value, state = fixture.start()
-        with self.assertRaisesRegex(PricingError, "credit_prices_invalid"):
+        with self.assertRaisesRegex(
+            WorkOSError, "workos_provider_unavailable"
+        ) as failure:
             fixture.finish(value, state)
+        self.assertEqual(failure.exception.status, 503)
+        self.assertNotIn("credit_prices_invalid", str(failure.exception))
         self.assertEqual(fixture.count_users(), 2)
         self.assertEqual(self.rows(fixture, accounts), [])
         self.assertEqual(self.rows(fixture, entries), [])

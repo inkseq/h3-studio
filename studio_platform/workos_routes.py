@@ -1,11 +1,23 @@
 """AuthKit browser entry points and current-account API, without token storage."""
 
-from fastapi import HTTPException, Request
+from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
 from .auth import LoginLimited
+from .http_limits import hosted_error_redirect
 from .workos_auth import STATE_COOKIE, STATE_SECONDS, WorkOSAuth, WorkOSError
+
+HOSTED_PATHS = {"/api/auth/workos/start", "/api/auth/workos/callback"}
+BROWSER_ERRORS = {
+    "workos_state_invalid": "state_invalid",
+    "return_to_invalid": "state_invalid",
+    "workos_link_session_changed": "state_invalid",
+    "workos_sign_in_cancelled": "cancelled",
+    "account_deleted": "account_deleted",
+    "account_unavailable": "account_unavailable",
+    "account_suspended": "account_unavailable",
+}
 
 
 def register_routes(app, *, service=None):
@@ -28,17 +40,30 @@ def register_routes(app, *, service=None):
     def response(value):
         return JSONResponse(value, headers={"Cache-Control": "no-store"})
 
+    def failure(request, *, code, detail, status, retry_after=None):
+        hosted = request.method == "GET" and request.url.path in HOSTED_PATHS
+        headers = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+        if retry_after is not None:
+            headers["Retry-After"] = str(retry_after)
+        public_code = (
+            "rate_limited"
+            if status == 429
+            else BROWSER_ERRORS.get(code, "provider_unavailable")
+        )
+        result = hosted_error_redirect(
+            request.scope, public_code, retry_after=retry_after
+        )
+        if result is None:
+            result = JSONResponse(
+                {"detail": detail, "code": code}, status_code=status, headers=headers
+            )
+        # An extra click must not erase the cookie of a pending Google flow.
+        return clear_state(result) if hosted and status != 429 else result
+
     @app.exception_handler(WorkOSError)
     async def workos_error(request, error):
-        result = JSONResponse(
-            {"detail": error.detail, "code": error.code},
-            status_code=error.status,
-            headers={"Cache-Control": "no-store"},
-        )
-        return (
-            clear_state(result)
-            if request.url.path.startswith("/api/auth/workos/")
-            else result
+        return failure(
+            request, code=error.code, detail=error.detail, status=error.status
         )
 
     @app.get("/api/auth/workos/start")
@@ -60,18 +85,17 @@ def register_routes(app, *, service=None):
         if link and request.headers.get("sec-fetch-site") == "cross-site":
             raise WorkOSError("workos_link_session_changed", 403)
         try:
-            service.auth.reserve_login(
-                "workos-start:" + (request.client.host if request.client else "unknown")
+            service.auth.reserve_workos_start(
+                request.client.host if request.client else "unknown"
             )
         except LoginLimited as error:
-            raise HTTPException(
-                429,
-                "Too many sign-in attempts. Please try again later.",
-                headers={
-                    "Retry-After": str(error.retry_after),
-                    "Cache-Control": "no-store",
-                },
-            ) from None
+            return failure(
+                request,
+                code="rate_limited",
+                status=429,
+                detail="Too many sign-in attempts. Please try again later.",
+                retry_after=error.retry_after,
+            )
         value = service.start(
             origin=origin(request),
             return_to=query.get("return_to", "/"),

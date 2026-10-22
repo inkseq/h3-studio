@@ -308,6 +308,14 @@ class Auth:
         self.set_password(username, new_password, expected_version=row["updated"])
 
     def reserve_login(self, source: str):
+        self._reserve_login(source, 5)
+
+    def reserve_workos_start(self, source: str):
+        # Opening the hosted chooser is not a password attempt. Keep its
+        # separate existing IP namespace and leave credential attempts strict.
+        self._reserve_login("workos-start:" + source, 20)
+
+    def _reserve_login(self, source: str, limit: int):
         key, now = digest(source), self.clock()
         # A unique row followed by a conditional UPDATE also serializes writers
         # when two API processes see the first attempt at the same time.
@@ -338,7 +346,7 @@ class Auth:
                 .where(
                     login_limits.c.tenant == self.tenant,
                     login_limits.c.source_hash == key,
-                    login_limits.c.attempts < 5,
+                    login_limits.c.attempts < limit,
                 )
                 .values(attempts=login_limits.c.attempts + 1)
             )
