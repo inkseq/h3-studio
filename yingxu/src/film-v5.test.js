@@ -14,6 +14,7 @@ import { detachClipSound, effectiveMuted, setTrackFade } from './film-audio-mode
 import { chapterTiming, trackPlacement } from './media-timing.js';
 import { outputFrames, rangeShapeIssue, videoBinding } from './video-cut-model.js';
 import { chapterShots } from './storyboard-domain.js';
+import { validateProject } from './store.js';
 
 const node = (id, type, parentId, order, data = {}) => ({
   id,
@@ -171,4 +172,66 @@ test('own sound follows clip speed, detaches at its place, and fades stay within
   assert.throws(() => setTrackFade(p, 'ch', 'm', 'out', 1.5), /fadeTooLong/);
   setTrackFade(p, 'ch', 'm', 'in', 0);
   assert.equal('fade_in_s' in music, false);
+});
+
+test('a detached clip sound and a speed binding keep the story valid for saving', () => {
+  const p = story();
+  p.layout = { positions: {}, viewport: { x: 0, y: 0, zoom: 1 } };
+  trimClip(p, 'C', 0, 3, 5);
+  setClipSpeed(p, 'C', 0.75, 5);
+  const generatedFrom = {
+    jobId: 'j',
+    videoEntityId: 'v-C',
+    videoArtifactId: 'va',
+    audioArtifactId: 'aa',
+  };
+  const track = {
+    id: 's',
+    assetId: 'a',
+    fileId: 'f',
+    role: 'generated',
+    shotId: 'C',
+    offset: 0,
+    start: 0,
+    end: 3,
+    duration: 5,
+    gain: 0.7,
+    muted: false,
+    generatedFrom,
+  };
+  p.journey = { soundTracks: { ch: [track] }, filmCuts: { ch: { clip_sound_crossfade_s: 0.5 } } };
+  assert.equal(validateProject(p).ok, true, validateProject(p).error);
+  detachClipSound(p, 'ch', 's', chapterTiming(chapterShots(p, 'ch')));
+  assert.equal(validateProject(p).ok, true, validateProject(p).error);
+  // A coupled track still may not drift from its shot's start.
+  p.journey.soundTracks.ch.push({ ...track, id: 's2', detached: false, shotId: 'C', offset: 1 });
+  assert.equal(validateProject(p).ok, false);
+});
+
+test('a speed binding sets the length even when seconds are stale or the file is unreadable', () => {
+  // Shaped like a story edited through the API: seconds still hold the pre-speed values.
+  const p = story();
+  for (const [id, start, end, rate] of [
+    ['C', 0, 3, 0.75],
+    ['A', 3, 5, 2],
+    ['D', 5, 7, 0.5],
+  ]) {
+    const shot = p.entities.find((e) => e.id === id),
+      video = p.entities.find((e) => e.id === 'v-' + id);
+    shot.data.seconds = end - start;
+    shot.data.selectedVideoRange = { ...videoBinding(video), start, end, playback_rate: rate };
+  }
+  p.entities.find((e) => e.id === 'v-C').data.missingFile = true;
+  assert.deepEqual(
+    editorClips(p, 'ch').map((c) => c.frames),
+    [96, 24, 96],
+  );
+  assert.deepEqual(
+    chapterTiming(chapterShots(p, 'ch')).map((s) => [s.start, s.end]),
+    [
+      [0, 4],
+      [4, 5],
+      [5, 9],
+    ],
+  );
 });

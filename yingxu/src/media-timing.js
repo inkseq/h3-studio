@@ -1,3 +1,4 @@
+import { speedFrames } from './video-cut-model.js';
 import { translate } from './i18n/locale.js';
 export function validateRange(start, end, duration, locale = 'zh') {
   if (
@@ -19,7 +20,12 @@ export function chapterTiming(shots) {
   let cursor = 0;
   return shots.map((shot) => {
     const start = cursor / 24;
-    cursor += Math.max(0, Math.floor((Number(shot.data.seconds) || 0) * 24 + 0.5));
+    // A speed binding's length comes from its range and rate (#408), like the exporter.
+    cursor += Math.max(
+      0,
+      speedFrames(shot.data.selectedVideoRange) ??
+        Math.floor((Number(shot.data.seconds) || 0) * 24 + 0.5),
+    );
     const rate = shot.data.selectedVideoRange?.playback_rate ?? 1;
     return { id: shot.id, title: shot.title, start, end: cursor / 24, shot, rate };
   });

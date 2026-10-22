@@ -312,9 +312,15 @@ export function validateProject(input) {
               'audioArtifactId,jobId,videoArtifactId,videoEntityId' ||
             Object.values(g).some((id) => typeof id !== 'string' || !id || id.length > 200) ||
             typeof track.shotId !== 'string' ||
-            !track.shotId ||
-            track.offset !== 0 ||
-            (track.needsReview !== undefined && typeof track.needsReview !== 'boolean')
+            (track.detached !== undefined && typeof track.detached !== 'boolean') ||
+            // A coupled clip sound follows its shot from offset 0; a detached one (#408, render
+            // v5) has no shot and sits at its own absolute place on the film.
+            (track.detached
+              ? track.shotId !== '' || !finite(track.offset) || track.offset < 0
+              : !track.shotId || track.offset !== 0) ||
+            (track.needsReview !== undefined && typeof track.needsReview !== 'boolean') ||
+            (track.slow_rate_audio_enabled !== undefined &&
+              typeof track.slow_rate_audio_enabled !== 'boolean')
           )
             return fail('生成声音须保留同任务视频／音频绑定与镜头起点；请解除关联后再独立编辑。');
         }
