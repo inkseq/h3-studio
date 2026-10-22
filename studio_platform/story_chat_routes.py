@@ -354,18 +354,37 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
         reference = "story_chat_image:" + request_id
         scope = app.state.scope(principal, project_id)
         original = None
-        if isinstance(started, dict):
+        if started is not None or attached is not None:
+            # Any recovery needs the validated original decision. An attachment without a
+            # valid start receipt (legacy or incomplete history) is never charged anew.
             try:
                 original = started["project"]["journey"]["storyChat"]["imageRequests"][
                     request_id
                 ]
+                snapshot_card = card_in(started["project"])
             except (KeyError, TypeError):
-                original = None
+                original, snapshot_card = None, None
             if (
                 not isinstance(original, dict)
                 or type(original.get("charged")) is not bool
+                or not isinstance(original.get("input_hash"), str)
+                or len(original["input_hash"]) != 64
+                or original.get("card_id") != card_id
+                or snapshot_card is None
             ):
+                if isinstance(original, dict) and original.get("card_id") not in (
+                    None,
+                    card_id,
+                ):
+                    _fail("story_chat_image_request_conflict", 409, field="card_id")
                 _fail("story_chat_image_outcome_unconfirmed", 502)
+            # Same request id, same request: the incoming instruction must reproduce the
+            # original hash against the IMMUTABLE start snapshot (not today's edited card).
+            if (
+                input_hash(started["project"], snapshot_card, instruction)
+                != original["input_hash"]
+            ):
+                _fail("story_chat_image_request_conflict", 409, field="instruction")
         binding = {
             "tenant": scope.tenant_id,
             "owner": scope.owner_id,

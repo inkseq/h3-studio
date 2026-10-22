@@ -263,6 +263,86 @@ class RealCreditImageTests(unittest.TestCase):
         self.assertEqual(self.balance(), (95, 0))
         self.assertEqual(len(self.images.calls), 1)
 
+    def start_receipt(self, request_id, change):
+        """Rewrite (or delete) the stored start receipt to simulate legacy history."""
+        from sqlalchemy import delete
+
+        from studio_platform.guided import receipts
+
+        where = receipts.c.key == "story-chat-image-start-" + request_id
+        with self.repo.transaction() as conn:
+            if change is None:
+                conn.execute(delete(receipts).where(where))
+                return
+            response = conn.execute(
+                select(receipts.c.response).where(where)
+            ).scalar_one()
+            change(
+                response["project"]["journey"]["storyChat"]["imageRequests"][request_id]
+            )
+            conn.execute(update(receipts).where(where).values(response=response))
+
+    def test_attachment_without_a_valid_start_is_never_charged(self):
+        self.assertEqual(self.draw("pic-legacy-001").status_code, 200)
+        self.start_receipt("pic-legacy-001", None)
+        self.policy(True)
+        replay = self.draw("pic-legacy-001")
+        self.assertEqual(replay.status_code, 502, replay.text)
+        self.assertEqual(
+            replay.json()["detail"]["code"], "story_chat_image_outcome_unconfirmed"
+        )
+        self.assertEqual(self.balance(), (100, 0))
+        self.assertEqual(len(self.images.calls), 1)
+
+    def test_start_record_without_a_hash_fails_closed_not_500(self):
+        self.assertEqual(self.draw("pic-nohash-01").status_code, 200)
+        self.start_receipt("pic-nohash-01", lambda record: record.pop("input_hash"))
+        replay = self.draw("pic-nohash-01")
+        self.assertEqual(replay.status_code, 502, replay.text)
+        self.assertEqual(
+            replay.json()["detail"]["code"], "story_chat_image_outcome_unconfirmed"
+        )
+
+    def test_same_id_with_changed_arguments_is_refused(self):
+        self.assertEqual(self.draw("pic-args-0001").status_code, 200)
+        other = self.client.post(
+            self.path,
+            json={
+                "request_id": "pic-args-0001",
+                "card_id": self.zib,
+                "instruction": "bigger eyes",
+            },
+        )
+        self.assertEqual(other.status_code, 409, other.text)
+        self.assertEqual(
+            other.json()["detail"]["code"], "story_chat_image_request_conflict"
+        )
+        mia = self.story["cards"]["characters"][1]["id"]
+        swapped = self.client.post(
+            self.path, json={"request_id": "pic-args-0001", "card_id": mia}
+        )
+        self.assertEqual(swapped.status_code, 409, swapped.text)
+        self.assertEqual(
+            swapped.json()["detail"]["code"], "story_chat_image_request_conflict"
+        )
+        # The original request itself still replays, after later card edits too.
+        current = self.client.get("/v1/projects/" + self.story["project_id"]).json()
+        self.client.post(
+            f"/v1/projects/{self.story['project_id']}/actions",
+            json={
+                "expected_version": current["version"],
+                "actions": [
+                    {
+                        "op": "entity.update",
+                        "entity_id": self.zib,
+                        "patch": {"description": "edited"},
+                    }
+                ],
+            },
+        )
+        self.assertEqual(self.draw("pic-args-0001").status_code, 200)
+        self.assertEqual(len(self.images.calls), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
