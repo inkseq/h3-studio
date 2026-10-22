@@ -248,3 +248,18 @@ gates. Old rows remain readable without adoption. Implement A then B/C/D, markin
 unimplemented scheduling controls explicitly pending. Staging verification and
 Claude acceptance precede any production activation; no new tables or services.
 
+## CR-20261023-55 — story-card image credits reuse the customer ledger
+
+Owner requests implementation of [#463](https://github.com/inkseq/h3-studio/issues/463),
+option2 approved in [6345957205](https://github.com/inkseq/h3-studio/issues/463#issuecomment-6345957205).
+Use the existing immutable price revisions, owner spending lock, credit accounts and
+hold/capture/release entries; no synthetic video jobs, table family, queue or provider.
+Recommend5 credits per image, explicitly published through the audited admin price
+path. Legacy revisions stay unpriced for images; deployment/read does not adopt5.
+Freeze owner/project/card/request/input hash/original actor and price. Capture requires
+a durable owner-bound attachment; release cannot override a committed picture. One
+terminal outcome only, including retries, changed prices and charging subsequently OFF.
+Claude retains the image route/UI and its duplicate-provider-call fencing; Codex owns
+the money primitive. No automatic stale-hold release, production activation or real
+provider call follows from this implementation. Separate integrated staging acceptance
+and Claude sign-off remain required before charged images become usable.

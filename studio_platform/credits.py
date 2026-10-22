@@ -229,7 +229,7 @@ def daily_projection(connection, tenant, owner, now, actor_id=None):
         select(terminal.c.id).where(
             terminal.c.tenant == credit_entries.c.tenant,
             terminal.c.user_id == credit_entries.c.user_id,
-            terminal.c.reference_type == "job",
+            terminal.c.reference_type == credit_entries.c.reference_type,
             terminal.c.reference_id == credit_entries.c.reference_id,
             terminal.c.kind.in_(("capture", "release")),
         )

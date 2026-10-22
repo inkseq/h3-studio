@@ -12,6 +12,7 @@ from .credit_schema import CreditSchemaError, prices, ready
 from .identity_schema import users
 
 DEFAULT_RATES = {"fast": 2, "standard": 4, "refine": 12}
+RECOMMENDED_IMAGE_CREDITS = 5
 DEFAULT_CONFIGURATION = {
     "cost_multiplier": 3,
     "fee_rate": 0.07,
@@ -66,7 +67,18 @@ def _number(value, minimum, maximum):
 def configuration(value):
     if (
         type(value) is not dict
-        or set(value) != set(DEFAULT_CONFIGURATION)
+        or set(value)
+        not in (
+            set(DEFAULT_CONFIGURATION),
+            set(DEFAULT_CONFIGURATION) | {"image_credits"},
+        )
+        or (
+            "image_credits" in value
+            and (
+                type(value["image_credits"]) is not int
+                or not 1 <= value["image_credits"] <= 1_000_000
+            )
+        )
         or not _number(value["cost_multiplier"], 0, 1000)
         or not _number(value["fee_rate"], 0, 1)
         or value["credit_usd"] != 0.01
@@ -120,6 +132,24 @@ def current(connection, tenant):
 def public_prices(connection, tenant):
     value = current(connection, tenant)
     return {key: value[key] for key in ("revision", "rates")}
+
+
+def image_price(connection, tenant):
+    """An explicit audited image price, never a default adopted by a read.
+
+    Legacy immutable configurations are deliberately left without this field.
+    The image route must refuse a charged request when this returns None while
+    charging is enabled; None is not authority to generate for free.
+    """
+    from .credits import credit_policy
+
+    if not credit_policy(connection, tenant)["enabled"]:
+        return None
+    price = current(connection, tenant)
+    amount = price["configuration"].get("image_credits")
+    if amount is None or price["revision"] is None:
+        return None
+    return {"credits": amount, "price_revision": price["revision"]}
 
 
 def admin_margin_estimate(price, catalog):
