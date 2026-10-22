@@ -1,0 +1,25 @@
+/* Release notice (#453): one quiet line above every page while an update is in progress. */
+.maintenance-bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #2a2412;
+  color: #f1d98a;
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: left;
+}
+.maintenance-bar.critical {
+  background: #3a1715;
+  color: #f6c3bd;
+}
+.maintenance-bar svg {
+  flex: none;
+  margin-top: 2px;
+}
+.maintenance-bar em {
+  font-style: normal;
+  opacity: 0.85;
+}

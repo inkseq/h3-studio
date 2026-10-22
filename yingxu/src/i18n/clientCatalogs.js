@@ -26,6 +26,16 @@ export const clientCatalogs = {
       'The signed-in account changed. The old response was not shown or saved. Reopen the current account’s project.',
     'client.contextChanged':
       'The signed-in account changed. The request was blocked and the old account’s draft is retained.',
+    'maintenance.title': 'Inkseq is updating.',
+    'maintenance.until': 'New videos can start again around {time} (your time).',
+    'maintenance.soon': 'New videos can start again shortly.',
+    'maintenance.overdue':
+      'The update is taking longer than expected; this notice clears by itself when it is done.',
+    'maintenance.safe': 'Your stories, files and running jobs are safe.',
+    'errors.maintenance_in_progress':
+      'Inkseq is updating. Nothing was submitted or charged. Try again after {time} (your time).',
+    'errors.maintenance_in_progress_soon':
+      'Inkseq is updating. Nothing was submitted or charged. Try again in a few minutes.',
     'client.capacityDrain':
       'The GPU is sleeping or switching. Nothing was submitted. Check again before generating; your work and references are retained.',
     'client.versionChanged':
@@ -86,6 +96,14 @@ export const clientCatalogs = {
     'client.accountChanged': '登录账户已改变，请重新打开项目。',
     'client.identityChanged': '登录身份已改变。旧账户响应未展示或写入，请重新打开当前账户项目。',
     'client.contextChanged': '登录身份已改变。请求被阻止，旧账户草稿仍保留。',
+    'maintenance.title': '映序正在更新。',
+    'maintenance.until': '预计 {time}（你的当地时间）可以重新开始生成。',
+    'maintenance.soon': '很快就可以重新开始生成。',
+    'maintenance.overdue': '更新比预计的久，完成后这条提示会自动消失。',
+    'maintenance.safe': '你的作品、素材和正在跑的任务都不受影响。',
+    'errors.maintenance_in_progress':
+      '映序正在更新，这次没有提交也没有扣费。请在 {time}（你的当地时间）之后再试。',
+    'errors.maintenance_in_progress_soon': '映序正在更新，这次没有提交也没有扣费。请几分钟后再试。',
     'client.capacityDrain':
       'GPU 正在休眠或切换，任务尚未提交。请重新检查后生成；作品和素材已保留。',
     'client.versionChanged': '云端版本已改变。你的草稿已保留，请先比较新版本。',

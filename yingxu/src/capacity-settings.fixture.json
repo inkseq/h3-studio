@@ -1,0 +1,216 @@
+{
+ "version": 1,
+ "value": {
+  "test_task_limit_microusd": 20000000,
+  "max_hourly_price_microusd": 850000,
+  "fleet_hourly_limit_microusd": 850000,
+  "idle_shutdown_seconds": 600,
+  "max_runtime_seconds": 7200
+ },
+ "adopted": false,
+ "test_budget_scope": "acceptance_task",
+ "tenant_daily_supplier_spending": {
+  "status": "policy_not_adopted",
+  "limit_microusd": null,
+  "warning_fraction": 0.8,
+  "timezone": "Australia/Sydney",
+  "period_start": 1792674000,
+  "resets_at": 1792760400,
+  "settled_microusd": 0,
+  "committed_microusd": 0,
+  "pending_microusd": 0,
+  "projected_microusd": null,
+  "unresolved_count": 2,
+  "details": [
+   {
+    "code": "external_obligation_unconfirmed",
+    "reference_type": "job",
+    "reference_id": "job-1",
+    "field": "reference_type"
+   },
+   {
+    "code": "external_obligation_unconfirmed",
+    "reference_type": "job",
+    "reference_id": "job-1",
+    "field": "reference_type"
+   }
+  ],
+  "confirmed_exposure_microusd": 0
+ },
+ "capacity_policy": {
+  "adopted": false,
+  "adoption_state": "legacy_unadopted",
+  "capacity_policy_version": null,
+  "defaults": {
+   "capacity_policy_version": 1,
+   "tenant_daily_limit_microusd": 100000000,
+   "tenant_daily_warning_fraction": 0.8,
+   "fleet_hourly_limit_microusd": 3000000,
+   "mode_hourly_ceiling_microusd": {
+    "ref": 1500000,
+    "fl": 850000,
+    "other": 850000
+   },
+   "max_hourly_price_microusd": 1000000,
+   "max_machines": 2,
+   "idle_shutdown_seconds": 600,
+   "max_runtime_seconds": 7200,
+   "test_task_limit_microusd": 20000000,
+   "idle_active_seconds": 1500,
+   "idle_quiet_seconds": 300,
+   "interactive_activity_window_seconds": 1800,
+   "interactive_wait_target_seconds": 180,
+   "batch_start_target_seconds": 600,
+   "batch_guaranteed_share_slots": {
+    "numerator": 1,
+    "denominator": 4
+   },
+   "per_user_machine_share_policy": "equal_active_users",
+   "per_user_minimum_machine_share": 1
+  },
+  "field_bounds": {
+   "tenant_daily_limit_microusd": {
+    "minimum": 1000000,
+    "maximum": 1000000000
+   },
+   "tenant_daily_warning_fraction": {
+    "minimum": 0.5,
+    "maximum": 0.95
+   },
+   "fleet_hourly_limit_microusd": {
+    "minimum": 100000,
+    "maximum": 40000000
+   },
+   "max_hourly_price_microusd": {
+    "minimum": 100000,
+    "maximum": 5000000
+   },
+   "max_machines": {
+    "minimum": 1,
+    "maximum": 8
+   },
+   "idle_shutdown_seconds": {
+    "minimum": 1,
+    "maximum": 86400
+   },
+   "max_runtime_seconds": {
+    "minimum": 300,
+    "maximum": 14400
+   },
+   "test_task_limit_microusd": {
+    "minimum": 1000000,
+    "maximum": 20000000
+   },
+   "idle_active_seconds": {
+    "minimum": 60,
+    "maximum": 3600
+   },
+   "idle_quiet_seconds": {
+    "minimum": 60,
+    "maximum": 1800
+   },
+   "interactive_activity_window_seconds": {
+    "minimum": 60,
+    "maximum": 7200
+   },
+   "interactive_wait_target_seconds": {
+    "minimum": 30,
+    "maximum": 1800
+   },
+   "batch_start_target_seconds": {
+    "minimum": 60,
+    "maximum": 7200
+   },
+   "per_user_minimum_machine_share": {
+    "minimum": 1,
+    "maximum": 8
+   },
+   "mode_hourly_ceiling_microusd": {
+    "fields": {
+     "ref": {
+      "minimum": 100000,
+      "maximum": 5000000
+     },
+     "fl": {
+      "minimum": 100000,
+      "maximum": 5000000
+     },
+     "other": {
+      "minimum": 100000,
+      "maximum": 5000000
+     }
+    }
+   },
+   "batch_guaranteed_share_slots": {
+    "numerator_minimum": 1,
+    "denominator_minimum": 2,
+    "denominator_maximum": 16
+   },
+   "per_user_machine_share_policy": {
+    "allowed": [
+     "equal_active_users"
+    ]
+   }
+  },
+  "controls": {
+   "tenant_daily_limit_microusd": {
+    "pending_implementation": false
+   },
+   "tenant_daily_warning_fraction": {
+    "pending_implementation": false
+   },
+   "fleet_hourly_limit_microusd": {
+    "pending_implementation": false
+   },
+   "mode_hourly_ceiling_microusd": {
+    "pending_implementation": false
+   },
+   "max_hourly_price_microusd": {
+    "pending_implementation": false
+   },
+   "max_machines": {
+    "pending_implementation": false
+   },
+   "idle_shutdown_seconds": {
+    "pending_implementation": false
+   },
+   "max_runtime_seconds": {
+    "pending_implementation": false
+   },
+   "test_task_limit_microusd": {
+    "pending_implementation": false
+   },
+   "idle_active_seconds": {
+    "pending_implementation": true
+   },
+   "idle_quiet_seconds": {
+    "pending_implementation": true
+   },
+   "interactive_activity_window_seconds": {
+    "pending_implementation": true
+   },
+   "interactive_wait_target_seconds": {
+    "pending_implementation": true
+   },
+   "batch_start_target_seconds": {
+    "pending_implementation": true
+   },
+   "batch_guaranteed_share_slots": {
+    "pending_implementation": true
+   },
+   "per_user_machine_share_policy": {
+    "pending_implementation": true
+   },
+   "per_user_minimum_machine_share": {
+    "pending_implementation": true
+   }
+  },
+  "latest_changes": {
+   "test_task_limit_microusd": {
+    "actor_id": "browser:qa-admin",
+    "observed_at": 1792465679,
+    "reason": null
+   }
+  }
+ }
+}

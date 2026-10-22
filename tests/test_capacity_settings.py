@@ -30,15 +30,69 @@ class CapacityPolicyTests(unittest.TestCase):
     def test_legacy_read_and_snapshot_never_adopt_or_mutate(self):
         old = self.legacy(max_runtime_seconds=86400)
         before = copy.deepcopy(old)
-        self.assertFalse(capacity.metadata(old)["adopted"])
+        metadata = capacity.metadata(old)
+        self.assertFalse(metadata["adopted"])
+        self.assertEqual(metadata["defaults"]["max_hourly_price_microusd"], 1_500_000)
         self.assertIsNone(capacity.admission_snapshot(old))
         self.assertEqual(old, before)
         preview = capacity.preview_change(
             old, {"fleet_hourly_limit_microusd": 3_000_000}, {}
         )
         self.assertEqual(preview["value"]["max_runtime_seconds"], 86400)
+        self.assertEqual(preview["value"]["max_hourly_price_microusd"], 1_000_000)
         self.assertTrue(preview["confirmation_required"])
         self.assertEqual(old, before)
+
+    def test_recommended_machine_ceiling_matches_ref_without_adopting(self):
+        old = {"version": 0, "value": {}}
+        preview = capacity.preview_change(old, {}, {})
+        self.assertEqual(preview["value"]["max_hourly_price_microusd"], 1_500_000)
+        self.assertFalse(capacity.metadata(old)["adopted"])
+        self.assertEqual(old, {"version": 0, "value": {}})
+        self.assertNotIn(
+            "mode_ceiling_above_machine_ceiling",
+            {item["code"] for item in preview["consequences"]},
+        )
+
+    def test_lower_machine_ceiling_warns_once_per_mode_and_still_constrains(self):
+        profiles = {
+            name: {"mode": "ref", "price_ceiling_microusd": 2_000_000}
+            for name in ("ref-a", "ref-b")
+        }
+        preview = capacity.preview_change(self.legacy(), {}, profiles)
+        self.assertEqual(
+            [
+                item
+                for item in preview["consequences"]
+                if item["code"] == "mode_ceiling_above_machine_ceiling"
+            ],
+            [
+                {
+                    "code": "mode_ceiling_above_machine_ceiling",
+                    "mode": "ref",
+                    "mode_hourly_microusd": 1_500_000,
+                    "machine_hourly_microusd": 1_000_000,
+                }
+            ],
+        )
+        combination = next(
+            item
+            for item in preview["consequences"]
+            if item["code"] == "fleet_limits_combination"
+        )
+        self.assertEqual(combination["required_hourly_microusd"], 2_000_000)
+        self.assertEqual(preview["value"]["max_hourly_price_microusd"], 1_000_000)
+
+    def test_profile_ceiling_still_constrains_higher_recommended_machine_cap(self):
+        profiles = {"ref": {"mode": "ref", "price_ceiling_microusd": 850_000}}
+        preview = capacity.preview_change({"version": 0, "value": {}}, {}, profiles)
+        combination = next(
+            item
+            for item in preview["consequences"]
+            if item["code"] == "fleet_allows_combination"
+        )
+        self.assertEqual(combination["hourly_microusd"], 1_700_000)
+        self.assertEqual(preview["profile_snapshots"], profiles)
 
     def test_invalid_changes_have_finite_field_diagnostics(self):
         for field, value in (
@@ -82,6 +136,7 @@ class CapacityPolicyTests(unittest.TestCase):
                 "admitted_work_may_exceed_daily_limit",
                 "fleet_limits_combination",
                 "mode_price_ceiling",
+                "mode_ceiling_above_machine_ceiling",
                 "setting_next_admission_only",
                 "control_pending_implementation",
             },
@@ -222,8 +277,16 @@ class CapacityRouteTests(unittest.TestCase):
         before = self.money_counts()
         old = self.client.get(PATH).json()
         self.assertFalse(old["capacity_policy"]["adopted"])
+        self.assertEqual(
+            old["capacity_policy"]["defaults"]["max_hourly_price_microusd"],
+            1_500_000,
+        )
+        self.assertEqual(old["value"]["max_hourly_price_microusd"], 1_000_000)
         preview = self.preview()
-        self.assertFalse(self.client.get(PATH).json()["capacity_policy"]["adopted"])
+        after_preview = self.client.get(PATH).json()
+        self.assertFalse(after_preview["capacity_policy"]["adopted"])
+        self.assertEqual(after_preview["version"], old["version"])
+        self.assertEqual(after_preview["value"], old["value"])
         with self.app.state.repository.engine.connect() as c:
             self.assertEqual(
                 c.scalar(select(func.count()).select_from(spending_settings)), 0

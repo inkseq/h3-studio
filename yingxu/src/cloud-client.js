@@ -1,6 +1,7 @@
 /* Same-origin application API only. This module never holds provider credentials. */
 import { readLocale, translate } from './i18n/locale.js';
 import { CREDITS_CHANGED, INSUFFICIENT_CREDITS, insufficientCredits } from './credits.js';
+import { MAINTENANCE_CHANGED, formatEnd, maintenanceRefusal } from './maintenance-notice.js';
 // The credits chip and the not-enough-credits prompt listen for these (h3-studio#306).
 function announce(type, detail) {
   if (typeof globalThis.dispatchEvent === 'function' && typeof CustomEvent === 'function')
@@ -290,9 +291,18 @@ export function createCloudClient({
           ].includes(detail?.code)
             ? 'errors.' + detail.code
             : null;
-          const localized = budgetKey
-            ? translate(uiLocale(expectedAccount), budgetKey)
-            : detail?.messages?.[uiLocale(expectedAccount)] || reason;
+          // A release window refuses new work with its end time (#453): say when, and let the
+          // banner re-check now instead of at its next poll.
+          const maintenance = maintenanceRefusal(detail);
+          if (maintenance) announce(MAINTENANCE_CHANGED, maintenance);
+          const until = maintenance && formatEnd(maintenance.endsAt, uiLocale(expectedAccount));
+          const localized = maintenance
+            ? until
+              ? ui('errors.maintenance_in_progress', expectedAccount, { time: until })
+              : ui('errors.maintenance_in_progress_soon', expectedAccount)
+            : budgetKey
+              ? translate(uiLocale(expectedAccount), budgetKey)
+              : detail?.messages?.[uiLocale(expectedAccount)] || reason;
           throw new CloudError(localized, { status: response.status, detail });
         }
         const result = blob
