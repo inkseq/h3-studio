@@ -1,3 +1,4 @@
+import { asPreviewed } from './preview-as-user.js';
 import React, { useEffect, useState } from 'react';
 import { Server } from 'lucide-react';
 import { createOperatorClient } from './operator-client.js';
@@ -19,7 +20,7 @@ export default function OperatorEntry({ account, className = '' }) {
         if (
           active &&
           (value.username || value.account) === account &&
-          value.operator_capacity?.view === true
+          asPreviewed(value).operator_capacity?.view === true
         )
           setVisible(true);
       })

@@ -1,3 +1,4 @@
+import { asPreviewed, previewingAsUser } from './preview-as-user.js';
 // What the signed-in account may see in the shared header (h3-studio#304 / #328).
 // The backend still enforces every route; this only hides navigation the account cannot use.
 // One cached /api/auth/me read per page load; a failed or anonymous read shows nothing privileged.
@@ -17,9 +18,14 @@ export function readAccess(fetcher = globalThis.fetch) {
   return pending;
 }
 
-export function accessFrom(me) {
-  const operator = me?.operator_capacity || {};
+export function accessFrom(record) {
+  const realAdmin = !record?.machine && record?.operator_capacity?.admin === true,
+    me = asPreviewed(record),
+    operator = me?.operator_capacity || {};
   return {
+    // An admin can switch this tab to what a regular user sees (preview-as-user.js).
+    canPreview: realAdmin,
+    previewing: realAdmin && previewingAsUser(),
     signedIn: Boolean(me && (me.username || me.account)),
     displayName: displayName(me),
     email: typeof me?.email === 'string' ? me.email : null,
