@@ -285,6 +285,42 @@ class StoryChatTests(unittest.TestCase):
         self.assertEqual(after["version"], first["version"] + 1)
         self.assertEqual(len(after["messages"]), 2)
 
+    def test_full_project_save_during_the_call_is_not_overwritten(self):
+        chat = self.start()
+        first = self.turn(chat, "aliens").json()
+        zib = first["cards"]["characters"][0]["id"]
+
+        def save():
+            current = self.client.get(f"/v1/projects/{chat['project_id']}").json()
+            project = current["project"]
+            card = next(e for e in project["entities"] if e["id"] == zib)
+            # A browser save changes content without bumping the nested entity version.
+            card["title"], card["description"] = "USER via PUT", "user blue coat"
+            r = self.client.put(
+                f"/v1/projects/{chat['project_id']}",
+                json={"project": project, "expected_version": current["version"]},
+            )
+            self.assertEqual(r.status_code, 200, r.text)
+
+        self.model.during = save
+        plan = {
+            "reply": "Renamed.",
+            "actions": [
+                {
+                    "tool": "upsert_character",
+                    "ref": zib,
+                    "name": "Model",
+                    "description": "model",
+                }
+            ],
+        }
+        response = self.turn(chat, "rename", turn_id="turn-0014", plan=plan)
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual(response.json()["detail"]["code"], "story_chat_card_changed")
+        after = self.client.get(f"/v1/story-chats/{chat['project_id']}").json()
+        self.assertEqual(after["cards"]["characters"][0]["name"], "USER via PUT")
+        self.assertEqual(after["cards"]["characters"][0]["text"], "user blue coat")
+
     def test_text_only_shot_edit_keeps_length_cast_place_and_props(self):
         chat = self.start()
         first = self.turn(chat, "aliens").json()

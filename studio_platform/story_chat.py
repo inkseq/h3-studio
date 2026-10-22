@@ -11,6 +11,7 @@ proposal is advice the user confirms through the existing generation routes.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import re
 import uuid
@@ -255,11 +256,29 @@ def _unique(ids):
     return ids
 
 
+def _digest(value):
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, ensure_ascii=False, default=str).encode()
+    ).hexdigest()
+
+
 def snapshot(project):
-    """Versions of what the model saw, to detect a concurrent edit of the same card."""
-    versions = {e["id"]: e["version"] for e in project["entities"]}
-    versions["project"] = (project.get("title"), project.get("logline", ""))
-    return versions
+    """Content digests of what the model saw, to detect a concurrent edit of the same card.
+
+    Bound to the card's actual content, not its nested version: a full-project browser
+    save can change a title or description without bumping that version.
+    """
+    digests = {
+        e["id"]: _digest(
+            {
+                k: e.get(k)
+                for k in ("type", "parentId", "title", "description", "order", "data")
+            }
+        )
+        for e in project["entities"]
+    }
+    digests["project"] = _digest([project.get("title"), project.get("logline", "")])
+    return digests
 
 
 def apply_plan(project, chat, plan):
