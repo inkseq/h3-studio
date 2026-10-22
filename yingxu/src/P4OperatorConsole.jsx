@@ -56,12 +56,28 @@ import {
   time,
   todayMetrics,
   workspaceStale,
+  choiceOf,
+  defaultIdleMinutes,
+  engineVersion,
+  profileChoices,
+  sameEngineInMode,
 } from './p4-operator-model.js';
 import { useAppLocation, usePageActive } from './AppRouteCache.jsx';
 import { navigateApp } from './app-navigation.js';
 import './v2/ops-adapter.css';
 
 const quiet = (promise) => promise.catch(() => {});
+// The service's launch refusals are codes; say what to do about the two common ones.
+const LAUNCH_HELP = {
+  dstack_no_compatible_offers: 'operator.error.noOffers',
+  dstack_no_compatible_host_offers: 'operator.error.noOffers',
+  dstack_execution_policy_unconfirmed: 'operator.error.policyUnconfirmed',
+};
+const launchError = (error, t) => {
+  const code = error?.detail?.code || error?.code || String(error?.message || '').trim();
+  const key = LAUNCH_HELP[code];
+  return key ? t(key) : error?.message || String(error);
+};
 const label = (profile, locale = 'zh') =>
   profile?.label || profile?.model_id || translate(locale, 'operator.more.modelPending');
 const localFuture = () => {
@@ -139,13 +155,30 @@ function KeepFields({ value, onChange }) {
             type="button"
             key={key}
             aria-pressed={value.keep_on === key}
-            onClick={() => onChange({ ...value, keep_on: key })}
+            onClick={() =>
+              onChange({
+                ...value,
+                keep_on: key,
+                idle_minutes: defaultIdleMinutes(key, value.until),
+              })
+            }
           >
             {text}
           </button>
         ))}
       </div>
       <div className="p4-policy-extra">
+        {value.keep_on === 'until' && (
+          <label>
+            {t('operator.copy49')}
+            <input
+              aria-label={t('operator.status2')}
+              type="datetime-local"
+              value={value.until}
+              onChange={(event) => onChange({ ...value, until: event.target.value })}
+            />
+          </label>
+        )}
         {value.keep_on !== 'until_stopped' && (
           <label>
             {t('operator.copy47')}
@@ -160,18 +193,18 @@ function KeepFields({ value, onChange }) {
             {t('operator.copy48')}
           </label>
         )}
-        {value.keep_on === 'until' && (
-          <label>
-            {t('operator.copy49')}
-            <input
-              aria-label={t('operator.status2')}
-              type="datetime-local"
-              value={value.until}
-              onChange={(event) => onChange({ ...value, until: event.target.value })}
-            />
-          </label>
-        )}
-        {value.keep_on === 'until_stopped' && <small>{t('operator.copy50')}</small>}
+        {/* Both limits apply: whichever comes first stops the machine. Saying so here stops
+            people setting "keep until 21:00" and losing the machine to the 10-minute idle. */}
+        <small className="p4-policy-note">
+          {t(
+            value.keep_on === 'until'
+              ? 'operator.keepNote.until'
+              : value.keep_on === 'idle'
+                ? 'operator.keepNote.idle'
+                : 'operator.copy50',
+            { minutes: value.idle_minutes },
+          )}
+        </small>
       </div>
     </>
   );
@@ -502,6 +535,7 @@ function StartDialog({
     [working, setWorking] = useState(false),
     [error, setError] = useState(''),
     [confirmed, setConfirmed] = useState(false);
+  const choices = useMemo(() => profileChoices(profiles), [profiles]);
   const expanded = priceRows(rows, profiles, batchRows(rows, profiles)),
     maxRate = expanded?.reduce((sum, item) => sum + item.max_price_microusd, 0),
     count = expanded?.length || 0;
@@ -564,7 +598,7 @@ function StartDialog({
       }
       setPreviews(next);
     } catch (error) {
-      if (alive.current) setError(error.message);
+      if (alive.current) setError(launchError(error, t));
     } finally {
       if (alive.current) setWorking(false);
     }
@@ -691,6 +725,8 @@ function StartDialog({
             </div>
             {rows.map((row, index) => {
               const selected = profiles.find((profile) => profile.id === row.profile_id),
+                choice = choiceOf(choices, row.profile_id),
+                engines = choice?.engines || [],
                 price = profilePrice(selected),
                 priceText =
                   row.price_caps?.[row.profile_id] ?? usdInput(selected?.max_price_microusd);
@@ -725,57 +761,52 @@ function StartDialog({
                     </div>
                   </header>
                   <div className="p4-configfields">
-                    <label>
+                    <label className="p4-field-wide">
                       {t('operator.copy71')}
                       <select
                         aria-label={t('operator.more.configModel', { index: index + 1 })}
-                        value={row.profile_id}
-                        onChange={(event) => edit(row.id, { profile_id: event.target.value })}
-                      >
-                        {profiles.map((profile) => (
-                          <option key={profile.id} value={profile.id}>
-                            {label(profile, locale)} · {dstackProvider(profile.backend)} ·{' '}
-                            {profile.gpu_names.join('/')} · {modeLabel(profile.mode, locale)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      {t('operator.copy72')}
-                      <select
-                        aria-label={t('operator.more.configMode', { index: index + 1 })}
-                        value={selected?.mode || ''}
+                        value={choice ? choice.group.key : ''}
                         onChange={(event) => {
-                          const choice = profiles.find(
-                            (profile) =>
-                              profile.model_id === selected.model_id &&
-                              profile.backend === selected.backend &&
-                              profile.gpu_names.join() === selected.gpu_names.join() &&
-                              profile.mode === event.target.value,
-                          );
-                          if (choice) edit(row.id, { profile_id: choice.id });
+                          const group = choices.find((item) => item.key === event.target.value);
+                          const list =
+                            group?.modes.get(selected?.mode) ||
+                            [...(group?.modes.values() || [])][0];
+                          if (list?.[0]) edit(row.id, { profile_id: list[0].id });
                         }}
                       >
-                        {['fl', 'ref', 'both'].map((mode) => (
-                          <option
-                            key={mode}
-                            value={mode}
-                            disabled={
-                              !profiles.some(
-                                (profile) =>
-                                  profile.model_id === selected?.model_id &&
-                                  profile.backend === selected?.backend &&
-                                  profile.gpu_names.join() === selected?.gpu_names?.join() &&
-                                  profile.mode === mode,
-                              )
-                            }
-                          >
-                            {modeLabel(mode, locale)}
+                        {choices.map((group) => (
+                          <option key={group.key} value={group.key}>
+                            {label(group.modes.values().next().value[0], locale)} ·{' '}
+                            {group.gpu_names.join('/')}
                           </option>
                         ))}
                       </select>
                     </label>
-                    <label>
+                    <div className="p4-field">
+                      <span className="p4-field-label">{t('operator.copy72')}</span>
+                      <div className="p4-seg" role="group">
+                        {['fl', 'ref'].map((mode) => {
+                          const target = sameEngineInMode(choices, row.profile_id, mode);
+                          return (
+                            <button
+                              key={mode}
+                              type="button"
+                              aria-pressed={selected?.mode === mode}
+                              disabled={!target}
+                              title={
+                                target
+                                  ? modeLabel(mode, locale)
+                                  : t('operator.more.modeUnavailable')
+                              }
+                              onClick={() => target && edit(row.id, { profile_id: target.id })}
+                            >
+                              {t('operator.mode.short.' + mode)}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <label className="p4-field-narrow">
                       {t('operator.copy73')}
                       <input
                         aria-label={t('operator.more.configCount', { index: index + 1 })}
@@ -786,7 +817,7 @@ function StartDialog({
                         onChange={(event) => edit(row.id, { quantity: Number(event.target.value) })}
                       />
                     </label>
-                    <label>
+                    <label className="p4-field-narrow">
                       {t('operator.copy74')}
                       <input
                         aria-label={t('operator.more.configPrice', { index: index + 1 })}
@@ -804,6 +835,35 @@ function StartDialog({
                       <small>{t('operator.more.ceiling', { price: money(price?.ceiling) })}</small>
                     </label>
                   </div>
+                  {/* Same model and GPU can exist as several engine builds; only the newest
+                      usually has a current execution policy, so older ones fail at launch. */}
+                  {engines.length > 1 && (
+                    <details className="p4-engine">
+                      <summary>
+                        {t('operator.more.engine', {
+                          version: engineVersion(selected) || '—',
+                        })}
+                      </summary>
+                      <div className="p4-engine-list">
+                        {engines.map((profile, position) => (
+                          <button
+                            key={profile.id}
+                            type="button"
+                            aria-pressed={profile.id === row.profile_id}
+                            onClick={() => edit(row.id, { profile_id: profile.id })}
+                          >
+                            v{engineVersion(profile) || '?'}
+                            {position === 0 && (
+                              <small className="p4-engine-tag">
+                                {t('operator.more.engineNewest')}
+                              </small>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                      <small>{t('operator.more.engineHelp')}</small>
+                    </details>
+                  )}
                   <small>
                     {selected && (
                       <>
