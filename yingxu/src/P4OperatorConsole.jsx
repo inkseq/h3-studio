@@ -2136,7 +2136,12 @@ export default function P4OperatorConsole() {
                           {dstackProvider(node.provider)} · {modeLabel(node.mode, locale)}
                         </b>
                         <small className="muted">
-                          {elapsed(node.usage?.runtime_seconds, locale)} ·{' '}
+                          {/* When it ran comes first: an old rental read as today's is what
+                              made the owner think a running machine had been stopped. */}
+                          {finite(node.preparation?.started_at)
+                            ? time(node.preparation.started_at, locale)
+                            : t('operator.status15')}{' '}
+                          · {elapsed(node.usage?.runtime_seconds, locale)} ·{' '}
                           {money(node.usage?.total_cost_microusd)} ·{' '}
                           {costLabel(node.usage?.cost_basis, locale)}
                         </small>
