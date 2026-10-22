@@ -75,7 +75,7 @@ export function fromServer(view, labels = {}) {
     });
     // Suggested card pictures: a confirm card each; the id is stable, so a replay never
     // draws or charges twice.
-    if (message === latest)
+    if (message === latest && labels.picturesEnabled !== false)
       for (const card of message.proposal?.picture_card_ids || []) {
         const id = `pic-${message.id.slice(-14)}-${card.slice(-14)}`.replace(/[^A-Za-z0-9_-]/g, '');
         const name = cards.find((item) => item.id === card)?.name || '';
@@ -125,13 +125,14 @@ export function createLiveChat({
   labels,
   onProject,
   imageCredits = null,
+  picturesEnabled = true,
 }) {
   let project = projectId,
     view = null;
   const settled = {};
   const load = (value, emit, fresh = []) => {
     view = value;
-    const state = fromServer(value, { ...labels, imageCredits });
+    const state = fromServer(value, { ...labels, imageCredits, picturesEnabled });
     for (const [id, status] of Object.entries(settled))
       if (state.quotes[id]) state.quotes[id] = { ...state.quotes[id], status };
     emit({ type: 'chat.loaded', state, fresh });
@@ -153,6 +154,10 @@ export function createLiveChat({
     // The admin-set picture price, read from /v1/story-chats/config when the server has it.
     set imageCredits(value) {
       imageCredits = value;
+    },
+    // Picture suggestions are hidden while an admin has pictures switched off.
+    set picturesEnabled(value) {
+      picturesEnabled = value;
     },
     async open(emit) {
       if (!project) return;
