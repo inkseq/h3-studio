@@ -351,9 +351,14 @@ def apply_plan(project, chat, plan):
             if creating or "seconds" in item:
                 data["seconds"] = _seconds(item.get("seconds", 5))
             if creating or "cast" in item:
-                data["cast"] = _unique(
-                    [resolve(r, {"character"}) for r in item.get("cast") or []]
-                )
+                # The binding shape Works reads; an empty lookId uses the default look.
+                data["cast"] = [
+                    {"characterId": ident, "lookId": ""}
+                    for ident in _unique(
+                        [resolve(r, {"character"}) for r in item.get("cast") or []]
+                    )
+                ]
+
             board = {}
             if creating or "place" in item:
                 place = item.get("place")

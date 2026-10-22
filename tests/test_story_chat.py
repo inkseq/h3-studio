@@ -186,6 +186,11 @@ class StoryChatTests(unittest.TestCase):
         self.assertEqual(shot["data"]["prompt"], "They touch hands.")
         self.assertEqual(shot["data"]["storyboard"]["mode"], "ref")
         self.assertEqual(shot["data"]["seconds"], 6)
+        # Works reads character/look bindings, not bare ids.
+        self.assertEqual(
+            shot["data"]["cast"],
+            [{"characterId": mia, "lookId": ""}, {"characterId": zib, "lookId": ""}],
+        )
 
     def test_replayed_turn_does_not_call_the_model_again(self):
         chat = self.start()
