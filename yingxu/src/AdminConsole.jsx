@@ -2,6 +2,7 @@
 // Port of prototype account.jsx AdminPanel. The backend enforces require_admin on every route;
 // a tab whose endpoint is not deployed yet says so instead of failing.
 import React, { useEffect, useMemo, useState } from 'react';
+import StoryChatAdminSwitch from './StoryChatAdminSwitch.jsx';
 import { History, ShieldCheck, TrendingUp, Users } from 'lucide-react';
 import { createCloudClient } from './cloud-client.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -403,7 +404,12 @@ export default function AdminConsole({ account, active, testMachines }) {
         ))}
       </div>
       {tab === 'users' && <AdminUsers api={api} active={active} />}
-      {tab === 'pricing' && <AdminPricing api={api} active={active} />}
+      {tab === 'pricing' && (
+        <>
+          <StoryChatAdminSwitch api={api} active={active} />
+          <AdminPricing api={api} active={active} />
+        </>
+      )}
       {tab === 'machines' && testMachines}
       {tab === 'audit' && <AdminAudit api={api} active={active} />}
     </div>

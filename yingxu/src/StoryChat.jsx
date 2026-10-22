@@ -406,6 +406,8 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
     return client;
   }, [account]);
   const [unavailable, setUnavailable] = useState('');
+  // Admin switch (#466): card pictures only when the server says they are on.
+  const [picturesOn, setPicturesOn] = useState(!live);
   // The story this chat edits: the address's id at first, then whatever the client created.
   const story = useRef(projectId);
   const [session, setSession] = useState(0);
@@ -499,6 +501,8 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
       .then((config) => {
         if (!alive) return;
         if (Number.isSafeInteger(config.image_credits)) client.imageCredits = config.image_credits;
+        setPicturesOn(config.pictures_enabled === true);
+        client.picturesEnabled = config.pictures_enabled === true;
         if (!config.enabled || !config.assistant_ready) setUnavailable(t('storyChat.notReady'));
         else {
           void refreshStories();
@@ -856,7 +860,7 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
               card={open}
               profiles={profiles}
               busy={state.busy}
-              canDraw
+              canDraw={picturesOn}
               onEdit={edit}
               onPicture={(card) => {
                 setOpenId(null);
