@@ -66,6 +66,10 @@ actions in the same turn may reuse):
    (new shots go at the end unless "after" names a shot; "after":null puts it first)
 {"tool":"remove_card","ref":string}
 {"tool":"propose_generate","shots":[refs] or ["all"]}
+{"tool":"propose_new_story","idea":string}
+   (when the person asks for a different, unrelated story: do NOT change this story's cards;
+   propose a new story with their idea and say it will open in a new chat. Only rework this
+   story when they clearly want to change or replace it)
 {"tool":"propose_image","ref":string}
    (only when the person asks to draw or redraw a character, place or prop picture; the
    person confirms it and it costs credits: say they can review and confirm it, never that
@@ -342,6 +346,7 @@ def apply_plan(project, chat, plan):
     shots = [s["id"] for s in shots_of(project, chat)]
     removed = set()
     pictures = []  # cards the person may confirm a picture for (advice only)
+    new_story = None  # an idea for a separate story the person may start (advice only)
     touched = set()  # existing cards (and "project" for the title) this plan writes
 
     def resolve(ref, kinds):
@@ -507,6 +512,8 @@ def apply_plan(project, chat, plan):
             if ident in shots:
                 shots.remove(ident)
             changes.append({"kind": lookup[ident]["type"], "op": "delete", "id": ident})
+        elif tool == "propose_new_story":
+            new_story = _text(item.get("idea"), 1000)
         elif tool == "propose_image":
             ident = resolve(item.get("ref"), {"character", "location", "prop"})
             pictures.append(ident)
@@ -543,6 +550,11 @@ def apply_plan(project, chat, plan):
     if proposal:
         proposal["shot_ids"] = [s for s in proposal["shot_ids"] if s not in removed]
         proposal = proposal if proposal["shot_ids"] else None
+    if new_story:
+        proposal = {
+            **(proposal or {"kind": "new_story", "shot_ids": []}),
+            "new_story": new_story,
+        }
     pictures = [c for c in dict.fromkeys(pictures) if c not in removed][:4]
     if pictures:
         # Picture proposals ride on the same advice-only proposal field.

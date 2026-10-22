@@ -507,6 +507,39 @@ class StoryChatTests(unittest.TestCase):
         ]
         self.assertFalse(any(e["type"] == "image" for e in project["entities"]))
 
+    def test_a_different_story_is_proposed_not_mixed_in(self):
+        chat = self.start()
+        first = self.turn(chat, "aliens").json()
+        plan = {
+            "reply": "That sounds like a new story; open it in a new chat?",
+            "actions": [
+                {"tool": "propose_new_story", "idea": "A fox who cannot sleep"}
+            ],
+        }
+        value = self.turn(
+            chat, "now a story about a fox", turn_id="turn-0030", plan=plan
+        ).json()
+        self.assertEqual(
+            value["turn"]["proposal"]["new_story"], "A fox who cannot sleep"
+        )
+        self.assertEqual(value["cards"], first["cards"])
+        self.assertEqual(value["title"], first["title"])
+
+    def test_story_list_shows_only_my_story_chats_newest_first(self):
+        older = self.start()
+        self.client.post("/v1/projects", json={"title": "Plain project"})
+        newer = self.client.post("/v1/story-chats", json={"language": "en"}).json()
+        self.turn(older, "aliens")
+        listed = self.client.get("/v1/story-chats").json()["story_chats"]
+        self.assertEqual(
+            [c["project_id"] for c in listed],
+            [older["project_id"], newer["project_id"]],
+        )
+        self.assertEqual(listed[0]["title"], "First Contact")
+        self.client.post("/api/auth/logout")
+        self.login("supervan")
+        self.assertEqual(self.client.get("/v1/story-chats").json()["story_chats"], [])
+
     def test_model_failure_writes_nothing(self):
         chat = self.start()
         self.model.plans.append(ChatError("upstream_timeout", "timeout", 502))

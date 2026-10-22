@@ -1073,6 +1073,7 @@ class Repository:
         allowed_ids=None,
         summary=False,
         exclude_managed=False,
+        story_chat=False,
     ):
         """Project catalogs can read metadata without materializing every draft.
 
@@ -1119,13 +1120,21 @@ class Repository:
             statement = statement.where(or_(marker.is_(None), marker != "quick_chat"))
         if allowed is not None:
             statement = statement.where(documents.c.document_id.in_(allowed))
+        order = (documents.c.document_id,)
+        if story_chat:
+            # Story chats (#422): projects carrying journey.storyChat, newest first.
+            if kind != "project":
+                raise ValueError("invalid_document_summary")
+            statement = statement.where(
+                documents.c.payload[("journey", "storyChat", "version")].as_integer()
+                == 1
+            )
+            order = (documents.c.updated_at.desc(), documents.c.document_id)
         with self.engine.connect() as connection:
             values = [
                 dict(r)
                 for r in connection.execute(
-                    statement.order_by(documents.c.document_id)
-                    .limit(limit)
-                    .offset(offset)
+                    statement.order_by(*order).limit(limit).offset(offset)
                 ).mappings()
             ]
         if summary:

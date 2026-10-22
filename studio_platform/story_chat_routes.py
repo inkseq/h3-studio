@@ -119,6 +119,31 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             "max_turns": MAX_TURNS,
         }
 
+    @app.get("/v1/story-chats")
+    def list_story_chats(request: Request, limit: int = 50):
+        principal = principal_of(request)
+        if type(limit) is not int or not 1 <= limit <= 100:
+            _fail("story_chat_invalid", 422, field="limit")
+        rows = app.state.repository.list_documents(
+            app.state.generation_access.project_scope(principal),
+            "project",
+            limit=limit,
+            summary=True,
+            exclude_managed=True,
+            story_chat=True,
+        )
+        return {
+            "story_chats": [
+                {
+                    "project_id": row["document_id"],
+                    "title": row["payload"]["title"],
+                    "version": row["version"],
+                    "updated_at": row["updated_at"],
+                }
+                for row in rows
+            ]
+        }
+
     @app.post("/v1/story-chats", status_code=201)
     def create_story_chat(request: Request, body: dict | None = None):
         principal = principal_of(request)
