@@ -3,19 +3,27 @@ import React, { useEffect, useState } from 'react';
 import { Cpu, Images, LayoutGrid, MessageSquare, Settings2, Trash2 } from 'lucide-react';
 import { LanguageSwitcher, useI18n } from './i18n/I18nProvider.jsx';
 import { navigateApp } from './app-navigation.js';
-import { accountLabel, readAccess, resetAccess } from './account-access.js';
+import { accountLabel, readAccess, readAccessFor } from './account-access.js';
 import { CreditsChip } from './CreditsUI.jsx';
 import AccountMenu from './AccountMenu.jsx';
 import InkMark from './InkMark.jsx';
 import { dailyInkMark } from './ink-mark-daily.js';
+
+// Reads the account's access once; if a signed-in read came back empty (busy server), asks once
+// more shortly after instead of leaving "My account" in place of the name.
+function loadAccess(account, apply) {
+  readAccessFor(account).then((value) => {
+    apply(value);
+    if (account && !value.signedIn) setTimeout(() => readAccessFor(account).then(apply), 1500);
+  });
+}
 
 // What the signed-in account may see (role, sign-in method, credits); re-read when it changes.
 export function useAccess(account) {
   const [access, setAccess] = useState(null);
   useEffect(() => {
     let live = true;
-    if (account) resetAccess();
-    readAccess().then((value) => live && setAccess(value));
+    loadAccess(account, (value) => live && setAccess(value));
     return () => {
       live = false;
     };
@@ -33,8 +41,7 @@ export function useAccountLabel(account) {
       setAccess(null);
       return undefined;
     }
-    resetAccess();
-    readAccess().then((value) => live && setAccess(value));
+    loadAccess(account, (value) => live && setAccess(value));
     return () => {
       live = false;
     };

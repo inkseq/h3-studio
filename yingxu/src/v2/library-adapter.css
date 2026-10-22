@@ -588,3 +588,10 @@ body.libp-resizing {
 .libp-pcard.open {
   border-color: var(--ink);
 }
+
+/* Search sits on the left next to the title; actions stay on the right (owner, 2026-10-22). */
+.libp-head .lib-search-left {
+  flex: 0 1 320px;
+  min-width: 160px;
+  margin-left: 12px;
+}

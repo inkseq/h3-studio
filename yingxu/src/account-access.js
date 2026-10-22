@@ -3,19 +3,37 @@ import { asPreviewed, previewingAsUser } from './preview-as-user.js';
 // The backend still enforces every route; this only hides navigation the account cannot use.
 // One cached /api/auth/me read per page load; a failed or anonymous read shows nothing privileged.
 
-let pending = null;
+let pending = null,
+  pendingAccount;
 
 export function readAccess(fetcher = globalThis.fetch) {
   if (!pending) {
-    pending = fetcher('/api/auth/me', {
+    const read = (pending = fetcher('/api/auth/me', {
       credentials: 'same-origin',
       headers: { Accept: 'application/json' },
     })
-      .then((response) => (response.ok ? response.json() : null))
+      .then((response) => {
+        // A busy or failed read (e.g. 429 when several parts of the page ask at once) is not
+        // cached, so the next caller retries instead of showing "My account" for the page.
+        if (!response.ok) throw Error('access');
+        return response.json();
+      })
       .then(accessFrom)
-      .catch(() => accessFrom(null));
+      .catch(() => {
+        if (pending === read) pending = null;
+        return accessFrom(null);
+      }));
   }
   return pending;
+}
+
+/** One shared read per signed-in account: the header, menu and settings all reuse it. */
+export function readAccessFor(account, fetcher) {
+  if (account !== pendingAccount) {
+    pending = null;
+    pendingAccount = account;
+  }
+  return readAccess(fetcher);
 }
 
 export function accessFrom(record) {
