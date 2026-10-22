@@ -326,7 +326,9 @@ def _claim(service):
                 )
                 _write(connection, row, payload, now)
                 return _result('blocked', 'allocation_uncertain'), None
-            max_instances, max_gpus = service.machine_limits(connection)
+            max_instances, max_gpus = service.machine_limits(
+                connection, for_demand=True
+            )
             if (
                 usage['instances'] >= max_instances
                 or usage['physical_gpus'] >= max_gpus

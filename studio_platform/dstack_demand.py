@@ -521,7 +521,7 @@ def summary(service, connection, now):
         and row['payload'].get('reason_code') == DOWNLOAD_RETRY_LIMIT
         for job, _ in work
     )
-    machine_limit, _ = service.machine_limits(connection)
+    machine_limit, _ = service.machine_limits(connection, for_demand=True)
     reason = (
         "disabled"
         if not runtime["enabled"]

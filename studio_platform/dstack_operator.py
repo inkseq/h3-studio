@@ -2215,7 +2215,7 @@ class DstackOperator:
             fresh_seconds=self.policy["observation_fresh_seconds"],
         )
 
-    def machine_limits(self, connection):
+    def machine_limits(self, connection, *, for_demand=False):
         from .capacity_settings import DEFAULTS
 
         settings = self._admin_limits(connection)
@@ -2224,7 +2224,11 @@ class DstackOperator:
             return maximum, maximum
         # Old environments are not adopted by deploying a reader. Preserve the
         # old protected configuration until the explicit audited settings write.
-        maximum = DEFAULTS["max_machines"] if self.policy.get("demand_start") else 128
+        maximum = (
+            DEFAULTS["max_machines"]
+            if for_demand or self.policy.get("demand_start")
+            else 128
+        )
         return (
             min(maximum, self.policy["max_instances"]),
             min(maximum, self.policy["max_physical_gpus"]),
