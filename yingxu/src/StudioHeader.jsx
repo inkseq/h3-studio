@@ -1,3 +1,4 @@
+import { setPreviewAsUser } from './preview-as-user.js';
 import React, { useEffect, useState } from 'react';
 import { Cpu, Images, LayoutGrid, MessageSquare, Settings2, Trash2 } from 'lucide-react';
 import { LanguageSwitcher, useI18n } from './i18n/I18nProvider.jsx';
@@ -69,38 +70,48 @@ export default function StudioHeader({
   ];
   // Port of prototype pages.jsx/AppHeader. Only navigation and account data differ.
   return (
-    <header className="hbar">
-      <a className="logo" href={account ? '/quick-chat' : '/'}>
-        <InkMark size={26} variant={dailyInkMark()} />
-        <span>{t('app.name')}</span>
-      </a>
-      <nav aria-label={t('nav.mobile')}>
-        {links.map(([id, href, label, Icon]) => (
-          <button
-            key={id}
-            type="button"
-            className={active === id ? 'on' : ''}
-            aria-current={active === id ? 'page' : undefined}
-            onClick={() => navigateApp(href)}
-          >
-            <Icon className="nav-ico" size={20} aria-hidden="true" />
-            <span>{t(label)}</span>
+    <>
+      {access?.previewing && (
+        <div className="preview-as-user-bar" role="status">
+          {t('menu.previewing')}
+          <button type="button" className="small" onClick={() => setPreviewAsUser(false)}>
+            {t('menu.previewExit')}
           </button>
-        ))}
-      </nav>
-      <div className="spacer" />
-      <CreditsChip account={account} />
-      <LanguageSwitcher />
-      <button
-        type="button"
-        className={'ghost hbar-trash' + (active === 'trash' ? ' on' : '')}
-        onClick={() => navigateApp('/trash')}
-        aria-label={t('trash.title')}
-        title={t('trash.title')}
-      >
-        <Trash2 size={15} />
-      </button>
-      {accountMenu || <AccountMenu account={account} items={menuItems} onSignIn={onSignIn} />}
-    </header>
+        </div>
+      )}
+      <header className="hbar">
+        <a className="logo" href={account ? '/quick-chat' : '/'}>
+          <InkMark size={26} variant={dailyInkMark()} />
+          <span>{t('app.name')}</span>
+        </a>
+        <nav aria-label={t('nav.mobile')}>
+          {links.map(([id, href, label, Icon]) => (
+            <button
+              key={id}
+              type="button"
+              className={active === id ? 'on' : ''}
+              aria-current={active === id ? 'page' : undefined}
+              onClick={() => navigateApp(href)}
+            >
+              <Icon className="nav-ico" size={20} aria-hidden="true" />
+              <span>{t(label)}</span>
+            </button>
+          ))}
+        </nav>
+        <div className="spacer" />
+        <CreditsChip account={account} />
+        <LanguageSwitcher />
+        <button
+          type="button"
+          className={'ghost hbar-trash' + (active === 'trash' ? ' on' : '')}
+          onClick={() => navigateApp('/trash')}
+          aria-label={t('trash.title')}
+          title={t('trash.title')}
+        >
+          <Trash2 size={15} />
+        </button>
+        {accountMenu || <AccountMenu account={account} items={menuItems} onSignIn={onSignIn} />}
+      </header>
+    </>
   );
 }

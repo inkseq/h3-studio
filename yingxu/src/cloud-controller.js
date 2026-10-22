@@ -1,3 +1,4 @@
+import { asPreviewed } from './preview-as-user.js';
 import { providerLogoutUrl } from './account-access.js';
 import { videoCacheIdentity, clearVideoCache } from './video-cache-client.js';
 import { storyboardCommandStore, verifyStoryboardReceipt } from './storyboard-commands.js';
@@ -332,7 +333,7 @@ export function createCloudController({
           observedEpoch = epoch;
         }
         emit({
-          operatorAccess: accountRecord.operator_capacity?.view === true,
+          operatorAccess: asPreviewed(accountRecord).operator_capacity?.view === true,
           storyboardEnabled: accountRecord.features?.storyboard_workspace === true,
         });
         if (loadLists || changed) await reloadProjects();

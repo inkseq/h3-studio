@@ -11,6 +11,8 @@ import {
 
 test('anonymous or failed reads expose nothing privileged', () => {
   assert.deepEqual(accessFrom(null), {
+    canPreview: false,
+    previewing: false,
     signedIn: false,
     displayName: null,
     email: null,
@@ -20,6 +22,8 @@ test('anonymous or failed reads expose nothing privileged', () => {
     admin: false,
   });
   assert.deepEqual(accessFrom({}), {
+    canPreview: false,
+    previewing: false,
     signedIn: false,
     displayName: null,
     email: null,
@@ -34,6 +38,8 @@ test('GPUs follow operator_capacity.view and admin follows operator_capacity.adm
   assert.deepEqual(
     accessFrom({ username: 'supervan', operator_capacity: { view: true, admin: false } }),
     {
+      canPreview: false,
+      previewing: false,
       signedIn: true,
       displayName: 'supervan',
       email: null,
@@ -44,6 +50,8 @@ test('GPUs follow operator_capacity.view and admin follows operator_capacity.adm
     },
   );
   assert.deepEqual(accessFrom({ username: 'mia', operator_capacity: { view: false } }), {
+    canPreview: false,
+    previewing: false,
     signedIn: true,
     displayName: 'mia',
     email: null,
@@ -62,6 +70,8 @@ test('machine principals (agent keys) never get GPU or admin navigation', () => 
       operator_capacity: { view: true, admin: true },
     }),
     {
+      canPreview: false,
+      previewing: false,
       signedIn: true,
       displayName: 'superdan',
       email: null,
@@ -81,6 +91,8 @@ test('one cached read per page load; errors fall back to no access', async () =>
     return Promise.reject(new Error('offline'));
   };
   assert.deepEqual(await readAccess(failing), {
+    canPreview: false,
+    previewing: false,
     signedIn: false,
     displayName: null,
     email: null,
@@ -147,4 +159,28 @@ test('hosted sign-in carries the sign-up/sign-in screen hint, and provider logou
   assert.equal(providerLogoutUrl({ ok: true }), null);
   assert.equal(providerLogoutUrl({ logout_url: 'javascript:alert(1)' }), null);
   assert.equal(providerLogoutUrl({ logout_url: 'http://example.com' }), null);
+});
+
+test('an admin can preview as a regular user only in the interface (owner, 2026-10-22)', () => {
+  const store = new Map();
+  globalThis.sessionStorage = {
+    getItem: (k) => store.get(k) ?? null,
+    setItem: (k, v) => store.set(k, v),
+    removeItem: (k) => store.delete(k),
+  };
+  try {
+    const me = { username: 'superdan', operator_capacity: { view: true, admin: true } };
+    assert.equal(accessFrom(me).admin, true);
+    assert.equal(accessFrom(me).canPreview, true);
+    store.set('inkseq.previewAsUser', '1');
+    const preview = accessFrom(me);
+    assert.equal(preview.admin, false);
+    assert.equal(preview.gpus, false);
+    assert.equal(preview.previewing, true);
+    assert.equal(preview.canPreview, true); // still able to switch back
+    // A regular user with the flag set sees nothing different.
+    assert.equal(accessFrom({ username: 'mia' }).previewing, false);
+  } finally {
+    delete globalThis.sessionStorage;
+  }
 });

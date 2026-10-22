@@ -1,3 +1,4 @@
+import { asPreviewed } from './preview-as-user.js';
 import { createQuickChatClient } from './quick-chat-client.js';
 import { stableJSON, digest } from './cloud-model.js';
 import { bindingPayload } from './quick-chat-model.js';
@@ -169,7 +170,8 @@ export function createQuickChatController({
       guard(ctx, { session: false });
       emit({
         operatorAccess:
-          (me.username || me.account) === state.account && me.operator_capacity?.view === true,
+          (me.username || me.account) === state.account &&
+          asPreviewed(me).operator_capacity?.view === true,
       });
     } catch {}
   }

@@ -15,6 +15,10 @@ export const settingsCatalogs = {
     'settings.budget': 'My budget',
     'settings.limits': 'Usage limits',
     'menu.signedOut': 'Not signed in. Your work stays on this device.',
+    'menu.previewAsUser': 'View as a regular user',
+    'menu.previewExit': 'Back to admin view',
+    'menu.previewing':
+      'You are viewing the site as a regular user sees it. Your account is still an admin.',
     'cloud.unreachable':
       'Can’t reach the cloud right now. Your work is safe on this device; try again in a moment.',
     'cloud.sessionUnchecked': 'Couldn’t confirm your sign-in: {reason}',
@@ -86,6 +90,9 @@ export const settingsCatalogs = {
     'settings.budget': '我的预算',
     'settings.limits': '用量上限',
     'menu.signedOut': '未登录，作品保存在本机。',
+    'menu.previewAsUser': '以普通用户视角查看',
+    'menu.previewExit': '回到管理员视角',
+    'menu.previewing': '你正在以普通用户的视角查看网站，账号本身仍是管理员。',
     'cloud.unreachable': '暂时连不上云端。本机作品不受影响，请稍后再试。',
     'cloud.sessionUnchecked': '暂时无法确认登录状态：{reason}',
     'skin.title': '外观',

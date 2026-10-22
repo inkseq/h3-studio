@@ -1,7 +1,8 @@
+import { setPreviewAsUser } from './preview-as-user.js';
 // One account menu for every page (#358): who you are on top, page actions, then
 // Settings / Trash / Sign out. Pages add their own actions through `items`.
 import React, { useRef } from 'react';
-import { LogIn, LogOut, Settings2, Trash2, UserRound } from 'lucide-react';
+import { Eye, LogIn, LogOut, Settings2, Trash2, UserRound } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { navigateApp } from './app-navigation.js';
 import { resetAccess } from './account-access.js';
@@ -78,6 +79,11 @@ export default function AccountMenu({ account, items, onSignIn }) {
           <MenuItem icon={Trash2} onClick={() => navigateApp('/trash')}>
             {t('trash.title')}
           </MenuItem>
+          {access?.canPreview && (
+            <MenuItem icon={Eye} onClick={() => setPreviewAsUser(!access.previewing)}>
+              {t(access.previewing ? 'menu.previewExit' : 'menu.previewAsUser')}
+            </MenuItem>
+          )}
         </div>
         {account && (
           <div className="account-menu-group">

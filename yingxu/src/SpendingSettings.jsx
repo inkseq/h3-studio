@@ -1,3 +1,4 @@
+import { previewingAsUser } from './preview-as-user.js';
 import VideoCacheSettings from './VideoCacheSettings.jsx';
 import SettingsGenerationDefaults from './SettingsGenerationDefaults.jsx';
 import SpendingBreakdown from './SpendingBreakdown.jsx';
@@ -174,7 +175,7 @@ export default function SpendingSettings({ account }) {
               ),
             },
       );
-      if (data.admin) {
+      if (data.admin && !previewingAsUser()) {
         const next = await api.request('/v1/operator/admin/spending-settings');
         if (current !== epoch.current) return;
         setAdmin(next);

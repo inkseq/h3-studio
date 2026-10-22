@@ -125,3 +125,21 @@
     min-height: 40px;
   }
 }
+
+/* Admin previewing the site as a regular user (preview-as-user.js). */
+.preview-as-user-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 6px 16px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.preview-as-user-bar button {
+  background: rgb(0 0 0 / 0.15);
+  border-color: transparent;
+  color: inherit;
+}
