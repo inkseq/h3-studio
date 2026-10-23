@@ -68,7 +68,13 @@ IDs and frozen quote before new selection; never rewrite their history or price.
 Rates come from the returned immutable price revision. Tier selection bypasses
 neither terms, moderation, scopes, human confirmation nor budgets.
 
-## Quick Create requests
+## Legacy Quick Create compatibility
+
+Use project/actions for new story-card authoring. Existing session/card routes
+remain supported during the migration compatibility window; no cutoff or bulk
+conversion is implied. Preserve source IDs, immutable revisions and original
+jobs. A star is a favourite, not a chosen take. Do not reconstruct a browser-only
+preview selection or regenerate historical results.
 
 Let B = `/v1/quick-chat/sessions/SESSION`.
 
@@ -169,6 +175,44 @@ python scripts/inkseq.py --base-url $origin --connection $connection request POS
 GET `/v1/projects` and `/v1/projects/PROJECT`; POST `/v1/projects` creates an owned story with title/logline. POST `/v1/projects/PROJECT/actions` uses `{expected_version:VERSION,actions:[...]}` and Idempotency-Key. Use `/v1/guided-schema` for exact entity.create/update shapes. `entity.update` merges one data level; nested objects replace whole values. Never overwrite unrelated nested data.
 
 A character look is `{id:"day",name:"Day",description:"User description",version:1,gallery:{}}`; gallery accepts front/side/full entity IDs. A character's two looks can be referenced by two shot cast entries `{characterId:"CHARACTER",lookId:"day"}` / a second actual look ID. Gallery references must be authorized existing document assets; do not substitute upload receipt IDs where entity IDs are required.
+
+### Unified card binding example
+
+The chat's character, place, prop and shot cards are entities in this same owned
+project. Read its current version and `/v1/guided-schema`; choose unused IDs for
+new entities. This example creates document structure and bindings only. It does
+not attach media, call a model or enqueue generation. Replace `expected_version`
+with the actual version and save one Idempotency-Key before POSTing to
+`/v1/projects/PROJECT/actions`:
+
+```json
+{
+  "expected_version": 1,
+  "actions": [
+    {"op":"entity.create","entity":{"id":"chapter-arrival","type":"chapter","title":"Arrival"}},
+    {"op":"entity.create","entity":{"id":"scene-station","type":"scene","parentId":"chapter-arrival","title":"Station"}},
+    {"op":"entity.create","entity":{"id":"character-mia","type":"character","title":"Mia","data":{"looks":[{"id":"raincoat","name":"Raincoat","description":"A yellow raincoat","version":1,"gallery":{},"imageIds":[]}],"defaultLookId":"raincoat"}}},
+    {"op":"entity.create","entity":{"id":"location-platform","type":"location","title":"Platform","data":{"versions":[{"id":"night","name":"Night","description":"A rain-soaked platform","imageIds":[],"version":1}],"defaultVersionId":"night"}}},
+    {"op":"entity.create","entity":{"id":"prop-letter","type":"prop","title":"Letter","data":{"imageIds":[]}}},
+    {"op":"entity.create","entity":{"id":"shot-letter","type":"shot","parentId":"scene-station","title":"The letter","data":{"seconds":5,"prompt":"Mia opens a letter on the platform.","cast":[{"characterId":"character-mia","lookId":"raincoat"}],"storyboard":{"version":1,"mode":"ref","place":{"locationId":"location-platform","versionId":"night"},"propIds":["prop-letter"]}}}}
+  ]
+}
+```
+
+Use the returned project version for the next edit. When editing existing shots,
+preserve other `data.storyboard` keys: an `entity.update` nested object replaces
+that whole object. Profile image/gallery bindings use attached document entity
+IDs; `shot.configure_generation.inputs` uses ready upload receipt IDs instead.
+An upload alone does not choose its role. Read `/v1/capabilities` for the exact
+REF limits before configuring/preflighting; never truncate references to fit an
+assumed limit. No available references may still mean a blocked preflight.
+
+Return `ORIGIN/quick-chat?story=PROJECT` for a human to continue. The website may
+attach an ordinary owned project through `POST /v1/story-chats/PROJECT/open` in
+its signed-in browser. This route is human-only, including for an admin-owned
+PAT: Agents use `/v1/projects` and `/actions`, not `/open` or a browser credential.
+The link must never contain a key. Legacy `?session=` links stay legacy until an
+explicit conversion is accepted; do not rewrite them to guessed project IDs.
 
 `shot.configure_generation` takes `shot_id` and requested tier/mode, prompt, controls and inputs; consistent neutral recipe/profile aliases also work. GET `/v1/projects/PROJECT/shots/SHOT/generation-draft`, then POST its `/generation-plans` with `{expected_version:project_version}` (optional current capabilities_version). Plan generation does not enqueue. POST `/v1/jobs` with `{plan_id:READY_PLAN}` or `/v1/batches` with `{client_project_id:PROJECT,plan_ids:[READY_PLAN,...]}` only within generation authority. Batch admission may partially succeed; observe its original receipt.
 
