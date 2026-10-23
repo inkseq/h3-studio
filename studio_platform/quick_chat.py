@@ -426,6 +426,10 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
             for scope in scopes
         ):
             raise NotFound("quick_chat_session_not_found")
+        if mutating:
+            from .quick_chat_migration import assert_legacy_mutable
+
+            assert_legacy_mutable(conn, self.tenant, principal.owner, (session_id,))
         state = self._history(row)["trash_state"]
         if state == "purged":
             raise QuickChatError(
@@ -589,6 +593,7 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
             ),
             "latest_seq": p["latest_seq"],
             "web_url": "/quick-chat?session=" + row["id"],
+            "migrated_project_id": None,
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
             "created_by": self._creation_public(row, "session"),
@@ -682,11 +687,18 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
             return {"session": self._session_public(session)}
 
     def get_session(self, principal, session_id):
-        return {
-            "session": self._session_public(
-                self._access(principal, session_id, "projects:read")
-            )
-        }
+        from .quick_chat_migration import migrated_project_id
+
+        with self.repo.engine.connect() as connection:
+            row = self._access(principal, session_id, "projects:read", conn=connection)
+            return {
+                "session": {
+                    **self._session_public(row),
+                    "migrated_project_id": migrated_project_id(
+                        connection, self.tenant, principal.owner, row
+                    ),
+                }
+            }
 
     def list_sessions(
         self, principal, *, limit=20, cursor=None, view="active", hide_tests=False
@@ -1954,7 +1966,11 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
         return self.get_preflight(principal, session_id, record["id"])
 
     def get_preflight(self, principal, session_id, ident):
-        self._access(principal, session_id, "projects:read", "jobs:write")
+        # Retain the original scope requirement without treating a historical
+        # GET as authoring on an adopted, read-only legacy session.
+        session = self._access(principal, session_id, "projects:read")
+        if not principal.allows(session["payload"]["project_id"], "jobs:write"):
+            raise NotFound("quick_chat_session_not_found")
         with self.repo.engine.connect() as conn:
             row = self._get(conn, principal, ident, session_id, "preflight")
         stale = (
