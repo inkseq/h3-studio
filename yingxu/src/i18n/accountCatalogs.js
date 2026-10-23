@@ -7,6 +7,12 @@ export const accountCatalogs = {
     'account.signOutEverywhereYes': 'Sign out everywhere',
     'account.hostedSignIn':
       'Signs in with Google, GitHub or email. Manage sign-in methods on the sign-in page.',
+    'account.linkTitle': 'Sign in with Google',
+    'account.linkBody':
+      'Link Google (or GitHub or email) to this account to sign in with it. Your username and password keep working, and your stories and credits stay the same.',
+    'account.linkButton': 'Link Google sign-in',
+    'account.linked':
+      'Linked. You can sign in with Google, GitHub or email, or with your password.',
     'account.copy1': 'My stories',
     'account.copy2': 'New story',
     'account.copy3': 'Story name',
@@ -359,6 +365,11 @@ export const accountCatalogs = {
     'account.signOutEverywhereConfirm': '所有浏览器和手机上的登录都会退出，包括这一台。',
     'account.signOutEverywhereYes': '全部退出',
     'account.hostedSignIn': '通过 Google、GitHub 或邮箱登录，登录方式在登录页面管理。',
+    'account.linkTitle': '用 Google 登录',
+    'account.linkBody':
+      '绑定 Google（或 GitHub、邮箱）后就能用它登录这个账号。原来的用户名和密码照样能用，作品和积分都不变。',
+    'account.linkButton': '绑定 Google 登录',
+    'account.linked': '已绑定。可以用 Google、GitHub、邮箱或原来的密码登录。',
     'account.copy1': '我的故事',
     'account.copy2': '新建故事',
     'account.copy3': '故事名称',

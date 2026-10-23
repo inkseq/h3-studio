@@ -11,6 +11,7 @@ import { useI18n } from './i18n/I18nProvider.jsx';
 import { readBrowserLocale } from './i18n/locale.js';
 import StudioHeader, { useAccess, useAccountLabel } from './StudioHeader.jsx';
 import AccountPassword from './AccountPassword.jsx';
+import AccountGoogleLink from './AccountGoogleLink.jsx';
 import { CreditsPanel, useCredits } from './CreditsUI.jsx';
 import AdminConsole from './AdminConsole.jsx';
 import CapacitySettings from './CapacitySettings.jsx';
@@ -373,6 +374,7 @@ export default function SpendingSettings({ account }) {
             <SkinPicker />
             {account && (
               <>
+                {!hosted && <AccountGoogleLink api={api} />}
                 {!hosted && (
                   <div className="card-box">
                     <AccountPassword inline busy={busy} />
