@@ -148,12 +148,82 @@ def chat_of(project):
     return chat
 
 
+def _story_key(entity, lookup):
+    """Chapter → scene → shot reading order, as Works plays the story."""
+    path = []
+    seen = set()
+    while entity is not None and entity["id"] not in seen:
+        seen.add(entity["id"])
+        order = entity.get("order", 0)
+        path.append((order if type(order) in (int, float) else 0, entity["id"]))
+        entity = lookup.get(entity.get("parentId"))
+    return tuple(reversed(path))
+
+
 def shots_of(project, chat):
-    scene = chat.get("sceneId")
-    shots = [
-        e for e in project["entities"] if e["type"] == "shot" and e["parentId"] == scene
-    ]
-    return sorted(shots, key=lambda e: (e.get("order", 0), e["id"]))
+    """Every shot of the story in reading order. A chat-made story has one scene; an
+    existing story opened in the chat (#422) may have several chapters and scenes."""
+    lookup = {e["id"]: e for e in project["entities"]}
+    shots = [e for e in project["entities"] if e["type"] == "shot"]
+    return sorted(shots, key=lambda e: _story_key(e, lookup))
+
+
+def last_scene(project):
+    """The scene new shots join when an existing story is opened in the chat."""
+    lookup = {e["id"]: e for e in project["entities"]}
+    scenes = [e for e in project["entities"] if e["type"] == "scene"]
+    return max(scenes, key=lambda e: _story_key(e, lookup))["id"] if scenes else None
+
+
+def open_actions(project, language):
+    """Attach an empty chat to an existing story; add a chapter and scene if it has none."""
+    actions = []
+    scene = last_scene(project)
+    if scene is None:
+        # Reuse the story's last chapter if it has one; new ids never collide.
+        lookup = {e["id"]: e for e in project["entities"]}
+        chapters = [e for e in project["entities"] if e["type"] == "chapter"]
+        base = new_story(project["id"], "", language)["entities"]
+        if chapters:
+            chapter_id = max(chapters, key=lambda e: _story_key(e, lookup))["id"]
+        else:
+            chapter_id = "chapter-" + uuid.uuid4().hex
+            actions.append(
+                {
+                    "op": "entity.create",
+                    "entity": {
+                        **{k: v for k, v in base[0].items() if k != "version"},
+                        "id": chapter_id,
+                    },
+                }
+            )
+        scene = "scene-" + uuid.uuid4().hex
+        actions.append(
+            {
+                "op": "entity.create",
+                "entity": {
+                    **{k: v for k, v in base[1].items() if k != "version"},
+                    "id": scene,
+                    "parentId": chapter_id,
+                    "order": len(
+                        [
+                            e
+                            for e in project["entities"]
+                            if e["type"] == "scene" and e["parentId"] == chapter_id
+                        ]
+                    ),
+                },
+            }
+        )
+    chat = {
+        "version": 1,
+        "language": language,
+        "sceneId": scene,
+        "turns": 0,
+        "messages": [],
+        "opened": True,
+    }
+    return actions + [{"op": "journey.update", "patch": {"storyChat": chat}}]
 
 
 def _image(entity):
@@ -346,6 +416,10 @@ def apply_plan(project, chat, plan):
     scene = chat["sceneId"]
     shots = [s["id"] for s in shots_of(project, chat)]
     removed = set()
+    # Shots created or moved this turn; their scene follows their position.
+    placed = set()
+    # Created without "after": the chat's scene unless that breaks reading order.
+    appended = set()
     pictures = []  # cards the person may confirm a picture for (advice only)
     new_story = None  # an idea for a separate story the person may start (advice only)
     touched = set()  # existing cards (and "project" for the title) this plan writes
@@ -452,6 +526,10 @@ def apply_plan(project, chat, plan):
                     "quality": "draft",
                     **board,
                 }
+                # Its scene is settled after ordering, from its neighbours.
+                placed.add(ident)
+                if "after" not in item:
+                    appended.add(ident)
                 entity = {
                     "id": ident,
                     "type": "shot",
@@ -494,6 +572,7 @@ def apply_plan(project, chat, plan):
                     lookup[ident] = {**lookup[ident], "data": {**current, **data}}
                 if "after" in item:
                     after = item["after"]
+                    placed.add(ident)
                     shots.remove(ident)
                     position = (
                         0
@@ -531,9 +610,39 @@ def apply_plan(project, chat, plan):
                 proposal = {"kind": "generate", "shot_ids": list(dict.fromkeys(ids))}
         else:
             raise StoryChatError("story_chat_plan_invalid", 502)
+
     # Guided.delete_entity already removes deleted cards from cast, place and props
     # against the evolving document, so no separate cleanup patch is emitted here.
     # Shot order is explicit so Works plays them in the chat's order.
+    # A placed shot keeps its scene (an appended one takes the chat's scene) unless that
+    # would break chapter/scene reading order against its neighbours; only then does it
+    # join the scene of the shot before it, or of the next unmoved shot when it is first.
+    # A plan that restates the existing order therefore moves nothing between scenes.
+    def scene_key(scene_id):
+        entity = lookup.get(scene_id)
+        return _story_key(entity, lookup) if entity else ()
+
+    parents = {}
+    for index, shot_id in enumerate(shots):
+        if shot_id not in placed:
+            parents[shot_id] = lookup[shot_id]["parentId"]
+            continue
+        before = next((parents[s] for s in reversed(shots[:index])), None)
+        following = next(
+            (lookup[s]["parentId"] for s in shots[index + 1 :] if s not in placed), None
+        )
+        created = shot_id in refs.values()
+        keep = (
+            None if created and shot_id not in appended else lookup[shot_id]["parentId"]
+        )
+        if (
+            keep is not None
+            and (before is None or scene_key(keep) >= scene_key(before))
+            and (following is None or scene_key(keep) <= scene_key(following))
+        ):
+            parents[shot_id] = keep
+        else:
+            parents[shot_id] = before or following or scene
     for index, shot_id in enumerate(shots):
         current = lookup[shot_id].get("order")
         if shot_id in refs.values():
@@ -543,11 +652,18 @@ def apply_plan(project, chat, plan):
                     and action["entity"]["id"] == shot_id
                 ):
                     action["entity"]["order"] = index
-        elif current != index:
-            touched.add(shot_id)
-            actions.append(
-                {"op": "entity.update", "entity_id": shot_id, "patch": {"order": index}}
-            )
+                    action["entity"]["parentId"] = parents[shot_id]
+        else:
+            patch = {}
+            if current != index:
+                patch["order"] = index
+            if parents[shot_id] != lookup[shot_id]["parentId"]:
+                patch["parentId"] = parents[shot_id]
+            if patch:
+                touched.add(shot_id)
+                actions.append(
+                    {"op": "entity.update", "entity_id": shot_id, "patch": patch}
+                )
     if proposal:
         proposal["shot_ids"] = [s for s in proposal["shot_ids"] if s not in removed]
         proposal = proposal if proposal["shot_ids"] else None
