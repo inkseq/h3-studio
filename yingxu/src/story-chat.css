@@ -14,12 +14,9 @@
   height: 100dvh;
   background: var(--sc-paper);
   color: var(--sc-ink);
-  font:
-    14px/1.55 -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    'PingFang SC',
-    sans-serif;
+  /* The app's own typeface (and the shared header inside it) — only size/leading here. */
+  font-size: 14px;
+  line-height: 1.55;
 }
 .sc-shell * {
   box-sizing: border-box;

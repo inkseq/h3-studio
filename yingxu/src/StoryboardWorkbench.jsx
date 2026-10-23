@@ -260,6 +260,8 @@ export function WorkbenchTakes({ shot, wide = false, onWide, onPreview, previewI
                     {row.starred && <Star size={11} aria-label={t('workbench.star')} />}
                   </span>
                   {row.selected && <em>{t('takes.selected')}</em>}
+                  {/* A take adopted from an old Quick Create conversation (#481). */}
+                  {row.aliased && <em className="ver-legacy">{t('workbench.fromQuickCreate')}</em>}
                 </button>
                 {/* The narrow panel needs its own "use" action: cloud takes are not always local
                   versions, so the preview above cannot offer one (found in #347 staging check). */}
@@ -313,6 +315,7 @@ export function WorkbenchTakes({ shot, wide = false, onWide, onPreview, previewI
               </div>
               <div className="take-top">
                 {row.selected && <em>{t('takes.selected')}</em>}
+                {row.aliased && <em className="ver-legacy">{t('workbench.fromQuickCreate')}</em>}
                 {comparing && compare.includes(row.id) && (
                   <em className="cmp-n">{compare.indexOf(row.id) === 0 ? 'A' : 'B'}</em>
                 )}
