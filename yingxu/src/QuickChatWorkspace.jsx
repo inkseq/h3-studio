@@ -135,7 +135,7 @@ function settingsForMode(capabilities, current, mode) {
     },
   };
 }
-export function Login({ onClose, onDone, title, lead }) {
+export function Login({ onClose, onDone, title, lead, passwordFirst = false }) {
   const { t, locale } = useI18n();
   const c = useCloud(),
     [username, setUsername] = useState(''),
@@ -172,7 +172,7 @@ export function Login({ onClose, onDone, title, lead }) {
           }}
         >
           <p>{lead ?? t('workspace.copy119')}</p>
-          <HostedSignIn auth={c.auth} />
+          <HostedSignIn auth={c.auth} passwordFirst={passwordFirst} />
           <label className="qc-field">
             {t('workspace.copy3')}
             <input

@@ -63,7 +63,8 @@ function retryAllowed() {
 export default function Landing() {
   const { t } = useI18n();
   const active = usePageActive(),
-    [login, setLogin] = useState(false);
+    [login, setLogin] = useState(false),
+    [passwordFirst, setPasswordFirst] = useState(false);
   useEffect(() => {
     if (active) document.title = t('landing.pageTitle');
   }, [active, t]);
@@ -174,7 +175,19 @@ export default function Landing() {
               </button>
             </div>
             {hostedSignInEnabled(c.auth) && (
-              <small className="muted">{t('landing.noAccount')}</small>
+              <small className="muted">
+                {t('landing.noAccount')}{' '}
+                <button
+                  type="button"
+                  className="linkish"
+                  onClick={() => {
+                    setPasswordFirst(true);
+                    setLogin(true);
+                  }}
+                >
+                  {t('landing.passwordSignIn')}
+                </button>
+              </small>
             )}
           </div>
           <DemoBoard />
@@ -219,6 +232,7 @@ export default function Landing() {
         <Login
           title={t('landing.signInTitle')}
           lead={t('landing.signInLead')}
+          passwordFirst={passwordFirst}
           onClose={() => setLogin(false)}
           onDone={() => setLogin(false)}
         />
