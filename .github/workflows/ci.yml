@@ -174,7 +174,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     services:
       postgres:
         image: postgres:17-alpine
@@ -272,7 +272,7 @@ jobs:
         env:
           PLATFORM_TEST_DATABASE_URL: postgresql+psycopg://sixnine_test:sixnine-ci-test-only@127.0.0.1:5432/sixnine_test
           CI_SLOW_TEST_MODULES: ${{ needs.changes.outputs.slow_modules }}
-        run: python tools/ci_test_shards.py --suite postgres --shard-index ${{ matrix.shard }} --shard-count 6 --slow-modules "$CI_SLOW_TEST_MODULES" --timing-output ci-timings/postgres-${{ matrix.shard }}.json
+        run: python tools/ci_test_shards.py --suite postgres --shard-index ${{ matrix.shard }} --shard-count 10 --slow-modules "$CI_SLOW_TEST_MODULES" --timing-output ci-timings/postgres-${{ matrix.shard }}.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -719,6 +719,111 @@ jobs:
       - run: python -m pip install --require-hashes -r requirements.dispatch.lock.txt
       - run: python tools/check_aws_release_account.py
       - run: python tools/deploy_aws_release.py "$GITHUB_SHA" --target staging
+
+  journeys-staging:
+    # This post-deploy gate fails the original run; it cannot authorize promotion.
+    # Keep QA secrets out of checkout/npm/browser installation and AWS jobs.
+    if: ${{ !cancelled() && needs.deploy-staging-aws.result == 'success' }}
+    needs: [changes, deploy-staging-aws]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    permissions: {contents: read}
+    concurrency: {group: sixnine-staging-deploy, cancel-in-progress: false}
+    steps:
+      - name: Check out canonical public journey checks
+        uses: actions/checkout@v4
+        with:
+          repository: inkseq/inkseq-design
+          ref: main
+          path: journey-design
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.4'
+          cache: npm
+          cache-dependency-path: journey-design/studio-app/package-lock.json
+      - run: npm ci --ignore-scripts
+        working-directory: journey-design/studio-app
+      - name: Install official Playwright Chromium and system dependencies
+        run: npx --no-install playwright install --with-deps chromium
+        working-directory: journey-design/studio-app
+      - name: Bind the deployed frontend and canonical journey source
+        id: journey-before
+        env:
+          JOURNEY_STAGED_ACTION: ${{ needs.changes.outputs.action }}
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/inkseq-journey-staging-check.mjs" <<'JS'
+          import { execFileSync } from 'node:child_process';
+          import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          const origin = 'https://staging.inkseq.com';
+          const mode = process.argv[2];
+          const expected = process.env.GITHUB_SHA;
+          const design = execFileSync('git', ['-C', 'journey-design', 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+          if (!['before', 'after'].includes(mode) || !/^[a-f0-9]{40}$/.test(expected) || !/^[a-f0-9]{40}$/.test(design))
+            throw Error('Exact journey source and deployment identity required');
+          const request = (path) => fetch(origin + path, { redirect: 'error', signal: AbortSignal.timeout(15000) });
+          const root = await request('/');
+          const frontend = root.headers.get('X-Sixnine-Frontend-Commit');
+          if (root.status !== 200 || root.url !== origin + '/' || frontend !== expected)
+            throw Error('Staging changed from this original deployment; do not accept another tuple');
+          await root.body?.cancel();
+          const response = await request('/healthz');
+          const raw = await response.text();
+          if (response.status !== 200 || response.url !== origin + '/healthz' || raw.length > 65536)
+            throw Error('Staging health response unavailable or oversized');
+          const health = JSON.parse(raw);
+          if (health.status !== 'ok' || health.auth_ready !== true) throw Error('Staging is not ready for QA journeys');
+          const observed = { frontend_commit: frontend, health: { status: health.status, auth_ready: health.auth_ready }, observed_at: new Date().toISOString() };
+          const file = join(process.env.RUNNER_TEMP, 'inkseq-journey-staging.json');
+          let metadata;
+          if (mode === 'before') {
+            if (!['stage-platform', 'stage-frontend'].includes(process.env.JOURNEY_STAGED_ACTION))
+              throw Error('Original staging deployment classification required');
+            metadata = { version: 1, candidate_commit: expected, source_run_id: process.env.GITHUB_RUN_ID,
+              source_run_attempt: process.env.GITHUB_RUN_ATTEMPT, origin, design_repository: 'inkseq/inkseq-design',
+              design_commit: design, original_staging_action: process.env.JOURNEY_STAGED_ACTION,
+              platform_commit: null, platform_identity_basis: 'Not exposed by public health; use original protected deployment receipt', before: observed };
+          } else {
+            metadata = JSON.parse(readFileSync(file, 'utf8'));
+            if (metadata.candidate_commit !== expected || metadata.design_commit !== design || metadata.before.frontend_commit !== frontend)
+              throw Error('Journey identity drift; original result cannot qualify another tuple');
+            metadata.after = observed;
+          }
+          writeFileSync(file, JSON.stringify(metadata, null, 2) + '\n');
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, `Journey ${mode}: staging frontend \`${frontend}\`, design \`${design}\`, original run ${process.env.GITHUB_RUN_ID}/${process.env.GITHUB_RUN_ATTEMPT}.\n\n`);
+          JS
+          node "$RUNNER_TEMP/inkseq-journey-staging-check.mjs" before
+      - name: Run all staging user journeys with QA accounts only
+        working-directory: journey-design/studio-app
+        env:
+          JOURNEY_BASE: https://staging.inkseq.com
+          QA_USER: ${{ secrets.QA_USER }}
+          QA_USER_PASSWORD: ${{ secrets.QA_USER_PASSWORD }}
+          QA_ADMIN: ${{ secrets.QA_ADMIN }}
+          QA_ADMIN_PASSWORD: ${{ secrets.QA_ADMIN_PASSWORD }}
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          if (process.env.JOURNEY_BASE !== 'https://staging.inkseq.com'
+              || process.env.QA_USER !== 'qa-user' || process.env.QA_ADMIN !== 'qa-admin'
+              || !process.env.QA_USER_PASSWORD || !process.env.QA_ADMIN_PASSWORD
+              || process.env.QA_ACCOUNTS_FILE || process.env.JOURNEY_ONLY)
+            throw Error('Complete staging QA credentials and the full journey suite are required');
+          JS
+          node tools/journeys.mjs
+      - name: Verify the same deployment after journeys
+        if: ${{ !cancelled() && steps.journey-before.outcome == 'success' }}
+        run: node "$RUNNER_TEMP/inkseq-journey-staging-check.mjs" after
+      - name: Retain nonsecret journey identity metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: inkseq-staging-journey-identity-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/inkseq-journey-staging.json
+          if-no-files-found: ignore
+          retention-days: 7
 
   promote-accepted-aws:
     if: ${{ !cancelled() && needs.test.result == 'success' && needs.changes.outputs.action == 'promote' && vars.SIXNINE_AWS_DEPLOY_ROLE != '' }}

@@ -55,6 +55,7 @@ inventory.json
 !studio_platform/__init__.py
 !studio_platform/api.py
 !studio_platform/settings.py
+!studio_platform/error_monitoring.py
 !studio_platform/workos_config.py
 !studio_platform/workos_auth.py
 !studio_platform/workos_routes.py

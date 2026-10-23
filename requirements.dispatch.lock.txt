@@ -110,6 +110,7 @@ certifi==2026.10.19 \
     #   httpcore
     #   httpx
     #   requests
+    #   sentry-sdk
 cffi==2.1.1 \
     --hash=sha256:046bfc24911b37851ee1b51aab8bffe713d89c68c6a057b09484ce9fd5f69b4e \
     --hash=sha256:06c72bb76605a4b0cd0aad6930b69d4baf7dd5d806cfc409b824191099700e66 \
@@ -479,7 +480,9 @@ disposable-email-domains==0.0.283 \
 fastapi==0.142.2 \
     --hash=sha256:06366626f2e70576367714d9ab2fe8472e6c8456dba69b399f9f797ab5e92570 \
     --hash=sha256:bd5f4d81f1e93a88bcd77caf4dfe3c2dbffc3805407a0007e9a114c18b3a670b
-    # via -r requirements.lock.txt
+    # via
+    #   -r requirements.lock.txt
+    #   sentry-sdk
 googleapis-common-protos==1.75.5 \
     --hash=sha256:c7a866fc34ed29a3b10af627a4b9b1dc2433313ca6e959f0ae4feb132047ed72 \
     --hash=sha256:d7285525c23039db98f2463e6d5a4f9b958b94d497f03a844ece3259c4e72d5d
@@ -1279,6 +1282,10 @@ s3transfer==0.19.2 \
     # via
     #   -r requirements.lock.txt
     #   boto3
+sentry-sdk==2.71.0 \
+    --hash=sha256:7beb27a22f06396f3a05510c3da6ea10e1c79e02e859993c27ce4ff074e296d6 \
+    --hash=sha256:9ed36b4c206048aa67b5ddba0a6e28d59fc55cf10d60f5f7aea2c3917184bf4a
+    # via -r requirements.lock.txt
 six==1.17.0 \
     --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274 \
     --hash=sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81
@@ -1404,6 +1411,7 @@ urllib3==2.8.0 \
     #   botocore
     #   opentelemetry-exporter-http-transport
     #   requests
+    #   sentry-sdk
 uvicorn==0.54.0 \
     --hash=sha256:505bdb0f318731d45f1f712071fc781a8981f6847a31c902c9f5e652d4f67faf \
     --hash=sha256:a2e33cbfaa0306f8e6b0c13e0cb89d7d7a2da3e62b90c66e18c33d9807b28620
