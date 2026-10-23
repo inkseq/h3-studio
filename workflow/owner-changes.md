@@ -258,8 +258,9 @@ and queue are unchanged. Tier 1: no new table, queue, worker, provider, credenti
 money path. A story chat is an ordinary project edited through the existing
 `Guided.mutate`; its transcript lives in `journey.storyChat`. The model reuses the
 existing title text credential and only proposes generation, which the user confirms
-through the existing generation routes. On in staging by default; production requires
-`INKSEQ_STORY_CHAT=1` after Claude/Codex acceptance.
+through the existing generation routes. On by default in code (#469);
+`INKSEQ_STORY_CHAT=0` turns it off. Production receives it only through a normal
+promotion of a Claude-accepted exact tuple; there is no separate flag write.
 
 ## CR-20261023-55 — story-card image credits reuse the customer ledger
 
@@ -296,8 +297,9 @@ Production story chat may be enabled only after Claude's explicit real-model
 staging acceptance, using the identical accepted platform/frontend tuple and a
 retained rollback target. The accepted tuple must include the admin picture
 switch from PR466, verified OFF; do not enable production before that switch is
-present. Set `INKSEQ_STORY_CHAT=1` and reuse the existing title mount/config path
-through the guarded rollout flow. Preserve billing, Checkout and auth activation
+present. Enablement is the code default from #469 (no deploy-contract change or flag
+write), reusing the existing title mount/config path through normal guarded promotion
+of the identical accepted tuple. Preserve billing, Checkout and auth activation
 state. Image-price publication and charging remain separate CR55 decisions;
 neither this change nor deployment enables them. Prepare production now, execute
 only after the staged sign-off, and refuse state/identity drift before writes.
