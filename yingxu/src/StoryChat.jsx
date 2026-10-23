@@ -28,6 +28,7 @@ import { createLiveChat } from './story-chat-client.js';
 import { createCloudClient } from './cloud-client.js';
 import { agentLinkSearch } from './agent-navigation.js';
 import './story-chat.css';
+import { track } from './analytics.js';
 
 function reducer(state, action) {
   if (action.type === 'edit') return editCard(state, action.id, action.patch);
@@ -566,6 +567,7 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
     const message = value.trim();
     if ((!message && !files.length) || state.busy || unavailable) return;
     chat.current.send({ text: message, attachments: files }, emit);
+    track('story_chat_message', { live, attachments: files.length });
     setText('');
     setFiles([]);
     setTab('chat');
