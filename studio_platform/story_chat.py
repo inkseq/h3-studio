@@ -160,11 +160,21 @@ def _story_key(entity, lookup):
     return tuple(reversed(path))
 
 
+def retained(entity):
+    """A source projection kept only for provenance by the Quick Create migration (#481).
+
+    It stays in the story for its jobs and history but is not a visible card: the chat
+    neither shows nor edits it; its takes appear on the canonical shot instead.
+    """
+    marker = entity.get("data", {}).get("migration")
+    return isinstance(marker, dict) and marker.get("retained") is True
+
+
 def shots_of(project, chat):
-    """Every shot of the story in reading order. A chat-made story has one scene; an
-    existing story opened in the chat (#422) may have several chapters and scenes."""
+    """Every visible shot of the story in reading order. A chat-made story has one scene;
+    an existing story opened in the chat (#422) may have several chapters and scenes."""
     lookup = {e["id"]: e for e in project["entities"]}
-    shots = [e for e in project["entities"] if e["type"] == "shot"]
+    shots = [e for e in project["entities"] if e["type"] == "shot" and not retained(e)]
     return sorted(shots, key=lambda e: _story_key(e, lookup))
 
 
@@ -409,7 +419,7 @@ def apply_plan(project, chat, plan):
     Raises StoryChatError for a plan that names a card that no longer exists, so a
     plan computed before a concurrent user edit is never applied to the wrong card.
     """
-    lookup = {e["id"]: e for e in project["entities"]}
+    lookup = {e["id"]: e for e in project["entities"] if not retained(e)}
     refs = {}
     actions, changes = [], []
     proposal = None
