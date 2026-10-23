@@ -264,7 +264,7 @@ export function TrashProvider({ account, children }) {
     </Context.Provider>
   );
 }
-export function TrashMenu({ target, onRename, onEdit, onTrashSettled, disabled = false }) {
+export function TrashMenu({ target, onRename, onEdit, onChat, onTrashSettled, disabled = false }) {
   const ctx = useTrash(),
     { t } = useI18n();
   if (!ctx?.account) return null;
@@ -292,6 +292,17 @@ export function TrashMenu({ target, onRename, onEdit, onTrashSettled, disabled =
               }}
             >
               {t('trash.edit')}
+            </button>
+          )}
+          {onChat && (
+            <button
+              role="menuitem"
+              onClick={() => {
+                close();
+                onChat();
+              }}
+            >
+              {t('trash.editInChat')}
             </button>
           )}
           <button
