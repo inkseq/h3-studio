@@ -327,3 +327,33 @@ recheck zero nonterminal work before CPU recreation. Post the exact production
 receipt on #305; Claude performs the anonymous production read-back, while users
 complete their own authenticated linking. No paid generation or billing
 activation is authorized by this decision.
+
+## CR-20261024-58 — free production pictures, existing Gmail admin and overnight preparation
+
+Owner explicitly authorizes the existing audited story-chat settings API to set
+production `pictures_enabled=true`, reason `owner: open pictures`. This supersedes
+only the earlier picture-OFF launch condition: credit charging and Stripe Checkout
+remain OFF, pictures are temporarily free to users, and the owner accepts provider
+cost. Include `image_credits=5` with rates2/4/12 in revenue preparation; publication,
+charging and LIVE Checkout remain separate guarded actions. Do not infer payment
+enablement from the picture switch. The completed switch receipt is
+[#422/6370033341](https://github.com/inkseq/h3-studio/issues/422#issuecomment-6370033341).
+
+Owner also supersedes the earlier instruction to wait for Google linking before
+granting production admin: grant only the existing Google-created Dan Mo account
+`danmo2060@gmail.com` the admin role through the audited human-admin API, reason
+`owner Gmail admin`. No new account, merge, email/provider/credits/works change;
+superdan remains admin. Completed role-only receipt:
+[#305/6370152170](https://github.com/inkseq/h3-studio/issues/305#issuecomment-6370152170).
+
+The overnight priority is revenue preparation without turning charging or LIVE
+payments on, then production Film gate preparation, backend Sentry and staging QA
+journeys in CI, one isolated staging restore drill, and #481. For #481, owner
+preauthorizes production conversion after accepted staging checks and Claude's
+delegated review of a reasonable per-account production census (about26 superdan
+sessions including trash and14 supervan). Skip/list uncertainty; never force or
+resurrect trash. Option2 purge redaction is not a prerequisite; retain option1's
+permanent-purge refusal. Exact source hashes, current-state checks, original
+operation receipts and the normal accepted-artifact production gate still apply.
+Revenue wins conflicts. Source: direct owner decisions2026-10-24 and
+[#481/6369552441](https://github.com/inkseq/h3-studio/issues/481#issuecomment-6369552441).
