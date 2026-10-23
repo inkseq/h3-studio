@@ -364,7 +364,9 @@ function SeriesApp({ sidebarView, onSidebarView }) {
   return (
     <>
       <div className="home" hidden={sidebarView !== 'library'}>
-        <StudioHeader account={c.account} active="works" accountMenu={accountMenu} />
+        {/* The same account menu as every other page; the story actions (ZIP backup, local
+            import, connect AI, trash) stay in the open story's own header below (#358). */}
+        <StudioHeader account={c.account} active="works" onSignIn={() => open({ type: 'cloud' })} />
         <main id={sidebarView === 'library' ? 'workspace' : undefined} tabIndex={-1}>
           <StoryLibraryHome
             state={state}
