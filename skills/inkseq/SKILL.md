@@ -77,7 +77,7 @@ For `resume_admission_available`, use [admission recovery](reference/recovery.md
 
 1. Identify the authorized project (or existing legacy session); read `capabilities.upload_constraints`. Preserve original media, with no silent cropping or transcoding.
 2. Save a stable client asset ID; upload once. An uncertain response requires finding/resuming that receipt, not uploading a replacement.
-3. Bind ready receipt IDs to intended card inputs, shots or character looks. Keep video soundtrack selection, audio and source ranges distinct.
+3. Attach ready uploads to the owned project before profile binding. Character looks, places, props and shot bindings use document entity IDs; executable generation inputs use ready asset receipt IDs. Keep video soundtrack selection, audio and source ranges distinct.
 4. Assets keep their original project/session ownership. Discover authorized projects' files with `GET /v1/library` filters and inspect current shot usage with `GET /v1/library/usage`. Tag/file through the original project's versioned actions; use explicit import for another story. See the [library contract](reference/api.md#project-scoped-library-and-explicit-imports-238).
 
 ```sh
