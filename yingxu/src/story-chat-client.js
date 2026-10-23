@@ -137,6 +137,18 @@ export function createLiveChat({
       if (state.quotes[id]) state.quotes[id] = { ...state.quotes[id], status };
     emit({ type: 'chat.loaded', state, fresh });
   };
+  // After a timeout or lost response, re-read the story; true if it shows the outcome.
+  async function recovered(done, emit) {
+    if (!project) return false;
+    try {
+      const value = await api.request(`/v1/story-chats/${encodeURIComponent(project)}`);
+      if (!done(value)) return false;
+      load(value, emit);
+      return true;
+    } catch {
+      return false;
+    }
+  }
   async function ensure() {
     if (project) return project;
     const created = await api.request('/v1/story-chats', { method: 'POST', body: { language } });
@@ -172,9 +184,14 @@ export function createLiveChat({
         const value = await api.request(`/v1/story-chats/${encodeURIComponent(ident)}/turns`, {
           method: 'POST',
           body: { turn_id: id, text },
+          // A model turn can take 10–30 s; never give up before the server does.
+          timeoutMs: 120000,
         });
         load(value, emit, (value.turn?.changes || []).map((change) => change.id).filter(Boolean));
       } catch (failure) {
+        // The server may still have finished (lost response): show what it holds.
+        if (await recovered((value) => value.messages?.some((item) => item.turn_id === id), emit))
+          return;
         emit({
           type: 'assistant.message',
           id: id + '-error',
@@ -205,9 +222,19 @@ export function createLiveChat({
         const value = await api.request(`/v1/story-chats/${encodeURIComponent(project)}/images`, {
           method: 'POST',
           body: { request_id: quote.id, card_id: card },
+          // Drawing plus storing a picture takes 15–40 s.
+          timeoutMs: 180000,
         });
         load(value, emit, [card]);
       } catch (failure) {
+        const before = fromServer(view || {}, labels).cards.find((item) => item.id === card)?.image;
+        if (
+          await recovered((value) => {
+            const now = fromServer(value, labels).cards.find((item) => item.id === card)?.image;
+            return now && now !== before;
+          }, emit)
+        )
+          return;
         emit({ type: 'card.status', id: card, status: 'draft' });
         emit({
           type: 'assistant.message',
