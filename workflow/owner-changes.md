@@ -204,7 +204,7 @@ Owner authorizes importing the existing restricted LIVE key from the specific pr
 
 Owner directs the overnight sequence: #374 approved host LIVE wiring (Claude6315459515), staging before production; #395 WorkOS logout_url and sign-up/sign-in hint; #409 credit-mode generation-budget onboarding; #347 filmCuts export inclusion and order/trim/exclusion fixture; #415 sign-out-all and self-service deletion design; #408 speed/detach/fades/crossfade design; #353 missing-only production historical thumbnails; then CA/certifi/Node patch work.
 
-For each ready completed slice, post its exact staged/operational receipt and replace labels with needs-claude-acceptance, then continue the next item. Tier2 compares options and awaits Claude design review before implementation; blocked items record the actual dependency and are skipped while other authorized work advances. Charging, LIVE Checkout and WorkOS activation stay OFF. Do not operate supervan's production machines/jobs. Test GPU authorization remains USD20 per task. #374 CPU recreation additionally requires an immediately rechecked zero-nonterminal-job gate; create at most one webhook after full inventory and preserve the accepted rollback/CAS boundaries. Existing source/financial/GPU operations are not replayed. Host and image trust stores are updated for the reported emSign incident, including the official Node patch when actually available; no Node major migration. Source: direct owner instruction2026-10-21 and linked issue scopes.
+For each ready completed slice, post its exact staged/operational receipt and replace labels with needs-claude-acceptance, then continue the next item. Tier2 compares options and awaits Claude design review before implementation; blocked items record the actual dependency and are skipped while other authorized work advances. Charging and LIVE Checkout stay OFF; the WorkOS activation hold is superseded only by CR-20261023-57. Do not operate supervan's production machines/jobs. Test GPU authorization remains USD20 per task. #374 CPU recreation additionally requires an immediately rechecked zero-nonterminal-job gate; create at most one webhook after full inventory and preserve the accepted rollback/CAS boundaries. Existing source/financial/GPU operations are not replayed. Host and image trust stores are updated for the reported emSign incident, including the official Node patch when actually available; no Node major migration. Source: direct owner instruction2026-10-21 and linked issue scopes.
 
 ## CR-20261022-52 — one watchdog, local busy lease and idle GitHub fallback
 
@@ -303,3 +303,27 @@ of the identical accepted tuple. Preserve billing, Checkout and auth activation
 state. Image-price publication and charging remain separate CR55 decisions;
 neither this change nor deployment enables them. Prepare production now, execute
 only after the staged sign-off, and refuse state/identity drift before writes.
+
+## CR-20261023-57 — enable existing production WorkOS Google sign-in
+
+Owner directly authorizes guarded production import and hosted sign-in activation
+for [#305](https://github.com/inkseq/h3-studio/issues/305), following prerequisites
+[6359710953](https://github.com/inkseq/h3-studio/issues/305#issuecomment-6359710953)
+and [6359789675](https://github.com/inkseq/h3-studio/issues/305#issuecomment-6359789675).
+Use the existing Windows Credential Manager target `inkseq/workos-prod` and
+`tools/import_workos_credentials.py`; no new key, rotation or secret-drop file.
+The exact production client is `client_01M592BTTGGDTK1A9WCRJGFGRQ`, callback
+`https://inkseq.com/api/auth/workos/callback`, login
+`https://inkseq.com/api/auth/workos/start`, and sign-out `https://inkseq.com/`.
+
+This supersedes only the earlier WorkOS-OFF requirement. Preserve password login,
+billing, Checkout, the picture switch, accepted artifacts and rollback. Do not
+edit account emails or identities directly: superdan and supervan each use their
+password session and Settings → Account → Link Google sign-in; the verified
+provider callback sets the Gmail. Before activation, include Claude's accepted
+password-entry frontend fix from design#180 ([6359898950](https://github.com/inkseq/h3-studio/issues/305#issuecomment-6359898950)).
+Use independently reviewed, receipt-bound configuration CAS and immediately
+recheck zero nonterminal work before CPU recreation. Post the exact production
+receipt on #305; Claude performs the anonymous production read-back, while users
+complete their own authenticated linking. No paid generation or billing
+activation is authorized by this decision.
