@@ -31,7 +31,8 @@ FILES = {"image.tar.gz", "compose.yaml", "Caddyfile", "init_database.py", "check
 TARGET_FILES = FILES | {'Caddyfile.staging', 'deployment_target.py'}
 ENV_FIELDS = {"SIXNINE_IMAGE", "SIXNINE_POSTGRES_IMAGE", "SIXNINE_CADDY_IMAGE",
               "SIXNINE_DB_ADMIN_SECRET_FILE", "SIXNINE_APP_DSN_SECRET_FILE"}
-OPTIONAL_ENV_FIELDS = {"INKSEQ_LEGACY_REDIRECT", 'INKSEQ_DEPLOYMENT_TARGET'}
+OPTIONAL_ENV_FIELDS = {"INKSEQ_LEGACY_REDIRECT", 'INKSEQ_DEPLOYMENT_TARGET', 'INKSEQ_SENTRY_DSN'}
+SENTRY_DSN = "https://7339f473c737f7b493b03da92a2bb925@o4512306171019264.ingest.us.sentry.io/4512306334728192"
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -259,6 +260,9 @@ def deployment_environment(path, commit):
         require(value == value.strip() and "\x00" not in value, "invalid_nonsecret_site_config")
         values[key] = value
     require(ENV_FIELDS <= set(values) <= ENV_FIELDS | OPTIONAL_ENV_FIELDS, "incomplete_site_config")
+    require(values.get('INKSEQ_SENTRY_DSN', '') in {'', SENTRY_DSN}, 'invalid_api_error_monitoring_destination')
+    require(not values.get('INKSEQ_SENTRY_DSN') or values.get('INKSEQ_DEPLOYMENT_TARGET') in {'staging', 'production'},
+            'api_error_monitoring_target_required')
     if "INKSEQ_LEGACY_REDIRECT" in values:
         require(values["INKSEQ_LEGACY_REDIRECT"] in {"0", "1"}, "invalid_domain_redirect_phase")
     selected = deployment_target.site_environment(path.parent, values)

@@ -21,6 +21,9 @@ class ConfigurationError(ValueError):
     pass
 
 
+SENTRY_DSN = "https://7339f473c737f7b493b03da92a2bb925@o4512306171019264.ingest.us.sentry.io/4512306334728192"
+
+
 def require(condition, message):
     if not condition:
         raise ConfigurationError(message)
@@ -36,7 +39,7 @@ def validate(config, *, deployment_directory=None, compose_version=None, target=
     services = config.get("services", {})
     require(set(services) == {"app", "db", "db-init", "caddy"}, "Unexpected service set")
     allowed_env = {
-        "app": {"SIXNINE_DATA", "SIXNINE_DATABASE_URL_FILE", "SIXNINE_PUBLIC_ORIGIN", "PUBLIC_ORIGIN", "PUBLIC_ORIGIN_ALIASES", "SIXNINE_AUTH_MODE", "INKSEQ_BROWSER_SESSION_SECONDS", "INKSEQ_DEPLOYMENT_TARGET",
+        "app": {"SIXNINE_DATA", "SIXNINE_DATABASE_URL_FILE", "SIXNINE_PUBLIC_ORIGIN", "PUBLIC_ORIGIN", "PUBLIC_ORIGIN_ALIASES", "SIXNINE_AUTH_MODE", "INKSEQ_BROWSER_SESSION_SECONDS", "INKSEQ_DEPLOYMENT_TARGET", "INKSEQ_SENTRY_DSN",
                 "SIXNINE_GENERATION_ENABLED", "SIXNINE_RENDER_ENABLED", "SIXNINE_EXECUTION_BACKEND", "SIXNINE_CLOUD_CREATION_ENABLED",
                 "SIXNINE_STORAGE_PROVIDER", "SIXNINE_FRONTEND_DIR", "SIXNINE_FRONTEND_RELEASE_DIR", "SIXNINE_TITLE_CONFIG_FILE"},
         "db": {"POSTGRES_USER", "POSTGRES_DB", "POSTGRES_PASSWORD_FILE", "POSTGRES_INITDB_ARGS",
@@ -117,6 +120,12 @@ def validate(config, *, deployment_directory=None, compose_version=None, target=
         required["INKSEQ_BROWSER_SESSION_SECONDS"] = duration
     if "INKSEQ_DEPLOYMENT_TARGET" in app.get("environment", {}):
         required["INKSEQ_DEPLOYMENT_TARGET"] = target
+    if "INKSEQ_SENTRY_DSN" in app.get("environment", {}):
+        dsn = app["environment"]["INKSEQ_SENTRY_DSN"]
+        require(isinstance(dsn, str) and dsn in {"", SENTRY_DSN}, "API error monitoring destination differs")
+        require(not dsn or app["environment"].get("INKSEQ_DEPLOYMENT_TARGET") == target,
+                "API error monitoring requires an explicit deployment target")
+        required["INKSEQ_SENTRY_DSN"] = dsn
     require(app.get("environment") == required, "App production safety settings differ")
     networks = config.get("networks", {})
     require(set(networks) == {"web", "database", "edge"}, "Unexpected network definition")
