@@ -68,7 +68,7 @@ class MigrationTests(unittest.TestCase):
                 connection.execute(text('CREATE SCHEMA "' + self.schema + '"'))
             self.url = parsed.update_query_dict(
                 {"options": "-csearch_path=" + self.schema}
-            )
+            ).render_as_string(hide_password=False)
         else:
             self.url = "sqlite:///" + str(
                 Path(self.temp.name) / "migration.sqlite3"

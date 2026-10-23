@@ -593,6 +593,7 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
             ),
             "latest_seq": p["latest_seq"],
             "web_url": "/quick-chat?session=" + row["id"],
+            "migrated_project_id": None,
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
             "created_by": self._creation_public(row, "session"),
