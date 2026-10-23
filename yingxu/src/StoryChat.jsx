@@ -444,7 +444,7 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
     return () => window.removeEventListener('popstate', back);
   }, [live]);
   const [state, dispatch] = useReducer(reducer, null, () => emptyChat());
-  const [balance, setBalance] = useState(0);
+  const [balance, setBalance] = useState(live ? Number.NaN : 0);
   const [text, setText] = useState('');
   const [files, setFiles] = useState([]);
   const [tab, setTab] = useState('chat');
@@ -502,6 +502,11 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
         if (!alive) return;
         if (Number.isSafeInteger(config.image_credits)) client.imageCredits = config.image_credits;
         setPicturesOn(config.pictures_enabled === true);
+        // The confirm card shows the real balance, or none if it cannot be read.
+        api
+          .request('/v1/credits')
+          .then((value) => alive && setBalance(Number(value.available)))
+          .catch(() => alive && setBalance(Number.NaN));
         client.picturesEnabled = config.pictures_enabled === true;
         if (!config.enabled || !config.assistant_ready) setUnavailable(t('storyChat.notReady'));
         else {

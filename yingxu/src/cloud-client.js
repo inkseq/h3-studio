@@ -161,7 +161,16 @@ export function createCloudClient({
   }
   async function request(
     path,
-    { method = 'GET', body, key, blob = false, anonymous = false, signal } = {},
+    {
+      method = 'GET',
+      body,
+      key,
+      blob = false,
+      anonymous = false,
+      signal,
+      // A slower call (e.g. a model turn or picture) may ask for a longer deadline.
+      timeoutMs: requestTimeoutMs,
+    } = {},
   ) {
     const multipart = typeof FormData !== 'undefined' && body instanceof FormData;
     const encodedBody = body !== undefined && !multipart ? JSON.stringify(body) : body;
@@ -180,7 +189,14 @@ export function createCloudClient({
     };
     let timedOut = false,
       releaseRead = null;
-    const duration = blob ? downloadTimeoutMs : multipart ? uploadTimeoutMs : timeoutMs,
+    const duration =
+        Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0
+          ? requestTimeoutMs
+          : blob
+            ? downloadTimeoutMs
+            : multipart
+              ? uploadTimeoutMs
+              : timeoutMs,
       deadline = Date.now() + duration;
     const timer = setTimeout(() => {
       timedOut = true;
