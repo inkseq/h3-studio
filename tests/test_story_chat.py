@@ -594,3 +594,20 @@ class StoryChatTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StoryChatSettingTests(unittest.TestCase):
+    def test_on_everywhere_unless_explicitly_off(self):
+        from unittest import mock
+
+        for target in ("production", "staging"):
+            for flag, expected in ((None, True), ("1", True), ("0", False)):
+                env = {"INKSEQ_DEPLOYMENT_TARGET": target}
+                if flag is not None:
+                    env["INKSEQ_STORY_CHAT"] = flag
+                with mock.patch.dict("os.environ", env, clear=True):
+                    self.assertIs(
+                        Settings.from_environment().story_chat_enabled,
+                        expected,
+                        (target, flag),
+                    )
