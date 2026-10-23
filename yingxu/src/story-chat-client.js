@@ -183,7 +183,14 @@ export function createLiveChat({
     },
     async open(emit) {
       if (!project) return;
-      load(await api.request(`/v1/story-chats/${encodeURIComponent(project)}`), emit);
+      const path = `/v1/story-chats/${encodeURIComponent(project)}`;
+      try {
+        load(await api.request(path), emit);
+      } catch (failure) {
+        // A story made in Works: attach a chat to it so it can be edited by chatting.
+        if (failure.detail?.detail?.code !== 'story_chat_not_found') throw failure;
+        load(await api.request(path + '/open', { method: 'POST', body: { language } }), emit);
+      }
     },
     async send({ text }, emit) {
       const id = turnId();
