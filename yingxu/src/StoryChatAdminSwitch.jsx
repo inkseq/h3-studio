@@ -69,7 +69,11 @@ export default function StoryChatAdminSwitch({ api, active }) {
         />
       </label>
       <div className="row tight" style={{ justifyContent: 'flex-end' }}>
-        {message && <small className="muted">{message}</small>}
+        {message ? (
+          <small className="muted">{message}</small>
+        ) : (
+          !reason.trim() && <small className="muted">{t('storyChatAdmin.reasonFirst')}</small>
+        )}
         <button
           type="button"
           className={on ? 'ghost' : 'primary'}
