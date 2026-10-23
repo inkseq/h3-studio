@@ -416,6 +416,8 @@ inventory.json
 
 # Preserved Quick Chat authoring on the existing business ledger.
 !studio_platform/quick_chat.py
+!studio_platform/quick_chat_migration.py
+!tools/migrate_quick_chat_stories.py
 !studio_platform/quick_chat_routes.py
 !studio_platform/quick_chat_schema.py
 !studio_platform/quick_chat_response_schema.py

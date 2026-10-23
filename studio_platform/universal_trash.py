@@ -172,6 +172,32 @@ def project_blocker(conn, tenant, owner, project_id):
     return history_blocker(conn, SimpleNamespace(tenant=tenant), owner, original)
 
 
+def assert_project_archive_purge_available(conn, tenant, owner, project_id):
+    """Do not report deleted authoring while its migration archive survives."""
+    from .quick_chat_migration import KIND, _completed_rollback
+
+    rows = list(
+        conn.execute(
+            select(documents)
+            .where(
+                documents.c.tenant_id == tenant,
+                documents.c.owner_id == owner,
+                documents.c.project_id == project_id,
+                documents.c.kind == KIND,
+            )
+            .limit(2)
+        ).mappings()
+    )
+    if not rows:
+        return
+    try:
+        released = len(rows) == 1 and _completed_rollback(rows[0])
+    except (AttributeError, KeyError, TypeError, ValueError):
+        released = False
+    if not released:
+        raise Conflict("migrated_project_archive_retained")
+
+
 def restore_value(before, after, current):
     """Three-way inverse: preserve unrelated edits; never overwrite a changed reference."""
     if before == after:
@@ -914,6 +940,9 @@ class UniversalTrash:
                     raise Conflict("trash_cleanup_scope_required")
                 for target in targets:
                     if target["kind"] == "project":
+                        assert_project_archive_purge_available(
+                            conn, self.tenant, principal.owner, target["project_id"]
+                        )
                         dependents = conn.execute(
                             select(documents.c.document_id).where(
                                 documents.c.tenant_id == self.tenant,

@@ -102,6 +102,12 @@ class QuickChatHistoryMixin:
         reason = None
         if principal is not None and connection is not None:
             reason = history_blocker(connection, self, principal.owner, row)
+            from .quick_chat_migration import has_migration_receipt
+
+            if has_migration_receipt(
+                connection, self.tenant, principal.owner, row["id"]
+            ):
+                reason = "quick_chat_migrated_read_only"
         if history["trash_state"] in {"purging", "purged"}:
             reason = "purge_already_started"
         return {
@@ -140,6 +146,8 @@ class QuickChatHistoryMixin:
             )
 
     def _history_select(self, connection, principal, body):
+        from .quick_chat_migration import assert_legacy_mutable
+
         objects, _, _ = _tables()
         if not isinstance(body, dict):
             raise _error("invalid_request", status=422)
@@ -176,6 +184,9 @@ class QuickChatHistoryMixin:
             ]
             for row in selected:
                 self._history_authorize(principal, row, cleanup=True)
+            assert_legacy_mutable(
+                connection, self.tenant, principal.owner, (r["id"] for r in selected)
+            )
             return selected
         requested = body.get("sessions")
         if not isinstance(requested, list) or not 1 <= len(requested) <= 100:
@@ -202,6 +213,9 @@ class QuickChatHistoryMixin:
             self._version(row, item["expected_version"])
             self._history_authorize(principal, row, cleanup=action == "purge")
             selected.append(row)
+        assert_legacy_mutable(
+            connection, self.tenant, principal.owner, (r["id"] for r in selected)
+        )
         return selected
 
     def _history_snapshot(self, connection, principal, body, sessions):
@@ -483,6 +497,7 @@ class QuickChatHistoryMixin:
     def _cleanup_one_object_locked(self, record, index):
         """External IO over one durable intent. Unknown results never restore."""
         from .quick_chat import objects
+        from .quick_chat_migration import assert_legacy_mutable
 
         owner = record["owner"]
         with self.repo.transaction() as connection:
@@ -492,6 +507,10 @@ class QuickChatHistoryMixin:
                 connection, select(objects).where(objects.c.id == record["id"])
             )
             payload = copy.deepcopy(current["payload"])
+            if current["kind"] == "history_action":
+                assert_legacy_mutable(
+                    connection, self.tenant, owner, payload["plan"]["session_ids"]
+                )
             spec = payload["plan"]["objects"][index]
             if spec["state"] == "deleted":
                 return
@@ -604,6 +623,7 @@ class QuickChatHistoryMixin:
 
     def _finish_history_purge(self, record):
         from .quick_chat import objects
+        from .quick_chat_migration import assert_legacy_mutable
 
         owner = record["owner"]
         with self.repo.transaction() as connection:
@@ -613,6 +633,9 @@ class QuickChatHistoryMixin:
                 connection, select(objects).where(objects.c.id == record["id"])
             )
             payload = copy.deepcopy(current["payload"])
+            assert_legacy_mutable(
+                connection, self.tenant, owner, payload["plan"]["session_ids"]
+            )
             if payload["state"] == "completed" or any(
                 spec["state"] != "deleted" for spec in payload["plan"]["objects"]
             ):
@@ -769,6 +792,12 @@ class QuickChatHistoryMixin:
                         connection, select(objects).where(objects.c.id == row["id"])
                     )
                 )
+                from .quick_chat_migration import has_migration_receipt
+
+                if has_migration_receipt(
+                    connection, self.tenant, row["owner"], current["id"]
+                ):
+                    continue
                 if (
                     self._history(current)["trash_state"] == "active"
                     and self._history(current).get("archive_pending")

@@ -14,8 +14,10 @@ from studio_platform.repository import (
     artifacts,
     attempts,
     budget_reservations,
+    documents,
     Scope,
     Conflict,
+    request_hash,
 )
 from studio_platform.auth import Principal
 from studio_platform.source_snapshot import source_snapshot
@@ -257,6 +259,307 @@ class StoryboardVersionTests(unittest.TestCase):
                 )
             )
         return ident, artifact
+
+    def migration_versions_fixture(self):
+        """Seed two original succeeded shot jobs and one trusted adoption receipt."""
+        self.prepare()
+        current = self.current()
+        created = self.edit(
+            [
+                {
+                    "op": "entity.create",
+                    "entity": {
+                        "id": "shot-alias",
+                        "type": "shot",
+                        "parentId": "scene-one",
+                        "title": "Earlier take",
+                        "data": {"seconds": 5},
+                    },
+                },
+                {
+                    "op": "shot.configure_generation",
+                    "shot_id": "shot-alias",
+                    "prompt": "Earlier immutable action",
+                    "controls": {"seed": "17", "duration": 5},
+                    "inputs": {"first_frame": {"asset_id": "frame"}},
+                },
+            ],
+            version=current['version'],
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        response = self.client.post(
+            '/v1/projects/story-one/storyboard/preflights',
+            headers={'Idempotency-Key': 'alias-fixture-plans'},
+            json={
+                'expected_version': created.json()['version'],
+                'shot_ids': ['shot-one', 'shot-alias'],
+                'copies': 1,
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        made = [self.completed(item['plan_id']) for item in response.json()['items']]
+        current = self.current()
+        project = current['project']
+        sources = ['shot-one', 'shot-alias']
+        mapping = {}
+        for index, ident in enumerate(sources):
+            shot = next(e for e in project['entities'] if e['id'] == ident)
+            shot['data']['quickChatProjection'] = {
+                'session_id': 'session-migrated',
+                'revision_id': f'revision-{index}',
+                'item_id': f'item-{index}',
+            }
+            mapping[f'item-{index}'] = {
+                'card_id': 'card-original',
+                'revision_id': f'revision-{index}',
+                'shot_id': ident,
+            }
+        before_project = copy.deepcopy(project)
+        archived = next(
+            e for e in before_project['entities'] if e['id'] == 'shot-alias'
+        )
+        canonical = next(e for e in project['entities'] if e['id'] == 'shot-one')
+        canonical['data']['migration'] = {
+            'canonical': True,
+            'source_shot_ids': sources,
+            'source_session_id': 'session-migrated',
+            'receipt_id': 'session-migrated',
+        }
+        project['entities'] = [
+            e for e in project['entities'] if e['id'] != 'shot-alias'
+        ]
+        project['links'] = [
+            e
+            for e in project['links']
+            if 'shot-alias' not in (e['source'], e['target'])
+        ]
+        project['layout']['positions'].pop('shot-alias', None)
+        receipt = {
+            'contract': 1,
+            'mapping_version': 2,
+            'status': 'completed',
+            'tenant_id': self.settings.tenant_id,
+            'owner_id': 'superdan',
+            'project_id': 'story-one',
+            'source_session_id': 'session-migrated',
+            'receipt_id': 'session-migrated',
+            'after_project_version': current['version'],
+            'archive_strategy': 'receipt_archive',
+            'before_project': before_project,
+            'before_project_hash': request_hash(before_project),
+            'archived_shots': {
+                'shot-alias': {'entity': archived, 'projection_hash': 'a' * 64}
+            },
+            'mapping': mapping,
+            'canonical_shots': {
+                'shot-one': {
+                    'card_id': 'card-original',
+                    'source_shot_ids': sources,
+                    'selected_asset_id': None,
+                    'selection_reason': 'current_revision_first_item',
+                }
+            },
+        }
+        with self.app.state.repository.transaction() as conn:
+            conn.execute(
+                update(documents)
+                .where(
+                    documents.c.kind == 'project',
+                    documents.c.document_id == 'story-one',
+                    documents.c.owner_id == 'superdan',
+                )
+                .values(payload=project)
+            )
+            conn.execute(
+                insert(documents).values(
+                    tenant_id=self.settings.tenant_id,
+                    owner_id='superdan',
+                    project_id='story-one',
+                    kind='quick_chat_story_migration',
+                    document_id='session-migrated',
+                    version=1,
+                    payload=receipt,
+                    updated_at=1,
+                )
+            )
+        return made, project, receipt
+
+    def test_migration_alias_versions_select_restore_and_star_preserve_original_jobs(
+        self,
+    ):
+        made, _, _ = self.migration_versions_fixture()
+        with self.app.state.repository.engine.connect() as conn:
+            before = conn.execute(select(jobs)).mappings().all()
+        path = '/v1/projects/story-one/shots/shot-one/versions'
+        first = self.client.get(path + '?limit=1').json()
+        second = self.client.get(path + '?limit=1&offset=1').json()
+        versions = first['versions'] + second['versions']
+        self.assertEqual({v['id'] for v in versions}, {a for _, a in made})
+        self.assertEqual(
+            {v['source_shot_id'] for v in versions}, {'shot-one', 'shot-alias'}
+        )
+        self.assertEqual(sum(v['aliased'] for v in versions), 1)
+        self.assertTrue(all(not v['selected'] for v in versions))
+        alias = next(v for v in versions if v['aliased'])
+        edited = self.edit(
+            [
+                {
+                    'op': 'storyboard.select',
+                    'shot_id': 'shot-one',
+                    'artifact_id': alias['id'],
+                },
+                {
+                    'op': 'storyboard.star',
+                    'shot_id': 'shot-one',
+                    'artifact_id': alias['id'],
+                    'starred': True,
+                },
+                {
+                    'op': 'storyboard.restore',
+                    'shot_id': 'shot-one',
+                    'artifact_id': alias['id'],
+                },
+            ],
+            version=self.current()['version'],
+            key='alias-select-restore',
+        )
+        self.assertEqual(edited.status_code, 200, edited.text)
+        values = self.client.get(path).json()['versions']
+        picked = next(v for v in values if v['id'] == alias['id'])
+        self.assertTrue(picked['selected'] and picked['starred'])
+        shot = next(
+            e for e in edited.json()['project']['entities'] if e['id'] == 'shot-one'
+        )
+        self.assertEqual(shot['data']['prompt'], 'Earlier immutable action')
+        with self.app.state.repository.engine.connect() as conn:
+            self.assertEqual(conn.execute(select(jobs)).mappings().all(), before)
+            self.assertEqual(
+                conn.scalar(select(func.count()).select_from(budget_reservations)), 0
+            )
+
+    def test_migration_alias_rejects_forged_marker_or_wrong_receipt_scope(self):
+        made, project, _ = self.migration_versions_fixture()
+        original = copy.deepcopy(project)
+        shot = next(e for e in project['entities'] if e['id'] == 'shot-one')
+        shot['data']['migration']['source_shot_ids'] = ['shot-one', 'unrelated-shot']
+        with self.app.state.repository.transaction() as conn:
+            conn.execute(
+                update(documents)
+                .where(documents.c.kind == 'project')
+                .values(payload=project)
+            )
+        path = '/v1/projects/story-one/shots/shot-one/versions'
+        self.assertEqual(self.client.get(path).status_code, 409)
+        refused = self.edit(
+            [
+                {
+                    'op': 'storyboard.select',
+                    'shot_id': 'shot-one',
+                    'artifact_id': made[1][1],
+                }
+            ],
+            version=self.current()['version'],
+            key='forged-migration-select',
+        )
+        self.assertEqual(refused.status_code, 409)
+        with self.app.state.repository.transaction() as conn:
+            conn.execute(
+                update(documents)
+                .where(documents.c.kind == 'project')
+                .values(payload=original)
+            )
+            conn.execute(
+                update(documents)
+                .where(documents.c.kind == 'quick_chat_story_migration')
+                .values(owner_id='supervan')
+            )
+        self.assertEqual(self.client.get(path).status_code, 409)
+
+    def test_migration_alias_rejects_cross_card_mapping_and_projection_drift(self):
+        _, project, receipt = self.migration_versions_fixture()
+        path = '/v1/projects/story-one/shots/shot-one/versions'
+        invalid = copy.deepcopy(receipt)
+        invalid['mapping']['item-1']['card_id'] = 'another-card'
+        with self.app.state.repository.transaction() as conn:
+            conn.execute(
+                update(documents)
+                .where(documents.c.kind == 'quick_chat_story_migration')
+                .values(payload=invalid)
+            )
+        self.assertEqual(self.client.get(path).status_code, 409)
+        with self.app.state.repository.transaction() as conn:
+            conn.execute(
+                update(documents)
+                .where(documents.c.kind == 'quick_chat_story_migration')
+                .values(payload=receipt)
+            )
+            source = next(e for e in project['entities'] if e['id'] == 'shot-one')
+            source['data']['quickChatProjection']['session_id'] = 'another-session'
+            conn.execute(
+                update(documents)
+                .where(documents.c.kind == 'project')
+                .values(payload=project)
+            )
+        self.assertEqual(self.client.get(path).status_code, 409)
+
+    def test_stale_or_damaged_archive_receipt_cannot_authorize_version_actions(self):
+        made, _, receipt = self.migration_versions_fixture()
+        path = '/v1/projects/story-one/shots/shot-one/versions'
+        variants = []
+        rolled_back = copy.deepcopy(receipt)
+        rolled_back['rollback'] = {'status': 'completed'}
+        variants.append((1, rolled_back))
+        variants.append((2, receipt))
+        damaged = copy.deepcopy(receipt)
+        damaged['archived_shots']['shot-alias']['entity']['data']['prompt'] = 'changed'
+        variants.append((1, damaged))
+        damaged = copy.deepcopy(receipt)
+        damaged['before_project']['title'] = 'changed original'
+        variants.append((1, damaged))
+        before = self.current()
+        for index, (version, value) in enumerate(variants):
+            with self.subTest(index=index):
+                with self.app.state.repository.transaction() as conn:
+                    conn.execute(
+                        update(documents)
+                        .where(documents.c.kind == 'quick_chat_story_migration')
+                        .values(version=version, payload=value)
+                    )
+                self.assertEqual(self.client.get(path).status_code, 409)
+                response = self.edit(
+                    [
+                        {
+                            'op': 'storyboard.star',
+                            'shot_id': 'shot-one',
+                            'artifact_id': made[1][1],
+                            'starred': True,
+                        }
+                    ],
+                    version=before['version'],
+                    key=f'invalid-archive-{index}',
+                )
+                self.assertEqual(response.status_code, 409, response.text)
+                self.assertEqual(self.current(), before)
+
+    def test_migration_archive_keeps_versions_and_owner_project_job_filters(self):
+        made, _, _ = self.migration_versions_fixture()
+        path = '/v1/projects/story-one/shots/shot-alias/versions'
+        kept = self.client.get(path)
+        self.assertEqual(kept.status_code, 404, kept.text)
+        before = self.client.get('/v1/projects/story-one/shots/shot-one/versions')
+        self.assertEqual(
+            {v['id'] for v in before.json()['versions']}, {a for _, a in made}
+        )
+        with self.app.state.repository.transaction() as conn:
+            conn.execute(
+                update(jobs)
+                .where(jobs.c.id == made[1][0])
+                .values(project_id='another-project')
+            )
+        canonical = self.client.get('/v1/projects/story-one/shots/shot-one/versions')
+        self.assertEqual([v['id'] for v in canonical.json()['versions']], [made[0][1]])
+        self.login('supervan')
+        self.assertEqual(self.client.get(path).status_code, 404)
 
     def test_restore_uses_immutable_effective_recipe_after_profiles_and_defaults_change(
         self,
