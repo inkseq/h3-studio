@@ -866,3 +866,46 @@ class OpenExistingStoryNoOpOrderTests(OpenExistingStoryOrderTests):
         response = self.turn({"project_id": pid}, "x", turn_id="turn-0006", plan=plan)
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(self.parents(pid)["Coda."], "scene-empty")
+
+
+class RetainedMigrationShotTests(OpenExistingStoryTests):
+    """#481 contract: data.migration.retained shots are kept but invisible to the chat."""
+
+    def test_retained_shots_are_hidden_and_cannot_be_targeted(self):
+        pid, scene1 = self.existing()
+        row = self.client.get(f"/v1/projects/{pid}").json()
+        hidden = {
+            "op": "entity.create",
+            "entity": {
+                "id": "shot-retained",
+                "type": "shot",
+                "parentId": scene1,
+                "title": "",
+                "description": "Old take projection.",
+                "order": 99,
+                "data": {
+                    "prompt": "Old take projection.",
+                    "migration": {"retained": True, "canonical_shot_id": None},
+                },
+            },
+        }
+        done = self.client.post(
+            f"/v1/projects/{pid}/actions",
+            json={"expected_version": row["version"], "actions": [hidden]},
+        )
+        self.assertEqual(done.status_code, 200, done.text)
+        opened = self.client.post(
+            f"/v1/story-chats/{pid}/open", json={"language": "en"}
+        )
+        self.assertEqual(opened.status_code, 200, opened.text)
+        texts = [s["text"] for s in opened.json()["cards"]["shots"]]
+        self.assertNotIn("Old take projection.", texts)
+        self.assertEqual(len(texts), 4)
+        plan = {
+            "reply": "ok",
+            "chips": [],
+            "actions": [{"tool": "upsert_shot", "ref": "shot-retained", "text": "x"}],
+        }
+        refused = self.turn({"project_id": pid}, "x", turn_id="turn-0007", plan=plan)
+        self.assertEqual(refused.status_code, 409, refused.text)
+        self.assertEqual(refused.json()["detail"]["code"], "story_chat_card_missing")
