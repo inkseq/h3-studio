@@ -21,6 +21,41 @@ def jpeg():
     return out.getvalue()
 
 
+def set_pictures(app, enabled):
+    """Store the admin switch directly (the admin route is tested separately)."""
+    from sqlalchemy import insert, select, update
+
+    from studio_platform import story_chat_settings as switch
+    from studio_platform.repository import documents
+
+    repo = app.state.repository
+    tenant = app.state.settings.tenant_id
+    where = (
+        documents.c.tenant_id == tenant,
+        documents.c.owner_id == switch.OWNER,
+        documents.c.project_id == switch.PROJECT,
+        documents.c.kind == switch.KIND,
+        documents.c.document_id == switch.ID,
+    )
+    with repo.transaction() as conn:
+        value = {"pictures_enabled": enabled}
+        if conn.execute(select(documents.c.version).where(*where)).first():
+            conn.execute(update(documents).where(*where).values(payload=value))
+        else:
+            conn.execute(
+                insert(documents).values(
+                    tenant_id=tenant,
+                    owner_id=switch.OWNER,
+                    project_id=switch.PROJECT,
+                    kind=switch.KIND,
+                    document_id=switch.ID,
+                    payload=value,
+                    version=1,
+                    updated_at=repo.clock(),
+                )
+            )
+
+
 class FakeImages:
     def __init__(self):
         self.calls, self.fail, self.during = [], None, None
@@ -52,6 +87,9 @@ class Billing:
         terminal = {"kind": prior} if prior in ("capture", "release") else None
         return {"created": False, "terminal": terminal, "attachment": None}
 
+    def has_hold(self, scope, reference):
+        return reference in self.state
+
     def capture(self, scope, reference, binding):
         self.events.append(("capture", reference))
         self.state[reference] = "capture"
@@ -73,6 +111,7 @@ class StoryChatImageTests(unittest.TestCase):
             settings, story_chat_client=self.model, story_chat_image_client=self.images
         )
         self.addCleanup(self.app.state.repository.engine.dispose)
+        set_pictures(self.app, True)
         self.billing = Billing()
         self.client = TestClient(self.app)
         self.assertEqual(
@@ -372,6 +411,42 @@ class StoryChatImageTests(unittest.TestCase):
             self.assertEqual(listed.status_code, 200, listed.text)
             ids = [c["project_id"] for c in listed.json()["story_chats"]]
             self.assertEqual(ids, [self.story["project_id"]])
+
+    def test_switch_off_refuses_new_pictures_before_any_hold(self):
+        zib = self.story["cards"]["characters"][0]["id"]
+        set_pictures(self.app, False)
+        self.assertFalse(
+            self.client.get("/v1/story-chats/config").json()["pictures_enabled"]
+        )
+        refused = self.draw(zib)
+        self.assertEqual(refused.status_code, 403, refused.text)
+        self.assertEqual(
+            refused.json()["detail"]["code"], "story_chat_pictures_disabled"
+        )
+        self.assertEqual(self.images.calls, [])
+        set_pictures(self.app, True)
+        self.assertTrue(
+            self.client.get("/v1/story-chats/config").json()["pictures_enabled"]
+        )
+
+    def test_switch_off_still_returns_an_already_drawn_picture(self):
+        zib = self.story["cards"]["characters"][0]["id"]
+        first = self.draw(zib).json()
+        set_pictures(self.app, False)
+        again = self.draw(zib)
+        self.assertEqual(again.status_code, 200, again.text)
+        self.assertEqual(again.json()["image"], first["image"])
+        self.assertEqual(len(self.images.calls), 1)
+
+    def test_only_admins_read_or_change_the_switch(self):
+        self.assertEqual(
+            self.client.get("/v1/admin/story-chat/settings").status_code, 403
+        )
+        put = self.client.put(
+            "/v1/admin/story-chat/settings",
+            json={"expected_version": 1, "pictures_enabled": False, "reason": "x"},
+        )
+        self.assertEqual(put.status_code, 403)
 
     def test_prompt_and_attach_shapes(self):
         project = self.project()

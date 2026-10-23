@@ -105,6 +105,42 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             reject_managed(row["payload"])
         return row
 
+    def pictures_enabled():
+        from .story_chat_settings import read as read_settings
+
+        with app.state.repository.engine.connect() as connection:
+            return read_settings(connection, settings.tenant_id)["pictures_enabled"]
+
+    def require_admin(request):
+        from .identity import is_admin
+
+        principal = request.state.principal
+        if not is_admin(principal, app.state.repository, settings):
+            _fail("admin_required", 403)
+        return principal
+
+    @app.get("/v1/admin/story-chat/settings")
+    def get_story_chat_settings(request: Request):
+        from .story_chat_settings import read as read_settings
+
+        require_admin(request)
+        with app.state.repository.engine.connect() as connection:
+            return read_settings(connection, settings.tenant_id)
+
+    @app.put("/v1/admin/story-chat/settings")
+    def put_story_chat_settings(request: Request, body: dict):
+        from .story_chat_settings import StoryChatSettingsError, write
+
+        principal = require_admin(request)
+        repo = app.state.repository
+        try:
+            with repo.transaction() as connection:
+                return write(
+                    connection, settings.tenant_id, principal, body, repo.clock()
+                )
+        except StoryChatSettingsError as error:
+            _fail(error.code, error.status)
+
     @app.get("/v1/story-chats/config")
     def story_chat_config(request: Request):
         if holder["client"] is None and enabled:
@@ -113,6 +149,8 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             "enabled": enabled and not request.state.principal.machine,
             # False means the text credential is missing: turns would answer 503.
             "assistant_ready": holder["client"] is not None,
+            # Admin switch (default off): whether card pictures may be drawn here.
+            "pictures_enabled": enabled and pictures_enabled(),
             # Credits per card picture from the server's price revision; null while
             # charging is off or no image price is published (then pictures are free/refused).
             "image_credits": (charges.price(settings.tenant_id) or {}).get("credits")
@@ -351,6 +389,10 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
         started, attached = receipt(start_key), receipt(attach_key)
         if card is None and attached is None:
             _fail("story_chat_card_missing", 404, ref=card_id)
+        if started is None and attached is None and not pictures_enabled():
+            # Admin switch off: no new picture, before any hold or provider call. Requests
+            # that already started still settle their original outcome below.
+            _fail("story_chat_pictures_disabled", 403)
         reference = "story_chat_image:" + request_id
         scope = app.state.scope(principal, project_id)
         original = None
@@ -411,12 +453,20 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
         # The original request's charging decision is final: a request that started while
         # charging was off is never charged later, and a charged one is always settled.
         held = None
+        if (
+            original is not None
+            and original["charged"]
+            and not charges.has_hold(scope, reference)
+        ):
+            # A start marker is project data a client can also write; only real ledger
+            # evidence may be recovered. Never admit a new paid hold on a replay.
+            _fail("story_chat_image_outcome_unconfirmed", 502)
         if original is None or original["charged"]:
             try:
                 held = charges.hold(scope, reference, binding)
             except CreditError as error:
                 credit_fail(error)
-            if original is not None and held is None:
+            if original is not None and (held is None or held["created"]):
                 _fail("story_chat_image_outcome_unconfirmed", 502)
         if attached is not None:
             # A replay of a delivered picture never draws again; it settles the original hold.
