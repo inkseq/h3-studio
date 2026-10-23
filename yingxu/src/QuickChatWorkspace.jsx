@@ -479,6 +479,12 @@ export default function QuickChatWorkspace() {
     historyDirty.current = false;
     quietly(controller.list());
   }, [pageActive, historyRevision, state.busy, state.account, c.account, controller]);
+  // A conversation already converted into a story (#481) opens that story in the chat.
+  const migratedTo = state.session?.migrated_project_id;
+  useEffect(() => {
+    if (pageActive && typeof migratedTo === 'string' && migratedTo)
+      navigateApp('/quick-chat?story=' + encodeURIComponent(migratedTo), { replace: true });
+  }, [pageActive, migratedTo]);
   useEffect(() => {
     if (pageActive && state.session?.id && lastSelected.current !== state.session.id) {
       lastSelected.current = state.session.id;
