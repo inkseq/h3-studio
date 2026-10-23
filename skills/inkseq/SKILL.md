@@ -24,9 +24,36 @@ python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID request GE
 
 Replace placeholders with actual returned values. Example safe response projection: `{"status":"connected","connection_id":"CONNECTION_ID","owner":"OWNER"}`; never a token. Lost exchange? Resume the same saved connection; see recovery.
 
-## Quick Create: plan → takes → choose → story
+## Unified story cards: author → preflight → versions
 
-Video uses `tier: standard|refine|fast`, `mode: fl|ref`; Fast is unavailable. All Agents use public tiers; [aliases/refusals](reference/api.md#video-quality-selection). Conversation selection is unchanged.
+Video uses `tier: standard|refine|fast`, `mode: fl|ref`; Fast is unavailable. Read [aliases/refusals](reference/api.md#video-quality-selection) and live capabilities, never a hard-coded REF reference limit.
+
+1. Read the owned project/version and guided schema. A story chat and Works edit the same project: character, location, prop and shot cards are existing entities. Use project actions instead of replacing the document or creating a second session.
+2. Create/edit chapters, scenes, shots, characters, places and props. Bind shot cast with `{characterId,lookId}`, the location with `data.storyboard.place.locationId`, and props with `data.storyboard.propIds`. These are entity IDs, not upload receipts. See the complete [card binding example](reference/api.md#unified-card-binding-example). Preserve user names and ready owned assets.
+3. Configure saved shot drafts with the chosen tier/mode, then inspect effective inputs/defaults before planning. Preserve omitted fields; never trim references or change quality to bypass blockers.
+4. For authorized multi-shot work, POST the story's `/storyboard/preflights` with `{expected_version,shot_ids,copies}` and one saved key. Inspect aggregate cost and retained per-copy plans before using the explicit-plan batch API. Copies share the owner's editable limit; only the first uses a fixed seed.
+5. Inspect results; adopt with `select:false` to retain the current choice. Use `shot.select` only when choosing that version is intended. Return original receipts and story/shot links.
+
+For a person to continue in the website, return `ORIGIN/quick-chat?story=PROJECT` using the actual owned project ID. Attaching an ordinary story to chat uses the signed-in browser's `POST /v1/story-chats/PROJECT/open`; it is human-only. PATs must not call `/open`, impersonate a browser or put a token in that link. Creating/editing entities through `/actions` neither calls the conversation model nor generates media.
+
+```http
+POST /v1/batches
+Idempotency-Key: saved-scene-batch-key
+
+{"client_project_id":"PROJECT","plan_ids":["READY_PLAN_A","READY_PLAN_B"]}
+```
+
+Example response projection: `{"batch_id":"BATCH","status":"active"}`; inspect its actual per-item list. HTTP 202 means admission, not inference success. Observe the original batch/per-item jobs; partial admission retains its original identity.
+
+Read a shot's `/versions` for immutable recipes; old missing recipes stay unknown. `storyboard.restore` restores known effective settings without generating. `storyboard.star`, atomic bulk draft/final/move, account→story→shot defaults and project-local profile forks use the [story contract](reference/api.md#storyboard-versions-and-bulk-work). Duration/seed stay per shot; no automatic deletion or global usage search.
+
+For an authorized whole-film request, check `capabilities.story_film.enabled`, then follow [one-click film](reference/api.md#one-click-film). Preflight freezes the story; inspect reuse, missing shots and cost before confirming. Observe/resume that original run, retaining per-shot budgets and grants. Read [film recovery](reference/recovery.md#one-click-film-recovery) after an uncertain response.
+
+Caption burn:2 nonempty lines ×18 characters/cue maximum. Confirmation/SRT cannot waive bounds; no silent trim/rewrap.
+
+## Legacy Quick Create compatibility
+
+Use this only for an explicitly authorized existing session or consumer still using the legacy API. New authoring uses project actions above. Session endpoints remain compatible during migration; a source session is not permission to convert it, delete it, or regenerate its results. Starred is a favourite, not a selected result; browser-only preview focus is not a persisted choice.
 
 1. Open an authorized session or create one. Read complete `next_settings`, schema and copy preferences. Upload references, wait for ready receipts, then explicitly select roles/ranges; upload alone selects nothing.
 2. Save a card with complete tier, mode, prompt, controls, inputs and copies. Card = group; revisions are immutable. A fixed seed applies only to the first new take, others receive distinct random seeds. The owner copy maximum defaults to 4 and is editable.
@@ -46,38 +73,15 @@ Example response projection: `{"card":{"id":"CARD"},"revision":{"id":"NEW_REVISI
 
 For `resume_admission_available`, use [admission recovery](reference/recovery.md#original-admission-recovery), never a new take/retry or cap increase.
 
-## Build or edit a story
-
-1. Read the owned project/version and guided schema. Preserve unrelated content; use project actions instead of replacing the document.
-2. Create/edit chapters, scenes, shots, characters, places and props. Characters support multiple `looks`; shot cast can select `{characterId,lookId}`. Use ready owned assets and preserve user names.
-3. Configure saved shot drafts with the chosen tier/mode, then inspect effective inputs/defaults before planning. Preserve omitted fields; never trim references or change quality to bypass blockers.
-4. For authorized multi-shot work, POST the story's `/storyboard/preflights` with `{expected_version,shot_ids,copies}` and one saved key. Inspect aggregate cost and retained per-copy plans before using the explicit-plan batch API. Copies share the owner's editable limit; only the first uses a fixed seed.
-5. Inspect results; adopt with `select:false` to retain the current choice. Use `shot.select` only when choosing that version is intended. Return original receipts and story/shot links.
-
-```http
-POST /v1/batches
-Idempotency-Key: saved-scene-batch-key
-
-{"client_project_id":"PROJECT","plan_ids":["READY_PLAN_A","READY_PLAN_B"]}
-```
-
-Example response projection: `{"batch_id":"BATCH","status":"active"}`; inspect its actual per-item list. HTTP 202 means admission, not inference success. Observe the original batch/per-item jobs; partial admission retains its original identity.
-
-Read a shot's `/versions` for immutable recipes; old missing recipes stay unknown. `storyboard.restore` restores known effective settings without generating. `storyboard.star`, atomic bulk draft/final/move, account→story→shot defaults and project-local profile forks use the [story contract](reference/api.md#storyboard-versions-and-bulk-work). Duration/seed stay per shot; no automatic deletion or global usage search.
-
-For an authorized whole-film request, check `capabilities.story_film.enabled`, then follow [one-click film](reference/api.md#one-click-film). Preflight freezes the story; inspect reuse, missing shots and cost before confirming. Observe/resume that original run, retaining per-shot budgets and grants. Read [film recovery](reference/recovery.md#one-click-film-recovery) after an uncertain response.
-
-Caption burn:2 nonempty lines ×18 characters/cue maximum. Confirmation/SRT cannot waive bounds; no silent trim/rewrap.
-
 ## Upload and organise references
 
-1. Identify the authorized session/project; read `capabilities.upload_constraints`. Preserve original media, with no silent cropping or transcoding.
+1. Identify the authorized project (or existing legacy session); read `capabilities.upload_constraints`. Preserve original media, with no silent cropping or transcoding.
 2. Save a stable client asset ID; upload once. An uncertain response requires finding/resuming that receipt, not uploading a replacement.
 3. Bind ready receipt IDs to intended card inputs, shots or character looks. Keep video soundtrack selection, audio and source ranges distinct.
 4. Assets keep their original project/session ownership. Discover authorized projects' files with `GET /v1/library` filters and inspect current shot usage with `GET /v1/library/usage`. Tag/file through the original project's versioned actions; use explicit import for another story. See the [library contract](reference/api.md#project-scoped-library-and-explicit-imports-238).
 
 ```sh
-python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID upload --session SESSION --asset-id SAVED_CLIENT_ASSET_ID --file reference.png --output upload.json
+python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID upload --project PROJECT --asset-id SAVED_CLIENT_ASSET_ID --file reference.png --output upload.json
 ```
 
 Example ready receipt projection: `{"asset_id":"ASSET","status":"ready"}`. Use that `asset_id`, not filename or document entity ID.
