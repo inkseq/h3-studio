@@ -6892,8 +6892,11 @@ button.ghost.danger:hover {
 }
 /* A take adopted from an old Quick Create conversation (#481): quieter than "selected". */
 .ver em.ver-legacy {
-  left: auto;
-  right: 7px;
+  /* Bottom of the thumbnail so it never covers the "selected" chip at the top. */
+  top: auto;
+  bottom: 30px;
+  left: 7px;
+  right: auto;
   background: var(--surface-3);
   color: var(--ink-2);
 }
