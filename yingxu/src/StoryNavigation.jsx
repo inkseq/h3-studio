@@ -1,5 +1,5 @@
 import './v2/works-adapter.css';
-import { TrashMenu } from './UniversalTrash.jsx';
+import { TrashMenu, useTrash } from './UniversalTrash.jsx';
 import { translate } from './i18n/locale.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -434,7 +434,7 @@ function useLibraryReader(account) {
   );
 }
 
-function StoryLibraryCard({ story, reader, working, onOpen }) {
+function StoryLibraryCard({ story, reader, working, onOpen, picked = false, onPick }) {
   const { t, locale } = useI18n();
   const ref = useRef(),
     [visible, setVisible] = useState(false),
@@ -540,7 +540,17 @@ function StoryLibraryCard({ story, reader, working, onOpen }) {
   const known = summary.shotCount !== null,
     chapterCount = project.entities?.filter((e) => e.type === 'chapter').length ?? 0;
   return (
-    <div className="story-wrap">
+    <div className={'story-wrap' + (picked ? ' picked' : '')}>
+      {onPick && (
+        <label className="story-pick" title={t('trash.selectStory')}>
+          <input
+            type="checkbox"
+            checked={picked}
+            onChange={onPick}
+            aria-label={t('trash.selectStory') + ' · ' + summary.title}
+          />
+        </label>
+      )}
       <button
         ref={ref}
         type="button"
@@ -649,8 +659,28 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
     [visibleLimit, setVisibleLimit] = useState(12),
     input = useRef(),
     reader = useLibraryReader(c.account),
-    who = useAccountLabel(c.account);
+    who = useAccountLabel(c.account),
+    trash = useTrash(),
+    // Hover a cloud story to tick it; with any ticked, clicks tick instead of opening.
+    [picked, setPicked] = useState(() => new Set());
+  const selecting = picked.size > 0,
+    pickable = (story) => story.mode === 'cloud' && !!trash?.account;
+  const toggle = (id) =>
+    setPicked((before) => {
+      const next = new Set(before);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  const trashPicked = async () => {
+    const ids = [...picked];
+    const receipt = await trash.request(
+      'trash',
+      ids.map((id) => ({ kind: 'project', project_id: id, id })),
+    );
+    if (receipt) setPicked(new Set());
+  };
   useEffect(() => {
+    setPicked(new Set());
     setQuery('');
     setCreating(false);
     setTitle('');
@@ -811,7 +841,34 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
         </p>
       )}
       <StoryOpenNotice onOpened={onSelect} />
-      <div className="story-grid">
+      {selecting && (
+        <div className="works-select-bar" role="toolbar" aria-label={t('trash.selectStory')}>
+          <b>{t('trash.selectedCount', { count: picked.size })}</b>
+          <button
+            type="button"
+            className="linkish"
+            onClick={() =>
+              setPicked(new Set(visible.filter(pickable).map((story) => story.project.id)))
+            }
+          >
+            {t('trash.selectAll')}
+          </button>
+          <span className="spacer" />
+          <button type="button" className="ghost" onClick={() => setPicked(new Set())}>
+            {t('library.cancel')}
+          </button>
+          <button
+            type="button"
+            className="danger"
+            disabled={trash?.busy || !!trash?.pending}
+            onClick={() => void trashPicked()}
+          >
+            <Trash2 size={14} aria-hidden="true" />
+            {t('trash.moveSelected', { count: picked.size })}
+          </button>
+        </div>
+      )}
+      <div className={'story-grid' + (selecting ? ' selecting' : '')}>
         {visible.slice(0, visibleLimit).map((story) => (
           <StoryLibraryCard
             key={
@@ -824,7 +881,13 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
             story={story}
             reader={reader}
             working={working}
-            onOpen={() => library.openStory(story, onSelect, onOpenCloud)}
+            picked={picked.has(story.project.id)}
+            onPick={pickable(story) ? () => toggle(story.project.id) : undefined}
+            onOpen={() =>
+              selecting && pickable(story)
+                ? toggle(story.project.id)
+                : library.openStory(story, onSelect, onOpenCloud)
+            }
           />
         ))}
         <button

@@ -4361,6 +4361,55 @@ button.danger {
 .story-wrap.menu-open .card-dots {
   opacity: 1;
 }
+/* Works multi-select: a tick box on hover; always shown once anything is ticked. */
+.story-pick {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  cursor: pointer;
+  opacity: 0;
+}
+.story-pick input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.story-wrap:hover .story-pick,
+.story-pick:focus-within,
+.story-grid.selecting .story-pick {
+  opacity: 1;
+}
+.story-wrap.picked > .story-card {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.works-select-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+.works-select-bar .spacer {
+  flex: 1;
+}
+@media (hover: none) {
+  .story-pick {
+    opacity: 1;
+  }
+}
 .card-menu {
   bottom: auto;
   top: 40px;
