@@ -360,6 +360,30 @@ class MigrationArtifacts(unittest.TestCase):
 
         write()
         maintenance.settings(self.root)
+        for dsn in ("", release.SENTRY_DSN):
+            environment.update(
+                INKSEQ_DEPLOYMENT_TARGET="production", INKSEQ_SENTRY_DSN=dsn
+            )
+            write()
+            self.assertEqual(
+                maintenance.settings(self.root)[0]["environment"]["INKSEQ_SENTRY_DSN"],
+                dsn,
+            )
+        environment["INKSEQ_SENTRY_DSN"] = "https://example.test/other-collector"
+        write()
+        with self.assertRaisesRegex(
+            release.ReleaseError, "monitoring_destination_invalid"
+        ):
+            maintenance.settings(self.root)
+        environment["INKSEQ_SENTRY_DSN"] = release.SENTRY_DSN
+        environment.pop("INKSEQ_DEPLOYMENT_TARGET")
+        write()
+        with self.assertRaisesRegex(release.ReleaseError, "monitoring_target_required"):
+            maintenance.settings(self.root)
+        environment["INKSEQ_SENTRY_DSN"] = ""
+        write()
+        maintenance.settings(self.root)  # Legacy missing-target configs stay OFF.
+        environment.pop("INKSEQ_SENTRY_DSN")
         environment.update(
             SIXNINE_OPERATOR_ADMIN_OWNERS="superdan", SIXNINE_STAGE_QUERY_CONFIG_FILE=""
         )
@@ -616,6 +640,9 @@ class MigrationArtifacts(unittest.TestCase):
             'e3a852fe013300dcb468d6f5a9875e183e1109be',
             '57043af14df1e1db3f1711a33ed172f762fb022d',
             '3d6355caafdbb8dca6648cdd9b3a04fd9b6dafe8',
+            '5676bd46e8b31dac36fb5b9758de4763114b84ca',
+            '59d2ebefba0e98d677907c30b65144ac47681762',
+            'f7b1db096099d0b3ad09736a95afffa57f9626c7',
         }
         self.assertEqual(
             set(maintenance.RETAINED_DSTACK_HELPER_PAIRS), expected_commits
@@ -677,6 +704,18 @@ class MigrationArtifacts(unittest.TestCase):
         trusted_path = (
             Path(maintenance.__file__).resolve().with_name('migration_check.py')
         )
+        for commit in (
+            '5676bd46e8b31dac36fb5b9758de4763114b84ca',
+            '59d2ebefba0e98d677907c30b65144ac47681762',
+            'f7b1db096099d0b3ad09736a95afffa57f9626c7',
+        ):
+            self.assertEqual(
+                maintenance.RETAINED_DSTACK_HELPER_PAIRS[commit],
+                (
+                    '719d8d3f83fdcd687d06d343f4076db117c675de607f2e46e61d2b65da5db8b3',
+                    'fba8d75a6845fe2fe7c78ea120747797b2f57ec80e0c6bc4861a0f6bfda54790',
+                ),
+            )
         for commit, pair in maintenance.RETAINED_DSTACK_HELPER_PAIRS.items():
             (self.artifact / maintenance.MANIFEST).write_text(
                 json.dumps(
@@ -734,6 +773,9 @@ class MigrationArtifacts(unittest.TestCase):
         production = '498e073113564881a621189c8bb312315d2f4d9b'
         rollback = '5165403eb95966962f659168a50ad239d595c360'
         staging = '3d6355caafdbb8dca6648cdd9b3a04fd9b6dafe8'
+        sentry_current = '5676bd46e8b31dac36fb5b9758de4763114b84ca'
+        sentry_previous = '59d2ebefba0e98d677907c30b65144ac47681762'
+        sentry_entry = 'f7b1db096099d0b3ad09736a95afffa57f9626c7'
         for commit, pair in (
             ('f' * 40, pairs[original]),
             ('f' * 40, pairs[current]),
@@ -746,6 +788,10 @@ class MigrationArtifacts(unittest.TestCase):
             (production, pairs[promoted]),
             (rollback, pairs[paired]),
             (staging, pairs[production]),
+            ('f' * 40, pairs[sentry_current]),
+            (sentry_current, pairs[staging]),
+            (sentry_previous, pairs[production]),
+            (sentry_entry, pairs[staging]),
         ):
             (self.artifact / maintenance.MANIFEST).write_text(
                 json.dumps({'commit': commit, 'dstack': {}})

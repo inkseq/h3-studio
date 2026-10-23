@@ -239,6 +239,40 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(env["PATH"], "/usr/sbin:/usr/bin:/sbin:/bin")
         self.assertEqual(env["SIXNINE_IMAGE"], "sixnine-platform:" + COMMIT)
         original = site.read_text(encoding="utf-8")
+        for target in ("production", "staging"):
+            for dsn in ("", release.SENTRY_DSN):
+                site.write_text(
+                    original
+                    + "\nINKSEQ_DEPLOYMENT_TARGET="
+                    + target
+                    + "\nINKSEQ_SENTRY_DSN="
+                    + dsn,
+                    encoding="utf-8",
+                )
+                with (
+                    patch.object(release, "regular"),
+                    patch.object(
+                        release.deployment_target,
+                        "host",
+                        return_value=release.deployment_target.profile(target),
+                    ),
+                ):
+                    self.assertEqual(
+                        release.deployment_environment(site, COMMIT)[
+                            "INKSEQ_SENTRY_DSN"
+                        ],
+                        dsn,
+                    )
+        for suffix in (
+            "\nINKSEQ_SENTRY_DSN=" + release.SENTRY_DSN,
+            "\nINKSEQ_DEPLOYMENT_TARGET=production\nINKSEQ_SENTRY_DSN=https://example.test/key",
+        ):
+            site.write_text(original + suffix, encoding="utf-8")
+            with (
+                patch.object(release, "regular"),
+                self.assertRaises(release.ReleaseError),
+            ):
+                release.deployment_environment(site, COMMIT)
         for phase in ("0", "1"):
             site.write_text(
                 original + "\nINKSEQ_LEGACY_REDIRECT=" + phase, encoding="utf-8"

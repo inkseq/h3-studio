@@ -206,6 +206,59 @@ class MigrationDeployTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "^" + code + "$"):
             validate(value)
 
+    def test_sentry_render_is_app_only_with_explicit_target(self):
+        from deploy.platform.deployment_target import profile
+        from studio_platform.error_monitoring import DSN
+
+        for target in ("production", "staging"):
+            identity = profile(target)
+            environment = fixture_environment()
+            environment.update(
+                INKSEQ_DEPLOYMENT_TARGET=target,
+                INKSEQ_SENTRY_DSN=DSN,
+                INKSEQ_PUBLIC_ORIGIN=identity["origin"],
+                INKSEQ_PUBLIC_ORIGIN_ALIASES=identity["aliases"],
+                INKSEQ_CADDY_PROFILE=identity["caddy"],
+                INKSEQ_LEGACY_REDIRECT="0",
+            )
+            rendered = {}
+
+            def render(command, **kwargs):
+                result = subprocess.run(command, **kwargs)
+                if result.returncode == 0:
+                    rendered.update(json.loads(result.stdout))
+                return result
+
+            check(
+                ROOT / "deploy/platform/compose.yaml",
+                ROOT / "deploy/dstack/platform-overlay.yaml",
+                environment=environment,
+                runner=render,
+            )
+            self.assertEqual(
+                rendered["services"]["app"]["environment"]["INKSEQ_SENTRY_DSN"], DSN
+            )
+            for name, service in rendered["services"].items():
+                if name != "app":
+                    self.assertNotIn(
+                        "INKSEQ_SENTRY_DSN", service.get("environment", {})
+                    )
+            for name in rendered["services"]:
+                if name == "app":
+                    continue
+                broken = copy.deepcopy(rendered)
+                broken["services"][name].setdefault("environment", {})[
+                    "INKSEQ_SENTRY_DSN"
+                ] = ""
+                with self.assertRaises(ValueError):
+                    validate(broken, target=target)
+            broken = copy.deepcopy(rendered)
+            broken["services"]["app"]["environment"]["INKSEQ_SENTRY_DSN"] = (
+                DSN + "?prompt=secret"
+            )
+            with self.assertRaisesRegex(ValueError, "monitoring_destination_invalid"):
+                validate(broken, target=target)
+
     def test_workos_opt_in_is_app_only_and_uses_the_independent_fixed_file(self):
         self.assertEqual(
             self.document['services']['app']['environment'][
