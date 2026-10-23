@@ -344,7 +344,7 @@ class RealCreditImageTests(unittest.TestCase):
         self.assertEqual(self.draw("pic-args-0001").status_code, 200)
         self.assertEqual(len(self.images.calls), 1)
 
-    def test_admin_switch_write_is_versioned_reasoned_and_audited(self):
+    def test_admin_switch_write_is_versioned_and_audited(self):
         from studio_platform.identity_schema import admin_audit
 
         with self.repo.transaction() as conn:
@@ -353,15 +353,15 @@ class RealCreditImageTests(unittest.TestCase):
             )
         current = self.client.get("/v1/admin/story-chat/settings").json()
         self.assertTrue(current["pictures_enabled"])
-        no_reason = self.client.put(
+        bad = self.client.put(
             "/v1/admin/story-chat/settings",
             json={
                 "expected_version": current["version"],
                 "pictures_enabled": False,
-                "reason": " ",
+                "reason": "x\n",
             },
         )
-        self.assertEqual(no_reason.status_code, 422)
+        self.assertEqual(bad.status_code, 422)
         stale = self.client.put(
             "/v1/admin/story-chat/settings",
             json={
@@ -392,6 +392,24 @@ class RealCreditImageTests(unittest.TestCase):
             [tuple(r) for r in rows], [("story_chat.pictures", "launch: pictures off")]
         )
         self.assertEqual(self.draw("pic-off-00001").status_code, 403)
+        # A plain toggle without a reason is still audited.
+        on = self.client.put(
+            "/v1/admin/story-chat/settings",
+            json={"expected_version": current["version"] + 1, "pictures_enabled": True},
+        )
+        self.assertEqual(on.status_code, 200, on.text)
+        self.assertTrue(on.json()["pictures_enabled"])
+        with self.repo.engine.connect() as conn:
+            reasons = (
+                conn.execute(
+                    select(admin_audit.c.reason).where(
+                        admin_audit.c.action == "story_chat.pictures"
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        self.assertIn("Pictures turned on in Admin", reasons)
 
     def test_forged_start_marker_never_admits_a_new_hold(self):
         # A client can write journey data with any idempotency key through the public
