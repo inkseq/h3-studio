@@ -1346,7 +1346,16 @@ function AppContent() {
           const params = new URLSearchParams(page.search);
           const story = params.get('story');
           if (story === 'preview') return <StoryChat account={account} />;
-          if (params.get('mode') === 'direct') return <QuickChatWorkspace active={active} />;
+          // Links into the original Quick Create (a conversation, card, revision, submission
+          // or its preferences) keep opening it; the story chat would show an empty story
+          // instead (h3-studio#477).
+          if (
+            params.get('mode') === 'direct' ||
+            ['session', 'card', 'revision', 'submission', 'preferences'].some((key) =>
+              params.has(key),
+            )
+          )
+            return <QuickChatWorkspace active={active} />;
           return (
             <QuickCreateEntry
               account={account}
