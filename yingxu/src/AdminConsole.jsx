@@ -179,29 +179,30 @@ function AdminUsers({ api, active }) {
                 >
                   {t('admin.adjust')}
                 </button>
-                <span className="user-adjust-gap" />
-                <button
-                  type="button"
-                  className="ghost small"
-                  disabled={busy}
-                  onClick={() =>
-                    void update(user, { role: user.role === 'admin' ? 'user' : 'admin' })
-                  }
-                >
-                  {t(user.role === 'admin' ? 'admin.makeUser' : 'admin.makeAdmin')}
-                </button>
-                <button
-                  type="button"
-                  className={'ghost small' + (user.status === 'suspended' ? '' : ' danger')}
-                  disabled={busy}
-                  onClick={() =>
-                    void update(user, {
-                      status: user.status === 'suspended' ? 'active' : 'suspended',
-                    })
-                  }
-                >
-                  {t(user.status === 'suspended' ? 'admin.restore' : 'admin.suspend')}
-                </button>
+                <span className="user-adjust-actions">
+                  <button
+                    type="button"
+                    className="ghost small"
+                    disabled={busy}
+                    onClick={() =>
+                      void update(user, { role: user.role === 'admin' ? 'user' : 'admin' })
+                    }
+                  >
+                    {t(user.role === 'admin' ? 'admin.makeUser' : 'admin.makeAdmin')}
+                  </button>
+                  <button
+                    type="button"
+                    className={'ghost small' + (user.status === 'suspended' ? '' : ' danger')}
+                    disabled={busy}
+                    onClick={() =>
+                      void update(user, {
+                        status: user.status === 'suspended' ? 'active' : 'suspended',
+                      })
+                    }
+                  >
+                    {t(user.status === 'suspended' ? 'admin.restore' : 'admin.suspend')}
+                  </button>
+                </span>
               </div>
             )}
           </React.Fragment>
@@ -389,6 +390,16 @@ function auditLabel(action, t) {
     .join(' · ');
 }
 
+// The one-click picture switch records a fixed English note; show it in the page language.
+function auditReason(reason, t) {
+  return (
+    {
+      'Pictures turned on in Admin': t('admin.act.turnedOn'),
+      'Pictures turned off in Admin': t('admin.act.turnedOff'),
+    }[reason] || reason
+  );
+}
+
 function AdminAudit({ api, active }) {
   const { t, locale } = useI18n();
   const list = usePaged(api, '/v1/admin/audit', active);
@@ -409,7 +420,7 @@ function AdminAudit({ api, active }) {
               </b>
               {row.reason && (
                 <small className="clip" title={row.reason}>
-                  {row.reason}
+                  {auditReason(row.reason, t)}
                 </small>
               )}
               <small className="muted">
