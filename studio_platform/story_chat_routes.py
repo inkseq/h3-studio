@@ -8,6 +8,7 @@ import uuid
 from fastapi import HTTPException, Request
 
 from .google_chat import ChatError, GoogleChatClient
+from . import story_chat_undo
 from .repository import Conflict
 from .story_chat import (
     INSTRUCTION,
@@ -112,10 +113,16 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                     count += 1
         return count
 
-    def view(row):
+    def view(row, principal=None):
         project = row["payload"]
         chat = chat_of(project)
+        undo = (
+            story_chat_undo.available(app, principal, row)
+            if principal is not None
+            else None
+        )
         return {
+            "undo_turn_id": undo["turn_id"] if undo else None,
             "project_id": project["id"],
             "version": row["version"],
             "title": project.get("title"),
@@ -340,7 +347,29 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
     @app.get("/v1/story-chats/{project_id}")
     def get_story_chat(project_id: str, request: Request):
         principal = principal_of(request, "read")
-        return view(read(principal, project_id))
+        return view(read(principal, project_id), principal)
+
+    @app.post("/v1/story-chats/{project_id}/undo")
+    def undo_story_chat(project_id: str, request: Request, body: dict):
+        """Undo the latest turn while nothing has changed the story since."""
+        principal = principal_of(request, "write")
+        if not isinstance(body, dict) or set(body) != {"turn_id"}:
+            _fail("story_chat_invalid", 422, field="body")
+        row = read(principal, project_id, "projects:write")
+        saved = story_chat_undo.available(app, principal, row)
+        if not saved or saved["turn_id"] != body["turn_id"]:
+            _fail("story_chat_undo_unavailable", 409)
+        try:
+            app.state.guided.save(
+                principal,
+                project_id,
+                story_chat_undo.restored(saved, chat_of(row["payload"])),
+                row["version"],
+            )
+        except Conflict:
+            _fail("story_chat_undo_unavailable", 409)
+        story_chat_undo.forget(app, principal, project_id)
+        return view(read(principal, project_id), principal)
 
     @app.post("/v1/story-chats/{project_id}/turns")
     def story_chat_turn(project_id: str, request: Request, body: dict):
@@ -355,7 +384,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
         text = text.strip()
 
         def answer(row, messages):
-            result = view(row)
+            result = view(row, principal)
             assistant = next(m for m in messages if m["role"] == "assistant")
             return {
                 **result,
@@ -427,6 +456,9 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                 changes,
                 proposal,
                 actor=principal.actor_id if principal.machine else None,
+            )
+            story_chat_undo.remember(
+                app, principal, project_id, turn_id, version, project
             )
             try:
                 app.state.guided.mutate(
