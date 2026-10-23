@@ -6890,3 +6890,14 @@ button.ghost.danger:hover {
 .copies-field input {
   height: 32px;
 }
+/* A take adopted from an old Quick Create conversation (#481): quieter than "selected". */
+.ver em.ver-legacy {
+  left: auto;
+  right: 7px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+}
+.take-top em.ver-legacy {
+  background: var(--surface-3);
+  color: var(--ink-2);
+}
