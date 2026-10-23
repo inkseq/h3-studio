@@ -227,3 +227,29 @@
     display: none;
   }
 }
+
+/* Story chat pictures: switch on the title row, price on its own row. */
+.story-chat-admin .row .spacer {
+  flex: 1;
+}
+.story-chat-admin-price {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.story-chat-admin-price label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.story-chat-admin-price input {
+  width: 88px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.story-chat-admin-price small {
+  flex-basis: 100%;
+}
