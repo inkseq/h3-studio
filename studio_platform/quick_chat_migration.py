@@ -1,6 +1,6 @@
 """Operator-only legacy story adoption on existing rows; no schema or providers.
 
-Preview is read-only. Apply is staging-only and preserves every original ID.
+Preview is read-only. Operator entry guards preserve every original ID.
 Receipt archives group original takes under one logical card without losing IDs.
 """
 
@@ -1246,6 +1246,33 @@ def apply_staging(
         and settings.public_origin == "https://staging.inkseq.com",
         "production_apply_not_authorized",
     )
+    return _apply(
+        connection,
+        settings,
+        owner,
+        session_id,
+        source_hash=source_hash,
+        project_version=project_version,
+        actor_user_id=actor_user_id,
+        reader_evidence=reader_evidence,
+        now=now,
+    )
+
+
+def _apply(
+    connection,
+    settings,
+    owner,
+    session_id,
+    *,
+    source_hash,
+    project_version,
+    actor_user_id,
+    reader_evidence,
+    now=None,
+    production_guard=None,
+):
+    """One atomic write body; only environment-specific operator wrappers call it."""
     require(connection.in_transaction(), "migration_transaction_required")
     actor = (
         connection.execute(
@@ -1261,6 +1288,23 @@ def apply_staging(
     )
     require(actor is not None, "active_admin_actor_required")
     owner_reference_gate(connection, settings.tenant_id, owner)
+    if production_guard is not None:
+        # Any original outcome (including a malformed/cross-project receipt)
+        # requires read-only reconciliation, never a second production call.
+        require(
+            connection.execute(
+                select(documents.c.document_id)
+                .where(
+                    documents.c.tenant_id == settings.tenant_id,
+                    documents.c.owner_id == owner,
+                    documents.c.kind == KIND,
+                    documents.c.document_id == session_id,
+                )
+                .limit(1)
+            ).first()
+            is None,
+            "production_receipt_exists_reconcile_only",
+        )
     closure = _load(connection, settings.tenant_id, owner, session_id, lock=True)
     session, row = closure["session"], closure["project"]
     previous = (
@@ -1275,6 +1319,7 @@ def apply_staging(
         .first()
     )
     if previous:
+        require(production_guard is None, "production_receipt_exists_reconcile_only")
         require(
             previous["payload"].get("source_hash") == source_hash
             and migrated_project_id(connection, settings.tenant_id, owner, session)
@@ -1287,7 +1332,11 @@ def apply_staging(
         "migration_source_changed",
     )
     assert_project_writable(connection, settings.tenant_id, owner, row["document_id"])
-    readers = validate_reader_evidence(reader_evidence)
+    readers = (
+        validate_reader_evidence(reader_evidence)
+        if production_guard is None
+        else production_guard.readers
+    )
     analysis = _analyze(closure, max_project_bytes=settings.max_project_bytes)
     require(
         not analysis["mapping_refusals"],
@@ -1296,6 +1345,8 @@ def apply_staging(
         else "mapping_invalid",
     )
     target = analysis["project"]
+    if production_guard is not None:
+        production_guard.check(closure, analysis)
     assert_reference_payload(connection, settings.tenant_id, owner, target)
     at = time.time() if now is None else now
     receipt = {
@@ -1323,6 +1374,8 @@ def apply_staging(
         "actor_owner": actor["owner"],
         "completed_at": at,
     }
+    if production_guard is not None:
+        receipt["production_approval"] = production_guard.approval
     _bounded_payload(receipt, settings.max_project_bytes)
     # Reserve enough of the SAME existing bound for an audited rollback. Never
     # create an archive that fits but cannot later record its restoration.

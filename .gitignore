@@ -766,3 +766,9 @@ inventory.json
 !tests/test_capacity_admission.py
 !tests/test_capacity_test_continuation.py
 !docs/CAPACITY-SETTINGS.md
+
+# Closed operator-only production adoption; no private manifest or runtime proof.
+!studio_platform/quick_chat_production_migration.py
+!tools/apply_approved_quick_chat_stories.py
+!tests/test_quick_chat_production_migration.py
+!docs/QUICK-CHAT-PRODUCTION-ADOPTION.md
