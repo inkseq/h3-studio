@@ -374,7 +374,7 @@ export default function SpendingSettings({ account }) {
             <SkinPicker />
             {account && (
               <>
-                {!hosted && <AccountGoogleLink api={api} />}
+                <AccountGoogleLink api={api} />
                 {!hosted && (
                   <div className="card-box">
                     <AccountPassword inline busy={busy} />

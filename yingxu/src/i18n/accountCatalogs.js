@@ -9,7 +9,11 @@ export const accountCatalogs = {
       'Signs in with Google, GitHub or email. Manage sign-in methods on the sign-in page.',
     'account.linkTitle': 'Sign in with Google',
     'account.linkBody':
-      'Link Google (or GitHub or email) to this account to sign in with it. Your username and password keep working, and your stories and credits stay the same.',
+      'Link Google (or GitHub or email) to sign in to this same account with it. We verify the email and attach it here; your username and password keep working, and your stories, credits and role stay the same.',
+    'account.linkLoading': 'Checking sign-in methods…',
+    'account.linkError': 'Could not read your sign-in methods.',
+    'account.linkRetry': 'Try again',
+    'account.linkedAs': 'Signs in with Google / email as {email}.',
     'account.linkButton': 'Link Google sign-in',
     'account.linked':
       'Linked. You can sign in with Google, GitHub or email, or with your password.',
@@ -367,7 +371,11 @@ export const accountCatalogs = {
     'account.hostedSignIn': '通过 Google、GitHub 或邮箱登录，登录方式在登录页面管理。',
     'account.linkTitle': '用 Google 登录',
     'account.linkBody':
-      '绑定 Google（或 GitHub、邮箱）后就能用它登录这个账号。原来的用户名和密码照样能用，作品和积分都不变。',
+      '绑定 Google（或 GitHub、邮箱）后，就能用它登录这个账号。会先验证这个邮箱，再绑定到当前账号；原来的用户名和密码照样能用，作品、积分和身份都不变。',
+    'account.linkLoading': '正在读取登录方式…',
+    'account.linkError': '暂时读不到登录方式。',
+    'account.linkRetry': '重试',
+    'account.linkedAs': '已绑定 Google / 邮箱登录：{email}',
     'account.linkButton': '绑定 Google 登录',
     'account.linked': '已绑定。可以用 Google、GitHub、邮箱或原来的密码登录。',
     'account.copy1': '我的故事',
