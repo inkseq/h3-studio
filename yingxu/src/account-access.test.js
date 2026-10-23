@@ -4,6 +4,7 @@ import {
   accessFrom,
   hostedSignInEnabled,
   hostedSignInUrl,
+  hostedLinkUrl,
   providerLogoutUrl,
   readAccessFor,
   readAccess,
@@ -194,4 +195,9 @@ test('an admin can preview as a regular user only in the interface (owner, 2026-
   } finally {
     delete globalThis.sessionStorage;
   }
+});
+
+test('linking hosted sign-in keeps the safe return path and asks for a link', () => {
+  assert.equal(hostedLinkUrl(), '/api/auth/workos/start?return_to=%2Fsettings&link=1');
+  assert.equal(hostedLinkUrl('//evil'), '/api/auth/workos/start?return_to=%2F&link=1');
 });

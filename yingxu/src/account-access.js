@@ -72,6 +72,11 @@ export function hostedSignInUrl(returnTo = '/', hint) {
   return '/api/auth/workos/start?return_to=' + encodeURIComponent(path) + screen;
 }
 
+// Links hosted sign-in to the signed-in password account; same return_to rules as above.
+export function hostedLinkUrl(returnTo = '/settings') {
+  return hostedSignInUrl(returnTo) + '&link=1';
+}
+
 // After sign-out the server may return the hosted provider's logout page, which ends the
 // WorkOS session too, so the next sign-in asks for an account again (#395). Only https.
 export function providerLogoutUrl(value) {
