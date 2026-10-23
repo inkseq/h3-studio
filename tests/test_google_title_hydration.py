@@ -34,7 +34,9 @@ class TitleHydrationTests(unittest.TestCase):
                 root = Mock()
                 root.mkdir.side_effect = RuntimeError('test filesystem boundary')
                 with patch.object(module, 'ROOT', root):
-                    with self.assertRaisesRegex(RuntimeError, 'test filesystem boundary'):
+                    with self.assertRaisesRegex(
+                        RuntimeError, 'test filesystem boundary'
+                    ):
                         module.hydrate_titles(api, target=target)
                 api.get_secret_value.assert_called_once_with(SecretId=source)
 
@@ -56,7 +58,9 @@ class TitleHydrationTests(unittest.TestCase):
             with self.subTest(target=target):
                 api, root = Mock(), Mock()
                 with patch.object(module, 'ROOT', root):
-                    with self.assertRaisesRegex(ValueError, 'deployment_target_invalid'):
+                    with self.assertRaisesRegex(
+                        ValueError, 'deployment_target_invalid'
+                    ):
                         module.hydrate_titles(api, target=target)
                 api.get_secret_value.assert_not_called()
                 root.mkdir.assert_not_called()
@@ -130,7 +134,9 @@ class TitleHydrationTests(unittest.TestCase):
                 self.assertEqual(path.stat().st_mode & 0o777, 0o440)
                 self.assertFalse(list(root.glob('.google-titles-*')))
 
-    @unittest.skipIf(os.name == 'nt', 'Host atomic file ownership exercised on Linux CI')
+    @unittest.skipIf(
+        os.name == 'nt', 'Host atomic file ownership exercised on Linux CI'
+    )
     def test_staging_rotation_is_atomic_and_missing_secret_replaces_with_disabled(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -153,7 +159,9 @@ class TitleHydrationTests(unittest.TestCase):
                 api.get_secret_value.return_value = {'SecretString': json.dumps(FAKE)}
                 module.hydrate_titles(api, target='staging')
                 with path.open() as bound:
-                    api.get_secret_value.side_effect = RuntimeError('private staging error')
+                    api.get_secret_value.side_effect = RuntimeError(
+                        'private staging error'
+                    )
                     with patch('builtins.print') as output:
                         module.hydrate_titles(api, target='staging')
                     self.assertEqual(json.loads(path.read_text()), {'enabled': False})
@@ -163,7 +171,9 @@ class TitleHydrationTests(unittest.TestCase):
                 self.assertFalse(list(root.glob('.google-titles-*')))
             self.assertEqual(api.get_secret_value.call_count, 2)
             for call in api.get_secret_value.call_args_list:
-                self.assertEqual(call.kwargs, {'SecretId': '/sixnine/staging/google-titles'})
+                self.assertEqual(
+                    call.kwargs, {'SecretId': '/sixnine/staging/google-titles'}
+                )
 
 
 if __name__ == '__main__':
