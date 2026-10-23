@@ -2,6 +2,7 @@
 // /v1/story-chats. The server owns the transcript and cards; every reply replaces the local
 // state with the server's view. Paid generation is never started here: a proposal hands the
 // story to Works, where the existing preflight, quote and confirmation run.
+import { track } from './analytics.js';
 
 const KIND = { characters: 'character', places: 'place', props: 'prop' };
 
@@ -164,6 +165,7 @@ export function createLiveChat({
     const created = await api.request('/v1/story-chats', { method: 'POST', body: { language } });
     project = created.project_id;
     view = created;
+    track('story_chat_story_created');
     onProject?.(project);
     return project;
   }

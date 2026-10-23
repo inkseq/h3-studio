@@ -22,6 +22,7 @@
     "@xyflow/react": "^12.9.0",
     "jszip": "^3.10.1",
     "lucide-react": "^0.468.0",
+    "posthog-js": "1.438.6",
     "qrcode-generator": "2.0.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

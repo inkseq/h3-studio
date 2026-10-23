@@ -10,8 +10,10 @@ import './skins.css';
 import { applySkin, readSkin } from './skins.js';
 import { installPopoverDismiss } from './popover-dismiss.js';
 import { installMonitoring, reactErrorHandler } from './monitoring.js';
+import { installAnalytics } from './analytics.js';
 
 const monitored = installMonitoring();
+installAnalytics();
 applySkin(readSkin());
 installPopoverDismiss();
 createRoot(
