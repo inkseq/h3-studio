@@ -36,6 +36,7 @@ import { createCloudClient } from './cloud-client.js';
 import { checkedProjectRecord } from './cloud-model.js';
 import { getFile } from './media.js';
 import StoryOpenNotice from './StoryOpenNotice.jsx';
+import { navigateApp } from './app-navigation.js';
 import { storyTitle } from './story-open.js';
 
 export default function StoryNavigation({ state, onOpenCloud, onOpenLocal, onSelect }) {
@@ -642,6 +643,7 @@ function StoryLibraryCard({ story, reader, working, onOpen, picked = false, onPi
         <TrashMenu
           target={{ kind: 'project', project_id: story.project.id, id: story.project.id }}
           onEdit={onOpen}
+          onChat={() => navigateApp('/quick-chat?story=' + encodeURIComponent(story.project.id))}
         />
       )}
     </div>
