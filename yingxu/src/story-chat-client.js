@@ -72,6 +72,7 @@ export function fromServer(view, labels = {}) {
       text: message.text,
       attachments: [],
       chips: message.chips || [],
+      turnId: message.turn_id || null,
     });
     // Suggested card pictures: a confirm card each; the id is stable, so a replay never
     // draws or charges twice.
@@ -110,7 +111,16 @@ export function fromServer(view, labels = {}) {
       messages.push({ id, role: 'quote', quoteId: id });
     }
   }
-  return { title: view.title || '', version: view.version, cards, messages, quotes, busy: false };
+  return {
+    title: view.title || '',
+    version: view.version,
+    cards,
+    messages,
+    quotes,
+    busy: false,
+    // The server says the latest turn can still be undone (nothing changed since).
+    undoTurnId: view.undo_turn_id || null,
+  };
 }
 
 const turnId = () =>
@@ -260,6 +270,23 @@ export function createLiveChat({
     },
     // A card edit from the drawer goes through the ordinary project actions API.
     // Rename the story itself through the ordinary project actions.
+    // Undo the latest turn; the server refuses if anything changed the story since.
+    async undo(id, emit) {
+      if (!project || !id) return false;
+      try {
+        load(
+          await api.request(`/v1/story-chats/${encodeURIComponent(project)}/undo`, {
+            method: 'POST',
+            body: { turn_id: id },
+          }),
+          emit,
+        );
+        return true;
+      } catch {
+        load(await api.request(`/v1/story-chats/${encodeURIComponent(project)}`), emit);
+        return false;
+      }
+    },
     async rename(title, emit) {
       const value = title.trim();
       if (!project || !value || value === view?.title) return;
