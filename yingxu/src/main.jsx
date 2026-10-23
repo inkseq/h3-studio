@@ -9,9 +9,17 @@ import './dialogs.css';
 import './skins.css';
 import { applySkin, readSkin } from './skins.js';
 import { installPopoverDismiss } from './popover-dismiss.js';
+import { installMonitoring, reactErrorHandler } from './monitoring.js';
 
+const monitored = installMonitoring();
 applySkin(readSkin());
 installPopoverDismiss();
-createRoot(document.getElementById('root')).render(<App />);
+createRoot(
+  document.getElementById('root'),
+  // React 19 reports render crashes here; send them to Sentry on the deployed sites.
+  monitored
+    ? { onUncaughtError: reactErrorHandler(), onCaughtError: reactErrorHandler() }
+    : undefined,
+).render(<App />);
 
 if (import.meta.env.PROD) installVideoCache(videoCacheWorkerURL);
