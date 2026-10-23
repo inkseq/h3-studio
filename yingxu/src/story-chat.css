@@ -864,3 +864,18 @@
 .sc-direct-link:hover {
   color: var(--sc-ink);
 }
+/* Undo last round: a quiet text action under the latest reply. */
+.sc-shell .sc-undo {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--sc-muted);
+  font-size: 12px;
+}
+.sc-shell .sc-undo:hover {
+  color: var(--sc-ink);
+}
