@@ -156,7 +156,8 @@
   min-height: 28px;
   border-radius: var(--r-sm);
 }
-.lib-shell button:not([data-ui-surface]),
+/* The shared header (.hbar) keeps its own geometry on every page. */
+.lib-shell button:not([data-ui-surface]):not(.hbar *),
 .libp-detail button {
   height: 32px;
   min-height: 32px;

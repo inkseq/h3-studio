@@ -14,23 +14,27 @@
   height: 100dvh;
   background: var(--sc-paper);
   color: var(--sc-ink);
-  /* The app's own typeface (and the shared header inside it) — only size/leading here. */
+}
+/* Everything below the shared header. The header (and the admin preview bar) must look
+   exactly as on every other page, so none of the chat's type or button rules reach it.
+   :where keeps these at the original .sc-shell specificity. */
+.sc-shell > :where(:not(.hbar, .preview-as-user-bar)) {
   font-size: 14px;
   line-height: 1.55;
 }
-.sc-shell * {
+.sc-shell > :where(:not(.hbar, .preview-as-user-bar)) * {
   box-sizing: border-box;
 }
-.sc-shell button {
+.sc-shell > :where(:not(.hbar, .preview-as-user-bar)) button {
   font: inherit;
   color: inherit;
   cursor: pointer;
 }
-.sc-shell button:disabled {
+.sc-shell > :where(:not(.hbar, .preview-as-user-bar)) button:disabled {
   cursor: default;
   opacity: 0.45;
 }
-.sc-shell :focus-visible {
+.sc-shell > :where(:not(.hbar, .preview-as-user-bar)) :focus-visible {
   outline: 2px solid var(--sc-green);
   outline-offset: 2px;
 }
