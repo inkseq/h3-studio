@@ -8,6 +8,7 @@ import {
   Paperclip,
   Plus,
   Sparkles,
+  Undo2,
   X,
 } from 'lucide-react';
 import StudioHeader from './StudioHeader.jsx';
@@ -719,6 +720,25 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
               return (
                 <div key={message.id} className="sc-msg assistant">
                   <p>{message.text}</p>
+                  {live &&
+                    message === lastAssistant &&
+                    !state.busy &&
+                    state.undoTurnId &&
+                    message.turnId === state.undoTurnId && (
+                      <button
+                        type="button"
+                        className="sc-undo linkish"
+                        onClick={() =>
+                          void chat.current.undo(state.undoTurnId, emit).then((ok) => {
+                            setNotice(t(ok ? 'storyChat.undone' : 'storyChat.undoStale'));
+                            refreshStories();
+                          })
+                        }
+                      >
+                        <Undo2 size={13} aria-hidden="true" />
+                        {t('storyChat.undo')}
+                      </button>
+                    )}
                   {message === lastAssistant &&
                     !state.busy &&
                     !proposalShown &&

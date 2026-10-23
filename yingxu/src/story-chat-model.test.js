@@ -211,3 +211,21 @@ test('a suggested card picture becomes one stable confirm card', async () => {
   assert.match(quotes[0].id, /^[A-Za-z0-9_-]{8,80}$/);
   assert.equal(Object.keys(fromServer(view, labels).quotes)[0], quotes[0].id);
 });
+
+test('the server view marks the latest turn undoable only when it says so', async () => {
+  const { fromServer } = await import('./story-chat-client.js');
+  const view = {
+    title: 'T',
+    version: 3,
+    cards: { characters: [], places: [], props: [], shots: [] },
+    messages: [
+      { id: 't1-u', turn_id: 't1', role: 'user', text: 'hi' },
+      { id: 't1-a', turn_id: 't1', role: 'assistant', text: 'ok', chips: [], changes: [] },
+    ],
+    undo_turn_id: 't1',
+  };
+  const state = fromServer(view, {});
+  assert.equal(state.undoTurnId, 't1');
+  assert.equal(state.messages.find((m) => m.role === 'assistant').turnId, 't1');
+  assert.equal(fromServer({ ...view, undo_turn_id: null }, {}).undoTurnId, null);
+});
