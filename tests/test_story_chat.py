@@ -727,3 +727,94 @@ class OpenExistingStoryTests(StoryChatTests):
         pid, _ = self.existing()
         bad = self.client.post(f"/v1/story-chats/{pid}/open", json={"language": "xx"})
         self.assertEqual(bad.status_code, 422)
+
+
+class OpenExistingStoryOrderTests(OpenExistingStoryTests):
+    """Codex review of #480: scene membership follows the plan's global order."""
+
+    def opened(self):
+        pid, scene1 = self.existing()
+        self.client.post(f"/v1/story-chats/{pid}/open", json={"language": "en"})
+        return pid, scene1
+
+    def parents(self, pid):
+        project = self.client.get(f"/v1/projects/{pid}").json()["project"]
+        return {
+            e["description"]: e["parentId"]
+            for e in project["entities"]
+            if e["type"] == "shot"
+        }
+
+    def test_new_opening_shot_joins_the_first_scene(self):
+        pid, scene1 = self.opened()
+        plan = {
+            "reply": "ok",
+            "chips": [],
+            "actions": [
+                {
+                    "tool": "upsert_shot",
+                    "ref": "new:o",
+                    "text": "Opening.",
+                    "after": None,
+                }
+            ],
+        }
+        response = self.turn({"project_id": pid}, "x", turn_id="turn-0003", plan=plan)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["cards"]["shots"][0]["text"], "Opening.")
+        self.assertEqual(self.parents(pid)["Opening."], scene1)
+
+    def test_moving_a_later_scene_shot_first_moves_its_scene(self):
+        pid, scene1 = self.opened()
+        plan = {
+            "reply": "ok",
+            "chips": [],
+            "actions": [{"tool": "upsert_shot", "ref": "shot-late", "after": None}],
+        }
+        response = self.turn({"project_id": pid}, "x", turn_id="turn-0004", plan=plan)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["cards"]["shots"][0]["text"], "They fly away.")
+        self.assertEqual(self.parents(pid)["They fly away."], scene1)
+
+    def test_scene_less_story_with_a_chapter_reopens(self):
+        pid, scene1 = self.existing()
+        row = self.client.get(f"/v1/projects/{pid}").json()
+        project = row["project"]
+        doomed = [
+            e["id"] for e in project["entities"] if e["type"] in ("shot", "scene")
+        ]
+        actions = [
+            {"op": "entity.delete", "entity_id": i, "cascade": False}
+            for i in sorted(doomed, key=lambda i: not i.startswith("shot"))
+        ]
+        done = self.client.post(
+            f"/v1/projects/{pid}/actions",
+            json={"expected_version": row["version"], "actions": actions},
+        )
+        self.assertEqual(done.status_code, 200, done.text)
+        opened = self.client.post(
+            f"/v1/story-chats/{pid}/open", json={"language": "en"}
+        )
+        self.assertEqual(opened.status_code, 200, opened.text)
+        project = self.client.get(f"/v1/projects/{pid}").json()["project"]
+        chapters = [e for e in project["entities"] if e["type"] == "chapter"]
+        self.assertEqual(len(chapters), len({e["id"] for e in chapters}))
+        self.assertEqual(
+            len([e for e in project["entities"] if e["type"] == "scene"]), 1
+        )
+
+    def test_unsupported_chat_is_refused_not_replaced(self):
+        pid, _ = self.existing()
+        row = self.client.get(f"/v1/projects/{pid}").json()
+        legacy = {"version": 2, "messages": [{"role": "user", "text": "keep me"}]}
+        self.client.post(
+            f"/v1/projects/{pid}/actions",
+            json={
+                "expected_version": row["version"],
+                "actions": [{"op": "journey.update", "patch": {"storyChat": legacy}}],
+            },
+        )
+        refused = self.client.post(f"/v1/story-chats/{pid}/open", json={})
+        self.assertEqual(refused.status_code, 409, refused.text)
+        project = self.client.get(f"/v1/projects/{pid}").json()["project"]
+        self.assertEqual(project["journey"]["storyChat"], legacy)

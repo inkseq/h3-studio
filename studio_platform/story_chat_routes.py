@@ -214,11 +214,13 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
         for _attempt in range(3):
             row = app.state.authorized_project(principal, project_id, "projects:write")
             project = row["payload"]
-            try:
-                chat_of(project)
+            if project.get("journey", {}).get("storyChat") is not None:
+                try:
+                    chat_of(project)
+                except StoryChatError:
+                    # Present but not a chat this version reads: never replace it.
+                    _fail("story_chat_unsupported", 409)
                 return view(row)
-            except StoryChatError:
-                pass
             from .generation_admission import reject_managed
 
             reject_managed(project)

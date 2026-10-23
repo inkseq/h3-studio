@@ -180,20 +180,41 @@ def open_actions(project, language):
     actions = []
     scene = last_scene(project)
     if scene is None:
+        # Reuse the story's last chapter if it has one; new ids never collide.
+        lookup = {e["id"]: e for e in project["entities"]}
+        chapters = [e for e in project["entities"] if e["type"] == "chapter"]
         base = new_story(project["id"], "", language)["entities"]
-        roots = [e for e in project["entities"] if e["parentId"] is None]
-        chapter = {
-            **base[0],
-            "order": len([e for e in roots if e["type"] == "chapter"]),
-        }
-        actions += [
+        if chapters:
+            chapter_id = max(chapters, key=lambda e: _story_key(e, lookup))["id"]
+        else:
+            chapter_id = "chapter-" + uuid.uuid4().hex
+            actions.append(
+                {
+                    "op": "entity.create",
+                    "entity": {
+                        **{k: v for k, v in base[0].items() if k != "version"},
+                        "id": chapter_id,
+                    },
+                }
+            )
+        scene = "scene-" + uuid.uuid4().hex
+        actions.append(
             {
                 "op": "entity.create",
-                "entity": {k: v for k, v in e.items() if k != "version"},
+                "entity": {
+                    **{k: v for k, v in base[1].items() if k != "version"},
+                    "id": scene,
+                    "parentId": chapter_id,
+                    "order": len(
+                        [
+                            e
+                            for e in project["entities"]
+                            if e["type"] == "scene" and e["parentId"] == chapter_id
+                        ]
+                    ),
+                },
             }
-            for e in (chapter, base[1])
-        ]
-        scene = base[1]["id"]
+        )
     chat = {
         "version": 1,
         "language": language,
@@ -395,6 +416,9 @@ def apply_plan(project, chat, plan):
     scene = chat["sceneId"]
     shots = [s["id"] for s in shots_of(project, chat)]
     removed = set()
+    placed = (
+        set()
+    )  # shots created or moved this turn; their scene follows their position
     pictures = []  # cards the person may confirm a picture for (advice only)
     new_story = None  # an idea for a separate story the person may start (advice only)
     touched = set()  # existing cards (and "project" for the title) this plan writes
@@ -501,14 +525,12 @@ def apply_plan(project, chat, plan):
                     "quality": "draft",
                     **board,
                 }
-                # Next to the shot it follows (its scene), else the chat's scene.
-                parent = scene
-                if item.get("after"):
-                    parent = lookup[resolve(item["after"], {"shot"})]["parentId"]
+                # Its scene is settled after ordering, from its neighbours.
+                placed.add(ident)
                 entity = {
                     "id": ident,
                     "type": "shot",
-                    "parentId": parent,
+                    "parentId": scene,
                     "title": "",
                     "description": data["prompt"],
                     "data": data,
@@ -547,6 +569,7 @@ def apply_plan(project, chat, plan):
                     lookup[ident] = {**lookup[ident], "data": {**current, **data}}
                 if "after" in item:
                     after = item["after"]
+                    placed.add(ident)
                     shots.remove(ident)
                     position = (
                         0
@@ -587,6 +610,18 @@ def apply_plan(project, chat, plan):
     # Guided.delete_entity already removes deleted cards from cast, place and props
     # against the evolving document, so no separate cleanup patch is emitted here.
     # Shot order is explicit so Works plays them in the chat's order.
+    # A created or moved shot joins the scene of the shot before it (or after it, when
+    # first), so a multi-chapter story shows it exactly where the plan put it.
+    parents = {}
+    for index, shot_id in enumerate(shots):
+        if shot_id not in placed:
+            parents[shot_id] = lookup[shot_id]["parentId"]
+            continue
+        before = next((parents[s] for s in reversed(shots[:index])), None)
+        following = next(
+            (lookup[s]["parentId"] for s in shots[index + 1 :] if s not in placed), None
+        )
+        parents[shot_id] = before or following or scene
     for index, shot_id in enumerate(shots):
         current = lookup[shot_id].get("order")
         if shot_id in refs.values():
@@ -596,11 +631,18 @@ def apply_plan(project, chat, plan):
                     and action["entity"]["id"] == shot_id
                 ):
                     action["entity"]["order"] = index
-        elif current != index:
-            touched.add(shot_id)
-            actions.append(
-                {"op": "entity.update", "entity_id": shot_id, "patch": {"order": index}}
-            )
+                    action["entity"]["parentId"] = parents[shot_id]
+        else:
+            patch = {}
+            if current != index:
+                patch["order"] = index
+            if parents[shot_id] != lookup[shot_id]["parentId"]:
+                patch["parentId"] = parents[shot_id]
+            if patch:
+                touched.add(shot_id)
+                actions.append(
+                    {"op": "entity.update", "entity_id": shot_id, "patch": patch}
+                )
     if proposal:
         proposal["shot_ids"] = [s for s in proposal["shot_ids"] if s not in removed]
         proposal = proposal if proposal["shot_ids"] else None
