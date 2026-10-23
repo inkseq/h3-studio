@@ -53,25 +53,9 @@ Caption burn:2 nonempty lines ×18 characters/cue maximum. Confirmation/SRT cann
 
 ## Legacy Quick Create compatibility
 
-Use this only for an explicitly authorized existing session or consumer still using the legacy API. New authoring uses project actions above. Session endpoints remain compatible during migration; a source session is not permission to convert it, delete it, or regenerate its results. Starred is a favourite, not a selected result; browser-only preview focus is not a persisted choice.
+Existing authorized sessions keep their session/card/revision APIs during migration; new stories use project actions above. Read the [legacy requests](reference/api.md#legacy-quick-create-compatibility) for complete bodies. Follow actual versions, input hashes, per-item seeds and take cursors. Again creates a fresh revision, never a retry of an uncertain execution; preflight and confirm it separately. Transfer copies a selected take to an owned story without enqueueing.
 
-1. Open an authorized session or create one. Read complete `next_settings`, schema and copy preferences. Upload references, wait for ready receipts, then explicitly select roles/ranges; upload alone selects nothing.
-2. Save a card with complete tier, mode, prompt, controls, inputs and copies. Card = group; revisions are immutable. A fixed seed applies only to the first new take, others receive distinct random seeds. The owner copy maximum defaults to 4 and is editable.
-3. Read the revision; refresh exact tier/mode availability and preflight its `input_hash`. Inspect price, readiness and machine allowance. Submit only the unchanged ready preflight within authorized spending and any required human confirmation. Saving or Again alone never generates.
-4. Observe original submissions/jobs; list all group pages and inspect outputs/full recipes. Star via annotation CAS. Display `group_number`; retain original item/job/execution IDs for actions.
-5. Tweak via a complete new revision, or use Again for a fresh revision in the same group. Separately preflight/confirm it; Again is not retry of an uncertain execution.
-6. Transfer the selected take to an owned story scene at its current project version. This copies the complete recipe/references and seed lock into an editable shot, **without enqueueing**. Return its same-origin work link.
-
-```http
-POST /v1/quick-chat/sessions/SESSION/cards/CARD/again
-Idempotency-Key: saved-again-key
-
-{"expected_card_version":3,"source_revision_id":"REVISION","item_id":"TAKE","copies":1}
-```
-
-Example response projection: `{"card":{"id":"CARD"},"revision":{"id":"NEW_REVISION","input_hash":"HASH"}}`. Read that ID/hash; never auto-chain generation. Exact preflight, star and transfer bodies are in the API reference.
-
-For `resume_admission_available`, use [admission recovery](reference/recovery.md#original-admission-recovery), never a new take/retry or cap increase.
+Keep source IDs and receipts. A star is a favourite, not a chosen result; browser preview focus is not persisted selection. Never convert/delete a session or regenerate old results implicitly. For `resume_admission_available`, use [original admission recovery](reference/recovery.md#original-admission-recovery), not a new take/key or cap increase.
 
 ## Upload and organise references
 
