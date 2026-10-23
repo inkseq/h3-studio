@@ -4,10 +4,10 @@ import { useI18n } from './i18n/I18nProvider.jsx';
 
 // Admin on/off for story-chat card pictures (h3-studio#466). Hidden where the server has no
 // such setting yet. Turning it off never touches pictures already drawn or being settled.
+// One click toggles it (owner, 2026-10-23); the audit log gets a plain on/off note.
 export default function StoryChatAdminSwitch({ api, active }) {
   const { t } = useI18n();
   const [value, setValue] = useState(null);
-  const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   useEffect(() => {
@@ -31,11 +31,12 @@ export default function StoryChatAdminSwitch({ api, active }) {
         body: {
           expected_version: value.version,
           pictures_enabled: !value.pictures_enabled,
-          reason: reason.trim(),
+          reason: value.pictures_enabled
+            ? 'Pictures turned off in Admin'
+            : 'Pictures turned on in Admin',
         },
       });
       setValue(next);
-      setReason('');
       setMessage(t('storyChatAdmin.saved'));
     } catch (failure) {
       const code = failure.detail?.detail?.code;
@@ -58,28 +59,9 @@ export default function StoryChatAdminSwitch({ api, active }) {
         </span>
       </div>
       <p className="muted">{t('storyChatAdmin.help')}</p>
-      <label className="story-chat-admin-reason">
-        {t('storyChatAdmin.reason')}
-        <input
-          value={reason}
-          maxLength={500}
-          disabled={busy}
-          placeholder={on ? t('storyChatAdmin.reasonOff') : t('storyChatAdmin.reasonOn')}
-          onChange={(event) => setReason(event.target.value)}
-        />
-      </label>
       <div className="row tight" style={{ justifyContent: 'flex-end' }}>
-        {message ? (
-          <small className="muted">{message}</small>
-        ) : (
-          !reason.trim() && <small className="muted">{t('storyChatAdmin.reasonFirst')}</small>
-        )}
-        <button
-          type="button"
-          className={on ? 'ghost' : 'primary'}
-          disabled={busy || !reason.trim()}
-          onClick={save}
-        >
+        {message && <small className="muted">{message}</small>}
+        <button type="button" className={on ? 'ghost' : 'primary'} disabled={busy} onClick={save}>
           {on ? t('storyChatAdmin.turnOff') : t('storyChatAdmin.turnOn')}
         </button>
       </div>

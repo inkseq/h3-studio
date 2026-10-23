@@ -11,10 +11,6 @@ export const storyChatCatalogs = {
     'storyChatAdmin.off': 'Off',
     'storyChatAdmin.help':
       'Lets people draw pictures for character, place and prop cards in Quick Create. The price per picture is set under credit prices; while credit charging is off, pictures are free and the supplier cost is ours.',
-    'storyChatAdmin.reason': 'Reason (saved in the audit log)',
-    'storyChatAdmin.reasonOn': 'e.g. launch pictures for paying users',
-    'storyChatAdmin.reasonOff': 'e.g. pause pictures while we check costs',
-    'storyChatAdmin.reasonFirst': 'Write a reason first, then the button turns on.',
     'storyChatAdmin.turnOn': 'Turn pictures on',
     'storyChatAdmin.turnOff': 'Turn pictures off',
     'storyChatAdmin.saved': 'Saved.',
@@ -107,10 +103,6 @@ export const storyChatCatalogs = {
     'storyChatAdmin.off': '已关闭',
     'storyChatAdmin.help':
       '允许用户在快速创作里给角色、地点、道具卡画图。每张图的价格在积分价格里设置；积分扣费没开的时候画图免费，供应商费用由我们承担。',
-    'storyChatAdmin.reason': '原因（会记入审计日志）',
-    'storyChatAdmin.reasonOn': '例如：给付费用户开放画图',
-    'storyChatAdmin.reasonOff': '例如：先暂停画图核对成本',
-    'storyChatAdmin.reasonFirst': '先填写原因，按钮才能点。',
     'storyChatAdmin.turnOn': '开启画图',
     'storyChatAdmin.turnOff': '关闭画图',
     'storyChatAdmin.saved': '已保存。',
