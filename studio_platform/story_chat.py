@@ -148,12 +148,61 @@ def chat_of(project):
     return chat
 
 
+def _story_key(entity, lookup):
+    """Chapter → scene → shot reading order, as Works plays the story."""
+    path = []
+    seen = set()
+    while entity is not None and entity["id"] not in seen:
+        seen.add(entity["id"])
+        order = entity.get("order", 0)
+        path.append((order if type(order) in (int, float) else 0, entity["id"]))
+        entity = lookup.get(entity.get("parentId"))
+    return tuple(reversed(path))
+
+
 def shots_of(project, chat):
-    scene = chat.get("sceneId")
-    shots = [
-        e for e in project["entities"] if e["type"] == "shot" and e["parentId"] == scene
-    ]
-    return sorted(shots, key=lambda e: (e.get("order", 0), e["id"]))
+    """Every shot of the story in reading order. A chat-made story has one scene; an
+    existing story opened in the chat (#422) may have several chapters and scenes."""
+    lookup = {e["id"]: e for e in project["entities"]}
+    shots = [e for e in project["entities"] if e["type"] == "shot"]
+    return sorted(shots, key=lambda e: _story_key(e, lookup))
+
+
+def last_scene(project):
+    """The scene new shots join when an existing story is opened in the chat."""
+    lookup = {e["id"]: e for e in project["entities"]}
+    scenes = [e for e in project["entities"] if e["type"] == "scene"]
+    return max(scenes, key=lambda e: _story_key(e, lookup))["id"] if scenes else None
+
+
+def open_actions(project, language):
+    """Attach an empty chat to an existing story; add a chapter and scene if it has none."""
+    actions = []
+    scene = last_scene(project)
+    if scene is None:
+        base = new_story(project["id"], "", language)["entities"]
+        roots = [e for e in project["entities"] if e["parentId"] is None]
+        chapter = {
+            **base[0],
+            "order": len([e for e in roots if e["type"] == "chapter"]),
+        }
+        actions += [
+            {
+                "op": "entity.create",
+                "entity": {k: v for k, v in e.items() if k != "version"},
+            }
+            for e in (chapter, base[1])
+        ]
+        scene = base[1]["id"]
+    chat = {
+        "version": 1,
+        "language": language,
+        "sceneId": scene,
+        "turns": 0,
+        "messages": [],
+        "opened": True,
+    }
+    return actions + [{"op": "journey.update", "patch": {"storyChat": chat}}]
 
 
 def _image(entity):
@@ -452,10 +501,14 @@ def apply_plan(project, chat, plan):
                     "quality": "draft",
                     **board,
                 }
+                # Next to the shot it follows (its scene), else the chat's scene.
+                parent = scene
+                if item.get("after"):
+                    parent = lookup[resolve(item["after"], {"shot"})]["parentId"]
                 entity = {
                     "id": ident,
                     "type": "shot",
-                    "parentId": scene,
+                    "parentId": parent,
                     "title": "",
                     "description": data["prompt"],
                     "data": data,

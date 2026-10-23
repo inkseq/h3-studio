@@ -611,3 +611,119 @@ class StoryChatSettingTests(unittest.TestCase):
                         expected,
                         (target, flag),
                     )
+
+
+class OpenExistingStoryTests(StoryChatTests):
+    """An existing story (several chapters) continues in the chat (owner, 2026-10-23)."""
+
+    def existing(self):
+        chat = self.start()
+        self.assertEqual(self.turn(chat, "aliens").status_code, 200)
+        pid = chat["project_id"]
+        row = self.client.get(f"/v1/projects/{pid}").json()
+        project = row["project"]
+        scene1 = next(e["id"] for e in project["entities"] if e["type"] == "scene")
+        actions = [
+            {"op": "journey.update", "patch": {"storyChat": None}},
+            {
+                "op": "entity.create",
+                "entity": {
+                    "id": "chapter-two",
+                    "type": "chapter",
+                    "parentId": None,
+                    "title": "Two",
+                    "description": "",
+                    "order": 1,
+                    "data": {},
+                },
+            },
+            {
+                "op": "entity.create",
+                "entity": {
+                    "id": "scene-two",
+                    "type": "scene",
+                    "parentId": "chapter-two",
+                    "title": "Night",
+                    "description": "",
+                    "order": 0,
+                    "data": {"script": ""},
+                },
+            },
+            {
+                "op": "entity.create",
+                "entity": {
+                    "id": "shot-late",
+                    "type": "shot",
+                    "parentId": "scene-two",
+                    "title": "",
+                    "description": "They fly away.",
+                    "order": 0,
+                    "data": {"prompt": "They fly away.", "seconds": 5},
+                },
+            },
+        ]
+        done = self.client.post(
+            f"/v1/projects/{pid}/actions",
+            json={"expected_version": row["version"], "actions": actions},
+        )
+        self.assertEqual(done.status_code, 200, done.text)
+        self.assertEqual(self.client.get(f"/v1/story-chats/{pid}").status_code, 404)
+        return pid, scene1
+
+    def test_open_attaches_a_chat_once_and_lists_every_chapter(self):
+        pid, _ = self.existing()
+        opened = self.client.post(
+            f"/v1/story-chats/{pid}/open", json={"language": "en"}
+        )
+        self.assertEqual(opened.status_code, 200, opened.text)
+        value = opened.json()
+        self.assertEqual(value["messages"], [])
+        texts = [s["text"] for s in value["cards"]["shots"]]
+        self.assertEqual(texts[-1], "They fly away.")
+        self.assertEqual(len(texts), 4)
+        again = self.client.post(f"/v1/story-chats/{pid}/open", json={"language": "en"})
+        self.assertEqual(again.json()["version"], value["version"])
+        listed = self.client.get("/v1/story-chats").json()["story_chats"]
+        self.assertIn(pid, [row["project_id"] for row in listed])
+
+    def test_new_shot_joins_the_scene_of_the_shot_it_follows(self):
+        pid, scene1 = self.existing()
+        self.client.post(f"/v1/story-chats/{pid}/open", json={"language": "en"})
+        first = self.client.get(f"/v1/story-chats/{pid}").json()["cards"]["shots"][0]
+        plan = {
+            "reply": "Added.",
+            "chips": [],
+            "actions": [
+                {
+                    "tool": "upsert_shot",
+                    "ref": "new:a",
+                    "text": "A beat.",
+                    "after": first["id"],
+                },
+                {"tool": "upsert_shot", "ref": "new:b", "text": "The end."},
+            ],
+        }
+        response = self.turn(
+            {"project_id": pid}, "more", turn_id="turn-0002", plan=plan
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        texts = [s["text"] for s in response.json()["cards"]["shots"]]
+        self.assertEqual(texts[1], "A beat.")
+        self.assertEqual(texts[-2:], ["They fly away.", "The end."])
+        project = self.client.get(f"/v1/projects/{pid}").json()["project"]
+        parent = {
+            e["description"]: e["parentId"]
+            for e in project["entities"]
+            if e["type"] == "shot"
+        }
+        self.assertEqual(parent["A beat."], scene1)
+        self.assertEqual(parent["The end."], "scene-two")
+        self.assertEqual(parent["They fly away."], "scene-two")
+
+    def test_open_needs_write_access_and_a_known_story(self):
+        self.login()
+        missing = self.client.post("/v1/story-chats/project-nope/open", json={})
+        self.assertIn(missing.status_code, (403, 404))
+        pid, _ = self.existing()
+        bad = self.client.post(f"/v1/story-chats/{pid}/open", json={"language": "xx"})
+        self.assertEqual(bad.status_code, 422)
