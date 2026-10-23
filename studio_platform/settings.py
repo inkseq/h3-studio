@@ -144,14 +144,6 @@ class Settings:
         from .error_monitoring import valid_dsn
 
         if (
-            not valid_dsn(self.sentry_dsn)
-            or type(self.sentry_environment) is not str
-            or self.sentry_environment not in {"", "staging", "production"}
-            or self.sentry_environment
-            and self.sentry_environment != self.deployment_target
-        ):
-            raise ValueError("Invalid API error monitoring configuration")
-        if (
             not isinstance(self.account_deletion_test_owners, tuple)
             or len(self.account_deletion_test_owners) > 20
             or any(
@@ -162,6 +154,14 @@ class Settings:
             raise ValueError("Invalid disposable account deletion fixtures")
         if self.deployment_target not in {"production", "staging"}:
             raise ValueError("Unsupported deployment target")
+        if (
+            not valid_dsn(self.sentry_dsn)
+            or type(self.sentry_environment) is not str
+            or self.sentry_environment not in {"", "staging", "production"}
+            or self.sentry_environment
+            and self.sentry_environment != self.deployment_target
+        ):
+            raise ValueError("Invalid API error monitoring configuration")
         if self.stripe_mode not in {"off", "test", "live"}:
             raise ValueError("Unsupported Stripe mode")
         if self.stripe_config_file is not None:
