@@ -374,7 +374,7 @@ export default function SpendingSettings({ account }) {
             <SkinPicker />
             {account && (
               <>
-                {!hosted && <AccountGoogleLink api={api} />}
+                <AccountGoogleLink api={api} />
                 {!hosted && (
                   <div className="card-box">
                     <AccountPassword inline busy={busy} />
@@ -552,7 +552,14 @@ export default function SpendingSettings({ account }) {
                       </div>
                     </form>
                   )}
-                  {pageActive && <BudgetAdministration account={account} />}
+                  {/* Per-account dollar budgets and per-GPU prices are test-machine plumbing;
+                      folded so the everyday limits above stay readable. */}
+                  {pageActive && (
+                    <details className="admin-fold">
+                      <summary>{t('admin.legacyBudgets')}</summary>
+                      <BudgetAdministration account={account} />
+                    </details>
+                  )}
                 </>
               }
             />

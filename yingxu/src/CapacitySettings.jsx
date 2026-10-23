@@ -378,19 +378,30 @@ export default function CapacitySettings({ settings, api, onSaved }) {
           )}
         </div>
       )}
-      {CAPACITY_GROUPS.map((group) => (
-        <section key={group.id} className="cap-group" aria-labelledby={'cap-' + group.id}>
-          <h4 id={'cap-' + group.id}>{t('capacity.group.' + group.id)}</h4>
-          {group.id === 'queue' && <p className="muted small">{t('capacity.group.queueHelp')}</p>}
-          {group.fields.map(([id]) =>
-            id === 'batch_guaranteed_share_slots.denominator'
-              ? null
-              : id === 'batch_guaranteed_share_slots.numerator'
-                ? shareRow()
-                : row(id),
-          )}
-        </section>
-      ))}
+      {CAPACITY_GROUPS.map((group) => {
+        const fields = group.fields.map(([id]) =>
+          id === 'batch_guaranteed_share_slots.denominator'
+            ? null
+            : id === 'batch_guaranteed_share_slots.numerator'
+              ? shareRow()
+              : row(id),
+        );
+        // Queue rules are recorded but not enforced yet (#456 B/C/D), so they start folded.
+        return group.id === 'queue' ? (
+          <details key={group.id} className="cap-group cap-fold">
+            <summary>
+              <h4 id={'cap-' + group.id}>{t('capacity.group.' + group.id)}</h4>
+            </summary>
+            <p className="muted small">{t('capacity.group.queueHelp')}</p>
+            {fields}
+          </details>
+        ) : (
+          <section key={group.id} className="cap-group" aria-labelledby={'cap-' + group.id}>
+            <h4 id={'cap-' + group.id}>{t('capacity.group.' + group.id)}</h4>
+            {fields}
+          </section>
+        );
+      })}
       {error && (
         <p className="cap-error-bar" role="alert">
           {error}
