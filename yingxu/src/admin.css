@@ -118,8 +118,11 @@
 .user-row button[aria-expanded='true'] svg {
   transform: rotate(180deg);
 }
-.user-adjust-gap {
-  flex: 1;
+.user-adjust-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-left: auto;
 }
 .user-adjust {
   display: flex;
