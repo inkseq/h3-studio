@@ -818,3 +818,51 @@ class OpenExistingStoryOrderTests(OpenExistingStoryTests):
         self.assertEqual(refused.status_code, 409, refused.text)
         project = self.client.get(f"/v1/projects/{pid}").json()["project"]
         self.assertEqual(project["journey"]["storyChat"], legacy)
+
+
+class OpenExistingStoryNoOpOrderTests(OpenExistingStoryOrderTests):
+    """Codex re-review of #480: no-op full order and append into an empty last scene."""
+
+    def test_restating_the_full_order_moves_nothing(self):
+        pid, _ = self.opened()
+        before = self.parents(pid)
+        shots = self.client.get(f"/v1/story-chats/{pid}").json()["cards"]["shots"]
+        actions, previous = [], None
+        for shot in shots:
+            actions.append(
+                {"tool": "upsert_shot", "ref": shot["id"], "after": previous}
+            )
+            previous = shot["id"]
+        plan = {"reply": "ok", "chips": [], "actions": actions}
+        response = self.turn({"project_id": pid}, "x", turn_id="turn-0005", plan=plan)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.parents(pid), before)
+
+    def test_append_uses_an_empty_last_scene(self):
+        pid, _ = self.existing()
+        row = self.client.get(f"/v1/projects/{pid}").json()
+        empty = {
+            "op": "entity.create",
+            "entity": {
+                "id": "scene-empty",
+                "type": "scene",
+                "parentId": "chapter-two",
+                "title": "Later",
+                "description": "",
+                "order": 1,
+                "data": {"script": ""},
+            },
+        }
+        self.client.post(
+            f"/v1/projects/{pid}/actions",
+            json={"expected_version": row["version"], "actions": [empty]},
+        )
+        self.client.post(f"/v1/story-chats/{pid}/open", json={"language": "en"})
+        plan = {
+            "reply": "ok",
+            "chips": [],
+            "actions": [{"tool": "upsert_shot", "ref": "new:z", "text": "Coda."}],
+        }
+        response = self.turn({"project_id": pid}, "x", turn_id="turn-0006", plan=plan)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(self.parents(pid)["Coda."], "scene-empty")

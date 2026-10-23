@@ -416,9 +416,10 @@ def apply_plan(project, chat, plan):
     scene = chat["sceneId"]
     shots = [s["id"] for s in shots_of(project, chat)]
     removed = set()
-    placed = (
-        set()
-    )  # shots created or moved this turn; their scene follows their position
+    # Shots created or moved this turn; their scene follows their position.
+    placed = set()
+    # Created without "after": the chat's scene unless that breaks reading order.
+    appended = set()
     pictures = []  # cards the person may confirm a picture for (advice only)
     new_story = None  # an idea for a separate story the person may start (advice only)
     touched = set()  # existing cards (and "project" for the title) this plan writes
@@ -527,6 +528,8 @@ def apply_plan(project, chat, plan):
                 }
                 # Its scene is settled after ordering, from its neighbours.
                 placed.add(ident)
+                if "after" not in item:
+                    appended.add(ident)
                 entity = {
                     "id": ident,
                     "type": "shot",
@@ -607,11 +610,18 @@ def apply_plan(project, chat, plan):
                 proposal = {"kind": "generate", "shot_ids": list(dict.fromkeys(ids))}
         else:
             raise StoryChatError("story_chat_plan_invalid", 502)
+
     # Guided.delete_entity already removes deleted cards from cast, place and props
     # against the evolving document, so no separate cleanup patch is emitted here.
     # Shot order is explicit so Works plays them in the chat's order.
-    # A created or moved shot joins the scene of the shot before it (or after it, when
-    # first), so a multi-chapter story shows it exactly where the plan put it.
+    # A placed shot keeps its scene (an appended one takes the chat's scene) unless that
+    # would break chapter/scene reading order against its neighbours; only then does it
+    # join the scene of the shot before it, or of the next unmoved shot when it is first.
+    # A plan that restates the existing order therefore moves nothing between scenes.
+    def scene_key(scene_id):
+        entity = lookup.get(scene_id)
+        return _story_key(entity, lookup) if entity else ()
+
     parents = {}
     for index, shot_id in enumerate(shots):
         if shot_id not in placed:
@@ -621,7 +631,18 @@ def apply_plan(project, chat, plan):
         following = next(
             (lookup[s]["parentId"] for s in shots[index + 1 :] if s not in placed), None
         )
-        parents[shot_id] = before or following or scene
+        created = shot_id in refs.values()
+        keep = (
+            None if created and shot_id not in appended else lookup[shot_id]["parentId"]
+        )
+        if (
+            keep is not None
+            and (before is None or scene_key(keep) >= scene_key(before))
+            and (following is None or scene_key(keep) <= scene_key(following))
+        ):
+            parents[shot_id] = keep
+        else:
+            parents[shot_id] = before or following or scene
     for index, shot_id in enumerate(shots):
         current = lookup[shot_id].get("order")
         if shot_id in refs.values():
