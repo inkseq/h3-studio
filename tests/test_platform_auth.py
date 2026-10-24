@@ -175,7 +175,9 @@ class PlatformAuthTests(unittest.TestCase):
             self.repo.engine.url,
             pool_size=1,
             max_overflow=0,
-            pool_timeout=0.1,
+            # A nested checkout deadlocks a one-connection pool at any timeout; 0.1 s
+            # also failed honest waits on busy CI runners.
+            pool_timeout=5,
             connect_args={"check_same_thread": False},
         )
         self.addCleanup(engine.dispose)
