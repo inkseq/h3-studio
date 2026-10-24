@@ -790,3 +790,5 @@ inventory.json
 !tests/test_telegram_bot_core.py
 !studio_platform/generation_stats.py
 !tests/test_generation_stats.py
+!studio_platform/support_view.py
+!tests/test_support_view.py

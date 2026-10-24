@@ -474,6 +474,31 @@ def create_app(
             )
         finally:
             lease.release("authentication")
+        support_view_id = request.headers.get("x-support-view")
+        if support_view_id is None and request.method in {"GET", "HEAD"}:
+            # Native media cannot send headers; only content downloads take the query form.
+            if re.fullmatch(
+                r"/v1/(?:assets|artifacts)/[^/]+/content", request.url.path
+            ):
+                support_view_id = request.query_params.get("support_view")
+        if support_view_id is not None:
+            from .support_view import refusal, resolve
+
+            viewed = await run_in_threadpool(
+                resolve, repo, settings, principal, support_view_id
+            )
+            refused = (
+                "support_view_invalid"
+                if viewed is None
+                else refusal(request.method, request.url.path)
+            )
+            if refused:
+                return JSONResponse(
+                    {"detail": refused, "code": refused},
+                    status_code=403,
+                    headers={"Cache-Control": "no-store"},
+                )
+            principal = viewed
         expected_account = request.headers.get("x-expected-account")
         native_content = (
             request.method in {"GET", "HEAD"}
@@ -1605,6 +1630,9 @@ def create_app(
     from .operator_jobs import register_routes as register_operator_jobs
 
     register_operator_jobs(app)
+    from .support_view import register_routes as register_support_view
+
+    register_support_view(app)
     from .generation_stats import register_routes as register_generation_stats
 
     register_generation_stats(app)
