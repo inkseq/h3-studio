@@ -486,6 +486,24 @@ class MigrationArtifacts(unittest.TestCase):
         }
         seal.write_text(json.dumps(sealed))
         seal.chmod(0o600)
+        # Only this synthetic seal's owner differs from a root-owned host.
+        # Preserve the actual opened file's mode, links, size and inode checks.
+        seal_info = seal.stat()
+        fstat = os.fstat
+
+        def fixture_fstat(fd):
+            info = fstat(fd)
+            if (info.st_dev, info.st_ino) == (seal_info.st_dev, seal_info.st_ino):
+                fields = list(info)
+                fields[4] = 0
+                return os.stat_result(fields)
+            return info
+
+        ownership = patch.object(
+            maintenance.deployment_target.os, 'fstat', fixture_fstat
+        )
+        ownership.start()
+        self.addCleanup(ownership.stop)
         operator = Path(environment['SIXNINE_DSTACK_OPERATOR_CONFIG_FILE'])
         return value, paths, seal, sealed, operator
 
