@@ -33,16 +33,11 @@
   padding: 18px;
   border: 1px solid #d3dfd4;
   border-radius: 12px;
-  background: #f3f7ed;
+  background: var(--ink);
 }
 .activity-intro span {
   flex: 1;
   line-height: 1.6;
-}
-.activity-empty {
-  border: 1px dashed #cbd7c9;
-  border-radius: 12px;
-  padding: 24px;
 }
 .activity-events {
   padding: 0;

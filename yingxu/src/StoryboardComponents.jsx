@@ -15,6 +15,7 @@ import {
   X,
   Search,
   Maximize2,
+  Minimize2,
   Check,
   Pin,
   AlertTriangle,
@@ -23,6 +24,8 @@ import {
   Upload,
   Pencil,
 } from 'lucide-react';
+import { Segmented } from './ui/Segmented.jsx';
+import { Chip, Note } from './ui/Note.jsx';
 import { TrashMenu, TrashButton, RenameDialog } from './UniversalTrash.jsx';
 import { WorkbenchTakes, WorkbenchCopies, WorkbenchDefaults } from './StoryboardWorkbench.jsx';
 import { AssistantBadge } from './AssistantConnections.jsx';
@@ -382,7 +385,9 @@ function ChooseFiles({ kind, exclude, title, onPick, onFiles, onClose }) {
             }}
           />
         </div>
-        <div className="picker-note">{tr('storyboard.copy39')}</div>
+        <Note as="div" tone="info">
+          {tr('storyboard.copy39')}
+        </Note>
         {kind === 'image' ? (
           <div className="picker-grid">
             {list.map((a) => (
@@ -1102,9 +1107,7 @@ export function ProfileEditor() {
             })}
           </b>
           {usedIn.map((s) => (
-            <span key={s.id} className="chip">
-              {s.title}
-            </span>
+            <Chip key={s.id}>{s.title}</Chip>
           ))}
           {usedIn.length > 0 && <small className="muted">{tr('storyboard.copy74')}</small>}
         </div>
@@ -1281,7 +1284,9 @@ export function AssetPicker({ shotId, slot, x, y, onClose }) {
         ))}
       </div>
       {(slot === 'start' || slot === 'end') && (
-        <div className="picker-note">{tr('storyboard.copy75')}</div>
+        <Note as="div" tone="info">
+          {tr('storyboard.copy75')}
+        </Note>
       )}
       <div className="picker-grid">
         {profiles.map((p) => {
@@ -1415,24 +1420,22 @@ export function WhoChips({ shot, small }) {
         const p = db.profile(c.id);
         return (
           p && (
-            <span key={c.id} className="chip character">
+            <Chip key={c.id} kind="character">
               {p.name}
               <i>{variantOf(p, c.variant)?.name || tr('storyboard.detail41')}</i>
-            </span>
+            </Chip>
           )
         );
       })}
       {shot.place && db.profile(shot.place.id) && (
-        <span className="chip location">
-          {db.profile(shot.place.id).name.replace('旧车站 · ', '')}
-        </span>
+        <Chip kind="location">{db.profile(shot.place.id).name.replace('旧车站 · ', '')}</Chip>
       )}
       {shot.props.map(
         (id) =>
           db.profile(id) && (
-            <span key={id} className="chip prop">
+            <Chip key={id} kind="prop">
               {db.profile(id).name}
-            </span>
+            </Chip>
           ),
       )}
     </div>
@@ -1712,6 +1715,17 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
             </button>
           </div>
         </div>
+        {onWide && (
+          <button
+            type="button"
+            className="ghost round ed-expand"
+            aria-label={tr(wide ? 'workbench.collapse' : 'workbench.expand')}
+            title={tr(wide ? 'workbench.collapse' : 'workbench.expand')}
+            onClick={onWide}
+          >
+            {wide ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+          </button>
+        )}
         <TrashButton target={{ kind: 'entity', project_id: state.project.id, id: shot.id }} />
         {onClose && (
           <button className="x big" aria-label={tr('storyboard.closeEditor')} onClick={onClose}>
@@ -1740,6 +1754,13 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
               </button>
             )}
         </div>
+        <WorkbenchTakes
+          shot={shot}
+          wide={wide}
+          onWide={onWide}
+          previewId={viewing?.id}
+          onPreview={(row) => setPreview(row.entity_id || row.id)}
+        />
         {['done', 'succeeded'].includes(viewing?.status) && (
           <div className="row tight">
             <StoryboardDownloads version={viewing} title={shot.title} />
@@ -1784,32 +1805,8 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
         {viewing?.id === shot.chosen && ['done', 'succeeded'].includes(viewing?.status) && (
           <ShotTrim shotId={shot.id} mediaRef={mediaRef} />
         )}
-
-        <WorkbenchTakes
-          shot={shot}
-          wide={wide}
-          onWide={onWide}
-          previewId={viewing?.id}
-          onPreview={(row) => setPreview(row.entity_id || row.id)}
-        />
       </div>
       <div className="ed-form">
-        <WorkbenchDefaults
-          shotId={shot.id}
-          initialTarget={
-            new URLSearchParams(globalThis.location?.search || '').get('defaults') === 'account'
-              ? 'account'
-              : 'shot'
-          }
-        />
-        <label className="field">
-          <span>{tr('storyboard.copy84')}</span>
-          <textarea
-            rows={2}
-            value={shot.script}
-            onChange={(e) => upd({ script: e.target.value })}
-          />
-        </label>
         <label className="field">
           <span>{tr(restoredExact ? 'workbench.restoredPrompt' : 'storyboard.copy85')}</span>
           <textarea
@@ -1965,6 +1962,14 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
           </Slot>
         )}
 
+        <label className="field">
+          <span>{tr('storyboard.copy84')}</span>
+          <textarea
+            rows={2}
+            value={shot.script}
+            onChange={(e) => upd({ script: e.target.value })}
+          />
+        </label>
         <div className="modetabs" role="tablist" aria-label={tr('storyboard.finish13')}>
           {['FL', 'REF'].map((k) => (
             <button
@@ -2160,49 +2165,54 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
           ))}
         </details>
 
-        <div className="row quality-row">
-          <div className="seg">
-            {['draft', 'final'].map((q) => (
-              <button
-                key={q}
-                className={shot.quality === q ? 'on' : ''}
-                onClick={() => upd({ quality: q })}
-              >
-                {QUALITY_LABEL[q]}
-              </button>
-            ))}
-          </div>
-          <small className="muted">
-            {info.res} · {info.sec} {tr('storyboard.secondsUnit')}
-          </small>
-        </div>
-        {shot.versions.length > 0 && (
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={shot.seedLock}
-              onChange={(e) => upd({ seedLock: e.target.checked })}
+        <WorkbenchDefaults
+          shotId={shot.id}
+          initialTarget={
+            new URLSearchParams(globalThis.location?.search || '').get('defaults') === 'account'
+              ? 'account'
+              : 'shot'
+          }
+        />
+        {/* Quality, copies and Generate stay in view at the bottom (owner, 2026-10-24). */}
+        <div className="ed-footer">
+          <div className="row quality-row">
+            <Segmented
+              options={['draft', 'final'].map((q) => ({ value: q, label: QUALITY_LABEL[q] }))}
+              value={shot.quality}
+              onChange={(quality) => upd({ quality })}
             />
-            {tr('storyboard.mixed21')}
-          </label>
-        )}
-        <WorkbenchCopies value={copies} onChange={setCopies} max={state.copiesMax} />
-        <div className="ed-actions">
-          <button
-            className="primary"
-            disabled={
-              busy ||
-              !Number.isInteger(Number(copies)) ||
-              Number(copies) < 1 ||
-              Number(copies) > state.copiesMax
-            }
-            onClick={() =>
-              dispatch({ type: 'workbenchGenerate', ids: [shot.id], copies: Number(copies) })
-            }
-          >
-            {shot.versions.length ? tr('storyboard.detail67') : tr('storyboard.detail68')} ·{' '}
-            {qualityLabel}
-          </button>
+            <small className="muted">
+              {info.res} · {info.sec} {tr('storyboard.secondsUnit')}
+            </small>
+          </div>
+          {shot.versions.length > 0 && (
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={shot.seedLock}
+                onChange={(e) => upd({ seedLock: e.target.checked })}
+              />
+              {tr('storyboard.mixed21')}
+            </label>
+          )}
+          <WorkbenchCopies value={copies} onChange={setCopies} max={state.copiesMax} />
+          <div className="ed-actions">
+            <button
+              className="primary"
+              disabled={
+                busy ||
+                !Number.isInteger(Number(copies)) ||
+                Number(copies) < 1 ||
+                Number(copies) > state.copiesMax
+              }
+              onClick={() =>
+                dispatch({ type: 'workbenchGenerate', ids: [shot.id], copies: Number(copies) })
+              }
+            >
+              {shot.versions.length ? tr('storyboard.detail67') : tr('storyboard.detail68')} ·{' '}
+              {qualityLabel}
+            </button>
+          </div>
         </div>
         {picker && <AssetPicker shotId={shot.id} {...picker} onClose={() => setPicker(null)} />}
       </div>

@@ -1,4 +1,6 @@
+import { EmptyState, Note } from './ui/Note.jsx';
 import StudioHeader from './StudioHeader.jsx';
+import { Dialog as SharedDialog } from './ui/Dialog.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import { MenuItem } from './AccountMenu.jsx';
 import { readBrowserLocale, translate } from './i18n/locale.js';
@@ -102,44 +104,18 @@ const hostPlace = (node) =>
   node.region ||
   '';
 
+// The console's dialogs use the shared Dialog (h3-studio#514); p4-dialog keeps their content layout.
 function Dialog({ title, subtitle, onClose, wide = false, children }) {
-  const { t, locale } = useI18n();
-  const active = usePageActive(),
-    ref = useRef(),
-    opener = useRef(globalThis.document?.activeElement);
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!active) {
-      dialog.close();
-      return;
-    }
-    dialog.showModal();
-    return () => {
-      dialog.close();
-      if (opener.current?.isConnected && !opener.current.closest('[inert]')) opener.current.focus();
-    };
-  }, [active]);
   return (
-    <dialog
-      ref={ref}
+    <SharedDialog
+      title={title}
+      subtitle={subtitle}
+      onClose={onClose}
+      size={wide ? 'xl' : 'wide'}
       className={'p4-dialog' + (wide ? ' wide' : '')}
-      aria-label={title}
-      onCancel={(event) => {
-        event.preventDefault();
-        onClose();
-      }}
     >
-      <header>
-        <div>
-          <h2>{title}</h2>
-          {subtitle && <p>{subtitle}</p>}
-        </div>
-        <button className="p4-close" aria-label={t('operator.copy32')} onClick={onClose}>
-          <X size={20} />
-        </button>
-      </header>
       {children}
-    </dialog>
+    </SharedDialog>
   );
 }
 function KeepFields({ value, onChange }) {
@@ -218,7 +194,7 @@ function Login() {
     [error, setError] = useState('');
   const local = ['username-only-test', 'username-test'].includes(c.auth?.authentication);
   return (
-    <section className="p4-empty">
+    <section className="ui-empty">
       <ShieldCheck size={30} />
       <h2>{t('operator.copy51')}</h2>
       <form
@@ -1035,10 +1011,10 @@ function KeepDialog({ target, kind, controller, busy, onClose }) {
       <fieldset disabled={busy || working || !!receipt}>
         <KeepFields value={value} onChange={setValue} />
       </fieldset>
-      <p className="p4-note">
+      <Note>
         {kind === 'group' ? t('operator.status32') : ''}
         {t('operator.more.protections')}
-      </p>
+      </Note>
       {receipt && <ActionResults receipt={receipt} />}{' '}
       <FloatingMessage tone="error" text={error ? error : null} />
       <footer>
@@ -1106,11 +1082,26 @@ function StopDialog({ target, kind, controller, busy, onClose }) {
     setWorking(true);
     setError('');
     try {
-      setReceipt(
-        kind === 'group'
-          ? await controller.groupStop(target, impact)
-          : await controller.stop(target, impact),
-      );
+      // A running node's version moves with every observation (every few seconds), so a stop
+      // can lose the race. Retry with a fresh impact while the person's choice still holds:
+      // same warnings they confirmed. Anything else goes back to them.
+      let current = impact;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          setReceipt(
+            kind === 'group'
+              ? await controller.groupStop(target, current)
+              : await controller.stop(target, current),
+          );
+          break;
+        } catch (error) {
+          if (attempt >= 3 || !String(error.message).includes('operator_node_version_conflict'))
+            throw error;
+          const next = await controller.stopImpact(kind, target.id);
+          if ((next?.warnings?.length || 0) !== (current?.warnings?.length || 0)) throw error;
+          current = next;
+        }
+      }
     } catch (error) {
       setError(error.message);
       setImpact(null);
@@ -1144,7 +1135,7 @@ function StopDialog({ target, kind, controller, busy, onClose }) {
       ))}
       {receipt && <ActionResults receipt={receipt} />}{' '}
       <FloatingMessage tone="error" text={error ? error : null} />
-      <p className="p4-note">{t('operator.copy83')}</p>
+      <Note>{t('operator.copy83')}</Note>
       <footer>
         <span />
         <div>
@@ -1385,7 +1376,7 @@ function MoveDialog({ node, groups, controller, busy, onClose }) {
           ))}
         </select>
       </label>
-      <p className="p4-note">{t('operator.copy99')}</p>
+      <Note>{t('operator.copy99')}</Note>
       <FloatingMessage tone="error" text={error ? error : null} />
       <footer>
         <span />
@@ -1414,7 +1405,7 @@ export function InventoryAdvisory({ item }) {
   if (outcome.state !== 'empty')
     return item.error ? <p className="p4-error">{item.error}</p> : null;
   return (
-    <p className="p4-note" role="status">
+    <Note role="status">
       {outcome.message}
       <br />
       <small>
@@ -1426,7 +1417,7 @@ export function InventoryAdvisory({ item }) {
           price: money(profile.max_price_microusd),
         })}
       </small>
-    </p>
+    </Note>
   );
 }
 function Inventory({ profiles, controller, onStart, testTaskRequired = false }) {
@@ -1626,7 +1617,7 @@ function Inventory({ profiles, controller, onStart, testTaskRequired = false }) 
         })}
       </div>
       {!items.length && (
-        <section className="p4-empty">
+        <section className="ui-empty">
           <Server size={26} />
           <p>{t('operator.copy115')}</p>
         </section>
@@ -1638,7 +1629,7 @@ function AdminView({ snapshot, profiles, onDetail, onStop }) {
   const { t, locale } = useI18n();
   if (!snapshot)
     return (
-      <section className="p4-empty" role="status">
+      <section className="ui-empty" role="status">
         {t('operator.copy116')}
       </section>
     );
@@ -1683,7 +1674,7 @@ function AdminView({ snapshot, profiles, onDetail, onStop }) {
             </div>
           ))
         ) : (
-          <div className="p4-empty">{t('operator.copy120')}</div>
+          <div className="ui-empty ui-empty-compact">{t('operator.copy120')}</div>
         )}
       </div>
       <details className="p4-method">
@@ -1884,20 +1875,17 @@ export default function P4OperatorConsole() {
         {!c.account ? (
           <Login />
         ) : state.denied ? (
-          <div className="empty-state">
-            <span>
-              <ShieldCheck size={22} />
-            </span>
-            <b>{t('operator.copy136')}</b>
-            <a href="/quick-chat">{t('operator.copy137')}</a>
-          </div>
+          <EmptyState
+            icon={<ShieldCheck size={22} />}
+            title={t('operator.copy136')}
+            action={<a href="/quick-chat">{t('operator.copy137')}</a>}
+          />
         ) : !snapshot ? (
-          <div className="empty-state" role="status">
-            <span>
-              <Cpu size={22} />
-            </span>
-            <b>{state.loading ? t('operator.status54') : t('operator.status55')}</b>
-          </div>
+          <EmptyState
+            role="status"
+            icon={<Cpu size={22} />}
+            title={state.loading ? t('operator.status54') : t('operator.status55')}
+          />
         ) : (
           <>
             <nav className="seg ops-page-tabs" aria-label={t('operator.status119')}>

@@ -40,6 +40,15 @@ LEGACY_HELPER_PAIRS = {commit: (
         "07da40322559ee5a12829be6884c541c401d852a")}
 # Exact retained current/previous helper bytes before the staging upgrade.
 RETAINED_DSTACK_HELPER_PAIRS = {
+    # Observed staging A1 current/previous, SSM 74cb6214 (2026-10-24).
+    'fcd3ce618dbbf2a4f0dad4ee09e0c74121c4f69c': ('49905c8b60ae0375ec02485028db8fa4f7cabd718a91a936649dbf301fb5d86d', 'ddd25ad1c878e5066245bc32bb660e97908a223bb41c6d2bb38de1e433ddeafe'),
+    'a978e9ceb7e78c9a9b54f9365d1e6c368aea83ea': ('49905c8b60ae0375ec02485028db8fa4f7cabd718a91a936649dbf301fb5d86d', 'ddd25ad1c878e5066245bc32bb660e97908a223bb41c6d2bb38de1e433ddeafe'),
+    # Later exact-source pair: aedd staged by original SSM 3b9b8e43;
+    # 6cce is a planned retained source, not a claim of runtime acceptance.
+    'aedd790ef843b5a2284c9885bfaaa97635e217e1': ('49905c8b60ae0375ec02485028db8fa4f7cabd718a91a936649dbf301fb5d86d', 'ddd25ad1c878e5066245bc32bb660e97908a223bb41c6d2bb38de1e433ddeafe'),
+    '6cce36dc33176c9845c5b2095d9062374c654a47': ('49905c8b60ae0375ec02485028db8fa4f7cabd718a91a936649dbf301fb5d86d', 'ddd25ad1c878e5066245bc32bb660e97908a223bb41c6d2bb38de1e433ddeafe'),
+    # Published platform candidate; runtime still validates its actual retained manifest/pair.
+    '38dbd871b4bcb775af9b181c6d80bf8250247f7b': ('49905c8b60ae0375ec02485028db8fa4f7cabd718a91a936649dbf301fb5d86d', 'ddd25ad1c878e5066245bc32bb660e97908a223bb41c6d2bb38de1e433ddeafe'),
     # Exact retained staging reader/current pair before DBOS writer adoption.
     'baa0e351fcd0a3f7e4f3678dd1282a38ef0f6a96': ('3bf05a2128bd80b809c7ab0577a4ce49903890a5c58f7d0a49b6ea19ce0ebb69', '860d696caca2f6162f66ef194c915f05d4ff31f8293aedff35b039b441d317e0'),
     '6ccf461c178f9c3f9a4013c041844174687dbef4': ('3bf05a2128bd80b809c7ab0577a4ce49903890a5c58f7d0a49b6ea19ce0ebb69', '860d696caca2f6162f66ef194c915f05d4ff31f8293aedff35b039b441d317e0'),
@@ -65,13 +74,35 @@ RETAINED_DSTACK_HELPER_PAIRS = {
     'f7b1db096099d0b3ad09736a95afffa57f9626c7': ('719d8d3f83fdcd687d06d343f4076db117c675de607f2e46e61d2b65da5db8b3', 'fba8d75a6845fe2fe7c78ea120747797b2f57ec80e0c6bc4861a0f6bfda54790'),
 }
 LEGACY_HELPER_PAIRS.update(RETAINED_DSTACK_HELPER_PAIRS)
-DSTACK_BASE_IMAGE = "dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc1682dc2169075c6210d2ec873146f1ad8"
-DSTACK_SOURCE_PATHS = frozenset({"dstack/_internal/core/backends/vastai/api_client.py",
-    "dstack/_internal/core/backends/vastai/compute.py", "gpuhunt/providers/vastai.py",
-    "dstack/_internal/server/services/backends/__init__.py",
-    "dstack/_internal/server/background/pipeline_tasks/jobs_submitted.py",
-    "dstack/_internal/server/background/scheduled_tasks/offers_catalog.py"})
-DSTACK_IMAGE_CHECK = "import hashlib,json\nfrom pathlib import Path\nroot=Path('/root/.local/share/uv/tools/dstack/lib/python3.11/site-packages')\nfolder=Path('/opt/sixnine/native-vast')\npaths={'dstack/_internal/core/backends/vastai/api_client.py','dstack/_internal/core/backends/vastai/compute.py',\n 'gpuhunt/providers/vastai.py','dstack/_internal/server/services/backends/__init__.py',\n 'dstack/_internal/server/background/pipeline_tasks/jobs_submitted.py',\n 'dstack/_internal/server/background/scheduled_tasks/offers_catalog.py'}\nvalue=json.loads((folder/'installed-provenance.json').read_text())\nassert set(value)=={'patched_sources','dstack_version','upstream_commit','original_sources','helper_sha256','sources'} and value['patched_sources']==6 and set(value['sources'])==paths\noriginal=json.loads((folder/'native-vast-provenance.json').read_text())\nassert value['dstack_version']==original['dstack_version']=='0.22.3' and value['upstream_commit']==original['dstack_upstream_commit']=='009e2916e335d4c9e02d961bc68f704951f5db20'\nassert value['original_sources']=={name:item['sha256'] for name,item in original['sources'].items()} and set(value['original_sources'])==paths\nassert all(hashlib.sha256((root/name).read_bytes()).hexdigest()==digest for name,digest in value['sources'].items())\nhelper=hashlib.sha256((root/'dstack/_internal/core/backends/vastai/sixnine_safety.py').read_bytes()).hexdigest()\nassert helper==value['helper_sha256']==hashlib.sha256((folder/'native_vast_safety.py').read_bytes()).hexdigest()\nprint(json.dumps({'installed':value,'helper_sha256':helper,\n 'installer_sha256':hashlib.sha256((folder/'patch_native_vast.py').read_bytes()).hexdigest(),\n 'source_provenance_sha256':hashlib.sha256((folder/'native-vast-provenance.json').read_bytes()).hexdigest()},sort_keys=True))\n"
+# Closed stock tuples: current build and the exact retained rollback only.
+DSTACK_STOCK = {'0.22.3': ('009e2916e335d4c9e02d961bc68f704951f5db20', 'dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc1682dc2169075c6210d2ec873146f1ad8', '731ee908299af3f4592b3bfd1542e8f00fa59bb3fc24506a9f32d73a5fc274ba'), '0.22.5': ('e59a6caa6d3d76f8b8c3430b7e8eeb7271138065', 'dstackai/dstack:0.22.5@sha256:8dc2c8a5ee348789b1ed1621bc75b31c156adf31d849fded29508cfc21b279e4', 'b12e1157da5a13102899132e41c4a7950b3a2dfad4a0a5b52960e1cd86078c5e')}
+DSTACK_SHARED_SOURCE_HASHES = {'dstack/_internal/core/backends/vastai/api_client.py': '9a8a68d3bd00b995901af7a66b58511ff4451be8122135e6f7b1a534d4e3c685', 'dstack/_internal/core/backends/vastai/compute.py': '3d6466c87ad37ce3125d54feadff54287f82131425e80bbc57ccf0bec8acdea9', 'gpuhunt/providers/vastai.py': 'f3cefc3a20f6f05d2cce911cd8e61ff980c6af2a42ed16e4a8f290bc0e5f76db', 'dstack/_internal/server/background/pipeline_tasks/jobs_submitted.py': 'a68386172ebdf5fe28bd08f61e18ecdfd6a4a1310e9782c8147ce3a96e8eeaac', 'dstack/_internal/server/background/scheduled_tasks/offers_catalog.py': '158bc7bee1a5cadc4d7a1efa2512701edda39707ae5dda33b8cd71bcd342d092'}
+DSTACK_BASE_IMAGE = DSTACK_STOCK["0.22.5"][1]
+LEGACY_DSTACK_BASE_IMAGE = DSTACK_STOCK["0.22.3"][1]
+DSTACK_SOURCE_PATHS = frozenset({*DSTACK_SHARED_SOURCE_HASHES, "dstack/_internal/server/services/backends/__init__.py"})
+DSTACK_IMAGE_CHECK = r'''import hashlib,importlib.metadata,json
+from pathlib import Path
+root=Path('/root/.local/share/uv/tools/dstack/lib/python3.11/site-packages')
+folder=Path('/opt/sixnine/native-vast')
+stock={'0.22.3': ('009e2916e335d4c9e02d961bc68f704951f5db20', 'dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc1682dc2169075c6210d2ec873146f1ad8', '731ee908299af3f4592b3bfd1542e8f00fa59bb3fc24506a9f32d73a5fc274ba'), '0.22.5': ('e59a6caa6d3d76f8b8c3430b7e8eeb7271138065', 'dstackai/dstack:0.22.5@sha256:8dc2c8a5ee348789b1ed1621bc75b31c156adf31d849fded29508cfc21b279e4', 'b12e1157da5a13102899132e41c4a7950b3a2dfad4a0a5b52960e1cd86078c5e')}
+shared={'dstack/_internal/core/backends/vastai/api_client.py': '9a8a68d3bd00b995901af7a66b58511ff4451be8122135e6f7b1a534d4e3c685', 'dstack/_internal/core/backends/vastai/compute.py': '3d6466c87ad37ce3125d54feadff54287f82131425e80bbc57ccf0bec8acdea9', 'gpuhunt/providers/vastai.py': 'f3cefc3a20f6f05d2cce911cd8e61ff980c6af2a42ed16e4a8f290bc0e5f76db', 'dstack/_internal/server/background/pipeline_tasks/jobs_submitted.py': 'a68386172ebdf5fe28bd08f61e18ecdfd6a4a1310e9782c8147ce3a96e8eeaac', 'dstack/_internal/server/background/scheduled_tasks/offers_catalog.py': '158bc7bee1a5cadc4d7a1efa2512701edda39707ae5dda33b8cd71bcd342d092'}
+value=json.loads((folder/'installed-provenance.json').read_text())
+assert set(value)=={'patched_sources','dstack_version','upstream_commit','original_sources','helper_sha256','sources'} and value['patched_sources']==6
+original=json.loads((folder/'native-vast-provenance.json').read_text())
+assert set(original)=={'version','dstack_version','dstack_upstream_commit','base_image','sources'} and original['version']==1
+selected=stock[original['dstack_version']]
+assert value['dstack_version']==original['dstack_version']==importlib.metadata.version('dstack')
+assert value['upstream_commit']==original['dstack_upstream_commit']==selected[0] and original['base_image']==selected[1]
+expected={**shared,'dstack/_internal/server/services/backends/__init__.py':selected[2]}
+assert original['sources']=={name:{'sha256':digest} for name,digest in expected.items()}
+assert value['original_sources']==expected and set(value['sources'])==set(expected)
+assert all(hashlib.sha256((root/name).read_bytes()).hexdigest()==digest for name,digest in value['sources'].items())
+helper=hashlib.sha256((root/'dstack/_internal/core/backends/vastai/sixnine_safety.py').read_bytes()).hexdigest()
+assert helper==value['helper_sha256']==hashlib.sha256((folder/'native_vast_safety.py').read_bytes()).hexdigest()
+print(json.dumps({'installed':value,'helper_sha256':helper,
+ 'installer_sha256':hashlib.sha256((folder/'patch_native_vast.py').read_bytes()).hexdigest(),
+ 'source_provenance_sha256':hashlib.sha256((folder/'native-vast-provenance.json').read_bytes()).hexdigest()},sort_keys=True))
+'''
 MANIFEST = "migration-manifest.json"
 SHARED = ("dstack", "hatchet", "dispatch", "controller")
 PATH_FIELDS = frozenset({"SIXNINE_EXECUTION_PROFILES_SECRET_FILE", "SIXNINE_GRAFANA_CONFIG_FILE",
@@ -154,16 +185,18 @@ def dstack_provenance(directory, value):
     proof = json.loads((Path(directory) / "dstack-native-provenance.json").read_text())
     fields = {"version", "commit", "base_image", "installed", "helper_sha256", "installer_sha256", "source_provenance_sha256"}
     release.require(type(proof) is dict and set(proof) == fields and proof["version"] == 1
-        and proof["commit"] == value["commit"] and proof["base_image"] == DSTACK_BASE_IMAGE
+        and proof["commit"] == value["commit"] and proof["base_image"] in {item[1] for item in DSTACK_STOCK.values()}
         and all(type(proof[k]) is str and release.DIGEST.fullmatch(proof[k])
             for k in ("helper_sha256", "installer_sha256", "source_provenance_sha256")),
         "migration_dstack_provenance_invalid")
     installed = proof["installed"]
+    selected = next(item for item in DSTACK_STOCK.values() if item[1] == proof["base_image"])
+    version = next(version for version, item in DSTACK_STOCK.items() if item == selected)
     release.require(type(installed) is dict and set(installed) == {"patched_sources", "dstack_version", "upstream_commit", "original_sources", "helper_sha256", "sources"}
         and installed["patched_sources"] == 6 and installed["helper_sha256"] == proof["helper_sha256"]
-        and installed["dstack_version"] == "0.22.3" and installed["upstream_commit"] == "009e2916e335d4c9e02d961bc68f704951f5db20"
-        and type(installed["original_sources"]) is dict and set(installed["original_sources"]) == DSTACK_SOURCE_PATHS
-        and all(type(digest) is str and release.DIGEST.fullmatch(digest) for digest in installed["original_sources"].values())
+        and installed["dstack_version"] == version and installed["upstream_commit"] == selected[0]
+        and installed["original_sources"] == {**DSTACK_SHARED_SOURCE_HASHES,
+            "dstack/_internal/server/services/backends/__init__.py": selected[2]}
         and type(installed["sources"]) is dict and set(installed["sources"]) == DSTACK_SOURCE_PATHS
         and all(type(digest) is str and release.DIGEST.fullmatch(digest) for digest in installed["sources"].values()),
         "migration_dstack_provenance_invalid")
@@ -670,7 +703,7 @@ def verify_services(base, directory, environment, app, dispatch):
         mounts = [item for item in values[service].get("Mounts", []) if item.get("Destination") == destination]
         release.require(len(mounts) == 1 and mounts[0].get("Type") == "volume"
             and mounts[0].get("Name") == environment[volume], "migration_broker_volume_changed")
-    for service, image in (("dstack", "dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc1682dc2169075c6210d2ec873146f1ad8"),
+    for service, image in (("dstack", LEGACY_DSTACK_BASE_IMAGE),
             ("hatchet", "ghcr.io/hatchet-dev/hatchet/hatchet-lite:v0.110.5@sha256:cc81f078a5285d7d2051ec4a4fa459d033e1face4ca5983d82612b00da6e3fa3"),
             ("hatchet-db", "postgres:15@sha256:c961aa287d8698297cb26cdfadfbe9fd2cbaf77e53cfffe9636e8d8a1e4d842c")):
         if service not in values or service == "dstack" and server is not None:
@@ -771,7 +804,7 @@ def apply_locked(root, commit):
     dispatch["_dstack_server"] = server
     env.update(config["environment"], SIXNINE_IMAGE=pinned_loaded_image(app, env),
         SIXNINE_DISPATCH_IMAGE=pinned_loaded_image(dispatch, env), SIXNINE_DSTACK_SOURCE_DIR=str(directory / "sources"),
-        SIXNINE_DSTACK_SERVER_IMAGE=pinned_loaded_image(server, env) if server else DSTACK_BASE_IMAGE)
+        SIXNINE_DSTACK_SERVER_IMAGE=pinned_loaded_image(server, env) if server else LEGACY_DSTACK_BASE_IMAGE)
     default_profile(directory, env)
     checker.check(base / "compose.yaml", directory / "overlay.yaml", environment=env,
         host_memory_mib=config["host_memory_mib"], check_inputs=True)
@@ -907,7 +940,7 @@ def _storyboard_context(root, commit, config):
     dispatch["_dstack_server"] = server
     environment.update(config["environment"], SIXNINE_IMAGE=pinned_loaded_image(app, environment),
         SIXNINE_DISPATCH_IMAGE=pinned_loaded_image(dispatch, environment), SIXNINE_DSTACK_SOURCE_DIR=str(directory / "sources"),
-        SIXNINE_DSTACK_SERVER_IMAGE=pinned_loaded_image(server, environment) if server else DSTACK_BASE_IMAGE)
+        SIXNINE_DSTACK_SERVER_IMAGE=pinned_loaded_image(server, environment) if server else LEGACY_DSTACK_BASE_IMAGE)
     default_profile(directory, environment)
     checker.check(base / "compose.yaml", overlay, environment=environment,
         host_memory_mib=config["host_memory_mib"], check_inputs=True)

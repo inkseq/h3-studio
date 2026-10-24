@@ -19,6 +19,9 @@
 :root dialog.qc-dialog.qc-dialog-wide {
   width: min(720px, calc(100vw - 32px));
 }
+:root dialog.qc-dialog.qc-dialog-xl {
+  width: min(1080px, calc(100vw - 32px));
+}
 :root dialog.qc-dialog::backdrop {
   background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(2px);
@@ -35,6 +38,18 @@
   font-size: 18px;
   line-height: 1.35;
   text-wrap: balance;
+}
+:root dialog.qc-dialog .qc-eyebrow {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: var(--fs-2xs);
+  letter-spacing: 2px;
+}
+:root dialog.qc-dialog .qc-dialog-subtitle {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: var(--fs-md);
 }
 :root dialog.qc-dialog .qc-dialog-head > button {
   flex: none;
@@ -91,13 +106,21 @@ select {
   outline-offset: 2px;
 }
 
+:root dialog.qc-dialog .dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+}
+
 /* Messages: errors and notices read as short callouts, not loose red text. */
 :root dialog.qc-dialog [role='alert'] {
   margin: 10px 0 0;
   padding: 8px 12px;
   border-radius: var(--r-sm, 8px);
-  background: color-mix(in srgb, var(--bad, #ff7a6b) 12%, transparent);
-  color: var(--bad, #ff7a6b);
+  background: color-mix(in srgb, var(--bad, var(--bad)) 12%, transparent);
+  color: var(--bad, var(--bad));
   font-size: 13px;
 }
 :root dialog.qc-dialog [role='status'] {
@@ -106,7 +129,8 @@ select {
 
 @media (max-width: 560px) {
   :root dialog.qc-dialog,
-  :root dialog.qc-dialog.qc-dialog-wide {
+  :root dialog.qc-dialog.qc-dialog-wide,
+  :root dialog.qc-dialog.qc-dialog-xl {
     width: calc(100vw - 16px);
     max-height: calc(100dvh - 16px);
     padding: 16px;
@@ -168,7 +192,7 @@ select optgroup {
   height: 168px;
   padding: 6px;
   border-radius: 10px;
-  background: #fff;
+  background: var(--white);
 }
 .telegram-qr svg {
   width: 100%;

@@ -25,8 +25,13 @@ function elements(node) {
   if (!node || typeof node !== 'object') return [];
   return [node, ...React.Children.toArray(node.props?.children).flatMap(elements)];
 }
+// Native buttons and the shared Button (which defaults to type="button").
 const button = (form, type) =>
-  elements(form).find((node) => node.type === 'button' && node.props.type === type);
+  elements(form).find(
+    (node) =>
+      (node.type === 'button' || node.type?.name === 'Button') &&
+      (node.props.type ?? 'button') === type,
+  );
 
 test('the actual naming form labels its input and submits one trimmed nonempty name', () => {
   const received = [],

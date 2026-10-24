@@ -802,6 +802,9 @@ class RenditionApiTests(unittest.TestCase):
     def test_small_gate_allows_eight_readers_while_heavy_gate_stays_bounded(self):
         value = self.upload()
         admission = self.app.state.request_admission
+        # Exercise independent media gates with a small fixture; production
+        # defaults may be wider without removing either finite bound.
+        admission.limits.update(owner_downloads=2, thumbnails=8)
         # Occupied original-media slots do not make tiny display copies queue
         # behind a full video stream. Owner/auth/global limits remain in force.
         self.assertTrue(admission.acquire("downloads"))

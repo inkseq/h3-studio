@@ -2,7 +2,8 @@
 
 The original rental ledger is the money authority. Account layers and customer
 job prices are not additional supplier bills. This reader never settles costs;
-uncertain attribution remains an explicit blocker for the next paid admission.
+uncertain attribution remains a warning without becoming an invented cost.
+Only confirmed supplier exposure controls the daily admission ceiling.
 """
 
 from collections import defaultdict
@@ -204,6 +205,9 @@ def projection(connection, tenant_id, now, *, policy=None):
         "projected_microusd": 0,
         "unresolved_count": 0,
         "details": [],
+        "admission_basis": "confirmed_supplier_exposure",
+        "uncertainty_warning": False,
+        "admission_blocked": False,
     }
     grouped = defaultdict(list)
     for row in connection.execute(
@@ -274,12 +278,17 @@ def projection(connection, tenant_id, now, *, policy=None):
     result["projected_microusd"] = (
         None if result["details"] else result["confirmed_exposure_microusd"]
     )
+    result["uncertainty_warning"] = bool(result["details"])
     if snapshot is not None:
-        if result["details"]:
-            result["status"] = "usage_unconfirmed"
-        elif result["projected_microusd"] >= limit:
+        # Unconfirmed references stay visible, but cannot hide a confirmed
+        # limit breach or independently refuse an otherwise valid admission.
+        if result["confirmed_exposure_microusd"] >= limit:
             result["status"] = "limit_reached"
-        elif result["projected_microusd"] >= limit * warning:
+            result["admission_blocked"] = True
+        elif (
+            result["details"]
+            or result["confirmed_exposure_microusd"] >= limit * warning
+        ):
             result["status"] = "warning"
     return result
 
@@ -311,11 +320,10 @@ def admit(
     if snapshot is None or test_task:
         return snapshot
     usage = projection(connection, tenant_id, now, policy=policy)
-    if usage["status"] == "usage_unconfirmed":
-        raise BudgetExceeded("tenant_daily_usage_unconfirmed")
     if (
-        usage["projected_microusd"] + additional_microusd > usage["limit_microusd"]
-        or usage["status"] == "limit_reached"
+        usage["confirmed_exposure_microusd"] + additional_microusd
+        > usage["limit_microusd"]
+        or usage["admission_blocked"]
     ):
         raise BudgetExceeded("tenant_daily_limit_reached")
     return snapshot

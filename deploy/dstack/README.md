@@ -26,7 +26,7 @@ production promotes the same artifact bytes, without rebuild.
 
 # dstack capacity boundary
 
-`studio_platform.dstack_capacity` targets dstack **0.22.3** using its REST API.
+`studio_platform.dstack_capacity` targets dstack **0.22.5** using its REST API.
 The pinned CPU server in `compose.yml` owns Vast/RunPod credentials and a separate
 dstack database/user. The business database retains original capacity intents,
 reservations, accepted jobs, attempts and output obligations. The dstack database
@@ -35,13 +35,14 @@ The integrated app accesses loopback port 3000 through the shared namespace
 described below; a container's own loopback cannot reach a standalone host port.
 Do not publish the administrator endpoint.
 
-Current #132 qualification explicitly uses central
+The existing configuration uses central
 `vastai/vastai--sixnine-dstack-20261011` and
-`runpod/runpod--sixnine-dstack-20261011` with unchanged pinned-client protocols.
-Preserve old profiles. Authenticated stock checks are read-only for both; paid
-P2 is Vast only and RunPod remains read-only. Before production activation,
-qualify two independent single-GPU runs (one FL, one REF), warm successive jobs,
-business idle stop and keep-on within the original deadline.
+`runpod/runpod--sixnine-dstack-20261011`; preserve these profiles. #517 B1 upgrades
+only the CPU server and qualifies one Vast cold cycle after isolated old/new/old
+database and token checks. The 0.22.5 upstream RunPod REST v2 change requires the
+separate B2 staging qualification. Lium and CloudRift remain outside this adapter's
+allowlist until separately implemented and qualified. This upgrade does not enable
+another provider or change production credentials.
 
 Bind both source selections and protected execution/capacity configuration to
 `h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3`, with new configuration
@@ -172,7 +173,7 @@ state) and the existing dstack token. The pinned server seeds an initial token
 only when its admin user does not exist; changing the environment is **not** an
 existing-token rotation. `--log-level WARNING` prevents the upstream INFO startup
 message from printing that token. The automatic OTel enable variables must be
-absent: even the value `"0"` enables them in 0.22.3.
+absent: even the value `"0"` enables them in 0.22.5.
 Its CLI also writes a daily update-check marker in `/root/.cache` before starting
 the server. A 1 MiB private tmpfs provides that cache on the read-only container;
 the entrypoint seeds only this nonsecret marker to prevent startup update probes.
@@ -262,11 +263,11 @@ their original execution route and recovery services. The root release owner
 records the exact deployment and recovery evidence; a successful Compose check
 is not publication or public video acceptance.
 
-References: [pinned run schemas](https://github.com/dstackai/dstack/blob/0.22.3/src/dstack/_internal/server/schemas/runs.py),
-[pinned configuration models](https://github.com/dstackai/dstack/blob/0.22.3/src/dstack/_internal/core/models/configurations.py),
+References: [pinned run schemas](https://github.com/dstackai/dstack/blob/0.22.5/src/dstack/_internal/server/schemas/runs.py),
+[pinned configuration models](https://github.com/dstackai/dstack/blob/0.22.5/src/dstack/_internal/core/models/configurations.py),
 [run API](https://dstack.ai/docs/reference/api/runs/),
-[backend boundaries](https://github.com/dstackai/dstack/blob/0.22.3/contributing/BACKENDS.md).
+[backend boundaries](https://github.com/dstackai/dstack/blob/0.22.5/contributing/BACKENDS.md).
 Deployment behavior was checked against the pinned
-[server image recipe](https://github.com/dstackai/dstack/blob/0.22.3/docker/server/release/Dockerfile),
-[server CLI](https://github.com/dstackai/dstack/blob/0.22.3/src/dstack/_internal/cli/commands/server.py),
-and [startup/authentication](https://github.com/dstackai/dstack/blob/0.22.3/src/dstack/_internal/server/app.py).
+[server image recipe](https://github.com/dstackai/dstack/blob/0.22.5/docker/server/release/Dockerfile),
+[server CLI](https://github.com/dstackai/dstack/blob/0.22.5/src/dstack/_internal/cli/commands/server.py),
+and [startup/authentication](https://github.com/dstackai/dstack/blob/0.22.5/src/dstack/_internal/server/app.py).

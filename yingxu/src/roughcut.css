@@ -92,7 +92,7 @@
   max-width: 100%;
   max-height: 440px;
   margin-top: 14px;
-  background: #191b19;
+  background: var(--surface-2);
 }
 .roughcut button {
   white-space: normal;

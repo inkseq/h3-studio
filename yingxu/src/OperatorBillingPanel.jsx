@@ -1,3 +1,4 @@
+import { Note } from './ui/Note.jsx';
 import React, { useEffect, useState } from 'react';
 import { FloatingMessage } from './floating-notice.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -204,7 +205,7 @@ export default function OperatorBillingPanel({ controller, state, busy }) {
       </form>
       <details className="billing-date-filter">
         <summary>{t('billing.dateFilter')}</summary>
-        <p className="billing-note">{t('billing.dateFilterHelp')}</p>
+        <Note>{t('billing.dateFilterHelp')}</Note>
         <label>
           {t('billing.createdAfter')}
           <input
@@ -338,7 +339,7 @@ export default function OperatorBillingPanel({ controller, state, busy }) {
                       </div>
                     )}
                   </dl>
-                  {!eligible && <p className="billing-note">{t('billing.unavailable')}</p>}
+                  {!eligible && <Note>{t('billing.unavailable')}</Note>}
                   {selected[key] && action === 'settle' && (
                     <div className="billing-item-inputs">
                       <label>
@@ -412,7 +413,7 @@ export default function OperatorBillingPanel({ controller, state, busy }) {
             {action === 'settle' && (
               <details>
                 <summary>{t('billing.importAllocations')}</summary>
-                <p className="billing-note">{t('billing.importHelp')}</p>
+                <Note>{t('billing.importHelp')}</Note>
                 <label>
                   {t('billing.allocationJson')}
                   <textarea
@@ -465,9 +466,7 @@ export default function OperatorBillingPanel({ controller, state, busy }) {
                 }}
               />
             </label>
-            <p className="billing-note">
-              {t(action === 'waive' ? 'billing.waiveHelp' : 'billing.settleHelp')}
-            </p>
+            <Note>{t(action === 'waive' ? 'billing.waiveHelp' : 'billing.settleHelp')}</Note>
             <button type="button" disabled={locked || !valid} onClick={() => void prepare()}>
               {t('billing.preview', { count: rows.length })}
             </button>
@@ -486,7 +485,7 @@ export default function OperatorBillingPanel({ controller, state, busy }) {
           </p>
           <p>{preview.request.reason}</p>
           <BillingPreviewTotals preview={preview} />
-          <p className="billing-note">{t('billing.layers')}</p>
+          <Note>{t('billing.layers')}</Note>
           <label className="billing-confirm">
             <input
               type="checkbox"

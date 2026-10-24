@@ -1,4 +1,6 @@
+import { Note } from './ui/Note.jsx';
 import StudioHeader from './StudioHeader.jsx';
+import { Dialog as SharedDialog } from './ui/Dialog.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import { operatorFormatters, operatorDisplay } from './i18n/legacyOperatorPresentation.js';
 import { useI18n, LanguageSwitcher } from './i18n/I18nProvider.jsx';
@@ -68,45 +70,19 @@ const quietly = (promise) => promise.catch(() => {});
 const known = (value) => (Number.isFinite(value) ? value : '—');
 const date = (value) =>
   typeof value === 'number' ? new Date(value * 1000).toLocaleString('zh-CN') : '尚未记录';
+// The console's dialogs use the shared Dialog (h3-studio#514); op-dialog keeps their content layout.
 function Dialog({ title, subtitle, onClose, children, wide = false }) {
-  const { t: lo, locale } = useI18n();
-  const active = usePageActive(),
-    ref = useRef(),
-    opener = useRef(document.activeElement);
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!active) {
-      dialog.close();
-      return;
-    }
-    dialog.showModal();
-    return () => {
-      dialog.close();
-      if (opener.current?.isConnected && !opener.current.closest('[inert]')) opener.current.focus();
-    };
-  }, [active]);
   return (
-    <dialog
-      ref={ref}
+    <SharedDialog
+      title={title}
+      subtitle={subtitle}
+      onClose={onClose}
+      eyebrow="GPU CONTROL"
+      size={wide ? 'xl' : 'wide'}
       className={'op-dialog' + (wide ? ' op-market-dialog' : '')}
-      aria-label={title}
-      onCancel={(e) => {
-        e.preventDefault();
-        onClose();
-      }}
     >
-      <header>
-        <div>
-          <span className="op-eyebrow">GPU CONTROL</span>
-          <h2>{title}</h2>
-          {subtitle && <p>{subtitle}</p>}
-        </div>
-        <button className="op-icon" aria-label={lo('legacyOp.copy1')} onClick={onClose}>
-          <X size={19} />
-        </button>
-      </header>
       {children}
-    </dialog>
+    </SharedDialog>
   );
 }
 function RecipeEvidence({ profile }) {
@@ -208,7 +184,7 @@ function Login() {
           </label>
         )}
         {['username-only-test', 'username-test'].includes(c.auth?.authentication) && (
-          <p className="op-note">{lo('legacyOp.copy17')}</p>
+          <Note>{lo('legacyOp.copy17')}</Note>
         )}
         <FloatingMessage tone="error" text={error ? error : null} />
         <button className="op-primary" disabled={c.busy || !c.auth || c.auth.auth_ready === false}>
@@ -233,7 +209,7 @@ function ManualReviewDialog({ node, busy, onClose, onReview }) {
         {node.provider_instance_id ? lo('legacyOp.copy23') : lo('legacyOp.copy24')}：
         <code>{node.provider_instance_id ?? node.id}</code>
       </p>
-      {node.provider_instance_id == null && <p className="op-note">{lo('legacyOp.copy25')}</p>}
+      {node.provider_instance_id == null && <Note>{lo('legacyOp.copy25')}</Note>}
       <label className="op-check">
         <input type="checkbox" checked={absent} onChange={(e) => setAbsent(e.target.checked)} />
         {lo('legacyOp.copy26')}
@@ -242,7 +218,7 @@ function ManualReviewDialog({ node, busy, onClose, onReview }) {
         <input type="checkbox" checked={noCharge} onChange={(e) => setNoCharge(e.target.checked)} />
         {lo('legacyOp.copy27')}
       </label>
-      <p className="op-note">{lo('legacyOp.copy28')}</p>
+      <Note>{lo('legacyOp.copy28')}</Note>
       <FloatingMessage tone="error" text={error ? error : null} />
       <footer className="op-dialog-actions">
         <button onClick={onClose}>{lo('legacy.panel36')}</button>
@@ -312,7 +288,7 @@ function ExtensionDialog({ node, busy, controller, onClose, now }) {
         {lo('legacyOp.copy32')}
         <b>{date(node.hard_deadline)}</b>
       </p>
-      <p className="op-note">{lo('legacyOp.copy33')}</p>
+      <Note>{lo('legacyOp.copy33')}</Note>
       {!supported ? (
         <p className="op-error">{lo('legacyOp.copy34')}</p>
       ) : (
@@ -364,9 +340,9 @@ function ExtensionDialog({ node, busy, controller, onClose, now }) {
                 <dd>{dollars(preview.incremental_reservation_microusd)}</dd>
               </dl>
               <Reasons items={preview.blockers} />
-              <p className="op-note">
+              <Note>
                 {lo('legacyOp.copy48')} {date(preview.expires_at)}。
-              </p>
+              </Note>
             </div>
           )}
           {submitted && (
@@ -427,7 +403,7 @@ function PolicyDialog({ policy, busy, onSave, onClose }) {
           />
           {lo('legacyOp.copy63')}
         </label>
-        <p className="op-note">{lo('legacyOp.copy64')}</p>
+        <Note>{lo('legacyOp.copy64')}</Note>
         <div className="op-form-grid">
           {fields.map(([key, label, unit]) => (
             <label key={key}>
@@ -467,9 +443,9 @@ function PolicyDialog({ policy, busy, onSave, onClose }) {
             </div>
           </label>
         </div>
-        <p className="op-note">
+        <Note>
           {lo('legacyOp.copy67')} {policy.version}。
-        </p>
+        </Note>
         <FloatingMessage tone="error" text={error ? error : null} />
         <footer className="op-dialog-actions">
           <button type="button" onClick={onClose}>
@@ -537,9 +513,9 @@ function MarketFilters({ result, catalog }) {
             {catalog?.profiles?.find((item) => item.id === profile.runtime_profile_id)?.label ||
               profile.runtime_profile_id}
           </h4>
-          <p className="op-note">{lo('legacyOp.copy81')}</p>
+          <Note>{lo('legacyOp.copy81')}</Note>
           <FilterFacts filters={profile.hard_requirements} />
-          <p className="op-note">{lo('legacyOp.copy82')}</p>
+          <Note>{lo('legacyOp.copy82')}</Note>
           <FilterFacts filters={profile.guidance} />
           {profile.deployments?.length ? (
             <details className="op-details">
@@ -564,7 +540,7 @@ function MarketFilters({ result, catalog }) {
               ))}
             </details>
           ) : (
-            <p className="op-note">{lo('legacyOp.copy89')}</p>
+            <Note>{lo('legacyOp.copy89')}</Note>
           )}
         </section>
       ))}
@@ -718,10 +694,10 @@ function StartDrawer({ catalog, policy, controller, busy, onClose }) {
         subtitle={`${providerLabel(selection.provider)} · ${selection.gpu_type} × ${selection.gpu_count}`}
         onClose={back}
       >
-        <p className="op-note">
+        <Note>
           {model?.label} · {query.mode === 'fl' ? lo('availability.fl') : lo('availability.ref')}{' '}
           {lo('legacyOp.copy106')} {duration(selection.ttl_seconds)}
-        </p>
+        </Note>
         {market.loading === 'preview' && <p role="status">{lo('legacyOp.copy107')}</p>}
         {preview && (
           <div className="op-preview">
@@ -771,7 +747,7 @@ function StartDrawer({ catalog, policy, controller, busy, onClose }) {
               )}
               {profile && <RecipeEvidence profile={profile} />}
             </details>
-            <p className="op-note">{lo('legacyOp.copy123')}</p>
+            <Note>{lo('legacyOp.copy123')}</Note>
           </div>
         )}
         <FloatingMessage tone="error" text={error ? error : null} />
@@ -890,9 +866,7 @@ function StartDrawer({ catalog, policy, controller, busy, onClose }) {
                 {lo('legacyOp.copy144')}
               </small>
             </div>
-            <p className="op-note" role="status">
-              {operatorMarketSummary(result, now)}
-            </p>
+            <Note role="status">{operatorMarketSummary(result, now)}</Note>
             <div className="op-market-providers" aria-live="polite">
               {['lium', 'targon'].map((provider) => {
                 const observation = operatorMarketProvider(result, provider, now);
@@ -943,7 +917,7 @@ function StartDrawer({ catalog, policy, controller, busy, onClose }) {
                 ))}
               </div>
             ) : (
-              <div className="op-market-empty">
+              <div className="ui-empty ui-empty-compact">
                 <Server size={25} />
                 <p>{lo('legacyOp.copy147')}</p>
                 <small>{lo('legacyOp.copy148')}</small>
@@ -951,7 +925,7 @@ function StartDrawer({ catalog, policy, controller, busy, onClose }) {
             )}
           </section>
         ) : (
-          <div className="op-market-empty">
+          <div className="ui-empty ui-empty-compact">
             <Server size={27} />
             <p>
               {market.loading === 'candidates'
@@ -1057,7 +1031,7 @@ export default function OperatorConsole() {
   const content = !c.account ? (
     <Login />
   ) : state.denied ? (
-    <section className="op-empty">
+    <section className="ui-empty">
       <ShieldCheck size={32} />
       <h2>{lo('legacyOp.copy154')}</h2>
       <p>{lo('legacyOp.copy155')}</p>
@@ -1066,7 +1040,7 @@ export default function OperatorConsole() {
       </a>
     </section>
   ) : !snapshot ? (
-    <section className="op-empty">
+    <section className="ui-empty">
       <Server size={34} />
       <h2>
         {state.loading
@@ -1190,7 +1164,7 @@ export default function OperatorConsole() {
                 ))}
               </div>
             ) : (
-              <div className="op-list-empty">
+              <div className="ui-empty ui-empty-compact">
                 <Server size={22} />
                 <p>{lo('legacyOp.copy188')}</p>
               </div>
@@ -1233,11 +1207,11 @@ export default function OperatorConsole() {
                 {history.length} / {groups.history.length} {lo('legacyOp.copy196')}
               </small>
             </div>
-            <p className="op-note">{lo('legacyOp.copy197')}</p>
+            <Note>{lo('legacyOp.copy197')}</Note>
             {history.length ? (
               <div className="op-machine-list">{history.map(row)}</div>
             ) : (
-              <div className="op-list-empty">
+              <div className="ui-empty ui-empty-compact">
                 <Search size={22} />
                 <p>{groups.history.length ? lo('legacyOp.copy198') : lo('legacyOp.copy199')}</p>
               </div>
@@ -1293,7 +1267,7 @@ export default function OperatorConsole() {
             </table>
           </div>
         ) : (
-          <p className="op-note">{lo('legacyOp.copy212')}</p>
+          <Note>{lo('legacyOp.copy212')}</Note>
         )}
       </details>
     </>
@@ -1462,7 +1436,7 @@ export default function OperatorConsole() {
           onClose={() => setDialog(null)}
         >
           <p>{dialog.kind === 'drain' ? lo('legacyOp.copy239') : lo('legacyOp.copy240')}</p>
-          <p className="op-note">{lo('legacyOp.copy241')}</p>
+          <Note>{lo('legacyOp.copy241')}</Note>
           <FloatingMessage tone="error" text={actionError ? actionError : null} />
           <footer className="op-dialog-actions">
             <button onClick={() => setDialog(null)}>{lo('legacy.panel36')}</button>

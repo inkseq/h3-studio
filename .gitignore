@@ -675,6 +675,8 @@ inventory.json
 # Managed prototype view snapshot (source-manifest constrained)
 !yingxu/src/v2/
 !yingxu/src/v2/**
+!yingxu/src/ui/
+!yingxu/src/ui/**
 
 # Held staging-only, no-GPU resource spike (#295).
 !tools/workflow_spike295.py

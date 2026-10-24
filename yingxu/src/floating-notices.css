@@ -20,8 +20,8 @@
   padding: 8px 8px 8px 16px;
   border: 1px solid var(--line-2, #333);
   border-radius: 999px;
-  background: var(--surface, #141614);
-  color: var(--ink, #eee);
+  background: var(--surface, var(--surface));
+  color: var(--ink, var(--ink));
   font-size: 13px;
   line-height: 1.4;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
@@ -45,8 +45,8 @@
   border: 0;
   padding: 0 12px;
   border-radius: 999px;
-  background: var(--surface-3, #232723);
-  color: var(--ink, #eee);
+  background: var(--surface-3, var(--surface-3));
+  color: var(--ink, var(--ink));
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
@@ -65,7 +65,7 @@
   color: var(--muted, #999);
 }
 .floating-notice > button:not(.floating-notice-action):hover {
-  color: var(--ink, #eee);
+  color: var(--ink, var(--ink));
 }
 @keyframes floating-notice-in {
   from {
@@ -94,8 +94,8 @@
   padding: 24px;
   border: 1px solid var(--line-2, #333);
   border-radius: 16px;
-  background: var(--surface, #141614);
-  color: var(--ink, #eee);
+  background: var(--surface, var(--surface));
+  color: var(--ink, var(--ink));
   text-align: center;
 }
 .page-error h2 {

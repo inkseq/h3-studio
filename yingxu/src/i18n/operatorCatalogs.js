@@ -14,6 +14,7 @@ export const operatorCatalogs = {
     'operator.copy11': 'Default cap per GPU · USD/hour',
     'operator.copy12': 'Maximum allowed price · USD/hour',
     'operator.copy13': 'Save price policy',
+    'operator.reviewPrice': 'Review change',
     'operator.copy14':
       "The default price must be positive and no higher than the administrator's maximum.",
     'operator.copy15': 'Budget and price management',
@@ -444,6 +445,7 @@ export const operatorCatalogs = {
     'operator.copy11': '默认每 GPU 上限 · USD/小时',
     'operator.copy12': '允许的最高价格 · USD/小时',
     'operator.copy13': '保存价格策略',
+    'operator.reviewPrice': '预览改动',
     'operator.copy14': '默认价格须大于零，并且不超过管理员最高价格。',
     'operator.copy15': '预算与价格管理',
     'operator.copy16': '仅修改已有额度与未来启动价格；已结算、预留和原任务均保留。',

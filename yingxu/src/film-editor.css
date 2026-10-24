@@ -36,7 +36,7 @@
   min-height: 0;
   display: grid;
   place-items: center;
-  background: #000;
+  background: var(--black);
   border-radius: var(--r, 12px);
   overflow: hidden;
 }
@@ -70,7 +70,7 @@
   gap: 5px;
 }
 .film-inspector-head button.on {
-  color: #74adff;
+  color: var(--fl);
 }
 .film-inspector-body {
   display: grid;
@@ -82,7 +82,7 @@
   aspect-ratio: 16 / 9;
   display: grid;
   place-items: center;
-  background: #000;
+  background: var(--black);
   border-radius: 8px;
   overflow: hidden;
   font-size: 11px;
@@ -202,7 +202,7 @@
   gap: 5px;
   align-items: baseline;
   font-size: 11px;
-  color: #fff;
+  color: var(--white);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
   white-space: nowrap;
   overflow: hidden;
@@ -216,7 +216,7 @@
   position: absolute;
   top: 4px;
   right: 5px;
-  color: #74adff;
+  color: var(--fl);
 }
 .film-playhead {
   position: absolute;
@@ -271,7 +271,7 @@
   padding: 0;
 }
 .autosave-status.warn {
-  color: var(--warn, #f3b65a);
+  color: var(--warn, var(--warn));
 }
 button.autosave-status {
   cursor: pointer;
@@ -331,8 +331,8 @@ button.autosave-status {
   overflow: hidden;
 }
 .film-audio.generated {
-  background: color-mix(in srgb, #74adff 18%, var(--surface-2, var(--surface)));
-  border-color: color-mix(in srgb, #74adff 50%, transparent);
+  background: color-mix(in srgb, var(--fl) 18%, var(--surface-2, var(--surface)));
+  border-color: color-mix(in srgb, var(--fl) 50%, transparent);
   cursor: pointer;
 }
 .film-audio.muted {

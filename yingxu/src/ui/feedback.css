@@ -1,0 +1,133 @@
+/* Shared notes and empty states (h3-studio#514). Use <Note> / <EmptyState> from ui/Note.jsx. */
+.ui-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.ui-note-info,
+.ui-note-warn,
+.ui-note-bad {
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+}
+.ui-note-info {
+  color: var(--fl);
+  background: var(--fl-soft);
+}
+.ui-note-warn {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.ui-note-bad {
+  color: var(--bad);
+  background: var(--bad-soft);
+}
+
+.ui-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 64px var(--sp-5);
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r-lg);
+  color: var(--muted);
+  text-align: center;
+}
+.ui-empty > strong {
+  color: var(--ink);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.ui-empty > p {
+  max-width: 420px;
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+}
+.ui-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: 6px;
+  border-radius: var(--r-lg);
+  background: var(--surface-3);
+  color: var(--ink-2);
+}
+/* Markup that predates <EmptyState>: an icon (bare or in a span), a title and a line. */
+.ui-empty > svg {
+  color: var(--ink-2);
+}
+.ui-empty > span:first-child:has(> svg) {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: 6px;
+  border-radius: var(--r-lg);
+  background: var(--surface-3);
+  color: var(--ink-2);
+}
+.ui-empty > :is(h2, b) {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.ui-empty > :is(small, p) {
+  max-width: 42ch;
+  margin: 0;
+}
+.ui-empty-compact {
+  padding: var(--sp-5) var(--sp-4);
+  border: 0;
+}
+
+/* Badges (status) and chips (card kinds, tags). Use <Badge> / <Chip> from ui/Note.jsx. */
+.badge {
+  font-size: var(--fs-xs);
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-style: normal;
+  font-weight: 500;
+}
+.badge.cloud {
+  background: var(--good-soft);
+  color: var(--good);
+}
+.badge.local {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.chip {
+  font-size: var(--fs-xs);
+  line-height: 16px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-weight: 500;
+  background: var(--surface-3);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.chip i {
+  font-style: normal;
+  opacity: 0.65;
+  margin-left: 4px;
+}
+.chip.character {
+  color: var(--char);
+  background: var(--char-soft);
+}
+.chip.location {
+  color: var(--loc);
+  background: var(--loc-soft);
+}
+.chip.prop {
+  color: var(--prp);
+  background: var(--prp-soft);
+}

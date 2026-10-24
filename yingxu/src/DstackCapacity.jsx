@@ -1,4 +1,6 @@
+import { Note } from './ui/Note.jsx';
 import { dstackNodeStatus as rawDstackNodeStatus } from './dstack-presentation.js';
+import { Dialog as SharedDialog } from './ui/Dialog.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import { operatorFormatters, operatorDisplay } from './i18n/legacyOperatorPresentation.js';
 import { useI18n, LanguageSwitcher } from './i18n/I18nProvider.jsx';
@@ -25,44 +27,18 @@ const date = (value) =>
   typeof value === 'number' && Number.isFinite(value)
     ? new Date(value * 1000).toLocaleString('zh-CN')
     : '尚未确认';
+// The console's dialogs use the shared Dialog (h3-studio#514); op-dialog keeps their content layout.
 function Dialog({ title, onClose, children }) {
-  const { t: lo, locale } = useI18n();
-  const active = usePageActive(),
-    ref = useRef(),
-    opener = useRef(document.activeElement);
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!active) {
-      dialog.close();
-      return;
-    }
-    dialog.showModal();
-    return () => {
-      dialog.close();
-      if (opener.current?.isConnected && !opener.current.closest('[inert]')) opener.current.focus();
-    };
-  }, [active]);
   return (
-    <dialog
-      ref={ref}
+    <SharedDialog
+      title={title}
+      onClose={onClose}
+      eyebrow="GPU CONTROL"
+      size="wide"
       className="op-dialog"
-      aria-label={title}
-      onCancel={(event) => {
-        event.preventDefault();
-        onClose();
-      }}
     >
-      <header>
-        <div>
-          <span className="op-eyebrow">GPU CONTROL</span>
-          <h2>{title}</h2>
-        </div>
-        <button className="op-icon" aria-label={lo('legacyOp.copy1')} onClick={onClose}>
-          <X size={19} />
-        </button>
-      </header>
       {children}
-    </dialog>
+    </SharedDialog>
   );
 }
 
@@ -189,10 +165,10 @@ function Start({ profiles, lifecycleVersion, controller, busy, now, onClose }) {
           </select>
         </label>
         {profile && (
-          <p className="op-note">
+          <Note>
             {lo('legacyOp.copy69')} {profile.memory_gib} {lo('legacyOp.copy249')} {profile.disk_gib}{' '}
             {lo('legacyOp.copy250')} {profile.gpu_memory_gib} {lo('legacyOp.copy251')}
-          </p>
+          </Note>
         )}
         {continuing && (
           <label>
@@ -232,10 +208,10 @@ function Start({ profiles, lifecycleVersion, controller, busy, now, onClose }) {
             </div>
           </label>
         )}
-        <p className="op-note">
+        <Note>
           {continuing ? lo('legacyOp.copy258') : lo('legacyOp.copy259')}
           {lo('legacyOp.copy260')}
-        </p>
+        </Note>
         <button disabled={!valid} onClick={check}>
           <RefreshCw size={14} />
           {checking ? lo('legacyOp.copy261') : lo('legacyOp.copy262')}
@@ -265,11 +241,11 @@ function Start({ profiles, lifecycleVersion, controller, busy, now, onClose }) {
             <dt>{lo('legacyOp.copy271')}</dt>
             <dd>{date(preview.expires_at)}</dd>
           </dl>
-          <p className="op-note">
+          <Note>
             {lo('legacyOp.copy272')}
             {continuing ? lo('legacyOp.copy273') : ''}
             {lo('legacyOp.copy274')}
-          </p>
+          </Note>
         </div>
       )}
       <FloatingMessage tone="error" text={error ? error : null} />
@@ -348,12 +324,12 @@ function NodeDialog({ node, controller, busy, now, onClose }) {
           {dollars(node.hourly_cost_microusd, { digits: 3 })} {lo('legacyOp.copy114')}
         </dd>
       </dl>
-      <p className="op-note">
+      <Note>
         {lo('legacyOp.copy282')}
         {node.billing_state !== 'no_charge_confirmed'
           ? lo('legacyOp.copy283')
           : lo('legacyOp.copy284')}
-      </p>
+      </Note>
       {node.reason_code && (
         <details className="op-details">
           <summary>{lo('legacyOp.copy285')}</summary>
@@ -435,13 +411,13 @@ function NodeDialog({ node, controller, busy, now, onClose }) {
                     : lo('legacyOp.copy294', { x0: minutes })
                 : lo('legacyOp.copy295', { x0: minutes })}
           </b>
-          <p className="op-note">
+          <Note>
             {action === 'stop'
               ? lo('legacyOp.copy296')
               : continuing
                 ? lo('legacyOp.copy297', { x0: dollars(node.hourly_cost_microusd, { digits: 3 }) })
                 : lo('legacyOp.copy298', { x0: date(node.hard_deadline) })}
-          </p>
+          </Note>
           <button
             className="op-primary"
             disabled={busy || (action === 'hold' && !holdValid)}
@@ -553,7 +529,7 @@ export default function DstackCapacity({ account }) {
       )}
       <FloatingMessage tone="error" text={state.error ? state.error : null} />
       {!snapshot ? (
-        <p className="op-note" role="status">
+        <Note role="status">
           {state.loading
             ? lo('legacyOp.copy305')
             : state.denied
@@ -561,17 +537,11 @@ export default function DstackCapacity({ account }) {
               : state.unavailable
                 ? lo('legacyOp.copy307')
                 : lo('legacyOp.copy308')}
-        </p>
+        </Note>
       ) : (
         <>
-          {!enabled && (
-            <p className="op-note" role="status">
-              {lo('legacyOp.copy309')}
-            </p>
-          )}
-          {enabled && !catalog?.profiles?.length && (
-            <p className="op-note">{lo('legacyOp.copy310')}</p>
-          )}
+          {!enabled && <Note role="status">{lo('legacyOp.copy309')}</Note>}
+          {enabled && !catalog?.profiles?.length && <Note>{lo('legacyOp.copy310')}</Note>}
           <div className="op-dstack-summary">
             <span>
               {lo('legacyOp.copy311')}{' '}

@@ -1,4 +1,5 @@
 import { ChatDialog } from './QuickChatControls.jsx';
+import { Badge } from './ui/Note.jsx';
 import InkLoader from './InkLoader.jsx';
 import { cloudSystemMessage } from './cloud-model.js';
 import { exportSrt } from './caption-model.js';
@@ -468,7 +469,7 @@ function SeriesApp({ sidebarView, onSidebarView }) {
               </div>
             </details>
           ) : (
-            <span className="badge local">{t('story.copy9')}</span>
+            <Badge tone="local">{t('story.copy9')}</Badge>
           )}
           <div className="spacer" />
           <button
