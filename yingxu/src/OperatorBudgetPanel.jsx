@@ -14,6 +14,8 @@ import {
 import './operator-budget.css';
 import './v2/ops-adapter.css';
 import OperatorBillingPanel from './OperatorBillingPanel.jsx';
+import { Consequences } from './CapacitySettings.jsx';
+import { Button } from './ui/Button.jsx';
 
 export function BudgetAccounts({ budgets = [], compact = false }) {
   const { t, locale } = useI18n();
@@ -325,14 +327,18 @@ function BudgetEditor({ row, busy, onSave }) {
     </section>
   );
 }
-function PriceEditor({ row, busy, onSave }) {
+function PriceEditor({ row, busy, onPreview, onSave }) {
   const { t, locale } = useI18n();
   const [max, setMax] = useState(() => usdInput(row.max_price_microusd)),
     [ceiling, setCeiling] = useState(() => usdInput(row.price_ceiling_microusd)),
+    [review, setReview] = useState(null),
+    [reason, setReason] = useState(''),
     [error, setError] = useState('');
   useEffect(() => {
     setMax(usdInput(row.max_price_microusd));
     setCeiling(usdInput(row.price_ceiling_microusd));
+    setReview(null);
+    setReason('');
     setError('');
   }, [row.id, row.snapshot]);
   const defaultValue = usdMicrousd(max),
@@ -352,7 +358,7 @@ function PriceEditor({ row, busy, onSave }) {
           event.preventDefault();
           setError('');
           try {
-            await onSave(row, defaultValue, ceilingValue);
+            setReview(await onPreview(row, defaultValue, ceilingValue));
           } catch (error) {
             setError(error.message);
           }
@@ -363,7 +369,7 @@ function PriceEditor({ row, busy, onSave }) {
           <input
             aria-label={t('operatorPanel.priceAria', { id: row.id })}
             inputMode="decimal"
-            disabled={busy}
+            disabled={busy || !!review}
             value={max}
             onChange={(event) => setMax(event.target.value)}
           />
@@ -373,23 +379,61 @@ function PriceEditor({ row, busy, onSave }) {
           <input
             aria-label={t('operatorPanel.ceilingAria', { id: row.id })}
             inputMode="decimal"
-            disabled={busy}
+            disabled={busy || !!review}
             value={ceiling}
             onChange={(event) => setCeiling(event.target.value)}
           />
         </label>
-        <button
-          type="submit"
-          disabled={
-            busy ||
-            !valid ||
-            (defaultValue === row.max_price_microusd && ceilingValue === row.price_ceiling_microusd)
-          }
-        >
-          {t('operator.copy13')}
-        </button>
+        {!review && (
+          <Button
+            type="submit"
+            disabled={
+              busy ||
+              !valid ||
+              (defaultValue === row.max_price_microusd &&
+                ceilingValue === row.price_ceiling_microusd)
+            }
+          >
+            {t('operator.reviewPrice')}
+          </Button>
+        )}
       </form>
       {!valid && <p role="status">{t('operator.copy14')}</p>}
+      {review && (
+        <section className="cap-review" aria-label={t('capacity.reviewTitle')}>
+          <Consequences preview={review} />
+          <label className="cap-reason">
+            {t('capacity.reason')}
+            <textarea
+              rows={2}
+              maxLength={500}
+              value={reason}
+              onChange={(event) => setReason(event.target.value)}
+            />
+            <small className="muted">{t('capacity.reasonHelp')}</small>
+          </label>
+          <div className="cap-actions">
+            <Button variant="ghost" disabled={busy} onClick={() => setReview(null)}>
+              {t('capacity.back')}
+            </Button>
+            <Button
+              variant="primary"
+              disabled={busy || !reason.trim()}
+              onClick={async () => {
+                setError('');
+                try {
+                  await onSave(row, defaultValue, ceilingValue, { preview: review, reason });
+                } catch (error) {
+                  setReview(null);
+                  setError(error.message);
+                }
+              }}
+            >
+              {t('capacity.confirm')}
+            </Button>
+          </div>
+        </section>
+      )}
       {error && <p role="alert">{error}</p>}
     </section>
   );
@@ -475,7 +519,10 @@ export function AdminBudgetPanel({ controller, state, busy }) {
             key={row.id}
             row={row}
             busy={busy || reading}
-            onSave={(row, max, ceiling) => save(() => controller.updatePrice(row, max, ceiling))}
+            onPreview={(row, max, ceiling) => controller.previewPrice(row, max, ceiling)}
+            onSave={(row, max, ceiling, confirmation) =>
+              save(() => controller.updatePrice(row, max, ceiling, confirmation))
+            }
           />
         ))
       ) : (

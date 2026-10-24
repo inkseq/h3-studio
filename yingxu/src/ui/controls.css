@@ -1,0 +1,114 @@
+/* Shared controls (h3-studio#514): the one definition of how buttons look.
+ * Use the Button / IconButton components (ui/Button.jsx); pages only lay buttons out. */
+button {
+  font: inherit;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--ink);
+  background: var(--surface-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  min-height: var(--h-md);
+  padding: 6px 12px;
+  cursor: pointer;
+  transition:
+    background var(--ease),
+    border-color var(--ease),
+    color var(--ease),
+    transform var(--ease);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+button:hover {
+  background: var(--surface-4);
+  border-color: var(--line-3);
+}
+button:active {
+  transform: scale(0.98);
+}
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+  transform: none;
+}
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+button > svg {
+  flex: none;
+  stroke-width: 1.9;
+}
+
+/* Variants */
+button.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: var(--accent-glow);
+}
+button.primary:hover {
+  background: var(--accent);
+  filter: brightness(1.05);
+}
+button.ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+button.ghost:hover {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--white);
+}
+button.ghost.danger {
+  background: transparent;
+  color: var(--bad);
+  border-color: transparent;
+  box-shadow: none;
+  width: auto;
+  align-self: flex-start;
+}
+button.ghost.danger:hover {
+  background: var(--bad-soft);
+}
+
+/* Sizes */
+button.small {
+  min-height: var(--h-sm);
+  padding: 4px 10px;
+  font-size: var(--fs-sm);
+  border-radius: 7px;
+  white-space: nowrap;
+}
+button.round {
+  width: 36px;
+  height: 36px;
+  min-height: 0;
+  border-radius: 50%;
+  padding: 0;
+  justify-content: center;
+}
+
+/* Square icon-only buttons (IconButton) */
+button.icon-button {
+  width: var(--h-md);
+  padding: 0;
+  justify-content: center;
+}
+button.icon-button.small {
+  width: var(--h-sm);
+  padding: 0;
+}

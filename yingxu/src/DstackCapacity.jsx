@@ -1,4 +1,5 @@
 import { dstackNodeStatus as rawDstackNodeStatus } from './dstack-presentation.js';
+import { useModal } from './ui/Dialog.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import { operatorFormatters, operatorDisplay } from './i18n/legacyOperatorPresentation.js';
 import { useI18n, LanguageSwitcher } from './i18n/I18nProvider.jsx';
@@ -27,21 +28,7 @@ const date = (value) =>
     : '尚未确认';
 function Dialog({ title, onClose, children }) {
   const { t: lo, locale } = useI18n();
-  const active = usePageActive(),
-    ref = useRef(),
-    opener = useRef(document.activeElement);
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!active) {
-      dialog.close();
-      return;
-    }
-    dialog.showModal();
-    return () => {
-      dialog.close();
-      if (opener.current?.isConnected && !opener.current.closest('[inert]')) opener.current.focus();
-    };
-  }, [active]);
+  const ref = useModal();
   return (
     <dialog
       ref={ref}

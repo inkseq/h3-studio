@@ -17,59 +17,10 @@ import {
   automaticInputMode,
 } from './quick-chat-model.js';
 import Control from './GenerationControl.jsx';
-export function ChatDialog({
-  title,
-  onClose,
-  children,
-  wide = false,
-  className = '',
-  eyebrow = '',
-}) {
-  const { t, locale } = useI18n();
-  const pageActive = usePageActive();
-  const ref = useRef(),
-    opener = useRef(globalThis.document?.activeElement);
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!pageActive) {
-      dialog.close();
-      return;
-    }
-    dialog.showModal();
-    dialog.querySelector('button,input,textarea,select')?.focus();
-    return () => {
-      dialog.close();
-      if (opener.current?.isConnected && !opener.current.closest('[inert]')) opener.current.focus();
-    };
-  }, [pageActive]);
-  useEffect(() => {
-    const dialog = ref.current,
-      close = () => onClose();
-    dialog.addEventListener('inkseq-close-after-trash', close);
-    return () => dialog.removeEventListener('inkseq-close-after-trash', close);
-  }, [onClose]);
-  return (
-    <dialog
-      className={'qc-dialog ' + (wide ? 'qc-dialog-wide ' : '') + className}
-      ref={ref}
-      aria-label={title}
-      onCancel={(e) => {
-        e.preventDefault();
-        if (!ref.current?.querySelector('.item-menu [aria-expanded="true"]')) onClose();
-      }}
-    >
-      <div className="qc-dialog-head">
-        <div>
-          {eyebrow && <span className="qc-eyebrow">{eyebrow}</span>}
-          <h2>{title}</h2>
-        </div>
-        <button type="button" aria-label={t('workspace.copy88')} onClick={onClose}>
-          <X size={18} />
-        </button>
-      </div>
-      {children}
-    </dialog>
-  );
+import { Dialog } from './ui/Dialog.jsx';
+// Kept as a name for existing callers; the behaviour and look live in ui/Dialog.jsx.
+export function ChatDialog(props) {
+  return <Dialog {...props} />;
 }
 function ProfileInputBoundary({ support }) {
   const { t, locale } = useI18n();

@@ -80,6 +80,8 @@ export function createP4OperatorClient(options = {}) {
         throw new CloudError(message('priceIdentity'));
       return value;
     },
+    previewPrice: (profileId, body) =>
+      api.request(ROOT + '/admin/prices/' + id(profileId) + '/preview', { method: 'POST', body }),
     updatePrice: (profileId, body, key) =>
       api.request(ROOT + '/admin/prices/' + id(profileId), { method: 'PUT', body, key }),
     async adminJobs({ after_id, limit = 100 } = {}) {
