@@ -1269,9 +1269,9 @@ class DstackOperator:
                 getattr(settings, "public_origin", None) == "https://staging.inkseq.com"
                 and self.config.get("project") == "sixnine-staging"
                 and self.policy.get("lifecycle_version") == 2
-                and self.policy.get("max_instances")
-                == self.policy.get("max_physical_gpus")
-                == 1
+                and _integer(self.policy.get("max_instances"), 1, 10)
+                and _integer(self.policy.get("max_physical_gpus"), 1, 10)
+                and self.policy["max_instances"] == self.policy["max_physical_gpus"]
                 and 1 <= self.policy["idle_shutdown_seconds"] <= 86400
                 and all(
                     profile["pool"] in POOLS
@@ -2229,7 +2229,7 @@ class DstackOperator:
         if settings["adopted"]:
             maximum = settings["value"]["max_machines"]
             # A production policy adoption does not widen the independently
-            # qualified staging test guard or its one-machine allowance.
+            # qualified staging test guard or its explicitly protected allowance.
             if "test_gpu_guard" in self.policy:
                 return (
                     min(maximum, self.policy["max_instances"]),

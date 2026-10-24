@@ -1,5 +1,6 @@
 export const editorCatalogs = {
   en: {
+    'editor.keptParts': 'This shot keeps {count} parts of its take. Edit them in the shot.',
     'chapter.number': 'Chapter {n}',
     'chapter.meta': '{count} shots · {duration}',
     'chapter.fold': 'Collapse chapter',
@@ -107,6 +108,7 @@ export const editorCatalogs = {
     'editor.saveFailed': 'This change was not saved; the story is unchanged.',
   },
   zh: {
+    'editor.keptParts': '这个镜头保留了 {count} 段，请在镜头里编辑。',
     'chapter.number': '第 {n} 章',
     'chapter.meta': '{count} 个镜头 · {duration}',
     'chapter.fold': '收起这一章',

@@ -146,6 +146,94 @@ class DailyTestBudgetTests(LedgerCase):
             )
         return node_id
 
+    def test_explicit_test_capacity_one_and_ten_preserve_original_task_guards(self):
+        for maximum in (1, 10):
+            with self.subTest(maximum=maximum):
+                config = copy.deepcopy(self.config)
+                config["policy"].update(
+                    max_instances=maximum, max_physical_gpus=maximum
+                )
+                before = copy.deepcopy(config)
+                service = DstackOperator(
+                    self.repo, self.settings, self.capacity, config
+                )
+                self.assertEqual(service.config, before)
+                self.assertEqual(config, before)
+                self.assertEqual(self.counts(), (0, 0, 0, 0))
+                self.assertEqual(self.client.applied, [])
+        self.service = service
+        node = self.start()["node_id"]
+        intent, row = self.rows()
+        self.assertIsNone(intent["hard_deadline"])
+        self.assertEqual(
+            self.store.load(node)["run_spec"]["configuration"]["max_duration"], 7200
+        )
+        self.assertEqual(
+            row["payload"]["lifecycle"]["test_gpu_guard"],
+            task_guard(GUARD, "issue-267", limit=20_000_000, max_runtime=7200),
+        )
+        self.assertEqual(row["payload"]["lifecycle"]["idle_shutdown_seconds"], 600)
+        self.assertEqual(
+            row["payload"]["lifecycle"]["budget_account_ids"], [ACCOUNT, "owner-budget"]
+        )
+        for options in ({"keep_on": "until_stopped"}, {"idle_shutdown_seconds": 601}):
+            with self.assertRaisesRegex(OperatorError, "test_idle_policy"):
+                self.preview(**options)
+
+    def test_test_capacity_requires_matching_exact_integers_even_when_disabled(self):
+        for enabled in (True, False):
+            for instances, gpus in (
+                (11, 11),
+                (0, 0),
+                (True, True),
+                (False, False),
+                (1.0, 1.0),
+                ("10", "10"),
+                (10, 1),
+                (1, 10),
+                (True, 1),
+                (1, True),
+                (10, True),
+                (True, 10),
+            ):
+                with self.subTest(enabled=enabled, instances=instances, gpus=gpus):
+                    config = copy.deepcopy(self.config)
+                    config["policy"].update(
+                        enabled=enabled, max_instances=instances, max_physical_gpus=gpus
+                    )
+                    with self.assertRaises(OperatorError):
+                        DstackOperator(self.repo, self.settings, self.capacity, config)
+        self.assertEqual(self.counts(), (0, 0, 0, 0))
+        self.assertEqual(self.client.applied, [])
+
+    def test_test_capacity_ten_preserves_namespace_and_budget_account_binding(self):
+        for target, field, value in (
+            ("config", "project", "sixnine"),
+            ("policy", "lifecycle_version", 1),
+            ("profile", "pool", "production-pool"),
+            ("profile", "project_id", "production-project"),
+            ("profile", "budget_account_ids", ["owner-budget"]),
+            ("profile", "extra_reservation_microusd", 0),
+        ):
+            with self.subTest(target=target, field=field):
+                config = copy.deepcopy(self.config)
+                config["policy"].update(max_instances=10, max_physical_gpus=10)
+                selected = {
+                    "config": config,
+                    "policy": config["policy"],
+                    "profile": config["profiles"][0],
+                }[target]
+                selected[field] = value
+                with self.assertRaises(OperatorError):
+                    DstackOperator(self.repo, self.settings, self.capacity, config)
+        config = copy.deepcopy(self.config)
+        config["policy"].update(max_instances=10, max_physical_gpus=10)
+        self.settings.public_origin = "https://inkseq.com"
+        with self.assertRaisesRegex(OperatorError, "test_guard_binding"):
+            DstackOperator(self.repo, self.settings, self.capacity, config)
+        self.assertEqual(self.counts(), (0, 0, 0, 0))
+        self.assertEqual(self.client.applied, [])
+
     def test_native_timeout_is_only_opt_in_and_cannot_change_idle_or_production_scope(
         self,
     ):

@@ -35,6 +35,8 @@ import { store } from './store.js';
 import { cutFps, videoCut } from './video-cut-model.js';
 import { trimClip } from './film-edit-model.js';
 import TrimBar from './TrimBar.jsx';
+import ShotSegments from './ShotSegments.jsx';
+import { sourceTime } from './shot-segments.js';
 import { createPortal } from 'react-dom';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { useSortable } from '@dnd-kit/sortable';
@@ -1602,7 +1604,9 @@ function growTextarea(node) {
 
 // The chosen take's trim, right under the panel's video (owner, 2026-10-21): drag a handle and
 // the video shows that frame; letting go saves the new range. No separate editor needed.
-function ShotTrim({ shotId, mediaRef }) {
+// The chosen take's source length and the shot's current single trim, for the trim bar and
+// as the first kept part (#512).
+function useTakeRange(shotId, mediaRef) {
   const project = useSyncExternalStore(store.subscribe, () => store.getState().project);
   const [probed, setProbed] = useState(null);
   const shot = project.entities.find((e) => e.id === shotId),
@@ -1616,17 +1620,42 @@ function ShotTrim({ shotId, mediaRef }) {
     node.addEventListener('loadedmetadata', read);
     return () => node.removeEventListener('loadedmetadata', read);
   });
-  if (!shot || video?.type !== 'video') return null;
+  if (!shot || video?.type !== 'video') return { getVideo, shot: null };
   const cut = videoCut(shot, video),
     known = video.data.metadata?.duration ?? video.data.metadata?.duration_s,
     start = (cut.aligned?.startFrame ?? 0) / cutFps,
     end = start + (cut.requestedFrames || 0) / cutFps;
+  return {
+    getVideo,
+    shot,
+    duration: Number.isFinite(known) ? known : probed,
+    start,
+    end: end > start ? end : start + 1 / cutFps,
+  };
+}
+
+function ShotParts({ shot, mediaRef }) {
+  const take = useTakeRange(shot.id, mediaRef);
+  if (!take.shot) return null;
+  return (
+    <ShotSegments
+      shot={shot}
+      getVideo={take.getVideo}
+      duration={take.duration}
+      trim={[take.start, take.end]}
+    />
+  );
+}
+
+function ShotTrim({ shotId, mediaRef }) {
+  const take = useTakeRange(shotId, mediaRef);
+  if (!take.shot) return null;
   return (
     <TrimBar
-      duration={Number.isFinite(known) ? known : probed}
-      start={start}
-      end={end > start ? end : start + 1 / cutFps}
-      getVideo={getVideo}
+      duration={take.duration}
+      start={take.start}
+      end={take.end}
+      getVideo={take.getVideo}
       onCommit={(s, e, total) => store.editProject((p) => void trimClip(p, shotId, s, e, total))}
     />
   );
@@ -1803,7 +1832,11 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
         )}
 
         {viewing?.id === shot.chosen && ['done', 'succeeded'].includes(viewing?.status) && (
-          <ShotTrim shotId={shot.id} mediaRef={mediaRef} />
+          <>
+            {/* With kept parts, the parts panel has its own selection bar (#512). */}
+            {!shot.segments?.length && <ShotTrim shotId={shot.id} mediaRef={mediaRef} />}
+            <ShotParts shot={shot} mediaRef={mediaRef} />
+          </>
         )}
       </div>
       <div className="ed-form">
@@ -2276,7 +2309,8 @@ export function Screen({ player, big, style }) {
   const sync = () =>
     playback.current.sync({
       video: ref.current,
-      time: local,
+      // A shot with kept parts plays them in order from the same source (#512).
+      time: sourceTime(seg?.shot.segments, local),
       playing,
       onFailure: () => player.setPlaying(false),
     });

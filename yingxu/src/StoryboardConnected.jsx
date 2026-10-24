@@ -508,8 +508,10 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
       return { ok: true, receipt: value };
     }
     if (action.type === 'workbenchAction') {
-      const actions = [action.action];
+      // One action, or several applied together in one story edit (e.g. clear segments + choose).
+      const actions = action.actions || [action.action];
       if (
+        action.action &&
         action.profileId &&
         action.action.op === 'storyboard.bulk' &&
         ['draft', 'final'].includes(action.action.operation)
@@ -532,8 +534,13 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
     if (action.type === 'workbenchUseLatest') {
       // Choose each shot's newest finished video in one story edit; shots without one are left alone.
       const context = captureWorkspace(store);
+      const entities = store.getState().project?.entities || [];
+      const keeps = (id) =>
+        (entities.find((e) => e.id === id)?.data?.videoSegments || []).length > 0;
       const picks = await Promise.all(
         action.ids.map(async (id) => {
+          // Kept parts belong to the chosen take (#512); those shots keep it.
+          if (keeps(id)) return null;
           const value = await adapter.readVersions(id);
           const row = value.versions.find((v) => v.kind === 'video' && isActiveTrashItem(v));
           return row ? { op: 'storyboard.select', shot_id: id, artifact_id: row.id } : null;

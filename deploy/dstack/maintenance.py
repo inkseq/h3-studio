@@ -40,6 +40,13 @@ LEGACY_HELPER_PAIRS = {commit: (
         "07da40322559ee5a12829be6884c541c401d852a")}
 # Exact retained current/previous helper bytes before the staging upgrade.
 RETAINED_DSTACK_HELPER_PAIRS = {
+    # Exact original 7a candidate being reconciled through its normal deployer.
+    '7a24b5a99df4546f775224b83a890aeb53897734': ('794921cab61dd3455aeb6cddf1ab1ec636d6b1251e5568946f934a275ce6dcf5', 'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b'),
+    # Exact source of the queued #516 platform; retained runtime must still match.
+    '20ab3dfd308800daad10a3ce8ac060da342b164a': ('794921cab61dd3455aeb6cddf1ab1ec636d6b1251e5568946f934a275ce6dcf5', 'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b'),
+    # Exact B1 staging current/rollback sources before compact-cap validation changed.
+    '5c01b159781729b6c34379b4f4383b88364426fb': ('794921cab61dd3455aeb6cddf1ab1ec636d6b1251e5568946f934a275ce6dcf5', 'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b'),
+    '32d1ec4f7e40adca65b2563b5ea11810dd223039': ('794921cab61dd3455aeb6cddf1ab1ec636d6b1251e5568946f934a275ce6dcf5', 'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b'),
     # Observed staging A1 current/previous, SSM 74cb6214 (2026-10-24).
     'fcd3ce618dbbf2a4f0dad4ee09e0c74121c4f69c': ('49905c8b60ae0375ec02485028db8fa4f7cabd718a91a936649dbf301fb5d86d', 'ddd25ad1c878e5066245bc32bb660e97908a223bb41c6d2bb38de1e433ddeafe'),
     'a978e9ceb7e78c9a9b54f9365d1e6c368aea83ea': ('49905c8b60ae0375ec02485028db8fa4f7cabd718a91a936649dbf301fb5d86d', 'ddd25ad1c878e5066245bc32bb660e97908a223bb41c6d2bb38de1e433ddeafe'),
@@ -422,9 +429,11 @@ def settings(root):
         operator = Path(value['environment']['SIXNINE_DSTACK_OPERATOR_CONFIG_FILE'])
         release.regular(operator, root_owned=True, maximum=1024**2)
         policy = json.loads(operator.read_text()).get('policy', {})
-        release.require(all(type(policy.get(key)) is int and policy[key] == 1
+        # The compact profile seals CPU resources, not a separate single-GPU policy.
+        # CR59 permits explicit protected limits up to ten; reads never adopt them.
+        release.require(all(type(policy.get(key)) is int and 1 <= policy[key] <= 10
                             for key in ('max_instances', 'max_physical_gpus')),
-                        'migration_compact_requires_single_gpu_capacity')
+                        'migration_compact_capacity_limit_invalid')
     return settings_document(value), release.checksum(directory / "paths.json")
 
 
