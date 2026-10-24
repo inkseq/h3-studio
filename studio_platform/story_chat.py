@@ -88,6 +88,14 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def iso_seconds(value):
+    """Epoch seconds of a stored now_iso() value; 0 for anything unreadable."""
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except (AttributeError, TypeError, ValueError):
+        return 0.0
+
+
 def _text(value, limit, *, required=True):
     if value is None and not required:
         return ""
@@ -756,18 +764,22 @@ def prompt_messages(project, chat, text):
     return history
 
 
-def append_turn(chat, turn_id, text, plan, changes, proposal):
+def append_turn(chat, turn_id, text, plan, changes, proposal, actor=None):
     value = copy.deepcopy(chat)
     at = now_iso()
     value["turns"] = value.get("turns", 0) + 1
+    user = {
+        "id": turn_id + "-u",
+        "turn_id": turn_id,
+        "role": "user",
+        "text": text,
+        "at": at,
+    }
+    if actor:
+        # A connection's turn (Agent, Telegram) is attributed for its daily cap.
+        user["actor"] = actor
     value["messages"] = value.get("messages", []) + [
-        {
-            "id": turn_id + "-u",
-            "turn_id": turn_id,
-            "role": "user",
-            "text": text,
-            "at": at,
-        },
+        user,
         {
             "id": turn_id + "-a",
             "turn_id": turn_id,

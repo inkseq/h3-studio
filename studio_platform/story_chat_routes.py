@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 
 from fastapi import HTTPException, Request
@@ -20,6 +21,7 @@ from .story_chat import (
     apply_plan,
     cards,
     chat_of,
+    iso_seconds,
     new_story,
     prompt_messages,
     snapshot,
@@ -69,14 +71,46 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             _fail("assistant_unavailable", 503)
         return holder["client"]
 
-    def principal_of(request):
+    # Agent and Telegram connections drive the same story chat as the website (#531).
+    # Card pictures stay browser-only until their own paid-admission review (#511 S2).
+    MACHINE_SCOPES = {
+        "read": {"projects:read"},
+        "write": {"projects:read", "projects:write"},
+        "create": {"projects:read", "projects:write", "projects:create"},
+    }
+
+    def principal_of(request, need="read", browser_only=False):
         if not enabled:
             _fail("story_chat_disabled", 404)
         principal = request.state.principal
-        if principal.machine:
-            # Agents already edit projects through the public actions API.
-            _fail("story_chat_browser_only", 403)
+        if principal.machine and (
+            browser_only or not MACHINE_SCOPES[need].issubset(principal.scopes)
+        ):
+            _fail(
+                "story_chat_browser_only" if browser_only else "story_chat_scope", 403
+            )
         return principal
+
+    def connection_turns_today(principal):
+        """Chat turns this connection sent in the last 24 h, across the owner's stories."""
+        since = time.time() - 86400
+        rows = app.state.repository.list_documents(
+            app.state.generation_access.project_scope(principal),
+            "project",
+            limit=100,
+            exclude_managed=True,
+            story_chat=True,
+        )
+        count = 0
+        for row in rows:
+            for message in chat_of(row["payload"]).get("messages", []):
+                if (
+                    message.get("role") == "user"
+                    and message.get("actor") == principal.actor_id
+                    and iso_seconds(message.get("at")) >= since
+                ):
+                    count += 1
+        return count
 
     def view(row):
         project = row["payload"]
@@ -164,7 +198,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
 
     @app.get("/v1/story-chats")
     def list_story_chats(request: Request, limit: int = 50):
-        principal = principal_of(request)
+        principal = principal_of(request, "read")
         if type(limit) is not int or not 1 <= limit <= 100:
             _fail("story_chat_invalid", 422, field="limit")
         rows = app.state.repository.list_documents(
@@ -190,7 +224,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
     @app.patch("/v1/story-chats/{project_id}")
     def update_story_chat(project_id: str, request: Request, body: dict):
         """Rename a chat (= its story) or remove it from Quick Create; the story stays."""
-        principal = principal_of(request)
+        principal = principal_of(request, "write")
         if not isinstance(body, dict) or not body or set(body) - {"title", "hidden"}:
             _fail("story_chat_invalid", 422, field="body")
         title = body.get("title")
@@ -230,7 +264,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
 
     @app.post("/v1/story-chats", status_code=201)
     def create_story_chat(request: Request, body: dict | None = None):
-        principal = principal_of(request)
+        principal = principal_of(request, "create")
         body = body or {}
         if set(body) - {"title", "language"}:
             _fail("story_chat_invalid", 422, field="body")
@@ -247,7 +281,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
     @app.post("/v1/story-chats/{project_id}/open")
     def open_story_chat(project_id: str, request: Request, body: dict | None = None):
         """Continue an existing story in the chat (owner, 2026-10-23). Idempotent."""
-        principal = principal_of(request)
+        principal = principal_of(request, "write")
         body = body or {}
         language = body.get("language", "zh")
         if set(body) - {"language"} or language not in LANGUAGES:
@@ -305,12 +339,12 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
 
     @app.get("/v1/story-chats/{project_id}")
     def get_story_chat(project_id: str, request: Request):
-        principal = principal_of(request)
+        principal = principal_of(request, "read")
         return view(read(principal, project_id))
 
     @app.post("/v1/story-chats/{project_id}/turns")
     def story_chat_turn(project_id: str, request: Request, body: dict):
-        principal = principal_of(request)
+        principal = principal_of(request, "write")
         if not isinstance(body, dict) or set(body) != {"turn_id", "text"}:
             _fail("story_chat_invalid", 422, field="body")
         turn_id, text = body["turn_id"], body["text"]
@@ -343,6 +377,10 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             return answer(row, prior)
         if chat.get("turns", 0) >= MAX_TURNS:
             _fail("story_chat_turn_limit", 429, max_turns=MAX_TURNS)
+        if principal.machine:
+            limit = settings.story_chat_connection_daily_turns
+            if connection_turns_today(principal) >= limit:
+                _fail("story_chat_connection_daily_limit", 429, limit=limit)
         try:
             result = model_client().generate(
                 MODEL,
@@ -381,7 +419,15 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                         nothing_written=True,
                         cards=changed,
                     )
-            value = append_turn(chat, turn_id, text, plan, changes, proposal)
+            value = append_turn(
+                chat,
+                turn_id,
+                text,
+                plan,
+                changes,
+                proposal,
+                actor=principal.actor_id if principal.machine else None,
+            )
             try:
                 app.state.guided.mutate(
                     principal,
@@ -425,7 +471,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             prompt_for,
         )
 
-        principal = principal_of(request)
+        principal = principal_of(request, browser_only=True)
         if (
             not isinstance(body, dict)
             or not {"request_id", "card_id"} <= set(body)

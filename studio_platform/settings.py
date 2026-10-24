@@ -136,6 +136,8 @@ class Settings:
     # production). It reuses the title text credential; without one /quick-chat keeps the
     # original Quick Create. Pictures stay behind their own audited admin switch.
     story_chat_enabled: bool = False
+    # Chat turns per Agent/Telegram connection per 24 h (#531); bounds model cost.
+    story_chat_connection_daily_turns: int = 200
     public_origin_aliases: tuple[str, ...] = ()
     account_deletion_test_owners: tuple[str, ...] = ()
     sentry_dsn: str = ""
