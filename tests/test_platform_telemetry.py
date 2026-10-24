@@ -155,16 +155,45 @@ class TelemetryTests(unittest.TestCase):
         for stage in STAGES:
             for gpu in GPU_TYPES:
                 for mode in ("fl", "ref"):
-                    self.telemetry.start(
-                        stage, {"mode": mode, "gpu_type": gpu}
-                    ).finish()
-        self.assertLessEqual(self.telemetry.status()["metric_labelsets"], 128)
+                    for height in (480, 720, 768):
+                        self.telemetry.start(
+                            stage,
+                            {"mode": mode, "gpu_type": gpu, "height": height},
+                        ).finish()
+        self.assertLessEqual(self.telemetry.status()["metric_labelsets"], 512)
         self.assertTrue(
             any(
                 attrs.get("stage") == "unknown"
                 for _, attrs in self.telemetry.duration.points
             )
         )
+
+    def test_content_bands_label_only_content_stages(self):
+        context = {
+            "mode": "ref",
+            "gpu_type": "rtx5090",
+            "frames": 362,
+            "fps": 24,
+            "height": 768,
+            "image_refs": 3,
+            "audio_refs": 1,
+        }
+        self.telemetry.start("generate", context).finish(duration_seconds=4000)
+        self.telemetry.start("queue_wait", context).finish(duration_seconds=5)
+        points = {attrs["stage"]: attrs for _, attrs in self.telemetry.duration.points}
+        self.assertEqual(
+            {
+                k: points["generate"][k]
+                for k in ("length", "resolution", "image_refs_band", "audio_ref")
+            },
+            {
+                "length": "gt12s",
+                "resolution": "gt720",
+                "image_refs_band": "3-5",
+                "audio_ref": "yes",
+            },
+        )
+        self.assertEqual(points["queue_wait"]["length"], "any")
 
     def test_captured_gpu_names_reach_allocation_and_cold_events_without_host_metric_labels(
         self,
