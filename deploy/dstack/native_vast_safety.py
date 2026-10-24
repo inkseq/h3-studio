@@ -350,3 +350,81 @@ def failure_message(attempts):
             complete = False
     safe = complete and len(outcomes) == attempts.tried and all(value["outcome"] == "rejected" for value in outcomes)
     return ATTEMPTS_PREFIX + json.dumps({"version": 1, "outcome": "no_allocation" if safe else "unknown", "attempted_count": attempts.tried, "attempts": outcomes}, sort_keys=True, separators=(",", ":"))
+
+
+# RunPod's create endpoints have no idempotency key. These helpers deliberately
+# share only the exact-source derivative, not Vast's remote-rejection allowlist.
+RUNPOD_PREFIX = "sixnine_runpod_outcome_v1:"
+RUNPOD_LOCAL_CODES = frozenset({"multiple_volumes", "spot_unsupported", "community_cpu",
+    "private_registry", "cluster_unsupported", "cpu_gpu_type", "cpu_count_for_gpu",
+    "cpu_count_required", "network_volume_unsupported"})
+
+
+class RunPodPreRequestRejected(Exception):
+    def __init__(self, code):
+        if code not in RUNPOD_LOCAL_CODES:
+            raise ValueError("runpod_local_code_invalid")
+        self.code = code
+        super().__init__("sixnine_runpod_local_" + code)
+
+
+class RunPodAllocationUnknown(Exception):
+    def __init__(self, code="create_unknown", pod_id=None):
+        self.code = code if code in {"create_unknown", "authentication_rejected"} else "create_unknown"
+        self.pod_id = pod_id if _runpod_id(pod_id) else None
+        super().__init__("sixnine_runpod_" + self.code)
+
+
+def _runpod_id(value):
+    return type(value) is str and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", value) is not None
+
+
+def runpod_safe_for_fallback(error):
+    # An exception message or provider status can never become local proof.
+    return type(error) is RunPodPreRequestRejected and error.code in RUNPOD_LOCAL_CODES
+
+
+def runpod_closed_error(error):
+    local = runpod_safe_for_fallback(error)
+    value = {"outcome": "not_sent" if local else "unknown", "code": error.code if local or
+        type(error) is RunPodAllocationUnknown else "create_unknown", "pod_id":
+        error.pod_id if type(error) is RunPodAllocationUnknown else None}
+    return RUNPOD_PREFIX + json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def runpod_create_once(session, url, payload, *, timeout, graphql=False):
+    """One original create; no read, cleanup, redirect, or allocation retry."""
+    expected = "https://api.runpod.io/graphql" if graphql else "https://api.runpod.io/v2/pods"
+    if url != expected or type(payload) is not dict:
+        # Unsupported configuration is terminal, never provider nonallocation proof.
+        raise RunPodAllocationUnknown() from None
+    response = None
+    try:
+        response = session.request(method="POST", url=url, timeout=timeout,
+                                   json=payload, allow_redirects=False)
+        status = response.status_code
+        try:
+            value = response.json()
+        except Exception:
+            raise RunPodAllocationUnknown() from None
+        pod = value
+        if graphql:
+            data = value.get("data") if type(value) is dict else None
+            pod = data.get("podFindAndDeployOnDemand") if type(data) is dict else None
+            identity = pod.get("id") if type(pod) is dict else None
+            if type(value) is not dict or "errors" in value or type(data) is not dict:
+                raise RunPodAllocationUnknown(pod_id=identity) from None
+            if set(data) != {"podFindAndDeployOnDemand"}:
+                raise RunPodAllocationUnknown(pod_id=identity) from None
+        identity = pod.get("id") if type(pod) is dict else None
+        if type(status) is not int or not 200 <= status < 300 or not _runpod_id(identity):
+            raise RunPodAllocationUnknown("authentication_rejected" if status in {401,403}
+                                          else "create_unknown", identity) from None
+        return pod
+    except RunPodAllocationUnknown:
+        raise
+    except Exception:
+        raise RunPodAllocationUnknown() from None
+    finally:
+        if response is not None:
+            _close(response)

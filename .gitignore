@@ -774,3 +774,6 @@ inventory.json
 !tools/apply_approved_quick_chat_stories.py
 !tests/test_quick_chat_production_migration.py
 !docs/QUICK-CHAT-PRODUCTION-ADOPTION.md
+
+!deploy/dstack/test_native_runpod_safety.py
+!tests/test_dstack_native_runpod.py
