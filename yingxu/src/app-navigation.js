@@ -5,6 +5,7 @@ export const APP_PATHS = Object.freeze([
   '/quick-chat',
   '/library',
   '/operator',
+  '/admin',
   '/settings',
   '/trash',
   '/freestyle',

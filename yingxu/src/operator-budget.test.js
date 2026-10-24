@@ -687,7 +687,7 @@ test('actual budget cards show sparse recorded dates and legacy uncertainty with
   assert.match(admin, /共享 GPU 预算/);
   assert.match(admin, /共享生成预算/);
   assert.match(admin, /全部账户已读取/);
-  assert.match(admin, /settings\?tab=admin/);
+  assert.match(admin, /admin\?section=limits/);
   const ordinary = renderWithLocale(
     module,
     React.createElement(module.exports.BudgetWorkspace, {
@@ -701,7 +701,7 @@ test('actual budget cards show sparse recorded dates and legacy uncertainty with
       busy: false,
     }),
   );
-  assert.doesNotMatch(ordinary, /预算与价格管理|共享 GPU 预算|共享生成预算|settings\?tab=admin/);
+  assert.doesNotMatch(ordinary, /预算与价格管理|共享 GPU 预算|共享生成预算|admin\?section=limits/);
   const english = renderWithLocale(
     module,
     React.createElement(module.exports.BudgetAccounts, { budgets: [retiredRow], compact: true }),
