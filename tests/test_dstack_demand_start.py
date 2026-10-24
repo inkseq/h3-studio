@@ -21,6 +21,116 @@ import test_dstack_operator as original
 
 
 class DemandStartTests(LedgerCase):
+    def test_startup_replacement_advances_without_supplier_removal_proof(self):
+        from studio_platform.capacity_watchdog import reclaim_node
+        from studio_platform.repository import instance_intents
+
+        self.enabled()
+        job = self.accepted()
+        first = start_once(self.service)
+        self.assertEqual(first['state'], 'accepted')
+        self.now += 1201
+        with self.repo.engine.connect() as connection:
+            node = dict(connection.execute(select(operator_nodes)).mappings().one())
+            intent = dict(connection.execute(select(instance_intents)).mappings().one())
+        recovered = reclaim_node(self.service, node, intent)
+        self.assertTrue(recovered['stop_requested'])
+        self.assertIsNone(
+            self.store.load(node['intent_id']).get('provider_removal_proof')
+        )
+        waiting = start_once(self.service)
+        self.assertEqual(waiting['reason_code'], 'backoff')
+        self.now += 80  # Past the original 60s lease plus <=15s identity jitter.
+        second = start_once(self.service)
+        self.assertEqual(second['state'], 'accepted')
+        self.assertNotEqual(second['node_id'], first['node_id'])
+        self.assertEqual(self.repo.get_job(self.scope, job['id'])['status'], 'queued')
+        self.assertEqual(len(self.client.applied), 2)
+
+    def test_demand_does_not_spend_when_actual_registration_cap_is_disabled(self):
+        self.enabled()
+        self.accepted()
+        self.repo.configure_capacity(max_instances=0, max_physical_gpus=0)
+        result = start_once(self.service)
+        self.assertEqual(
+            (result['state'], result['reason_code']), ('blocked', 'capacity_limit')
+        )
+        self.assertEqual(self.client.applied, [])
+
+    def test_adopted_ten_launches_and_registers_fifth_under_positive_legacy_four(self):
+        from studio_platform.control import WorkerControl, WorkerSpec
+        from studio_platform.repository import registered_workers
+        from test_capacity_admission import adopt
+        from test_dstack_registration import RegistrationCapacityTests
+
+        self.repo.configure_capacity(max_instances=4, max_physical_gpus=4)
+        self.repo.configure_pool('dstack-test', max_instances=4, max_physical_gpus=4)
+        for index in range(4):
+            WorkerControl(self.repo).register(
+                WorkerSpec(
+                    'legacy-' + str(index),
+                    'test-pool',
+                    'lium',
+                    'old-' + str(index),
+                    ('GPU-' + str(index),),
+                    ('recipe',),
+                    'model',
+                    'config',
+                )
+            )
+        adopt(self, 10)
+        self.enabled()
+        original = self.accepted()
+        accepted = start_once(self.service)
+        self.assertEqual(accepted['state'], 'accepted')
+        self.assertEqual(len(self.client.applied), 1)
+        self.provisioned(accepted['node_id'])
+        binding = self.store.load(accepted['node_id'])
+        run = self.client.runs[binding['run_name']]
+        run['status'] = 'running'
+        run['latest_job_submission']['job_provisioning_data']['instance_id'] = '4300005'
+        self.capacity.observe(accepted['node_id'])
+        WorkerControl(
+            self.repo, capacity_usage=self.service.registration_capacity_usage
+        ).register(RegistrationCapacityTests.spec(self, accepted['node_id']))
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(
+                len(list(connection.execute(select(registered_workers)))), 5
+            )
+            payload = connection.execute(select(operator_nodes.c.payload)).scalar_one()
+        self.assertEqual(
+            payload['capacity_policy_snapshot']['value']['max_machines'], 10
+        )
+        self.assertEqual(payload['request']['lifecycle_version'], 2)
+        self.assertEqual(self.repo.get_job(self.scope, original['id']), original)
+
+    def test_legacy_registered_device_blocks_prelaunch_before_any_paid_apply(self):
+        from studio_platform.control import WorkerControl, WorkerSpec
+
+        self.enabled()
+        original = self.accepted()
+        self.repo.configure_capacity(max_instances=1, max_physical_gpus=1)
+        WorkerControl(self.repo).register(
+            WorkerSpec(
+                'legacy-worker',
+                'test-pool',
+                'lium',
+                'legacy-machine',
+                ('GPU-legacy',),
+                ('recipe',),
+                'model',
+                'config',
+            )
+        )
+        with patch.object(self.service, '_preview_for_owner') as planner:
+            self.assertEqual(
+                start_once(self.service),
+                dict(state='blocked', reason_code='capacity_limit'),
+            )
+            planner.assert_not_called()
+        self.assertEqual(self.client.applied, [])
+        self.assertEqual(self.repo.get_job(self.scope, original['id']), original)
+
     def setUp(self):
         super().setUp()
         original.DstackOperatorTests._setup_dstack(self)
@@ -336,8 +446,8 @@ class DemandStartTests(LedgerCase):
         with (
             patch.object(
                 self.service,
-                '_live_capacity_usage',
-                wraps=self.service._live_capacity_usage,
+                'prelaunch_capacity_usage',
+                wraps=self.service.prelaunch_capacity_usage,
             ) as live,
             patch.object(self.service, '_preview_for_owner') as planner,
         ):
@@ -410,7 +520,7 @@ class DemandStartTests(LedgerCase):
         ) as preview:
             first = start_once(self.service)
             self.assertEqual(first['state'], 'accepted')
-            with patch.object(self.service, '_live_capacity_usage') as live:
+            with patch.object(self.service, 'prelaunch_capacity_usage') as live:
                 self.assertEqual(start_once(self.service)['node_id'], first['node_id'])
                 live.assert_not_called()
             preview.assert_called_once()
@@ -510,7 +620,7 @@ class DemandStartTests(LedgerCase):
         ) as preview:
             self.assertEqual(start_once(self.service)['reason_code'], 'backoff')
             self.now += 120
-            with patch.object(self.service, '_live_capacity_usage') as live:
+            with patch.object(self.service, 'prelaunch_capacity_usage') as live:
                 self.assertEqual(start_once(self.service)['reason_code'], 'backoff')
                 live.assert_not_called()
             preview.assert_called_once()
@@ -529,7 +639,7 @@ class DemandStartTests(LedgerCase):
                 start_once(self.service)['reason_code'], 'allocation_uncertain'
             )
         frozen = copy.deepcopy(self.journal()['payload'])
-        with patch.object(self.service, '_live_capacity_usage') as live:
+        with patch.object(self.service, 'prelaunch_capacity_usage') as live:
             self.assertEqual(start_once(self.service)['reason_code'], 'backoff')
             live.assert_not_called()
         self.now += 80
