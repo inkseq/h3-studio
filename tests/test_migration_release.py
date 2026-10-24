@@ -791,6 +791,37 @@ class MigrationArtifacts(unittest.TestCase):
                 maintenance.installed_checker(self.artifact)
             importer.assert_not_called()
 
+    def test_193_compat_pairs_refuse_unlisted_commits_and_swapped_pairs(self):
+        # #193 Small: only the exact commit -> exact pair entries are trusted.
+        original = self.artifact / maintenance.MANIFEST
+        old = maintenance.RETAINED_DSTACK_HELPER_PAIRS[
+            '808e46744ac31a4e0cb57ae1307d4cb6bbd8b98b'
+        ]
+        new = maintenance.RETAINED_DSTACK_HELPER_PAIRS[
+            'f6c1972b904d6e0a4b9acccc405efb0d706c239e'
+        ]
+        for value, incoming in (
+            ({"commit": "1" * 40, "dstack": {}}, old),  # unlisted commit, old pair
+            ({"commit": "808e46744ac31a4e0cb57ae1307d4cb6bbd8b98b", "dstack": {}}, new),
+            ({"commit": "f6c1972b904d6e0a4b9acccc405efb0d706c239e", "dstack": {}}, old),
+            ({"commit": "808e46744ac3", "dstack": {}}, old),  # prefix only
+        ):
+            original.write_text(json.dumps(value))
+            with (
+                patch.object(release, "regular"),
+                patch.object(
+                    release, "checksum", side_effect=["a" * 64, "b" * 64, *incoming]
+                ),
+                patch.object(
+                    maintenance.importlib.util, "spec_from_file_location"
+                ) as importer,
+                self.assertRaisesRegex(
+                    release.ReleaseError, "helpers_need_reviewed_update"
+                ),
+            ):
+                maintenance.installed_checker(self.artifact)
+            importer.assert_not_called()
+
     def test_retained_current_previous_derivatives_use_only_exact_installed_checker_pairs(
         self,
     ):
@@ -822,9 +853,32 @@ class MigrationArtifacts(unittest.TestCase):
             '5676bd46e8b31dac36fb5b9758de4763114b84ca',
             '59d2ebefba0e98d677907c30b65144ac47681762',
             'f7b1db096099d0b3ad09736a95afffa57f9626c7',
+            '808e46744ac31a4e0cb57ae1307d4cb6bbd8b98b',
+            'd67a76b70777874e74623f480d7ffbea9e3d3b88',
+            'c08ea6d4595763195a3c9e15d428f93cf90e16c0',
+            'f6c1972b904d6e0a4b9acccc405efb0d706c239e',
         }
         self.assertEqual(
             set(maintenance.RETAINED_DSTACK_HELPER_PAIRS), expected_commits
+        )
+        old_pair = (
+            'd0d8eeff6a9d1d52d6357806382b17f7c3a6f0158776e7d4941ca1d30543c8eb',
+            'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b',
+        )
+        for commit in (
+            '808e46744ac31a4e0cb57ae1307d4cb6bbd8b98b',
+            'd67a76b70777874e74623f480d7ffbea9e3d3b88',
+            'c08ea6d4595763195a3c9e15d428f93cf90e16c0',
+        ):
+            self.assertEqual(maintenance.RETAINED_DSTACK_HELPER_PAIRS[commit], old_pair)
+        self.assertEqual(
+            maintenance.RETAINED_DSTACK_HELPER_PAIRS[
+                'f6c1972b904d6e0a4b9acccc405efb0d706c239e'
+            ],
+            (
+                'dde95072245c0d75714cfbc888e679d294d24cbd45952240e8382298fbee70c6',
+                '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a',
+            ),
         )
         for commit in (
             '7a24b5a99df4546f775224b83a890aeb53897734',
