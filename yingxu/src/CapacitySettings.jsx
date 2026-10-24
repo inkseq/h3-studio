@@ -45,15 +45,22 @@ function DailyStatus({ daily }) {
         minute: '2-digit',
       }).format(new Date(daily.resets_at * 1000))
     : null;
-  const tone = ['limit_reached', 'usage_unconfirmed'].includes(daily.status)
+  // The server can flag "warning" for unconfirmed supplier bills alone; only call it near the
+  // cap when spend really is near it (h3-studio#537), the bills note below covers the rest.
+  const near =
+    Number.isSafeInteger(daily.limit_microusd) && daily.limit_microusd > 0
+      ? (spent || 0) >= daily.limit_microusd * (daily.warning_fraction ?? 0.8)
+      : true;
+  const status = daily.status === 'warning' && !near ? 'within_limit' : daily.status;
+  const tone = ['limit_reached', 'usage_unconfirmed'].includes(status)
     ? 'bad'
-    : daily.status === 'warning'
+    : status === 'warning'
       ? 'warn'
       : 'ok';
   return (
     <section className={'cap-today ' + tone} aria-label={t('capacity.today')}>
       <div className="cap-today-head">
-        <strong>{t('capacity.today.' + daily.status)}</strong>
+        <strong>{t('capacity.today.' + status)}</strong>
         {resets && (
           <small>
             <Clock size={13} aria-hidden="true" /> {t('capacity.resets', { time: resets })}

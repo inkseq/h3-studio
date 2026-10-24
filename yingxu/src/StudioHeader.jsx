@@ -1,6 +1,14 @@
 import { setPreviewAsUser } from './preview-as-user.js';
 import React, { useEffect, useState } from 'react';
-import { Cpu, Images, LayoutGrid, MessageSquare, Settings2, Trash2 } from 'lucide-react';
+import {
+  Cpu,
+  Images,
+  LayoutGrid,
+  MessageSquare,
+  Settings2,
+  Trash2,
+  ShieldCheck,
+} from 'lucide-react';
 import { LanguageSwitcher, useI18n } from './i18n/I18nProvider.jsx';
 import { navigateApp } from './app-navigation.js';
 import { accountLabel, readAccess, readAccessFor } from './account-access.js';
@@ -74,6 +82,10 @@ export default function StudioHeader({
     ['library', '/library', 'library.title', Images],
     ...(access?.gpus || active === 'operator' ? [['operator', '/operator', 'v2.gpus', Cpu]] : []),
     ['settings', '/settings', 'settings.title', Settings2],
+    // One admin console (h3-studio#537), only for admins.
+    ...(access?.admin || active === 'admin'
+      ? [['admin', '/admin', 'adminHome.title', ShieldCheck]]
+      : []),
   ];
   // Port of prototype pages.jsx/AppHeader. Only navigation and account data differ.
   return (
