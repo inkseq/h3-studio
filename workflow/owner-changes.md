@@ -365,3 +365,32 @@ and removed from Quick Create without deleting the story, and that the Works lis
 defaults to newest first. Removing only hides the chat (`journey.storyChat.hidden`);
 continuing the story in the chat from Works brings it back with its messages. Source:
 direct owner message 2026-10-24.
+
+## CR-20261024-59 — generous capacity, warning-only supplier uncertainty, provider qualification
+
+Owner's direct instruction and [#193/6380342993](https://github.com/inkseq/h3-studio/issues/193#issuecomment-6380342993)
+supersede CR53's earlier operating defaults and the conservative A1 review conditions.
+Explicit audited adoption targets fleet USD15/hour, a hard maximum of10 running or
+starting machines, REF USD3/hour per machine, and the existing USD100/day supplier
+ceiling. Keep per-machine max_price and idle stop. Unresolved supplier references
+remain visible warnings and never independently prevent new admission; only
+confirmed supplier exposure can reach the daily ceiling. Do not invent invoices,
+zero unknown costs, delete evidence or replay settlements. Snapshot settings and
+profile versions before adoption. One quick staging adopt/read-back precedes
+same-day production activation; the read-only classification is not a gate.
+
+Widen ordinary queue, per-owner request and transient-admission retry limits by a
+large margin, retaining protection against extreme anomalies. This does not waive
+authentication, ownership, CAS, idempotency, immutable accepted work or the separate
+USD20 test-task budget. Never stop, restart or modify supervan's production machines
+or jobs. Production charging and LIVE Checkout remain OFF.
+
+Per [#517/6380346694](https://github.com/inkseq/h3-studio/issues/517#issuecomment-6380346694),
+B1's stock-pinned dstack0.22.3 to0.22.5 upgrade starts alongside A2. Stage it and run
+one Vast cold cycle as the regression check, then qualify RunPod, Lium and CloudRift
+on staging under USD20 per item. Each test rental retains max_price, idle stop,
+maximum runtime and stop-at-completion. Reuse existing protected provider profiles;
+missing/new credentials, provider accounts or budget overruns still require owner
+action. Production enablement of each new provider remains a separate decision.
+Keep Tier2 independent safety review and exact-artifact receipts; no new service,
+queue or financial repair is implied. Source: direct owner instruction2026-10-24.

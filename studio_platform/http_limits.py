@@ -39,14 +39,14 @@ class RequestAdmission:
     def __init__(
         self,
         *,
-        total=32,
+        total=256,
         authentication=8,
         login=2,
-        per_owner=8,
-        downloads=4,
-        downloads_per_owner=2,
-        thumbnails=8,
-        thumbnails_per_owner=8,
+        per_owner=64,
+        downloads=32,
+        downloads_per_owner=16,
+        thumbnails=64,
+        thumbnails_per_owner=32,
     ):
         values = (
             total,

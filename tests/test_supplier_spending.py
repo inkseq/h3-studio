@@ -164,7 +164,7 @@ class SupplierSpendingTests(LedgerCase):
         self.rental(200_000, identity='same')
         self.rental(300_000, identity='same')
         value = self.read()
-        self.assertEqual(value['status'], 'usage_unconfirmed')
+        self.assertEqual(value['status'], 'warning')
         self.assertIsNone(value['projected_microusd'])
         self.assertEqual(value['details'][0]['code'], 'supplier_reference_conflict')
 
@@ -202,7 +202,7 @@ class SupplierSpendingTests(LedgerCase):
                     value['resets_at'] - value['period_start'], hours * 3600
                 )
 
-    def test_conflicting_actual_or_missing_timestamp_blocks_next_admission(self):
+    def test_conflicting_actual_or_missing_timestamp_warns_without_blocking(self):
         self.layer('shared')
         ref = self.rental(
             500_000,
@@ -221,17 +221,27 @@ class SupplierSpendingTests(LedgerCase):
                 .values(actual_cost_microusd=200_000)
             )
         value = self.read()
-        self.assertEqual(value['status'], 'usage_unconfirmed')
-        with (
-            self.repo.transaction() as c,
-            self.assertRaisesRegex(BudgetExceeded, 'tenant_daily_usage_unconfirmed'),
-        ):
+        self.assertEqual(value['status'], 'warning')
+        self.assertTrue(value['uncertainty_warning'])
+        self.assertFalse(value['admission_blocked'])
+        self.assertIsNone(value['projected_microusd'])
+        with self.repo.transaction() as c:
+            before = [
+                dict(row) for row in c.execute(select(budget_reservations)).mappings()
+            ]
             admit(
                 c,
                 self.scope.tenant_id,
                 self.now,
                 reference_type='instance',
                 additional_microusd=1,
+            )
+            self.assertEqual(
+                before,
+                [
+                    dict(row)
+                    for row in c.execute(select(budget_reservations)).mappings()
+                ],
             )
         with self.repo.transaction() as c:
             c.execute(
@@ -257,6 +267,66 @@ class SupplierSpendingTests(LedgerCase):
         self.assertEqual(value['details'][0]['code'], 'external_obligation_unconfirmed')
         self.assertIsNone(value['projected_microusd'])
         self.assertEqual(value['confirmed_exposure_microusd'], 0)
+
+    def test_confirmed_cap_takes_precedence_over_unknown_warning(self):
+        unknown = self.rental(700_000, state='settled', actual=500_000)
+        confirmed = self.rental(900_000)
+        value = self.read()
+        self.assertTrue(value['uncertainty_warning'])
+        self.assertIsNone(value['projected_microusd'])
+        self.assertEqual(value['confirmed_exposure_microusd'], 900_000)
+        self.assertFalse(value['admission_blocked'])
+        with self.repo.transaction() as c:
+            original = [
+                dict(row) for row in c.execute(select(budget_reservations)).mappings()
+            ]
+            admit(
+                c,
+                self.scope.tenant_id,
+                self.now,
+                reference_type='instance',
+                additional_microusd=100_000,
+            )
+            with self.assertRaisesRegex(BudgetExceeded, 'tenant_daily_limit_reached'):
+                admit(
+                    c,
+                    self.scope.tenant_id,
+                    self.now,
+                    reference_type='instance',
+                    additional_microusd=100_001,
+                )
+            self.assertEqual(
+                original,
+                [
+                    dict(row)
+                    for row in c.execute(select(budget_reservations)).mappings()
+                ],
+            )
+        self.rental(100_000)
+        value = self.read()
+        self.assertEqual(value['status'], 'limit_reached')
+        self.assertTrue(value['admission_blocked'])
+        self.assertTrue(value['uncertainty_warning'])
+        self.assertIsNone(value['projected_microusd'])
+        with self.repo.transaction() as c:
+            with self.assertRaisesRegex(BudgetExceeded, 'tenant_daily_limit_reached'):
+                admit(c, self.scope.tenant_id, self.now, reference_type='instance')
+            self.assertEqual(
+                c.execute(
+                    select(budget_reservations.c.settled_at).where(
+                        budget_reservations.c.reference_id == unknown
+                    )
+                ).scalar_one(),
+                None,
+            )
+            self.assertEqual(
+                c.execute(
+                    select(budget_reservations.c.state).where(
+                        budget_reservations.c.reference_id == confirmed
+                    )
+                ).scalar_one(),
+                'reserved',
+            )
 
     def test_missing_intent_and_foreign_tenant_reference_refuse_attribution(self):
         ref = self.rental()
@@ -413,7 +483,7 @@ class SupplierSpendingTests(LedgerCase):
                 .values(payload=payload)
             )
         value = self.read()
-        self.assertEqual(value['status'], 'usage_unconfirmed')
+        self.assertEqual(value['status'], 'warning')
         self.assertEqual(value['details'][0]['field'], 'test_gpu_guard')
 
     def test_free_cpu_job_and_existing_rental_settlement_are_not_rejected(self):
@@ -537,23 +607,30 @@ class SupplierSpendingTests(LedgerCase):
                 ).status_code,
                 200,
             )
-            for code in (
-                'tenant_daily_limit_reached',
-                'tenant_daily_usage_unconfirmed',
-            ):
-                response = client.post('/_test/paid-admission')
-                self.assertEqual(response.status_code, 429)
-                self.assertEqual(response.json(), {'code': code})
-                self.assertEqual(response.headers['Cache-Control'], 'no-store')
-                with self.repo.transaction() as c:
-                    c.execute(
-                        update(budget_reservations)
-                        .where(budget_reservations.c.reference_id == ref)
-                        .values(state='unknown')
-                    )
+            response = client.post('/_test/paid-admission')
+            self.assertEqual(response.status_code, 429)
+            self.assertEqual(response.json(), {'code': 'tenant_daily_limit_reached'})
+            self.assertEqual(response.headers['Cache-Control'], 'no-store')
+            with self.repo.transaction() as c:
+                c.execute(
+                    update(budget_reservations)
+                    .where(budget_reservations.c.reference_id == ref)
+                    .values(state='unknown')
+                )
+            response = client.post('/_test/paid-admission')
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertTrue(self.read()['uncertainty_warning'])
             self.assertEqual(client.post('/api/auth/logout').status_code, 200)
         with self.repo.engine.connect() as c:
-            self.assertEqual(list(c.execute(select(jobs))), [])
+            self.assertEqual(len(list(c.execute(select(jobs)))), 1)
+            self.assertEqual(
+                c.execute(
+                    select(budget_reservations.c.state).where(
+                        budget_reservations.c.reference_id == ref
+                    )
+                ).scalar_one(),
+                'unknown',
+            )
 
     def test_cross_owner_machine_admission_and_reservation_are_atomic(self):
         self.repo.configure_pool('gpu', max_instances=10, max_physical_gpus=10)
