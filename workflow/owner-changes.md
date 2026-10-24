@@ -512,3 +512,16 @@ Owner product directions, same day: the story list collapses to an icon rail whe
 dragged narrow; item menus are plain rows; an open tab offers "Refresh" when a
 newer build is served. Production promotion still requires Claude's staging
 acceptance of the exact candidate; charging and LIVE Checkout stay OFF.
+
+## CR-20261025-64 — long shots with live engine progress are not reclaimed at 2× expected
+
+Production evidence, 2026-10-25: job bbee9b98 is a 15 s 1344×768 REF take (362 frames).
+It ran past 60 min at full GPU with fresh engine heartbeats, and attempt 12 was
+stopped by the runtime bound while it was still generating. Claude, as the
+current owner of the flow, refines CR-62's timeout rule:
+- silence (no positive engine heartbeat for 10 min) is still reclaimed at once;
+- without a fresh heartbeat, the original `max(2 × expected, 30 min)` bound applies;
+- with a fresh heartbeat, a run may continue up to a hard 3 h ceiling.
+
+The reclaim limits (max 2 automatic reclaims, fenced old attempts, charge once)
+are unchanged.
