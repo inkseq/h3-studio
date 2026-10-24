@@ -109,7 +109,58 @@ ERROR_CODES = (
         }
     )
 )
-_LABEL_FIELDS = ("stage", "provider", "profile_id", "mode", "gpu_type", "warmth")
+_LABEL_FIELDS = (
+    "stage",
+    "provider",
+    "profile_id",
+    "mode",
+    "gpu_type",
+    "warmth",
+    "length",
+    "resolution",
+    "image_refs_band",
+    "audio_ref",
+)
+# Content bands label only the stages whose time depends on the video itself; other
+# stages read "any" so the metric series stay few (owner, 2026-10-25).
+_CONTENT_STAGES = frozenset({"generate", "end_to_end", "collect", "validate_output"})
+_CONTENT_FIELDS = ("length", "resolution", "image_refs_band", "audio_ref")
+
+
+def _bands(result):
+    frames, fps, height = result.get("frames"), result.get("fps"), result.get("height")
+    seconds = frames / fps if frames and fps else None
+    images, audios = result.get("image_refs"), result.get("audio_refs")
+    return {
+        "length": "unknown"
+        if seconds is None
+        else "le5s"
+        if seconds <= 5.5
+        else "5-8s"
+        if seconds <= 8.5
+        else "8-12s"
+        if seconds <= 12.5
+        else "gt12s",
+        "resolution": "unknown"
+        if not height
+        else "le480"
+        if height <= 480
+        else "le720"
+        if height <= 720
+        else "gt720",
+        "image_refs_band": "unknown"
+        if images is None
+        else "0"
+        if images == 0
+        else "1-2"
+        if images <= 2
+        else "3-5"
+        if images <= 5
+        else "6+",
+        "audio_ref": "unknown" if audios is None else "yes" if audios else "no",
+    }
+
+
 _UUID = re.compile(
     r"(?:[a-z]+-)?(?:[0-9a-f]{32}|[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})\Z"
 )
@@ -503,13 +554,19 @@ class StageTelemetry(NullTelemetry):
             pass
 
     def _labels(self, stage, context, outcome=None):
-        labels = {"stage": stage, **{name: context[name] for name in _LABEL_FIELDS[1:]}}
+        labels = {
+            "stage": stage,
+            **{name: context[name] for name in _LABEL_FIELDS[1:6]},
+        }
+        bands = _bands(context)
+        for name in _CONTENT_FIELDS:
+            labels[name] = bands[name] if stage in _CONTENT_STAGES else "any"
         if outcome is not None:
             labels["outcome"] = outcome
         identity = tuple(sorted(labels.items()))
         with self._lock:
             if identity not in self._labelsets:
-                if len(self._labelsets) >= 128:
+                if len(self._labelsets) >= 512:
                     return {name: "unknown" for name in labels}
                 self._labelsets.add(identity)
         return labels
