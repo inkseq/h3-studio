@@ -79,6 +79,12 @@ RETAINED_DSTACK_HELPER_PAIRS = {
     '5676bd46e8b31dac36fb5b9758de4763114b84ca': ('719d8d3f83fdcd687d06d343f4076db117c675de607f2e46e61d2b65da5db8b3', 'fba8d75a6845fe2fe7c78ea120747797b2f57ec80e0c6bc4861a0f6bfda54790'),
     '59d2ebefba0e98d677907c30b65144ac47681762': ('719d8d3f83fdcd687d06d343f4076db117c675de607f2e46e61d2b65da5db8b3', 'fba8d75a6845fe2fe7c78ea120747797b2f57ec80e0c6bc4861a0f6bfda54790'),
     'f7b1db096099d0b3ad09736a95afffa57f9626c7': ('719d8d3f83fdcd687d06d343f4076db117c675de607f2e46e61d2b65da5db8b3', 'fba8d75a6845fe2fe7c78ea120747797b2f57ec80e0c6bc4861a0f6bfda54790'),
+    # #193 helper compatibility (Small): staging current 808e/rollback d67a and
+    # production current c08e carry the pre-#540 pair; f6 is the held #540 candidate.
+    '808e46744ac31a4e0cb57ae1307d4cb6bbd8b98b': ('d0d8eeff6a9d1d52d6357806382b17f7c3a6f0158776e7d4941ca1d30543c8eb', 'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b'),
+    'd67a76b70777874e74623f480d7ffbea9e3d3b88': ('d0d8eeff6a9d1d52d6357806382b17f7c3a6f0158776e7d4941ca1d30543c8eb', 'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b'),
+    'c08ea6d4595763195a3c9e15d428f93cf90e16c0': ('d0d8eeff6a9d1d52d6357806382b17f7c3a6f0158776e7d4941ca1d30543c8eb', 'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b'),
+    'f6c1972b904d6e0a4b9acccc405efb0d706c239e': ('dde95072245c0d75714cfbc888e679d294d24cbd45952240e8382298fbee70c6', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
 }
 LEGACY_HELPER_PAIRS.update(RETAINED_DSTACK_HELPER_PAIRS)
 # Closed stock tuples: current build and the exact retained rollback only.
