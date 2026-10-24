@@ -103,21 +103,47 @@ class ProgressTests(LedgerCase):
                 "capacity_progress": {
                     "attempt_id": "a",
                     "kind": "engine_running",
-                    "at": 4999,
+                    "at": 1000,
                 }
             },
         }
         attempt = {"id": "a", "submission_started_at": 1000}
-        self.assertIsNone(timeout_reason(job, attempt, 4999))
-        self.assertIsNone(timeout_reason(job, attempt, 5000))
+        # No positive heartbeat since the start: the owner's 2x expected rule applies.
+        self.assertIsNone(timeout_reason(job, attempt, 1599))
         self.assertEqual(
-            timeout_reason(job, attempt, 5001)[0], "capacity_runtime_exceeded"
+            timeout_reason(job, attempt, 5001, no_progress_seconds=10**6)[0],
+            "capacity_runtime_exceeded",
         )
         job["expected_runtime_s"] = 10
-        job["result"]["capacity_progress"]["at"] = 2800
-        self.assertIsNone(timeout_reason(job, attempt, 2800))
+        self.assertIsNone(timeout_reason(job, attempt, 2800, no_progress_seconds=10**6))
         self.assertEqual(
-            timeout_reason(job, attempt, 2801)[0], "capacity_runtime_exceeded"
+            timeout_reason(job, attempt, 2801, no_progress_seconds=10**6)[0],
+            "capacity_runtime_exceeded",
+        )
+
+    def test_fresh_engine_heartbeat_extends_runtime_to_the_hard_ceiling(self):
+        # #193 2026-10-25: a long REF shot kept generating past 2x expected.
+        job = {
+            "expected_runtime_s": 1800,
+            "result": {
+                "capacity_progress": {
+                    "attempt_id": "a",
+                    "kind": "engine_running",
+                    "at": 1000 + 5000,
+                }
+            },
+        }
+        attempt = {"id": "a", "submission_started_at": 1000}
+        self.assertIsNone(timeout_reason(job, attempt, 1000 + 5100))
+        job["result"]["capacity_progress"]["at"] = 1000 + 10790
+        self.assertIsNone(timeout_reason(job, attempt, 1000 + 10800))
+        self.assertEqual(
+            timeout_reason(job, attempt, 1000 + 10801)[0], "capacity_runtime_exceeded"
+        )
+        # A stale heartbeat falls back to silence detection and the 2x rule.
+        job["result"]["capacity_progress"]["at"] = 1000 + 3000
+        self.assertEqual(
+            timeout_reason(job, attempt, 1000 + 3700)[0], "capacity_runtime_exceeded"
         )
 
     def test_progress_for_another_attempt_or_future_clock_is_ignored(self):

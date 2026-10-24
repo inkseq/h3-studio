@@ -44,7 +44,13 @@ def record_engine_progress(repo, queue, lease):
 
 
 def timeout_reason(
-    job, attempt, now, *, no_progress_seconds=600, runtime_floor_seconds=1800
+    job,
+    attempt,
+    now,
+    *,
+    no_progress_seconds=600,
+    runtime_floor_seconds=1800,
+    runtime_ceiling_seconds=10800,
 ):
     started = attempt.get("submission_started_at")
     if not _number(started) or started > now:
@@ -61,7 +67,13 @@ def timeout_reason(
         and started <= progress["at"] <= now
     ):
         last = progress["at"]
-    if now - started > max(2 * expected, runtime_floor_seconds):
+    limit = max(2 * expected, runtime_floor_seconds)
+    if last > started and now - last < no_progress_seconds:
+        # A long shot that keeps reporting engine progress is working, not lost: a
+        # 15 s 1344x768 REF take ran past 60 min at full GPU (#193, 2026-10-25).
+        # It still stops at the hard ceiling; silence is caught below.
+        limit = max(limit, runtime_ceiling_seconds)
+    if now - started > limit:
         return "capacity_runtime_exceeded", last
     if now - last >= no_progress_seconds:
         return "capacity_no_progress", last
