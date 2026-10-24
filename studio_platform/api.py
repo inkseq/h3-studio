@@ -1605,6 +1605,9 @@ def create_app(
     from .operator_jobs import register_routes as register_operator_jobs
 
     register_operator_jobs(app)
+    from .generation_stats import register_routes as register_generation_stats
+
+    register_generation_stats(app)
     from .operator_host_routes import register_routes as register_operator_host_routes
 
     register_operator_host_routes(app)
