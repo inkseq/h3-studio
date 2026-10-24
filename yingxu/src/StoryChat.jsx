@@ -1,16 +1,25 @@
 import React, { useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { FloatingMessage } from './floating-notice.js';
 import {
   ArrowUp,
   Check,
   Film,
   ImagePlus,
   MessageSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Paperclip,
   Plus,
   Sparkles,
+  Undo2,
   X,
 } from 'lucide-react';
 import StudioHeader from './StudioHeader.jsx';
+import ItemMenu from './ItemMenu.jsx';
+import { StoryboardSplitter, useStoryboardPanelSize } from './StoryboardPanels.jsx';
+import { RenameDialog } from './UniversalTrash.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { navigateApp } from './app-navigation.js';
 import {
@@ -27,6 +36,7 @@ import { createLiveChat } from './story-chat-client.js';
 import { createCloudClient } from './cloud-client.js';
 import { agentLinkSearch } from './agent-navigation.js';
 import './story-chat.css';
+import { track } from './analytics.js';
 
 function reducer(state, action) {
   if (action.type === 'edit') return editCard(state, action.id, action.patch);
@@ -308,11 +318,7 @@ function Board({ state, fresh, openId, onOpen, onWorks, notice }) {
           {t('storyChat.openWorks')}
         </button>
       </div>
-      {notice && (
-        <p className="sc-notice" role="status">
-          {notice}
-        </p>
-      )}
+      <FloatingMessage tone="info" text={notice ? notice : null} />
       {CARD_GROUPS.filter((group) => group.kind !== 'shot').map((group) =>
         groups[group.kind].length ? (
           <section key={group.kind} className="sc-group">
@@ -397,6 +403,24 @@ const openInWorks = (projectId, entityId) => {
 };
 
 // mode 'preview' uses sample replies; 'live' talks to /v1/story-chats (#422).
+// A remembered on/off switch for a panel; private browsing or full storage just forgets.
+function useRemembered(key, initial) {
+  const [value, setValue] = useState(() => {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw === null ? initial : raw === '1';
+    } catch {
+      return initial;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, value ? '1' : '0');
+    } catch {}
+  }, [key, value]);
+  return [value, setValue];
+}
+
 export default function StoryChat({ account, mode = 'preview', projectId = null }) {
   const { t, locale } = useI18n();
   const live = mode === 'live';
@@ -449,6 +473,20 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
   const [files, setFiles] = useState([]);
   const [tab, setTab] = useState('chat');
   const [openId, setOpenId] = useState(null);
+  // Desktop layout (owner, 2026-10-24): drag the story list and the card panel wider or
+  // narrower, or fold either away; phones keep the tabs.
+  const sideSize = useStoryboardPanelSize('story-chat-stories', 220, 160, 380),
+    boardSize = useStoryboardPanelSize('story-chat-board', 620, 320, 1200);
+  const [sideOpen, setSideOpen] = useRemembered('inkseq.storyChat.sideOpen', true),
+    [boardOpen, setBoardOpen] = useRemembered('inkseq.storyChat.boardOpen', true);
+  const [renaming, setRenaming] = useState(null);
+  // A chat is one Works story; renaming renames the story, removing only takes the chat
+  // out of this list (the story stays in Works and comes back when continued there).
+  const updateChat = async (ident, body) => {
+    await api.request(`/v1/story-chats/${encodeURIComponent(ident)}`, { method: 'PATCH', body });
+    refreshStories();
+    if (body.hidden && ident === story.current) openStory(null);
+  };
   const [fresh, setFresh] = useState([]);
   const [notice, setNotice] = useState('');
   const chat = useRef(null);
@@ -565,6 +603,7 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
     const message = value.trim();
     if ((!message && !files.length) || state.busy || unavailable) return;
     chat.current.send({ text: message, attachments: files }, emit);
+    track('story_chat_message', { live, attachments: files.length });
     setText('');
     setFiles([]);
     setTab('chat');
@@ -633,7 +672,16 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
           {t('storyChat.tabCards', { count: state.cards.length })}
         </button>
       </div>
-      <main className={'sc tab-' + tab + (stories ? ' with-stories' : '')}>
+      <main
+        className={
+          'sc tab-' +
+          tab +
+          (stories ? ' with-stories' : '') +
+          (sideOpen ? '' : ' side-closed') +
+          (boardOpen ? '' : ' board-closed')
+        }
+        style={{ '--sc-side': sideSize.size + 'px', '--sc-board': boardSize.size + 'px' }}
+      >
         {stories && (
           <nav className="sc-stories" aria-label={t('storyChat.myStories')}>
             <button className="sc-new-story keep-label" onClick={() => openStory(null)}>
@@ -652,22 +700,74 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
                     <span>{item.title}</span>
                     <small>{whenText(item.updated_at, locale)}</small>
                   </button>
+                  <ItemMenu label={t('storyChat.chatMenu')}>
+                    {(close) => (
+                      <>
+                        <button
+                          role="menuitem"
+                          onClick={() => {
+                            close();
+                            setRenaming(item);
+                          }}
+                        >
+                          {t('storyChat.renameChat')}
+                        </button>
+                        <button
+                          role="menuitem"
+                          title={t('storyChat.removeChatHelp')}
+                          onClick={() => {
+                            close();
+                            void updateChat(item.project_id, { hidden: true }).catch(() => {});
+                          }}
+                        >
+                          {t('storyChat.removeChat')}
+                        </button>
+                      </>
+                    )}
+                  </ItemMenu>
                 </li>
               ))}
             </ul>
-            <a
-              className="sc-direct-link"
-              href="/quick-chat?mode=direct"
-              onClick={(event) => {
-                event.preventDefault();
-                navigateApp('/quick-chat?mode=direct');
-              }}
-            >
-              {t('storyChat.directMode')}
-            </a>
+            {renaming && (
+              <RenameDialog
+                title={renaming.title}
+                onSave={(title) => updateChat(renaming.project_id, { title: title.trim() })}
+                onClose={() => setRenaming(null)}
+              />
+            )}
           </nav>
         )}
+        {stories && sideOpen && (
+          <StoryboardSplitter
+            panel={sideSize}
+            className="sc-split"
+            label={t('storyChat.resizeStories')}
+            title={t('storyChat.resizeHelp')}
+          />
+        )}
         <section className="sc-chat" aria-label={t('storyChat.tabChat')}>
+          <div className="sc-panel-toggles">
+            {stories && (
+              <button
+                type="button"
+                className="sc-icon"
+                aria-label={t(sideOpen ? 'storyChat.hideStories' : 'storyChat.showStories')}
+                title={t(sideOpen ? 'storyChat.hideStories' : 'storyChat.showStories')}
+                onClick={() => setSideOpen((v) => !v)}
+              >
+                {sideOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
+              </button>
+            )}
+            <button
+              type="button"
+              className="sc-icon"
+              aria-label={t(boardOpen ? 'storyChat.hideCards' : 'storyChat.showCards')}
+              title={t(boardOpen ? 'storyChat.hideCards' : 'storyChat.showCards')}
+              onClick={() => setBoardOpen((v) => !v)}
+            >
+              {boardOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+            </button>
+          </div>
           <div className="sc-thread" ref={thread}>
             {!state.messages.length && (
               <div className="sc-welcome">
@@ -719,6 +819,25 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
               return (
                 <div key={message.id} className="sc-msg assistant">
                   <p>{message.text}</p>
+                  {live &&
+                    message === lastAssistant &&
+                    !state.busy &&
+                    state.undoTurnId &&
+                    message.turnId === state.undoTurnId && (
+                      <button
+                        type="button"
+                        className="sc-undo linkish"
+                        onClick={() =>
+                          void chat.current.undo(state.undoTurnId, emit).then((ok) => {
+                            setNotice(t(ok ? 'storyChat.undone' : 'storyChat.undoStale'));
+                            refreshStories();
+                          })
+                        }
+                      >
+                        <Undo2 size={13} aria-hidden="true" />
+                        {t('storyChat.undo')}
+                      </button>
+                    )}
                   {message === lastAssistant &&
                     !state.busy &&
                     !proposalShown &&
@@ -828,6 +947,15 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
             </div>
           </form>
         </section>
+        {boardOpen && (
+          <StoryboardSplitter
+            panel={boardSize}
+            sign={-1}
+            className="sc-split"
+            label={t('storyChat.resizeCards')}
+            title={t('storyChat.resizeHelp')}
+          />
+        )}
         <section
           className="sc-board"
           aria-label={t('storyChat.tabCards', { count: state.cards.length })}

@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import { usePageActive } from './AppRouteCache.jsx';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -215,16 +216,8 @@ export default function OperatorJobsPanel({ controller, state, busy = false }) {
           {loading ? t('operator.status70') : t('operator.status71')}
         </button>
       </header>
-      {notice && (
-        <p role="status" className="p4-note">
-          {notice}
-        </p>
-      )}
-      {error && (
-        <p role="alert" className="p4-error">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="info" text={notice ? notice : null} />
+      <FloatingMessage tone="error" text={error ? error : null} />
       {value ? (
         <>
           {jobs.length ? (

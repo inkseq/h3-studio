@@ -1,4 +1,5 @@
 import StudioHeader from './StudioHeader.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import { MenuItem } from './AccountMenu.jsx';
 import { readBrowserLocale, translate } from './i18n/locale.js';
 import { LanguageSwitcher, useI18n } from './i18n/I18nProvider.jsx';
@@ -968,11 +969,7 @@ function StartDialog({
           <small>{t('operator.copy77')}</small>
         </div>
       )}
-      {error && (
-        <p className="p4-error" role="alert">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={error ? error : null} />
       <footer>
         <small>{t('operator.copy78')}</small>
         <div>
@@ -1043,11 +1040,7 @@ function KeepDialog({ target, kind, controller, busy, onClose }) {
         {t('operator.more.protections')}
       </p>
       {receipt && <ActionResults receipt={receipt} />}{' '}
-      {error && (
-        <p className="p4-error" role="alert">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={error ? error : null} />
       <footer>
         <span />
         <div>
@@ -1150,11 +1143,7 @@ function StopDialog({ target, kind, controller, busy, onClose }) {
         </div>
       ))}
       {receipt && <ActionResults receipt={receipt} />}{' '}
-      {error && (
-        <p className="p4-error" role="alert">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={error ? error : null} />
       <p className="p4-note">{t('operator.copy83')}</p>
       <footer>
         <span />
@@ -1397,11 +1386,7 @@ function MoveDialog({ node, groups, controller, busy, onClose }) {
         </select>
       </label>
       <p className="p4-note">{t('operator.copy99')}</p>
-      {error && (
-        <p className="p4-error" role="alert">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={error ? error : null} />
       <footer>
         <span />
         <button

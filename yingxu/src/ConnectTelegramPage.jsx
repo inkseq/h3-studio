@@ -3,7 +3,7 @@ import StudioHeader from './StudioHeader.jsx';
 import AssistantConnections from './AssistantConnections.jsx';
 import { useCredits } from './CreditsUI.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
-import { Login } from './QuickChatWorkspace.jsx';
+import { Login } from './LoginDialog.jsx';
 import { validTelegramNonce } from './TelegramLink.jsx';
 
 // Bot-first linking (h3-studio#382): the bot's /link opens this page. The owner signs in,

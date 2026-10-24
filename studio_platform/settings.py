@@ -135,8 +135,14 @@ class Settings:
     story_chat_enabled: bool = False
     public_origin_aliases: tuple[str, ...] = ()
     account_deletion_test_owners: tuple[str, ...] = ()
+    sentry_dsn: str = ""
+    # Internal derivation only; there is no independently overridable Sentry
+    # environment. Unlike the legacy deployment default, unset means no send.
+    sentry_environment: str = ""
 
     def __post_init__(self):
+        from .error_monitoring import valid_dsn
+
         if (
             not isinstance(self.account_deletion_test_owners, tuple)
             or len(self.account_deletion_test_owners) > 20
@@ -148,6 +154,14 @@ class Settings:
             raise ValueError("Invalid disposable account deletion fixtures")
         if self.deployment_target not in {"production", "staging"}:
             raise ValueError("Unsupported deployment target")
+        if (
+            not valid_dsn(self.sentry_dsn)
+            or type(self.sentry_environment) is not str
+            or self.sentry_environment not in {"", "staging", "production"}
+            or self.sentry_environment
+            and self.sentry_environment != self.deployment_target
+        ):
+            raise ValueError("Invalid API error monitoring configuration")
         if self.stripe_mode not in {"off", "test", "live"}:
             raise ValueError("Unsupported Stripe mode")
         if self.stripe_config_file is not None:
@@ -380,6 +394,8 @@ class Settings:
             database_url=database_url_from_environment(),
             public_origin=public_origin_from_environment(),
             deployment_target=os.environ.get("INKSEQ_DEPLOYMENT_TARGET", "production"),
+            sentry_dsn=os.environ.get("INKSEQ_SENTRY_DSN", ""),
+            sentry_environment=os.environ.get("INKSEQ_DEPLOYMENT_TARGET", ""),
             account_deletion_test_owners=tuple(
                 filter(
                     None,

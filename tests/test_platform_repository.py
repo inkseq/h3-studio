@@ -100,6 +100,91 @@ class LedgerCase(unittest.TestCase):
 
 
 class RepositoryTests(LedgerCase):
+    def test_hidden_story_chat_filter_is_typed_scoped_and_before_pagination(self):
+        scope = Scope(self.scope.tenant_id, self.scope.owner_id, "__projects")
+
+        def put(ident, chat, *, owner=scope, **extra):
+            self.now += 1
+            return self.repo.put_document(
+                owner,
+                "project",
+                ident,
+                {"title": ident, "journey": {"storyChat": chat}, **extra},
+            )
+
+        visible = []
+        for name, extra in (
+            ("missing", {}),
+            ("false", {"hidden": False}),
+            ("null", {"hidden": None}),
+            ("string", {"hidden": "true"}),
+            ("number", {"hidden": 1}),
+            ("object", {"hidden": {}}),
+            ("array", {"hidden": []}),
+        ):
+            ident = "chat-" + name
+            put(ident, {"version": 1, **extra})
+            visible.insert(0, ident)
+        hidden = put(
+            "chat-hidden",
+            {"version": 1, "hidden": True, "messages": [{"text": "Keep me"}]},
+        )
+        for name, marker in (("bool", True), ("string", "1"), ("null", None)):
+            put("invalid-" + name, {"version": marker})
+        put("managed", {"version": 1}, integration_kind="quick_chat")
+        put("deleted", {"version": 1}, content_deleted=True)
+        put(
+            "other-owner",
+            {"version": 1},
+            owner=Scope(scope.tenant_id, self.other.owner_id, scope.project_id),
+        )
+        put(
+            "other-tenant",
+            {"version": 1},
+            owner=Scope("another-tenant", scope.owner_id, scope.project_id),
+        )
+
+        def listed(**kwargs):
+            return self.repo.list_documents(
+                scope,
+                "project",
+                story_chat=True,
+                exclude_managed=True,
+                **kwargs,
+            )
+
+        self.assertEqual([r["document_id"] for r in listed()], visible)
+        page = listed(limit=2, offset=1, summary=True)
+        self.assertEqual([r["document_id"] for r in page], visible[1:3])
+        self.assertEqual(page[0]["payload"], {"title": visible[1]})
+        self.assertEqual(
+            [
+                r["document_id"]
+                for r in listed(allowed_ids=["chat-hidden", "chat-null"])
+            ],
+            ["chat-null"],
+        )
+        # Hidden is only a chat-list preference; Works still owns the original story.
+        works = self.repo.list_documents(scope, "project", exclude_managed=True)
+        self.assertIn("chat-hidden", [r["document_id"] for r in works])
+        reopened = hidden["payload"]
+        del reopened["journey"]["storyChat"]["hidden"]
+        self.now += 1
+        self.repo.put_document(
+            scope,
+            "project",
+            "chat-hidden",
+            reopened,
+            expected_version=hidden["version"],
+        )
+        self.assertEqual(listed(limit=1)[0]["document_id"], "chat-hidden")
+        self.assertEqual(
+            self.repo.get_document(scope, "project", "chat-hidden")["payload"][
+                "journey"
+            ]["storyChat"]["messages"],
+            [{"text": "Keep me"}],
+        )
+
     def test_100_large_job_summaries_preserve_public_protocol_without_full_snapshots(
         self,
     ):

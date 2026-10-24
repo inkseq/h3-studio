@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import React, { useState } from 'react';
 import { store } from './store.js';
 import { storyboardPrompt, promptDraftPatch, restorePromptPatch } from './shot-prompt.js';
@@ -121,11 +122,7 @@ export default function ShotPromptDraft({ project, shot }) {
           {current !== previous.applied && <p>{at('adjunct.shotPromptDraft.copy167')}</p>}
         </details>
       )}
-      {error && (
-        <p className="cloud-error" role="alert">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={error ? error : null} />
     </details>
   );
 }

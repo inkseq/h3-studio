@@ -73,8 +73,9 @@ export function hostedSignInUrl(returnTo = '/', hint) {
 }
 
 // Links hosted sign-in to the signed-in password account; same return_to rules as above.
+// Opens the sign-in screen: linking never needs the sign-up form's name fields.
 export function hostedLinkUrl(returnTo = '/settings') {
-  return hostedSignInUrl(returnTo) + '&link=1';
+  return hostedSignInUrl(returnTo, 'sign-in') + '&link=1';
 }
 
 // After sign-out the server may return the hosted provider's logout page, which ends the

@@ -1,42 +1,22 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import InkLoader from './InkLoader.jsx';
-import { createCloudClient } from './cloud-client.js';
+import { navigateApp } from './app-navigation.js';
+import { useCloud } from './CloudStudio.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
 
 const StoryChat = React.lazy(() => import('./StoryChat.jsx'));
 
-// Quick Create's front door (#422): the chat story builder when the server has it switched
-// on and ready, otherwise the original direct Quick Create. ?mode=direct keeps the original.
-let checked = null;
-function storyChatReady(account) {
-  if (!account) return Promise.resolve(false);
-  if (!checked || checked.account !== account) {
-    const client = createCloudClient();
-    client.setAccount(account);
-    checked = {
-      account,
-      ready: client
-        .request('/v1/story-chats/config')
-        .then((config) => !!(config.enabled && config.assistant_ready))
-        .catch(() => false),
-    };
-  }
-  return checked.ready;
-}
-
-export default function QuickCreateEntry({ account, story, direct }) {
-  const { t } = useI18n();
-  const [ready, setReady] = useState(null);
+// Quick Create's front door (#422): the chat story builder. Signed-out visitors sign in on
+// the home page; when the server has the chat switched off, the chat itself says so. The
+// original direct Quick Create was removed (owner, 2026-10-24).
+export default function QuickCreateEntry({ account, story }) {
+  const { t } = useI18n(),
+    { sessionReady } = useCloud();
+  // Only once the sign-in check has finished; a signed-in person must not be bounced.
   useEffect(() => {
-    let live = true;
-    storyChatReady(account).then((value) => live && setReady(value));
-    return () => {
-      live = false;
-    };
-  }, [account]);
-  // An explicit story link always opens the chat (it explains if it is switched off).
-  if (!story && ready === null) return <InkLoader label={t('loading.quickCreate')} />;
-  if (!story && !ready) return direct;
+    if (sessionReady && !account) navigateApp('/', { replace: true });
+  }, [sessionReady, account]);
+  if (!account) return <InkLoader label={t('loading.quickCreate')} />;
   return (
     <React.Suspense fallback={<InkLoader label={t('loading.quickCreate')} />}>
       {/* One stable instance: the address gains the story id after the first message and

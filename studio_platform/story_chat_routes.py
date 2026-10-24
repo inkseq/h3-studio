@@ -25,6 +25,7 @@ from .story_chat import (
     snapshot,
     stored_turn,
     _parse,
+    open_actions,
 )
 
 
@@ -186,6 +187,47 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             ]
         }
 
+    @app.patch("/v1/story-chats/{project_id}")
+    def update_story_chat(project_id: str, request: Request, body: dict):
+        """Rename a chat (= its story) or remove it from Quick Create; the story stays."""
+        principal = principal_of(request)
+        if not isinstance(body, dict) or not body or set(body) - {"title", "hidden"}:
+            _fail("story_chat_invalid", 422, field="body")
+        title = body.get("title")
+        if "title" in body and (
+            not isinstance(title, str) or not title.strip() or len(title) > 160
+        ):
+            _fail("story_chat_invalid", 422, field="title")
+        if "hidden" in body and type(body["hidden"]) is not bool:
+            _fail("story_chat_invalid", 422, field="hidden")
+        for _attempt in range(3):
+            row = read(principal, project_id, "projects:write")
+            chat = chat_of(row["payload"])
+            actions = []
+            if "title" in body:
+                actions.append(
+                    {"op": "project.update", "patch": {"title": title.strip()}}
+                )
+            if "hidden" in body and bool(chat.get("hidden")) != body["hidden"]:
+                value = {k: v for k, v in chat.items() if k != "hidden"}
+                if body["hidden"]:
+                    value["hidden"] = True
+                actions.append({"op": "journey.update", "patch": {"storyChat": value}})
+            if not actions:
+                return view(row)
+            try:
+                app.state.guided.mutate(
+                    principal,
+                    project_id,
+                    {"expected_version": row["version"], "actions": actions},
+                )
+            except Conflict as error:
+                if str(error) != "document_version_conflict":
+                    raise
+                continue
+            return view(read(principal, project_id))
+        _fail("story_chat_busy", 409)
+
     @app.post("/v1/story-chats", status_code=201)
     def create_story_chat(request: Request, body: dict | None = None):
         principal = principal_of(request)
@@ -201,6 +243,65 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
         project = new_story("project-" + uuid.uuid4().hex, title.strip(), language)
         app.state.guided.mutate(principal, project["id"], project, None, create=True)
         return view(read(principal, project["id"]))
+
+    @app.post("/v1/story-chats/{project_id}/open")
+    def open_story_chat(project_id: str, request: Request, body: dict | None = None):
+        """Continue an existing story in the chat (owner, 2026-10-23). Idempotent."""
+        principal = principal_of(request)
+        body = body or {}
+        language = body.get("language", "zh")
+        if set(body) - {"language"} or language not in LANGUAGES:
+            _fail("story_chat_invalid", 422, field="body")
+        for _attempt in range(3):
+            row = app.state.authorized_project(principal, project_id, "projects:write")
+            project = row["payload"]
+            if project.get("journey", {}).get("storyChat") is not None:
+                try:
+                    chat_of(project)
+                except StoryChatError:
+                    # Present but not a chat this version reads: never replace it.
+                    _fail("story_chat_unsupported", 409)
+                chat = project["journey"]["storyChat"]
+                if not chat.get("hidden"):
+                    return view(row)
+                # Continuing a removed chat from Works brings it back to Quick Create.
+                value = {k: v for k, v in chat.items() if k != "hidden"}
+                try:
+                    app.state.guided.mutate(
+                        principal,
+                        project_id,
+                        {
+                            "expected_version": row["version"],
+                            "actions": [
+                                {"op": "journey.update", "patch": {"storyChat": value}}
+                            ],
+                        },
+                    )
+                except Conflict as error:
+                    if str(error) != "document_version_conflict":
+                        raise
+                    continue
+                return view(read(principal, project_id))
+            from .generation_admission import reject_managed
+
+            reject_managed(project)
+            if project.get("schemaVersion") != 4:
+                _fail("story_chat_unsupported_story", 422)
+            try:
+                app.state.guided.mutate(
+                    principal,
+                    project_id,
+                    {
+                        "expected_version": row["version"],
+                        "actions": open_actions(project, language),
+                    },
+                )
+            except Conflict as error:
+                if str(error) != "document_version_conflict":
+                    raise
+                continue
+            return view(read(principal, project_id))
+        _fail("story_chat_busy", 409)
 
     @app.get("/v1/story-chats/{project_id}")
     def get_story_chat(project_id: str, request: Request):

@@ -259,6 +259,65 @@ class AccountDeletionTests(LedgerCase):
             )
         self.assertEqual(self.repo.get_budget("owner-budget"), before)
 
+    def test_migration_archive_and_source_do_not_block_full_account_deletion(self):
+        self.repo.put_document(
+            Scope(self.scope.tenant_id, self.owner, 'archived-story'),
+            'quick_chat_story_migration',
+            'archived-session',
+            {
+                'status': 'completed',
+                'before_project': {
+                    'id': 'archived-story',
+                    'logline': 'Private original fixture text',
+                },
+            },
+        )
+        with self.repo.transaction() as conn:
+            conn.execute(
+                insert(objects).values(
+                    id='archived-session',
+                    tenant=self.scope.tenant_id,
+                    owner=self.owner,
+                    session_id='archived-session',
+                    kind='session',
+                    business_key='archive-fixture',
+                    version=1,
+                    payload={
+                        'project_id': 'archived-story',
+                        'title': 'Private source fixture',
+                    },
+                    created_at=self.now,
+                    updated_at=self.now,
+                )
+            )
+        with patch(
+            'studio_platform.universal_trash.assert_project_archive_purge_available',
+            side_effect=AssertionError(
+                'Project-only guard must not gate account deletion'
+            ),
+        ):
+            preview = self.preview()
+            self.assertTrue(preview['can_delete'], preview['blockers'])
+            result = self.confirm(preview)
+            self.assertTrue(self.finish(result['operation_id'])['done'])
+        with self.repo.engine.connect() as conn:
+            archived = conn.scalar(
+                select(documents.c.payload).where(
+                    documents.c.tenant_id == self.scope.tenant_id,
+                    documents.c.owner_id == self.owner,
+                    documents.c.kind == 'quick_chat_story_migration',
+                )
+            )
+            source = conn.scalar(
+                select(objects.c.payload).where(
+                    objects.c.tenant == self.scope.tenant_id,
+                    objects.c.owner == self.owner,
+                    objects.c.id == 'archived-session',
+                )
+            )
+        self.assertEqual(archived, {'content_deleted': True})
+        self.assertEqual(source, {'content_deleted': True})
+
     def test_preview_expiry_changed_source_and_foreign_session_are_closed(self):
         first = self.preview()
         self.now += 601

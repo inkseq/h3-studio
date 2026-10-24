@@ -204,7 +204,7 @@ Owner authorizes importing the existing restricted LIVE key from the specific pr
 
 Owner directs the overnight sequence: #374 approved host LIVE wiring (Claude6315459515), staging before production; #395 WorkOS logout_url and sign-up/sign-in hint; #409 credit-mode generation-budget onboarding; #347 filmCuts export inclusion and order/trim/exclusion fixture; #415 sign-out-all and self-service deletion design; #408 speed/detach/fades/crossfade design; #353 missing-only production historical thumbnails; then CA/certifi/Node patch work.
 
-For each ready completed slice, post its exact staged/operational receipt and replace labels with needs-claude-acceptance, then continue the next item. Tier2 compares options and awaits Claude design review before implementation; blocked items record the actual dependency and are skipped while other authorized work advances. Charging, LIVE Checkout and WorkOS activation stay OFF. Do not operate supervan's production machines/jobs. Test GPU authorization remains USD20 per task. #374 CPU recreation additionally requires an immediately rechecked zero-nonterminal-job gate; create at most one webhook after full inventory and preserve the accepted rollback/CAS boundaries. Existing source/financial/GPU operations are not replayed. Host and image trust stores are updated for the reported emSign incident, including the official Node patch when actually available; no Node major migration. Source: direct owner instruction2026-10-21 and linked issue scopes.
+For each ready completed slice, post its exact staged/operational receipt and replace labels with needs-claude-acceptance, then continue the next item. Tier2 compares options and awaits Claude design review before implementation; blocked items record the actual dependency and are skipped while other authorized work advances. Charging and LIVE Checkout stay OFF; the WorkOS activation hold is superseded only by CR-20261023-57. Do not operate supervan's production machines/jobs. Test GPU authorization remains USD20 per task. #374 CPU recreation additionally requires an immediately rechecked zero-nonterminal-job gate; create at most one webhook after full inventory and preserve the accepted rollback/CAS boundaries. Existing source/financial/GPU operations are not replayed. Host and image trust stores are updated for the reported emSign incident, including the official Node patch when actually available; no Node major migration. Source: direct owner instruction2026-10-21 and linked issue scopes.
 
 ## CR-20261022-52 — one watchdog, local busy lease and idle GitHub fallback
 
@@ -303,3 +303,65 @@ of the identical accepted tuple. Preserve billing, Checkout and auth activation
 state. Image-price publication and charging remain separate CR55 decisions;
 neither this change nor deployment enables them. Prepare production now, execute
 only after the staged sign-off, and refuse state/identity drift before writes.
+
+## CR-20261023-57 — enable existing production WorkOS Google sign-in
+
+Owner directly authorizes guarded production import and hosted sign-in activation
+for [#305](https://github.com/inkseq/h3-studio/issues/305), following prerequisites
+[6359710953](https://github.com/inkseq/h3-studio/issues/305#issuecomment-6359710953)
+and [6359789675](https://github.com/inkseq/h3-studio/issues/305#issuecomment-6359789675).
+Use the existing Windows Credential Manager target `inkseq/workos-prod` and
+`tools/import_workos_credentials.py`; no new key, rotation or secret-drop file.
+The exact production client is `client_01M592BTTGGDTK1A9WCRJGFGRQ`, callback
+`https://inkseq.com/api/auth/workos/callback`, login
+`https://inkseq.com/api/auth/workos/start`, and sign-out `https://inkseq.com/`.
+
+This supersedes only the earlier WorkOS-OFF requirement. Preserve password login,
+billing, Checkout, the picture switch, accepted artifacts and rollback. Do not
+edit account emails or identities directly: superdan and supervan each use their
+password session and Settings → Account → Link Google sign-in; the verified
+provider callback sets the Gmail. Before activation, include Claude's accepted
+password-entry frontend fix from design#180 ([6359898950](https://github.com/inkseq/h3-studio/issues/305#issuecomment-6359898950)).
+Use independently reviewed, receipt-bound configuration CAS and immediately
+recheck zero nonterminal work before CPU recreation. Post the exact production
+receipt on #305; Claude performs the anonymous production read-back, while users
+complete their own authenticated linking. No paid generation or billing
+activation is authorized by this decision.
+
+## CR-20261024-58 — free production pictures, existing Gmail admin and overnight preparation
+
+Owner explicitly authorizes the existing audited story-chat settings API to set
+production `pictures_enabled=true`, reason `owner: open pictures`. This supersedes
+only the earlier picture-OFF launch condition: credit charging and Stripe Checkout
+remain OFF, pictures are temporarily free to users, and the owner accepts provider
+cost. Include `image_credits=5` with rates2/4/12 in revenue preparation; publication,
+charging and LIVE Checkout remain separate guarded actions. Do not infer payment
+enablement from the picture switch. The completed switch receipt is
+[#422/6370033341](https://github.com/inkseq/h3-studio/issues/422#issuecomment-6370033341).
+
+Owner also supersedes the earlier instruction to wait for Google linking before
+granting production admin: grant only the existing Google-created Dan Mo account
+`danmo2060@gmail.com` the admin role through the audited human-admin API, reason
+`owner Gmail admin`. No new account, merge, email/provider/credits/works change;
+superdan remains admin. Completed role-only receipt:
+[#305/6370152170](https://github.com/inkseq/h3-studio/issues/305#issuecomment-6370152170).
+
+The overnight priority is revenue preparation without turning charging or LIVE
+payments on, then production Film gate preparation, backend Sentry and staging QA
+journeys in CI, one isolated staging restore drill, and #481. For #481, owner
+preauthorizes production conversion after accepted staging checks and Claude's
+delegated review of a reasonable per-account production census (about26 superdan
+sessions including trash and14 supervan). Skip/list uncertainty; never force or
+resurrect trash. Option2 purge redaction is not a prerequisite; retain option1's
+permanent-purge refusal. Exact source hashes, current-state checks, original
+operation receipts and the normal accepted-artifact production gate still apply.
+Revenue wins conflicts. Source: direct owner decisions2026-10-24 and
+[#481/6369552441](https://github.com/inkseq/h3-studio/issues/481#issuecomment-6369552441).
+
+## 2026-10-24 — Quick Create chats can be renamed and removed; Works newest first
+
+Each Quick Create chat is one Works story. The owner asked that chats can be renamed
+and removed from Quick Create without deleting the story, and that the Works list
+defaults to newest first. Removing only hides the chat (`journey.storyChat.hidden`);
+continuing the story in the chat from Works brings it back with its messages. Source:
+direct owner message 2026-10-24.

@@ -40,6 +40,8 @@ python-multipart==0.0.32
 pyyaml==6.0.3
 requests==2.34.2
 s3transfer==0.19.2
+# PyPI 2026-09-28; at least14 days old at #501 adoption (2026-10-24).
+sentry-sdk[fastapi]==2.71.0
 six==1.17.0
 sqlalchemy==2.0.54
 starlette==1.7.0

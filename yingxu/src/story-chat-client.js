@@ -2,6 +2,7 @@
 // /v1/story-chats. The server owns the transcript and cards; every reply replaces the local
 // state with the server's view. Paid generation is never started here: a proposal hands the
 // story to Works, where the existing preflight, quote and confirmation run.
+import { track } from './analytics.js';
 
 const KIND = { characters: 'character', places: 'place', props: 'prop' };
 
@@ -30,7 +31,9 @@ export function fromServer(view, labels = {}) {
       place: shot.place || null,
       props: shot.props || [],
       refs: [...(shot.cast || []), shot.place, ...(shot.props || [])].filter(Boolean),
-      status: shot.selected_artifact_id ? 'ready' : 'draft',
+      image: shot.thumbnail_url || null,
+      // Finished takes but none chosen yet (e.g. moved from old Quick Create).
+      status: shot.selected_artifact_id ? 'ready' : shot.takes > 0 ? 'pick' : 'draft',
       version: shot.version,
     });
   const messages = [],
@@ -72,6 +75,7 @@ export function fromServer(view, labels = {}) {
       text: message.text,
       attachments: [],
       chips: message.chips || [],
+      turnId: message.turn_id || null,
     });
     // Suggested card pictures: a confirm card each; the id is stable, so a replay never
     // draws or charges twice.
@@ -110,7 +114,16 @@ export function fromServer(view, labels = {}) {
       messages.push({ id, role: 'quote', quoteId: id });
     }
   }
-  return { title: view.title || '', version: view.version, cards, messages, quotes, busy: false };
+  return {
+    title: view.title || '',
+    version: view.version,
+    cards,
+    messages,
+    quotes,
+    busy: false,
+    // The server says the latest turn can still be undone (nothing changed since).
+    undoTurnId: view.undo_turn_id || null,
+  };
 }
 
 const turnId = () =>
@@ -154,6 +167,7 @@ export function createLiveChat({
     const created = await api.request('/v1/story-chats', { method: 'POST', body: { language } });
     project = created.project_id;
     view = created;
+    track('story_chat_story_created');
     onProject?.(project);
     return project;
   }
@@ -173,7 +187,14 @@ export function createLiveChat({
     },
     async open(emit) {
       if (!project) return;
-      load(await api.request(`/v1/story-chats/${encodeURIComponent(project)}`), emit);
+      const path = `/v1/story-chats/${encodeURIComponent(project)}`;
+      try {
+        load(await api.request(path), emit);
+      } catch (failure) {
+        // A story made in Works: attach a chat to it so it can be edited by chatting.
+        if (failure.detail?.detail?.code !== 'story_chat_not_found') throw failure;
+        load(await api.request(path + '/open', { method: 'POST', body: { language } }), emit);
+      }
     },
     async send({ text }, emit) {
       const id = turnId();
@@ -260,6 +281,23 @@ export function createLiveChat({
     },
     // A card edit from the drawer goes through the ordinary project actions API.
     // Rename the story itself through the ordinary project actions.
+    // Undo the latest turn; the server refuses if anything changed the story since.
+    async undo(id, emit) {
+      if (!project || !id) return false;
+      try {
+        load(
+          await api.request(`/v1/story-chats/${encodeURIComponent(project)}/undo`, {
+            method: 'POST',
+            body: { turn_id: id },
+          }),
+          emit,
+        );
+        return true;
+      } catch {
+        load(await api.request(`/v1/story-chats/${encodeURIComponent(project)}`), emit);
+        return false;
+      }
+    },
     async rename(title, emit) {
       const value = title.trim();
       if (!project || !value || value === view?.title) return;

@@ -55,6 +55,7 @@ inventory.json
 !studio_platform/__init__.py
 !studio_platform/api.py
 !studio_platform/settings.py
+!studio_platform/error_monitoring.py
 !studio_platform/workos_config.py
 !studio_platform/workos_auth.py
 !studio_platform/workos_routes.py
@@ -416,6 +417,8 @@ inventory.json
 
 # Preserved Quick Chat authoring on the existing business ledger.
 !studio_platform/quick_chat.py
+!studio_platform/quick_chat_migration.py
+!tools/migrate_quick_chat_stories.py
 !studio_platform/quick_chat_routes.py
 !studio_platform/quick_chat_schema.py
 !studio_platform/quick_chat_response_schema.py
@@ -763,3 +766,9 @@ inventory.json
 !tests/test_capacity_admission.py
 !tests/test_capacity_test_continuation.py
 !docs/CAPACITY-SETTINGS.md
+
+# Closed operator-only production adoption; no private manifest or runtime proof.
+!studio_platform/quick_chat_production_migration.py
+!tools/apply_approved_quick_chat_stories.py
+!tests/test_quick_chat_production_migration.py
+!docs/QUICK-CHAT-PRODUCTION-ADOPTION.md

@@ -198,6 +198,12 @@ test('an admin can preview as a regular user only in the interface (owner, 2026-
 });
 
 test('linking hosted sign-in keeps the safe return path and asks for a link', () => {
-  assert.equal(hostedLinkUrl(), '/api/auth/workos/start?return_to=%2Fsettings&link=1');
-  assert.equal(hostedLinkUrl('//evil'), '/api/auth/workos/start?return_to=%2F&link=1');
+  assert.equal(
+    hostedLinkUrl(),
+    '/api/auth/workos/start?return_to=%2Fsettings&screen_hint=sign-in&link=1',
+  );
+  assert.equal(
+    hostedLinkUrl('//evil'),
+    '/api/auth/workos/start?return_to=%2F&screen_hint=sign-in&link=1',
+  );
 });

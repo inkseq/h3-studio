@@ -352,6 +352,135 @@ def apply_action(project, action, resolved=None):
         shot["version"] += 1
 
 
+def migration_source_shots(conn, tenant, owner, project, shot, project_version):
+    """Alias only the exact original shots in an owner-bound adoption receipt.
+
+    Editable entity metadata is an index hint, never authority over job history.
+    Ordinary shots (including historical source links) keep their own versions.
+    """
+    marker = shot.get("data", {}).get("migration")
+    if not isinstance(marker, dict) or marker.get("canonical") is not True:
+        return (shot["id"],)
+
+    def need(condition):
+        if not condition:
+            raise Conflict("story_migration_binding_invalid")
+
+    session = marker.get("source_session_id")
+    receipt_id = marker.get("receipt_id")
+    need(isinstance(session, str) and session and receipt_id == session)
+    row = (
+        conn.execute(
+            select(documents).where(
+                documents.c.tenant_id == tenant,
+                documents.c.owner_id == owner,
+                documents.c.project_id == project["id"],
+                documents.c.kind == "quick_chat_story_migration",
+                documents.c.document_id == receipt_id,
+            )
+        )
+        .mappings()
+        .first()
+    )
+    need(row is not None and row["version"] == 1)
+    receipt = row["payload"]
+    need(isinstance(receipt, dict))
+    need(
+        type(receipt.get("contract")) is int
+        and receipt["contract"] == 1
+        and type(receipt.get("mapping_version")) is int
+        and receipt["mapping_version"] == 2
+        and receipt.get("status") == "completed"
+        and "rollback" not in receipt
+        and receipt.get("tenant_id") == tenant
+        and receipt.get("owner_id") == owner
+        and receipt.get("project_id") == project["id"]
+        and receipt.get("source_session_id") == session
+        and receipt.get("receipt_id") == receipt_id
+        and receipt.get("archive_strategy") == "receipt_archive"
+        and type(receipt.get("after_project_version")) is int
+        and 1 <= receipt["after_project_version"] <= project_version
+    )
+    canonical = receipt.get("canonical_shots")
+    need(isinstance(canonical, dict) and isinstance(canonical.get(shot["id"]), dict))
+    entry = canonical[shot["id"]]
+    sources, card_id = entry.get("source_shot_ids"), entry.get("card_id")
+    need(
+        isinstance(sources, list)
+        and bool(sources)
+        and all(isinstance(s, str) and s for s in sources)
+        and len(sources) == len(set(sources))
+        and shot["id"] in sources
+        and isinstance(card_id, str)
+        and bool(card_id)
+    )
+    need(
+        marker
+        == {
+            "canonical": True,
+            "source_shot_ids": sources,
+            "source_session_id": session,
+            "receipt_id": receipt_id,
+        }
+    )
+    mapping = receipt.get("mapping")
+    need(isinstance(mapping, dict))
+    originals = {}
+    for item_id, item in mapping.items():
+        need(isinstance(item, dict))
+        if item.get("card_id") == card_id:
+            source = item.get("shot_id")
+            need(
+                isinstance(source, str)
+                and source not in originals
+                and isinstance(item_id, str)
+                and bool(item_id)
+                and isinstance(item.get("revision_id"), str)
+                and bool(item["revision_id"])
+            )
+            originals[source] = (item_id, item.get("revision_id"))
+    need(set(originals) == set(sources))
+    entities = {entity["id"]: entity for entity in project["entities"]}
+    before = receipt.get("before_project")
+    archived = receipt.get("archived_shots")
+    need(isinstance(before, dict) and before.get("id") == project["id"])
+    need(receipt.get("before_project_hash") == request_hash(before))
+    need(isinstance(before.get("entities"), list) and isinstance(archived, dict))
+    need(
+        all(
+            isinstance(e, dict)
+            and isinstance(e.get("id"), str)
+            and isinstance(e.get("data"), dict)
+            for e in before["entities"]
+        )
+    )
+    previous = {entity["id"]: entity for entity in before["entities"]}
+    need(len(previous) == len(before["entities"]))
+    for source in sources:
+        if source == shot["id"]:
+            entity = entities.get(source)
+        else:
+            archive = archived.get(source)
+            need(source not in entities and isinstance(archive, dict))
+            entity = archive.get("entity")
+            need(isinstance(entity, dict) and entity == previous.get(source))
+            need(
+                isinstance(archive.get("projection_hash"), str)
+                and len(archive["projection_hash"]) == 64
+                and all(c in '0123456789abcdef' for c in archive["projection_hash"])
+            )
+        need(entity is not None and entity.get("type") == "shot")
+        item_id, revision_id = originals[source]
+        projection = entity.get("data", {}).get("quickChatProjection")
+        need(isinstance(projection, dict))
+        need(
+            projection.get("session_id") == session
+            and projection.get("item_id") == item_id
+            and projection.get("revision_id") == revision_id
+        )
+    return tuple(sources)
+
+
 class StoryboardVersions:
     def __init__(self, app):
         self.app = app
@@ -361,12 +490,18 @@ class StoryboardVersions:
         self.tenant = self.settings.tenant_id
 
     def artifact_recipe(self, principal, project_id, shot_id, artifact_id):
-        self.access.project(principal, project_id)
+        record = self.access.project(principal, project_id)
+        project = record["payload"]
+        shot = shot_entity(project, shot_id)
         row = self.access.artifact(principal, artifact_id)
         job = self.access.job(principal, row["job_id"])
+        with self.repo.engine.connect() as conn:
+            source_ids = migration_source_shots(
+                conn, self.tenant, principal.owner, project, shot, record["version"]
+            )
         if (
             job["project_id"] != project_id
-            or job["request"].get("client_ref", {}).get("shot_id") != shot_id
+            or job["request"].get("client_ref", {}).get("shot_id") not in source_ids
         ):
             raise NotFound("artifact_not_found")
         return {
@@ -404,15 +539,18 @@ class StoryboardVersions:
             or offset < 0
         ):
             raise ValueError("Invalid page / 分页无效")
-        where = (
-            jobs.c.tenant_id == self.tenant,
-            jobs.c.owner_id == principal.owner,
-            jobs.c.project_id == project_id,
-            jobs.c.request["client_ref"]["shot_id"].as_string() == shot_id,
-            jobs.c.status == "succeeded",
-            artifacts.c.metadata["kind"].as_string().in_(("video", "image")),
-        )
         with self.repo.engine.connect() as conn:
+            source_ids = migration_source_shots(
+                conn, self.tenant, principal.owner, project, shot, record["version"]
+            )
+            where = (
+                jobs.c.tenant_id == self.tenant,
+                jobs.c.owner_id == principal.owner,
+                jobs.c.project_id == project_id,
+                jobs.c.request["client_ref"]["shot_id"].as_string().in_(source_ids),
+                jobs.c.status == "succeeded",
+                artifacts.c.metadata["kind"].as_string().in_(("video", "image")),
+            )
             rows = list(
                 conn.execute(
                     select(
@@ -460,6 +598,8 @@ class StoryboardVersions:
                     "id": row["id"],
                     "entity_id": entity["id"] if entity else None,
                     "job_id": row["job_id"],
+                    "source_shot_id": row["request"]["client_ref"]["shot_id"],
+                    "aliased": row["request"]["client_ref"]["shot_id"] != shot_id,
                     "trash_state": trash[row["id"]]["payload"]["state"]
                     if trash[row["id"]]
                     else "active",

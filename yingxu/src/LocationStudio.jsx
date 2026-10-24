@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { ImagePlus, MapPin, Plus, Upload, Trash2 } from 'lucide-react';
 import { store } from './store.js';
@@ -137,11 +138,7 @@ export function LocationReferenceEditor({ project, location }) {
           </button>
         </div>
       )}
-      {error && (
-        <p role="alert" className="cloud-error">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={error ? error : null} />
     </section>
   );
 }

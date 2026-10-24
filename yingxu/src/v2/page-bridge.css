@@ -674,7 +674,7 @@ dialog.modal.wide {
 /* Phone targets keep the approved compact geometry without shrinking controls. */
 @media (max-width: 760px) {
   .home-main button,
-  .lib-shell button,
+  .lib-shell button:not(.hbar *),
   .trash-page button {
     min-height: 36px;
     min-width: 36px;

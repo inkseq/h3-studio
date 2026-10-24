@@ -43,6 +43,7 @@ export const takesCatalogs = {
     'takes.copiesMax': 'Maximum takes per proposal',
     'takes.foldCount': 'Show this many takes before folding',
     'takes.save': 'Save preferences',
+    'takes.saved': 'Saved.',
     'takes.cancel': 'Cancel',
     'takes.preferencesHelp':
       'Defaults: up to 4 takes per proposal; fold after 8. These preferences do not change existing proposals.',
@@ -113,6 +114,7 @@ export const takesCatalogs = {
     'takes.copiesMax': '每个提案最多生成份数',
     'takes.foldCount': '超过多少条后折叠',
     'takes.save': '保存偏好',
+    'takes.saved': '已保存。',
     'takes.cancel': '取消',
     'takes.preferencesHelp': '默认每个提案最多4份，超过8条后折叠。偏好不会更改已有提案。',
     'takes.preferencesError': '偏好读取失败，原设置保持不变。',

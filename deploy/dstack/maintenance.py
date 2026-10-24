@@ -58,6 +58,11 @@ RETAINED_DSTACK_HELPER_PAIRS = {
     'e3a852fe013300dcb468d6f5a9875e183e1109be': ('588fe9b1e68119428a8cc5aa81aa043efb8f40cae6917eb13f873d74d2f0e1a1', 'fba8d75a6845fe2fe7c78ea120747797b2f57ec80e0c6bc4861a0f6bfda54790'),
     '57043af14df1e1db3f1711a33ed172f762fb022d': ('588fe9b1e68119428a8cc5aa81aa043efb8f40cae6917eb13f873d74d2f0e1a1', 'fba8d75a6845fe2fe7c78ea120747797b2f57ec80e0c6bc4861a0f6bfda54790'),
     '3d6355caafdbb8dca6648cdd9b3a04fd9b6dafe8': ('588fe9b1e68119428a8cc5aa81aa043efb8f40cae6917eb13f873d74d2f0e1a1', 'fba8d75a6845fe2fe7c78ea120747797b2f57ec80e0c6bc4861a0f6bfda54790'),
+    # #501 R/G and prior staging source pairs before optional Sentry adoption.
+    # The approved host packet still verifies actual retained manifest/bytes.
+    '5676bd46e8b31dac36fb5b9758de4763114b84ca': ('719d8d3f83fdcd687d06d343f4076db117c675de607f2e46e61d2b65da5db8b3', 'fba8d75a6845fe2fe7c78ea120747797b2f57ec80e0c6bc4861a0f6bfda54790'),
+    '59d2ebefba0e98d677907c30b65144ac47681762': ('719d8d3f83fdcd687d06d343f4076db117c675de607f2e46e61d2b65da5db8b3', 'fba8d75a6845fe2fe7c78ea120747797b2f57ec80e0c6bc4861a0f6bfda54790'),
+    'f7b1db096099d0b3ad09736a95afffa57f9626c7': ('719d8d3f83fdcd687d06d343f4076db117c675de607f2e46e61d2b65da5db8b3', 'fba8d75a6845fe2fe7c78ea120747797b2f57ec80e0c6bc4861a0f6bfda54790'),
 }
 LEGACY_HELPER_PAIRS.update(RETAINED_DSTACK_HELPER_PAIRS)
 DSTACK_BASE_IMAGE = "dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc1682dc2169075c6210d2ec873146f1ad8"
@@ -83,7 +88,7 @@ STORAGE_FIELDS = frozenset({"SIXNINE_STORAGE_PROVIDER", "SIXNINE_STORAGE_ENDPOIN
     "SIXNINE_STORAGE_BUCKET", "SIXNINE_STORAGE_PROFILE", "SIXNINE_STORAGE_CREDENTIAL_FILE"})
 OPTIONAL_FIELDS = frozenset({"SIXNINE_OPERATOR_ADMIN_OWNERS", "SIXNINE_STORYBOARD_OWNERS", 'INKSEQ_DEPLOYMENT_TARGET',
     'INKSEQ_RESOURCE_PROFILE', 'INKSEQ_CPU_CGROUP_PARENT', 'INKSEQ_GENERATION_QUEUE',
-    'INKSEQ_FILM_ENABLED', 'INKSEQ_STRIPE_MODE'}) | OPTIONAL_PATH_FIELDS | STORAGE_FIELDS
+    'INKSEQ_FILM_ENABLED', 'INKSEQ_STRIPE_MODE', 'INKSEQ_SENTRY_DSN'}) | OPTIONAL_PATH_FIELDS | STORAGE_FIELDS
 LEGACY_MARKERS = ("operator-capacity/active.json", "gpu-acceptance/active.json", "gpu-scaler/active.json")
 STORYBOARD_FLAG = "SIXNINE_STORYBOARD_OWNERS"
 STORYBOARD_RECEIPT = "storyboard-maintenance.json"
@@ -409,6 +414,10 @@ def settings_document(value):
         elif key.endswith("_VOLUME"):
             release.require(re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", text), "migration_volume_reference_invalid")
     env = value["environment"]
+    release.require(env.get('INKSEQ_SENTRY_DSN', '') in {'', release.SENTRY_DSN},
+        'migration_api_error_monitoring_destination_invalid')
+    release.require(not env.get('INKSEQ_SENTRY_DSN') or env.get('INKSEQ_DEPLOYMENT_TARGET') in {'staging', 'production'},
+        'migration_api_error_monitoring_target_required')
     release.require(env.get('INKSEQ_WORKOS_CONFIG_FILE', '') in {'', '/run/sixnine-secrets/workos'},
         'migration_workos_configuration_path_invalid')
     stripe_file = env.get('INKSEQ_STRIPE_CONFIG_FILE', '')

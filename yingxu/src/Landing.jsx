@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { FloatingMessage } from './floating-notice.js';
 import {
   ArrowRight,
   Clapperboard,
@@ -11,7 +12,7 @@ import {
 import InkMark from './InkMark.jsx';
 import { dailyInkMark } from './ink-mark-daily.js';
 import { PublicFooter } from './PublicPages.jsx';
-import { Login } from './QuickChatWorkspace.jsx';
+import { Login } from './LoginDialog.jsx';
 import { navigateApp } from './app-navigation.js';
 import { usePageActive } from './AppRouteCache.jsx';
 import { LanguageSwitcher, useI18n } from './i18n/I18nProvider.jsx';
@@ -63,7 +64,8 @@ function retryAllowed() {
 export default function Landing() {
   const { t } = useI18n();
   const active = usePageActive(),
-    [login, setLogin] = useState(false);
+    [login, setLogin] = useState(false),
+    [passwordFirst, setPasswordFirst] = useState(false);
   useEffect(() => {
     if (active) document.title = t('landing.pageTitle');
   }, [active, t]);
@@ -157,11 +159,7 @@ export default function Landing() {
           <div className="landing-hero-copy">
             <h1>{t('landing.title')}</h1>
             <p className="landing-lede">{t('landing.lede')}</p>
-            {signinError && (
-              <p className="landing-error" role="alert">
-                {signinError}
-              </p>
-            )}
+            <FloatingMessage tone="error" text={signinError ? signinError : null} />
             <div className="landing-ctas">
               <button
                 type="button"
@@ -174,7 +172,19 @@ export default function Landing() {
               </button>
             </div>
             {hostedSignInEnabled(c.auth) && (
-              <small className="muted">{t('landing.noAccount')}</small>
+              <small className="muted">
+                {t('landing.noAccount')}{' '}
+                <button
+                  type="button"
+                  className="linkish"
+                  onClick={() => {
+                    setPasswordFirst(true);
+                    setLogin(true);
+                  }}
+                >
+                  {t('landing.passwordSignIn')}
+                </button>
+              </small>
             )}
           </div>
           <DemoBoard />
@@ -219,6 +229,7 @@ export default function Landing() {
         <Login
           title={t('landing.signInTitle')}
           lead={t('landing.signInLead')}
+          passwordFirst={passwordFirst}
           onClose={() => setLogin(false)}
           onDone={() => setLogin(false)}
         />

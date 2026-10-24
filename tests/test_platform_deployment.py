@@ -97,6 +97,29 @@ class DeploymentPolicyTests(unittest.TestCase):
             policy.validate(self.rendered, compose_version=self.compose_version)
         )
 
+    def test_error_monitoring_is_optional_fixed_destination_and_app_only(self):
+        for value in (None, "", policy.SENTRY_DSN):
+            changed = copy.deepcopy(self.rendered)
+            env = changed["services"]["app"]["environment"]
+            env.pop("INKSEQ_SENTRY_DSN", None)
+            if value is not None:
+                env["INKSEQ_SENTRY_DSN"] = value
+            self.assertTrue(
+                policy.validate(changed, compose_version=self.compose_version)
+            )
+        for service, value in (
+            ("app", policy.SENTRY_DSN + "?prompt=secret"),
+            ("db", ""),
+            ("db-init", policy.SENTRY_DSN),
+            ("caddy", policy.SENTRY_DSN),
+        ):
+            changed = copy.deepcopy(self.rendered)
+            changed["services"][service].setdefault("environment", {})[
+                "INKSEQ_SENTRY_DSN"
+            ] = value
+            with self.assertRaises(policy.ConfigurationError):
+                policy.validate(changed, compose_version=self.compose_version)
+
     def test_browser_session_duration_is_bounded_and_retained_config_still_validates(
         self,
     ):

@@ -1,6 +1,7 @@
 // Credits chip, Settings → Credits and the not-enough-credits prompt (h3-studio#306/#307).
 // Port of prototype account.jsx. Hidden until GET /v1/credits answers, so it can merge early.
 import React, { useEffect, useMemo, useState } from 'react';
+import { FloatingMessage } from './floating-notice.js';
 import {
   Check,
   Coins,
@@ -29,6 +30,7 @@ import {
 } from './credits.js';
 import { mockCreditsFetch } from './credits-mock.js';
 import './credits.css';
+import { track } from './analytics.js';
 
 // Dev preview only: /settings?tab=credits&mockCredits shows the UI without a backend.
 const mocked = () =>
@@ -148,6 +150,7 @@ export function CreditsPanel({ account, active }) {
   }, [active]);
 
   async function checkout(pack) {
+    track('credits_checkout_started', { pack: pack.id });
     setBuying(pack.id);
     setError('');
     try {

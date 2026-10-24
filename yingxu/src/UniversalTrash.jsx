@@ -1,4 +1,5 @@
 import StudioHeader from './StudioHeader.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import { cloudController as cloud } from './cloud-controller.js';
 import CreationHistory from './CreationHistory.jsx';
 import { createQuickChatClient } from './quick-chat-client.js';
@@ -264,7 +265,7 @@ export function TrashProvider({ account, children }) {
     </Context.Provider>
   );
 }
-export function TrashMenu({ target, onRename, onEdit, onTrashSettled, disabled = false }) {
+export function TrashMenu({ target, onRename, onEdit, onChat, onTrashSettled, disabled = false }) {
   const ctx = useTrash(),
     { t } = useI18n();
   if (!ctx?.account) return null;
@@ -292,6 +293,17 @@ export function TrashMenu({ target, onRename, onEdit, onTrashSettled, disabled =
               }}
             >
               {t('trash.edit')}
+            </button>
+          )}
+          {onChat && (
+            <button
+              role="menuitem"
+              onClick={() => {
+                close();
+                onChat();
+              }}
+            >
+              {t('trash.editInChat')}
             </button>
           )}
           <button

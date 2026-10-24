@@ -1,6 +1,8 @@
 import { previewingAsUser } from './preview-as-user.js';
+import { FloatingMessage } from './floating-notice.js';
 import VideoCacheSettings from './VideoCacheSettings.jsx';
 import SettingsGenerationDefaults from './SettingsGenerationDefaults.jsx';
+import TakePreferencesSettings from './TakePreferencesSettings.jsx';
 import SpendingBreakdown from './SpendingBreakdown.jsx';
 import { admissionExposure } from './spending-breakdown.js';
 import { microsToDollars, dollarsToMicros, formatMoneyMicros } from './money.js';
@@ -374,7 +376,7 @@ export default function SpendingSettings({ account }) {
             <SkinPicker />
             {account && (
               <>
-                {!hosted && <AccountGoogleLink api={api} />}
+                <AccountGoogleLink api={api} />
                 {!hosted && (
                   <div className="card-box">
                     <AccountPassword inline busy={busy} />
@@ -434,14 +436,8 @@ export default function SpendingSettings({ account }) {
                   <br />
                   <small className="muted">{t('settings.defaults')}</small>
                 </div>
-                <div className="spacer" />
-                <button
-                  className="primary"
-                  onClick={() => navigateApp('/quick-chat?preferences=takes')}
-                >
-                  {t('takes.preferences')}
-                </button>
               </div>
+              <TakePreferencesSettings api={api} active={pageActive && section === 'defaults'} />
             </div>
           </div>
           {(!user || !draft) &&
@@ -552,7 +548,14 @@ export default function SpendingSettings({ account }) {
                       </div>
                     </form>
                   )}
-                  {pageActive && <BudgetAdministration account={account} />}
+                  {/* Per-account dollar budgets and per-GPU prices are test-machine plumbing;
+                      folded so the everyday limits above stay readable. */}
+                  {pageActive && (
+                    <details className="admin-fold">
+                      <summary>{t('admin.legacyBudgets')}</summary>
+                      <BudgetAdministration account={account} />
+                    </details>
+                  )}
                 </>
               }
             />
@@ -564,7 +567,7 @@ export default function SpendingSettings({ account }) {
               embedded
               account={account}
               active={pageActive && section === 'assistants'}
-              onLogin={() => navigateApp('/quick-chat')}
+              onLogin={() => navigateApp('/')}
             />
           </div>
         </section>

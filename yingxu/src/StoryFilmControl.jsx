@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { FloatingMessage } from './floating-notice.js';
 import { Clapperboard, Save } from 'lucide-react';
 import { ChatDialog } from './QuickChatControls.jsx';
 import { StoryboardVideo } from './StoryboardMedia.jsx';

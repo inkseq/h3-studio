@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { FloatingMessage } from './floating-notice.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { formatMoneyMicros as money } from './money.js';
 import { usdInput, usdMicrousd } from './operator-budget-model.js';

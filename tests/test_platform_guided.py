@@ -48,6 +48,53 @@ class GuidedTests(unittest.TestCase):
             headers={**(headers or {}), **({"Idempotency-Key": key} if key else {})},
         )
 
+    def test_shipped_story_card_example_uses_agent_actions_without_generation(self):
+        reference = (
+            Path(__file__).resolve().parents[1] / "skills/inkseq/reference/api.md"
+        ).read_text(encoding="utf-8")
+        section = reference.split("### Unified card binding example", 1)[1]
+        body = json.loads(section.split("```json\n", 1)[1].split("```", 1)[0])
+        self.login()
+        _, headers = self.key()
+        created = self.client.post(
+            "/v1/projects", json={"title": "Agent card fixture"}, headers=headers
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        created = created.json()
+        body["expected_version"] = created["version"]
+        with self.app.state.repository.engine.connect() as conn:
+            before = conn.execute(select(jobs)).mappings().all()
+        edited = self.client.post(
+            f"/v1/projects/{created['id']}/actions",
+            json=body,
+            headers={**headers, "Idempotency-Key": "documented-card-bindings"},
+        )
+        self.assertEqual(edited.status_code, 200, edited.text)
+        project_value = self.client.get(
+            f"/v1/projects/{created['id']}", headers=headers
+        ).json()["project"]
+        from studio_platform.generation_draft import read_draft
+
+        draft = read_draft(project_value, "shot-letter")[0]
+        shot = next(e for e in project_value["entities"] if e["id"] == "shot-letter")
+        self.assertEqual(
+            shot["data"]["cast"],
+            [{"characterId": "character-mia", "lookId": "raincoat"}],
+        )
+        self.assertEqual(shot["data"]["storyboard"]["mode"], "ref")
+        self.assertEqual(
+            shot["data"]["storyboard"]["place"],
+            {"locationId": "location-platform", "versionId": "night"},
+        )
+        self.assertEqual(shot["data"]["storyboard"]["propIds"], ["prop-letter"])
+        self.assertTrue(
+            {"cast", "place", "prop"}.issubset(
+                {item["kind"] for item in draft["storyboard"]["prompt_parts"]}
+            )
+        )
+        with self.app.state.repository.engine.connect() as conn:
+            self.assertEqual(conn.execute(select(jobs)).mappings().all(), before)
+
     def test_keys_only_hashed_once_response_and_owner_isolated(self):
         self.login()
         meta, headers = self.key()

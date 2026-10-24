@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshCw, Image as ImageIcon, Play, Pause, Download } from 'lucide-react';
 import { getFile, nativeMediaSource } from './media.js';
@@ -135,7 +136,7 @@ export function useStoryboardMediaUrl(asset, { thumbnail = false } = {}) {
   // retry can reload it; never re-resolve it under a later account.
   const source = native || direct || fileId;
   const onError = () => setFailure({ source, message: t('legacy.visible40') });
-  const onReady = () => setFailure((old) => (old?.source === source ? null : old));
+  const onReady = () => setFailure((old) => (old && old.source === source ? null : old));
   const retry = () => {
     native?.target?.assertCurrent();
     setFailure(null);
@@ -154,7 +155,7 @@ export function useStoryboardMediaUrl(asset, { thumbnail = false } = {}) {
       error = t('client.accountChanged');
     }
     const playbackUrl = error ? '' : native.target?.href || '';
-    if (failure?.source === native) error = failure.message;
+    if (failure && failure.source === native) error = failure.message;
     return {
       url: error ? '' : playbackUrl,
       playbackUrl,
@@ -167,7 +168,9 @@ export function useStoryboardMediaUrl(asset, { thumbnail = false } = {}) {
       assertCurrent: () => native.target?.assertCurrent(),
     };
   }
-  const error = failure?.source === source ? failure.message : value.error;
+  // An asset with no file yet (e.g. a previous-shot frame not saved) has no source: an
+  // absent failure must not match it (production crash INKSEQ-DESIGN-2/3, 2026-10-24).
+  const error = failure && failure.source === source ? failure.message : value.error;
   return {
     ...value,
     url: error ? '' : value.url,
@@ -179,6 +182,8 @@ export function useStoryboardMediaUrl(asset, { thumbnail = false } = {}) {
     assertCurrent: () => {},
   };
 }
+const AUTO_RETRIES = 4;
+
 export function StoryboardAssetImage({
   asset,
   className = '',
@@ -191,32 +196,57 @@ export function StoryboardAssetImage({
     useStoryboardMediaUrl(asset, { thumbnail: true });
   const small = useThumbnailSource(thumbnailOwner, url),
     src = thumbnailOwner ? small.src : url;
+  // A busy server answers 429 when a page asks for many pictures at once (owner,
+  // 2026-10-24: cards showed "preview unavailable" at random). Retry quietly with
+  // backoff; only a picture that still fails after that shows the error and button.
+  const attempts = useRef(0),
+    timer = useRef(null),
+    [waiting, setWaiting] = useState(false);
+  useEffect(() => {
+    attempts.current = 0;
+    setWaiting(false);
+    return () => clearTimeout(timer.current);
+  }, [playbackUrl]);
   const ready = () => {
       small.finish();
+      attempts.current = 0;
       onReady();
     },
     failed = () => {
       small.finish();
       onError();
+      if (!playbackUrl || attempts.current >= AUTO_RETRIES) return;
+      const delay = 1500 * 2 ** attempts.current++ + Math.random() * 500;
+      setWaiting(true);
+      timer.current = setTimeout(() => {
+        setWaiting(false);
+        try {
+          retry();
+        } catch {
+          onError();
+        }
+      }, delay);
     };
+  const shownError = waiting ? '' : error;
   if (!src)
     return (
       <span
         ref={small.ref}
         className={className + ' media-empty storyboard-thumbnail-empty'}
         style={style}
-        role={error ? 'alert' : undefined}
-        title={error || t('legacy.visible41')}
+        role={shownError ? 'alert' : undefined}
+        title={shownError || t('legacy.visible41')}
       >
         <ImageIcon size={20} aria-hidden="true" />
-        {error && <small>{t('library.previewUnavailable')}</small>}
-        {error && retryable && playbackUrl && (
+        {shownError && <small>{t('library.previewUnavailable')}</small>}
+        {shownError && retryable && playbackUrl && (
           <button
             className="small ghost"
             type="button"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
+              attempts.current = 0;
               try {
                 retry();
               } catch {

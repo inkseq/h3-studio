@@ -86,6 +86,21 @@ def validate_workos(document):
             'migration_workos_configuration_invalid')
 
 
+def validate_error_monitoring(document, *, target):
+    """Only API errors may leave the app, to the one owner-created project."""
+    approved = "https://7339f473c737f7b493b03da92a2bb925@o4512306171019264.ingest.us.sentry.io/4512306334728192"
+    for name, service in document['services'].items():
+        env = service.get('environment', {})
+        require(name == 'app' or 'INKSEQ_SENTRY_DSN' not in env,
+                'migration_api_error_monitoring_outside_app')
+    env = document['services']['app'].get('environment', {})
+    selected = env.get('INKSEQ_SENTRY_DSN', '')
+    require(type(selected) is str and selected in {'', approved},
+            'migration_api_error_monitoring_destination_invalid')
+    require(not selected or env.get('INKSEQ_DEPLOYMENT_TARGET') == target,
+            'migration_api_error_monitoring_target_invalid')
+
+
 def validate_stripe(document, *, target='production'):
     """Only API and the existing DBOS consumer receive the target's Stripe mode."""
     services, secrets = document['services'], document.get('secrets', {})
@@ -271,6 +286,7 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, targe
         require(env.get("SIXNINE_TELEMETRY_CONFIG_FILE") == "/run/secrets/grafana_cloud", "migration_cloud_telemetry_missing")
     validate_storage(document, target=target)
     validate_workos(document)
+    validate_error_monitoring(document, target=target)
     validate_stripe(document, target=target)
     controller = services["controller"]
     targets = {volume["target"] for volume in controller.get("volumes", [])}

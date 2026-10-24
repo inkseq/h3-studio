@@ -458,6 +458,196 @@ class UniversalPurgeTests(ledger.LedgerCase):
             self.scope.owner_id, self.scope.project_id, stream, 'sample.png'
         )
 
+    def migration_archive(self):
+        from studio_platform.repository import request_hash
+
+        before = copy.deepcopy(self.project)
+        before['integration_kind'] = 'quick_chat'
+        before['journey']['integration_kind'] = 'quick_chat'
+        before['journey']['quickChatSessionId'] = 'migration-session'
+        payload = {
+            'contract': 1,
+            'mapping_version': 2,
+            'status': 'completed',
+            'archive_strategy': 'receipt_archive',
+            'receipt_id': 'migration-session',
+            'source_session_id': 'migration-session',
+            'tenant_id': self.scope.tenant_id,
+            'owner_id': self.scope.owner_id,
+            'project_id': self.scope.project_id,
+            'before_project': before,
+            'before_project_hash': request_hash(before),
+            'after_project_hash': 'a' * 64,
+            'after_project_version': 2,
+        }
+        with self.repo.transaction() as conn:
+            conn.execute(
+                insert(documents).values(
+                    tenant_id=self.scope.tenant_id,
+                    owner_id=self.scope.owner_id,
+                    project_id=self.scope.project_id,
+                    kind='quick_chat_story_migration',
+                    document_id='migration-session',
+                    version=1,
+                    payload=payload,
+                    updated_at=self.now,
+                )
+            )
+        return payload
+
+    def test_migration_archive_blocks_project_purge_before_intent_quota_or_storage(
+        self,
+    ):
+        self.activate()
+        receipt = self.migration_archive()
+        moved = self.trash.apply(
+            self.principal, self.body('project', self.scope.project_id), 'trash'
+        )
+        body = {
+            'action': 'purge',
+            'items': [
+                {**item['target'], 'expected_version': item['version']}
+                for item in moved['items']
+            ],
+            'expected_project_versions': {self.scope.project_id: self.version()},
+            'confirmed': True,
+        }
+        with self.repo.engine.connect() as conn:
+            before = {
+                table.name: [
+                    dict(row) for row in conn.execute(select(table)).mappings()
+                ]
+                for table in (
+                    documents,
+                    objects,
+                    jobs,
+                    plans,
+                    attempts,
+                    budget_reservations,
+                )
+            }
+        with (
+            patch.object(
+                self.service.assets, 'usage', side_effect=AssertionError('quota IO')
+            ),
+            patch.object(
+                self.service.storage, 'delete', side_effect=AssertionError('storage IO')
+            ),
+            patch.object(
+                self.service.storage, 'stat', side_effect=AssertionError('storage IO')
+            ),
+        ):
+            for preview in (True, False):
+                with self.assertRaisesRegex(
+                    Conflict, '^migrated_project_archive_retained$'
+                ):
+                    self.trash.apply(self.principal, body, 'purge', preview=preview)
+        with self.repo.engine.connect() as conn:
+            for table in (
+                documents,
+                objects,
+                jobs,
+                plans,
+                attempts,
+                budget_reservations,
+            ):
+                self.assertEqual(
+                    [dict(row) for row in conn.execute(select(table)).mappings()],
+                    before[table.name],
+                )
+        restored = self.trash.apply(
+            self.principal,
+            {**body, 'action': 'restore'},
+            'restore',
+        )
+        self.assertEqual(restored['state'], 'completed')
+        with self.repo.engine.connect() as conn:
+            self.assertEqual(
+                conn.scalar(
+                    select(documents.c.payload).where(
+                        documents.c.kind == 'quick_chat_story_migration'
+                    )
+                ),
+                receipt,
+            )
+
+    def test_migration_archive_unknown_state_is_closed_and_validated_rollback_releases(
+        self,
+    ):
+        from studio_platform.quick_chat_migration import _rollback_record
+        from studio_platform.universal_trash import (
+            assert_project_archive_purge_available,
+        )
+
+        receipt = self.migration_archive()
+        rolled = {
+            **receipt,
+            'rollback': _rollback_record(
+                receipt,
+                {'id': 'admin-id', 'owner': 'qa-admin'},
+                self.now,
+                'Undo fixture',
+            ),
+        }
+        malformed = [
+            None,
+            {},
+            {**rolled, 'rollback': {'status': 'completed'}},
+            {**rolled, 'before_project': {**receipt['before_project'], 'journey': []}},
+        ]
+        with self.repo.transaction() as conn:
+            for payload in malformed:
+                conn.execute(
+                    update(documents)
+                    .where(documents.c.kind == 'quick_chat_story_migration')
+                    .values(payload=payload, version=2)
+                )
+                with self.assertRaisesRegex(
+                    Conflict, '^migrated_project_archive_retained$'
+                ):
+                    assert_project_archive_purge_available(
+                        conn,
+                        self.scope.tenant_id,
+                        self.scope.owner_id,
+                        self.scope.project_id,
+                    )
+            conn.execute(
+                update(documents)
+                .where(documents.c.kind == 'quick_chat_story_migration')
+                .values(payload=rolled, version=2)
+            )
+            assert_project_archive_purge_available(
+                conn, self.scope.tenant_id, self.scope.owner_id, self.scope.project_id
+            )
+            # A foreign receipt never discloses or blocks another owner/project.
+            for tenant, owner, project in (
+                ('other-tenant', self.scope.owner_id, self.scope.project_id),
+                (self.scope.tenant_id, 'other-owner', self.scope.project_id),
+                (self.scope.tenant_id, self.scope.owner_id, 'other-project'),
+            ):
+                assert_project_archive_purge_available(conn, tenant, owner, project)
+            conn.execute(
+                insert(documents).values(
+                    tenant_id=self.scope.tenant_id,
+                    owner_id=self.scope.owner_id,
+                    project_id=self.scope.project_id,
+                    kind='quick_chat_story_migration',
+                    document_id='unexpected-second-session',
+                    version=2,
+                    payload=rolled,
+                    updated_at=self.now,
+                )
+            )
+            with self.assertRaisesRegex(
+                Conflict, '^migrated_project_archive_retained$'
+            ):
+                assert_project_archive_purge_available(
+                    conn,
+                    self.scope.tenant_id,
+                    self.scope.owner_id,
+                    self.scope.project_id,
+                )
+
     def test_explicit_asset_purge_unknown_reconciles_original_and_releases_quota_once(
         self,
     ):

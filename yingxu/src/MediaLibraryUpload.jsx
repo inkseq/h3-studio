@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import React, { useRef, useState } from 'react';
 import { Upload, Image, Video, Music } from 'lucide-react';
 import { store } from './store.js';
@@ -95,16 +96,8 @@ export default function MediaLibraryUpload() {
         multiple
         onChange={(event) => accept([...event.target.files])}
       />
-      {error && (
-        <p role="alert" className="cloud-error">
-          {error}
-        </p>
-      )}
-      {message && (
-        <p role="status" className="media-upload-message">
-          {message}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={error ? error : null} />
+      <FloatingMessage tone="info" text={message ? message : null} />
     </section>
   );
 }

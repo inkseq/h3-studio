@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import { usePageActive } from './AppRouteCache.jsx';
 import React, { useEffect, useRef, useState } from 'react';
 import {
@@ -467,16 +468,8 @@ function HostEditor({ host, busy, onSave }) {
           })}
         </small>
       </form>
-      {notice && (
-        <p role="status" className="p4-note">
-          {notice}
-        </p>
-      )}
-      {error && (
-        <p role="alert" className="p4-error">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="info" text={notice ? notice : null} />
+      <FloatingMessage tone="error" text={error ? error : null} />
       {review && (
         <PolicyReview
           host={review.host}
@@ -544,11 +537,7 @@ function HostLookup({ controller, target, busy }) {
         </button>
       </form>
       <p className="p4-meta">{t('operator.copy179')}</p>
-      {error && (
-        <p role="alert" className="p4-error">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={error ? error : null} />
       {current && (
         <HostRecord key={machine} host={target}>
           <HostEditor

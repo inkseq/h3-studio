@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import React, { useState } from 'react';
 import { validDemandStart } from './demand-start-model.js';
 
@@ -126,11 +127,7 @@ export default function DemandStartPanel({ controller, state, busy }) {
           </div>
         </form>
       )}
-      {error && (
-        <p role="alert" className="p4-error">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={error ? error : null} />
     </section>
   );
 }

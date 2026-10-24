@@ -815,7 +815,7 @@
 
 /* #277: active real-service page controls use the same three sizes as the demo.
    Machine rows are navigable content surfaces, not toolbar-sized buttons. */
-.ops-adapter button:not([data-ui-surface]),
+.ops-adapter button:not([data-ui-surface]):not(.hbar *),
 .ops-dialog button {
   height: 32px;
   min-height: 32px;

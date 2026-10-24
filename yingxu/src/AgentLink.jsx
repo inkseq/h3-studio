@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import React, { useEffect, useState } from 'react';
 import { readAgentLink } from './agent-navigation.js';
 import { cloudController as cloud } from './cloud-controller.js';

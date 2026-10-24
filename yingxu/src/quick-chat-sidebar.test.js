@@ -77,7 +77,7 @@ const directory = fileURLToPath(new URL('.', import.meta.url)),
   filename = directory + 'quick-sidebar-test.cjs';
 const built = await build({
   stdin: {
-    contents: `import React from 'react';import QuickChatSidebar,{QuickChatRowActions} from './QuickChatSidebar.jsx';import CreationHistory from './CreationHistory.jsx';import QuickChatWorkspace from './QuickChatWorkspace.jsx';import {I18nProvider} from './i18n/I18nProvider.jsx';export {QuickChatWorkspace};export const Sidebar=props=><I18nProvider><QuickChatSidebar {...props}/></I18nProvider>;export const Actions=props=><I18nProvider><QuickChatRowActions {...props}/></I18nProvider>;export const History=props=><I18nProvider><CreationHistory {...props}/></I18nProvider>;`,
+    contents: `import React from 'react';import CreationHistory from './CreationHistory.jsx';import {I18nProvider} from './i18n/I18nProvider.jsx';export const History=props=><I18nProvider><CreationHistory {...props}/></I18nProvider>;`,
     resolveDir: directory,
     loader: 'jsx',
   },
@@ -92,43 +92,6 @@ const compiled = new Module(filename);
 compiled.filename = filename;
 compiled.paths = Module._nodeModulePaths(directory);
 compiled._compile(built.outputFiles[0].text, filename);
-test('sidebar exposes row-specific menus and select control; hide-test stays admin-only', () => {
-  const state = {
-    account: 'owner',
-    historyView: 'active',
-    historySelection: [],
-    sessions: [row('a'), row('b')],
-    session: row('a'),
-    hideTests: false,
-  };
-  const html = renderToStaticMarkup(
-    React.createElement(compiled.exports.Sidebar, {
-      state,
-      controller: {},
-      busy: false,
-      onSelect() {},
-    }),
-  );
-  assert.match(html, /More actions for Creation a/);
-  assert.match(html, /More actions for Creation b/);
-  assert.doesNotMatch(html, /Hide test/);
-  assert.match(html, /Select multiple/);
-  assert.doesNotMatch(html, /qc-history-dialog|qc-history-list|qc-history-tags/);
-});
-test('row menu has localized native icon actions and a disabled generating trash reason', () => {
-  const html = renderToStaticMarkup(
-    React.createElement(compiled.exports.Actions, {
-      row: row('busy'),
-      blocked: 'Still generating',
-      disabled: false,
-    }),
-  );
-  assert.match(html, /Rename/);
-  assert.match(html, /Mark as test/);
-  assert.match(html, /role="menuitem"[^>]*disabled=""/);
-  assert.match(html, /Still generating/);
-  assert.doesNotMatch(html, /[○✓⋯×‹＋]/);
-});
 test('active duplicate history view is retired while embedded Trash retains restore/purge controls', () => {
   const state = {
     account: 'owner',

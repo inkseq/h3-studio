@@ -366,6 +366,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_each_suite_matrix_is_complete_parallel_and_preserves_caches(self):
         for kind, next_job in (("python", "postgres"), ("postgres", "frontend")):
+            shard_count = {"python": 6, "postgres": 10}[kind]
             block = self.workflow.split(f"\n  {kind}:\n", 1)[1].split(
                 f"\n  {next_job}:\n", 1
             )[0]
@@ -373,10 +374,10 @@ class WorkflowTests(unittest.TestCase):
             indices = re.search(r"shard: \[(.*?)\]", block).group(1)
             self.assertEqual(
                 [int(value.strip()) for value in indices.split(",")],
-                list(range(ci.DEFAULT_SHARD_COUNT)),
+                list(range(shard_count)),
             )
             self.assertIn(
-                f"--suite {kind} --shard-index ${{{{ matrix.shard }}}} --shard-count {ci.DEFAULT_SHARD_COUNT}",
+                f"--suite {kind} --shard-index ${{{{ matrix.shard }}}} --shard-count {shard_count}",
                 block,
             )
             self.assertIn("cache: pip", block)
@@ -386,6 +387,41 @@ class WorkflowTests(unittest.TestCase):
             self.assertNotIn("secrets.", block)
             self.assertNotIn("id-token: write", block)
         self.assertNotIn("self-hosted", self.workflow)
+
+    def test_post_staging_journeys_cannot_use_deploy_identity_or_skip_qa_checks(self):
+        job = self.workflow.split("\n  journeys-staging:\n", 1)[1].split(
+            "\n  promote-accepted-aws:\n", 1
+        )[0]
+        self.assertIn("needs: [changes, deploy-staging-aws]", job)
+        self.assertIn("needs.deploy-staging-aws.result == 'success'", job)
+        self.assertIn("permissions: {contents: read}", job)
+        self.assertIn(
+            "concurrency: {group: sixnine-staging-deploy, cancel-in-progress: false}",
+            job,
+        )
+        for forbidden in (
+            "id-token:",
+            "configure-aws-credentials",
+            "role-to-assume",
+            "continue-on-error",
+        ):
+            self.assertNotIn(forbidden, job)
+        self.assertIn("repository: inkseq/inkseq-design", job)
+        self.assertIn("persist-credentials: false", job)
+        qa_step = job.split(
+            "- name: Run all staging user journeys with QA accounts only", 1
+        )[1].split("- name: Verify the same deployment after journeys", 1)[0]
+        for secret in ("QA_USER", "QA_USER_PASSWORD", "QA_ADMIN", "QA_ADMIN_PASSWORD"):
+            reference = "${{ secrets." + secret + " }}"
+            self.assertEqual(job.count(reference), 1)
+            self.assertIn(reference, qa_step)
+        self.assertIn("process.env.JOURNEY_ONLY", qa_step)
+        self.assertIn("process.env.QA_ACCOUNTS_FILE", qa_step)
+        self.assertIn("throw Error('Complete staging QA credentials", qa_step)
+        self.assertIn("node tools/journeys.mjs", qa_step)
+        self.assertIn("frontend !== expected", job)
+        self.assertIn("metadata.before.frontend_commit !== frontend", job)
+        self.assertIn("inkseq-journey-staging-check.mjs\" after", job)
 
     def aggregate(self, *, selected=True, override=None):
         flags = {name: "true" if selected else "false" for name in ci_gate_names()}

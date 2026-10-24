@@ -6,9 +6,10 @@ import { LogIn } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { hostedSignInEnabled, hostedSignInUrl } from './account-access.js';
 
-export default function HostedSignIn({ auth }) {
+// `passwordFirst` opens with the username form unfolded (an existing password account, #305).
+export default function HostedSignIn({ auth, passwordFirst = false }) {
   const { t } = useI18n();
-  const [legacy, setLegacy] = useState(false);
+  const [legacy, setLegacy] = useState(passwordFirst);
   if (!hostedSignInEnabled(auth)) return null;
   const here = () => window.location.pathname + window.location.search;
   return (

@@ -12,7 +12,6 @@ from urllib.parse import quote
 import uuid
 
 from fastapi import (
-    FastAPI,
     File,
     Form,
     Header,
@@ -166,7 +165,11 @@ def create_app(
             if repository is None:
                 repo.close()
 
-    app = FastAPI(title="Inkseq video platform", version="1.0.0-dev", lifespan=lifespan)
+    from .error_monitoring import monitored_app
+
+    app = monitored_app(
+        settings, title="Inkseq video platform", version="1.0.0-dev", lifespan=lifespan
+    )
     app.add_middleware(
         BodyLimitMiddleware,
         project_bytes=settings.max_project_bytes,
