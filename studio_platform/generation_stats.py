@@ -11,10 +11,10 @@ import statistics
 
 from fastapi import Query, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from .operator_capacity import operator_nodes
-from .repository import attempts, jobs
+from .repository import artifacts, attempts, jobs
 from .telemetry import _bands
 
 MAX_ROWS = 2000
@@ -49,14 +49,20 @@ def content(request):
         ("fps", "fps"),
         ("height", "height"),
     ):
-        item = output.get(source, inner.get(name))
+        item = output.get(source, output.get(name, inner.get(name)))
         if type(item) is int and item > 0:
             value[name] = item
     inputs = inner.get("inputs") if isinstance(inner.get("inputs"), dict) else {}
     for name, plural in (("image_refs", "images"), ("audio_refs", "audios")):
         if isinstance(inputs.get(plural), list):
             value[name] = len(inputs[plural])
-    if value.get("frames") and value.get("fps"):
+    seconds = output.get("actual_duration")
+    if type(seconds) in (int, float) and math.isfinite(seconds) and seconds > 0:
+        # Production output specs carry the native duration instead of an fps.
+        value["seconds"] = round(seconds, 2)
+        if value.get("frames") and "fps" not in value:
+            value["fps"] = max(1, round(value["frames"] / seconds))
+    elif value.get("frames") and value.get("fps"):
         value["seconds"] = round(value["frames"] / value["fps"], 2)
     return value
 
@@ -94,6 +100,12 @@ def generation_stats(repo, tenant_id, *, days, now):
                     attempts.c.submission_started_at,
                     attempts.c.updated_at,
                     attempts.c.actual_cost_microusd,
+                    # The first output written is the finish; updated_at moves on
+                    # later (settlement, reconciliation) and inflated runs to days.
+                    select(func.min(artifacts.c.created_at))
+                    .where(artifacts.c.attempt_id == attempts.c.id)
+                    .scalar_subquery()
+                    .label("output_at"),
                 )
                 .select_from(attempts.join(jobs, attempts.c.job_id == jobs.c.id))
                 .where(
@@ -120,7 +132,8 @@ def generation_stats(repo, tenant_id, *, days, now):
                 )
     items = []
     for row in rows:
-        started, finished = row["submission_started_at"], row["updated_at"]
+        started = row["submission_started_at"]
+        finished = row["output_at"] if _number(row["output_at"]) else row["updated_at"]
         if not (_number(started) and _number(finished) and finished >= started):
             continue
         detail = content(row["request"])
