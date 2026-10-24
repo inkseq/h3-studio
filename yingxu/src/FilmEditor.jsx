@@ -39,6 +39,7 @@ import TrimBar from './TrimBar.jsx';
 import { CloudSaveStatus } from './CloudAutosave.jsx';
 import { cloudController } from './cloud-controller.js';
 import './film-editor.css';
+import { Note } from './ui/Note.jsx';
 
 // Linear fade in/out over the given number of frames, as the exporter's afade.
 const envelope = (frame, frames, fadeIn, fadeOut) =>
@@ -56,7 +57,22 @@ function Cut({ clips, sources, cues = [], audio = [] }) {
     <AbsoluteFill style={{ background: '#000' }}>
       {clips.map((clip) => (
         <Sequence key={clip.id} from={clip.from} durationInFrames={clip.frames}>
-          {sources[clip.asset?.id] ? (
+          {sources[clip.asset?.id] && clip.parts ? (
+            clip.parts.map((part, index) => (
+              <Sequence
+                key={index}
+                from={clip.parts.slice(0, index).reduce((sum, p) => sum + p.frames, 0)}
+                durationInFrames={part.frames}
+              >
+                <Html5Video
+                  src={sources[clip.asset.id]}
+                  trimBefore={part.startFrame}
+                  muted
+                  style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                />
+              </Sequence>
+            ))
+          ) : sources[clip.asset?.id] ? (
             <Html5Video
               src={sources[clip.asset.id]}
               trimBefore={clip.startFrame}
@@ -226,6 +242,20 @@ function TimelineClip({ clip, pps, selected, playing, busy, sound, onSelect }) {
       {...sortable.listeners}
     >
       {clip.asset && <ClipThumb asset={clip.asset} />}
+      {clip.parts?.length > 1 &&
+        clip.parts.slice(1).map((_, index) => (
+          <span
+            key={index}
+            className="film-tclip-cut"
+            style={{
+              left:
+                (clip.parts.slice(0, index + 1).reduce((sum, p) => sum + p.frames, 0) /
+                  clip.frames) *
+                  100 +
+                '%',
+            }}
+          />
+        ))}
       <span className="film-tclip-label">
         <b>{clip.index + 1}</b>
         {width >= 72 && <span>{clip.title}</span>}
@@ -568,18 +598,22 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
                       <span className="muted">{t('editor.loading')}</span>
                     )}
                   </div>
-                  <TrimBar
-                    key={selected.id}
-                    duration={selected.sourceSeconds ?? durations[selected.asset.id]}
-                    start={selected.startFrame / cutFps}
-                    end={(selected.startFrame + selected.sourceFrames) / cutFps}
-                    getVideo={() => sourceVideo.current}
-                    disabled={busy}
-                    onCommit={(start, end, source) =>
-                      edit((p) => trimClip(p, selected.id, start, end, source))
-                    }
-                  />
-                  {rates && (
+                  {selected.parts ? (
+                    <Note>{t('editor.keptParts', { count: selected.parts.length })}</Note>
+                  ) : (
+                    <TrimBar
+                      key={selected.id}
+                      duration={selected.sourceSeconds ?? durations[selected.asset.id]}
+                      start={selected.startFrame / cutFps}
+                      end={(selected.startFrame + selected.sourceFrames) / cutFps}
+                      getVideo={() => sourceVideo.current}
+                      disabled={busy}
+                      onCommit={(start, end, source) =>
+                        edit((p) => trimClip(p, selected.id, start, end, source))
+                      }
+                    />
+                  )}
+                  {rates && !selected.parts && (
                     <div className="film-speed" role="group" aria-label={t('editor.speed')}>
                       <Gauge size={14} aria-hidden="true" />
                       <span>{t('editor.speed')}</span>

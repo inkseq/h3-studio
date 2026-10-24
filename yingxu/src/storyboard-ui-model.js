@@ -1,3 +1,4 @@
+import { segmentsTotal } from './shot-segments.js';
 import { storyboardPresentation } from './i18n/legacyPresentation.js';
 import { translate } from './i18n/locale.js';
 export const TYPE_LABEL = { character: '人物', location: '场景', prop: '道具' };
@@ -126,8 +127,10 @@ export function segments(shots) {
   let t = 0;
   return shots.map((shot) => {
     const version = chosenVersion(shot),
-      dur =
-        Number.isFinite(version?.duration) && version.duration > 0
+      kept = shot.segments?.length && version ? segmentsTotal(shot.segments) : 0,
+      dur = kept
+        ? kept
+        : Number.isFinite(version?.duration) && version.duration > 0
           ? version.duration
           : Number.isFinite(shot.duration) && shot.duration > 0
             ? shot.duration
