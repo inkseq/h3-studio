@@ -320,6 +320,17 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
       live = false;
     };
   }, [c.account, s.project.id, s.workspace.mode]);
+  // An unconfirmed edit (no generation, no money) replays itself with its original key:
+  // the server returns the first result or proves nothing was written (owner, 2026-10-25).
+  // Preflight and batch submissions still wait for the person to check them.
+  const pendingKind =
+    c.account && s.workspace.mode === 'cloud' && !cloud.workbenchRunning()
+      ? cloud.workbenchPending()?.kind
+      : null;
+  useEffect(() => {
+    if (!['actions', 'preferences', 'copies'].includes(pendingKind)) return;
+    void dispatch({ type: 'workbenchRecover' }).catch(() => {});
+  }, [pendingKind, s.project.id]);
   useEffect(() => {
     if (!c.account || !c.operatorAccess) {
       setQueue(null);

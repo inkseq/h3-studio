@@ -1055,7 +1055,20 @@ function StoryboardShell({ onLegacyGuide, onCanvas, onNewScene, filmControl }) {
       onDragCancel={() => setDragging(null)}
     >
       <section ref={container} className="sb-workspace" aria-label={t('storyboard.copy30')}>
-        <FloatingMessage tone="error" text={state.error || null} onDismiss={clearError} />
+        <FloatingMessage
+          tone="error"
+          // The pending warning below already says this, with its recover action.
+          text={
+            state.error &&
+            !(
+              state.workbenchPending &&
+              [t('workbench.pending'), 'workbench.pending'].includes(state.error)
+            )
+              ? state.error
+              : null
+          }
+          onDismiss={clearError}
+        />
         <FloatingMessage
           tone="warn"
           text={state.workbenchPending ? t('workbench.pending') : null}
