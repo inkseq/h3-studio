@@ -1,3 +1,4 @@
+import { EmptyState, Note } from './ui/Note.jsx';
 import StudioHeader from './StudioHeader.jsx';
 import { useModal } from './ui/Dialog.jsx';
 import { FloatingMessage } from './floating-notice.js';
@@ -1022,10 +1023,10 @@ function KeepDialog({ target, kind, controller, busy, onClose }) {
       <fieldset disabled={busy || working || !!receipt}>
         <KeepFields value={value} onChange={setValue} />
       </fieldset>
-      <p className="p4-note">
+      <Note>
         {kind === 'group' ? t('operator.status32') : ''}
         {t('operator.more.protections')}
-      </p>
+      </Note>
       {receipt && <ActionResults receipt={receipt} />}{' '}
       <FloatingMessage tone="error" text={error ? error : null} />
       <footer>
@@ -1146,7 +1147,7 @@ function StopDialog({ target, kind, controller, busy, onClose }) {
       ))}
       {receipt && <ActionResults receipt={receipt} />}{' '}
       <FloatingMessage tone="error" text={error ? error : null} />
-      <p className="p4-note">{t('operator.copy83')}</p>
+      <Note>{t('operator.copy83')}</Note>
       <footer>
         <span />
         <div>
@@ -1387,7 +1388,7 @@ function MoveDialog({ node, groups, controller, busy, onClose }) {
           ))}
         </select>
       </label>
-      <p className="p4-note">{t('operator.copy99')}</p>
+      <Note>{t('operator.copy99')}</Note>
       <FloatingMessage tone="error" text={error ? error : null} />
       <footer>
         <span />
@@ -1416,7 +1417,7 @@ export function InventoryAdvisory({ item }) {
   if (outcome.state !== 'empty')
     return item.error ? <p className="p4-error">{item.error}</p> : null;
   return (
-    <p className="p4-note" role="status">
+    <Note role="status">
       {outcome.message}
       <br />
       <small>
@@ -1428,7 +1429,7 @@ export function InventoryAdvisory({ item }) {
           price: money(profile.max_price_microusd),
         })}
       </small>
-    </p>
+    </Note>
   );
 }
 function Inventory({ profiles, controller, onStart, testTaskRequired = false }) {
@@ -1886,20 +1887,17 @@ export default function P4OperatorConsole() {
         {!c.account ? (
           <Login />
         ) : state.denied ? (
-          <div className="empty-state">
-            <span>
-              <ShieldCheck size={22} />
-            </span>
-            <b>{t('operator.copy136')}</b>
-            <a href="/quick-chat">{t('operator.copy137')}</a>
-          </div>
+          <EmptyState
+            icon={<ShieldCheck size={22} />}
+            title={t('operator.copy136')}
+            action={<a href="/quick-chat">{t('operator.copy137')}</a>}
+          />
         ) : !snapshot ? (
-          <div className="empty-state" role="status">
-            <span>
-              <Cpu size={22} />
-            </span>
-            <b>{state.loading ? t('operator.status54') : t('operator.status55')}</b>
-          </div>
+          <EmptyState
+            role="status"
+            icon={<Cpu size={22} />}
+            title={state.loading ? t('operator.status54') : t('operator.status55')}
+          />
         ) : (
           <>
             <nav className="seg ops-page-tabs" aria-label={t('operator.status119')}>

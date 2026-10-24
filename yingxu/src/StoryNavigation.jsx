@@ -1,3 +1,4 @@
+import { EmptyState, Note } from './ui/Note.jsx';
 import './v2/works-adapter.css';
 import { FloatingMessage } from './floating-notice.js';
 import { TrashMenu, useTrash } from './UniversalTrash.jsx';
@@ -248,15 +249,13 @@ export default function StoryNavigation({ state, onOpenCloud, onOpenLocal, onSel
               <p className="story-nav-group">{t('legacy.cloudAccount', { account: c.account })}</p>
               {visibleCloud.map((p) => item(p, 'cloud'))}
               <FloatingMessage tone="info" text={!c.projectsLoaded ? t('account.copy8') : null} />
-              {c.projectsLoaded && !cloudProjects.length && (
-                <p className="story-nav-note">{t('account.copy9')}</p>
-              )}
+              {c.projectsLoaded && !cloudProjects.length && <Note>{t('account.copy9')}</Note>}
             </>
           )}
           <p className="story-nav-group">{t('account.copy10')}</p>
           {visibleLocal.map((p) => item(p, 'local'))}
           {query && !visibleCloud.length && !visibleLocal.length && (
-            <p className="story-nav-note">{t('account.copy11')}</p>
+            <Note>{t('account.copy11')}</Note>
           )}
         </nav>
         {c.moreProjects && (
@@ -269,7 +268,7 @@ export default function StoryNavigation({ state, onOpenCloud, onOpenLocal, onSel
             {t('account.copy12')}
           </button>
         )}
-        {query && c.moreProjects && <p className="story-nav-note">{t('account.copy13')}</p>}
+        {query && c.moreProjects && <Note>{t('account.copy13')}</Note>}
         {library.error && (
           <p className="story-nav-error" role="alert">
             {t('account.copy14')}
@@ -285,9 +284,9 @@ export default function StoryNavigation({ state, onOpenCloud, onOpenLocal, onSel
         )}
       </div>
       {state.workspace.mode === 'cloud' && state.workspace.dirty && (
-        <p className="story-nav-note">
+        <Note>
           {state.saveState.startsWith('保存失败') ? t('legacy.visible11') : t('legacy.visible12')}
-        </p>
+        </Note>
       )}
       <FloatingMessage tone="info" text={pending ? pending : null} />
       <FloatingMessage tone="error" text={error ? error : null} />
@@ -910,11 +909,13 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
         </a>
       </footer>
       {!visible.length && (
-        <div className="story-library-empty">
-          <BookOpen size={28} />
-          <h2>{query ? t('legacy.visible19') : t('legacy.visible20')}</h2>
-          <p>{query ? t('legacy.visible21') : t('legacy.visible22')}</p>
-        </div>
+        <EmptyState
+          className="story-library-empty"
+          icon={<BookOpen size={22} />}
+          title={query ? t('legacy.visible19') : t('legacy.visible20')}
+        >
+          {query ? t('legacy.visible21') : t('legacy.visible22')}
+        </EmptyState>
       )}
       <FloatingMessage
         tone="info"
@@ -946,14 +947,14 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
           </button>
         )
       )}
-      {c.moreProjects && query && <p className="story-library-note">{t('account.copy27')}</p>}
+      {c.moreProjects && query && <Note>{t('account.copy27')}</Note>}
       <FloatingMessage
         tone="error"
         text={library.library.error ? t('account.copy28') : null}
         action={{ label: t('account.copy15'), onClick: onOpenLocal }}
       />
       {state.workspace.mode === 'cloud' && state.workspace.dirty && (
-        <p className="story-library-note">{t('account.copy29')}</p>
+        <Note>{t('account.copy29')}</Note>
       )}
       <FloatingMessage tone="info" text={library.pending ? library.pending : null} />
       <FloatingMessage tone="error" text={library.error ? library.error : null} />

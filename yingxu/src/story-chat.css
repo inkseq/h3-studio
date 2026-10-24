@@ -391,12 +391,8 @@
   padding: 12px 24px 32px;
 }
 .sc-board-empty {
-  display: grid;
-  place-items: center;
-  gap: 8px;
+  justify-content: center;
   height: 70%;
-  color: var(--sc-muted);
-  text-align: center;
 }
 .sc-progress {
   position: sticky;

@@ -1040,7 +1040,6 @@
   font-size: 20px;
   font-weight: 600;
 }
-.ops-adapter .spend-breakdown-note,
 .ops-adapter .spend-breakdown-unavailable {
   font-size: 12px;
   color: var(--muted);
@@ -1172,10 +1171,6 @@
   margin: 10px 0;
 }
 .ops-adapter .billing-admin dt,
-.ops-adapter .billing-note {
-  color: var(--muted);
-  font-size: 12px;
-}
 .ops-adapter .billing-admin dd {
   margin: 3px 0 0;
   font-variant-numeric: tabular-nums;

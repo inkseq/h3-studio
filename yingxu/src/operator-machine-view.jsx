@@ -1,3 +1,4 @@
+import { Note } from './ui/Note.jsx';
 import { operatorOfferReadiness as rawOfferReadiness } from './operator-model.js';
 import { FloatingMessage } from './floating-notice.js';
 import { operatorNodeStatus as rawOperatorNodeStatus } from './operator-presentation.js';
@@ -376,7 +377,7 @@ export function NodeCard({ node, profiles = [], disabled, onAction, now = Date.n
         <p>{history ? lo('legacyOp.copy363') : lo('legacyOp.copy364')}</p>
       </details>
       <div className="op-slots">
-        {history && node.slots?.length > 0 && <p className="op-note">{lo('legacyOp.copy365')}</p>}
+        {history && node.slots?.length > 0 && <Note>{lo('legacyOp.copy365')}</Note>}
         {node.slots?.length ? (
           node.slots.map((slot, index) => (
             <div className="op-slot" key={slot.id}>
@@ -418,17 +419,17 @@ export function NodeCard({ node, profiles = [], disabled, onAction, now = Date.n
               </p>
               <small>{slot.configuration_id || lo('legacyOp.copy374')}</small>
               {!history && !removal && slot.admission_allowed === false && (
-                <p className="op-note">
+                <Note>
                   {lo('legacyOp.copy375')}{' '}
                   {reasonText(slot.admission_reason_code || 'matching_worker_unavailable')}
                   <br />
                   <code>{slot.admission_reason_code || 'matching_worker_unavailable'}</code>
-                </p>
+                </Note>
               )}
             </div>
           ))
         ) : (
-          <p className="op-note">{history ? lo('legacyOp.copy376') : lo('legacyOp.copy377')}</p>
+          <Note>{history ? lo('legacyOp.copy376') : lo('legacyOp.copy377')}</Note>
         )}
       </div>
       <details className="op-details">
@@ -593,7 +594,7 @@ export function CandidateCard({ row, index, current, busy, onStart }) {
       </div>
       <Reasons items={row.blockers || []} />
       {row.preference_hints?.length > 0 && (
-        <p className="op-note">{row.preference_hints.map(reasonText).join(' ')}</p>
+        <Note>{row.preference_hints.map(reasonText).join(' ')}</Note>
       )}
       <details className="op-details">
         <summary>
