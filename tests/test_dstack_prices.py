@@ -330,12 +330,59 @@ class DstackPriceTests(ledger_fixtures.LedgerCase):
             before = self.repo.get_budget("owner-budget")
             counts = self.counts()
             second = self.service.preview(self.owner, {"profile_id": "5090-ref"})
-            self.assertEqual(second["max_price_microusd"], 1500000)
+            self.assertEqual(second["max_price_microusd"], 3000000)
             with self.assertRaisesRegex(OperatorError, "dstack_hourly_limit_exceeded"):
                 self.start(key="second-ref", preview=second)
         self.assertEqual(self.repo.get_budget("owner-budget"), before)
         self.assertEqual(self.counts(), counts)
         self.assertEqual(len(self.client.applied), 1)
+        self.assertEqual(self.client.stopped, [])
+
+    def test_explicit_ref_three_dollar_price_cas_reaches_original_start(self):
+        policies = self.continuing(("ref",), fleet=15_000_000)
+        config = copy.deepcopy(self.service.config)
+        config["profiles"][0]["max_price_microusd"] = 850000
+        self.service = DstackOperator(self.repo, self.settings, self.capacity, config)
+        self.adopt_capacity()
+        original = self.price()
+        body = {
+            "expected_snapshot": original["snapshot"],
+            "expected_settings_version": 1,
+            "max_price_microusd": 3_000_000,
+            "price_ceiling_microusd": 3_000_000,
+        }
+        confirmation = self.service.preview_price(self.owner, "5090-ref", body)
+        body.update(
+            reason="owner approved REF three dollars per hour",
+            confirmation_digest=confirmation["confirmation_digest"],
+        )
+        changed = self.service.update_price(self.owner, "5090-ref", body)
+        self.assertTrue(changed["changed"])
+        self.assertEqual(self.price()["max_price_microusd"], 3_000_000)
+        with patch(
+            "studio_platform.execution_profiles.selected_policy",
+            return_value=next(iter(policies.values())),
+        ):
+            preview = self.service.preview(self.owner, {"profile_id": "5090-ref"})
+            self.assertEqual(preview["max_price_microusd"], 3_000_000)
+            started = self.start(preview=preview)
+            self.assertEqual(len(self.client.applied), 1)
+            self.assertEqual(self.start(preview=preview), started)
+            self.assertEqual(len(self.client.applied), 1)
+            counts, budget = self.counts(), self.repo.get_budget("owner-budget")
+            with patch.object(
+                self.client, "plan", side_effect=AssertionError("plan forbidden")
+            ):
+                with self.assertRaisesRegex(OperatorError, "price_ceiling_exceeded"):
+                    self.service.preview(
+                        self.owner,
+                        {"profile_id": "5090-ref", "max_price_microusd": 3_000_001},
+                    )
+            self.assertEqual(self.counts(), counts)
+            self.assertEqual(self.repo.get_budget("owner-budget"), budget)
+        with self.assertRaisesRegex(OperatorError, "price_policy_conflict"):
+            self.service.update_price(self.owner, "5090-ref", body)
+        self.assertEqual(len(self.service.admin_prices(self.owner)["audits"]), 1)
         self.assertEqual(self.client.stopped, [])
 
     def test_ref_price_still_obeys_profile_admin_and_owner_caps(self):

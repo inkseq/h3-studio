@@ -4,8 +4,8 @@ This is the backend settings and admission slice. It reuses the admin
 `platform_spending_settings` row, profile-price overlays, original rental/job
 records and outbox audit. No new ledger, scheduler or table is introduced.
 Installing this code does **not** adopt defaults, change prices, enable demand
-start, or raise the current two-machine limit. Production adoption requires the
-separate accepted configuration action.
+start, or raise the legacy two-machine limit. Explicit adoption uses the owner's
+CR59 limits below; deployed defaults alone never change a stored policy.
 
 ## Admin API
 
@@ -44,8 +44,8 @@ not a promise that a mixed fleet or the corresponding stock is available.
 
 Defaults and bounds live in `studio_platform/capacity_settings.py`. The daily
 supplier admission ceiling defaults to USD100, warning fraction0.8 (range0.5–0.95),
-fleet ceiling USD3/hour and maximum machines2 (configurable1–8). Mode ceilings
-default to REF USD1.50/hour and FL/other USD0.85/hour; other cannot exceed either
+fleet ceiling USD15/hour and maximum machines10 (configurable1–10). Mode ceilings
+default to REF USD3/hour and FL/other USD0.85/hour; other cannot exceed either
 FL or REF. Each offer must satisfy the profile ceiling, mode ceiling, admin
 per-machine ceiling, fleet ceiling and original account/budget guards. No silent
 clamping or retroactive shutdown occurs.
@@ -70,20 +70,24 @@ The tenant daily projection uses Australia/Sydney calendar days, including DST.
 It counts one original rental once across its owner and shared budget layers.
 Known internal worker jobs, customer prices, credits, holds and captures are not
 additional supplier cost. Distinct original supplier allocations remain additive.
-Unknown external supplier obligations are visible blockers; no new per-job
+Unknown external supplier obligations are visible warnings; no new per-job
 supplier billing adapter is assumed.
 
 Confirmed actual settlements belong to their original settlement day. Original
 unsettled rental exposure carries across midnight until positively settled or
 released. A proven staging test rental is excluded from production daily usage
 but remains in its original isolated test task. Missing/conflicting bindings,
-amounts, states or timestamps produce `usage_unconfirmed`, a null total and
+amounts, states or timestamps produce an uncertainty warning, a null total and
 admin-only finite diagnostic details, never an invented bill or zero.
 
-Daily statuses: `policy_not_adopted`, `within_limit`, `warning`, `limit_reached`,
-`usage_unconfirmed`. The latter two block new paid admission with
-`tenant_daily_limit_reached` or `tenant_daily_usage_unconfirmed`. Warning is
-visible state only; no new notification channel is added.
+Daily statuses: `policy_not_adopted`, `within_limit`, `warning`, `limit_reached`.
+The old `usage_unconfirmed` admission refusal is removed. Only confirmed supplier
+exposure at the daily ceiling blocks
+new paid admission with `tenant_daily_limit_reached`, including when other
+references remain unresolved. `uncertainty_warning=true` retains the null total
+plus the known subtotal; it never turns uncertainty into zero or an invented bill.
+`admission_basis=confirmed_supplier_exposure` and `admission_blocked` make the
+effective gate explicit. No new notification channel is added.
 
 This is an **admission ceiling**, not a guaranteed cash maximum. Already accepted
 work continues, and its final supplier invoice can exceed the daily ceiling.
@@ -95,5 +99,8 @@ Focused SQLite and PostgreSQL tests cover CAS/confirmation races, budget-layer
 deduplication, unknown invoice carry, DST, cross-owner admission serialization,
 editable machine counts, disabled gates, replay and accepted-work continuation.
 These tests use fake providers and isolated databases, not real rentals.
-Staging adoption/readback and Claude acceptance are separate release gates;
-neither a passing local test nor a merged PR is production activation.
+CR59 authorizes production activation after one quick staging adoption/readback;
+read-only classification of unresolved historical references is not a gate.
+Snapshot settings and profile versions before every adoption and retain the
+original audited result. Neither a passing local test nor a merged PR is
+production activation.
