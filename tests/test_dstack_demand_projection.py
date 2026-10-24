@@ -16,6 +16,7 @@ from studio_platform.dstack_operator import DstackOperator, OperatorError
 from studio_platform.dstack_workspace import DstackWorkspace
 from studio_platform.repository import (
     Scope,
+    BudgetExceeded,
     attempts,
     jobs,
     instance_intents,
@@ -258,8 +259,8 @@ class DemandProjectionTests(LedgerCase):
                     {"preview_id": previews[index]["preview_id"]},
                     "manual-" + str(index),
                 )
-            except OperatorError as error:
-                self.assertEqual(str(error), "dstack_capacity_limit_exceeded")
+            except BudgetExceeded as error:
+                self.assertEqual(str(error), "global_capacity_exceeded")
                 return None
 
         values = self.parallel(start, count=6)

@@ -6,7 +6,7 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import func, insert, select, update
 
 from studio_platform.capacity_health import evaluate
 from studio_platform.capacity_health import (
@@ -15,11 +15,13 @@ from studio_platform.capacity_health import (
     snapshot,
     pending_reports,
     _event,
+    queue_episode_ages,
 )
 from studio_platform.dstack_demand_policy import policy_key, read_runtime
 from studio_platform.dstack_controller import DstackController
 from studio_platform.operator_capacity import operator_nodes, operator_policy
 from studio_platform.repository import outbox
+from studio_platform.queue import TaskQueue
 from studio_platform.telemetry import NullTelemetry
 from studio_platform.error_monitoring import report_capacity_health, sanitized_event
 from test_platform_repository import LedgerCase
@@ -260,6 +262,85 @@ class HealthLedgerTests(LedgerCase):
         self.assertEqual(len(self.events("capacity.health_alert_reported")), 1)
         self.assertEqual(self.repo.get_job(self.scope, original["id"]), before)
         self.assertEqual(self.repo.get_budget("owner-budget"), budget)
+
+    def test_repeated_real_claim_defer_does_not_reset_wait_but_submission_does(self):
+        original = self.job()
+        queue = TaskQueue(self.repo)
+        for _ in range(9):
+            self.now += 200
+            claim = queue.claim(
+                "fixture-worker", original["pool"], job_ids=[original["id"]]
+            )
+            self.assertIsNotNone(claim)
+            self.now += 1
+            queue.defer_unsubmitted(
+                claim.lease, retry_after_s=1, error_code="worker_preparation_not_ready"
+            )
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(
+                queue_episode_ages(connection, self.scope.tenant_id)[original["id"]],
+                original["created_at"],
+            )
+        self.assertEqual(check(self.service, NullTelemetry())["new_alerts"], 1)
+        self.now += 2
+        claim = queue.claim(
+            "fixture-worker", original["pool"], job_ids=[original["id"]]
+        )
+        queue.begin_submission(claim.lease)
+        queue.record_submitted(claim.lease, "fixture-task")
+        queue.reclaim_capacity(
+            self.scope,
+            original["id"],
+            expected_attempt_id=claim.lease.attempt_id,
+            expected_fence=claim.lease.fence,
+            reason="capacity_owner_recovery",
+            evidence_id="fixture-loss",
+        )
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(
+                queue_episode_ages(connection, self.scope.tenant_id)[original["id"]],
+                self.now,
+            )
+        self.assertEqual(check(self.service, NullTelemetry())["new_alerts"], 0)
+
+    def test_paused_cancelled_and_running_history_resets_waiting_episode(self):
+        originals = [
+            (state, self.job(key="history-" + state))
+            for state in ("paused", "cancelled", "running")
+        ]
+        with self.repo.engine.connect() as connection:
+            sequence = (
+                connection.execute(
+                    select(func.max(outbox.c.job_event_seq))
+                ).scalar_one()
+                or 0
+            )
+        for state, original in originals:
+            with self.subTest(state=state):
+                self.now += 1000
+                with self.repo.transaction() as connection:
+                    for status, stamp in (
+                        (state, self.now - 500),
+                        ("queued", self.now),
+                    ):
+                        sequence += 1
+                        connection.execute(
+                            insert(outbox).values(
+                                id=str(uuid.uuid4()),
+                                event_type="job.fixture",
+                                aggregate_id=original["id"],
+                                job_event_seq=sequence,
+                                payload={"public_state": {"status": status}},
+                                created_at=stamp,
+                            )
+                        )
+                with self.repo.engine.connect() as connection:
+                    self.assertEqual(
+                        queue_episode_ages(connection, self.scope.tenant_id)[
+                            original["id"]
+                        ],
+                        self.now,
+                    )
 
     def test_failed_export_remains_pending_until_same_event_is_accepted(self):
         self.job()

@@ -10,7 +10,7 @@ import copy
 import math
 import uuid
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import func, insert, select, update
 
 from .dstack_demand import _matches
 from .operator_capacity import operator_nodes, operator_policy
@@ -228,8 +228,44 @@ def evaluate(
     return result
 
 
+def queue_episode_ages(connection, tenant):
+    """Preparation claim/defer cycles are one wait until genuine submission."""
+    waiting = ("waiting_capacity", "queued", "claimed")
+    status = outbox.c.payload["public_state"]["status"].as_string()
+    boundary = (
+        select(
+            outbox.c.aggregate_id.label("job_id"),
+            func.max(outbox.c.job_event_seq).label("sequence"),
+        )
+        .join(jobs, outbox.c.aggregate_id == jobs.c.id)
+        .where(
+            jobs.c.tenant_id == tenant,
+            jobs.c.status.in_(QUEUED),
+            status.is_not(None),
+            status.not_in(waiting),
+        )
+        .group_by(outbox.c.aggregate_id)
+        .subquery()
+    )
+    rows = (
+        select(jobs.c.id, func.min(outbox.c.created_at).label("since"))
+        .select_from(
+            jobs.join(outbox, outbox.c.aggregate_id == jobs.c.id).outerjoin(
+                boundary, boundary.c.job_id == jobs.c.id
+            )
+        )
+        .where(
+            jobs.c.tenant_id == tenant,
+            jobs.c.status.in_(QUEUED),
+            status.in_(waiting),
+            outbox.c.job_event_seq > func.coalesce(boundary.c.sequence, 0),
+        )
+        .group_by(jobs.c.id)
+    )
+    return {row.id: row.since for row in connection.execute(rows)}
+
+
 def snapshot(service, connection, now):
-    from .alert_snapshot import _state_age
     from .dstack_demand import _nodes
     from .dstack_demand_policy import policy_key, read_runtime
 
@@ -278,7 +314,7 @@ def snapshot(service, connection, now):
         attempt_rows,
         workers,
         now=now,
-        queue_ages=_state_age(connection, tenant),
+        queue_ages=queue_episode_ages(connection, tenant),
         demand_enabled=enabled,
         demand_enabled_since=policy["updated_at"] if policy else None,
     )
