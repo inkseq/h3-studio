@@ -1,5 +1,6 @@
 /* Same-origin application API only. This module never holds provider credentials. */
 import { readLocale, translate } from './i18n/locale.js';
+import { currentSupportView } from './support-view.js';
 import { CREDITS_CHANGED, INSUFFICIENT_CREDITS, insufficientCredits } from './credits.js';
 import { MAINTENANCE_CHANGED, formatEnd, maintenanceRefusal } from './maintenance-notice.js';
 // The credits chip and the not-enough-credits prompt listen for these (h3-studio#306).
@@ -189,6 +190,7 @@ export function createCloudClient({
       ...(body !== undefined && !multipart ? { 'Content-Type': 'application/json' } : {}),
       ...(key ? { 'Idempotency-Key': key } : {}),
       ...(expectedAccount && !anonymous ? { 'X-Expected-Account': expectedAccount } : {}),
+      ...(currentSupportView() ? { 'X-Support-View': currentSupportView().id } : {}),
     };
     let timedOut = false,
       releaseRead = null;
@@ -287,19 +289,24 @@ export function createCloudClient({
           const reason =
             response.status === 409 && detail?.detail === 'capacity_drain_repreflight'
               ? ui('client.capacityDrain', expectedAccount)
-              : typeof detail?.detail === 'string'
-                ? detail.detail
-                : typeof detail?.message === 'string'
-                  ? detail.message
-                  : response.status === 409
-                    ? ui('client.versionChanged', expectedAccount)
-                    : response.status === 404
-                      ? ui('client.notFound', expectedAccount)
-                      : response.status === 401
-                        ? ui('client.login', expectedAccount)
-                        : response.status >= 500
-                          ? ui('client.unavailable', expectedAccount)
-                          : ui('client.status', expectedAccount, { status: response.status });
+              : String(detail?.code || '').startsWith('support_view_')
+                ? ui(
+                    'client.' + detail.code.replace(/_(\w)/g, (_, c) => c.toUpperCase()),
+                    expectedAccount,
+                  )
+                : typeof detail?.detail === 'string'
+                  ? detail.detail
+                  : typeof detail?.message === 'string'
+                    ? detail.message
+                    : response.status === 409
+                      ? ui('client.versionChanged', expectedAccount)
+                      : response.status === 404
+                        ? ui('client.notFound', expectedAccount)
+                        : response.status === 401
+                          ? ui('client.login', expectedAccount)
+                          : response.status >= 500
+                            ? ui('client.unavailable', expectedAccount)
+                            : ui('client.status', expectedAccount, { status: response.status });
           const budgetKey = [
             'user_daily_limit_reached',
             'connection_daily_limit_reached',
@@ -391,6 +398,7 @@ export function createCloudClient({
     const query = new URLSearchParams({
       expected_account: account,
       ...(role ? { rendition: role } : wantsDownload ? { download: '1' } : {}),
+      ...(currentSupportView() ? { support_view: currentSupportView().id } : {}),
     });
     return parsed.pathname + '?' + query;
   }

@@ -1,5 +1,7 @@
 export const settingsCatalogs = {
   en: {
+    'menu.supportView': 'Viewing the account of {name} (read-only) · ends in {minutes} min',
+    'menu.supportViewEnd': 'End',
     'settings.testTask': 'Test GPU limit per acceptance task (USD)',
     'settings.testTaskId': 'Acceptance task ID',
     'settings.testTaskHelp':
@@ -76,6 +78,8 @@ export const settingsCatalogs = {
       'Spending is not yet confirmed. Reconcile the existing charge before submitting again.',
   },
   zh: {
+    'menu.supportView': '正在以 {name} 的身份只读查看 · {minutes} 分钟后结束',
+    'menu.supportViewEnd': '结束',
     'settings.testTask': '每次验收任务的测试 GPU 上限（美元）',
     'settings.testTaskId': '验收任务编号',
     'settings.testTaskHelp': '同一项改动的机器和重试沿用同一编号；其他任务的费用记录保持独立。',
