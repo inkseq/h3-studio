@@ -492,3 +492,23 @@ does not authorize new credentials/provider accounts or a budget increase.
 A provider that fails qualification stays OFF and is reported with its blocker;
 it does not block independently qualified and accepted providers. Charging and
 LIVE Checkout remain governed by their separate owner decisions.
+
+## CR-20261025-63 — Claude takes over Codex's lane; production diagnosis and alerts
+
+Owner, 2026-10-25 (chat): Codex is out of tokens, so Claude takes over its open
+work: release helpers, staging/production promotion paperwork, and backend fixes.
+Claude may run read-only diagnosis on the production host (SSM/SSH reads, no
+writes) when the owner asks for a root cause. The REF "runtime unconfirmed" root
+cause and the split of the fix are in
+[#193/6386153093](https://github.com/inkseq/h3-studio/issues/193#issuecomment-6386153093).
+
+The production operator alert topic `sixnine-production-operator-alerts` had no
+subscriber, so alerts such as `job_stuck` reached no one. On the owner's
+explicit "订阅" (subscribe), Claude subscribed the owner's existing staging-alert
+email; the owner confirmed it the same day. No other alert, threshold or
+destination changed.
+
+Owner product directions, same day: the story list collapses to an icon rail when
+dragged narrow; item menus are plain rows; an open tab offers "Refresh" when a
+newer build is served. Production promotion still requires Claude's staging
+acceptance of the exact candidate; charging and LIVE Checkout stay OFF.
