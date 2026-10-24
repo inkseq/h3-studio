@@ -40,6 +40,8 @@ LEGACY_HELPER_PAIRS = {commit: (
         "07da40322559ee5a12829be6884c541c401d852a")}
 # Exact retained current/previous helper bytes before the staging upgrade.
 RETAINED_DSTACK_HELPER_PAIRS = {
+    # Exact original 7a candidate being reconciled through its normal deployer.
+    '7a24b5a99df4546f775224b83a890aeb53897734': ('794921cab61dd3455aeb6cddf1ab1ec636d6b1251e5568946f934a275ce6dcf5', 'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b'),
     # Exact source of the queued #516 platform; retained runtime must still match.
     '20ab3dfd308800daad10a3ce8ac060da342b164a': ('794921cab61dd3455aeb6cddf1ab1ec636d6b1251e5568946f934a275ce6dcf5', 'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b'),
     # Exact B1 staging current/rollback sources before compact-cap validation changed.
