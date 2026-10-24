@@ -1,4 +1,5 @@
 import { Badge, EmptyState, Note } from './ui/Note.jsx';
+import { currentSupportView } from './support-view.js';
 import { Spinner } from './ui/Field.jsx';
 import './v2/works-adapter.css';
 import { FloatingMessage } from './floating-notice.js';
@@ -323,10 +324,13 @@ function useStoryLibrary(state) {
   }, [c.account]);
   const local = store.getLocalProjectSummary(),
     currentLocal = state.workspace.mode === 'local' ? state.project : local;
-  const locals = [
-    ...(currentLocal ? [currentLocal] : []),
-    ...library.projects.filter((project) => project.id !== currentLocal?.id),
-  ];
+  // A support view shows the user's account only; this browser's drafts are the admin's.
+  const locals = currentSupportView()
+    ? []
+    : [
+        ...(currentLocal ? [currentLocal] : []),
+        ...library.projects.filter((project) => project.id !== currentLocal?.id),
+      ];
   const cloudProjects = c.account ? [...c.projects] : [];
   if (c.account && state.workspace.mode === 'cloud' && state.workspace.account === c.account) {
     const index = cloudProjects.findIndex((project) => project.id === state.project.id);
