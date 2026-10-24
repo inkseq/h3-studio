@@ -1784,13 +1784,6 @@ small {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.picker-note {
-  font-size: 11px;
-  color: var(--fl);
-  background: var(--fl-soft);
-  border-radius: var(--r-sm);
-  padding: 5px 8px;
-}
 .picker-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
@@ -6410,35 +6403,6 @@ h4,
 }
 .trash-filter button {
   font-size: 12px;
-}
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  gap: 8px;
-  padding: 64px 24px;
-  margin-top: 18px;
-  border: 1px dashed var(--line-2);
-  border-radius: 16px;
-}
-.empty-state > span {
-  width: 52px;
-  height: 52px;
-  border-radius: 16px;
-  display: grid;
-  place-items: center;
-  background: var(--surface-3);
-  color: var(--ink-2);
-  margin-bottom: 6px;
-}
-.empty-state b {
-  font-size: 15px;
-  font-weight: 650;
-  letter-spacing: -0.01em;
-}
-.empty-state small {
-  max-width: 42ch;
 }
 
 .seg.trash-filter {

@@ -623,7 +623,7 @@ export default function OperatorHostsPanel({ controller, state, admin = false, b
               </HostRecord>
             ))
           ) : (
-            <p className="p4-empty">{t('operator.copy180')}</p>
+            <p className="ui-empty ui-empty-compact">{t('operator.copy180')}</p>
           )}
           {value.has_more && (
             <button disabled={blocked} onClick={() => void read(value.offset + value.limit)}>

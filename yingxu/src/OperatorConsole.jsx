@@ -1,6 +1,6 @@
 import { Note } from './ui/Note.jsx';
 import StudioHeader from './StudioHeader.jsx';
-import { useModal } from './ui/Dialog.jsx';
+import { Dialog as SharedDialog } from './ui/Dialog.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import { operatorFormatters, operatorDisplay } from './i18n/legacyOperatorPresentation.js';
 import { useI18n, LanguageSwitcher } from './i18n/I18nProvider.jsx';
@@ -70,31 +70,19 @@ const quietly = (promise) => promise.catch(() => {});
 const known = (value) => (Number.isFinite(value) ? value : '—');
 const date = (value) =>
   typeof value === 'number' ? new Date(value * 1000).toLocaleString('zh-CN') : '尚未记录';
+// The console's dialogs use the shared Dialog (h3-studio#514); op-dialog keeps their content layout.
 function Dialog({ title, subtitle, onClose, children, wide = false }) {
-  const { t: lo, locale } = useI18n();
-  const ref = useModal();
   return (
-    <dialog
-      ref={ref}
+    <SharedDialog
+      title={title}
+      subtitle={subtitle}
+      onClose={onClose}
+      eyebrow="GPU CONTROL"
+      size={wide ? 'xl' : 'wide'}
       className={'op-dialog' + (wide ? ' op-market-dialog' : '')}
-      aria-label={title}
-      onCancel={(e) => {
-        e.preventDefault();
-        onClose();
-      }}
     >
-      <header>
-        <div>
-          <span className="op-eyebrow">GPU CONTROL</span>
-          <h2>{title}</h2>
-          {subtitle && <p>{subtitle}</p>}
-        </div>
-        <button className="op-icon" aria-label={lo('legacyOp.copy1')} onClick={onClose}>
-          <X size={19} />
-        </button>
-      </header>
       {children}
-    </dialog>
+    </SharedDialog>
   );
 }
 function RecipeEvidence({ profile }) {
@@ -929,7 +917,7 @@ function StartDrawer({ catalog, policy, controller, busy, onClose }) {
                 ))}
               </div>
             ) : (
-              <div className="op-market-empty">
+              <div className="ui-empty ui-empty-compact">
                 <Server size={25} />
                 <p>{lo('legacyOp.copy147')}</p>
                 <small>{lo('legacyOp.copy148')}</small>
@@ -937,7 +925,7 @@ function StartDrawer({ catalog, policy, controller, busy, onClose }) {
             )}
           </section>
         ) : (
-          <div className="op-market-empty">
+          <div className="ui-empty ui-empty-compact">
             <Server size={27} />
             <p>
               {market.loading === 'candidates'
@@ -1043,7 +1031,7 @@ export default function OperatorConsole() {
   const content = !c.account ? (
     <Login />
   ) : state.denied ? (
-    <section className="op-empty">
+    <section className="ui-empty">
       <ShieldCheck size={32} />
       <h2>{lo('legacyOp.copy154')}</h2>
       <p>{lo('legacyOp.copy155')}</p>
@@ -1052,7 +1040,7 @@ export default function OperatorConsole() {
       </a>
     </section>
   ) : !snapshot ? (
-    <section className="op-empty">
+    <section className="ui-empty">
       <Server size={34} />
       <h2>
         {state.loading
@@ -1176,7 +1164,7 @@ export default function OperatorConsole() {
                 ))}
               </div>
             ) : (
-              <div className="op-list-empty">
+              <div className="ui-empty ui-empty-compact">
                 <Server size={22} />
                 <p>{lo('legacyOp.copy188')}</p>
               </div>
@@ -1223,7 +1211,7 @@ export default function OperatorConsole() {
             {history.length ? (
               <div className="op-machine-list">{history.map(row)}</div>
             ) : (
-              <div className="op-list-empty">
+              <div className="ui-empty ui-empty-compact">
                 <Search size={22} />
                 <p>{groups.history.length ? lo('legacyOp.copy198') : lo('legacyOp.copy199')}</p>
               </div>
