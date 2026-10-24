@@ -41,7 +41,9 @@ export function createThumbnailQueue({ maxActive = 8 } = {}) {
 export function thumbnailQueue(api) {
   let queue = queues.get(api);
   if (!queue) {
-    queue = createThumbnailQueue();
+    // Four at a time: the server admits eight requests per account at once (#287 limits),
+    // and the page's API calls and playing video need room too.
+    queue = createThumbnailQueue({ maxActive: 4 });
     queues.set(api, queue);
   }
   return queue;

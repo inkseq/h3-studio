@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import './i18n/workspace-language.css';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Copy, KeyRound, RefreshCw, ShieldCheck, X } from 'lucide-react';
@@ -288,11 +289,7 @@ export default function ApiKeys({
           {t('account.copy47')}
         </button>
       </form>
-      {error && (
-        <p role="alert" className="cloud-error">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={error ? error : null} />
       {notice && <p role="status">{notice}</p>}
       <div className="api-key-list">
         {keys.map((k) => (

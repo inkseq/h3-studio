@@ -29,6 +29,11 @@
   min-width: 0;
   overflow: visible;
 }
+/* The card stays unclipped (menus), so the cover rounds its own top corners to sit
+   inside the card's 1px border (owner, 2026-10-24). */
+.works-page .story-card .cover {
+  border-radius: calc(var(--r-lg) - 1px) calc(var(--r-lg) - 1px) 0 0;
+}
 .works-page .story-card > small.story-logline {
   font-weight: 400;
   min-height: 1.5em;

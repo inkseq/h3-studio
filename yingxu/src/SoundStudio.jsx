@@ -1,4 +1,5 @@
 import { legacyReason } from './i18n/legacyReasons.js';
+import { FloatingMessage } from './floating-notice.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import React from 'react';
 import { generatedTrackState, unlinkGeneratedSound } from './generated-sound-model.js';

@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import React, { useState } from 'react';
 import { artifactMedia } from './artifact-media.js';
 
@@ -60,11 +61,7 @@ export default function ArtifactResult({ artifact, job, title }) {
             onError={() => setError(at('adjunct.artifactResult.copy44'))}
           />
         ))}
-      {error && (
-        <p role="alert" className="cloud-error">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={error ? error : null} />
       {message && <p role="status">{message}</p>}
     </div>
   );

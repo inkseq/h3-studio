@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import React, { useState } from 'react';
 import { store } from './store.js';
 import {
@@ -77,11 +78,7 @@ function CueForm({ cue, cues, duration, onSave, onCancel }) {
         </label>
       </div>
       <p>{lt('legacy.copy7')}</p>
-      {error && (
-        <p role="alert" className="cloud-error">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={error ? error : null} />
       <div className="cloud-actions">
         <button type="submit">{lt('legacy.copy8')}</button>
         <button type="button" onClick={onCancel}>

@@ -1,4 +1,5 @@
 import StudioHeader from './StudioHeader.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import { cloudController as cloud } from './cloud-controller.js';
 import CreationHistory from './CreationHistory.jsx';
 import { createQuickChatClient } from './quick-chat-client.js';

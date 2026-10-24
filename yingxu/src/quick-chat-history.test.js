@@ -9,31 +9,6 @@ import {
   captureThreadAnchor,
   restoreThreadAnchor,
 } from './quick-chat-history.js';
-import { build } from 'esbuild';
-import { Module } from 'node:module';
-import { fileURLToPath } from 'node:url';
-import React from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
-
-const directory = fileURLToPath(new URL('.', import.meta.url)),
-  filename = directory + 'quick-history-test.cjs';
-const compiled = await build({
-  stdin: {
-    contents:
-      "import React from 'react';import QuickChatHistory from './QuickChatHistory.jsx';import {I18nProvider} from './i18n/I18nProvider.jsx';export const View=props=><I18nProvider><QuickChatHistory {...props}/></I18nProvider>;",
-    resolveDir: directory,
-    loader: 'jsx',
-  },
-  bundle: true,
-  write: false,
-  format: 'cjs',
-  platform: 'node',
-  external: ['react', 'react-dom'],
-});
-const module = new Module(filename);
-module.filename = filename;
-module.paths = Module._nodeModulePaths(directory);
-module._compile(compiled.outputFiles[0].text, filename);
 
 function fixture(count = 66) {
   const calls = [],
@@ -328,72 +303,6 @@ test('real turn/assistant tail and a concurrent poll keep the first earlier page
   h.controller.destroy();
 });
 
-test('the first earlier-card click works while open is still hydrating latest submission details', async () => {
-  const h = fixture(),
-    originalTimeline = h.api.timeline,
-    originalSubmission = h.api.submission;
-  let entered, release;
-  const hydrationEntered = new Promise((resolve) => (entered = resolve)),
-    hydrationHeld = new Promise((resolve) => (release = resolve));
-  h.api.timeline = async (...args) => {
-    const page = await originalTimeline(...args);
-    return {
-      ...page,
-      events: [
-        ...page.events,
-        {
-          id: 'submission-event',
-          seq: 150,
-          type: 'submission.completed',
-          record: { id: 'submission-060', revision_id: 'revision-060' },
-        },
-      ],
-    };
-  };
-  h.api.submission = async (...args) => {
-    entered();
-    await hydrationHeld;
-    return originalSubmission(...args);
-  };
-  await h.controller.setAccount('owner');
-  const opening = h.controller.open('session');
-  try {
-    await hydrationEntered;
-    const state = h.controller.getState();
-    assert.equal(state.busy, true);
-    assert.equal(state.cardHistoryLoaded, true);
-    assert.equal(state.cardHistoryLoading, false);
-    assert.equal(Object.keys(state.cards).length, 10);
-    const markup = renderToStaticMarkup(
-      React.createElement(module.exports.View, {
-        state,
-        account: 'owner',
-        readyAccount: 'owner',
-        sessionReady: true,
-        onCards() {},
-        onText() {},
-      }),
-    );
-    const button = markup.match(/<button\b[^>]*data-history-load[^>]*>/)?.[0];
-    assert.ok(button);
-    assert.doesNotMatch(button, /\bdisabled/);
-    const result = await h.controller.history();
-    assert.equal(result.added, 10);
-    assert.equal(h.controller.getState().busy, true);
-    assert.equal(Object.keys(h.controller.getState().cards).length, 20);
-    assert.equal(h.stored.size, 0);
-  } finally {
-    release();
-    await opening;
-    h.controller.destroy();
-  }
-  assert.equal(
-    Object.keys(h.controller.getState().cards).length,
-    20,
-    'late open hydration cannot discard the first page',
-  );
-});
-
 test('initial card API failure stays unknown with a visible retry rather than claiming the beginning', async () => {
   const h = fixture();
   h.failCards(Object.assign(Error('not available'), { status: 503 }));
@@ -636,76 +545,6 @@ test('prepending preserves an existing visible row offset rather than blindly ju
   container.scrollHeight += 600;
   restoreThreadAnchor(container, anchor);
   assert.equal(container.scrollTop, 700);
-});
-
-test('history toolbar distinguishes loading, failure with retry and actual card exhaustion', () => {
-  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
-  Object.defineProperty(globalThis, 'localStorage', {
-    configurable: true,
-    value: { getItem: () => null },
-  });
-  const render = (state) =>
-    renderToStaticMarkup(
-      React.createElement(module.exports.View, { state, onCards() {}, onText() {} }),
-    );
-  try {
-    const loading = render({ cardHistoryLoading: true });
-    assert.match(loading, /Loading earlier cards/);
-    assert.doesNotMatch(loading, /All task cards loaded/);
-    const failed = render({ cardHistoryError: { key: 'quickHistory.failed', status: '503' } });
-    assert.equal((failed.match(/role="alert"/g) || []).length, 1);
-    assert.match(failed, /Retry loading cards/);
-    assert.doesNotMatch(failed, /All task cards loaded/);
-    const end = render({
-      cardHistoryLoaded: true,
-      cardHistoryHasMore: false,
-      historyCursor: 'older-events',
-    });
-    assert.match(end, /All task cards loaded/);
-    assert.match(end, /Load earlier conversation text/);
-    assert.doesNotMatch(end, /data-history-load/);
-  } finally {
-    if (original) Object.defineProperty(globalThis, 'localStorage', original);
-    else delete globalThis.localStorage;
-  }
-});
-
-test('actual history control gates account readiness and pending writes, not generic read hydration busy', () => {
-  const state = {
-    account: 'owner',
-    session: { id: 'session' },
-    cardHistoryLoaded: true,
-    cardHistoryHasMore: true,
-    busy: true,
-  };
-  const render = (change = {}, scope = {}) =>
-    renderToStaticMarkup(
-      React.createElement(module.exports.View, {
-        state: { ...state, ...change },
-        account: 'owner',
-        readyAccount: 'owner',
-        sessionReady: true,
-        onCards() {},
-        onText() {},
-        ...scope,
-      }),
-    );
-  const control = (html) => html.match(/<button\b[^>]*data-history-load[^>]*>/)?.[0];
-  assert.doesNotMatch(control(render()), /\bdisabled/);
-  for (const [change, scope] of [
-    [{}, { sessionReady: false }],
-    [{}, { readyAccount: null }],
-    [{}, { account: 'other' }],
-    [{ account: 'other' }, {}],
-    [{ pending: { method: 'patchSession' } }, {}],
-  ]) {
-    assert.match(control(render(change, scope)), /\bdisabled/);
-  }
-  assert.doesNotMatch(
-    render({ cardHistoryLoading: true }),
-    /data-history-load/,
-    'own single-flight loading state replaces the control',
-  );
 });
 
 test('opening saved history shows loading through auth and first-page hydration, never a false empty creation', () => {

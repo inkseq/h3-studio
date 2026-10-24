@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import { usePageActive } from './AppRouteCache.jsx';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createP4OperatorClient } from './p4-operator-client.js';

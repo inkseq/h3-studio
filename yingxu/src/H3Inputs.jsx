@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import React, { useRef, useState, useSyncExternalStore } from 'react';
 import { Upload, Image, Video, Music, Film, Plus, Trash2 } from 'lucide-react';
 import { store } from './store.js';
@@ -161,11 +162,7 @@ export function InputZone({
             ? t('h3more.copy9')
             : t('h3more.copy10', { p0: kind ? names[kind] : t('h3more.copy11') })}
       </button>
-      {error && (
-        <p className="cloud-error" role="alert">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={error ? error : null} />
       {!!assets.length && (
         <div className="h3-media-grid">
           {assets.map((asset) => (
@@ -370,11 +367,7 @@ function GuideTiming({ project, shot, recipe }) {
             </article>
           );
         })}
-        {error && (
-          <p role="alert" className="cloud-error">
-            {error}
-          </p>
-        )}
+        <FloatingMessage tone="error" text={error ? error : null} />
         <p>{t('h3more.copy30')}</p>
       </div>
     )

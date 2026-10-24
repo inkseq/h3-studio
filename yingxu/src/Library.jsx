@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { FloatingMessage } from './floating-notice.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { createCloudClient } from './cloud-client.js';
 import { createLibraryController, libraryKey } from './library-commands.js';

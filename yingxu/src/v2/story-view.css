@@ -382,10 +382,12 @@
   margin: 0;
   font-size: 12px;
 }
+/* Select circle sits in the thumbnail's top-left corner (owner, 2026-10-24); the shot
+   number there gives way while the circle shows. */
 .sb-workspace .card .workbench-select {
-  top: auto;
-  bottom: 8px;
-  left: 8px;
+  top: 6px;
+  bottom: auto;
+  left: 6px;
   min-width: 28px;
   width: 28px;
   height: 28px;
@@ -401,6 +403,12 @@
 .sb-workspace .card .workbench-select:focus-visible,
 .sb-workspace .card .workbench-select.checked {
   opacity: 1;
+}
+.sb-workspace .card:hover .card-no,
+.sb-workspace .card.picking .card-no,
+.sb-workspace .card:has(.workbench-select.checked) .card-no,
+.sb-workspace .card:has(.workbench-select:focus-visible) .card-no {
+  opacity: 0;
 }
 .sb-workspace .storyboard-thumbnail-empty {
   display: flex;
@@ -476,8 +484,7 @@
 .sb-workspace
   :is(
     .who.small .chip,
-    .track.audio,
-    .ticks,
+    .ruler,
     .ver em,
     .ver i.x,
     .slot-empty small,
@@ -618,6 +625,9 @@
   .sb-workspace .card .workbench-select,
   .sb-workspace .screen-expand {
     opacity: 1;
+  }
+  .sb-workspace .card .card-no {
+    opacity: 0;
   }
 }
 @media (max-width: 760px) {
@@ -960,8 +970,6 @@ body.sb-resizing-y video {
   flex: 1;
   min-width: 0;
 }
-.dock.mini .timeline .track.audio,
-.dock.mini .timeline .ticks,
 .dock.mini .dock-theater-toggle {
   display: none;
 }
@@ -1030,47 +1038,76 @@ body.sb-resizing-y video {
   color: var(--ink);
   border-color: var(--accent);
 }
-.timeline-scrub {
+/* One time bar (owner, 2026-10-24): the ruler under the shot strip is where you scrub. */
+.ruler {
   position: relative;
-  height: 14px;
-  margin-bottom: 4px;
-  cursor: pointer;
+  height: 18px;
+  border-top: 1px solid var(--line-2);
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  cursor: ew-resize;
   touch-action: none;
 }
-.timeline-scrub::before {
-  content: '';
+.ruler span {
   position: absolute;
-  left: 0;
-  right: 0;
-  top: 6px;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--line-2);
+  top: 3px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  pointer-events: none;
 }
-.timeline-scrub-fill {
-  position: absolute;
-  left: 0;
-  top: 6px;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--accent);
+.ruler span:first-of-type {
+  transform: none;
 }
-.timeline-scrub-knob {
+.ruler-knob {
   position: absolute;
-  top: 2px;
+  top: -6px;
   width: 11px;
   height: 11px;
   margin-left: -5px;
   border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 0 2px var(--surface);
+  pointer-events: none;
 }
-.timeline-scrub:focus-visible {
+.ruler:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-.dock.mini .timeline-scrub {
+.dock.mini .ruler span {
   display: none;
+}
+/* Many shots: a coloured square per shot instead of a picture. */
+.timeline.compact .track.video {
+  gap: 2px;
+  height: 26px;
+}
+.tseg.compact {
+  min-width: 4px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--muted) 35%, var(--surface-3));
+  border-radius: 3px;
+}
+.tseg.compact.good {
+  background: color-mix(in srgb, var(--good) 55%, var(--surface-3));
+}
+.tseg.compact.warn {
+  background: color-mix(in srgb, var(--warn) 55%, var(--surface-3));
+}
+.tseg.compact.busy {
+  background: color-mix(in srgb, var(--fl) 55%, var(--surface-3));
+}
+.tseg.compact.wait {
+  background: color-mix(in srgb, var(--ref) 55%, var(--surface-3));
+}
+.tseg-n {
+  color: #fff;
+  font-size: 9px;
+  font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+  max-width: 100%;
 }
 /* "To sort" items in the asset library: picture on top, text and actions below, so the
    row stays readable in a narrow sidebar (owner, 2026-10-22). */
@@ -1100,4 +1137,15 @@ body.sb-resizing-y video {
 .inbox .inrow-body .row > button {
   flex: 1 1 auto;
   white-space: nowrap;
+}
+
+/* The next shot's video loads here, invisible, so playback cuts without a black frame. */
+.screen-picture {
+  position: relative;
+}
+.screen-picture video.screen-buffer {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
 }

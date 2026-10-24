@@ -52,8 +52,8 @@ const ChapterRoughCut = React.lazy(() => import('./ChapterRoughCut.jsx'));
 const Freestyle = React.lazy(() => import('./Freestyle.jsx'));
 const StoryChat = React.lazy(() => import('./StoryChat.jsx'));
 const QuickCreateEntry = React.lazy(() => import('./QuickCreateEntry.jsx'));
+const LegacyQuickChatLink = React.lazy(() => import('./LegacyQuickChatLink.jsx'));
 import OperatorConsole from './P4OperatorConsole.jsx';
-import QuickChatWorkspace from './QuickChatWorkspace.jsx';
 import { navigateWorkspace } from './workspace-navigation.js';
 import { CloudProjects, useCloud } from './CloudStudio.jsx';
 import AgentConnect from './AgentConnect.jsx';
@@ -90,9 +90,18 @@ import SpendingSettings from './SpendingSettings.jsx';
 import { I18nProvider, LanguageSwitcher, useI18n } from './i18n/I18nProvider.jsx';
 import AppRouteCache, { useAppLocation, usePageActive } from './AppRouteCache.jsx';
 import MaintenanceBanner from './MaintenanceBanner.jsx';
+import FloatingNotices from './FloatingNotices.jsx';
+import PageErrorBoundary from './PageErrorBoundary.jsx';
 import { installAppNavigation, navigateApp } from './app-navigation.js';
 import StoryOpenNotice, { PreservedStoryDrafts } from './StoryOpenNotice.jsx';
 import { createStoryRouteLoader, openedStoryHref } from './story-open.js';
+// Replace the address with another page once rendered (old links that moved).
+function Redirect({ to }) {
+  useEffect(() => {
+    navigateApp(to, { replace: true });
+  }, [to]);
+  return null;
+}
 
 const icons = {
   chapter: BookOpen,
@@ -1342,29 +1351,17 @@ function AppContent() {
     ),
     '/quick-chat': ({ active, location: page }) => (
       <React.Suspense fallback={<InkLoader label={t('loading.quickCreate')} />}>
-        {/* ?story=preview: sample replies. ?mode=direct: the original Quick Create.
-            Otherwise the chat story builder when the server has it on (#422). */}
+        {/* ?story=preview: sample replies; otherwise the chat story builder (#422). The
+            original Quick Create was removed (owner, 2026-10-24): its old links open the
+            story the conversation became, its preferences moved to Settings. */}
         {(() => {
           const params = new URLSearchParams(page.search);
           const story = params.get('story');
           if (story === 'preview') return <StoryChat account={account} />;
-          // Links into the original Quick Create (a conversation, card, revision, submission
-          // or its preferences) keep opening it; the story chat would show an empty story
-          // instead (h3-studio#477).
-          if (
-            params.get('mode') === 'direct' ||
-            ['session', 'card', 'revision', 'submission', 'preferences'].some((key) =>
-              params.has(key),
-            )
-          )
-            return <QuickChatWorkspace active={active} />;
-          return (
-            <QuickCreateEntry
-              account={account}
-              story={story}
-              direct={<QuickChatWorkspace active={active} />}
-            />
-          );
+          if (params.has('preferences')) return <Redirect to="/settings?tab=defaults" />;
+          if (['session', 'card', 'revision', 'submission'].some((key) => params.has(key)))
+            return <LegacyQuickChatLink account={account} sessionId={params.get('session')} />;
+          return <QuickCreateEntry account={account} story={story} />;
         })()}
       </React.Suspense>
     ),
@@ -1385,8 +1382,11 @@ function AppContent() {
       <TrashProvider account={account}>
         <PersistenceWarning key={'persistence:' + workspaceKey} />
         <MaintenanceBanner />
-        <AppRouteCache location={location} routes={routes} />
+        <PageErrorBoundary resetKey={location.pathname + location.search}>
+          <AppRouteCache location={location} routes={routes} />
+        </PageErrorBoundary>
         <LowCreditsDialog />
+        <FloatingNotices />
       </TrashProvider>
     </div>
   );
