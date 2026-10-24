@@ -1,4 +1,4 @@
-"""Build-time, exact-source patch for the existing dstack 0.22.3 CPU server.
+"""Build-time, exact-source patch for the existing dstack 0.22.5 CPU server.
 
 No package import, dependency resolution, service command or network operation.
 Every original source is checked before any write; repeat application refuses.

@@ -206,6 +206,28 @@ class MigrationDeployTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "^" + code + "$"):
             validate(value)
 
+    def test_current_and_retained_stock_images_are_closed_and_explicit(self):
+        from tools.check_migration_deploy import LEGACY_DSTACK_IMAGE
+
+        for image in (DSTACK_IMAGE, LEGACY_DSTACK_IMAGE):
+            value = copy.deepcopy(self.document)
+            value["services"]["dstack"]["image"] = image
+            validate(value, dstack_image=image)
+        for image in (
+            "dstackai/dstack:0.22.5",
+            DSTACK_IMAGE.replace("0.22.5", "0.22.4"),
+            DSTACK_IMAGE.split("@")[0] + "@sha256:" + "0" * 64,
+        ):
+            value = copy.deepcopy(self.document)
+            value["services"]["dstack"]["image"] = image
+            with (
+                self.subTest(image=image),
+                self.assertRaisesRegex(
+                    ValueError, "migration_dstack_image_binding_invalid"
+                ),
+            ):
+                validate(value, dstack_image=image)
+
     def test_sentry_render_is_app_only_with_explicit_target(self):
         from deploy.platform.deployment_target import profile
         from studio_platform.error_monitoring import DSN
@@ -1073,7 +1095,7 @@ class MigrationDeployTests(unittest.TestCase):
     "Explicit isolated CPU proof opt-in required",
 )
 class DstackCPUProof(unittest.TestCase):
-    """Start only tagged temporary CPU containers with synthetic credentials.
+    """Historical 0.22.3 rollback proof with tagged temporary CPU containers.
 
     Images must already exist locally; --pull=never forbids implicit downloads.
     No provider configuration, rental call, real credentials or live volume is

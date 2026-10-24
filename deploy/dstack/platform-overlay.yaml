@@ -109,7 +109,7 @@ services:
             os.environ['DSTACK_DATABASE_URL']=dsn
         except Exception:
             sys.exit('dstack_protected_configuration_invalid')
-        # Pinned CLI 0.22.3 writes this marker and phones home on a fresh cache.
+        # Pinned CLI 0.22.5 writes this marker and phones home on a fresh cache.
         # Seed its nonsecret daily marker in tmpfs; immutable deployments do not
         # need an upstream CLI update probe at each server restart.
         update_marker=pathlib.Path('/root/.cache/.dstack/cli/last_check')

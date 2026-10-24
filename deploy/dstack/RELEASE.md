@@ -87,13 +87,29 @@ source sets. It contains no API token, SSH private key, Grafana credential, mode
 weight or local `.env`.
 
 The #193 migration also includes the exact CPU dstack safety image and installed
-provenance. It derives from the pinned 0.22.3 base and verifies six upstream
+provenance. It derives from the pinned 0.22.5 base and verifies six upstream
 source hashes before applying the bounded Vast fixes: qualified-offer fallback,
 shared 429 cooldown, explicit no-contract evidence, and disabled idle catalog
 preload. The original native allocator and GPU image/source bundles remain in
 use. The protected migration manifest binds the derivative image, helper and
 installed source hashes before publication/loading; old approved artifacts keep
 their original pinned dstack image for rollback.
+
+#517 B1 trusts only the complete 0.22.3 and 0.22.5 stock tuples: exact version,
+upstream commit, base-image digest and all six original source hashes. Mixed tuples
+are rejected before loading. The installed package version and every patched file
+are then checked inside the derivative. Build publication still requires the
+current checkout's exact provenance/installer/helper bytes; accepting the retained
+0.22.3 tuple does not permit building an old image as the current release. Artifacts
+that predate derivative images retain their original 0.22.3 stock fallback.
+
+Before replacing the CPU server, qualify the same isolated PostgreSQL state and
+synthetic administrator token through 0.22.3 → 0.22.5 → 0.22.3, including project
+identity, schema head and anonymous/invalid-token refusal. This fixture has no
+provider configuration or work. Then deploy normally to staging and run one bounded
+Vast cold cycle with the original task budget and removal evidence. Preserve the
+actual retained helper/checker pairs and rollback artifact; this proof does not
+cover new-provider data created by later B2/B3 work.
 
 Controller and slot workers subscribe to committed PostgreSQL wake hints before
 scanning the original ledgers. With no work or unresolved outcome they block;

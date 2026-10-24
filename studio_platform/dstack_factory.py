@@ -120,7 +120,7 @@ def _directory_parent(path):
 
 
 def coordinates_for_run(binding, run):
-    """Pinned 0.22.3 direct provider-container SSH; no SDK host-key bypass."""
+    """Pinned 0.22.5 direct provider-container SSH; no SDK host-key bypass."""
     _require(
         type(binding) is dict
         and type(run) is dict

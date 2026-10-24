@@ -1,5 +1,5 @@
 # CPU dstack server only. The accepted native GPU images/bundles are untouched.
-ARG DSTACK_SERVER_IMAGE=dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc1682dc2169075c6210d2ec873146f1ad8
+ARG DSTACK_SERVER_IMAGE=dstackai/dstack:0.22.5@sha256:8dc2c8a5ee348789b1ed1621bc75b31c156adf31d849fded29508cfc21b279e4
 FROM ${DSTACK_SERVER_IMAGE}
 ARG SOURCE_COMMIT
 LABEL org.opencontainers.image.revision=${SOURCE_COMMIT} role=sixnine-dstack
