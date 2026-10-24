@@ -1,4 +1,6 @@
 import StudioHeader from './StudioHeader.jsx';
+import { Button } from './ui/Button.jsx';
+import { DialogActions } from './ui/Dialog.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import { cloudController as cloud } from './cloud-controller.js';
 import CreationHistory from './CreationHistory.jsx';
@@ -842,10 +844,14 @@ export function RenameDialog({ title, onSave, onClose }) {
           <input value={value} onChange={(e) => setValue(e.target.value)} disabled={saving} />
         </label>
         {error && <p role="alert">{error}</p>}
-        <button type="button" disabled={saving} onClick={onClose}>
-          {t('trash.cancel')}
-        </button>
-        <button disabled={saving || !value.trim()}>{t('trash.save')}</button>
+        <DialogActions>
+          <Button disabled={saving} onClick={onClose}>
+            {t('trash.cancel')}
+          </Button>
+          <Button type="submit" variant="primary" disabled={saving || !value.trim()}>
+            {t('trash.save')}
+          </Button>
+        </DialogActions>
       </form>
     </ChatDialog>
   );

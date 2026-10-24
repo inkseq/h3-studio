@@ -1,14 +1,14 @@
 :root {
   font-family: Inter, 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
   color: #22352d;
-  background: #f5f6f2;
+  background: var(--ink);
   font-synthesis: none;
   --ink: #172923;
   --muted: #718078;
   --line: #dfe5dc;
   --lime: #d7eb9f;
   --green: #3f6655;
-  --paper: #fff;
+  --paper: var(--white);
 }
 * {
   box-sizing: border-box;
@@ -89,7 +89,7 @@ p {
 }
 .primary {
   background: var(--ink);
-  color: #f5f9ed;
+  color: var(--ink);
   border-color: var(--ink);
 }
 .primary:hover {
@@ -125,7 +125,7 @@ p {
 .topbar {
   height: 72px;
   border-bottom: 1px solid var(--line);
-  background: #fff;
+  background: var(--white);
   display: flex;
   align-items: center;
   padding: 0 23px;
@@ -158,7 +158,7 @@ p {
   gap: 3px;
   padding: 4px;
   border-radius: 10px;
-  background: #f1f3ed;
+  background: var(--ink);
 }
 .view-switch button {
   background: transparent;
@@ -429,7 +429,7 @@ p {
   display: flex;
   align-items: center;
   border: 1px solid var(--line);
-  background: #fff;
+  background: var(--white);
   border-radius: 11px;
   margin: 25px 0 31px;
   padding: 18px 21px;
@@ -486,7 +486,7 @@ p {
   gap: 18px;
 }
 .entity-card {
-  background: #fff;
+  background: var(--white);
   border: 1px solid var(--line);
   border-radius: 12px;
   overflow: hidden;
@@ -503,10 +503,10 @@ p {
   border: 0;
   border-radius: 0;
   padding: 0;
-  background: #fff;
+  background: var(--white);
 }
 .card-main:hover {
-  background: #fff;
+  background: var(--white);
 }
 .card-art {
   height: 104px;
@@ -526,7 +526,7 @@ p {
   color: #8c96ab;
 }
 .card-art.kind-scene {
-  background: #eef2eb;
+  background: var(--ink);
   color: #7a9073;
 }
 .card-art span {
@@ -553,7 +553,7 @@ p {
   font-size: 10px;
   border-radius: 4px;
   padding: 3px 7px;
-  background: #f1f3ed;
+  background: var(--ink);
   color: #76816c;
   white-space: nowrap;
   font-weight: 400;
@@ -649,7 +649,7 @@ p {
   padding: 9px 5px;
   text-align: left;
   justify-content: flex-start;
-  border-top: 1px solid #f1f4ec;
+  border-top: 1px solid var(--ink);
   border-radius: 0;
   font-size: 12px;
 }
@@ -697,7 +697,7 @@ p {
 .empty {
   padding: 50px 24px;
   text-align: center;
-  background: #fff;
+  background: var(--white);
   border: 1px dashed #d2dcc6;
   border-radius: 12px;
   margin: 15px 0;
@@ -741,7 +741,7 @@ p {
 }
 .readiness-banner > span {
   height: 24px;
-  background: #fff;
+  background: var(--white);
 }
 .check-row {
   display: flex;
@@ -829,7 +829,7 @@ p {
   border-radius: 7px;
   padding: 10px 11px;
   color: var(--ink);
-  background: #fff;
+  background: var(--white);
   font-size: 13px;
   line-height: 1.65;
   outline-offset: 1px;
@@ -862,7 +862,7 @@ p {
 }
 .parent-link {
   font-size: 10px;
-  background: #f5f7f0;
+  background: var(--ink);
   border: 0;
   max-width: 100%;
   margin: -9px 0 18px;
@@ -932,7 +932,7 @@ p {
 }
 .version-box {
   padding: 14px;
-  background: #f6f8f0;
+  background: var(--ink);
   border: 1px solid #e4ebd8;
   border-radius: 8px;
   font-size: 10px;
@@ -960,7 +960,7 @@ p {
 }
 .soft-box {
   padding: 17px;
-  background: #f5f6f2;
+  background: var(--ink);
   border-radius: 8px;
   border: 1px solid #e7eae0;
   font-size: 12px;
@@ -1645,7 +1645,7 @@ p {
   box-sizing: border-box;
   font-size: 13px;
   line-height: 1.7;
-  background: #f6f5ef;
+  background: var(--ink);
 }
 .panel-loading p,
 .panel-load-error p {
@@ -1674,5 +1674,5 @@ p {
 }
 .rail-caption .rail-add-chapter:hover {
   background: #ffffff16;
-  color: #fff;
+  color: var(--white);
 }

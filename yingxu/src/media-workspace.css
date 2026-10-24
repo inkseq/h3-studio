@@ -30,7 +30,7 @@
   border: 1px solid #d5ddcc;
   border-radius: 12px;
   padding: 16px;
-  background: #fff;
+  background: var(--white);
   cursor: pointer;
   min-width: 0;
 }
@@ -88,7 +88,7 @@
   min-width: 0;
   border: 1px solid #dce4d4;
   border-radius: 12px;
-  background: #fff;
+  background: var(--white);
   margin-bottom: 15px;
 }
 .h3-input-zone.is-dragging,
@@ -99,7 +99,7 @@
   background: #f0f6e8;
 }
 .h3-input-zone.is-disabled {
-  background: #f2f3ef;
+  background: var(--ink);
 }
 .h3-input-zone header {
   display: flex;
@@ -146,11 +146,11 @@
   overflow: hidden;
   border: 1px solid #e0e6d8;
   border-radius: 9px;
-  background: #fff;
+  background: var(--white);
 }
 .h3-media-preview {
   aspect-ratio: 4/3;
-  background: #f2f4ed;
+  background: var(--ink);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -196,7 +196,7 @@
   padding: 6px 8px;
   font-size: 11px;
   border: 0;
-  background: #f4f6ef;
+  background: var(--ink);
 }
 .h3-time-guides,
 .h3-reuse-details {
@@ -204,7 +204,7 @@
   padding: 15px;
   border: 1px solid #dde5d5;
   border-radius: 10px;
-  background: #fff;
+  background: var(--white);
 }
 .h3-time-guides summary,
 .h3-reuse-details summary {
@@ -255,7 +255,7 @@
   border: 1px solid #d4dfc9;
   border-radius: 6px;
   padding: 8px;
-  background: #fff;
+  background: var(--white);
   font: inherit;
   color: #304b27;
 }
@@ -289,7 +289,7 @@
 }
 .h3-shared-references {
   border: 1px solid #dce5d2;
-  background: #f5f8ef;
+  background: var(--ink);
   padding: 16px;
   border-radius: 11px;
   margin-bottom: 16px;
@@ -337,7 +337,7 @@
   padding: 26px;
   border: 1px dashed #aac198;
   border-radius: 13px;
-  background: #f6f9f0;
+  background: var(--ink);
   margin: 18px 0 25px;
   flex-wrap: wrap;
 }
@@ -366,7 +366,7 @@
 }
 .media-library-upload button {
   font-size: 12px;
-  background: #fff;
+  background: var(--white);
 }
 .media-library-upload > .cloud-error,
 .media-library-upload > .media-upload-message {
@@ -506,7 +506,7 @@
   gap: 8px;
   padding: 10px;
   text-align: left;
-  background: #fff;
+  background: var(--white);
   border: 1px solid #d9e3d0;
   border-radius: 11px;
   white-space: normal;
@@ -570,7 +570,7 @@
   border: 1px solid #dce4d3;
   border-radius: 11px;
   padding: 18px;
-  background: #fff;
+  background: var(--white);
   margin-top: 20px;
 }
 .local-shot-prompt h3 {
@@ -615,7 +615,7 @@
   border: 1px dashed #b3c5a2;
   border-radius: 10px;
   padding: 18px;
-  background: #f6f9f0;
+  background: var(--ink);
 }
 .add-form-upload > button {
   width: 100%;

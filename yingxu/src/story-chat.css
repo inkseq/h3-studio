@@ -25,14 +25,10 @@
 .sc-shell > :where(:not(.hbar, .preview-as-user-bar)) * {
   box-sizing: border-box;
 }
-.sc-shell > :where(:not(.hbar, .preview-as-user-bar)) button {
+/* Zero specificity: the chat's own unstyled buttons inherit, shared variants (ui/controls.css) win. */
+:where(.sc-shell > :not(.hbar, .preview-as-user-bar)) button {
   font: inherit;
   color: inherit;
-  cursor: pointer;
-}
-.sc-shell > :where(:not(.hbar, .preview-as-user-bar)) button:disabled {
-  cursor: default;
-  opacity: 0.45;
 }
 .sc-shell > :where(:not(.hbar, .preview-as-user-bar)) :focus-visible {
   outline: 2px solid var(--sc-green);
@@ -255,28 +251,6 @@
 .sc-short {
   color: var(--warn) !important;
 }
-.sc-primary,
-.sc-ghost {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 14px;
-  border-radius: 999px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-.sc-primary {
-  border: 0;
-  background: var(--sc-green);
-  color: var(--accent-ink) !important;
-}
-.sc-ghost {
-  border: 1px solid var(--sc-line);
-  background: none;
-}
-.sc-ghost:hover {
-  background: color-mix(in srgb, var(--sc-ink) 5%, transparent);
-}
 .sc-typing {
   display: flex;
   align-items: center;
@@ -382,22 +356,6 @@
 }
 .sc-compose-row textarea:focus {
   outline: none;
-}
-.sc-icon {
-  display: grid;
-  place-items: center;
-  width: 36px;
-  height: 36px;
-  flex: none;
-  padding: 0;
-  border: 0;
-  border-radius: 10px;
-  background: none;
-  color: var(--sc-muted) !important;
-}
-.sc-icon:hover {
-  background: color-mix(in srgb, var(--sc-ink) 6%, transparent);
-  color: var(--sc-ink) !important;
 }
 .sc-send {
   display: grid;
@@ -826,16 +784,7 @@
   background: var(--bg);
 }
 .sc-new-story {
-  display: inline-flex;
-  align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 9px 12px;
-  border: 0;
-  border-radius: 10px;
-  background: var(--sc-green);
-  color: var(--accent-ink) !important;
-  font-weight: 600;
 }
 .sc-stories h3 {
   margin: 12px 6px 2px;

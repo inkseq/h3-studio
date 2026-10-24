@@ -5,7 +5,7 @@
   border-radius: 14px;
   background: #fafbf5;
   min-width: 0;
-  color: #263329;
+  color: var(--surface-4);
 }
 .script-breakdown > header {
   display: flex;
@@ -43,15 +43,15 @@
   padding: 9px 11px;
   border: 1px solid #b7c8ac;
   border-radius: 7px;
-  background: #fff;
-  color: #263329;
+  background: var(--white);
+  color: var(--surface-4);
 }
 .script-breakdown textarea {
   resize: vertical;
 }
 .script-breakdown input[readonly],
 .script-breakdown textarea[readonly] {
-  background: #f5f7ee;
+  background: var(--ink);
 }
 .script-breakdown button {
   min-height: 40px;
@@ -104,7 +104,7 @@
   padding: 18px;
   border: 1px solid #d4dfca;
   border-radius: 10px;
-  background: #fff;
+  background: var(--white);
   min-width: 0;
 }
 .breakdown-scene-heading {
@@ -134,7 +134,7 @@
   overflow: auto;
   font-size: 13px;
   line-height: 1.7;
-  background: #f4f6ef;
+  background: var(--ink);
   border-left: 3px solid #a6b99a;
   margin: 8px 0;
   padding: 10px 12px;
@@ -152,7 +152,7 @@
   margin-top: 12px;
 }
 .breakdown-omitted {
-  background: #f1f2ec;
+  background: var(--ink);
   border-radius: 8px;
   padding: 0 14px;
   margin: 16px 0;

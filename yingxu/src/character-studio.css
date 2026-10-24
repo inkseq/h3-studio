@@ -2,7 +2,7 @@
   margin-top: 25px;
   border: 1px solid #dbe4d2;
   border-radius: 12px;
-  background: #fcfdf9;
+  background: var(--white);
   padding: 24px;
   color: #314b2c;
   min-width: 0;
@@ -46,7 +46,7 @@
   border: 1px solid #d4dec9;
   border-radius: 7px;
   padding: 9px 10px;
-  background: #fff;
+  background: var(--white);
   color: #304728;
   font: inherit;
   font-size: 13px;
@@ -152,7 +152,7 @@
   border: 1px solid #dde5d3;
   border-radius: 9px;
   overflow: hidden;
-  background: #fff;
+  background: var(--white);
   padding: 12px;
   min-width: 0;
 }
@@ -301,7 +301,7 @@
 .cs-scene {
   border: 1px solid #dae4ce;
   border-radius: 9px;
-  background: #fff;
+  background: var(--white);
   margin: 12px 0;
   padding: 16px;
 }
@@ -432,7 +432,7 @@
 }
 .cs-empty-text {
   padding: 17px;
-  background: #f2f5eb;
+  background: var(--ink);
   border-radius: 7px;
 }
 .character-studio button {

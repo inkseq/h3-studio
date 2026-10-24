@@ -1,10 +1,10 @@
 .reference-editor {
   margin-top: 18px;
   padding: 18px;
-  background: #f6f8f1;
+  background: var(--ink);
   border: 1px solid #dce4d2;
   border-radius: 14px;
-  color: #283527;
+  color: var(--surface-4);
 }
 .reference-editor h4 {
   margin: 0 0 7px;
@@ -52,7 +52,7 @@
   padding: 9px;
   border: 1px solid #cbd7bd;
   border-radius: 8px;
-  background: #fff;
+  background: var(--white);
   font: inherit;
   color: #293923;
 }

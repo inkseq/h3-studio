@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import StudioHeader from './StudioHeader.jsx';
 import ItemMenu from './ItemMenu.jsx';
+import { Button, IconButton } from './ui/Button.jsx';
 import { StoryboardSplitter, useStoryboardPanelSize } from './StoryboardPanels.jsx';
 import { RenameDialog } from './UniversalTrash.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -70,12 +71,12 @@ function QuoteCard({ quote, balance, onSettle }) {
         {quote.status === 'open' ? (
           <div className="sc-quote-actions">
             <small>{t('storyChat.newStoryHelp')}</small>
-            <button className="sc-primary keep-label" onClick={() => onSettle(quote, true)}>
+            <Button variant="primary" className="keep-label" onClick={() => onSettle(quote, true)}>
               {t('storyChat.newStoryStart')}
-            </button>
-            <button className="sc-ghost keep-label" onClick={() => onSettle(quote, false)}>
+            </Button>
+            <Button className="keep-label" onClick={() => onSettle(quote, false)}>
               {t('storyChat.newStoryStay')}
-            </button>
+            </Button>
           </div>
         ) : (
           <small className="sc-quote-done">
@@ -94,12 +95,12 @@ function QuoteCard({ quote, balance, onSettle }) {
         {quote.status === 'open' ? (
           <div className="sc-quote-actions">
             <small>{t('storyChat.liveQuoteHelp')}</small>
-            <button className="sc-primary keep-label" onClick={() => onSettle(quote, true)}>
+            <Button variant="primary" className="keep-label" onClick={() => onSettle(quote, true)}>
               {t('storyChat.makeInWorks')}
-            </button>
-            <button className="sc-ghost keep-label" onClick={() => onSettle(quote, false)}>
+            </Button>
+            <Button className="keep-label" onClick={() => onSettle(quote, false)}>
               {t('storyChat.notNow')}
-            </button>
+            </Button>
           </div>
         ) : (
           <small className="sc-quote-done">
@@ -123,20 +124,24 @@ function QuoteCard({ quote, balance, onSettle }) {
         <div className="sc-quote-actions">
           {Number.isFinite(balance) && <small>{t('storyChat.quoteBalance', { balance })}</small>}
           {affordable ? (
-            <button className="sc-primary keep-label" onClick={() => onSettle(quote, true)}>
+            <Button variant="primary" className="keep-label" onClick={() => onSettle(quote, true)}>
               {t('storyChat.confirm')}
-            </button>
+            </Button>
           ) : (
             <>
               <small className="sc-short">{t('storyChat.short')}</small>
-              <button className="sc-primary keep-label" onClick={() => navigateApp('/pricing')}>
+              <Button
+                variant="primary"
+                className="keep-label"
+                onClick={() => navigateApp('/pricing')}
+              >
                 {t('storyChat.buy')}
-              </button>
+              </Button>
             </>
           )}
-          <button className="sc-ghost keep-label" onClick={() => onSettle(quote, false)}>
+          <Button className="keep-label" onClick={() => onSettle(quote, false)}>
             {t('storyChat.notNow')}
-          </button>
+          </Button>
         </div>
       ) : (
         <small className="sc-quote-done">
@@ -184,16 +189,15 @@ function CardDetail({
       <header>
         <strong>{cardName(card, t)}</strong>
         {shot && <small>{t('storyChat.time', { start: card.start, end: card.end })}</small>}
-        <button
-          className="sc-icon"
-          aria-label={t('storyChat.close')}
+        <IconButton
+          label={t('storyChat.close')}
           onClick={() => {
             commit();
             onClose();
           }}
         >
           <X size={16} />
-        </button>
+        </IconButton>
       </header>
       <div className={'sc-detail-picture' + (shot ? ' wide' : '')}>
         {card.image ? (
@@ -248,8 +252,9 @@ function CardDetail({
       )}
       <div className="sc-detail-actions">
         {shot ? (
-          <button
-            className="sc-primary keep-label"
+          <Button
+            variant="primary"
+            className="keep-label"
             disabled={busy || card.status === 'generating'}
             onClick={() => {
               commit();
@@ -258,10 +263,11 @@ function CardDetail({
           >
             <Film size={15} aria-hidden="true" />
             {card.status === 'ready' ? t('storyChat.remakeShot') : t('storyChat.makeShot')}
-          </button>
+          </Button>
         ) : canDraw ? (
-          <button
-            className="sc-primary keep-label"
+          <Button
+            variant="primary"
+            className="keep-label"
             disabled={busy}
             onClick={() => {
               commit();
@@ -270,10 +276,10 @@ function CardDetail({
           >
             <ImagePlus size={15} aria-hidden="true" />
             {card.image ? t('storyChat.redrawPicture') : t('storyChat.makePicture')}
-          </button>
+          </Button>
         ) : null}
-        <button
-          className="sc-ghost keep-label"
+        <Button
+          className="keep-label"
           onClick={() => {
             commit();
             onAsk(card);
@@ -281,7 +287,7 @@ function CardDetail({
         >
           <MessageSquare size={15} aria-hidden="true" />
           {t('storyChat.askAbout')}
-        </button>
+        </Button>
       </div>
     </aside>
   );
@@ -309,14 +315,15 @@ function Board({ state, fresh, openId, onOpen, onWorks, notice }) {
             {t('storyChat.progressMade', done)}
           </span>
         )}
-        <button
-          className={'keep-label ' + (done.done ? 'sc-primary' : 'sc-ghost')}
+        <Button
+          variant={done.done ? 'primary' : 'secondary'}
+          className="keep-label"
           disabled={!done.shots}
           onClick={onWorks}
         >
           <Film size={15} aria-hidden="true" />
           {t('storyChat.openWorks')}
-        </button>
+        </Button>
       </div>
       <FloatingMessage tone="info" text={notice ? notice : null} />
       {CARD_GROUPS.filter((group) => group.kind !== 'shot').map((group) =>
@@ -684,10 +691,14 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
       >
         {stories && (
           <nav className="sc-stories" aria-label={t('storyChat.myStories')}>
-            <button className="sc-new-story keep-label" onClick={() => openStory(null)}>
+            <Button
+              variant="primary"
+              className="sc-new-story keep-label"
+              onClick={() => openStory(null)}
+            >
               <Plus size={15} aria-hidden="true" />
               {t('storyChat.newStory')}
-            </button>
+            </Button>
             <h3>{t('storyChat.myStories')}</h3>
             {stories.length === 0 && <p className="sc-stories-empty">{t('storyChat.noStories')}</p>}
             <ul>
@@ -748,25 +759,19 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
         <section className="sc-chat" aria-label={t('storyChat.tabChat')}>
           <div className="sc-panel-toggles">
             {stories && (
-              <button
-                type="button"
-                className="sc-icon"
-                aria-label={t(sideOpen ? 'storyChat.hideStories' : 'storyChat.showStories')}
-                title={t(sideOpen ? 'storyChat.hideStories' : 'storyChat.showStories')}
+              <IconButton
+                label={t(sideOpen ? 'storyChat.hideStories' : 'storyChat.showStories')}
                 onClick={() => setSideOpen((v) => !v)}
               >
                 {sideOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
-              </button>
+              </IconButton>
             )}
-            <button
-              type="button"
-              className="sc-icon"
-              aria-label={t(boardOpen ? 'storyChat.hideCards' : 'storyChat.showCards')}
-              title={t(boardOpen ? 'storyChat.hideCards' : 'storyChat.showCards')}
+            <IconButton
+              label={t(boardOpen ? 'storyChat.hideCards' : 'storyChat.showCards')}
               onClick={() => setBoardOpen((v) => !v)}
             >
               {boardOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
-            </button>
+            </IconButton>
           </div>
           <div className="sc-thread" ref={thread}>
             {!state.messages.length && (
@@ -868,9 +873,9 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
                   <strong>{t('storyChat.handoffTitle')}</strong>
                   <small>{t('storyChat.handoffHelp')}</small>
                 </span>
-                <button className="sc-primary keep-label" onClick={works}>
+                <Button variant="primary" className="keep-label" onClick={works}>
                   {t('storyChat.openWorks')}
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -903,16 +908,13 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
               </div>
             )}
             <div className="sc-compose-row">
-              <button
-                type="button"
-                className="sc-icon"
+              <IconButton
                 hidden={live}
-                aria-label={t('storyChat.attach')}
-                title={t('storyChat.attach')}
+                label={t('storyChat.attach')}
                 onClick={() => fileInput.current?.click()}
               >
                 <Paperclip size={17} />
-              </button>
+              </IconButton>
               <input
                 ref={fileInput}
                 type="file"

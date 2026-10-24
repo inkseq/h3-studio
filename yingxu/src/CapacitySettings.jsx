@@ -99,7 +99,7 @@ function DailyStatus({ daily }) {
   );
 }
 
-function Consequences({ preview }) {
+export function Consequences({ preview }) {
   const { t } = useI18n();
   const money = formatMoneyMicros;
   const pending =

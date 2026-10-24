@@ -268,7 +268,7 @@
 .libp-resize:hover,
 .libp-resize:focus-visible,
 body.libp-resizing .libp-resize {
-  background: var(--accent, #c7f36b);
+  background: var(--accent, var(--accent));
   opacity: 0.45;
   outline: none;
 }
@@ -285,14 +285,14 @@ body.libp-resizing {
   align-items: center;
   height: 32px;
   padding: 0 12px;
-  border: 1px solid var(--line-2, #2b302d);
+  border: 1px solid var(--line-2, var(--surface-4));
   border-radius: var(--r-sm, 8px);
-  color: var(--ink, #eef2ef);
+  color: var(--ink, var(--ink));
   text-decoration: none;
   font-size: 13px;
 }
 .libp-actions > a.small:hover {
-  background: var(--surface-3, #232825);
+  background: var(--surface-3, var(--surface-3));
 }
 @media (max-width: 900px) {
   .lib-shell .libp {

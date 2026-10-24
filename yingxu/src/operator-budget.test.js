@@ -459,6 +459,66 @@ test('price CAS preserves original snapshot/body and recovery is exact read-only
   assert.equal(controller.getState().pending, null);
 });
 
+test('price change previews against the settings version, then writes reason and digest', async () => {
+  const policy = {
+      id: 'ref',
+      owner_id: 'superdan',
+      max_price_microusd: 850000,
+      price_ceiling_microusd: 1000000,
+      snapshot: 'a'.repeat(64),
+    },
+    calls = [];
+  const preview = {
+    expected_snapshot: policy.snapshot,
+    expected_settings_version: 4,
+    consequences: [],
+    confirmation_digest: 'd'.repeat(64),
+  };
+  const api = fake({
+      adminPrices: async () => ({
+        operator: { account: 'superdan', admin: true },
+        expected_settings_version: 4,
+        profiles: [policy],
+        audits: [],
+      }),
+      previewPrice: async (id, body) => {
+        calls.push({ kind: 'preview', id, body });
+        return preview;
+      },
+      updatePrice: async (id, body, key) => {
+        calls.push({ kind: 'put', id, body, key });
+        return {
+          profile: { ...policy, ...body, snapshot: 'b'.repeat(64) },
+          changed: true,
+          audit_event_id: 'audit-1',
+        };
+      },
+    }),
+    controller = createP4OperatorController({ client: api, storage: memory() });
+  await controller.setAccount('superdan');
+  const reviewed = await controller.previewPrice(policy, 1500000, 3000000);
+  assert.equal(reviewed, preview);
+  assert.deepEqual(calls[0].body, {
+    expected_snapshot: policy.snapshot,
+    expected_settings_version: 4,
+    max_price_microusd: 1500000,
+    price_ceiling_microusd: 3000000,
+  });
+  await controller.updatePrice(policy, 1500000, 3000000, { preview, reason: ' owner #517 ' });
+  assert.deepEqual(calls[1].body, {
+    expected_snapshot: policy.snapshot,
+    max_price_microusd: 1500000,
+    price_ceiling_microusd: 3000000,
+    expected_settings_version: 4,
+    reason: 'owner #517',
+    confirmation_digest: 'd'.repeat(64),
+  });
+  await assert.rejects(
+    controller.previewPrice({ ...policy, snapshot: 'c'.repeat(64) }, 1500000, 3000000),
+  );
+  assert.equal(calls.length, 2);
+});
+
 test('admin permission change or stale budget CAS does not retry a mutation', async () => {
   let writes = 0;
   const controller = createP4OperatorController({

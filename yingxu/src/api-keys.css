@@ -14,7 +14,7 @@
   line-height: 1.65;
 }
 .api-key-form {
-  background: #f5f6ef;
+  background: var(--ink);
   border: 1px solid #dce2d5;
   border-radius: 10px;
   padding: 14px;

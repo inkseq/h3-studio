@@ -7,7 +7,7 @@
   border: 1px solid #dce2d5;
   border-radius: 17px;
   overflow: hidden;
-  background: #f3f5ed;
+  background: var(--ink);
   color: #172923;
   position: relative;
   box-shadow: 0 8px 26px #23382006;
@@ -58,7 +58,7 @@
   flex: 1;
   color: #82907a;
   border: 1px solid #e1e6d9;
-  background: #f3f5ed;
+  background: var(--ink);
   border-radius: 9px;
   padding: 9px 11px;
 }
@@ -93,7 +93,7 @@
   left: 0;
   width: max(100%, 300px);
   max-width: calc(100vw - 70px);
-  background: #fff;
+  background: var(--white);
   border: 1px solid #dce4d2;
   border-radius: 12px;
   padding: 5px;
@@ -171,7 +171,7 @@
   cursor: not-allowed;
 }
 .canvas-secondary {
-  background: #fff;
+  background: var(--white);
   border: 1px solid #dce2d5;
   color: #526447;
 }
@@ -186,7 +186,7 @@
   min-height: 40px;
   padding: 8px 17px;
   border-bottom: 1px solid #e0e5d9;
-  background: #f8faf3;
+  background: var(--ink);
   color: #566650;
   font-size: 11px;
 }
@@ -233,7 +233,7 @@
   position: relative;
 }
 .studio-canvas .react-flow {
-  background: #f3f5ed;
+  background: var(--ink);
 }
 .studio-canvas .react-flow__node:focus-visible {
   outline: 2px solid #537143;
@@ -244,7 +244,7 @@
   background: #819a6d;
   width: 10px;
   height: 10px;
-  border: 2px solid #fff;
+  border: 2px solid var(--white);
   transition: transform 0.15s;
 }
 .studio-canvas .react-flow__handle:hover {
@@ -302,7 +302,7 @@
   border-radius: 4px;
 }
 .studio-node {
-  background: #fcfdf9;
+  background: var(--white);
   border: 1px solid #d3dccb;
   border-radius: 12px;
   box-shadow: 0 4px 13px #32472c08;
@@ -342,7 +342,7 @@
 }
 .studio-node-status {
   font-size: 9px;
-  color: #858c7e;
+  color: var(--muted);
   white-space: nowrap;
 }
 .studio-node-status.status-ready {
@@ -653,7 +653,7 @@
   border: 1px solid #d8e1cb;
   border-radius: 7px;
   padding: 9px;
-  background: #f7faf1;
+  background: var(--ink);
 }
 .canvas-connect-panel > .canvas-add {
   width: 100%;
