@@ -25,7 +25,7 @@ import {
   Pencil,
 } from 'lucide-react';
 import { Segmented } from './ui/Segmented.jsx';
-import { Chip } from './ui/Note.jsx';
+import { Chip, Note } from './ui/Note.jsx';
 import { TrashMenu, TrashButton, RenameDialog } from './UniversalTrash.jsx';
 import { WorkbenchTakes, WorkbenchCopies, WorkbenchDefaults } from './StoryboardWorkbench.jsx';
 import { AssistantBadge } from './AssistantConnections.jsx';
@@ -385,7 +385,9 @@ function ChooseFiles({ kind, exclude, title, onPick, onFiles, onClose }) {
             }}
           />
         </div>
-        <div className="picker-note">{tr('storyboard.copy39')}</div>
+        <Note as="div" tone="info">
+          {tr('storyboard.copy39')}
+        </Note>
         {kind === 'image' ? (
           <div className="picker-grid">
             {list.map((a) => (
@@ -1282,7 +1284,9 @@ export function AssetPicker({ shotId, slot, x, y, onClose }) {
         ))}
       </div>
       {(slot === 'start' || slot === 'end') && (
-        <div className="picker-note">{tr('storyboard.copy75')}</div>
+        <Note as="div" tone="info">
+          {tr('storyboard.copy75')}
+        </Note>
       )}
       <div className="picker-grid">
         {profiles.map((p) => {

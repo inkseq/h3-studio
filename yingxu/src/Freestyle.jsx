@@ -20,7 +20,7 @@ export default function Freestyle() {
   return (
     <div className="home">
       <StudioHeader />
-      <main className="empty-state">
+      <main className="ui-empty">
         <p role={href ? 'status' : 'alert'}>
           {t(href ? 'quickView.openingWorkspace' : 'quickView.invalidWorkspaceLink')}
         </p>

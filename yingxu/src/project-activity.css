@@ -39,11 +39,6 @@
   flex: 1;
   line-height: 1.6;
 }
-.activity-empty {
-  border: 1px dashed #cbd7c9;
-  border-radius: 12px;
-  padding: 24px;
-}
 .activity-events {
   padding: 0;
   list-style: none;

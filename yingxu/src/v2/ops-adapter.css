@@ -286,46 +286,11 @@
   color: var(--accent);
   font-size: 11px;
 }
-.ops-adapter :is(.p4-dialog, .op-dialog),
-.ops-dialog {
-  background: var(--surface);
-  color: var(--ink);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-lg);
-  padding: 22px;
-  width: min(720px, 94vw);
-  max-height: 88dvh;
-  overflow: auto;
-}
-.ops-adapter :is(.p4-dialog, .op-dialog).wide {
-  width: min(1080px, 96vw);
-}
-.ops-adapter :is(.p4-dialog, .op-dialog)::backdrop,
-.ops-dialog::backdrop {
-  background: var(--bg);
-  opacity: 0.78;
-}
-.ops-adapter :is(.p4-dialog, .op-dialog) > header,
-.ops-adapter :is(.p4-dialog, .op-dialog) > footer,
-.ops-dialog .qc-dialog-head {
+.ops-adapter :is(.p4-dialog, .op-dialog) > footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-}
-.ops-adapter :is(.p4-dialog, .op-dialog) > header,
-.ops-dialog .qc-dialog-head {
-  margin-bottom: 18px;
-}
-.ops-adapter :is(.p4-dialog, .op-dialog) h2,
-.ops-dialog h2 {
-  margin: 0;
-  font-size: 19px;
-}
-.ops-adapter :is(.p4-dialog, .op-dialog) > header p {
-  margin: 5px 0 0;
-  color: var(--muted);
 }
 .ops-adapter :is(.p4-dialog, .op-dialog) > footer {
   margin-top: 20px;
@@ -608,20 +573,14 @@
   font-size: 11px;
   color: var(--muted);
 }
-.ops-adapter .p4-empty {
-  padding: 28px;
-  color: var(--muted);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-}
-.ops-adapter .p4-empty form {
+.ops-adapter .ui-empty form {
   display: flex;
   flex-direction: column;
   gap: 12px;
   max-width: 360px;
   margin: 16px auto;
 }
-.ops-adapter .p4-empty label {
+.ops-adapter .ui-empty label {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -790,12 +749,6 @@
   .ops-adapter .budget-accounts,
   .ops-adapter .p4-accountspend {
     grid-template-columns: 1fr;
-  }
-  .ops-adapter :is(.p4-dialog, .op-dialog),
-  .ops-dialog {
-    padding: 16px;
-    width: 94vw;
-    max-height: 86dvh;
   }
   .ops-adapter :is(.p4-dialog, .op-dialog) > footer {
     align-items: flex-start;

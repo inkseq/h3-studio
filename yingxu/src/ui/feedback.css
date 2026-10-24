@@ -58,6 +58,31 @@
   background: var(--surface-3);
   color: var(--ink-2);
 }
+/* Markup that predates <EmptyState>: an icon (bare or in a span), a title and a line. */
+.ui-empty > svg {
+  color: var(--ink-2);
+}
+.ui-empty > span:first-child:has(> svg) {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: 6px;
+  border-radius: var(--r-lg);
+  background: var(--surface-3);
+  color: var(--ink-2);
+}
+.ui-empty > :is(h2, b) {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.ui-empty > :is(small, p) {
+  max-width: 42ch;
+  margin: 0;
+}
 .ui-empty-compact {
   padding: var(--sp-5) var(--sp-4);
   border: 0;

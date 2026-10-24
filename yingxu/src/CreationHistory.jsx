@@ -343,7 +343,7 @@ export default function CreationHistory({ state, controller, busy, embeddedTrash
                 </label>
               ))}
               {!state.trashSessions.length && (
-                <p className="qc-history-empty">{t('history.copy50')}</p>
+                <p className="ui-empty ui-empty-compact">{t('history.copy50')}</p>
               )}
             </div>
             {state.trashCursor && (

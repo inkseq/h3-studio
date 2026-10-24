@@ -1,6 +1,6 @@
 import { Note } from './ui/Note.jsx';
 import { dstackNodeStatus as rawDstackNodeStatus } from './dstack-presentation.js';
-import { useModal } from './ui/Dialog.jsx';
+import { Dialog as SharedDialog } from './ui/Dialog.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import { operatorFormatters, operatorDisplay } from './i18n/legacyOperatorPresentation.js';
 import { useI18n, LanguageSwitcher } from './i18n/I18nProvider.jsx';
@@ -27,30 +27,18 @@ const date = (value) =>
   typeof value === 'number' && Number.isFinite(value)
     ? new Date(value * 1000).toLocaleString('zh-CN')
     : '尚未确认';
+// The console's dialogs use the shared Dialog (h3-studio#514); op-dialog keeps their content layout.
 function Dialog({ title, onClose, children }) {
-  const { t: lo, locale } = useI18n();
-  const ref = useModal();
   return (
-    <dialog
-      ref={ref}
+    <SharedDialog
+      title={title}
+      onClose={onClose}
+      eyebrow="GPU CONTROL"
+      size="wide"
       className="op-dialog"
-      aria-label={title}
-      onCancel={(event) => {
-        event.preventDefault();
-        onClose();
-      }}
     >
-      <header>
-        <div>
-          <span className="op-eyebrow">GPU CONTROL</span>
-          <h2>{title}</h2>
-        </div>
-        <button className="op-icon" aria-label={lo('legacyOp.copy1')} onClick={onClose}>
-          <X size={19} />
-        </button>
-      </header>
       {children}
-    </dialog>
+    </SharedDialog>
   );
 }
 

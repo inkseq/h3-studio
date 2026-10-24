@@ -1,6 +1,6 @@
 import { EmptyState, Note } from './ui/Note.jsx';
 import StudioHeader from './StudioHeader.jsx';
-import { useModal } from './ui/Dialog.jsx';
+import { Dialog as SharedDialog } from './ui/Dialog.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import { MenuItem } from './AccountMenu.jsx';
 import { readBrowserLocale, translate } from './i18n/locale.js';
@@ -104,30 +104,18 @@ const hostPlace = (node) =>
   node.region ||
   '';
 
+// The console's dialogs use the shared Dialog (h3-studio#514); p4-dialog keeps their content layout.
 function Dialog({ title, subtitle, onClose, wide = false, children }) {
-  const { t, locale } = useI18n();
-  const ref = useModal();
   return (
-    <dialog
-      ref={ref}
+    <SharedDialog
+      title={title}
+      subtitle={subtitle}
+      onClose={onClose}
+      size={wide ? 'xl' : 'wide'}
       className={'p4-dialog' + (wide ? ' wide' : '')}
-      aria-label={title}
-      onCancel={(event) => {
-        event.preventDefault();
-        onClose();
-      }}
     >
-      <header>
-        <div>
-          <h2>{title}</h2>
-          {subtitle && <p>{subtitle}</p>}
-        </div>
-        <button className="p4-close" aria-label={t('operator.copy32')} onClick={onClose}>
-          <X size={20} />
-        </button>
-      </header>
       {children}
-    </dialog>
+    </SharedDialog>
   );
 }
 function KeepFields({ value, onChange }) {
@@ -206,7 +194,7 @@ function Login() {
     [error, setError] = useState('');
   const local = ['username-only-test', 'username-test'].includes(c.auth?.authentication);
   return (
-    <section className="p4-empty">
+    <section className="ui-empty">
       <ShieldCheck size={30} />
       <h2>{t('operator.copy51')}</h2>
       <form
@@ -1629,7 +1617,7 @@ function Inventory({ profiles, controller, onStart, testTaskRequired = false }) 
         })}
       </div>
       {!items.length && (
-        <section className="p4-empty">
+        <section className="ui-empty">
           <Server size={26} />
           <p>{t('operator.copy115')}</p>
         </section>
@@ -1641,7 +1629,7 @@ function AdminView({ snapshot, profiles, onDetail, onStop }) {
   const { t, locale } = useI18n();
   if (!snapshot)
     return (
-      <section className="p4-empty" role="status">
+      <section className="ui-empty" role="status">
         {t('operator.copy116')}
       </section>
     );
@@ -1686,7 +1674,7 @@ function AdminView({ snapshot, profiles, onDetail, onStop }) {
             </div>
           ))
         ) : (
-          <div className="p4-empty">{t('operator.copy120')}</div>
+          <div className="ui-empty ui-empty-compact">{t('operator.copy120')}</div>
         )}
       </div>
       <details className="p4-method">
