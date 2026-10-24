@@ -115,6 +115,10 @@ class ExtensionTests(OperatorCase):
                 self.assertEqual(current[k], intent[k])
             current_node = dict(conn.execute(select(operator_nodes)).mappings().one())
             self.assertEqual(
+                current_node["payload"]["command_revision"],
+                node["payload"].get("command_revision", 0) + 1,
+            )
+            self.assertEqual(
                 current_node["payload"]["selection"], node["payload"]["selection"]
             )
         self.assertEqual(len(self.seeded_instances), 1)

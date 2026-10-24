@@ -186,6 +186,7 @@ class OperatorExtensions:
 
     def extend(self, principal, node_id, body, key):
         from .operator_capacity import (
+            advance_command_revision,
             operator_nodes,
             operator_previews,
             operator_commands,
@@ -313,7 +314,7 @@ class OperatorExtensions:
                 .where(operator_nodes.c.intent_id == node_id)
                 .values(
                     payload={
-                        **node["payload"],
+                        **advance_command_revision(node["payload"]),
                         "last_extension": {
                             **current,
                             "operation_id": command["id"],

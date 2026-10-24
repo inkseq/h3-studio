@@ -30,7 +30,11 @@ from .dstack_operator import (
     _cold_unadmitted_runtime,
     _window_open,
 )
-from .operator_capacity import operator_commands, operator_nodes
+from .operator_capacity import (
+    advance_command_revision,
+    operator_commands,
+    operator_nodes,
+)
 from .repository import (
     BudgetExceeded,
     attempts,
@@ -636,6 +640,7 @@ class DstackController:
                     if not isinstance(payload, dict):
                         return False
                 payload["stop_reason_code"] = reason_code
+                payload = advance_command_revision(payload)
                 connection.execute(
                     update(operator_nodes)
                     .where(operator_nodes.c.intent_id == node["intent_id"])

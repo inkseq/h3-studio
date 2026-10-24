@@ -584,6 +584,12 @@ class ReviewedHistoricalRemovalTests(LedgerCase):
             )
         request = self.reviewed_request(identity)
         original = self.repo.get_budget('owner-budget')['reserved_microusd']
+        with self.repo.engine.connect() as conn:
+            revision_before = (
+                conn.execute(select(operator_nodes.c.payload))
+                .scalar_one()
+                .get('command_revision', 0)
+            )
         self.assertGreater(original, 0)
         self.assertEqual(reconcile(self.repo, request)['state'], 'dry_run')
         self.assertEqual(
@@ -595,6 +601,7 @@ class ReviewedHistoricalRemovalTests(LedgerCase):
         with self.repo.engine.connect() as conn:
             intent = conn.execute(select(instance_intents)).mappings().one()
             node = conn.execute(select(operator_nodes)).mappings().one()
+            self.assertEqual(node['payload']['command_revision'], revision_before + 1)
             command = conn.execute(select(operator_commands)).mappings().one()
             reservation = conn.execute(select(budget_reservations)).mappings().one()
             self.assertEqual(

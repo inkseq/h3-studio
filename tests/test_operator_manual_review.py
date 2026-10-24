@@ -142,6 +142,12 @@ class ManualReviewTests(operator_fixtures.OperatorCase):
 
     def test_exact_review_preserves_reservation_deadline_and_provider_state(self):
         before = self.repo.list_instance_intents()[0]
+        with self.repo.engine.connect() as connection:
+            revision_before = (
+                connection.execute(select(operator_nodes.c.payload))
+                .scalar_one()
+                .get('command_revision', 0)
+            )
         budget = self.repo.get_budget('owner-budget')
         result = self.service.manual_review(
             self.actor, self.node_id, self.body, 'review-once'
@@ -175,6 +181,12 @@ class ManualReviewTests(operator_fixtures.OperatorCase):
         self.assertEqual(proof['manual_review']['actor'], 'superdan')
         self.assertFalse(snapshot['nodes'][0]['actions']['manual_review']['allowed'])
         with self.repo.engine.connect() as connection:
+            self.assertEqual(
+                connection.execute(select(operator_nodes.c.payload)).scalar_one()[
+                    'command_revision'
+                ],
+                revision_before + 1,
+            )
             self.assertEqual(
                 len(
                     list(

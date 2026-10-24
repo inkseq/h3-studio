@@ -16,6 +16,8 @@ from .control import WorkerControl
 from .dstack_operator import BACKEND_MARKER, _actor, _finite
 from .operator_capacity import (
     OperatorError,
+    advance_command_revision,
+    command_revision,
     operator_commands,
     operator_nodes,
     operator_policy,
@@ -533,10 +535,11 @@ class DstackWorkspace:
             group = owned_group(connection, self.settings, owner, body["group_id"])
             require(
                 "expected_version" not in body
-                or body["expected_version"] == node["updated_at"],
+                or body["expected_version"] == command_revision(node["payload"]),
                 "operator_node_version_conflict",
             )
-            now, payload = self.repo.clock(), copy.deepcopy(node["payload"])
+            now = self.repo.clock()
+            payload = advance_command_revision(copy.deepcopy(node["payload"]))
             previous = payload.get("group_id")
             payload["group_id"] = body["group_id"]
             connection.execute(
@@ -550,7 +553,7 @@ class DstackWorkspace:
                 "node_id": node_id,
                 "group_id": body["group_id"],
                 "group_name": group["name"] if group else None,
-                "version": now,
+                "version": command_revision(payload),
             }
             self._command(connection, actor, key, digest, "dstack_group_move", result)
             return result

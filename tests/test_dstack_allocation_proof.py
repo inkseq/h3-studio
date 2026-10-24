@@ -73,8 +73,12 @@ class AllocationProofTests(LedgerCase):
         unrelated = self.job("unrelated-job")
         node, _, _ = self.failed(marker())
         original = self.reservation(node)
+        version = self.service.state(self.owner)["nodes"][0]["version"]
         result = self.capacity.observe(node)
         self.assertEqual(result["reason_code"], "dstack_never_allocated")
+        self.assertEqual(
+            self.service.state(self.owner)["nodes"][0]["version"], version + 1
+        )
         settled = self.reservation(node)
         self.assertEqual(
             (settled["id"], settled["state"], settled["actual_cost_microusd"]),
@@ -110,6 +114,9 @@ class AllocationProofTests(LedgerCase):
         before = self.repo.get_budget("owner-budget")
         self.capacity.observe(node)
         self.assertEqual(self.reservation(node), settled)
+        self.assertEqual(
+            self.service.state(self.owner)["nodes"][0]["version"], version + 1
+        )
         self.assertEqual(self.repo.get_budget("owner-budget"), before)
         with self.repo.engine.connect() as c:
             self.assertEqual(
@@ -252,6 +259,7 @@ class AllocationProofTests(LedgerCase):
             "observed_at": self.now,
             "instance_ids": [],
         }
+        version = self.service.state(self.owner)["nodes"][0]["version"]
         reviewed = self.capacity.review_unallocated_start(
             node,
             reviewed_by="owner",
@@ -270,6 +278,9 @@ class AllocationProofTests(LedgerCase):
         self.assertEqual(self.repo.get_budget("owner-budget"), balance)
         self.capacity.observe(node)
         self.assertEqual(self.store.load(node)["billing_state"], "no_charge_confirmed")
+        self.assertEqual(
+            self.service.state(self.owner)["nodes"][0]["version"], version + 1
+        )
 
     def test_owner_review_refuses_live_partial_stale_or_unknown_account_results(self):
         node, _, _ = self.failed("legacy explicit owner-confirmed no-allocation review")
