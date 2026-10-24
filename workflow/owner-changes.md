@@ -392,7 +392,7 @@ one Vast cold cycle as the regression check, then qualify RunPod, Lium and Cloud
 on staging under USD20 per item. Each test rental retains max_price, idle stop,
 maximum runtime and stop-at-completion. Reuse existing protected provider profiles;
 missing/new credentials, provider accounts or budget overruns still require owner
-action. Production enablement of each new provider remains a separate decision.
+action. Production enablement of each new provider is now governed by CR61 below.
 Keep Tier2 independent safety review and exact-artifact receipts; no new service,
 queue or financial repair is implied. Source: direct owner instruction2026-10-24.
 
@@ -424,3 +424,31 @@ separately. Charging and LIVE Checkout stay OFF; cost caps, the USD20 test-task
 budget, max_price, idle/max-runtime safeguards and existing release/rollback
 mechanisms remain unchanged. Source: direct owner instructions2026-10-24 and the
 linked #193 decision; incident results remain in the original issue receipts.
+
+## CR-20261024-61 — conditional production enablement of qualified providers
+
+Owner preauthorizes production enablement of RunPod, Lium and CloudRift per
+[#517/6383431565](https://github.com/inkseq/h3-studio/issues/517#issuecomment-6383431565).
+This supersedes CR59's separate production decision requirement for these three
+providers; no further owner decision is needed for each provider once its
+conditions below are met.
+
+Each provider must first pass one staging cold start, generation, R2 delivery,
+idle stop and removal proof. Record measured time-to-ready and USD cost in
+[#130](https://github.com/inkseq/h3-studio/issues/130), then obtain Claude's
+`needs-claude-acceptance` to `accepted` sign-off for that provider. Enable accepted
+providers in production with the next normal promotion, retaining exact accepted
+artifacts, original receipts and rollback. This authorization is not evidence
+that any provider has already passed or been enabled.
+
+Preserve max_price, per-machine and fleet caps, the USD100/day ceiling, idle stop,
+the host blocklist and B4 price-ordered selection with fallback on `no capacity`.
+Unknown create or generation outcomes still require original-receipt reconciliation,
+never a duplicate operation or an inferred no-allocation result. Staging remains
+limited to USD20 per change/acceptance task with the existing maximum-runtime and
+stop-at-completion safeguards. Reuse existing protected profiles; this decision
+does not authorize new credentials/provider accounts or a budget increase.
+
+A provider that fails qualification stays OFF and is reported with its blocker;
+it does not block independently qualified and accepted providers. Charging and
+LIVE Checkout remain governed by their separate owner decisions.
