@@ -206,6 +206,15 @@ def frozen_story(project, results, *, chapters=None):
         shot = entities[shot_id]
         if result.get("entity"):
             entity = copy.deepcopy(result["entity"])
+            from .shot_segments import has_segments, segment_frames
+
+            if has_segments(shot):
+                if not result.get("reused"):
+                    raise Conflict("film_segments_source_requires_review")
+                try:
+                    segment_frames(shot, entity)
+                except ValueError:
+                    raise Conflict("film_segments_source_requires_review") from None
             if entity["id"] in entities and entities[entity["id"]] != entity:
                 raise Conflict("film_result_identity_conflict")
             if entity["id"] not in entities:
@@ -577,7 +586,15 @@ class FilmRuns:
         )
         if not 1 <= len(chapters) <= 50:
             raise ValueError("film_chapter_count_limit")
-        from .render_timing import crossfade, enabled, has_speed, shot_frames
+        from .render_timing import (
+            crossfade,
+            enabled,
+            expanded_audio_count,
+            has_speed,
+            segment_timing,
+            shot_frames,
+        )
+        from .shot_segments import has_segments
 
         render_version = (
             5
@@ -595,6 +612,19 @@ class FilmRuns:
             _, _, shots = ordered_chapter(project, chapter["id"])
             if not 1 <= len(shots) <= 50:
                 raise ValueError("film_chapter_shot_count_limit")
+            if (
+                sum(
+                    len(segment_timing(shot)) if has_segments(shot) else 1
+                    for shot in shots
+                )
+                > 50
+            ):
+                raise ValueError("film_chapter_clip_count_limit")
+            if (
+                any(has_segments(shot) for shot in shots)
+                and expanded_audio_count(project, chapter["id"], shots) > 32
+            ):
+                raise ValueError("film_audio_track_count_limit")
             if options["burn_subtitles"]:
                 from .caption_server import caption_signature, compile_subtitles
 
@@ -672,6 +702,8 @@ class FilmRuns:
                     None,
                 )
                 if selected is None:
+                    if has_segments(shot):
+                        raise Conflict("film_segments_source_requires_review")
                     if has_speed(shot):
                         raise Conflict("film_speed_source_requires_review")
                     missing.append(shot["id"])
@@ -680,7 +712,9 @@ class FilmRuns:
                     source = self.app.state.resolve_render_source(
                         principal, project_id, selected, "video"
                     )
-                    if has_speed(shot):
+                    if has_segments(shot):
+                        segment_timing(shot, selected, source["duration"])
+                    elif has_speed(shot):
                         from .render_plans import video_range
 
                         selected_range = shot["data"]["selectedVideoRange"]
@@ -722,6 +756,8 @@ class FilmRuns:
                         "source_hash": request_hash(source),
                     }
                 except (NotFound, Conflict, ValueError):
+                    if has_segments(shot):
+                        raise Conflict("film_segments_source_requires_review") from None
                     if has_speed(shot):
                         raise Conflict("film_speed_source_requires_review") from None
                     missing.append(shot["id"])

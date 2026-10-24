@@ -294,6 +294,9 @@ def validate_project(project, max_bytes=8 * 1024 * 1024):
                 raise ValueError("已采用视频的选段格式无效")
             # Media replacement/deletion may leave a stale recoverable edit.
             # Save that draft; the render compiler blocks stale bindings.
+        from .shot_segments import validate_segments_data
+
+        validate_segments_data(e)
         if "guides" in data.get("h3", {}) and (
             not isinstance(data["h3"]["guides"], list) or len(data["h3"]["guides"]) > 8
         ):
