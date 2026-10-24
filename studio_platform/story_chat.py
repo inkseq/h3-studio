@@ -253,6 +253,37 @@ def _image(entity):
     return gallery[0] if gallery and isinstance(gallery[0], str) else None
 
 
+def _shot_media(data, lookup):
+    """The chosen video (selectedAssetId → its video entity's artifact) and its small
+    thumbnail, plus how many finished takes are waiting to be chosen."""
+    picked = lookup.get(data.get("selectedAssetId")) or {}
+    artifact = (
+        (
+            picked.get("data", {}).get("cloudArtifactId")
+            if picked.get("type") == "video"
+            else None
+        )
+        or data.get("cloudArtifactId")
+        or data.get("selectedArtifactId")
+    )
+    if not (
+        isinstance(artifact, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,200}", artifact)
+    ):
+        artifact = None
+    takes = [
+        c
+        for c in data.get("candidateIds") or []
+        if isinstance(c, str) and (lookup.get(c) or {}).get("type") == "video"
+    ]
+    return {
+        "selected_artifact_id": artifact,
+        "thumbnail_url": f"/v1/artifacts/{artifact}/content?rendition=thumb"
+        if artifact
+        else None,
+        "takes": len(takes),
+    }
+
+
 def cards(project, chat):
     """Compact, UI-shaped view of the story's cards; entity IDs are the card IDs."""
 
@@ -299,8 +330,7 @@ def cards(project, chat):
                 ],
                 "place": (board.get("place") or {}).get("locationId"),
                 "props": list(board.get("propIds", [])),
-                "selected_artifact_id": data.get("cloudArtifactId")
-                or data.get("selectedArtifactId"),
+                **_shot_media(data, lookup),
                 "version": shot["version"],
             }
         )
