@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useState } from 'react';
+import { Spinner } from './ui/Field.jsx';
 import { createPortal } from 'react-dom';
 import { usePageActive } from './AppRouteCache.jsx';
 import { useCloud } from './CloudStudio.jsx';
@@ -90,7 +91,7 @@ export default function StoryOpenNotice({
     if (quietLoading) return null;
     const pill = (
       <div className="story-open-toast" role="status">
-        <span className="story-open-spinner" aria-hidden="true" />
+        <Spinner />
         {label}
       </div>
     );
