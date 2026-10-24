@@ -199,7 +199,7 @@ export default function ProductionQueue({ project, onInspect }) {
           </button>
         </p>
       )}
-      {!visible.length && <p className="queue-empty">{lt('legacy.explain20')}</p>}
+      {!visible.length && <p className="ui-empty ui-empty-compact">{lt('legacy.explain20')}</p>}
       <div className="queue-rows">
         {visible.map((row) => (
           <article key={row.id} data-testid={'queue-shot-' + row.id}>

@@ -173,7 +173,7 @@ export default function LibraryView({
             <Files size={20} />
             {t('library.title')}
           </h1>
-          <div className="empty-state">
+          <div className="ui-empty">
             <span>
               <UserRound size={24} />
             </span>

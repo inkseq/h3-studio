@@ -689,7 +689,7 @@ dialog.modal.wide {
     display: flex;
     align-items: center;
   }
-  .empty-state > a {
+  .ui-empty > a {
     min-height: 36px;
     display: inline-flex;
     align-items: center;

@@ -505,7 +505,7 @@ export default function UniversalTrash() {
         </div>
         <p className="muted">{t('trash.retention')}</p>
         {!ctx?.account ? (
-          <div className="empty-state">
+          <div className="ui-empty">
             <span>
               <Trash2 size={22} />
             </span>
@@ -692,7 +692,7 @@ export default function UniversalTrash() {
                   </div>
                 ) : (
                   !error && (
-                    <div className="empty-state" role={loading ? 'status' : undefined}>
+                    <div className="ui-empty" role={loading ? 'status' : undefined}>
                       <span>
                         <Trash2 size={22} />
                       </span>

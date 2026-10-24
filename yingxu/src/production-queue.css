@@ -101,12 +101,6 @@
   font-size: 12px;
   margin: 18px 0;
 }
-.queue-empty {
-  padding: 20px;
-  background: #f6f2e9;
-  border-radius: 10px;
-  font-size: 13px;
-}
 .queue-batches {
   margin: 20px 0;
 }

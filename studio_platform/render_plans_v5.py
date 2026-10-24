@@ -5,13 +5,16 @@ from .project_validation import validate_generated_audio_binding
 from .repository import NotFound
 from .render_timing import (
     crossfade,
+    expanded_audio_count,
     frame_sample,
     has_speed,
     number,
     sample,
+    segment_timing,
     shot_frames,
     validate_track_fields,
 )
+from .shot_segments import has_segments
 
 
 def compile_chapter(
@@ -29,10 +32,17 @@ def compile_chapter(
     burn = body.get("burn_subtitles", False)
     lookup = {entity["id"]: entity for entity in project["entities"]}
     sources, normalized, displayed, starts = {}, [], [], {}
+    shot_clips, clip_starts = {}, []
     blockers, warnings, cursor = [], [], 0
     boundary = crossfade(project, chapter["id"])
     if not 1 <= len(shots) <= 50:
         blockers.append("一章粗剪需要1–50个镜头")
+    if any(has_segments(shot) for shot in shots):
+        try:
+            if expanded_audio_count(project, chapter["id"], shots) > 32:
+                blockers.append("单章展开后最多32条声音轨道")
+        except ValueError as error:
+            blockers.append(str(error))
 
     def resolve(ident, kind):
         entity = lookup.get(ident) if isinstance(ident, str) else None
@@ -55,11 +65,32 @@ def compile_chapter(
 
     for shot in shots[:50]:
         try:
-            source_frames, frames, rate = shot_frames(shot)
             ident = shot.get("data", {}).get("selectedAssetId")
             source, entity = resolve(ident, "video")
+            if has_segments(shot):
+                clips = [
+                    (
+                        clip["start_frame"],
+                        clip["frames"],
+                        clip["output_frames"],
+                        clip["playback_rate"],
+                        {
+                            "selected_start": clip["start"],
+                            "selected_end": clip["end"],
+                            "source_start": clip["start"],
+                            "source_end": clip["end"],
+                            "aligned_range_end": clip["end"],
+                            "has_selected_range": True,
+                            "unused_tail": 0,
+                        },
+                    )
+                    for clip in segment_timing(shot, entity, source["duration"])
+                ]
+            else:
+                clips = None
+                source_frames, frames, rate = shot_frames(shot)
             selected = shot.get("data", {}).get("selectedVideoRange")
-            if has_speed(shot):
+            if clips is None and has_speed(shot):
                 if set(selected) != {
                     "assetId",
                     "fileId",
@@ -83,37 +114,45 @@ def compile_chapter(
                 }
             else:
                 legacy = shot
-            first, details = video_range(
-                legacy, entity, source["duration"], source_frames
-            )
-            if first + source_frames > 86400:
+            if clips is None:
+                first, details = video_range(
+                    legacy, entity, source["duration"], source_frames
+                )
+                clips = [(first, source_frames, frames, rate, details)]
+            if len(normalized) + len(clips) > 50:
+                raise ValueError("单章粗剪展开后最多50个片段")
+            if any(first + length > 86400 for first, length, *_ in clips):
                 raise ValueError("视频源范围超限")
-            starts[shot["id"]] = (cursor, frames)
-            normalized.append(
-                {
-                    "shot_id": shot["id"],
-                    "source_id": ident,
-                    "source_start_frame": first,
-                    "source_frames": source_frames,
-                    "frames": frames,
-                    "playback_rate": rate,
-                }
-            )
-            displayed.append(
-                {
-                    "shot_id": shot["id"],
-                    "title": shot["title"],
-                    "source_title": entity["title"],
-                    **details,
-                    "duration": frames / 24,
-                    "source_duration": source["duration"],
-                    "simulation": source["simulation"],
-                    "source_frames": source_frames,
-                    "output_frames": frames,
-                    "playback_rate": rate,
-                }
-            )
-            cursor += frames
+            starts[shot["id"]] = (cursor, sum(clip[2] for clip in clips))
+            shot_clips[shot["id"]] = []
+            for first, source_frames, frames, rate, details in clips:
+                shot_clips[shot["id"]].append(len(normalized))
+                clip_starts.append(cursor)
+                normalized.append(
+                    {
+                        "shot_id": shot["id"],
+                        "source_id": ident,
+                        "source_start_frame": first,
+                        "source_frames": source_frames,
+                        "frames": frames,
+                        "playback_rate": rate,
+                    }
+                )
+                displayed.append(
+                    {
+                        "shot_id": shot["id"],
+                        "title": shot["title"],
+                        "source_title": entity["title"],
+                        **details,
+                        "duration": frames / 24,
+                        "source_duration": source["duration"],
+                        "simulation": source["simulation"],
+                        "source_frames": source_frames,
+                        "output_frames": frames,
+                        "playback_rate": rate,
+                    }
+                )
+                cursor += frames
         except (ValueError, NotFound) as error:
             blockers.append(
                 str(error) if isinstance(error, ValueError) else "视频素材不可用"
@@ -132,7 +171,10 @@ def compile_chapter(
     mode = journey.get("sound", {}).get("mode")
     raw_tracks = chapter_tracks(project, chapter["id"])
     audio, display_audio, coupled, muted_tracks = [], [], {}, 0
-    shot_lookup = {item["shot_id"]: item for item in normalized}
+    coupled_shots = set()
+    shot_lookup = {
+        shot_id: normalized[indices[0]] for shot_id, indices in shot_clips.items()
+    }
     if mode not in {"silent", "dialogue", "music", "mixed"}:
         blockers.append("先选择声音方案")
     elif mode != "silent":
@@ -213,16 +255,25 @@ def compile_chapter(
                             "生成声音必须为当前拥有的同一已完成任务配套独立FLAC"
                         )
                 if binding is not None and not detached:
-                    if offset != 0 or shot_id in coupled:
+                    if offset != 0 or shot_id in coupled_shots:
                         raise ValueError("每个镜头只可关联一条原声且起点须跟随镜头")
-                    first = frame_sample(shot["source_start_frame"])
-                    last = frame_sample(
-                        shot["source_start_frame"] + shot["source_frames"]
-                    )
-                    beginning, frames = starts[shot_id]
-                    timeline = frame_sample(beginning)
-                    output = frame_sample(beginning + frames) - timeline
-                    rate = shot["playback_rate"]
+                    spans = []
+                    for index in shot_clips[shot_id]:
+                        clip = normalized[index]
+                        beginning, frames = clip_starts[index], clip["frames"]
+                        timeline = frame_sample(beginning)
+                        spans.append(
+                            (
+                                frame_sample(clip["source_start_frame"]),
+                                frame_sample(
+                                    clip["source_start_frame"] + clip["source_frames"]
+                                ),
+                                timeline,
+                                frame_sample(beginning + frames) - timeline,
+                                clip["playback_rate"],
+                                index,
+                            )
+                        )
                 else:
                     start, end = track.get("start"), track.get("end")
                     if (
@@ -248,49 +299,57 @@ def compile_chapter(
                         last -= timeline + output - frame_sample(cursor)
                         output = last - first
                         warnings.append("超出章节的手动声音尾部将裁掉")
-                if (
-                    timeline < 0
-                    or timeline >= frame_sample(cursor)
-                    or output <= 0
-                    or last > sample(source["duration"])
-                ):
-                    raise ValueError("声音源或时间线范围不足；不能补静音掩盖缺失")
+                    spans = [(first, last, timeline, output, rate, None)]
                 fade_in, fade_out = (
                     sample(track.get("fade_in_s", 0)),
                     sample(track.get("fade_out_s", 0)),
                 )
-                if fade_in + fade_out > output:
-                    raise ValueError("声音淡入淡出超出片段或相互重叠")
-                value = {
-                    "source_id": ident,
-                    "timeline_start_sample": timeline,
-                    "source_start_sample": first,
-                    "source_end_sample": last,
-                    "output_samples": output,
-                    "playback_rate": rate,
-                    "gain": gain,
-                    "fade_in_samples": fade_in,
-                    "fade_out_samples": fade_out,
-                }
-                audio.append(value)
-                display_audio.append(
-                    {
-                        **value,
-                        "title": entity["title"],
-                        "detached": detached,
-                        "effective_muted": False,
+                # Validate the entire expansion before accepting any of this track.
+                if len(audio) + len(spans) > 32:
+                    raise ValueError("单章展开后最多32条声音轨道")
+                for first, last, timeline, output, rate, index in spans:
+                    if (
+                        timeline < 0
+                        or timeline >= frame_sample(cursor)
+                        or output <= 0
+                        or last > sample(source["duration"])
+                    ):
+                        raise ValueError("声音源或时间线范围不足；不能补静音掩盖缺失")
+                    if fade_in + fade_out > output:
+                        raise ValueError("声音淡入淡出超出片段或相互重叠")
+                for first, last, timeline, output, rate, index in spans:
+                    value = {
+                        "source_id": ident,
+                        "timeline_start_sample": timeline,
+                        "source_start_sample": first,
+                        "source_end_sample": last,
+                        "output_samples": output,
+                        "playback_rate": rate,
+                        "gain": gain,
+                        "fade_in_samples": fade_in,
+                        "fade_out_samples": fade_out,
                     }
-                )
+                    audio.append(value)
+                    display_audio.append(
+                        {
+                            **value,
+                            "title": entity["title"],
+                            "detached": detached,
+                            "effective_muted": False,
+                        }
+                    )
+                    if index is not None:
+                        coupled[index] = value
                 if binding is not None and not detached:
-                    coupled[shot_id] = value
+                    coupled_shots.add(shot_id)
             except (ValueError, NotFound) as error:
                 blockers.append(
                     str(error) if isinstance(error, ValueError) else "声音素材不可用"
                 )
-        for left, right in zip(normalized, normalized[1:]):
+        for index in range(len(normalized) - 1):
             outgoing, incoming = (
-                coupled.get(left["shot_id"]),
-                coupled.get(right["shot_id"]),
+                coupled.get(index),
+                coupled.get(index + 1),
             )
             if (
                 outgoing is None

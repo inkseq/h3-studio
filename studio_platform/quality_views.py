@@ -539,6 +539,7 @@ def _chapter_render(value):
         "source_trim",
         "generated_audio",
         "detached_generated_audio",
+        "video_segments",
     }
     numbers = {
         "fps",
@@ -547,6 +548,7 @@ def _chapter_render(value):
         "max_audio_tracks",
         "render_contract_version",
         "audio_fades_max_s",
+        "max_video_segments",
     }
 
     def number(item):
