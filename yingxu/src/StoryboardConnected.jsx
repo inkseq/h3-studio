@@ -735,6 +735,25 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
     }
     return mutate(action);
   };
+  // A shot with no chosen take and exactly one finished take uses it without a click
+  // (owner, 2026-10-25). An existing choice is never replaced by a newer take.
+  const autoPicked = useRef(new Set());
+  useEffect(() => {
+    if (busy || serial.current) return;
+    const shot = view.shots.find((item) => {
+      if (item.chosen || autoPicked.current.has(item.id)) return false;
+      const done = item.versions.filter((v) => v.status === 'done');
+      return (
+        done.length === 1 &&
+        item.versions.every((v) => v.status === 'done' || v.status === 'failed') &&
+        done[0].asset?.entity?.data.fileId
+      );
+    });
+    if (!shot) return;
+    autoPicked.current.add(shot.id);
+    const version = shot.versions.find((v) => v.status === 'done');
+    void dispatch({ type: 'choose', shot: shot.id, version: version.id }).catch(() => {});
+  }, [view, busy]);
   const adapter = {
     readCopies: () => cloud.workbenchCopies(),
     readPreferences: () => cloud.workbenchPreferences(),
