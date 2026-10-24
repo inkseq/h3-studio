@@ -11,7 +11,7 @@ import { useI18n } from './i18n/I18nProvider.jsx';
 import { apiDate, formatCredits } from './credits.js';
 import './admin.css';
 
-function useClient(account) {
+export function useClient(account) {
   return useMemo(() => {
     const client = createCloudClient();
     client.setAccount(account);
@@ -47,7 +47,7 @@ function usePaged(api, path, active) {
   return { rows, setRows, next, state, error, load };
 }
 
-function AdminUsers({ api, active }) {
+export function AdminUsers({ api, active }) {
   const { t, locale } = useI18n();
   const [query, setQuery] = useState(''),
     [search, setSearch] = useState(''),
@@ -231,7 +231,7 @@ const pct = (value) =>
 
 // Read-only pricing view from GET /v1/admin/credits/prices (#306). Margins use the worst-case
 // net per credit (tax-inclusive, fees, biggest bonus); per-tier margin needs real GPU cost.
-function AdminPricing({ api, active }) {
+export function AdminPricing({ api, active }) {
   const { t, locale } = useI18n();
   const [data, setData] = useState(null),
     [state, setState] = useState('loading');
@@ -402,7 +402,7 @@ function auditReason(reason, t) {
   );
 }
 
-function AdminAudit({ api, active }) {
+export function AdminAudit({ api, active }) {
   const { t, locale } = useI18n();
   const list = usePaged(api, '/v1/admin/audit', active);
   if (list.state === 'missing') return <p className="muted">{t('admin.notDeployed')}</p>;

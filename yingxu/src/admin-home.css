@@ -1,0 +1,280 @@
+/* Admin console (h3-studio#537): one place, overview first. Built from tokens. */
+.admin-home .ah-shell {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: var(--sp-6);
+  width: 100%;
+  box-sizing: border-box;
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: var(--sp-5) var(--sp-5) 64px;
+}
+.ah-nav {
+  position: sticky;
+  top: 72px;
+  align-self: start;
+  display: grid;
+  gap: 2px;
+}
+.ah-nav h1 {
+  margin: 0 0 var(--sp-3);
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.ah-nav button {
+  justify-content: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-2);
+}
+.ah-nav button:hover {
+  background: var(--surface-2);
+  color: var(--ink);
+}
+.ah-nav button.on {
+  background: var(--surface-3);
+  color: var(--ink);
+  font-weight: 600;
+}
+.ah-main {
+  display: grid;
+  align-content: start;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+.ah-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.ah-head h2 {
+  margin: 0 0 4px;
+  font-size: var(--fs-2xl);
+  letter-spacing: -0.01em;
+}
+.ah-head .ui-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* KPI strip */
+.ah-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+.ah-kpi {
+  display: grid;
+  gap: 4px;
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+.ah-kpi > span {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.ah-kpi > b {
+  font-size: 26px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.ah-kpi > b > small {
+  color: var(--muted);
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+.ah-kpi > small {
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+}
+.ah-kpi.warn {
+  border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+}
+.ah-kpi.warn > b {
+  color: var(--warn);
+}
+.ah-kpi.bad {
+  border-color: color-mix(in srgb, var(--bad) 50%, transparent);
+}
+.ah-kpi.bad > b {
+  color: var(--bad);
+}
+.ah-kpi.good > b {
+  color: var(--good);
+}
+
+/* Cards */
+.ah-card {
+  display: grid;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+.ah-card > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.ah-card h2 {
+  margin: 0;
+  font-size: var(--fs-lg);
+}
+
+/* Alerts */
+.ah-allclear {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--good);
+  font-size: var(--fs-md);
+}
+.ah-alerts {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ah-alerts > li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.ah-alerts > li.bad {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+.ah-alerts > li > svg {
+  flex: none;
+  margin-top: 2px;
+}
+.ah-alerts b {
+  display: block;
+  color: var(--ink);
+  font-weight: 600;
+}
+.ah-alerts small {
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+}
+
+/* Tables */
+.ah-toolbar {
+  display: flex;
+  gap: var(--sp-2);
+}
+.ah-table-wrap {
+  overflow-x: auto;
+}
+.ah-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-md);
+}
+.ah-table th {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line-2);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.ah-table td {
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: middle;
+}
+.ah-table tr:last-child td {
+  border-bottom: 0;
+}
+.ah-table tr.flag td {
+  background: color-mix(in srgb, var(--bad) 6%, transparent);
+}
+.ah-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ah-status {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.ah-status small,
+.ah-sub {
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.ah-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.ah-dot.good {
+  background: var(--good);
+}
+.ah-dot.warm,
+.ah-dot.warn {
+  background: var(--warn);
+}
+.ah-dot.bad {
+  background: var(--bad);
+}
+.ah-id {
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+}
+.ah-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .admin-home .ah-shell {
+    grid-template-columns: 1fr;
+    padding: var(--sp-4);
+  }
+  .ah-nav {
+    position: static;
+    display: flex;
+    overflow-x: auto;
+  }
+  .ah-nav h1 {
+    display: none;
+  }
+  .ah-nav button {
+    width: auto;
+    white-space: nowrap;
+  }
+  .ah-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
