@@ -130,11 +130,8 @@ class DstackController:
 
     def _health_check(self, *, force=False):
         now = self.repo.clock()
-        if (
-            not force
-            and self._health_checked_at is not None
-            and 0 <= now - self._health_checked_at < 180
-        ):
+        checked_at = getattr(self, "_health_checked_at", None)
+        if not force and checked_at is not None and 0 <= now - checked_at < 180:
             return {
                 "state": "not_due",
                 "new_alerts": 0,
@@ -1107,6 +1104,7 @@ class DstackController:
             heartbeat_cpu()
         results = []
         closed_since_health = False
+        health_checked_at = getattr(self, "_health_checked_at", None)
         with self.repo.engine.connect() as connection:
             busy = self._business_demand(connection)
         if (
@@ -1121,8 +1119,7 @@ class DstackController:
                     node.get("payload", {}).get("dstack", {}).get("first_stopped_at")
                 )
                 if type(stopped_at) in (int, float) and (
-                    self._health_checked_at is None
-                    or stopped_at > self._health_checked_at
+                    health_checked_at is None or stopped_at > health_checked_at
                 ):
                     closed_since_health = True
                 if node.get("payload", {}).get("capacity_watchdog"):
@@ -1163,17 +1160,21 @@ class DstackController:
                             .mappings()
                             .one()
                         )
-                    if provider_removed(
+                    removed = provider_removed(
                         fresh_node["payload"].get("dstack", {}),
                         intent,
                         self.repo.clock(),
-                    ):
-                        reclaim_node(self.service, fresh_node, intent)
-                    if not active and not unsafe:
+                    )
+                    if removed or (not active and not unsafe):
+                        # A proven removed host cannot collect a zombie result.
+                        # Free local ports/CPU slots independently of the job's
+                        # reclaim and supplier-billing obligations below.
                         if self.worker_process:
                             self.worker_process.stop(node["intent_id"])
                         self.runtime.close(node["intent_id"])
                         self._cleanup_pending.discard(node["intent_id"])
+                    if removed:
+                        reclaim_node(self.service, fresh_node, intent)
                     continue
                 result = self._tick_node(node)
                 results.append(result)

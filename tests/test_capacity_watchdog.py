@@ -503,6 +503,115 @@ class NodeWatchdogTests(LedgerCase):
             (old["upstream_stopped"], old["actual_cost_microusd"]), (0, None)
         )
 
+    def _stopped_zombie(self):
+        node_id, controller, original, claim = self.lost()
+        self.now = 1001
+        node, intent = self.node(node_id)
+        binding = node["payload"]["dstack"]
+        binding.update(
+            state="stopped",
+            dstack_status="terminated",
+            provider_removal_proof={
+                "version": 1,
+                "backend": binding["backend"],
+                "run_id": binding["run_id"],
+                "provider_instance_id": intent["provider_instance_id"],
+                "observed_at": self.now,
+                "inventory_observed_at": self.now,
+                "complete": True,
+                "absent": True,
+                "inventory_sha256": "a" * 64,
+            },
+        )
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(operator_nodes)
+                .where(operator_nodes.c.intent_id == node_id)
+                .values(payload=node["payload"], runtime_state="stopped")
+            )
+            connection.execute(
+                update(instance_intents)
+                .where(instance_intents.c.id == node_id)
+                .values(state="destroyed")
+            )
+            connection.execute(
+                update(jobs)
+                .where(jobs.c.id == original["id"])
+                .values(status="collecting")
+            )
+        controller.worker_process = Mock()
+        controller.runtime.close = Mock()
+        controller._cleanup_pending.add(node_id)
+        return node_id, controller, original, claim
+
+    def test_removed_terminal_closes_transport_despite_unsafe_zombie_without_settlement(
+        self,
+    ):
+        node_id, controller, original, claim = self._stopped_zombie()
+        node, intent = self.node(node_id)
+        self.assertEqual(controller._obligations(intent)[1:3], (1, 1))
+        job = self.repo.get_job(self.scope, original["id"])
+        budget = self.repo.get_budget("owner-budget")
+        worker = controller.control.get("dstack-test-slot")
+        with self.repo.engine.connect() as connection:
+            attempt = dict(
+                connection.execute(
+                    select(attempts).where(attempts.c.id == claim.lease.attempt_id)
+                )
+                .mappings()
+                .one()
+            )
+        controller.tick()
+        controller.worker_process.stop.assert_called_once_with(node_id)
+        controller.runtime.close.assert_called_once_with(node_id)
+        self.assertNotIn(node_id, controller._cleanup_pending)
+        self.assertEqual(self.repo.get_job(self.scope, original["id"]), job)
+        self.assertEqual(self.repo.get_budget("owner-budget"), budget)
+        self.assertEqual(controller.control.get("dstack-test-slot"), worker)
+        self.assertEqual(self.store.load(node_id)["billing_state"], "unsettled")
+        self.assertEqual(self.client.stopped, [])
+        with self.repo.engine.connect() as connection:
+            after = dict(
+                connection.execute(
+                    select(attempts).where(attempts.c.id == claim.lease.attempt_id)
+                )
+                .mappings()
+                .one()
+            )
+        self.assertEqual(after, attempt)
+        self.assertEqual(
+            (after["upstream_stopped"], after["actual_cost_microusd"]), (0, None)
+        )
+
+    def test_destroyed_projection_without_exact_fresh_removal_keeps_unsafe_transport(
+        self,
+    ):
+        node_id, controller, original, claim = self._stopped_zombie()
+        node, _ = self.node(node_id)
+        original_payload = copy.deepcopy(node["payload"])
+        for change in (
+            {"complete": False},
+            {"provider_instance_id": "another-instance"},
+            {"observed_at": self.now - 31, "inventory_observed_at": self.now - 31},
+        ):
+            with self.subTest(change=change):
+                payload = copy.deepcopy(original_payload)
+                payload["dstack"]["provider_removal_proof"].update(change)
+                with self.repo.transaction() as connection:
+                    connection.execute(
+                        update(operator_nodes)
+                        .where(operator_nodes.c.intent_id == node_id)
+                        .values(payload=payload)
+                    )
+                controller.tick()
+                controller.worker_process.stop.assert_not_called()
+                controller.runtime.close.assert_not_called()
+                self.assertIn(node_id, controller._cleanup_pending)
+        self.assertEqual(
+            self.repo.get_job(self.scope, original["id"])["status"], "collecting"
+        )
+        self.assertEqual(self.client.stopped, [])
+
     def test_paid_idle_host_failure_uses_owned_stop_and_keeps_original_queue(self):
         from studio_platform.capacity_health import check
         from studio_platform.telemetry import NullTelemetry
