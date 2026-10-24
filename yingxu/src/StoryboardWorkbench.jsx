@@ -11,6 +11,9 @@ import { useI18n } from './i18n/I18nProvider.jsx';
 import { useStoryboardUI } from './storyboard-ui-context.jsx';
 import { StoryboardVideo, StoryboardAssetImage } from './StoryboardMedia.jsx';
 import { recipeChanges } from './storyboard-selection.js';
+import { segmentsAction } from './shot-segments.js';
+import { Dialog, DialogActions } from './ui/Dialog.jsx';
+import { Button } from './ui/Button.jsx';
 function versionTime(value, locale, t) {
   if (value === null || value === undefined) return t('workbench.unknownStatus');
   const date = new Date(typeof value === 'number' ? value * 1000 : value);
@@ -104,14 +107,47 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
       };
   async function action(op) {
     const n = generation.current;
-    const result = await dispatch({ type: 'workbenchAction', action: op });
+    const result = await dispatch(
+      Array.isArray(op)
+        ? { type: 'workbenchAction', actions: op }
+        : { type: 'workbenchAction', action: op },
+    );
     if (n === generation.current && result?.ok !== false) load();
+  }
+  // Kept parts belong to the chosen take (#512): another take clears them, after a confirm,
+  // in the same story edit as the choice.
+  const [confirmTake, setConfirmTake] = useState(null);
+  function choose(row) {
+    const select = { op: 'storyboard.select', artifact_id: row.id, shot_id: shot.id };
+    if (shot.segments?.length && row.id !== shot.chosen) setConfirmTake(row);
+    else action(select);
   }
   return (
     <section
       className={'storyboard-takes' + (comparing ? ' comparing' : '')}
       aria-label={t('takes.title')}
     >
+      {confirmTake && (
+        <Dialog title={t('segments.changeTitle')} onClose={() => setConfirmTake(null)}>
+          <p>{t('segments.changeBody', { count: shot.segments.length })}</p>
+          <DialogActions>
+            <Button onClick={() => setConfirmTake(null)}>{t('segments.changeCancel')}</Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                const row = confirmTake;
+                setConfirmTake(null);
+                action([
+                  segmentsAction(shot.id, []),
+                  { op: 'storyboard.select', artifact_id: row.id, shot_id: shot.id },
+                ]);
+              }}
+            >
+              {t('segments.changeConfirm')}
+            </Button>
+          </DialogActions>
+        </Dialog>
+      )}
       <div className="takes-head">
         <b>{t('takes.title')}</b>
         <small className="muted">{versions.length}</small>
@@ -181,9 +217,7 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                       <button
                         className="small primary"
                         disabled={state.busy || !!state.workbenchPending || !row}
-                        onClick={() =>
-                          action({ op: 'storyboard.select', artifact_id: row.id, shot_id: shot.id })
-                        }
+                        onClick={() => choose(row)}
                       >
                         {t('workbench.use')}
                       </button>
@@ -252,9 +286,7 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                     type="button"
                     className="small ver-use"
                     disabled={state.busy || !!state.workbenchPending}
-                    onClick={() =>
-                      action({ op: 'storyboard.select', artifact_id: row.id, shot_id: shot.id })
-                    }
+                    onClick={() => choose(row)}
                   >
                     {t('workbench.use')}
                   </button>
@@ -354,9 +386,7 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                     className="small"
                     disabled={state.busy || !!state.workbenchPending}
                     aria-pressed={row.selected}
-                    onClick={() =>
-                      action({ op: 'storyboard.select', artifact_id: row.id, shot_id: shot.id })
-                    }
+                    onClick={() => choose(row)}
                   >
                     {t('workbench.use')}
                   </button>
