@@ -165,6 +165,7 @@ inventory.json
 !studio_platform/render_plans.py
 !studio_platform/render_plans_v5.py
 !studio_platform/render_timing.py
+!studio_platform/shot_segments.py
 !studio_platform/render_backend.py
 !studio_platform/render_cli.py
 !studio_platform/caption_server.py

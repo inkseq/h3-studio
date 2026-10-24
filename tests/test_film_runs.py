@@ -87,6 +87,146 @@ class FilmTests(unittest.TestCase):
     def raw(self, run_id):
         return self.repo.get_document(self.scope, KIND, run_id)['payload']
 
+    def test_segment_preflight_reuses_take_and_freezes_ranges_without_generation(self):
+        from studio_platform.shot_segments import source_binding
+
+        project = copy.deepcopy(self.project)
+        shot, video = project['entities'][2], project['entities'][3]
+        shot['data'].update(
+            videoSegments=[{'start': 3, 'end': 4}, {'start': 0, 'end': 2}],
+            videoSegmentsSource=source_binding(video),
+        )
+        self.repo.put_document(
+            Scope('tenant', 'owner', '__projects'),
+            'project',
+            'story-one',
+            project,
+            expected_version=1,
+        )
+        self.app.state.storyboard_versions = SimpleNamespace(
+            preflight=Mock(side_effect=AssertionError('Segments must not generate'))
+        )
+        preview = self.service.preflight(
+            self.principal, 'story-one', {'expected_version': 2}, 'segments-only'
+        )
+        saved = self.raw(preview['id'])
+        self.assertEqual(saved['render_contract_version'], 5)
+        self.assertEqual(saved['counts']['generate'], 0)
+        self.assertEqual(saved['chapters'][0]['timing'][0]['frames'], 72)
+        self.assertEqual(saved['project']['entities'][2]['data']['seconds'], 2)
+        self.assertEqual(frozen_story(saved['project'], saved['results']), project)
+        self.assertEqual(
+            self.service.preflight(
+                self.principal, 'story-one', {'expected_version': 2}, 'segments-only'
+            ),
+            preview,
+        )
+        self.app.state.storyboard_versions.preflight.assert_not_called()
+        self.assertEqual(self.repo.list_jobs(self.scope), [])
+
+    def test_bad_segment_source_never_falls_through_to_generation(self):
+        from studio_platform.shot_segments import source_binding
+
+        self.app.state.storyboard_versions = SimpleNamespace(
+            preflight=Mock(side_effect=AssertionError('No paid replacement'))
+        )
+        for index, fault in enumerate(
+            ('missing', 'binding', 'duration', 'unavailable')
+        ):
+            project = copy.deepcopy(self.project)
+            shot, video = project['entities'][2], project['entities'][3]
+            shot['data'].update(
+                videoSegments=[{'start': 0, 'end': 2}],
+                videoSegmentsSource=source_binding(video),
+            )
+            if fault == 'missing':
+                project['entities'].remove(video)
+            elif fault == 'binding':
+                shot['data']['videoSegmentsSource']['fileId'] = 'replaced'
+            elif fault == 'duration':
+                shot['data']['videoSegments'][0]['end'] = 6
+            self.app.state.resolve_render_source = (
+                Mock(side_effect=NotFound('source_unavailable'))
+                if fault == 'unavailable'
+                else lambda *args: source(args[-2], args[-1])
+            )
+            self.repo.put_document(
+                Scope('tenant', 'owner', '__projects'),
+                'project',
+                'story-one',
+                project,
+                expected_version=index + 1,
+            )
+            with (
+                self.subTest(fault=fault),
+                self.assertRaisesRegex(
+                    Conflict, 'film_segments_source_requires_review'
+                ),
+            ):
+                self.service.preflight(
+                    self.principal,
+                    'story-one',
+                    {'expected_version': index + 2},
+                    'segment-fault-' + fault,
+                )
+        self.app.state.storyboard_versions.preflight.assert_not_called()
+        self.assertEqual(self.repo.list_jobs(self.scope), [])
+
+    def test_frozen_segments_never_apply_to_new_or_changed_take(self):
+        from studio_platform.shot_segments import source_binding
+
+        project = copy.deepcopy(self.project)
+        shot, video = project['entities'][2], project['entities'][3]
+        shot['data'].update(
+            videoSegments=[{'start': 0, 'end': 2}],
+            videoSegmentsSource=source_binding(video),
+        )
+        original = copy.deepcopy(project)
+        changed = copy.deepcopy(video)
+        changed['data']['fileId'] = 'replacement'
+        for reused, entity in ((False, video), (True, changed)):
+            with self.assertRaisesRegex(
+                Conflict, 'film_segments_source_requires_review'
+            ):
+                frozen_story(
+                    project, {shot['id']: {'entity': entity, 'reused': reused}}
+                )
+        self.assertEqual(project, original)
+
+    def test_expanded_audio_limit_precedes_quote_for_other_missing_shot(self):
+        from test_render_plans_v5 import fixture
+        from studio_platform.shot_segments import source_binding
+
+        project, _, _, resolve = fixture()
+        shot = next(item for item in project['entities'] if item['id'] == 'c')
+        video = next(item for item in project['entities'] if item['id'] == 'c-video')
+        shot['data'].update(
+            videoSegments=[{'start': 0, 'end': 1 / 24}] * 33,
+            videoSegmentsSource=source_binding(video),
+        )
+        missing = copy.deepcopy(self.project['entities'][2])
+        missing.update(id='missing', order=10)
+        missing['data'].pop('selectedAssetId')
+        project['entities'].append(missing)
+        project['journey']['filmCuts']['chapter-one']['shotIds'].append('missing')
+        self.repo.put_document(
+            Scope('tenant', 'owner', '__projects'),
+            'project',
+            'story-one',
+            project,
+            expected_version=1,
+        )
+        self.app.state.resolve_render_source = lambda *args: resolve(args[-2], args[-1])
+        self.app.state.storyboard_versions = SimpleNamespace(
+            preflight=Mock(side_effect=AssertionError('No quote for an invalid film'))
+        )
+        with self.assertRaisesRegex(ValueError, 'film_audio_track_count_limit'):
+            self.service.preflight(
+                self.principal, 'story-one', {'expected_version': 2}, 'audio-expansion'
+            )
+        self.app.state.storyboard_versions.preflight.assert_not_called()
+        self.assertEqual(self.repo.list_jobs(self.scope), [])
+
     def test_v5_preflight_freezes_timing_crossfade_without_generation(self):
         project = copy.deepcopy(self.project)
         project['entities'][2]['data']['selectedVideoRange'] = {
@@ -575,6 +715,17 @@ class FilmTests(unittest.TestCase):
         self.assertNotEqual(
             original['server_source_hash'], source_snapshot(project, 'shot-one')
         )
+        self.assertTrue(
+            selected_recipe_current(project, 'shot-one', original, {}, caps)
+        )
+        from studio_platform.shot_segments import source_binding
+
+        # Editing a take is not a changed generation recipe or an implicit purchase.
+        shot['data'].update(
+            videoSegments=[{'start': 3, 'end': 4}, {'start': 0, 'end': 1}],
+            videoSegmentsSource=source_binding(project['entities'][3]),
+        )
+        self.assertEqual(shot['data']['seconds'], 5)
         self.assertTrue(
             selected_recipe_current(project, 'shot-one', original, {}, caps)
         )

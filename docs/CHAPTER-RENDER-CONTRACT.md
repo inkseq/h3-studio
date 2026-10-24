@@ -36,6 +36,34 @@ API负责登录用户、项目/章节/素材权限与来源快照；客户端不
 
 示例为结构说明，摘要/大小不是可运行素材。API还可存client_ref、server_source_hash、simulation、render_blockers等业务元信息。`sources` 必须恰好等于本时间线上使用的来源集合；source ID只参与字典查找，绝不成为磁盘文件名。视频支持MP4/MOV；独立音频支持WAV/FLAC/MP3。`object`可附带受控存储ObjectInfo的provider、etag、version_id。
 
+## Ordered ranges within a chosen take (#512)
+
+An optional shot field `data.videoSegments: [{start,end}, ...]` stores ranges in
+seconds in playback order. The server binds it to the selected media through
+`data.videoSegmentsSource: {assetId,fileId,cloudAssetId,cloudArtifactId}`. The
+normal CAS action `shot.segments {shot_id,segments}` verifies the owned source's
+duration and snaps each start up/end down to the 24 fps grid. Every range must
+retain at least one frame; no sorting, merging or deduplication is performed.
+`segments:[]` explicitly clears the binding. A different chosen take is refused
+until that clear is supplied, including when changing sources through other
+actions or full-document saves. Generation `data.seconds` is never rewritten.
+
+Nonempty segments use the existing v5 renderer: each range becomes a consecutive
+clip with its own source offset/frame count and the existing playback rate.
+Film inclusion and canonical shot ordering apply first, then array order within
+each shot. Source references are deduplicated, while followed generated FLAC is
+cut once per segment with the same frame-to-sample mapping. Manual and detached
+audio retain their existing placement once per shot. The existing boundary
+crossfade applies between consecutive clips. Limits of 50 clips, 32 audio tracks
+and 600 output seconds apply after expansion; excess is refused, never truncated.
+
+Absent/empty segments preserve the previous v3/v5 plan and hash paths. Nonempty
+segments override single-range start/end while retaining a source-matched
+playback rate. Invalid, stale or unverifiable segment bindings block Film
+preflight rather than turning the shot into a replacement generation. Captions
+are invalidated by segment edits even if the total length is unchanged. Accepted
+Film requests keep their original frozen snapshots and source identities.
+
 ## Film editor inclusion (#347)
 
 `journey.filmCuts[chapterId] = {"shotIds": ["shot-a", "shot-b"]}` is optional

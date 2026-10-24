@@ -243,6 +243,46 @@ Do not automatically chain admission. Pending/unknown retains the original key/b
 
 GET `/v1/projects/PROJECT/storyboard/profiles` reports project-local shot usage only. `storyboard.fork_profile` action takes `profile_id,new_profile_id,shot_ids,title?`; one CAS copies a character/location/prop and rewires selected shots, leaving original profiles, unselected shots and other projects untouched. Authorized cross-project discovery and current-authoring usage are available through `GET /v1/library` and `GET /v1/library/usage`; writes retain original project permissions. 中文：旧配方缺失显示未知；预检不生成，未知结果保留原操作；档案副本只改所选镜头，删除撤销另属 #236。
 
+### Ordered shot segments
+
+Check `capabilities.chapter_render.video_segments` and the current guided schema.
+`shot.data.videoSegments` is an ordered list of `{start,end}` seconds within the
+chosen video's verified duration. For example, to play seconds 1–3, then 5–6,
+then 9–10 from the same ten-second take, save one request/key:
+
+```http
+POST /v1/projects/PROJECT/actions
+Idempotency-Key: saved-segment-edit-key
+
+{"expected_version":7,"actions":[{"op":"shot.segments","shot_id":"SHOT","segments":[{"start":1,"end":3},{"start":5,"end":6},{"start":9,"end":10}]}]}
+```
+
+Use the returned project version and normalized ranges. The server snaps the
+start inward up and the end inward down to the 24 fps grid; each range needs at
+least one frame. Booleans, nonfinite numbers and out-of-duration ranges are
+refused. Order, overlap and repeated ranges are intentional; do not sort, merge
+or deduplicate. The server writes `data.videoSegmentsSource` with
+`assetId,fileId,cloudAssetId,cloudArtifactId` (unused file IDs are null). Never
+construct a binding from guessed media metadata or submit a source URL.
+
+Nonempty segments override the single `selectedVideoRange` for export; the
+existing playback rate still applies. The example is four seconds at normal
+speed. Do not rewrite `data.seconds`: it remains a generation setting. Missing
+or empty segments keep the previous single-trim/whole-take behavior.
+
+Changing to another take while segments exist is refused, even when its duration
+would fit. After the user confirms discarding those edits, send `shot.segments`
+with `segments:[]` and the intended `shot.select` in one versioned action batch.
+The clear removes the source binding; a stale CAS changes nothing. Do not clear
+automatically to get around a refusal or retry an uncertain write with a new key.
+
+Film uses canonical included-shot order, then each shot's segment order. Each
+segment is a consecutive clip from the same authorized artifact; followed
+generated audio uses the same ranges. Manual/detached tracks remain once on the
+shot timeline. Existing clip/audio/duration bounds apply after expansion. Invalid
+or stale bindings block preflight instead of causing replacement generation;
+existing accepted Film snapshots and jobs keep their frozen edit.
+
 ### One-click film
 
 Use this only for the user's authorized whole-story output. Read authenticated

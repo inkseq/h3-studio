@@ -59,6 +59,12 @@ from .content_lifecycle import (
     assert_project_writable,
     assert_reference_payload,
 )
+from .shot_segments import (
+    has_segments,
+    segment_frames,
+    source_binding,
+    validate_segments_transition,
+)
 
 metadata = MetaData()
 receipts = Table(
@@ -198,8 +204,16 @@ def update_entity(entity, patch):
 def checked_captions(project, chapter_id):
     """SRT/editor checks; stricter burn-in validation stays in render planning."""
     shots = ordered_chapter(project, chapter_id)[2]
+    from .render_timing import enabled, shot_frames
+
+    edited_timing = enabled(project, chapter_id, shots)
     duration = (
-        sum(max(0, math.floor(s["data"].get("seconds", 0) * 24 + 0.5)) for s in shots)
+        sum(
+            shot_frames(s)[1]
+            if edited_timing
+            else max(0, math.floor(s["data"].get("seconds", 0) * 24 + 0.5))
+            for s in shots
+        )
         / 24
     )
     cues = (
@@ -385,6 +399,8 @@ class Guided:
             documents.c.kind == "project",
             documents.c.document_id == project_id,
         )
+        validate_project(project, self.settings.max_project_bytes)
+        segment_sources = self.resolve_segment_sources(principal, project_id, project)
         with self.repo.transaction() as conn:
             owner_reference_gate(conn, self.settings.tenant_id, principal.owner)
             assert_project_writable(
@@ -398,6 +414,8 @@ class Guided:
             project = resolve_quality_project(
                 self.settings, self.repo, principal, project, baseline=row["payload"]
             )
+            validate_segments_transition(row["payload"], project)
+            self.check_segment_sources(project, segment_sources)
             validate_project(project, self.settings.max_project_bytes)
             assert_reference_payload(
                 conn, self.settings.tenant_id, principal.owner, project
@@ -537,6 +555,54 @@ class Guided:
                         project_id,
                         {**action, "op": "artifact.adopt", "select": True},
                     )
+        # Preview segment-bearing edits only. Resolve their trusted durations
+        # before the write lock; the locked CAS repeats the same pure actions
+        # and checks the binding against these original source receipts.
+        segment_sources = None
+        if not create:
+            original = self.repo.get_document(document_scope, "project", project_id)
+            needs_segments = any(
+                has_segments(entity) for entity in original["payload"]["entities"]
+            ) or any(
+                action["op"] == "shot.segments"
+                or any(
+                    {"videoSegments", "videoSegmentsSource"}.intersection(value["data"])
+                    for value in (action.get("patch"), action.get("entity"))
+                    if isinstance(value, dict) and isinstance(value.get("data"), dict)
+                )
+                for action in body["actions"]
+            )
+            if needs_segments and original["version"] == body["expected_version"]:
+                preview = copy.deepcopy(original["payload"])
+                segment_sources = {}
+                for index, action in enumerate(body["actions"]):
+                    previous = copy.deepcopy(preview)
+                    if action["op"] == "shot.segments" and action.get("segments"):
+                        shot = entity_by_id(preview, action.get("shot_id"), {"shot"})
+                        entity = entity_by_id(
+                            preview, shot["data"].get("selectedAssetId"), {"video"}
+                        )
+                        source = self.resolve_segment_source(
+                            principal, project_id, entity
+                        )
+                        resolved[index] = {
+                            "binding": source_binding(entity),
+                            "duration": source.get("duration"),
+                        }
+                    self.apply(
+                        preview,
+                        generation_actions.get(index, action),
+                        resolved.get(index),
+                    )
+                    validate_segments_transition(previous, preview)
+                    segment_sources = self.resolve_segment_sources(
+                        principal, project_id, preview, cached=segment_sources
+                    )
+                    self.check_segment_sources(preview, segment_sources)
+        else:
+            # Full project creation can carry segment fields too; it must not
+            # become a path around trusted source validation.
+            segment_sources = self.resolve_segment_sources(principal, project_id, body)
         try:
             with self.repo.transaction() as conn:
                 owner_reference_gate(conn, self.settings.tenant_id, principal.owner)
@@ -578,6 +644,11 @@ class Guided:
                         raise Conflict("document_version_conflict")
                     project = copy.deepcopy(row["payload"])
                     for index, action in enumerate(body["actions"]):
+                        before_segments = (
+                            copy.deepcopy(project)
+                            if segment_sources is not None
+                            else None
+                        )
                         generic = action["op"] in {
                             "entity.create",
                             "entity.update",
@@ -604,7 +675,12 @@ class Guided:
                                 project,
                                 baseline=before_action,
                             )
+                        if before_segments is not None:
+                            validate_segments_transition(before_segments, project)
+                            self.check_segment_sources(project, segment_sources)
                     version = row["version"] + 1
+                if segment_sources is not None:
+                    self.check_segment_sources(project, segment_sources)
                 project["updatedAt"] = now_iso()
                 validate_project(project, self.settings.max_project_bytes)
                 assert_reference_payload(
@@ -767,6 +843,58 @@ class Guided:
             },
         }
 
+    def resolve_segment_sources(self, principal, project_id, project, *, cached=None):
+        """Read canonical source durations outside every document write lock."""
+        sources = dict(cached or {})
+        for shot in project.get("entities", []):
+            if not has_segments(shot):
+                continue
+            entity = entity_by_id(
+                project, shot["data"].get("selectedAssetId"), {"video"}
+            )
+            binding = source_binding(entity)
+            key = request_hash(binding)
+            if key not in sources:
+                source = self.resolve_segment_source(principal, project_id, entity)
+                duration = source.get("duration")
+                if (
+                    type(duration) not in (int, float)
+                    or not math.isfinite(duration)
+                    or duration <= 0
+                ):
+                    raise ValueError("video_segments_source_duration_unknown")
+                sources[key] = duration
+            segment_frames(shot, entity, sources[key])
+        return sources
+
+    def resolve_segment_source(self, principal, project_id, entity):
+        operation = (
+            "jobs:read"
+            if entity.get("data", {}).get("cloudArtifactId")
+            else "assets:read"
+        )
+        if principal.machine and not principal.allows(project_id, operation):
+            raise HTTPException(403, "视频选段需要对应素材读取授权")
+        return self.app.state.resolve_render_source(
+            principal, project_id, entity, "video"
+        )
+
+    @staticmethod
+    def check_segment_sources(project, sources):
+        for shot in project.get("entities", []):
+            if not has_segments(shot):
+                continue
+            entity = entity_by_id(
+                project, shot["data"].get("selectedAssetId"), {"video"}
+            )
+            key = request_hash(source_binding(entity))
+            if key not in sources:
+                raise Conflict("video_segments_source_changed")
+            ranges = segment_frames(shot, entity, sources[key])
+            shot["data"]["videoSegments"] = [
+                {"start": value["start"], "end": value["end"]} for value in ranges
+            ]
+
     def apply(self, project, action, resolved=None):
         validate_action_fields(action)
         op = action.get("op")
@@ -897,6 +1025,35 @@ class Guided:
                 "end": action.get("end"),
             }
             update_entity(shot, {"data": {"selectedVideoRange": bound}})
+        elif op == "shot.segments":
+            shot = entity_by_id(project, action.get("shot_id"), {"shot"})
+            segments = action.get("segments")
+            if not isinstance(segments, list):
+                raise ValueError("video_segments_invalid")
+            if segments:
+                entity = entity_by_id(
+                    project, shot["data"].get("selectedAssetId"), {"video"}
+                )
+                if not resolved or resolved.get("binding") != source_binding(entity):
+                    raise Conflict("video_segments_source_changed")
+                if resolved.get("duration") is None:
+                    raise ValueError("video_segments_source_duration_unknown")
+                update_entity(
+                    shot,
+                    {
+                        "data": {
+                            "videoSegments": copy.deepcopy(segments),
+                            "videoSegmentsSource": source_binding(entity),
+                        }
+                    },
+                )
+                ranges = segment_frames(shot, entity, resolved["duration"])
+                shot["data"]["videoSegments"] = [
+                    {"start": value["start"], "end": value["end"]} for value in ranges
+                ]
+            else:
+                update_entity(shot, {"data": {"videoSegments": []}})
+                shot["data"].pop("videoSegmentsSource", None)
         elif op == "sound.generated":
             shot = entity_by_id(project, action.get("shot_id"), {"shot"})
             scene = entity_by_id(project, shot["parentId"], {"scene"})
@@ -1159,6 +1316,7 @@ def register_routes(app):
                 "GET /v1/capabilities; POST /v1/generation-plans or /v1/render-plans; inspect blockers and estimate",
                 "POST /v1/jobs with plan_id and stable Idempotency-Key; poll same job",
                 "artifact.adopt attaches results; shot.select explicitly adopts; sound.generated binds matching FLAC",
+                "Use shot.segments in the same expected_version /actions CAS to keep ordered source-second ranges. The server binds them to the selected owned video and trusted duration; [] explicitly clears before selecting a different take. This edits the story only and never generates media.",
                 "Browser checks project version and explicitly loads newer document without overwriting local drafts",
             ],
             "exports": [
