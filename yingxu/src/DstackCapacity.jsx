@@ -1,4 +1,5 @@
 import { dstackNodeStatus as rawDstackNodeStatus } from './dstack-presentation.js';
+import { FloatingMessage } from './floating-notice.js';
 import { operatorFormatters, operatorDisplay } from './i18n/legacyOperatorPresentation.js';
 import { useI18n, LanguageSwitcher } from './i18n/I18nProvider.jsx';
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -271,11 +272,7 @@ function Start({ profiles, lifecycleVersion, controller, busy, now, onClose }) {
           </p>
         </div>
       )}
-      {error && (
-        <p className="op-error" role="alert">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={error ? error : null} />
       <footer className="op-dialog-actions">
         <button onClick={onClose}>{lo('legacy.panel36')}</button>
         <button className="op-primary" disabled={busy || checking || !current} onClick={start}>
@@ -454,11 +451,7 @@ function NodeDialog({ node, controller, busy, now, onClose }) {
           </button>
         </div>
       )}
-      {error && (
-        <p className="op-error" role="alert">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={error ? error : null} />
       <footer className="op-dialog-actions">
         <button onClick={onClose}>{lo('storyboard.copy58')}</button>
       </footer>
@@ -558,11 +551,7 @@ export default function DstackCapacity({ account }) {
           </button>
         </div>
       )}
-      {state.error && (
-        <p className="op-error" role="alert">
-          {state.error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={state.error ? state.error : null} />
       {!snapshot ? (
         <p className="op-note" role="status">
           {state.loading

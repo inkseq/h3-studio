@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { Activity, RefreshCw, ChevronRight } from 'lucide-react';
 import { cloudController as cloud } from './cloud-controller.js';
@@ -113,17 +114,9 @@ export default function ProjectActivity({ state, onLocate, onReview, onOpenCloud
           {at('adjunct.projectActivity.copy19')}
         </button>
       )}
-      {c.error && (
-        <p role="alert" className="cloud-error">
-          {c.error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={c.error ? c.error : null} />
       <h2>{at('adjunct.projectActivity.copy20')}</h2>
-      {error && (
-        <p role="alert" className="cloud-error">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={error ? error : null} />
       {!loaded && !error && <p role="status">{at('adjunct.projectActivity.copy21')}</p>}
       {windowReset && (
         <p role="status" className="cloud-warning">

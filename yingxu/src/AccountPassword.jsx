@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import React, { useState } from 'react';
 import { cloudController as cloud } from './cloud-controller.js';
 
@@ -91,11 +92,7 @@ export default function AccountPassword({ busy, inline = false }) {
             />
           </label>
           <button disabled={busy}>{at('adjunct.accountPassword.copy67')}</button>
-          {error && (
-            <p role="alert" className="cloud-error">
-              {error}
-            </p>
-          )}
+          <FloatingMessage tone="error" text={error ? error : null} />
         </form>
       )}
     </section>

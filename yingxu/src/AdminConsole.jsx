@@ -2,6 +2,7 @@
 // Port of prototype account.jsx AdminPanel. The backend enforces require_admin on every route;
 // a tab whose endpoint is not deployed yet says so instead of failing.
 import React, { useEffect, useMemo, useState } from 'react';
+import { FloatingMessage } from './floating-notice.js';
 import StoryChatAdminSwitch from './StoryChatAdminSwitch.jsx';
 import { ChevronDown, History, ShieldCheck, TrendingUp, Users } from 'lucide-react';
 import { createCloudClient } from './cloud-client.js';

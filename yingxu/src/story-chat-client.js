@@ -31,7 +31,9 @@ export function fromServer(view, labels = {}) {
       place: shot.place || null,
       props: shot.props || [],
       refs: [...(shot.cast || []), shot.place, ...(shot.props || [])].filter(Boolean),
-      status: shot.selected_artifact_id ? 'ready' : 'draft',
+      image: shot.thumbnail_url || null,
+      // Finished takes but none chosen yet (e.g. moved from old Quick Create).
+      status: shot.selected_artifact_id ? 'ready' : shot.takes > 0 ? 'pick' : 'draft',
       version: shot.version,
     });
   const messages = [],

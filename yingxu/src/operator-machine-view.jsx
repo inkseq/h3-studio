@@ -1,4 +1,5 @@
 import { operatorOfferReadiness as rawOfferReadiness } from './operator-model.js';
+import { FloatingMessage } from './floating-notice.js';
 import { operatorNodeStatus as rawOperatorNodeStatus } from './operator-presentation.js';
 import { operatorFormatters, operatorDisplay } from './i18n/legacyOperatorPresentation.js';
 import { useI18n, LanguageSwitcher } from './i18n/I18nProvider.jsx';

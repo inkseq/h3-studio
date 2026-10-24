@@ -1732,6 +1732,8 @@ export function createCloudController({
     guard(ctx);
     return value;
   }
+  let workbenchQueue = Promise.resolve(),
+    workbenchRunning = false;
   async function workbenchCommand(kind, body, { recover = false } = {}) {
     if (!recover) body = JSON.parse(JSON.stringify(body));
     requireCloud();
@@ -1926,9 +1928,26 @@ export function createCloudController({
       return value;
     },
     workbenchRead: (suffix) => workbenchRead(suffix),
-    workbenchCommand: (kind, body, options) => action(() => workbenchCommand(kind, body, options)),
+    // Story edits share one version, so they run one after another: a quick second click
+    // waits for the first instead of failing. While one is running its journal entry is
+    // expected; the person is asked to check it only when it outlives the run.
+    workbenchCommand: (kind, body, options) => {
+      const run = workbenchQueue
+        .catch(() => {})
+        .then(async () => {
+          workbenchRunning = true;
+          try {
+            return await action(() => workbenchCommand(kind, body, options));
+          } finally {
+            workbenchRunning = false;
+          }
+        });
+      workbenchQueue = run;
+      return run;
+    },
     workbenchPending: () =>
       state.account && current().workspace.mode === 'cloud' ? storyboardPending().read() : null,
+    workbenchRunning: () => workbenchRunning,
     async readProjectActivity(options = {}) {
       requireCloud();
       const ctx = context();

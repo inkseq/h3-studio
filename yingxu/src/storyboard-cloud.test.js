@@ -858,6 +858,41 @@ test('workbench unknown write reuses exact body/key and does not overwrite a new
     h.controller.destroy();
   }
 });
+test('a quick second story edit waits for the first instead of failing as pending', async () => {
+  const h = await harness();
+  try {
+    const sent = [];
+    let release;
+    const gate = new Promise((r) => (release = r));
+    h.api.request = async (path, options) => {
+      sent.push(options.body.actions[0].shot_id);
+      if (sent.length === 1) await gate;
+      const state = h.store.getState();
+      return {
+        id: state.project.id,
+        version: state.workspace.serverVersion + 1,
+        project: clone(state.project),
+      };
+    };
+    const first = h.controller.workbenchCommand('actions', {
+      actions: [{ op: 'storyboard.bulk', shot_ids: [h.shot], operation: 'final', shot_id: 'one' }],
+    });
+    const second = h.controller.workbenchCommand('actions', {
+      actions: [{ op: 'storyboard.bulk', shot_ids: [h.shot], operation: 'draft', shot_id: 'two' }],
+    });
+    while (!sent.length) await new Promise((r) => setTimeout(r, 0));
+    assert.equal(h.controller.workbenchRunning(), true);
+    assert.deepEqual(sent, ['one']);
+    release();
+    await first;
+    await second;
+    assert.deepEqual(sent, ['one', 'two']);
+    assert.equal(h.controller.workbenchRunning(), false);
+    assert.equal(h.controller.workbenchPending(), null);
+  } finally {
+    h.controller.destroy();
+  }
+});
 test('workbench closed no-write proof only clears matching request hash and project', async () => {
   const h = await harness();
   try {

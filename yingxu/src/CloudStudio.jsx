@@ -1,4 +1,5 @@
 import { TrashMenu } from './UniversalTrash.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import HostedSignIn from './HostedSignIn.jsx';
 import { translate } from './i18n/locale.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -86,11 +87,7 @@ export function CloudAssetStatus() {
           })}
         </p>
       )}
-      {c.assetError && (
-        <p role="alert" className="cloud-error">
-          {c.assetError}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={c.assetError ? c.assetError : null} />
       <div className="cloud-storage-list">
         {items.slice(0, 20).map((a) => (
           <article key={a.id}>
@@ -226,11 +223,7 @@ export function CloudWorkspaceBar({ onOpenCloud }) {
           </button>
         </p>
       )}
-      {c.error && (
-        <p role="alert" className="cloud-error">
-          {c.error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={c.error ? c.error : null} />
       {c.message && <p role="status">{cloudSystemMessage(c.message, locale)}</p>}
       <ServiceStatus capabilities={c.capabilities} projectId={s.project.id} />
       <button disabled={c.busy} onClick={() => run(cloud.reloadCapabilities())}>
@@ -327,11 +320,7 @@ export function CloudProjects({ onClose, quick = false, initialGrant = null }) {
             {c.auth.auth_ready === false && <p role="alert">{t('account.copy80')}</p>}
           </form>
         )}
-        {c.error && (
-          <p role="alert" className="cloud-error">
-            {c.error}
-          </p>
-        )}
+        <FloatingMessage tone="error" text={c.error ? c.error : null} />
       </div>
     );
   const open = (id, options) => run(cloud.open(id, options).then((done) => done && onClose()));
@@ -534,11 +523,7 @@ export function CloudProjects({ onClose, quick = false, initialGrant = null }) {
           <small>{t('storyOpen.draftBody')}</small>
         </section>
       )}
-      {c.error && (
-        <p className="cloud-error" role="alert">
-          {c.error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={c.error ? c.error : null} />
     </div>
   );
 }
@@ -1058,11 +1043,7 @@ export function CloudShotPanel({
                 {t('account.copy120')}
               </button>
             </div>
-            {guideError && (
-              <p className="cloud-error" role="alert">
-                {guideError}
-              </p>
-            )}
+            <FloatingMessage tone="error" text={guideError ? guideError : null} />
             {recipe.limits && (
               <p className="muted">
                 {t('cloud.inputLimits', {
@@ -1100,11 +1081,7 @@ export function CloudShotPanel({
             )
           )}
           {c.capabilities?.simulation && <p className="cloud-warning">{t('account.copy125')}</p>}
-          {c.error && (
-            <p role="alert" className="cloud-error">
-              {c.error}
-            </p>
-          )}
+          <FloatingMessage tone="error" text={c.error ? c.error : null} />
           <div className="cloud-actions">
             <button
               disabled={c.busy || held || !recipe}

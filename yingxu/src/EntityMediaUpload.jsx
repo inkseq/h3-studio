@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import React, { useRef, useState } from 'react';
 import { Upload } from 'lucide-react';
 import { store } from './store.js';
@@ -84,11 +85,7 @@ export default function EntityMediaUpload({ entity }) {
         <Upload size={14} />
         {busy ? at('adjunct.entityMediaUpload.copy76') : label}
       </button>
-      {error && (
-        <p role="alert" className="cloud-error">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={error ? error : null} />
     </div>
   );
 }

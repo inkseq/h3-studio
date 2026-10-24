@@ -1,4 +1,5 @@
 import StudioHeader from './StudioHeader.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import { operatorFormatters, operatorDisplay } from './i18n/legacyOperatorPresentation.js';
 import { useI18n, LanguageSwitcher } from './i18n/I18nProvider.jsx';
 import React, {
@@ -209,11 +210,7 @@ function Login() {
         {['username-only-test', 'username-test'].includes(c.auth?.authentication) && (
           <p className="op-note">{lo('legacyOp.copy17')}</p>
         )}
-        {error && (
-          <p role="alert" className="op-error">
-            {error}
-          </p>
-        )}
+        <FloatingMessage tone="error" text={error ? error : null} />
         <button className="op-primary" disabled={c.busy || !c.auth || c.auth.auth_ready === false}>
           {lo('legacyOp.copy18')}
         </button>
@@ -246,11 +243,7 @@ function ManualReviewDialog({ node, busy, onClose, onReview }) {
         {lo('legacyOp.copy27')}
       </label>
       <p className="op-note">{lo('legacyOp.copy28')}</p>
-      {error && (
-        <p className="op-error" role="alert">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={error ? error : null} />
       <footer className="op-dialog-actions">
         <button onClick={onClose}>{lo('legacy.panel36')}</button>
         <button
@@ -386,11 +379,7 @@ function ExtensionDialog({ node, busy, controller, onClose, now }) {
           )}
         </>
       )}
-      {error && (
-        <p role="alert" className="op-error">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={error ? error : null} />
       <footer className="op-dialog-actions">
         <button onClick={onClose}>
           {submitted ? lo('storyboard.copy58') : lo('legacy.panel36')}
@@ -481,11 +470,7 @@ function PolicyDialog({ policy, busy, onSave, onClose }) {
         <p className="op-note">
           {lo('legacyOp.copy67')} {policy.version}。
         </p>
-        {error && (
-          <p role="alert" className="op-error">
-            {error}
-          </p>
-        )}
+        <FloatingMessage tone="error" text={error ? error : null} />
         <footer className="op-dialog-actions">
           <button type="button" onClick={onClose}>
             {lo('legacy.panel36')}
@@ -789,11 +774,7 @@ function StartDrawer({ catalog, policy, controller, busy, onClose }) {
             <p className="op-note">{lo('legacyOp.copy123')}</p>
           </div>
         )}
-        {error && (
-          <p className="op-error" role="alert">
-            {error}
-          </p>
-        )}
+        <FloatingMessage tone="error" text={error ? error : null} />
         <footer className="op-dialog-actions">
           <button disabled={busy} onClick={back}>
             <ArrowLeft size={14} />
@@ -983,11 +964,7 @@ function StartDrawer({ catalog, policy, controller, busy, onClose }) {
           </div>
         )}
       </fieldset>
-      {error && (
-        <p className="op-error" role="alert">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="error" text={error ? error : null} />
       <footer className="op-dialog-actions">
         <button onClick={onClose}>{lo('storyboard.copy58')}</button>
       </footer>
@@ -1486,11 +1463,7 @@ export default function OperatorConsole() {
         >
           <p>{dialog.kind === 'drain' ? lo('legacyOp.copy239') : lo('legacyOp.copy240')}</p>
           <p className="op-note">{lo('legacyOp.copy241')}</p>
-          {actionError && (
-            <p className="op-error" role="alert">
-              {actionError}
-            </p>
-          )}
+          <FloatingMessage tone="error" text={actionError ? actionError : null} />
           <footer className="op-dialog-actions">
             <button onClick={() => setDialog(null)}>{lo('legacy.panel36')}</button>
             <button

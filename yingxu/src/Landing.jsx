@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { FloatingMessage } from './floating-notice.js';
 import {
   ArrowRight,
   Clapperboard,
@@ -11,7 +12,7 @@ import {
 import InkMark from './InkMark.jsx';
 import { dailyInkMark } from './ink-mark-daily.js';
 import { PublicFooter } from './PublicPages.jsx';
-import { Login } from './QuickChatWorkspace.jsx';
+import { Login } from './LoginDialog.jsx';
 import { navigateApp } from './app-navigation.js';
 import { usePageActive } from './AppRouteCache.jsx';
 import { LanguageSwitcher, useI18n } from './i18n/I18nProvider.jsx';
@@ -158,11 +159,7 @@ export default function Landing() {
           <div className="landing-hero-copy">
             <h1>{t('landing.title')}</h1>
             <p className="landing-lede">{t('landing.lede')}</p>
-            {signinError && (
-              <p className="landing-error" role="alert">
-                {signinError}
-              </p>
-            )}
+            <FloatingMessage tone="error" text={signinError ? signinError : null} />
             <div className="landing-ctas">
               <button
                 type="button"

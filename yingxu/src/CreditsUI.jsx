@@ -1,6 +1,7 @@
 // Credits chip, Settings → Credits and the not-enough-credits prompt (h3-studio#306/#307).
 // Port of prototype account.jsx. Hidden until GET /v1/credits answers, so it can merge early.
 import React, { useEffect, useMemo, useState } from 'react';
+import { FloatingMessage } from './floating-notice.js';
 import {
   Check,
   Coins,

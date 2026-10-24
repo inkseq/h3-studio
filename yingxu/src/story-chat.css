@@ -53,7 +53,54 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(360px, 5fr) 6fr;
+  /* chat · splitter · cards; widths are dragged and remembered (owner, 2026-10-24). */
+  grid-template-columns: minmax(340px, 1fr) 6px min(var(--sc-board, 620px), 62vw);
+}
+.sc.board-closed {
+  grid-template-columns: minmax(340px, 1fr);
+}
+.sc.board-closed > .sc-board,
+.sc.side-closed > .sc-stories {
+  display: none;
+}
+.sc-split {
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+  background: transparent;
+}
+.sc-split > i {
+  position: absolute;
+  inset: 0 2px;
+  border-radius: 2px;
+  transition: background 0.15s;
+}
+.sc-split:hover > i,
+.sc-split:focus-visible > i {
+  background: var(--sc-green);
+}
+.sc-split:focus-visible {
+  outline: none;
+}
+.sc-chat {
+  position: relative;
+}
+.sc-panel-toggles {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+  z-index: 2;
+}
+.sc-panel-toggles > button {
+  pointer-events: auto;
+  color: var(--sc-muted);
+}
+.sc-panel-toggles > button:only-child {
+  margin-left: auto;
 }
 
 /* Chat column */
@@ -66,7 +113,7 @@
 .sc-thread {
   flex: 1;
   overflow-y: auto;
-  padding: 24px 24px 12px;
+  padding: 44px 24px 12px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -567,8 +614,17 @@
 .sc-status.ready {
   color: var(--sc-green) !important;
 }
+.sc-status.pick {
+  color: var(--warn) !important;
+}
 .sc-shot-text {
   font-size: 13px;
+  /* Long generated prompts stay a few lines here; the full text is in the shot panel. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  overflow: hidden;
 }
 .sc-shot-refs {
   display: flex;
@@ -746,7 +802,18 @@
 
 /* Story list (live mode): one chat per story, newest first. */
 .sc.with-stories {
-  grid-template-columns: 220px minmax(340px, 5fr) 6fr;
+  grid-template-columns:
+    var(--sc-side, 220px) 6px minmax(340px, 1fr) 6px
+    min(var(--sc-board, 620px), 55vw);
+}
+.sc.with-stories.side-closed {
+  grid-template-columns: minmax(340px, 1fr) 6px min(var(--sc-board, 620px), 62vw);
+}
+.sc.with-stories.board-closed {
+  grid-template-columns: var(--sc-side, 220px) 6px minmax(340px, 1fr);
+}
+.sc.with-stories.side-closed.board-closed {
+  grid-template-columns: minmax(340px, 1fr);
 }
 .sc-stories {
   display: flex;
@@ -789,7 +856,7 @@
   padding: 0;
   list-style: none;
 }
-.sc-stories li button {
+.sc-stories li > button {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -800,27 +867,45 @@
   background: none;
   text-align: left;
 }
-.sc-stories li button:hover {
+.sc-stories li > button:hover {
   background: color-mix(in srgb, var(--sc-ink) 5%, transparent);
 }
-.sc-stories li button[aria-current='page'] {
+.sc-stories li > button[aria-current='page'] {
   background: color-mix(in srgb, var(--sc-green) 10%, transparent);
 }
-.sc-stories li span {
+.sc-stories li > button span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 13px;
 }
-.sc-stories li small {
+.sc-stories li > button small {
   color: var(--sc-muted);
   font-size: 11px;
 }
-@media (max-width: 1100px) {
-  .sc.with-stories {
-    grid-template-columns: 180px minmax(300px, 1fr) 1fr;
+.sc-stories li {
+  position: relative;
+}
+.sc-stories li > button {
+  padding-right: 32px;
+}
+/* Rename / remove: shown on hover or keyboard focus, always on touch screens. */
+.sc-stories li > .item-menu {
+  position: absolute;
+  top: 6px;
+  right: 4px;
+  opacity: 0;
+}
+.sc-stories li:hover > .item-menu,
+.sc-stories li:focus-within > .item-menu {
+  opacity: 1;
+}
+@media (hover: none) {
+  .sc-stories li > .item-menu {
+    opacity: 1;
   }
 }
+
 @media (max-width: 760px) {
   .sc.with-stories {
     grid-template-columns: 1fr;
@@ -879,4 +964,27 @@
 }
 .sc-shell .sc-undo:hover {
   color: var(--sc-ink);
+}
+
+@media (max-width: 760px) {
+  .sc[class] {
+    grid-template-columns: 1fr;
+  }
+  .sc-split,
+  .sc-panel-toggles {
+    display: none;
+  }
+  .sc.board-closed.tab-cards > .sc-board,
+  .sc.side-closed.tab-stories > .sc-stories {
+    display: flex;
+  }
+}
+/* A wide chat (cards folded away) keeps a readable column. */
+@media (min-width: 761px) {
+  .sc.board-closed .sc-thread {
+    padding-inline: max(24px, calc((100% - 860px) / 2));
+  }
+  .sc.board-closed .sc-composer {
+    margin-inline: max(16px, calc((100% - 860px) / 2));
+  }
 }

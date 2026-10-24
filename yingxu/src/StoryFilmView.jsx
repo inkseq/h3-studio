@@ -1,4 +1,5 @@
 import React from 'react';
+import { FloatingMessage } from './floating-notice.js';
 import { Download, RefreshCw, Square, Play, Check } from 'lucide-react';
 import { formatMoneyMicros } from './money.js';
 import { filmTerminal } from './story-film.js';

@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { FloatingMessage } from './floating-notice.js';
 import GeneratedSoundAction from './GeneratedSoundAction.jsx';
 import { reviewProgress, shotReviewState, reviewLabels } from './production-model.js';
 import React, { useState } from 'react';

@@ -2251,9 +2251,17 @@ export function Screen({ player, big, style }) {
     ref = useRef(),
     playback = useRef(null),
     local = seg ? t - seg.start : 0;
-  const [shape, setShape] = useState(null),
-    mediaKey = seg ? seg.shot.id + ':' + seg.version?.id : '';
-  const aspect = shape?.key === mediaKey ? shape.aspect : 16 / 9;
+  const [shapes, setShapes] = useState({}),
+    keyOf = (s) => s.shot.id + ':' + s.version?.id,
+    mediaKey = seg ? keyOf(seg) : '';
+  const aspect = shapes[mediaKey] || 16 / 9;
+  // Double buffer (owner, 2026-10-24): the next shot's video is mounted hidden and loads
+  // while this one plays, so the cut swaps to an already-buffered element, not black.
+  const index = seg ? player.segs.findIndex((s) => s.shot.id === seg.shot.id) : -1,
+    following = index >= 0 ? player.segs[index + 1] : null,
+    slots = [seg, following].filter(
+      (s, i, all) => s?.version && all.findIndex((o) => o && keyOf(o) === keyOf(s)) === i,
+    );
   if (!playback.current) playback.current = createStoryboardPlayback();
   const sync = () =>
     playback.current.sync({
@@ -2280,18 +2288,27 @@ export function Screen({ player, big, style }) {
     <div className={'screen' + (big ? ' big' : '')} style={{ ...style, '--media-aspect': aspect }}>
       {seg.version ? (
         <div className="screen-picture">
-          <StoryboardVideo
-            key={mediaKey}
-            asset={seg.version.asset || seg.version}
-            videoRef={ref}
-            onLoadedMetadata={(event) => {
-              const video = event.currentTarget;
-              if (video.videoWidth > 0 && video.videoHeight > 0)
-                setShape({ key: mediaKey, aspect: video.videoWidth / video.videoHeight });
-              sync();
-            }}
-            onCanPlay={sync}
-          />
+          {slots.map((slot) => {
+            const key = keyOf(slot),
+              active = key === mediaKey;
+            return (
+              <StoryboardVideo
+                key={key}
+                className={active ? '' : 'screen-buffer'}
+                aria-hidden={active ? undefined : true}
+                asset={slot.version.asset || slot.version}
+                videoRef={active ? ref : undefined}
+                preload="auto"
+                onLoadedMetadata={(event) => {
+                  const video = event.currentTarget;
+                  if (video.videoWidth > 0 && video.videoHeight > 0)
+                    setShapes((old) => ({ ...old, [key]: video.videoWidth / video.videoHeight }));
+                  if (active) sync();
+                }}
+                onCanPlay={active ? sync : undefined}
+              />
+            );
+          })}
           {caption}
         </div>
       ) : (
@@ -2338,7 +2355,7 @@ export function Transport({ player }) {
   );
 }
 
-function Segment({ seg, index, chapterStart, selected, onPick }) {
+function Segment({ seg, index, chapterStart, selected, onPick, compact }) {
   const { t: tr, locale } = useI18n();
   const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { state } = useStore();
@@ -2359,6 +2376,7 @@ function Segment({ seg, index, chapterStart, selected, onPick }) {
       style={{ flexGrow: seg.dur, flexBasis: 0 }}
       className={
         'tseg' +
+        (compact ? ' compact ' + status.tone : '') +
         (chapterStart ? ' chapter-start' : '') +
         (selected ? ' selected' : '') +
         (drag.isDragging ? ' dragging' : '') +
@@ -2367,28 +2385,48 @@ function Segment({ seg, index, chapterStart, selected, onPick }) {
       onClick={() => onPick(seg)}
       title={`${String(index + 1).padStart(2, '0')} · ${seg.shot.title} · ${fmt(seg.dur)} · ${status.label}`}
     >
-      {seg.version ? (
-        <StoryboardAssetImage asset={seg.version.asset || seg.version} />
+      {compact ? (
+        // Too many shots for pictures: a coloured square per shot, number when it fits.
+        <span className="tseg-n">{index + 1}</span>
       ) : (
-        <div className="tseg-empty" />
+        <>
+          {seg.version ? (
+            <StoryboardAssetImage asset={seg.version.asset || seg.version} />
+          ) : (
+            <div className="tseg-empty" />
+          )}
+          <span className="tseg-title">
+            <b>{String(index + 1).padStart(2, '0')}</b> {seg.shot.title}
+          </span>
+          <span className={'tseg-dot ' + status.tone} />
+        </>
       )}
-      <span className="tseg-title">
-        <b>{String(index + 1).padStart(2, '0')}</b> {seg.shot.title}
-      </span>
-      <span className={'tseg-dot ' + status.tone} />
     </button>
   );
 }
 
+// Seconds between ruler labels: the smallest of these that keeps labels ~56px apart.
+const RULER_STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300];
+
 export function Timeline({ player, selectedId, onPick, chapterStarts }) {
-  const { t: tr, locale } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
+  const { t: tr } = useI18n();
   const { segs, total, t, setT } = player;
+  const strip = useRef(null),
+    [width, setWidth] = useState(0);
+  useEffect(() => {
+    const el = strip.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const watch = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, []);
+  // Pictures only when an average shot gets at least ~44px; otherwise small squares.
+  const compact = width > 0 && segs.length > 0 && width / segs.length < 44;
   const pick = (seg) => {
     setT(seg.start);
     onPick?.(seg.shot.id);
   };
-  // A thin bar above the strip: press and drag to scrub to any moment (owner, 2026-10-22).
+  // The ruler is the one time bar: press and drag on it to scrub (owner, 2026-10-24).
   const scrub = (event) => {
     if (!total) return;
     const el = event.currentTarget,
@@ -2406,10 +2444,29 @@ export function Timeline({ player, selectedId, onPick, chapterStarts }) {
     el.addEventListener('pointerup', up);
     el.addEventListener('pointercancel', up);
   };
+  const step =
+    RULER_STEPS.find((s) => !width || !total || (s / total) * width >= 56) || RULER_STEPS.at(-1);
+  const marks = [];
+  for (let at = 0; total && at <= total + 0.001; at += step) marks.push(at);
+  const at = `${total ? (t / total) * 100 : 0}%`;
   return (
-    <div className="timeline">
+    <div className={'timeline' + (compact ? ' compact' : '')}>
+      <div className="track video" ref={strip}>
+        {segs.map((seg, index) => (
+          <Segment
+            key={seg.shot.id}
+            seg={seg}
+            index={index}
+            compact={compact}
+            chapterStart={index > 0 && !!chapterStarts?.has(seg.shot.id)}
+            selected={seg.shot.id === selectedId}
+            onPick={pick}
+          />
+        ))}
+        <div className="playhead" style={{ left: at }} />
+      </div>
       <div
-        className="timeline-scrub"
+        className="ruler"
         role="slider"
         tabIndex={0}
         aria-label={tr('storyboard.scrub')}
@@ -2418,46 +2475,18 @@ export function Timeline({ player, selectedId, onPick, chapterStarts }) {
         aria-valuenow={Math.round(t)}
         onPointerDown={scrub}
         onKeyDown={(event) => {
-          const step = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0;
-          if (!step) return;
+          const delta = event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : 0;
+          if (!delta) return;
           event.preventDefault();
-          setT(Math.max(0, Math.min(total, t + step)));
+          setT(Math.max(0, Math.min(total, t + delta)));
         }}
       >
-        <span
-          className="timeline-scrub-fill"
-          style={{ width: `${total ? (t / total) * 100 : 0}%` }}
-        />
-        <span
-          className="timeline-scrub-knob"
-          style={{ left: `${total ? (t / total) * 100 : 0}%` }}
-        />
-      </div>
-      <div className="track video">
-        {segs.map((seg, index) => (
-          <Segment
-            key={seg.shot.id}
-            seg={seg}
-            index={index}
-            chapterStart={index > 0 && !!chapterStarts?.has(seg.shot.id)}
-            selected={seg.shot.id === selectedId}
-            onPick={pick}
-          />
-        ))}
-        <div className="playhead" style={{ left: `${total ? (t / total) * 100 : 0}%` }} />
-      </div>
-      <div
-        className="track audio"
-        role="img"
-        aria-label={tr('storyboard.copy95')}
-        title={tr('storyboard.copy95')}
-      />
-      <div className="ticks">
-        {segs.map((s) => (
-          <span key={s.shot.id} style={{ flexGrow: s.dur, flexBasis: 0 }}>
-            {fmt(s.start)}
+        {marks.map((value) => (
+          <span key={value} style={{ left: `${(value / total) * 100}%` }}>
+            {fmt(value)}
           </span>
         ))}
+        <i className="ruler-knob" style={{ left: at }} />
       </div>
     </div>
   );

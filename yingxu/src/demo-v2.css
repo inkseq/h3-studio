@@ -992,23 +992,6 @@ input[type='radio'] {
   box-shadow: 0 0 8px var(--accent);
   border-radius: 2px;
 }
-.track.audio {
-  height: 18px;
-  background: repeating-linear-gradient(90deg, rgba(99, 214, 158, 0.28) 0 2px, transparent 2px 5px);
-  border-radius: 5px;
-  color: var(--muted);
-  font-size: 10px;
-  align-items: center;
-  padding-left: 8px;
-}
-.ticks {
-  display: flex;
-  gap: 3px;
-  font-size: 10px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-
 /* ---------- drawer & shot editor ---------- */
 .drawer {
   position: absolute;

@@ -1,3 +1,4 @@
+import { FloatingMessage } from './floating-notice.js';
 import {
   Columns2,
   Maximize2,

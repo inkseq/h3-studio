@@ -1,4 +1,5 @@
 import './v2/works-adapter.css';
+import { FloatingMessage } from './floating-notice.js';
 import { TrashMenu, useTrash } from './UniversalTrash.jsx';
 import { translate } from './i18n/locale.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -246,7 +247,7 @@ export default function StoryNavigation({ state, onOpenCloud, onOpenLocal, onSel
             <>
               <p className="story-nav-group">{t('legacy.cloudAccount', { account: c.account })}</p>
               {visibleCloud.map((p) => item(p, 'cloud'))}
-              {!c.projectsLoaded && <p className="story-nav-note">{t('account.copy8')}</p>}
+              <FloatingMessage tone="info" text={!c.projectsLoaded ? t('account.copy8') : null} />
               {c.projectsLoaded && !cloudProjects.length && (
                 <p className="story-nav-note">{t('account.copy9')}</p>
               )}
@@ -288,16 +289,8 @@ export default function StoryNavigation({ state, onOpenCloud, onOpenLocal, onSel
           {state.saveState.startsWith('保存失败') ? t('legacy.visible11') : t('legacy.visible12')}
         </p>
       )}
-      {pending && (
-        <p className="story-nav-note" role="status">
-          {pending}
-        </p>
-      )}
-      {error && (
-        <p className="story-nav-error" role="alert">
-          {error}
-        </p>
-      )}
+      <FloatingMessage tone="info" text={pending ? pending : null} />
+      <FloatingMessage tone="error" text={error ? error : null} />
     </section>
   );
 }
@@ -714,11 +707,18 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
       return done;
     });
   };
-  const visible = stories.filter((story) =>
-    String(story.project.title || '')
-      .toLocaleLowerCase()
-      .includes(query.trim().toLocaleLowerCase()),
-  );
+  // Newest edit first (owner, 2026-10-24); a story without a known time goes last.
+  const visible = stories
+    .filter((story) =>
+      String(story.project.title || '')
+        .toLocaleLowerCase()
+        .includes(query.trim().toLocaleLowerCase()),
+    )
+    .sort(
+      (a, b) =>
+        (storyEditedTimestamp(b.project.updatedAt ?? b.project.updated_at) || 0) -
+        (storyEditedTimestamp(a.project.updatedAt ?? a.project.updated_at) || 0),
+    );
   return (
     <section
       className={'home-main works-page' + (pending ? ' is-opening' : '')}
@@ -842,7 +842,7 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
           </button>
         </p>
       )}
-      <StoryOpenNotice onOpened={onSelect} />
+      <StoryOpenNotice onOpened={onSelect} quietLoading />
       {selecting && (
         <div className="works-select-bar" role="toolbar" aria-label={t('trash.selectStory')}>
           <b>{t('trash.selectedCount', { count: picked.size })}</b>
@@ -916,9 +916,10 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
           <p>{query ? t('legacy.visible21') : t('legacy.visible22')}</p>
         </div>
       )}
-      {c.account && !c.projectsLoaded && (
-        <p className="story-library-note">{t('account.copy24')}</p>
-      )}
+      <FloatingMessage
+        tone="info"
+        text={c.account && !c.projectsLoaded ? t('account.copy24') : null}
+      />
       {visible.length > visibleLimit ? (
         <button
           type="button"
@@ -946,27 +947,16 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
         )
       )}
       {c.moreProjects && query && <p className="story-library-note">{t('account.copy27')}</p>}
-      {library.library.error && (
-        <p className="story-library-error" role="alert">
-          {t('account.copy28')}
-          <button type="button" onClick={onOpenLocal}>
-            {t('account.copy15')}
-          </button>
-        </p>
-      )}
+      <FloatingMessage
+        tone="error"
+        text={library.library.error ? t('account.copy28') : null}
+        action={{ label: t('account.copy15'), onClick: onOpenLocal }}
+      />
       {state.workspace.mode === 'cloud' && state.workspace.dirty && (
         <p className="story-library-note">{t('account.copy29')}</p>
       )}
-      {library.pending && (
-        <p className="story-library-note" role="status">
-          {library.pending}
-        </p>
-      )}
-      {library.error && (
-        <p className="story-library-error" role="alert">
-          {library.error}
-        </p>
-      )}
+      <FloatingMessage tone="info" text={library.pending ? library.pending : null} />
+      <FloatingMessage tone="error" text={library.error ? library.error : null} />
     </section>
   );
 }

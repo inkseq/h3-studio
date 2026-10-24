@@ -36,7 +36,7 @@ export default function AccountMenu({ account, items, onSignIn }) {
       ref.current?.removeAttribute('open');
   };
   const email = access?.email && access.email !== who.label ? access.email : null;
-  const signIn = () => (onSignIn ? onSignIn() : navigateApp('/quick-chat'));
+  const signIn = () => (onSignIn ? onSignIn() : navigateApp('/'));
   return (
     <details className="account-menu" ref={ref}>
       <summary
