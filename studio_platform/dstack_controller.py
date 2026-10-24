@@ -94,7 +94,16 @@ def _terminal_review_candidate(run, binding, project):
 
 
 class DstackController:
-    def __init__(self, service, runtime, *, worker_process=None, telemetry=None, reclaim_reporter=None):
+    def __init__(
+        self,
+        service,
+        runtime,
+        *,
+        worker_process=None,
+        telemetry=None,
+        reclaim_reporter=None,
+        health_reporter=None,
+    ):
         if service.capacity is None:
             raise ValueError("dstack_capacity_disabled")
         self.service, self.repo, self.runtime = service, service.repo, runtime
@@ -105,6 +114,7 @@ class DstackController:
         )
         self.worker_process = worker_process
         self.reclaim_reporter = reclaim_reporter
+        self.health_reporter = health_reporter
         # The existing original-row writer publishes bounded allocation facts.
         # Import/construction stays offline; only the explicit entry point loads
         # the already mounted Cloud configuration. Export never owns state.
@@ -116,6 +126,39 @@ class DstackController:
         self._passive_unknown = {}
         self._removal_checked_at = {}
         self._invoice_checked_at = None
+        self._health_checked_at = None
+
+    def _health_check(self, *, force=False):
+        now = self.repo.clock()
+        if (
+            not force
+            and self._health_checked_at is not None
+            and 0 <= now - self._health_checked_at < 180
+        ):
+            return {
+                "state": "not_due",
+                "new_alerts": 0,
+                "stop_candidates": [],
+                "demand_paused": False,
+            }
+        self._health_checked_at = now
+        try:
+            from .capacity_health import check
+            from .capacity_watchdog import stop_unserved_node
+
+            result = check(self.service, self.telemetry, self.health_reporter)
+            result["stop_requested"] = sum(
+                stop_unserved_node(self.service, identity)
+                for identity in result["stop_candidates"]
+            )
+            return result
+        except Exception:
+            return {
+                "state": "observation_unconfirmed",
+                "new_alerts": 0,
+                "stop_candidates": [],
+                "demand_paused": False,
+            }
 
     def _business_demand(self, connection):
         if connection.execute(
@@ -381,6 +424,7 @@ class DstackController:
         if callable(heartbeat_cpu):
             heartbeat_cpu()
         invoice_check = self._invoice_check()
+        health_check = self._health_check()
         try:
             client = self.capacity.client
             rows = client._post(
@@ -445,6 +489,7 @@ class DstackController:
                 "state": "idle_safety_observed",
                 "active_runs": len(rows),
                 "invoice_check": invoice_check,
+                "health_check": health_check,
                 "provider_allocations": {
                     name: len(value["instance_ids"])
                     for name, value in providers.items()
@@ -459,7 +504,8 @@ class DstackController:
                 "provider_observed_at": {
                     name: value["observed_at"] for name, value in providers.items()
                 },
-                "business_writes": 0,
+                "business_writes": int(health_check["demand_paused"])
+                + health_check.get("stop_requested", 0),
                 "provider_mutations": 0,
             }
         except Exception:
@@ -467,7 +513,9 @@ class DstackController:
             return {
                 "state": "idle_safety_unconfirmed",
                 "invoice_check": invoice_check,
-                "business_writes": 0,
+                "health_check": health_check,
+                "business_writes": int(health_check["demand_paused"])
+                + health_check.get("stop_requested", 0),
                 "provider_mutations": 0,
             }
 
@@ -690,20 +738,49 @@ class DstackController:
         from .capacity_watchdog import fenced_node_stop, reclaim_node, report_reclaims
 
         recovery = reclaim_node(self.service, current, intent)
-        if recovery["stop_requested"]:
-            report_reclaims(self.service, intent_id, recovery["receipts"], self.telemetry, self.reclaim_reporter)
+        with self.repo.engine.connect() as connection:
+            stopped = dict(
+                connection.execute(
+                    select(operator_nodes).where(
+                        operator_nodes.c.intent_id == intent_id
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            recovery_stop = stopped["desired_state"] == "stopped" and fenced_node_stop(
+                connection, stopped, intent
+            )
+        if recovery["stop_requested"] or recovery_stop:
+            report_reclaims(
+                self.service,
+                intent_id,
+                recovery["receipts"],
+                self.telemetry,
+                self.reclaim_reporter,
+            )
             # Original attempt fence is committed before termination. An absent
             # provider receipt cannot delay the same job's replacement demand.
             with self.repo.engine.connect() as connection:
-                fenced = dict(connection.execute(select(operator_nodes).where(
-                    operator_nodes.c.intent_id == intent_id
-                )).mappings().one())
+                fenced = dict(
+                    connection.execute(
+                        select(operator_nodes).where(
+                            operator_nodes.c.intent_id == intent_id
+                        )
+                    )
+                    .mappings()
+                    .one()
+                )
                 permitted = fenced_node_stop(connection, fenced, intent)
             if permitted:
                 if self.worker_process:
                     self.worker_process.stop(intent_id)
                 result = self.capacity.stop(intent_id)
-                return {"node_id": intent_id, "state": result["state"], "code": recovery["reason"]}
+                return {
+                    "node_id": intent_id,
+                    "state": result["state"],
+                    "code": recovery["reason"],
+                }
         funded = True
         if (
             node["payload"].get("lifecycle", {}).get("version") == 2
@@ -1029,6 +1106,7 @@ class DstackController:
         if callable(heartbeat_cpu):
             heartbeat_cpu()
         results = []
+        closed_since_health = False
         with self.repo.engine.connect() as connection:
             busy = self._business_demand(connection)
         if (
@@ -1039,10 +1117,24 @@ class DstackController:
             self._passive_unknown.clear()
         for node in self._nodes():
             try:
-                if node["payload"].get("capacity_watchdog"):
+                stopped_at = (
+                    node.get("payload", {}).get("dstack", {}).get("first_stopped_at")
+                )
+                if type(stopped_at) in (int, float) and (
+                    self._health_checked_at is None
+                    or stopped_at > self._health_checked_at
+                ):
+                    closed_since_health = True
+                if node.get("payload", {}).get("capacity_watchdog"):
                     from .capacity_watchdog import report_reclaims
 
-                    report_reclaims(self.service, node["intent_id"], None, self.telemetry, self.reclaim_reporter)
+                    report_reclaims(
+                        self.service,
+                        node["intent_id"],
+                        None,
+                        self.telemetry,
+                        self.reclaim_reporter,
+                    )
                 if self._passive_matches(node):
                     continue
                 # A task terminal is not an invoice or provider destruction proof.
@@ -1059,6 +1151,24 @@ class DstackController:
                         )
                     _, active, unsafe, _ = self._obligations(intent)
                     self._refresh_pending_removal(node, intent)
+                    from .capacity_watchdog import provider_removed, reclaim_node
+
+                    with self.repo.engine.connect() as connection:
+                        fresh_node = dict(
+                            connection.execute(
+                                select(operator_nodes).where(
+                                    operator_nodes.c.intent_id == node["intent_id"]
+                                )
+                            )
+                            .mappings()
+                            .one()
+                        )
+                    if provider_removed(
+                        fresh_node["payload"].get("dstack", {}),
+                        intent,
+                        self.repo.clock(),
+                    ):
+                        reclaim_node(self.service, fresh_node, intent)
                     if not active and not unsafe:
                         if self.worker_process:
                             self.worker_process.stop(node["intent_id"])
@@ -1069,6 +1179,7 @@ class DstackController:
                 results.append(result)
                 if result["state"] == "stopped":
                     self._cleanup_pending.add(node["intent_id"])
+                    closed_since_health = True
             except Exception as error:
                 code = (
                     "global_capacity_exceeded"
@@ -1086,6 +1197,7 @@ class DstackController:
         return {
             "state": "running",
             "nodes": results,
+            "health_check": self._health_check(force=closed_since_health),
             "demand_start": self._demand_start(),
             "invoice_check": self._invoice_check(),
         }
@@ -1286,12 +1398,26 @@ def main(argv=None):
         else:
             processes = SlotProcesses(work_dir).__enter__()
         telemetry = configured_telemetry()
-        from .error_monitoring import create_client, report_capacity_reclaim
+        from .error_monitoring import (
+            create_client,
+            report_capacity_reclaim,
+            report_capacity_health,
+        )
 
         error_client = create_client(settings)
         controller = DstackController(
-            service, runtime, worker_process=processes, telemetry=telemetry,
-            reclaim_reporter=(lambda receipt: report_capacity_reclaim(error_client, receipt)) if error_client.dsn else None,
+            service,
+            runtime,
+            worker_process=processes,
+            telemetry=telemetry,
+            reclaim_reporter=(
+                lambda receipt: report_capacity_reclaim(error_client, receipt)
+            )
+            if error_client.dsn
+            else None,
+            health_reporter=(lambda value: report_capacity_health(error_client, value))
+            if error_client.dsn
+            else None,
         )
         stop = threading.Event()
         if threading.current_thread() is threading.main_thread():

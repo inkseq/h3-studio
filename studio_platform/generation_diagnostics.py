@@ -313,6 +313,7 @@ _WORKER_CODES = frozenset(
         'capacity_no_progress',
         'capacity_runtime_exceeded',
         'capacity_owner_recovery',
+        'capacity_provider_removed',
         'capacity_lost_retries_exhausted',
         'machine_failed',
         'runtime_process_exited',

@@ -1205,7 +1205,7 @@ class DstackLifetimeTests(LedgerCase):
         self.assertIsNone(reservation['actual_cost_microusd'])
         self.assertEqual(payload['stop_reason_code'], 'dstack_spend_limit_reached')
 
-    def test_legacy_obligation_does_not_count_new_path_and_terminal_absence_retains_old_money(
+    def test_registration_ceiling_counts_legacy_and_terminal_absence_retains_old_money(
         self,
     ):
         legacy = self.repo.reserve_instance_intent(
@@ -1223,6 +1223,12 @@ class DstackLifetimeTests(LedgerCase):
         self.repo.configure_capacity(max_instances=1, max_physical_gpus=1)
         self.repo.configure_pool('dstack-test', max_instances=1, max_physical_gpus=1)
         self.service.policy.update(max_instances=1, max_physical_gpus=1)
+        with self.assertRaisesRegex(BudgetExceeded, 'global_capacity_exceeded'):
+            self.start()
+        self.assertEqual(self.client.applied, [])
+        self.repo.configure_capacity(max_instances=2, max_physical_gpus=2)
+        self.repo.configure_pool('dstack-test', max_instances=2, max_physical_gpus=2)
+        self.service.policy.update(max_instances=2, max_physical_gpus=2)
         node = self.start()['node_id']
         self.running(node)
         run = self.client.runs[self.store.load(node)['run_name']]
@@ -1233,7 +1239,8 @@ class DstackLifetimeTests(LedgerCase):
         old_budget = self.repo.get_budget('owner-budget')
         with self.repo.transaction() as connection:
             usage = self.service._limits(connection, 750000)
-        self.assertEqual(usage['instances'], 0)
+        self.assertEqual(usage['instances'], 1)
+        self.assertEqual(usage['resources'], {('lium', 'intent:' + legacy['id']): 1})
         self.assertEqual(usage['active_instance_ids'], ())
         self.assertEqual(self.repo.get_budget('owner-budget'), old_budget)
         self.assertEqual(len(self.client.applied), 1)
@@ -1241,7 +1248,7 @@ class DstackLifetimeTests(LedgerCase):
             backend=backend, complete=True, observed_at=self.now - 31, instance_ids=[]
         )
         with self.repo.transaction() as connection:
-            with self.assertRaisesRegex(OperatorError, 'capacity_limit_exceeded'):
+            with self.assertRaisesRegex(BudgetExceeded, 'global_capacity_exceeded'):
                 self.service._limits(connection, 750000)
         with self.repo.engine.connect() as connection:
             original = (

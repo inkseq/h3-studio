@@ -443,6 +443,16 @@ reason. Replace a node that is not ready within20minutes. These timeouts are
 settings; report every reclaim through the existing Grafana event and a sanitized
 Sentry message, and retain the host-failure scorecard and blocklist.
 
+Honor a later explicit user cancellation instead of resurrecting that job.
+Use the same resource projection and limit predicate for demand admission and
+worker registration; reconcile stale capacity against fresh complete provider
+evidence in the existing controller cadence. Alert on a matching paid idle node
+with no dispatch for10minutes, queue age over30minutes, or2 zero-service
+start/stop cycles within1hour. Diagnose capacity/configuration faults without
+renting a replacement; stop and replace only a proven node fault with fenced work.
+The repeated zero-service loop pauses the existing demand switch and alerts.
+No new timer, service or task store follows from this decision.
+
 The urgent follow-up authorizes releasing the original removed workers' stale
 capacity and admitting the already-paid ready node `f7c407c7` / Vast57521189.
 Promote/adopt accepted A1 limits if the legacy cap still prevents registration:
@@ -452,7 +462,8 @@ node. Preserve recoverable work, rollback, max_price and idle stop; charging and
 LIVE Checkout remain OFF. No new credential, provider account or budget is
 authorized. Sources: direct owner2026-10-25 and
 [#193/6384745467](https://github.com/inkseq/h3-studio/issues/193#issuecomment-6384745467),
-[#193/6385240655](https://github.com/inkseq/h3-studio/issues/193#issuecomment-6385240655).
+[#193/6385240655](https://github.com/inkseq/h3-studio/issues/193#issuecomment-6385240655),
+[#193/6385265680](https://github.com/inkseq/h3-studio/issues/193#issuecomment-6385265680).
 
 ## CR-20261024-61 — conditional production enablement of qualified providers
 

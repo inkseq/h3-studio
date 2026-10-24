@@ -112,6 +112,25 @@ class CapacityReclaimTests(LedgerCase):
             )
         self.assertEqual(event["event_type"], "capacity.attempt_lost")
 
+    def test_trusted_provider_removal_preserves_unsettled_supplier_obligation(self):
+        claim = self.running()
+        original = self.attempt(claim.lease.attempt_id)
+        held = self.holds()
+        receipt = self.reclaim(claim, reason="capacity_provider_removed")
+        job = self.repo.get_job(self.scope, claim.job["id"])
+        lost = self.attempt(claim.lease.attempt_id)
+        self.assertEqual(receipt["reason"], "capacity_provider_removed")
+        self.assertEqual(job["status"], "queued")
+        self.assertEqual(history(job)[0], 1)
+        self.assertTrue(authorized_lost_attempt(job, lost))
+        self.assertEqual(lost["upstream_stopped"], original["upstream_stopped"])
+        self.assertIsNone(lost["actual_cost_microusd"])
+        self.assertEqual(self.holds(), held)
+        self.assertEqual(
+            self.reclaim(claim, reason="capacity_provider_removed"),
+            {**receipt, "replayed": True},
+        )
+
     def test_second_claim_is_original_job_and_late_result_cannot_attach(self):
         first = self.running()
         self.reclaim(first)
@@ -193,14 +212,42 @@ class CapacityReclaimTests(LedgerCase):
         self.assertEqual(before["current_attempt_id"], second.lease.attempt_id)
 
     def test_concurrent_reclaim_is_one_epoch_and_one_event(self):
+        # LedgerCase runs this same race on the existing PostgreSQL CI service.
         claim = self.running()
+        original = self.repo.get_job(self.scope, claim.job["id"])
+        held = self.holds()
         receipts = self.parallel(lambda _: self.reclaim(claim), 4)
         self.assertEqual(sum(not r["replayed"] for r in receipts), 1)
         self.assertEqual(len({r["event_id"] for r in receipts}), 1)
-        self.assertEqual(
-            self.repo.get_job(self.scope, claim.job["id"])["fence"],
-            claim.lease.fence + 1,
-        )
+        recovered = self.repo.get_job(self.scope, claim.job["id"])
+        self.assertEqual(recovered["fence"], claim.lease.fence + 1)
+        for field in ("id", "created_at", "request_hash", "plan_id"):
+            self.assertEqual(recovered[field], original[field])
+        self.assertEqual(self.holds(), held)
+        replacement = self.running(claim.job, worker="replacement")
+        self.assertEqual(replacement.job["id"], original["id"])
+        self.assertEqual(replacement.job["attempt_no"], 2)
+        with self.assertLogs("studio_platform.capacity_reclaim", "WARNING"):
+            with self.assertRaises(LeaseLost):
+                self.queue.complete(
+                    claim.lease, [VALID_ARTIFACT], actual_cost_microusd=1
+                )
+        with self.repo.engine.connect() as conn:
+            self.assertEqual(len(list(conn.execute(select(jobs)))), 1)
+            self.assertEqual(list(conn.execute(select(artifacts))), [])
+            self.assertEqual(
+                len(
+                    list(
+                        conn.execute(
+                            select(outbox).where(
+                                outbox.c.event_type == "capacity.attempt_lost"
+                            )
+                        )
+                    )
+                ),
+                1,
+            )
+        self.assertEqual(self.holds(), held)
 
     def test_two_requeues_then_exhaustion_preserves_supplier_hold(self):
         claim = self.running()

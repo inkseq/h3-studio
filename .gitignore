@@ -779,5 +779,7 @@ inventory.json
 # Fenced recovery of original generation jobs; no runtime receipts.
 !studio_platform/capacity_reclaim.py
 !studio_platform/capacity_watchdog.py
+!studio_platform/capacity_health.py
 !tests/test_capacity_reclaim.py
 !tests/test_capacity_watchdog.py
+!tests/test_capacity_health.py

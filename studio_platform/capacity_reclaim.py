@@ -26,6 +26,7 @@ REASONS = {
     "capacity_no_progress",
     "capacity_runtime_exceeded",
     "capacity_owner_recovery",
+    "capacity_provider_removed",
 }
 FIELDS = {
     "version",
@@ -253,6 +254,8 @@ def reclaim(
     """Fence one exact original attempt; the caller separately stops its owned node.
 
     Owner recovery is an explicit trusted incident operation, not an HTTP option.
+    Provider removal requires the caller to verify the exact owned terminal run
+    and fresh complete same-account absence; it never settles supplier costs.
     Automatic callers must supply the last positive engine heartbeat, never a
     lease renewal or a failed status read. Replays return the original receipt.
     """
