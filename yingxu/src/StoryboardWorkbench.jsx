@@ -1,14 +1,5 @@
 import { FloatingMessage } from './floating-notice.js';
-import {
-  Columns2,
-  Maximize2,
-  Minimize2,
-  MoreHorizontal,
-  RefreshCw,
-  Sparkles,
-  Star,
-  Trash2,
-} from 'lucide-react';
+import { Columns2, MoreHorizontal, RefreshCw, Sparkles, Star, Trash2 } from 'lucide-react';
 import { profileLabel } from './model-visibility.js';
 import { isActiveTrashItem } from './trash-commands.js';
 import { TrashMenu, RenameDialog, useTrash } from './UniversalTrash.jsx';
@@ -47,7 +38,7 @@ export function WorkbenchCopies({ value, onChange, max }) {
     </label>
   );
 }
-export function WorkbenchTakes({ shot, wide = false, onWide, onPreview, previewId }) {
+export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
   const { t, locale } = useI18n(),
     { state, adapter, dispatch } = useStoryboardUI();
   const [renaming, setRenaming] = useState(null),
@@ -147,16 +138,6 @@ export function WorkbenchTakes({ shot, wide = false, onWide, onPreview, previewI
           >
             <Star size={13} />
             {t('workbench.star')}
-          </button>
-        )}
-        {onWide && (
-          <button
-            className="small ghost"
-            onClick={onWide}
-            title={t(wide ? 'workbench.collapse' : 'workbench.expand')}
-          >
-            {wide ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-            {t(wide ? 'workbench.collapse' : 'workbench.expand')}
           </button>
         )}
         <button

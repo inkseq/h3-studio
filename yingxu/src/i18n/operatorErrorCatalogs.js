@@ -35,6 +35,8 @@ export const operatorErrorCatalogs = {
     'operatorError.copy25':
       'The original price change is unconfirmed. Keep its operation and refresh the audit; do not repeat the change.',
     'operatorError.copy26': 'The original operation is still running.',
+    'operatorError.priceChanged':
+      'This price changed since you opened it. Refresh and review again.',
     'operatorError.copy27': 'The change receipt is unconfirmed. Reconcile the original operation.',
     'operatorError.copy28':
       'The change audit receipt is unconfirmed. Reconcile the original operation.',
@@ -88,6 +90,7 @@ export const operatorErrorCatalogs = {
     'operatorError.copy24': '原额度修改尚未证实，保留原操作；请刷新审核记录，不重复修改。',
     'operatorError.copy25': '原价格修改尚未证实，保留原操作；请刷新审核记录，不重复修改。',
     'operatorError.copy26': '原操作仍在处理中。',
+    'operatorError.priceChanged': '这个价格在你打开后已被修改，请刷新后重新预览。',
     'operatorError.copy27': '修改收据尚未确认，请核对原操作。',
     'operatorError.copy28': '修改审核收据尚未确认，请核对原操作。',
     'operatorError.copy29': '原取消收据尚未确认，请核对原操作。',

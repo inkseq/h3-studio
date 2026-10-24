@@ -128,7 +128,7 @@
 .film-dialog .film-result video {
   width: 100%;
   max-height: 320px;
-  background: #111;
+  background: var(--black);
   object-fit: contain;
   border-radius: 8px;
 }

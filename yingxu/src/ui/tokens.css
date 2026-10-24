@@ -1,0 +1,73 @@
+/* Design tokens (h3-studio#514): the one place for colour, type, spacing, shape and layers.
+ * Skins override these variables only (skins.css). Pages use var(--…), never raw colours. */
+:root {
+  /* Surfaces and text */
+  --bg: #0b0c0c;
+  --surface: #131515;
+  --surface-2: #191c1b;
+  --surface-3: #222624;
+  --surface-4: #2b302d;
+  --line: rgba(255, 255, 255, 0.075);
+  --line-2: rgba(255, 255, 255, 0.12);
+  --line-3: rgba(255, 255, 255, 0.18);
+  --ink: #f2f4f1;
+  --ink-2: #bcc3bd;
+  --muted: #808983;
+  /* Accent and status */
+  --accent: #cdf26e;
+  --accent-ink: #11160a;
+  --accent-soft: rgba(205, 242, 110, 0.12);
+  --accent-glow: 0 1px 0 rgba(255, 255, 255, 0.35) inset, 0 4px 14px rgba(205, 242, 110, 0.16);
+  --good: #63d69e;
+  --good-soft: rgba(99, 214, 158, 0.14);
+  --warn: #f3b65a;
+  --warn-soft: rgba(243, 182, 90, 0.14);
+  --bad: #ff7a6b;
+  --bad-soft: rgba(255, 122, 107, 0.1);
+  --danger: #e5484d;
+  --fl: #74adff;
+  --fl-soft: rgba(116, 173, 255, 0.14);
+  --ref: #c79bff;
+  --ref-soft: rgba(199, 155, 255, 0.15);
+  /* Card kinds */
+  --char: #63d69e;
+  --loc: #f3b65a;
+  --prp: #c79bff;
+  /* Shape and motion */
+  --r-sm: 8px;
+  --r: 12px;
+  --r-lg: 16px;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 8px 24px rgba(0, 0, 0, 0.32);
+  --shadow-lg: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 24px 64px rgba(0, 0, 0, 0.55);
+  --ease: 180ms cubic-bezier(0.25, 0.8, 0.25, 1);
+  /* Fixed neutrals */
+  --white: #fff;
+  --black: #000;
+  --scrim: rgba(0, 0, 0, 0.6);
+  /* Type scale */
+  --fs-2xs: 10px;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
+  --fs-xl: 18px;
+  --fs-2xl: 22px;
+  /* Spacing */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  /* Controls */
+  --h-sm: 28px;
+  --h-md: 32px;
+  --h-lg: 40px;
+  /* Layers */
+  --z-raised: 3;
+  --z-sticky: 40;
+  --z-drawer: 70;
+  --z-overlay: 90;
+  --z-dialog: 100;
+  --z-toast: 200;
+}

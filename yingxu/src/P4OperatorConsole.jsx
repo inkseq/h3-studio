@@ -1,4 +1,5 @@
 import StudioHeader from './StudioHeader.jsx';
+import { useModal } from './ui/Dialog.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import { MenuItem } from './AccountMenu.jsx';
 import { readBrowserLocale, translate } from './i18n/locale.js';
@@ -104,21 +105,7 @@ const hostPlace = (node) =>
 
 function Dialog({ title, subtitle, onClose, wide = false, children }) {
   const { t, locale } = useI18n();
-  const active = usePageActive(),
-    ref = useRef(),
-    opener = useRef(globalThis.document?.activeElement);
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!active) {
-      dialog.close();
-      return;
-    }
-    dialog.showModal();
-    return () => {
-      dialog.close();
-      if (opener.current?.isConnected && !opener.current.closest('[inert]')) opener.current.focus();
-    };
-  }, [active]);
+  const ref = useModal();
   return (
     <dialog
       ref={ref}
