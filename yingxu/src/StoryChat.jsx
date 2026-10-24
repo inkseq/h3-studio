@@ -19,6 +19,7 @@ import {
 import StudioHeader from './StudioHeader.jsx';
 import ItemMenu from './ItemMenu.jsx';
 import { Button, IconButton } from './ui/Button.jsx';
+import { EmptyState } from './ui/Note.jsx';
 import { StoryboardSplitter, useStoryboardPanelSize } from './StoryboardPanels.jsx';
 import { RenameDialog } from './UniversalTrash.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -300,10 +301,13 @@ function Board({ state, fresh, openId, onOpen, onWorks, notice }) {
   const profiles = Object.fromEntries(state.cards.map((card) => [card.id, card]));
   if (!state.cards.length)
     return (
-      <div className="sc-board-empty">
-        <Sparkles size={22} aria-hidden="true" />
-        <p>{t('storyChat.boardEmpty')}</p>
-      </div>
+      <EmptyState
+        compact
+        className="sc-board-empty"
+        icon={<Sparkles size={22} aria-hidden="true" />}
+      >
+        {t('storyChat.boardEmpty')}
+      </EmptyState>
     );
   return (
     <>

@@ -1,3 +1,4 @@
+import { Note } from './ui/Note.jsx';
 import { previewingAsUser } from './preview-as-user.js';
 import { FloatingMessage } from './floating-notice.js';
 import VideoCacheSettings from './VideoCacheSettings.jsx';
@@ -468,7 +469,7 @@ export default function SpendingSettings({ account }) {
                       <i>
                         <b style={{ width: exposure.percent + '%' }} />
                       </i>
-                      <p className="spend-breakdown-note">{t('settings.admissionHelp')}</p>
+                      <Note>{t('settings.admissionHelp')}</Note>
                     </div>
                   )}
                 </div>

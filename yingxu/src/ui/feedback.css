@@ -1,0 +1,64 @@
+/* Shared notes and empty states (h3-studio#514). Use <Note> / <EmptyState> from ui/Note.jsx. */
+.ui-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.ui-note-info,
+.ui-note-warn,
+.ui-note-bad {
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+}
+.ui-note-info {
+  color: var(--fl);
+  background: var(--fl-soft);
+}
+.ui-note-warn {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.ui-note-bad {
+  color: var(--bad);
+  background: var(--bad-soft);
+}
+
+.ui-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 64px var(--sp-5);
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r-lg);
+  color: var(--muted);
+  text-align: center;
+}
+.ui-empty > strong {
+  color: var(--ink);
+  font-size: var(--fs-lg);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.ui-empty > p {
+  max-width: 420px;
+  margin: 0;
+  font-size: var(--fs-md);
+  line-height: 1.5;
+}
+.ui-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: 6px;
+  border-radius: var(--r-lg);
+  background: var(--surface-3);
+  color: var(--ink-2);
+}
+.ui-empty-compact {
+  padding: var(--sp-5) var(--sp-4);
+  border: 0;
+}
