@@ -139,7 +139,7 @@
 }
 .p4-host-rentals > section {
   padding: 10px;
-  background: #f4f6ef;
+  background: var(--ink);
   border-radius: 7px;
 }
 .p4-host-rentals small {

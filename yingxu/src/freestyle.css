@@ -1,6 +1,6 @@
 .freestyle-shell {
   min-height: 100vh;
-  background: #f8f9f5;
+  background: var(--ink);
   color: #172b23;
 }
 .freestyle-top {
@@ -79,7 +79,7 @@
   margin: 50px 0;
 }
 .freestyle-examples article {
-  background: #fff;
+  background: var(--white);
   border: 1px solid #dfe4d7;
   border-radius: 15px;
   padding: 24px;
@@ -137,7 +137,7 @@
 .freestyle-zone {
   border: 1px solid #dce3d3;
   border-radius: 13px;
-  background: #fff;
+  background: var(--white);
   padding: 18px;
   margin-bottom: 16px;
 }
@@ -147,7 +147,7 @@
   background: #f0f6e7;
 }
 .freestyle-zone.is-disabled {
-  background: #f1f2ed;
+  background: var(--ink);
   color: #92978c;
 }
 .freestyle-zone header {
@@ -235,7 +235,7 @@
   padding: 28px;
   border: 1px solid #dce3d3;
   border-radius: 15px;
-  background: #fff;
+  background: var(--white);
 }
 .freestyle-results > p {
   font-size: 13px;

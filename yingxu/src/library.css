@@ -5,8 +5,8 @@
   height: 100dvh;
   display: flex;
   flex-direction: column;
-  background: var(--bg, #f6f5f1);
-  color: var(--ink, #252721);
+  background: var(--bg, var(--ink));
+  color: var(--ink, var(--surface-3));
 }
 .library-page > header:not(.v2-header) {
   display: flex;
@@ -15,7 +15,7 @@
   min-height: 62px;
   padding: 0 24px;
   border-bottom: 1px solid var(--line, #ddd);
-  background: var(--surface, #fff);
+  background: var(--surface, var(--white));
 }
 .library-page > header:not(.v2-header) h1 {
   font-size: 18px;
@@ -35,7 +35,7 @@
   padding: 14px 10px;
   overflow: auto;
   border-right: 1px solid var(--line, #ddd);
-  background: var(--surface, #fff);
+  background: var(--surface, var(--white));
 }
 .library-sidebar h2 {
   font-size: 11px;
@@ -133,13 +133,13 @@
   border: 1px solid var(--line, #ddd);
   border-radius: 10px;
   overflow: hidden;
-  background: var(--surface, #fff);
+  background: var(--surface, var(--white));
 }
 .library-grid article.picked {
   outline: 2px solid var(--accent, #a5be6d);
 }
 .library-grid article.open {
-  border-color: var(--ink, #252721);
+  border-color: var(--ink, var(--surface-3));
 }
 .library-grid article > input {
   position: absolute;
@@ -205,7 +205,7 @@
   overflow: auto;
   padding: 16px;
   border-left: 1px solid var(--line, #ddd);
-  background: var(--surface, #fff);
+  background: var(--surface, var(--white));
   min-width: 0;
 }
 .library-detail > header {
@@ -427,7 +427,7 @@
   margin: 0;
 }
 .library-grid article > .item-menu button {
-  background: var(--surface, #fff);
+  background: var(--surface, var(--white));
 }
 @media (max-width: 760px) {
   .library-item strong,

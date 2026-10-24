@@ -50,7 +50,7 @@
 }
 .agent-connect-step {
   padding: 22px;
-  background: #fff;
+  background: var(--white);
   border: 1px solid var(--line, #dfe5dc);
   border-radius: 15px;
   display: flex;
@@ -157,7 +157,7 @@
   width: 100%;
   min-width: 0;
   padding: 8px;
-  background: #fff;
+  background: var(--white);
   border: 1px solid #d7dfd0;
   border-radius: 7px;
   color: #263d29;
@@ -200,7 +200,7 @@
   border: 1px solid #d4ddca;
   border-radius: 7px;
   padding: 12px;
-  background: #fff;
+  background: var(--white);
   font:
     11px/1.9 ui-monospace,
     SFMono-Regular,
@@ -221,7 +221,7 @@
   margin-top: 24px;
   padding: 21px 22px;
   border: 1px solid #dfe5d7;
-  background: #fff;
+  background: var(--white);
   border-radius: 13px;
 }
 .agent-review-icon {

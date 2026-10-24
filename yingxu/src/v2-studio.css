@@ -1,33 +1,33 @@
 /* Presentation rebuilt against the approved v2 reference; business state stays in existing controllers. */
 :root {
   color-scheme: dark;
-  --bg: #0b0c0c;
-  --surface: #131515;
-  --surface-2: #191c1b;
-  --surface-3: #222624;
-  --surface-4: #2b302d;
+  --bg: var(--bg);
+  --surface: var(--surface);
+  --surface-2: var(--surface-2);
+  --surface-3: var(--surface-3);
+  --surface-4: var(--surface-4);
   --paper: var(--bg);
   --panel: var(--surface);
-  --ink: #f2f4f1;
-  --ink-2: #bcc3bd;
-  --muted: #808983;
+  --ink: var(--ink);
+  --ink-2: var(--ink-2);
+  --muted: var(--muted);
   /* prettier-ignore */
   --line: rgba(255,255,255,.075);
   /* prettier-ignore */
   --line-2: rgba(255,255,255,.12);
-  --accent: #cdf26e;
-  --accent-ink: #11160a;
+  --accent: var(--accent);
+  --accent-ink: var(--accent-ink);
   /* prettier-ignore */
   --accent-soft: rgba(205,242,110,.12);
   --lime: var(--accent);
   --green: var(--accent);
   --brand: var(--accent);
   --brand-2: var(--accent-soft);
-  --good: #63d69e;
-  --bad: #ff7a6b;
-  --warn: #f3b65a;
-  --fl: #74adff;
-  --ref: #c79bff;
+  --good: var(--good);
+  --bad: var(--bad);
+  --warn: var(--warn);
+  --fl: var(--fl);
+  --ref: var(--ref);
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', 'PingFang SC', 'Microsoft YaHei',
     system-ui, sans-serif;
@@ -263,20 +263,20 @@ body {
 }
 .sb-workspace,
 .sb-portal {
-  --bg: #0b0c0c;
-  --panel: #131515;
-  --ink: #f2f4f1;
-  --muted: #808983;
+  --bg: var(--bg);
+  --panel: var(--surface);
+  --ink: var(--ink);
+  --muted: var(--muted);
   /* prettier-ignore */
   --line: rgba(255,255,255,.075);
-  --brand: #cdf26e;
+  --brand: var(--accent);
   /* prettier-ignore */
   --brand-2: rgba(205,242,110,.12);
-  --fl: #74adff;
-  --ref: #c79bff;
-  --warn: #f3b65a;
-  --bad: #ff7a6b;
-  --good: #63d69e;
+  --fl: var(--fl);
+  --ref: var(--ref);
+  --warn: var(--warn);
+  --bad: var(--bad);
+  --good: var(--good);
   font-family: inherit;
 }
 .sb-workspace :is(input, textarea, select),
@@ -308,7 +308,7 @@ body {
   background: var(--surface-3);
 }
 .sb-workspace :is(.thumb, .empty, .screen, .card-media, .shot-preview) {
-  background: #090a09;
+  background: var(--bg);
 }
 .sb-workspace :is(.seg, .vtabs, .slot, .inrow, .style-field, .chapter-summary) {
   border-color: var(--line);
@@ -440,7 +440,7 @@ body {
 }
 .story-library-cover {
   aspect-ratio: 16/10;
-  background: linear-gradient(135deg, #252c27, #101312);
+  background: linear-gradient(135deg, var(--surface-3), var(--surface));
   color: #3b423e;
 }
 .story-library-cover::after {
@@ -470,7 +470,7 @@ body {
   padding: 1px 7px;
   border-radius: 6px;
   background: #0009;
-  color: #fff;
+  color: var(--white);
   font-size: 11px;
 }
 .story-library-card-body {
@@ -647,7 +647,7 @@ body {
   border: 0;
   box-shadow: none;
   border-radius: 50%;
-  color: #fff;
+  color: var(--white);
   min-width: 28px;
   min-height: 28px;
   width: 28px;
@@ -659,7 +659,7 @@ body {
 .story-workspace-screen .sb-workspace .card-no,
 .story-workspace-screen .sb-workspace .card-dur {
   background: #0009;
-  color: #fff;
+  color: var(--white);
 }
 .story-workspace-screen .sb-workspace .workbench-select {
   opacity: 0;

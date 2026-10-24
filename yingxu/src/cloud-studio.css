@@ -16,7 +16,7 @@
 .cloud-workspace-bar {
   padding: 10px 22px;
   border-bottom: 1px solid #ded9cf;
-  background: #f7f4ed;
+  background: var(--ink);
   display: flex;
   flex-wrap: wrap;
   gap: 8px 22px;
@@ -178,7 +178,7 @@
   width: 18px;
 }
 .cloud-plan {
-  background: #f4f3ed;
+  background: var(--ink);
   border-radius: 8px;
   padding: 12px;
   margin-top: 12px;
@@ -373,8 +373,8 @@ button.brand {
   border: 1px solid var(--line, #d7dcd8);
   border-radius: 10px;
   padding: 10px 12px;
-  background: var(--panel, #f6f8f5);
-  color: var(--ink, #27332e);
+  background: var(--panel, var(--ink));
+  color: var(--ink, var(--surface-4));
   font-size: 13px;
   overflow-wrap: anywhere;
 }
@@ -400,7 +400,7 @@ button.brand {
   margin-top: 10px;
 }
 .input-usage {
-  background: #f1f6f3;
+  background: var(--ink);
   border: 1px solid #ccdbd1;
   border-radius: 10px;
   padding: 12px;

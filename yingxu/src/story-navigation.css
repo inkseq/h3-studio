@@ -37,7 +37,7 @@
   padding: 6px;
   background: transparent;
   border: 0;
-  color: #b8c9b9;
+  color: var(--ink-2);
 }
 .story-navigation .story-nav-create {
   width: 100%;
@@ -71,7 +71,7 @@
   min-width: 0;
   border: 1px solid #516556;
   background: #243a2e;
-  color: #f1f5eb;
+  color: var(--ink);
   padding: 8px;
   border-radius: 6px;
   font-size: 11px;
@@ -335,7 +335,7 @@
   min-width: 0;
   overflow: auto;
   padding: 30px clamp(20px, 4vw, 64px) 40px;
-  background: var(--paper, #f6f7f1);
+  background: var(--paper, var(--ink));
   color: var(--ink, #243c30);
 }
 .story-library-heading {

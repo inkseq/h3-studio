@@ -71,7 +71,7 @@
   overflow-wrap: anywhere;
 }
 .queue-summary {
-  background: #f0f5eb;
+  background: var(--ink);
   padding: 18px;
   border: 1px solid #c7d5bc;
   border-radius: 12px;
@@ -130,7 +130,7 @@
   padding: 14px 16px;
   border: 1px solid #d1dbca;
   border-radius: 10px;
-  background: #f6faf2;
+  background: var(--ink);
   margin-bottom: 16px;
 }
 .review-navigator p {
@@ -171,7 +171,7 @@
   margin: 16px 0;
   padding: 14px;
   border-radius: 9px;
-  background: #f2f3ef;
+  background: var(--ink);
   font-size: 12px;
 }
 .queue-activity small {

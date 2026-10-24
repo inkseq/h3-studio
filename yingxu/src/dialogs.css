@@ -96,8 +96,8 @@ select {
   margin: 10px 0 0;
   padding: 8px 12px;
   border-radius: var(--r-sm, 8px);
-  background: color-mix(in srgb, var(--bad, #ff7a6b) 12%, transparent);
-  color: var(--bad, #ff7a6b);
+  background: color-mix(in srgb, var(--bad, var(--bad)) 12%, transparent);
+  color: var(--bad, var(--bad));
   font-size: 13px;
 }
 :root dialog.qc-dialog [role='status'] {
@@ -168,7 +168,7 @@ select optgroup {
   height: 168px;
   padding: 6px;
   border-radius: 10px;
-  background: #fff;
+  background: var(--white);
 }
 .telegram-qr svg {
   width: 100%;

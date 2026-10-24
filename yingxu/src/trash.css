@@ -18,7 +18,7 @@
   padding: 6px;
   border: 1px solid var(--line, #ddd);
   border-radius: 12px;
-  background: var(--panel, #fff);
+  background: var(--panel, var(--white));
   box-shadow: 0 8px 28px #0002;
 }
 .item-menu-popover button {
@@ -64,7 +64,7 @@
   transform: translateX(-50%);
   max-width: calc(100vw - 24px);
   padding: 12px;
-  background: var(--panel, #fff);
+  background: var(--panel, var(--white));
   z-index: 120;
   border: 1px solid var(--line, #ddd);
   border-radius: 12px;

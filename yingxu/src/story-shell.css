@@ -51,7 +51,7 @@
   padding: 6px 8px;
   border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fff;
+  background: var(--white);
   font-size: 11px;
   color: var(--ink);
 }
@@ -90,7 +90,7 @@
   padding: 8px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fff;
+  background: var(--white);
 }
 .story-account-menu > summary::-webkit-details-marker {
   display: none;
@@ -107,7 +107,7 @@
   max-height: calc(100dvh - 90px);
   overflow: auto;
   padding: 16px;
-  background: #fff;
+  background: var(--white);
   border: 1px solid var(--line);
   border-radius: 12px;
   box-shadow: 0 16px 46px #1729231f;

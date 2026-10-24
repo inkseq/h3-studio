@@ -33,7 +33,7 @@
   padding: 18px;
   border: 1px solid #d3dfd4;
   border-radius: 12px;
-  background: #f3f7ed;
+  background: var(--ink);
 }
 .activity-intro span {
   flex: 1;

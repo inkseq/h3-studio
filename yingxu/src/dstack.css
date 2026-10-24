@@ -34,7 +34,7 @@
   border-radius: 0 !important;
   padding: 17px !important;
   text-align: left;
-  background: #fff !important;
+  background: var(--white) !important;
   white-space: normal !important;
   min-width: 0;
 }

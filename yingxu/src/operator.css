@@ -3,7 +3,7 @@
   --op-ink: #20322c;
   --op-muted: #718077;
   --op-line: #dfe5d9;
-  --op-cream: #f8f9f4;
+  --op-cream: var(--ink);
   display: flex;
   min-height: 100vh;
   background: var(--op-cream);
@@ -23,7 +23,7 @@
   gap: 8px;
   border: 1px solid #d8e0d3;
   border-radius: 8px;
-  background: #fff;
+  background: var(--white);
   color: #294235;
   padding: 10px 14px;
   font: inherit;
@@ -226,7 +226,7 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
   border: 1px solid #dce4d5;
   border-radius: 14px;
-  background: #fff;
+  background: var(--white);
   overflow: hidden;
 }
 .op-overview > div {
@@ -356,7 +356,7 @@
   gap: 5px;
   align-items: center;
   white-space: nowrap;
-  background: #f0f1ed;
+  background: var(--ink);
   color: #76806f;
   border-radius: 20px;
   padding: 5px 9px;
@@ -399,7 +399,7 @@
 .op-slot {
   padding: 12px 13px;
   margin-top: 8px;
-  background: #f8faf5;
+  background: var(--ink);
   border: 1px solid #e6ecdf;
   border-radius: 8px;
 }
@@ -457,7 +457,7 @@
   align-items: center;
   border-top: 1px solid #e6eadf;
   padding: 14px 21px;
-  background: #fbfcf9;
+  background: var(--white);
 }
 .op-node > footer button {
   padding: 8px 10px;
@@ -545,7 +545,7 @@
 .op-table-wrap th {
   font-weight: 500;
   color: #8a987e;
-  background: #f2f6ed;
+  background: var(--ink);
   padding: 13px 16px;
 }
 .op-table-wrap td {
@@ -603,7 +603,7 @@
   padding: 28px;
   width: min(740px, calc(100vw - 28px));
   max-height: 92vh;
-  background: #fcfdf9;
+  background: var(--white);
   box-shadow: 0 22px 100px #20302240;
   font: inherit;
 }
@@ -649,7 +649,7 @@
 }
 .op-dialog input:disabled,
 .op-dialog select:disabled {
-  background: #f0f2eb;
+  background: var(--ink);
   color: #909b84;
 }
 .op-dialog label {
@@ -773,7 +773,7 @@
   margin-top: 12px;
   position: sticky;
   bottom: -28px;
-  background: #fcfdf9;
+  background: var(--white);
   padding-bottom: 8px;
 }
 .op-login form {
@@ -1083,7 +1083,7 @@
   white-space: normal;
 }
 .op-machine-row .op-machine-open:hover {
-  background: #f3f7ee;
+  background: var(--ink);
 }
 .op-row-icon {
   display: grid;
@@ -1144,7 +1144,7 @@
   padding: 8px 10px;
 }
 .op-machine-row.historical {
-  background: #f7f9f3;
+  background: var(--ink);
 }
 .op-history-context {
   margin: 0 21px 15px;
@@ -1200,7 +1200,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  background: #f2f6eb;
+  background: var(--ink);
   border: 1px dashed #d8e2cc;
   border-radius: 10px;
   color: #8a9a7e;
@@ -1219,7 +1219,7 @@
   gap: 13px;
   border: 1px dashed #dce4d6;
   border-radius: 11px;
-  background: #f6f9f1;
+  background: var(--ink);
   padding: 16px;
   color: #6b825e;
 }
@@ -1337,7 +1337,7 @@
   flex: 1;
 }
 .op-removal.neutral {
-  background: #f3f5ee;
+  background: var(--ink);
   border-color: #dfe5d9;
   color: #596b50;
 }
@@ -1384,7 +1384,7 @@
   padding: 12px;
   border: 1px solid #e0e6d8;
   border-radius: 8px;
-  background: #f5f8ef;
+  background: var(--ink);
   font-size: 11px;
 }
 .op-provider-observations small {
@@ -1406,7 +1406,7 @@
   min-width: 0;
   border: 1px solid #dce4d4;
   border-radius: 10px;
-  background: #fff;
+  background: var(--white);
   padding: 15px;
 }
 .op-inventory-offer > header {
@@ -1524,7 +1524,7 @@
   flex-direction: column;
   gap: 5px;
   border: 1px solid #dce4d3;
-  background: #fff;
+  background: var(--white);
   border-radius: 8px;
   padding: 9px 13px;
   text-align: left;
@@ -1597,7 +1597,7 @@
 .op-candidate {
   border: 1px solid #dce5d2;
   border-radius: 12px;
-  background: #fff;
+  background: var(--white);
   padding: 17px;
   display: flex;
   flex-direction: column;
@@ -1609,7 +1609,7 @@
 .op-candidate.selected {
   border-color: #789567;
   box-shadow: 0 0 0 2px #e0ead5;
-  background: linear-gradient(145deg, #f8fbf2, #fff 55%);
+  background: linear-gradient(145deg, #f8fbf2, var(--white) 55%);
 }
 .op-candidate > header {
   display: flex;
@@ -1710,7 +1710,7 @@
 .op-rank-reasons span {
   font-size: 9px;
   color: #839674;
-  background: #f3f6ed;
+  background: var(--ink);
   border-radius: 4px;
   padding: 4px 6px;
 }
@@ -1759,7 +1759,7 @@
   border: 1px dashed #dbe3d1;
   border-radius: 12px;
   color: #94a285;
-  background: #f6f9f0;
+  background: var(--ink);
   margin: 16px 0;
 }
 .op-market-empty p {
@@ -1959,7 +1959,7 @@
 .op-market-filters {
   margin: 10px 0 14px;
   padding: 10px 12px;
-  background: #f4f7ee;
+  background: var(--ink);
   border: 1px solid #e2e8d9;
   border-radius: 9px;
 }

@@ -215,19 +215,19 @@
 /* Higher specificity than the legacy sheets, including dialogs portaled outside the shell. */
 .p4-dialog.p4-dialog {
   /* prettier-ignore */
-  --p4-bg: var(--bg,#0b0c0c);
+  --p4-bg: var(--bg,var(--bg));
   /* prettier-ignore */
-  --p4-paper: var(--surface,#131515);
+  --p4-paper: var(--surface,var(--surface));
   /* prettier-ignore */
-  --p4-ink: var(--ink,#f2f4f1);
+  --p4-ink: var(--ink,var(--ink));
   /* prettier-ignore */
-  --p4-muted: var(--muted,#808983);
+  --p4-muted: var(--muted,var(--muted));
   /* prettier-ignore */
   --p4-line: var(--line,rgba(255,255,255,.075));
   /* prettier-ignore */
-  --p4-green: var(--accent,#cdf26e);
+  --p4-green: var(--accent,var(--accent));
   /* prettier-ignore */
-  --p4-mint: var(--surface-2,#191c1b);
+  --p4-mint: var(--surface-2,var(--surface-2));
   background: var(--p4-paper);
   color: var(--p4-ink);
   box-shadow: 0 24px 80px #0008;
@@ -245,37 +245,37 @@
     .p4-preparation,
     .p4-metrics > div
   ) {
-  background: var(--surface, #131515);
-  color: var(--ink, #f2f4f1);
+  background: var(--surface, var(--surface));
+  color: var(--ink, var(--ink));
   /* prettier-ignore */
   border-color: var(--line,rgba(255,255,255,.075));
 }
 :is(.v2-gpu-shell.v2-gpu-shell, .p4-dialog.p4-dialog)
   :is(.p4-group > header, .p4-machine, .p4-admin-machine, table, tbody, tr, td) {
-  background: var(--surface, #131515);
-  color: var(--ink, #f2f4f1);
+  background: var(--surface, var(--surface));
+  color: var(--ink, var(--ink));
   /* prettier-ignore */
   border-color: var(--line,rgba(255,255,255,.075));
 }
 :is(.v2-gpu-shell.v2-gpu-shell, .p4-dialog.p4-dialog)
   :is(thead, th, .p4-total, .p4-preview, .p4-preparation-steps li) {
-  background: var(--surface-2, #191c1b);
-  color: var(--ink, #f2f4f1);
+  background: var(--surface-2, var(--surface-2));
+  color: var(--ink, var(--ink));
   /* prettier-ignore */
   border-color: var(--line,rgba(255,255,255,.075));
 }
 :is(.v2-gpu-shell.v2-gpu-shell, .p4-dialog.p4-dialog) :is(button, input, select, textarea) {
-  background: var(--surface-2, #191c1b);
-  color: var(--ink, #f2f4f1);
+  background: var(--surface-2, var(--surface-2));
+  color: var(--ink, var(--ink));
   /* prettier-ignore */
   border-color: var(--line,rgba(255,255,255,.075));
   color-scheme: dark;
 }
 :is(.v2-gpu-shell.v2-gpu-shell, .p4-dialog.p4-dialog) button:hover {
-  background: var(--surface-3, #222624);
+  background: var(--surface-3, var(--surface-3));
 }
 :is(.v2-gpu-shell.v2-gpu-shell, .p4-dialog.p4-dialog) :is(.p4-primary, .op-primary) {
-  background: var(--accent, #cdf26e);
+  background: var(--accent, var(--accent));
   color: var(--accent-ink, #17200a);
   border-color: transparent;
 }
@@ -292,13 +292,13 @@
     label,
     .p4-dialog > header p
   ) {
-  color: var(--muted, #808983);
+  color: var(--muted, var(--muted));
 }
 :is(.v2-gpu-shell.v2-gpu-shell, .p4-dialog.p4-dialog) :is(.budget-account summary, a) {
-  color: var(--ink, #f2f4f1);
+  color: var(--ink, var(--ink));
 }
 :is(.v2-gpu-shell.v2-gpu-shell, .p4-dialog.p4-dialog) .p4-link {
-  color: var(--accent, #cdf26e) !important;
+  color: var(--accent, var(--accent)) !important;
 }
 :is(.v2-gpu-shell.v2-gpu-shell, .p4-dialog.p4-dialog)
   :is(.p4-pill, .p4-note, .p4-preparation-steps li.current) {
@@ -307,8 +307,8 @@
   border-color: #315343;
 }
 :is(.v2-gpu-shell.v2-gpu-shell, .p4-dialog.p4-dialog) .p4-pill.muted {
-  background: var(--surface-3, #222624);
-  color: var(--muted, #808983);
+  background: var(--surface-3, var(--surface-3));
+  color: var(--muted, var(--muted));
 }
 :is(.v2-gpu-shell.v2-gpu-shell, .p4-dialog.p4-dialog)
   :is(.p4-warning, .p4-pill.warm, .budget-account.warning) {
@@ -329,9 +329,9 @@
 }
 :is(.v2-gpu-shell.v2-gpu-shell, .p4-dialog.p4-dialog)
   :is(.p4-policies button[aria-pressed='true'], .p4-tabs button[aria-current='page']) {
-  background: var(--surface-3, #222624);
-  border-color: var(--accent, #cdf26e);
-  color: var(--ink, #f2f4f1);
+  background: var(--surface-3, var(--surface-3));
+  border-color: var(--accent, var(--accent));
+  color: var(--ink, var(--ink));
 }
 :is(.v2-gpu-shell.v2-gpu-shell, .p4-dialog.p4-dialog)
   :is(
@@ -347,17 +347,17 @@
   border-color: var(--line,rgba(255,255,255,.075));
 }
 :is(.v2-gpu-shell.v2-gpu-shell, .p4-dialog.p4-dialog) progress {
-  accent-color: var(--accent, #cdf26e);
-  background: var(--surface-3, #222624);
+  accent-color: var(--accent, var(--accent));
+  background: var(--surface-3, var(--surface-3));
 }
 :is(.v2-gpu-shell.v2-gpu-shell, .p4-dialog.p4-dialog) progress::-webkit-progress-bar {
-  background: var(--surface-3, #222624);
+  background: var(--surface-3, var(--surface-3));
 }
 :is(.v2-gpu-shell.v2-gpu-shell, .p4-dialog.p4-dialog) progress::-webkit-progress-value {
-  background: var(--accent, #cdf26e);
+  background: var(--accent, var(--accent));
 }
 :is(.v2-gpu-shell.v2-gpu-shell, .p4-dialog.p4-dialog) progress::-moz-progress-bar {
-  background: var(--accent, #cdf26e);
+  background: var(--accent, var(--accent));
 }
 
 .v2-gpu-shell.v2-gpu-shell .p4-heading h1 {
@@ -366,7 +366,7 @@
   gap: 10px;
 }
 .v2-gpu-shell.v2-gpu-shell .p4-heading h1 svg {
-  color: var(--accent, #cdf26e);
+  color: var(--accent, var(--accent));
 }
 .v2-gpu-shell.v2-gpu-shell .p4-extra-tools {
   display: flex;
@@ -381,7 +381,7 @@
 .v2-gpu-shell.v2-gpu-shell .p4-extra-tools summary {
   cursor: pointer;
   font-size: 12px;
-  color: var(--muted, #808983);
+  color: var(--muted, var(--muted));
   padding: 5px 0;
 }
 .v2-gpu-shell.v2-gpu-shell .p4-extra-tools details[open] {

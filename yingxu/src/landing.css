@@ -133,10 +133,10 @@
   color: rgba(255, 255, 255, 0.85);
 }
 .tone-a {
-  background: linear-gradient(160deg, #2b3a4a, #13202b 60%, #0d1418);
+  background: linear-gradient(160deg, #2b3a4a, #13202b 60%, var(--surface));
 }
 .tone-b {
-  background: linear-gradient(160deg, #4a3b26, #2a2016 60%, #15100b);
+  background: linear-gradient(160deg, #4a3b26, #2a2016 60%, var(--accent-ink));
 }
 .tone-c {
   background: linear-gradient(160deg, #3b2a44, #21172a 60%, #110c16);

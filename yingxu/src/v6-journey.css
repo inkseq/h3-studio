@@ -175,7 +175,7 @@
   min-width: 0;
   border: 1px solid #d6dfcb;
   border-radius: 8px;
-  background: #fff;
+  background: var(--white);
   color: #243d30;
   padding: 10px 12px;
   box-sizing: border-box;

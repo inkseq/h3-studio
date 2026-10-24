@@ -39,7 +39,7 @@
   height: 110px;
   display: grid;
   place-items: center;
-  background: #eef3ef;
+  background: var(--ink);
 }
 .qc-take-compare {
   display: grid;

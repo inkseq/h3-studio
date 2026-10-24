@@ -1,10 +1,10 @@
 /* Quick Chat v2: scoped to this route; original controls and receipts stay intact. */
 .qc-v2 {
-  --qc-ink: #f2f4f1;
+  --qc-ink: var(--ink);
   --qc-muted: #929c95;
   --qc-line: #ffffff16;
-  --qc-paper: #0b0c0c;
-  --qc-green: #cdf26e;
+  --qc-paper: var(--bg);
+  --qc-green: var(--accent);
   background: var(--qc-paper);
   color: var(--qc-ink);
   color-scheme: dark;
@@ -26,7 +26,7 @@
 .qc-v2 .qc-sidebar {
   top: 58px;
   width: 240px;
-  background: #131515;
+  background: var(--surface);
   padding: 16px 12px;
   gap: 10px;
 }
@@ -36,8 +36,8 @@
 }
 .qc-v2 .qc-sidebar .qc-new {
   margin: 0 0 8px;
-  background: #cdf26e;
-  color: #11160a;
+  background: var(--accent);
+  color: var(--accent-ink);
   border-color: transparent;
   font-weight: 650;
   justify-content: center;
@@ -47,14 +47,14 @@
   margin-left: 240px;
   padding-top: 58px;
   height: 100dvh;
-  background: #0b0c0c;
+  background: var(--bg);
 }
 .qc-v2 .qc-header {
   height: 52px;
   padding: 0 24px;
   border-bottom: 0;
   gap: 12px;
-  color: #bcc3bd;
+  color: var(--ink-2);
 }
 .qc-v2 .qc-header > span {
   flex: 1;
@@ -76,7 +76,7 @@
   line-height: 1.25;
   font-family: inherit;
   letter-spacing: -0.025em;
-  color: #f2f4f1;
+  color: var(--ink);
   margin: 14px 0;
 }
 .qc-v2 .qc-welcome p {
@@ -89,50 +89,50 @@
 .qc-v2 input,
 .qc-v2 select,
 .qc-v2 textarea {
-  color: #eef1ec;
-  background: #1c201e;
+  color: var(--ink);
+  background: var(--surface-2);
   border-color: #ffffff21;
 }
 .qc-v2 button:hover {
-  background: #2b302d;
+  background: var(--surface-4);
 }
 .qc-v2 a {
-  color: #cdf26e;
+  color: var(--accent);
 }
 .qc-v2 .qc-primary {
-  background: #cdf26e;
-  border-color: #cdf26e;
-  color: #11160a;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
   font-weight: 650;
 }
 .qc-v2 .qc-primary:hover {
   background: #dbf78f;
 }
 .qc-v2 .qc-avatar {
-  background: #2b3328;
-  color: #cdf26e;
+  background: var(--surface-4);
+  color: var(--accent);
   width: 32px;
   height: 32px;
 }
 .qc-v2 .qc-sidebar nav button.active {
   background: #cdf26e15;
-  color: #cdf26e;
+  color: var(--accent);
 }
 .qc-v2 .qc-sidebar nav button {
-  color: #bcc3bd;
+  color: var(--ink-2);
 }
 .qc-v2 .qc-sidebar .qc-agent-entry {
   margin-top: auto;
-  color: #bcc3bd;
+  color: var(--ink-2);
 }
 .qc-v2 .qc-composer-wrap {
   padding: 12px 24px 20px;
-  background: linear-gradient(transparent, #0b0c0c 18%);
+  background: linear-gradient(transparent, var(--bg) 18%);
   max-height: 56dvh;
 }
 .qc-v2 .qc-composer {
   max-width: 868px;
-  background: #191c1b;
+  background: var(--surface-2);
   border-color: #ffffff21;
   border-radius: 16px;
   box-shadow: 0 8px 24px #0003;
@@ -144,14 +144,14 @@
 .qc-v2 .qc-prompt {
   min-height: 58px;
   padding: 12px 2px;
-  color: #eef1ec;
+  color: var(--ink);
   background: transparent;
 }
 .qc-v2 .qc-input-head button,
 .qc-v2 .qc-chip,
 .qc-v2 .qc-badge {
-  background: #252b26;
-  color: #bcc3bd;
+  background: var(--surface-3);
+  color: var(--ink-2);
 }
 .qc-v2 .qc-input-head {
   gap: 8px;
@@ -165,7 +165,7 @@
 }
 .qc-v2 .qc-model-label select {
   background: transparent;
-  color: #bcc3bd;
+  color: var(--ink-2);
 }
 .qc-v2 .qc-footnote,
 .qc-v2 .qc-input-note,
@@ -175,16 +175,16 @@
 }
 .qc-v2 .qc-user-message {
   background: #263421;
-  color: #eef1ec;
+  color: var(--ink);
   border-radius: 14px 14px 3px 14px;
 }
 .qc-v2 .qc-assistant-text,
 .qc-v2 .qc-card-prompt {
-  color: #bcc3bd;
+  color: var(--ink-2);
 }
 .qc-v2 .qc-card,
 .qc-v2 .qc-result {
-  background: #131515;
+  background: var(--surface);
   border-color: #ffffff16;
   border-radius: 12px;
 }
@@ -202,8 +202,8 @@
 .qc-v2 .qc-status-placeholder,
 .qc-v2 .qc-material,
 .qc-v2 .qc-staged-file {
-  background: #1c201e;
-  color: #bcc3bd;
+  background: var(--surface-2);
+  color: var(--ink-2);
 }
 .qc-v2 .qc-preflight.ready,
 .qc-v2 .qc-notice {
@@ -218,7 +218,7 @@
 .qc-v2 .qc-availability {
   background: transparent;
   border-color: #ffffff16;
-  color: #bcc3bd;
+  color: var(--ink-2);
   font-size: 11px;
   padding: 8px;
 }
@@ -229,13 +229,13 @@
 }
 .qc-v2 .qc-card input,
 .qc-v2 .qc-card textarea {
-  background: #191c1b;
-  color: #eef1ec;
+  background: var(--surface-2);
+  color: var(--ink);
 }
 .qc-v2 .qc-take,
 .qc-v2 .qc-take-recipe {
-  background: #191c1b;
-  color: #bcc3bd;
+  background: var(--surface-2);
+  color: var(--ink-2);
 }
 @media (max-width: 760px) {
   .qc-v2 .qc-main {
@@ -318,8 +318,8 @@
   }
 }
 .qc-v2 .qc-dialog {
-  background: #131515;
-  color: #eef1ec;
+  background: var(--surface);
+  color: var(--ink);
   border: 1px solid #ffffff21;
   box-shadow: 0 24px 64px #0008;
 }
@@ -333,8 +333,8 @@
 .qc-v2 .qc-field input,
 .qc-v2 .qc-field select,
 .qc-v2 .qc-field textarea {
-  background: #191c1b;
-  color: #eef1ec;
+  background: var(--surface-2);
+  color: var(--ink);
   border-color: #ffffff21;
 }
 .qc-v2 .qc-dialog-footer,
@@ -343,23 +343,23 @@
 }
 .qc-v2 .qc-takes-strip button,
 .qc-v2 .qc-take-thumb {
-  background: #1c201e;
+  background: var(--surface-2);
   border-color: #ffffff21;
-  color: #bcc3bd;
+  color: var(--ink-2);
 }
 .qc-v2 .qc-takes-strip button[aria-pressed='true'] {
-  border-color: #cdf26e;
+  border-color: var(--accent);
   background: #cdf26e12;
 }
 .qc-v2 .qc-take-grid article {
-  background: #191c1b;
+  background: var(--surface-2);
   border-color: #ffffff21;
 }
 .qc-v2 .qc-take-grid article.selected {
-  outline-color: #cdf26e;
+  outline-color: var(--accent);
 }
 .qc-v2 .qc-take-placeholder {
-  background: #222624;
+  background: var(--surface-3);
   color: #929c95;
 }
 .qc-v2 .qc-deployment-field {
@@ -473,20 +473,20 @@
   overflow: auto;
 }
 .qc-v2 .qc-availability-mode {
-  background: #222624;
-  color: #bcc3bd;
+  background: var(--surface-3);
+  color: var(--ink-2);
 }
 .qc-v2 .qc-availability-mode.available {
-  color: #63d69e;
+  color: var(--good);
 }
 .qc-v2 .qc-availability-mode.unavailable {
-  color: #f3b65a;
+  color: var(--warn);
 }
 .qc-v2 .qc-availability-mode[aria-current='true'] {
   outline-color: #ffffff30;
 }
 .qc-v2 .qc-availability-actions a {
-  color: #cdf26e;
+  color: var(--accent);
 }
 .qc-v2 .qc-header .qc-connection-state {
   font-size: 12px;
@@ -557,8 +557,8 @@
 }
 
 .qc-v2 .qc-composer-bottom .qc-controls {
-  background: #222624;
-  color: #f2f4f1;
+  background: var(--surface-3);
+  color: var(--ink);
   border: 1px solid #ffffff21;
 }
 .qc-v2 .qc-mode-options {
@@ -575,12 +575,12 @@
   white-space: nowrap;
   font-size: 11px;
   padding: 5px 9px;
-  background: #191c1b;
-  color: #bcc3bd;
+  background: var(--surface-2);
+  color: var(--ink-2);
 }
 .qc-v2 .qc-mode-options button[aria-pressed='true'] {
   background: #cdf26e18;
-  color: #cdf26e;
+  color: var(--accent);
   border-color: #cdf26e40;
 }
 .qc-v2 .qc-connection-dot {
