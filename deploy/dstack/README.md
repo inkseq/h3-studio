@@ -44,6 +44,19 @@ separate B2 staging qualification. Lium and CloudRift remain outside this adapte
 allowlist until separately implemented and qualified. This upgrade does not enable
 another provider or change production credentials.
 
+#517 B2's public-image, single-pod derivative disables RunPod registry creation
+and account-wide credential cleanup. Secure-cloud creation uses REST v2;
+community-cloud creation uses GraphQL. Each sends one create with redirects
+turned off. Only typed validation performed before that request may advance to
+another offer; HTTP errors, lost/malformed replies and local failures after a
+successful create terminate that submission as unknown, preserving a validated
+original pod ID when available. No new native apply is inferred from that result.
+Private registries, network volumes, spot and cluster creation are outside this
+slice. The existing complete GraphQL inventory witness still requires staging
+parity against the exact original REST-created pod before provider acceptance.
+Version-2 provenance pins all eight sources; rollback recognizes only the exact
+retained six-source 0.22.3/0.22.5 tuples. No provider is enabled by these patches.
+
 Bind both source selections and protected execution/capacity configuration to
 `h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3`, with new configuration
 identities and an explicit default. This additive revision has a 29 GiB

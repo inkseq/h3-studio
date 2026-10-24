@@ -1944,6 +1944,18 @@ class DstackCapacity:
                 state="stopped", reason_code="dstack_run_terminal_billing_pending"
             )
             message = submission.get("termination_reason_message")
+            if (
+                binding.get("backend") == "runpod"
+                and isinstance(message, str)
+                and message.startswith("sixnine_runpod_outcome_v1:")
+            ):
+                # The original create may have allocated. A terminal native job
+                # is not provider absence, a free slot, or permission to reapply.
+                value.update(
+                    state="creation_unknown",
+                    reason_code="dstack_allocation_requires_reconciliation",
+                )
+                return value
             if isinstance(message, str) and message.startswith(
                 "sixnine_vast_attempts_v1:"
             ):

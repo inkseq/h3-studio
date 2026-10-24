@@ -461,6 +461,12 @@ jobs:
             -f deploy/dstack/Dockerfile.server-vast --label "org.opencontainers.image.revision=$GITHUB_SHA" \
             -t "sixnine-dstack:$GITHUB_SHA" .
           python -m unittest deploy.dstack.test_native_vast_safety -v
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true \
+            --memory 512m --cpus 1 \
+            --mount "type=bind,source=$PWD/deploy/dstack,target=/checks,readonly" \
+            --entrypoint /root/.local/share/uv/tools/dstack/bin/python \
+            "sixnine-dstack:$GITHUB_SHA" -B /checks/test_native_runpod_safety.py \
+            --installed-root /root/.local/share/uv/tools/dstack/lib/python3.11/site-packages -v
       - name: Verify explicitly selected prior native source preparation
         if: needs.changes.outputs.action == 'prepare-platform' && inputs.retain_native_sources_run != '' && inputs.retain_native_sources_transport != 's3'
         env:
