@@ -1059,6 +1059,10 @@ class StoryChatConnectionTests(unittest.TestCase):
         refused = reader.post("/v1/story-chats", json={})
         self.assertEqual(refused.status_code, 403)
         self.assertEqual(refused.json()["detail"]["code"], "story_chat_scope")
+        # Undo rewrites the story, so a read-only connection cannot undo (#490).
+        undo = reader.post("/v1/story-chats/x/undo", json={"turn_id": "tg-turn-0001"})
+        self.assertEqual(undo.status_code, 403)
+        self.assertEqual(undo.json()["detail"]["code"], "story_chat_scope")
 
     def test_card_pictures_stay_browser_only(self):
         bot = self.machine(["projects:read", "projects:write", "projects:create"])
