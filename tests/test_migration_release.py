@@ -795,6 +795,7 @@ class MigrationArtifacts(unittest.TestCase):
         self,
     ):
         expected_commits = {
+            '20ab3dfd308800daad10a3ce8ac060da342b164a',
             '5c01b159781729b6c34379b4f4383b88364426fb',
             '32d1ec4f7e40adca65b2563b5ea11810dd223039',
             'fcd3ce618dbbf2a4f0dad4ee09e0c74121c4f69c',
@@ -825,6 +826,7 @@ class MigrationArtifacts(unittest.TestCase):
             set(maintenance.RETAINED_DSTACK_HELPER_PAIRS), expected_commits
         )
         for commit in (
+            '20ab3dfd308800daad10a3ce8ac060da342b164a',
             '5c01b159781729b6c34379b4f4383b88364426fb',
             '32d1ec4f7e40adca65b2563b5ea11810dd223039',
         ):
