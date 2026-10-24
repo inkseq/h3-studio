@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { LanguageSwitcher, useI18n } from './i18n/I18nProvider.jsx';
 import { navigateApp } from './app-navigation.js';
+import { currentSupportView, endSupportView } from './support-view.js';
 import { accountLabel, readAccess, readAccessFor } from './account-access.js';
 import { CreditsChip } from './CreditsUI.jsx';
 import AccountMenu from './AccountMenu.jsx';
@@ -88,8 +89,20 @@ export default function StudioHeader({
       : []),
   ];
   // Port of prototype pages.jsx/AppHeader. Only navigation and account data differ.
+  const supportView = currentSupportView();
   return (
     <>
+      {supportView && (
+        <div className="preview-as-user-bar support-view-bar" role="status">
+          {t('menu.supportView', {
+            name: supportView.display_name || supportView.owner,
+            minutes: Math.max(1, Math.round((supportView.expires_at - Date.now() / 1000) / 60)),
+          })}
+          <button type="button" className="small" onClick={() => void endSupportView()}>
+            {t('menu.supportViewEnd')}
+          </button>
+        </div>
+      )}
       {access?.previewing && (
         <div className="preview-as-user-bar" role="status">
           {t('menu.previewing')}

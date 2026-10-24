@@ -7,6 +7,7 @@ import { ChevronDown, History } from 'lucide-react';
 import { createCloudClient } from './cloud-client.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { apiDate, formatCredits } from './credits.js';
+import { rememberSupportView } from './support-view.js';
 import './admin.css';
 
 export function useClient(account) {
@@ -180,6 +181,28 @@ export function AdminUsers({ api, active }) {
                   {t('admin.adjust')}
                 </button>
                 <span className="user-adjust-actions">
+                  {user.role !== 'admin' && (
+                    <button
+                      type="button"
+                      className="ghost small"
+                      disabled={busy || !reason.trim()}
+                      title={t('admin.viewAsHelp')}
+                      onClick={async () => {
+                        try {
+                          const view = await api.request('/v1/admin/support-views', {
+                            method: 'POST',
+                            body: { user_id: user.id, reason: reason.trim() },
+                          });
+                          rememberSupportView(view);
+                          window.location.assign('/');
+                        } catch (failure) {
+                          setNotice(failure.message);
+                        }
+                      }}
+                    >
+                      {t('admin.viewAs')}
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="ghost small"

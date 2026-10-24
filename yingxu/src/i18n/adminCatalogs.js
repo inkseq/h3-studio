@@ -1,6 +1,9 @@
 // Settings → Admin (#304).
 export const adminCatalogs = {
   en: {
+    'admin.viewAs': 'View as this user (read-only)',
+    'admin.viewAsHelp':
+      'Opens their account read-only for 30 minutes in this tab. Fill in the reason first; it is recorded in the activity log.',
     'adminHome.stats': 'Generation stats',
     'adminHome.stats.days': '{count} days',
     'adminHome.stats.notDeployed': 'Generation stats are not deployed on this server yet.',
@@ -162,6 +165,9 @@ export const adminCatalogs = {
     'admin.noAudit': 'No admin actions yet.',
   },
   zh: {
+    'admin.viewAs': '以 TA 的身份只读查看',
+    'admin.viewAsHelp':
+      '在当前标签页只读打开 TA 的账户，30 分钟后自动结束。请先填写原因，会记入操作记录。',
     'adminHome.stats': '生成统计',
     'adminHome.stats.days': '{count} 天',
     'adminHome.stats.notDeployed': '这个服务器还没有部署生成统计。',
