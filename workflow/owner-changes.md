@@ -382,8 +382,9 @@ same-day production activation; the read-only classification is not a gate.
 Widen ordinary queue, per-owner request and transient-admission retry limits by a
 large margin, retaining protection against extreme anomalies. This does not waive
 authentication, ownership, CAS, idempotency, immutable accepted work or the separate
-USD20 test-task budget. Never stop, restart or modify supervan's production machines
-or jobs. Production charging and LIVE Checkout remain OFF.
+USD20 test-task budget. The prohibition on operating supervan's production machines
+or jobs is superseded only for recoverable incident handling by CR-20261024-60 below.
+Production charging and LIVE Checkout remain OFF.
 
 Per [#517/6380346694](https://github.com/inkseq/h3-studio/issues/517#issuecomment-6380346694),
 B1's stock-pinned dstack0.22.3 to0.22.5 upgrade starts alongside A2. Stage it and run
@@ -394,3 +395,32 @@ missing/new credentials, provider accounts or budget overruns still require owne
 action. Production enablement of each new provider remains a separate decision.
 Keep Tier2 independent safety review and exact-artifact receipts; no new service,
 queue or financial repair is implied. Source: direct owner instruction2026-10-24.
+
+## CR-20261024-60 — recoverable abnormal-machine stops and upgrade priority
+
+The owner first authorized stopping the stuck node `1c2db2ac` / Vast instance
+`57459470`, confirming provider removal without waiting indefinitely for the
+unreachable worker to drain, and failing the original job `9ef33766` through normal
+reconciliation without automatic retry; supervan will resubmit. Keep queued job
+`569a6d94`. Source: [#193/6381680638](https://github.com/inkseq/h3-studio/issues/193#issuecomment-6381680638).
+
+The owner's subsequent direct instruction authorizes stopping abnormal machines,
+including production machines, without a separate per-stop question, provided
+accepted tasks and queued work remain recoverable. This narrowly supersedes CR59's
+blanket production-machine prohibition, including for supervan's machines; it does
+not authorize discarding accepted work. Give upgrades priority when production is
+recoverable, without adding another approval or process gate.
+
+The latest owner follow-up reports that the machine was manually stopped and asks
+to return to development. Do not issue a duplicate incident command or make further
+incident diagnosis an unnecessary prerequisite for development and upgrades;
+preserve the durable queue/task recovery state and original receipts.
+
+Preserve original jobs, attempts, operation IDs, recoverable queue/task state and
+R2 assets. Check uncertain lifecycle or generation results against their original
+receipts before further action; never blindly replay generation, rentals, stops,
+settlements or releases. Retain confirmed spend and unknown supplier liabilities
+separately. Charging and LIVE Checkout stay OFF; cost caps, the USD20 test-task
+budget, max_price, idle/max-runtime safeguards and existing release/rollback
+mechanisms remain unchanged. Source: direct owner instructions2026-10-24 and the
+linked #193 decision; incident results remain in the original issue receipts.
