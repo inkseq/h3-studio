@@ -88,12 +88,18 @@ def validate_workos(document):
 
 
 def validate_error_monitoring(document, *, target):
-    """Only API errors may leave the app, to the one owner-created project."""
+    """API errors and closed controller reclaim events use the owner project."""
     approved = "https://7339f473c737f7b493b03da92a2bb925@o4512306171019264.ingest.us.sentry.io/4512306334728192"
     for name, service in document['services'].items():
         env = service.get('environment', {})
-        require(name == 'app' or 'INKSEQ_SENTRY_DSN' not in env,
+        require(name in {'app', 'controller'} or 'INKSEQ_SENTRY_DSN' not in env,
                 'migration_api_error_monitoring_outside_app')
+        if name == 'controller':
+            selected = env.get('INKSEQ_SENTRY_DSN', '')
+            require(type(selected) is str and selected in {'', approved},
+                    'migration_api_error_monitoring_destination_invalid')
+            require(not selected or env.get('INKSEQ_DEPLOYMENT_TARGET') == target,
+                    'migration_api_error_monitoring_target_invalid')
     env = document['services']['app'].get('environment', {})
     selected = env.get('INKSEQ_SENTRY_DSN', '')
     require(type(selected) is str and selected in {'', approved},

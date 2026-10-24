@@ -19,6 +19,7 @@ from .host_policy import (
     HostPolicyStore,
     REASONS,
     bound_observation,
+    capacity_failure,
     failure,
     finite,
     numeric_id,
@@ -340,6 +341,10 @@ class OperatorHosts:
                 failed_nodes.add(node["intent_id"])
             except ValueError:
                 pass
+            recovered = capacity_failure(node, now=now)
+            if recovered is not None:
+                execution_failures.append(recovered)
+                failed_nodes.add(node["intent_id"])
             observed = (failed or {}).get(node["intent_id"], [])
             execution_failures.extend(observed)
             if observed:

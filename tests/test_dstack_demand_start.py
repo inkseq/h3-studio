@@ -21,6 +21,38 @@ import test_dstack_operator as original
 
 
 class DemandStartTests(LedgerCase):
+    def test_startup_replacement_advances_without_supplier_removal_proof(self):
+        from studio_platform.capacity_watchdog import reclaim_node
+        from studio_platform.repository import instance_intents
+
+        self.enabled()
+        job = self.accepted()
+        first = start_once(self.service)
+        self.assertEqual(first['state'], 'accepted')
+        self.now += 1201
+        with self.repo.engine.connect() as connection:
+            node = dict(connection.execute(select(operator_nodes)).mappings().one())
+            intent = dict(connection.execute(select(instance_intents)).mappings().one())
+        recovered = reclaim_node(self.service, node, intent)
+        self.assertTrue(recovered['stop_requested'])
+        self.assertIsNone(self.store.load(node['intent_id']).get('provider_removal_proof'))
+        waiting = start_once(self.service)
+        self.assertEqual(waiting['reason_code'], 'backoff')
+        self.now += 61
+        second = start_once(self.service)
+        self.assertEqual(second['state'], 'accepted')
+        self.assertNotEqual(second['node_id'], first['node_id'])
+        self.assertEqual(self.repo.get_job(self.scope, job['id'])['status'], 'queued')
+        self.assertEqual(len(self.client.applied), 2)
+
+    def test_demand_does_not_spend_when_actual_registration_cap_is_disabled(self):
+        self.enabled()
+        self.accepted()
+        self.repo.configure_capacity(max_instances=0, max_physical_gpus=0)
+        result = start_once(self.service)
+        self.assertEqual((result['state'], result['reason_code']), ('blocked', 'capacity_limit'))
+        self.assertEqual(self.client.applied, [])
+
     def setUp(self):
         super().setUp()
         original.DstackOperatorTests._setup_dstack(self)

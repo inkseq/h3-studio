@@ -775,3 +775,9 @@ inventory.json
 !tools/apply_approved_quick_chat_stories.py
 !tests/test_quick_chat_production_migration.py
 !docs/QUICK-CHAT-PRODUCTION-ADOPTION.md
+
+# Fenced recovery of original generation jobs; no runtime receipts.
+!studio_platform/capacity_reclaim.py
+!studio_platform/capacity_watchdog.py
+!tests/test_capacity_reclaim.py
+!tests/test_capacity_watchdog.py

@@ -201,6 +201,17 @@ class GenerationRead:
             visible.get('result'),
             hide_dollars=hide_dollar_estimate(job['execution_plan'], principal),
         )
+        from .capacity_reclaim import history
+
+        visible["capacity_reclaim_count"] = history(job)[0]
+        if isinstance(visible["result"], dict):
+            # Internal fencing evidence and engine heartbeat are not client
+            # authoring fields. The bounded count is the public contract.
+            visible["result"] = {
+                key: value
+                for key, value in visible["result"].items()
+                if key not in {"capacity_reclaims", "capacity_progress"}
+            }
         visible.update(
             **public_quote(job["execution_plan"]),
             client_ref=stored_request.get("client_ref", {}),

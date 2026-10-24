@@ -94,7 +94,7 @@ def _terminal_review_candidate(run, binding, project):
 
 
 class DstackController:
-    def __init__(self, service, runtime, *, worker_process=None, telemetry=None):
+    def __init__(self, service, runtime, *, worker_process=None, telemetry=None, reclaim_reporter=None):
         if service.capacity is None:
             raise ValueError("dstack_capacity_disabled")
         self.service, self.repo, self.runtime = service, service.repo, runtime
@@ -104,6 +104,7 @@ class DstackController:
             self.repo, capacity_usage=service.registration_capacity_usage
         )
         self.worker_process = worker_process
+        self.reclaim_reporter = reclaim_reporter
         # The existing original-row writer publishes bounded allocation facts.
         # Import/construction stays offline; only the explicit entry point loads
         # the already mounted Cloud configuration. Export never owns state.
@@ -686,6 +687,23 @@ class DstackController:
             if reviewed_instance_fenced(connection, intent, current):
                 return {"node_id": intent_id, "state": "stopped"}
         binding = self.capacity.store.load(intent_id)
+        from .capacity_watchdog import fenced_node_stop, reclaim_node, report_reclaims
+
+        recovery = reclaim_node(self.service, current, intent)
+        if recovery["stop_requested"]:
+            report_reclaims(self.service, intent_id, recovery["receipts"], self.telemetry, self.reclaim_reporter)
+            # Original attempt fence is committed before termination. An absent
+            # provider receipt cannot delay the same job's replacement demand.
+            with self.repo.engine.connect() as connection:
+                fenced = dict(connection.execute(select(operator_nodes).where(
+                    operator_nodes.c.intent_id == intent_id
+                )).mappings().one())
+                permitted = fenced_node_stop(connection, fenced, intent)
+            if permitted:
+                if self.worker_process:
+                    self.worker_process.stop(intent_id)
+                result = self.capacity.stop(intent_id)
+                return {"node_id": intent_id, "state": result["state"], "code": recovery["reason"]}
         funded = True
         if (
             node["payload"].get("lifecycle", {}).get("version") == 2
@@ -1021,6 +1039,10 @@ class DstackController:
             self._passive_unknown.clear()
         for node in self._nodes():
             try:
+                if node["payload"].get("capacity_watchdog"):
+                    from .capacity_watchdog import report_reclaims
+
+                    report_reclaims(self.service, node["intent_id"], None, self.telemetry, self.reclaim_reporter)
                 if self._passive_matches(node):
                     continue
                 # A task terminal is not an invoice or provider destruction proof.
@@ -1220,6 +1242,7 @@ def main(argv=None):
     runtime = None
     processes = None
     telemetry = None
+    error_client = None
     durable_executor = None
     try:
         service = from_environment(repo, settings)
@@ -1263,8 +1286,12 @@ def main(argv=None):
         else:
             processes = SlotProcesses(work_dir).__enter__()
         telemetry = configured_telemetry()
+        from .error_monitoring import create_client, report_capacity_reclaim
+
+        error_client = create_client(settings)
         controller = DstackController(
-            service, runtime, worker_process=processes, telemetry=telemetry
+            service, runtime, worker_process=processes, telemetry=telemetry,
+            reclaim_reporter=(lambda receipt: report_capacity_reclaim(error_client, receipt)) if error_client.dsn else None,
         )
         stop = threading.Event()
         if threading.current_thread() is threading.main_thread():
@@ -1294,6 +1321,8 @@ def main(argv=None):
         finally:
             wakeup.close()
     finally:
+        if error_client is not None:
+            error_client.close()
         # Closing local tunnels is safe; durable original attempts remain
         # recoverable. Do not translate process shutdown into paid-host stop.
         try:

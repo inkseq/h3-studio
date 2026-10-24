@@ -869,12 +869,15 @@ class LedgerDstackStore:
                 else []
             )
             worker_ids = [worker["id"] for worker in workers]
+            from .capacity_watchdog import fenced_node_stop
+
+            watchdog_stop = fenced_node_stop(connection, node, intent)
             if workers and any(
                 worker["state"] != "retired" or worker["current_job_id"]
                 for worker in workers
-            ):
+            ) and not watchdog_stop:
                 return False
-            if worker_ids:
+            if worker_ids and not watchdog_stop:
                 from .control import WorkerControl
 
                 relevant = jobs.outerjoin(attempts, jobs.c.id == attempts.c.job_id)
@@ -926,6 +929,7 @@ class LedgerDstackStore:
             )
             if (
                 not retry
+                and not watchdog_stop
                 and not cold_unadmitted
                 and (
                     launch_started

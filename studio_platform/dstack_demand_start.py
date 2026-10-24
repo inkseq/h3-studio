@@ -152,6 +152,22 @@ def _ended_with_proof(node):
     )
 
 
+def _ended_for_replacement(connection, node):
+    if _ended_with_proof(node):
+        return True
+    if node is None or node['desired_state'] != 'stopped':
+        return False
+    from .capacity_watchdog import fenced_node_stop
+    from .repository import instance_intents
+
+    intent = connection.execute(select(instance_intents).where(
+        instance_intents.c.id == node['intent_id']
+    )).mappings().one()
+    # Execution fencing permits replacement immediately. This does not alter
+    # prior rental usage/reservations or manufacture physical removal evidence.
+    return fenced_node_stop(connection, node, intent)
+
+
 def _write(connection, row, payload, now):
     connection.execute(
         update(operator_commands)
@@ -267,7 +283,7 @@ def _claim(service):
                     .mappings()
                     .first()
                 )
-                if _ended_with_proof(node):
+                if _ended_for_replacement(connection, node):
                     timed_out = (
                         node['payload'].get('stop_reason_code') == DOWNLOAD_TIMEBOX
                     )
@@ -306,10 +322,14 @@ def _claim(service):
                 for item in usage['observations']
                 if item['counted']
             }
+            uncertainty = {
+                n['intent_id'] for n in _nodes(connection, tenant)
+                if n['intent_id'] in counted and not _ended_for_replacement(connection, n)
+            }
             stages = [
                 node_stage(n, now) or 'unknown'
                 for n in _nodes(connection, tenant)
-                if n['intent_id'] in counted
+                if n['intent_id'] in uncertainty
             ]
             if 'unknown' in stages or any(
                 item['reason_code']
@@ -317,7 +337,7 @@ def _claim(service):
                     'dstack_capacity_unconfirmed',
                     'dstack_terminal_provider_unconfirmed',
                 }
-                for item in counted.values()
+                for identity, item in counted.items() if identity in uncertainty
             ):
                 payload.update(
                     phase='backoff',
@@ -329,6 +349,18 @@ def _claim(service):
             max_instances, max_gpus = service.machine_limits(
                 connection, for_demand=True
             )
+            # Admission must fit the actual worker registration ceiling, not
+            # only the separate operator policy. Otherwise we pay for a ready
+            # machine which the control plane is known to refuse afterwards.
+            from .repository import capacity_gate
+
+            registration = connection.execute(select(capacity_gate).where(
+                capacity_gate.c.id == 'global'
+            )).mappings().first()
+            if registration is None:
+                return _result('blocked', 'capacity_limit'), None
+            max_instances = min(max_instances, registration['max_instances'])
+            max_gpus = min(max_gpus, registration['max_physical_gpus'])
             if (
                 usage['instances'] >= max_instances
                 or usage['physical_gpus'] >= max_gpus

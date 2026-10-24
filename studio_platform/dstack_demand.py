@@ -282,17 +282,23 @@ def eligible_jobs(service, connection, now):
             service.repo, job["tenant_id"], job["pool"], execution["configuration_id"]
         ):
             continue
-        unresolved = connection.execute(
-            select(attempts.c.id)
-            .where(
-                attempts.c.job_id == job["id"],
-                attempts.c.submission_started_at.is_not(None),
-                (attempts.c.upstream_stopped != 1)
-                | attempts.c.upstream_stopped.is_(None),
+        from .capacity_reclaim import authorized_lost_attempt
+
+        unresolved = (
+            connection.execute(
+                select(attempts)
+                .where(
+                    attempts.c.job_id == job["id"],
+                    attempts.c.submission_started_at.is_not(None),
+                    (attempts.c.upstream_stopped != 1)
+                    | attempts.c.upstream_stopped.is_(None),
+                )
+                .limit(4)
             )
-            .limit(1)
-        ).first()
-        if unresolved:
+            .mappings()
+            .all()
+        )
+        if any(not authorized_lost_attempt(job, previous) for previous in unresolved):
             continue
         try:
             policy = selected_policy(

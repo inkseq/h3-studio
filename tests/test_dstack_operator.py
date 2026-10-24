@@ -1018,6 +1018,8 @@ class DstackLifetimeTests(LedgerCase):
     def test_cold_paid_elapsed_is_funded_before_native_callback_without_second_apply(
         self,
     ):
+        # Exercise funding independently of the owner-configurable startup cap.
+        self.settings.capacity_startup_timeout_seconds = 86400
         node = self.start()['node_id']
         self.capacity.readiness = None
         self.running(node)
@@ -1175,6 +1177,7 @@ class DstackLifetimeTests(LedgerCase):
         self.assertEqual(self.client.stopped, [])
 
     def test_always_cannot_bypass_money_cap_cold_stop_keeps_reserved_unknown_bill(self):
+        self.settings.capacity_startup_timeout_seconds = 86400
         node = self.start(preview=self.preview(keep_on='until_stopped'))['node_id']
         self.capacity.readiness = None
         self.running(node)
