@@ -30,11 +30,14 @@ function defaultSpendingConfirmation(detail, account) {
   );
 }
 export class CloudError extends Error {
-  constructor(message, { status = 0, detail = null } = {}) {
+  constructor(message, { status = 0, detail = null, quiet = false } = {}) {
     super(message);
     this.name = 'CloudError';
     this.status = status;
     this.detail = detail;
+    // A read dropped because the account changed or the page moved on: nothing was
+    // lost, so pages refresh instead of showing an error (owner, 2026-10-25).
+    this.quiet = quiet;
   }
 }
 export function safeCloudPath(path) {
@@ -210,8 +213,12 @@ export function createCloudClient({
         releaseRead = typeof slot === 'function' ? slot : await slot;
       }
       let spendingConfirmed = false;
+      const accountChanged = () =>
+        new CloudError(ui('client.accountChanged', expectedAccount), {
+          quiet: method === 'GET',
+        });
       for (let attempt = 0; ; attempt++) {
-        if (current !== epoch) throw new CloudError(ui('client.accountChanged', expectedAccount));
+        if (current !== epoch) throw accountChanged();
         if (controller.signal.aborted) throw abortError();
         const response = await fetcher(target, {
           method,
@@ -221,7 +228,7 @@ export function createCloudClient({
           signal: controller.signal,
           ...(body !== undefined ? { body: encodedBody } : {}),
         });
-        if (current !== epoch) throw new CloudError(ui('client.accountChanged', expectedAccount));
+        if (current !== epoch) throw accountChanged();
         const responseAccount = response.headers.get('X-Authenticated-Account');
         if (
           expectedAccount &&
@@ -326,7 +333,7 @@ export function createCloudClient({
           : response.status === 204
             ? null
             : await response.json();
-        if (current !== epoch) throw new CloudError(ui('client.accountChanged', expectedAccount));
+        if (current !== epoch) throw accountChanged();
         if (method !== 'GET' && !anonymous) announce(CREDITS_CHANGED);
         return result;
       }
@@ -345,7 +352,8 @@ export function createCloudClient({
             expectedAccount,
           ),
         );
-      if (error.name === 'AbortError') throw new CloudError(ui('client.aborted', expectedAccount));
+      if (error.name === 'AbortError')
+        throw new CloudError(ui('client.aborted', expectedAccount), { quiet: method === 'GET' });
       throw new CloudError(ui('client.offline', expectedAccount));
     } finally {
       clearTimeout(timer);
