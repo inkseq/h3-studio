@@ -1283,6 +1283,8 @@ test('late project page cannot reappear after context invalidation', async () =>
     h.controller.getState().projects.some((p) => p.id === 'late'),
     false,
   );
+  // Dropping a stale read is expected, not an error the person must dismiss.
+  assert.equal(h.controller.getState().error, '');
   h.controller.destroy();
 });
 test('request timeout aborts once without retrying and project pagination uses explicit bounds', async () => {

@@ -390,7 +390,7 @@ export function createCloudController({
               ...projectOpenFailure(error),
             },
           });
-      } else emit({ error: error.message });
+      } else if (!error?.quiet) emit({ error: error.message });
       throw error;
     } finally {
       operation = false;
@@ -406,7 +406,7 @@ export function createCloudController({
   const accountContext = () => ({ epoch, account: state.account });
   const guardAccount = (ctx) => {
     if (!ctx.account || ctx.epoch !== epoch || ctx.account !== state.account)
-      throw Error('账户已经改变，旧账户列表没有写入。');
+      throw Object.assign(Error('账户已经改变，旧账户列表没有写入。'), { quiet: true });
   };
   async function reloadProjects({ replace = false } = {}) {
     const ctx = accountContext(),
@@ -1881,7 +1881,7 @@ export function createCloudController({
         emit({ auth });
         await recheckSession({ loadLists: true });
       } catch (error) {
-        if (observedEpoch === epoch) emit({ error: error.message });
+        if (observedEpoch === epoch && !error?.quiet) emit({ error: error.message });
       } finally {
         emit({ sessionReady: true });
       }
@@ -2261,7 +2261,7 @@ export function createCloudController({
             await checkRemoteVersion();
           }
         } catch (error) {
-          if (!stopped) emit({ error: error.message });
+          if (!stopped && !error?.quiet) emit({ error: error.message });
         }
         if (!stopped) timer = setTimeout(tick, 5000);
       };
