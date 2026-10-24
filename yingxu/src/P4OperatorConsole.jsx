@@ -1093,11 +1093,26 @@ function StopDialog({ target, kind, controller, busy, onClose }) {
     setWorking(true);
     setError('');
     try {
-      setReceipt(
-        kind === 'group'
-          ? await controller.groupStop(target, impact)
-          : await controller.stop(target, impact),
-      );
+      // A running node's version moves with every observation (every few seconds), so a stop
+      // can lose the race. Retry with a fresh impact while the person's choice still holds:
+      // same warnings they confirmed. Anything else goes back to them.
+      let current = impact;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          setReceipt(
+            kind === 'group'
+              ? await controller.groupStop(target, current)
+              : await controller.stop(target, current),
+          );
+          break;
+        } catch (error) {
+          if (attempt >= 3 || !String(error.message).includes('operator_node_version_conflict'))
+            throw error;
+          const next = await controller.stopImpact(kind, target.id);
+          if ((next?.warnings?.length || 0) !== (current?.warnings?.length || 0)) throw error;
+          current = next;
+        }
+      }
     } catch (error) {
       setError(error.message);
       setImpact(null);
