@@ -1,6 +1,7 @@
 """Additive host release boundaries; synthetic artifacts/fake Docker only."""
 
 from contextlib import ExitStack, contextmanager
+import copy
 import gzip
 import hashlib
 import importlib.util
@@ -127,7 +128,7 @@ class MigrationArtifacts(unittest.TestCase):
         }
         checked["installed"] = {
             "patched_sources": 6,
-            "dstack_version": "0.22.3",
+            "dstack_version": "0.22.5",
             "upstream_commit": provenance["dstack_upstream_commit"],
             "helper_sha256": checked["helper_sha256"],
             "original_sources": {
@@ -308,6 +309,56 @@ class MigrationArtifacts(unittest.TestCase):
         ):
             maintenance.dstack_image(directory, self.value, {}, load=True)
         command.assert_not_called()
+
+    def test_only_complete_old_and_new_native_stock_tuples_are_accepted(self):
+        path = self.artifact / "dstack-native-provenance.json"
+        original = json.loads(path.read_text())
+        self.assertEqual(builder.DSTACK_STOCK, maintenance.DSTACK_STOCK)
+        self.assertEqual(
+            builder.DSTACK_SHARED_SOURCE_HASHES, maintenance.DSTACK_SHARED_SOURCE_HASHES
+        )
+        for version, (commit, image, backend_hash) in maintenance.DSTACK_STOCK.items():
+            valid = copy.deepcopy(original)
+            valid["base_image"] = image
+            installed = valid["installed"]
+            installed.update(dstack_version=version, upstream_commit=commit)
+            installed["original_sources"] = {
+                **maintenance.DSTACK_SHARED_SOURCE_HASHES,
+                "dstack/_internal/server/services/backends/__init__.py": backend_hash,
+            }
+            path.write_text(json.dumps(valid))
+            self.assertEqual(
+                maintenance.dstack_provenance(self.artifact, self.value)["installed"],
+                installed,
+            )
+            other = next(
+                value
+                for key, value in maintenance.DSTACK_STOCK.items()
+                if key != version
+            )
+            for mutation in ("version", "commit", "base", "source", "unknown_base"):
+                invalid = copy.deepcopy(valid)
+                if mutation == "version":
+                    invalid["installed"]["dstack_version"] = "0.22.4"
+                elif mutation == "commit":
+                    invalid["installed"]["upstream_commit"] = other[0]
+                elif mutation == "base":
+                    invalid["base_image"] = other[1]
+                elif mutation == "source":
+                    invalid["installed"]["original_sources"][
+                        "dstack/_internal/server/services/backends/__init__.py"
+                    ] = other[2]
+                else:
+                    invalid["base_image"] = image.split("@")[0] + "@sha256:" + "0" * 64
+                path.write_text(json.dumps(invalid))
+                with (
+                    self.subTest(version=version, mutation=mutation),
+                    self.assertRaisesRegex(
+                        release.ReleaseError, "migration_dstack_provenance_invalid"
+                    ),
+                ):
+                    maintenance.dstack_provenance(self.artifact, self.value)
+        path.write_text(json.dumps(original))
 
     def test_legacy_artifact_has_no_derivative_fallback_or_extra_file_acceptance(self):
         legacy = dict(self.value)

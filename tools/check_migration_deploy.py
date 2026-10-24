@@ -23,7 +23,8 @@ except ImportError:
     from deploy.platform import deployment_target
 
 ROOT = Path(__file__).resolve().parents[1]
-DSTACK_IMAGE = "dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc1682dc2169075c6210d2ec873146f1ad8"
+DSTACK_IMAGE = "dstackai/dstack:0.22.5@sha256:8dc2c8a5ee348789b1ed1621bc75b31c156adf31d849fded29508cfc21b279e4"
+LEGACY_DSTACK_IMAGE = "dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc1682dc2169075c6210d2ec873146f1ad8"
 HATCHET_IMAGE = "ghcr.io/hatchet-dev/hatchet/hatchet-lite:v0.110.5@sha256:cc81f078a5285d7d2051ec4a4fa459d033e1face4ca5983d82612b00da6e3fa3"
 CPU_SHARED = ("dstack", "hatchet", "dispatch", "controller")
 PROBE = """import json,pathlib,urllib.request,urllib.error
@@ -241,7 +242,7 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, targe
             and all(not {"PUBLIC_ORIGIN", "PUBLIC_ORIGIN_ALIASES"} & set(services[name].get("environment", {}))
                 for name in business if name != "app"), "migration_public_origin_split")
         require(not services["caddy"].get("environment"), "migration_domain_redirect_phase_invalid")
-    require(dstack_image == DSTACK_IMAGE or re.fullmatch(r"sixnine-dstack:[0-9a-f]{40}@sha256:[0-9a-f]{64}", dstack_image),
+    require(dstack_image in {DSTACK_IMAGE, LEGACY_DSTACK_IMAGE} or re.fullmatch(r"sixnine-dstack:[0-9a-f]{40}@sha256:[0-9a-f]{64}", dstack_image),
             "migration_dstack_image_binding_invalid")
     require(services["dstack"]["image"] == dstack_image and (modern or services["hatchet"]["image"] == HATCHET_IMAGE),
             "migration_infrastructure_image_changed")

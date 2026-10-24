@@ -1,4 +1,4 @@
-# One build-only patch in the existing dstack0.22.3 Python environment; no deps.
+# One build-only patch in the existing dstack0.22.5 Python environment; no deps.
 # https://pypi.org/pypi/certifi/2026.10.19/json
 certifi==2026.10.19 \
     --hash=sha256:42d35340cc5b9ba78e818ddbff0c5b1c2b779de448a340fd1b989f5fa8670e1b

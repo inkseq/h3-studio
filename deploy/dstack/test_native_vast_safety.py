@@ -312,7 +312,7 @@ class NativeVastSafetyTests(unittest.TestCase):
 
     def test_source_provenance_is_closed_and_complete(self):
         data = json.loads((HERE / "native-vast-provenance.json").read_text())
-        self.assertEqual(data["dstack_version"], "0.22.3")
+        self.assertEqual(data["dstack_version"], "0.22.5")
         self.assertEqual(len(data["sources"]), 6)
         for path, source in data["sources"].items():
             self.assertNotIn("..", Path(path).parts)
@@ -340,7 +340,7 @@ class NativeVastSafetyTests(unittest.TestCase):
                 target = root / path;target.parent.mkdir(parents=True, exist_ok=True)
                 original = next(cache / path.replace("/", "__") for cache in CACHES if (cache / path.replace("/", "__")).is_file())
                 target.write_bytes(original.read_bytes())
-            with patch.object(installer.importlib.metadata, "version", return_value="0.22.3"):
+            with patch.object(installer.importlib.metadata, "version", return_value="0.22.5"):
                 self.assertEqual(installer.install(root, check_only=True), {"checked_sources": 6, "writes": 0})
                 before = {path: (root / path).read_bytes() for path in sources}
                 first = next(iter(sources));(root / first).write_bytes(b"drift")

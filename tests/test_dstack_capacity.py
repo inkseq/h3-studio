@@ -904,7 +904,7 @@ class DstackCapacityTests(unittest.TestCase):
                 request(**fields)
 
     def test_pinned_model_parsed_response_is_compatible(self):
-        # Optional SDK check, also run explicitly with dstack==0.22.3 locally.
+        # Optional SDK check, also run explicitly with the pinned 0.22.5 image.
         try:
             from dstack._internal.core.models.configurations import TaskConfiguration
         except ImportError:

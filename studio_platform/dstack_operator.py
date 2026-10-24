@@ -149,7 +149,7 @@ def _cold_unadmitted_runtime(binding, workers, instance_id, now, fresh_seconds):
 
 
 def plan_offers(plan, request):
-    """Project pinned 0.22.3 offers; no backend_data, SSH or user/job payload."""
+    """Project pinned 0.22.5 offers; no backend_data, SSH or user/job payload."""
     require(
         isinstance(plan, dict)
         and isinstance(plan.get("job_plans"), list)

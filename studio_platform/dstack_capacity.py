@@ -27,7 +27,7 @@ import httpx
 
 from .inference.wangp_contract import HostReadiness, safe_model_progress
 
-DSTACK_VERSION = "0.22.3"
+DSTACK_VERSION = "0.22.5"
 BACKENDS = frozenset({"vastai", "runpod"})
 OWNER = "sixnine"
 SHA256 = re.compile(r"[0-9a-f]{64}")
@@ -141,7 +141,7 @@ def native_preparation(value):
 
 
 def image_preparation(submission):
-    """Pinned dstack 0.22.3 ImagePullProgress; no Docker text or image URLs."""
+    """Pinned dstack 0.22.5 ImagePullProgress; no Docker text or image URLs."""
     raw = (
         submission.get("image_pull_progress") if isinstance(submission, dict) else None
     )
@@ -373,7 +373,7 @@ class CapacityRequest:
                     "memory": f"{self.gpu_memory_gib}GB..",
                 },
             },
-            # Pinned 0.22.3 null means inherit the profile; "off" explicitly
+            # Pinned 0.22.5 null means inherit the profile; "off" explicitly
             # disables only the new intent's fixed running-duration limit.
             "max_price": self.max_price_microusd / 1_000_000,
             "max_duration": (self.test_max_duration_s or "off")
@@ -410,7 +410,7 @@ class CapacityRequest:
             "ssh_key_pub": ssh_key_pub,
         }
         if self.host_selection is not None:
-            # Native 0.22.3 uses this selector for backend offers AND fleet
+            # Native 0.22.5 uses this selector for backend offers AND fleet
             # reuse. Editing plan.offers would not constrain its later apply.
             spec["profile"] = {
                 "instance_types": [
@@ -464,7 +464,7 @@ class DstackStore(Protocol):
 
 
 class DstackClient:
-    """Exact 0.22.3 REST requests, no automatic side-effect retry."""
+    """Exact 0.22.5 REST requests, no automatic side-effect retry."""
 
     def __init__(
         self,
@@ -558,7 +558,7 @@ class DstackClient:
             if absent and response.status_code == 404:
                 return None
             _require(len(response.content) <= 8 * 1024**2, "dstack_response_limit")
-            # Pinned 0.22.3 returns its structured NotExistsError as HTTP 400.
+            # Pinned 0.22.5 returns its structured NotExistsError as HTTP 400.
             # Only an exact optional read may interpret that sole error as
             # absence; never treat other errors or a rejected mutation so.
             if absent and response.status_code == 400:
@@ -883,7 +883,7 @@ class DstackClient:
     def reusable_hosts_confirmed(self, approved):
         """Complete project fleet read before apply; no unknown reuse fallback.
 
-        Native 0.22.3 skips type constraints if an existing instance has no JPD.
+        Native 0.22.5 skips type constraints if an existing instance has no JPD.
         Refuse every potentially reusable unknown instance; a known matching
         bundle additionally needs an exact same-account physical identity read.
         """
@@ -1109,7 +1109,7 @@ class DstackClient:
             raise DstackError("dstack_provider_inventory_unavailable") from None
 
     def plan(self, spec):
-        # 0.22.3 ordinary planning selects an existing fleet. This endpoint is
+        # 0.22.5 ordinary planning selects an existing fleet. This endpoint is
         # our advisory global stock query; it does not create a fleet or run.
         return self._post(
             f"/api/project/{self.project}/runs/get_plan",
@@ -1196,7 +1196,7 @@ def _owns(run, binding, project):
         "groups",
     ):
         _require(actual.get(key) in (None, False), "dstack_run_binding_mismatch")
-    # 0.22.3 run preprocessing stores a homogeneous TaskConfiguration's
+    # 0.22.5 run preprocessing stores a homogeneous TaskConfiguration's
     # omitted nodes as integer 1. Preserve the frozen spec while allowing only
     # that single-node default, never multinode or grouped execution.
     nodes = actual.get("nodes")
@@ -2255,10 +2255,10 @@ class DstackCapacity:
             "dstack_owned_run_id_required",
         )
         if binding.get("stop_started"):
-            # dstack 0.22.3 stop_runs only moves existing nonfinished runs to
+            # dstack 0.22.5 stop_runs only moves existing nonfinished runs to
             # TERMINATING under locks; repeating that stop never creates a run.
             # Source: dstack/_internal/server/services/runs/__init__.py:868-909
-            # in upstream tag 0.22.3 (not the create/update apply endpoint).
+            # in upstream tag 0.22.5 (not the create/update apply endpoint).
             # An accepted lost response normally already reads TERMINATING.
             # Only a *new* exact-owned positive RUNNING read can retry a stop
             # that was never delivered, after the original ledger's due/count
@@ -2449,7 +2449,7 @@ def native_bootstrap_config(
 def main(argv=None):
     """Trusted CPU operations CLI. Persistence is the original service factory."""
     parser = argparse.ArgumentParser(
-        description="Sixnine dstack capacity operations (0.22.3)"
+        description="Sixnine dstack capacity operations (0.22.5)"
     )
     parser.add_argument(
         "action",
