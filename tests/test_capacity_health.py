@@ -104,6 +104,50 @@ class CapacityHealthTests(unittest.TestCase):
         self.job["created_at"] = 100
         self.assertEqual(self.evaluate(now=1000, queue_ages={"job": 950}), [])
 
+    def test_queued_deferred_attempts_without_submission_or_live_lease_do_not_hide_paid_idle(
+        self,
+    ):
+        self.node["runtime_state"] = "runtime_unconfirmed"
+        self.node["payload"]["dstack"].update(
+            reason_code="dstack_runtime_not_observed", state="runtime_unconfirmed"
+        )
+        deferred = [
+            {
+                "id": "deferred-" + str(index),
+                "job_id": "job",
+                "worker_id": "dstack-" + "a" * 32,
+                "status": "deferred",
+                "submission_started_at": None,
+                "upstream_task_id": None,
+                "updated_at": 1000,
+            }
+            for index in range(9)
+        ]
+        self.job.update(
+            current_attempt_id=deferred[-1]["id"],
+            lease_worker_id=None,
+            lease_expires_at=None,
+        )
+        finding = self.evaluate(attempts=deferred)[0]
+        self.assertEqual(
+            (finding["code"], finding["diagnosis"], finding["stop_replace"]),
+            ("capacity_paid_idle_queue", "dispatch_unobserved", False),
+        )
+        self.job.update(
+            status="claimed",
+            lease_worker_id=deferred[-1]["worker_id"],
+            lease_expires_at=1030,
+        )
+        queued = copy.deepcopy(self.job)
+        queued.update(
+            id="next-queued",
+            status="queued",
+            current_attempt_id=None,
+            lease_worker_id=None,
+            lease_expires_at=None,
+        )
+        self.assertEqual(self.evaluate(jobs=[self.job, queued], attempts=deferred), [])
+
     def test_only_fresh_positive_host_fault_requests_stop_and_replace(self):
         self.node["payload"]["dstack"]["reason_code"] = "runtime_process_exited"
         self.assertTrue(self.evaluate()[0]["stop_replace"])

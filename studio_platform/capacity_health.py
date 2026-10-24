@@ -54,6 +54,27 @@ def matching(node, job):
         return False
 
 
+def active_attempt(job, attempt, now):
+    """A retained deferred attempt is history, not an engine or worker lease."""
+    if (
+        job["current_attempt_id"] != attempt["id"]
+        or job["status"] in TERMINAL
+        or attempt["status"] == "attempt_lost"
+    ):
+        return False
+    submitted = finite(attempt.get("submission_started_at"), now) or bool(
+        isinstance(attempt.get("upstream_task_id"), str) and attempt["upstream_task_id"]
+    )
+    expires = job.get("lease_expires_at")
+    leased = (
+        job.get("lease_worker_id") == attempt["worker_id"]
+        and type(expires) in (int, float)
+        and math.isfinite(expires)
+        and expires > now
+    )
+    return submitted or leased
+
+
 def evaluate(
     nodes,
     job_rows,
@@ -143,8 +164,7 @@ def evaluate(
             continue
         if any(
             (job := jobs.get(attempt["job_id"])) is not None
-            and job["current_attempt_id"] == attempt["id"]
-            and job["status"] not in TERMINAL
+            and active_attempt(job, attempt, now)
             for attempt in related
         ):
             continue
