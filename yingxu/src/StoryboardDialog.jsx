@@ -1,53 +1,23 @@
-import { X } from 'lucide-react';
+import { Dialog, DialogActions } from './ui/Dialog.jsx';
+import { Button } from './ui/Button.jsx';
 import { translate } from './i18n/locale.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import React, { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 
 // HTML dialogs keep keyboard focus inside the page instead of opening a browser
 // JavaScript prompt. Closing a dialog never commits its draft.
 function StoryboardDialog({ title, children, onClose, busy = false }) {
-  const { t, locale } = useI18n();
-  const dialog = useRef(),
-    opener = useRef(document.activeElement);
-  useEffect(() => {
-    const node = dialog.current;
-    node.showModal();
-    return () => {
-      node.close();
-      queueMicrotask(() => {
-        if (opener.current?.isConnected) opener.current.focus();
-      });
-    };
-  }, []);
-  return createPortal(
-    <dialog
-      ref={dialog}
-      className="qc-dialog sb-portal sb-dialog"
-      aria-label={title}
-      onCancel={(event) => {
-        event.preventDefault();
-        if (!busy) onClose();
-      }}
-      onClick={(event) => {
-        if (event.target === event.currentTarget && !busy) onClose();
-      }}
+  return (
+    <Dialog
+      title={title}
+      onClose={onClose}
+      busy={busy}
+      closeOnBackdrop
+      portal
+      className="sb-portal sb-dialog"
     >
-      <div className="picker-head">
-        <h2>{title}</h2>
-        <button
-          type="button"
-          className="x big"
-          aria-label={t('storyboard.copy1')}
-          disabled={busy}
-          onClick={onClose}
-        >
-          <X size={18} />
-        </button>
-      </div>
       {children}
-    </dialog>,
-    document.body,
+    </Dialog>
   );
 }
 
@@ -84,14 +54,14 @@ export function StoryboardNameForm({
           {error}
         </p>
       )}
-      <div className="row sb-dialog-actions">
-        <button type="button" disabled={busy} onClick={onCancel}>
+      <DialogActions>
+        <Button disabled={busy} onClick={onCancel}>
           {t('storyboard.copy2')}
-        </button>
-        <button type="submit" className="primary" disabled={!valid || busy}>
+        </Button>
+        <Button type="submit" variant="primary" disabled={!valid || busy}>
           {busy ? t('storyboard.copy3') : t('storyboard.copy4')}
-        </button>
-      </div>
+        </Button>
+      </DialogActions>
     </form>
   );
 }

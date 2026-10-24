@@ -922,25 +922,42 @@ export function createP4OperatorController({
           return { expected_snapshot: row.snapshot, limit_microusd: limit };
         },
       ),
-    updatePrice: (row, max, ceiling) =>
-      command(
-        'updatePrice',
-        [row.id],
-        {
+    // Price changes follow the capacity-settings protocol: preview against the current settings
+    // version, show the consequences, then write the same body with a reason and the digest.
+    previewPrice: (row, max, ceiling) =>
+      act(async () => {
+        const account = state.account,
+          version = epoch;
+        const prices = await client.adminPrices();
+        guard(account, version);
+        const fresh = prices.profiles.find((profile) => profile.id === row.id);
+        if (!fresh || fresh.snapshot !== row.snapshot) throw Error(message('priceChanged'));
+        const preview = await client.previewPrice(row.id, {
           expected_snapshot: row.snapshot,
+          expected_settings_version: prices.expected_settings_version,
           max_price_microusd: max,
           price_ceiling_microusd: ceiling,
-        },
-        async (account, version) => {
-          await readAdmin();
-          guard(account, version);
-          return {
-            expected_snapshot: row.snapshot,
-            max_price_microusd: max,
-            price_ceiling_microusd: ceiling,
-          };
-        },
-      ),
+        });
+        guard(account, version);
+        return preview;
+      }),
+    updatePrice: (row, max, ceiling, confirmation) => {
+      const body = {
+        expected_snapshot: row.snapshot,
+        max_price_microusd: max,
+        price_ceiling_microusd: ceiling,
+        ...(confirmation && {
+          expected_settings_version: confirmation.preview.expected_settings_version,
+          reason: confirmation.reason.trim(),
+          confirmation_digest: confirmation.preview.confirmation_digest,
+        }),
+      };
+      return command('updatePrice', [row.id], body, async (account, version) => {
+        await readAdmin();
+        guard(account, version);
+        return body;
+      });
+    },
     cancelJobs: (jobs, reason) =>
       command('cancelJobs', [], null, async (account, version) => {
         const body = cancellationBody(jobs, reason);

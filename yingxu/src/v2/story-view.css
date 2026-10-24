@@ -184,7 +184,7 @@
   aspect-ratio: 16/9;
   cursor: pointer;
   overflow: hidden;
-  background: #000;
+  background: var(--black);
 }
 .sb-workspace .storyboard-takes .take-thumb > video,
 .sb-workspace .storyboard-takes .take-thumb > img {
@@ -231,7 +231,7 @@
   width: 100%;
   max-height: 38vh;
   object-fit: contain;
-  background: #000;
+  background: var(--black);
 }
 .sb-workspace .ed-media:has(.storyboard-takes.comparing) > .ed-preview,
 .sb-workspace .ed-media:has(.storyboard-takes.comparing) > .saveframe {
@@ -396,7 +396,7 @@
   opacity: 0;
   border-radius: 50%;
   background: #17211bdd;
-  color: #fff;
+  color: var(--white);
 }
 .sb-workspace .card:hover .workbench-select,
 .sb-workspace .card.picking .workbench-select,
@@ -508,8 +508,8 @@
 }
 .sb-workspace .tseg-title {
   font-size: 11px;
-  color: #fff;
-  text-shadow: 0 1px 2px #000;
+  color: var(--white);
+  text-shadow: 0 1px 2px var(--black);
   background: linear-gradient(transparent, #000b);
   bottom: 0;
   padding: 8px 4px 3px;
@@ -852,7 +852,7 @@ body.sb-resizing-y video {
 }
 .sb-topbar .sb-film-primary .story-film-control > button {
   background: var(--accent);
-  color: var(--accent-ink, #11160a);
+  color: var(--accent-ink, var(--accent-ink));
   border-color: transparent;
   font-weight: 600;
 }
@@ -1102,7 +1102,7 @@ body.sb-resizing-y video {
   background: color-mix(in srgb, var(--ref) 55%, var(--surface-3));
 }
 .tseg-n {
-  color: #fff;
+  color: var(--white);
   font-size: 9px;
   font-weight: 600;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
@@ -1148,4 +1148,49 @@ body.sb-resizing-y video {
   inset: 0;
   opacity: 0;
   pointer-events: none;
+}
+
+/* Shot panel (owner, 2026-10-24): expand sits with delete/close; versions follow the
+   player; quality, copies and Generate stay pinned at the bottom of the panel. */
+.editor .ed-head {
+  gap: 4px;
+}
+.editor .ed-head > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.editor .ed-expand {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: var(--ink-2);
+}
+.editor .ed-expand:hover {
+  color: var(--ink);
+}
+.editor .ed-footer {
+  position: sticky;
+  bottom: -1px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 10px 0 12px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+.editor .ed-footer .ed-actions {
+  padding-top: 0;
+}
+.editor .ed-footer .ed-actions .primary {
+  flex: 1;
+}
+.editor .ed-title-row .ed-title {
+  width: auto;
+  flex: 0 1 auto;
 }

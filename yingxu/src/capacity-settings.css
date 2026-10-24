@@ -168,7 +168,7 @@
 .cap-badge {
   padding: 0 7px;
   border-radius: 999px;
-  background: var(--surface-2, #eee);
+  background: var(--surface-2, var(--ink));
   color: var(--muted);
   font-size: 11px;
   white-space: nowrap;
@@ -241,7 +241,7 @@
   justify-content: flex-end;
   gap: 10px;
   padding: 10px 0;
-  background: linear-gradient(transparent, var(--bg, #fff) 30%);
+  background: linear-gradient(transparent, var(--bg, var(--white)) 30%);
 }
 .cap-bar > span {
   margin-right: auto;
