@@ -357,3 +357,11 @@ permanent-purge refusal. Exact source hashes, current-state checks, original
 operation receipts and the normal accepted-artifact production gate still apply.
 Revenue wins conflicts. Source: direct owner decisions2026-10-24 and
 [#481/6369552441](https://github.com/inkseq/h3-studio/issues/481#issuecomment-6369552441).
+
+## 2026-10-24 — Quick Create chats can be renamed and removed; Works newest first
+
+Each Quick Create chat is one Works story. The owner asked that chats can be renamed
+and removed from Quick Create without deleting the story, and that the Works list
+defaults to newest first. Removing only hides the chat (`journey.storyChat.hidden`);
+continuing the story in the chat from Works brings it back with its messages. Source:
+direct owner message 2026-10-24.

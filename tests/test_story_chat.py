@@ -513,6 +513,36 @@ class StoryChatTests(unittest.TestCase):
         self.login("supervan")
         self.assertEqual(self.client.get("/v1/story-chats").json()["story_chats"], [])
 
+    def test_rename_and_remove_a_chat_keeps_the_story(self):
+        chat = self.start()
+        pid = chat["project_id"]
+        renamed = self.client.patch(f"/v1/story-chats/{pid}", json={"title": "  Moon  "})
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+        self.assertEqual(renamed.json()["title"], "Moon")
+        removed = self.client.patch(f"/v1/story-chats/{pid}", json={"hidden": True})
+        self.assertEqual(removed.status_code, 200, removed.text)
+        listed = self.client.get("/v1/story-chats").json()["story_chats"]
+        self.assertNotIn(pid, [c["project_id"] for c in listed])
+        story = self.client.get(f"/v1/projects/{pid}").json()["project"]
+        self.assertEqual(story["title"], "Moon")
+        self.assertEqual(story["journey"]["storyChat"]["hidden"], True)
+        # Continuing it from Works brings the chat back, messages intact.
+        reopened = self.client.post(f"/v1/story-chats/{pid}/open", json={})
+        self.assertEqual(reopened.status_code, 200, reopened.text)
+        listed = self.client.get("/v1/story-chats").json()["story_chats"]
+        self.assertIn(pid, [c["project_id"] for c in listed])
+        self.assertNotIn(
+            "hidden",
+            self.client.get(f"/v1/projects/{pid}").json()["project"]["journey"]["storyChat"],
+        )
+        for body in ({}, {"title": " "}, {"hidden": "yes"}, {"other": 1}):
+            bad = self.client.patch(f"/v1/story-chats/{pid}", json=body)
+            self.assertEqual(bad.status_code, 422, body)
+        self.client.post("/api/auth/logout")
+        self.login("supervan")
+        other = self.client.patch(f"/v1/story-chats/{pid}", json={"hidden": True})
+        self.assertIn(other.status_code, (403, 404))
+
     def test_model_failure_writes_nothing(self):
         chat = self.start()
         self.model.plans.append(ChatError("upstream_timeout", "timeout", 502))
