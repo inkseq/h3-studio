@@ -6,6 +6,20 @@
 import { chapterShots } from './storyboard-domain.js';
 import { children } from './store.js';
 import { applyVideoRange, cutFps, rateOf, videoBinding, videoCut } from './video-cut-model.js';
+import { shotSegments } from './shot-segments.js';
+
+// Kept parts (#512) as whole source frames, snapped like the server (start up, end down).
+function partFrames(shot, video) {
+  if (!video) return null;
+  const parts = shotSegments(shot.data.videoSegments)
+    .map((r) => {
+      const startFrame = Math.ceil(r.start * cutFps - 1e-7),
+        endFrame = Math.floor(r.end * cutFps + 1e-7);
+      return { startFrame, frames: endFrame - startFrame };
+    })
+    .filter((part) => part.frames > 0);
+  return parts.length ? parts : null;
+}
 
 const find = (project, id) => project.entities.find((e) => e.id === id);
 const sourceSeconds = (asset) =>
@@ -27,9 +41,13 @@ export function editorClips(project, chapterId) {
     const asset = find(project, shot.data.selectedAssetId),
       video = asset?.type === 'video' ? asset : null,
       cut = videoCut(shot, video),
-      frames =
-        Number.isInteger(cut.requestedFrames) && cut.requestedFrames > 0 ? cut.requestedFrames : 0,
-      startFrame = cut.aligned?.startFrame ?? 0,
+      parts = partFrames(shot, video),
+      frames = parts
+        ? parts.reduce((sum, part) => sum + part.frames, 0)
+        : Number.isInteger(cut.requestedFrames) && cut.requestedFrames > 0
+          ? cut.requestedFrames
+          : 0,
+      startFrame = parts ? parts[0].startFrame : (cut.aligned?.startFrame ?? 0),
       inCut = included.has(shot.id),
       clip = {
         id: shot.id,
@@ -42,7 +60,9 @@ export function editorClips(project, chapterId) {
         frames,
         // Source frames the clip uses (more than `frames` when slowed down).
         sourceFrames: cut.rate ? cut.aligned.frames : frames,
-        rate: rateOf(shot.data.selectedVideoRange),
+        rate: parts ? 1 : rateOf(shot.data.selectedVideoRange),
+        // Several kept parts of the take play back to back in this clip's slot.
+        parts,
         included: inCut,
         // A clip without a usable video still holds its slot so timing matches export.
         playable: !!video?.data.fileId && !video.data.missingFile,
