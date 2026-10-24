@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
   Activity,
   AlertTriangle,
@@ -13,6 +13,9 @@ import {
 } from 'lucide-react';
 import StudioHeader from './StudioHeader.jsx';
 import CapacitySettings from './CapacitySettings.jsx';
+import { AdminBudgetPanel } from './OperatorBudgetPanel.jsx';
+import { createP4OperatorController } from './p4-operator-controller.js';
+import { readBrowserLocale } from './i18n/locale.js';
 import StoryChatAdminSwitch from './StoryChatAdminSwitch.jsx';
 import { AdminAudit, AdminPricing, AdminUsers, useClient } from './AdminConsole.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -350,14 +353,68 @@ function Overview({ data, api }) {
   );
 }
 
-function Limits({ api, active }) {
+// Per-account dollar budgets and per-GPU prices (moved from Settings → Admin).
+function BudgetAdministration({ account }) {
+  const { t } = useI18n();
+  const controller = useMemo(() => createP4OperatorController({ locale: readBrowserLocale }), []),
+    state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
+  useEffect(() => () => controller.destroy(), [controller]);
+  useEffect(() => {
+    void controller.setAccount(account);
+  }, [account, controller]);
+  const current = state.account === account,
+    authorized = current && state.snapshot?.operator?.admin === true;
+  return (
+    <section className="ops-tab-panel">
+      {state.error && current && <p role="alert">{state.error}</p>}
+      {authorized ? (
+        <AdminBudgetPanel
+          controller={controller}
+          state={state}
+          busy={state.busy || !!state.pending}
+        />
+      ) : (
+        <p role="status">
+          {t(
+            !current || state.loading
+              ? 'operatorPanel.adminPermissionPending'
+              : 'operatorPanel.adminPermissionDenied',
+          )}
+        </p>
+      )}
+      {state.pending && current && authorized && (
+        <section className="card-box" role="alert">
+          <p>{t('operatorPanel.pendingAdmin')}</p>
+          <button disabled={state.busy} onClick={() => void controller.recover().catch(() => {})}>
+            {t('operatorPanel.checkAdmin')}
+          </button>
+        </section>
+      )}
+    </section>
+  );
+}
+
+function Limits({ api, active, account }) {
   const [settings, setSettings] = useState(null);
   const load = async () => setSettings(await api.request(SETTINGS_PATH));
   useEffect(() => {
     if (active) void load().catch(() => setSettings(null));
   }, [api, active]);
+  const { t } = useI18n();
   if (!settings) return <Spinner />;
-  return <CapacitySettings settings={settings} api={api} onSaved={() => void load()} />;
+  return (
+    <>
+      {settings.capacity_policy ? (
+        <CapacitySettings settings={settings} api={api} onSaved={() => void load()} />
+      ) : (
+        <Note tone="warn">{t('adminHome.noPolicy')}</Note>
+      )}
+      <details className="admin-fold">
+        <summary>{t('admin.legacyBudgets')}</summary>
+        <BudgetAdministration account={account} />
+      </details>
+    </>
+  );
 }
 
 export default function AdminHome({ account }) {
@@ -436,7 +493,7 @@ export default function AdminHome({ account }) {
                   />
                 </section>
               ))}
-            {section === 'limits' && <Limits api={api} active={active} />}
+            {section === 'limits' && <Limits api={api} active={active} account={account} />}
             {section === 'users' && <AdminUsers api={api} active={active} />}
             {section === 'pricing' && (
               <>
