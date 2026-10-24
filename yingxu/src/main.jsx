@@ -14,6 +14,8 @@ import { applySkin, readSkin } from './skins.js';
 import { installPopoverDismiss } from './popover-dismiss.js';
 import { installMonitoring, reactErrorHandler } from './monitoring.js';
 import { installAnalytics } from './analytics.js';
+import { installVersionCheck } from './version-check.js';
+import { showNotice } from './floating-notice.js';
 
 const monitored = installMonitoring();
 installAnalytics();
@@ -27,4 +29,7 @@ createRoot(
     : undefined,
 ).render(<App />);
 
-if (import.meta.env.PROD) installVideoCache(videoCacheWorkerURL);
+if (import.meta.env.PROD) {
+  installVideoCache(videoCacheWorkerURL);
+  installVersionCheck({ notify: showNotice });
+}

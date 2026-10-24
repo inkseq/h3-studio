@@ -1,5 +1,7 @@
 export const clientCatalogs = {
   en: {
+    'client.newVersion': 'A newer version of Inkseq is available.',
+    'client.newVersionReload': 'Refresh',
     'client.budgetIdentity':
       'The account budget identity or cumulative records could not be confirmed. Refresh before continuing.',
     'client.billingIdentity':
@@ -81,6 +83,8 @@ export const clientCatalogs = {
       'This approval has already been used. Recover the original submission instead of approving it again.',
   },
   zh: {
+    'client.newVersion': '映序有新版本了。',
+    'client.newVersionReload': '刷新',
     'client.budgetIdentity': '账户预算身份或累计记录尚未确认，请刷新。',
     'client.billingIdentity': '所选账户的费用记录身份尚未确认，请重新读取。',
     'client.consoleIdentity': '控制台状态尚未确认，请刷新。',

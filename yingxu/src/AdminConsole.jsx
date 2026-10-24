@@ -1,17 +1,15 @@
-// Settings → Admin (h3-studio#304): users, audit log and the existing test-machine limits.
-// Port of prototype account.jsx AdminPanel. The backend enforces require_admin on every route;
-// a tab whose endpoint is not deployed yet says so instead of failing.
-import { Segmented } from './ui/Segmented.jsx';
+// Admin panels for /admin (h3-studio#304, #537): users, pricing and the audit log.
+// The backend enforces require_admin on every route; a panel whose endpoint is not deployed
+// yet says so instead of failing.
 import React, { useEffect, useMemo, useState } from 'react';
 import { FloatingMessage } from './floating-notice.js';
-import StoryChatAdminSwitch from './StoryChatAdminSwitch.jsx';
-import { ChevronDown, History, ShieldCheck, TrendingUp, Users } from 'lucide-react';
+import { ChevronDown, History } from 'lucide-react';
 import { createCloudClient } from './cloud-client.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { apiDate, formatCredits } from './credits.js';
 import './admin.css';
 
-function useClient(account) {
+export function useClient(account) {
   return useMemo(() => {
     const client = createCloudClient();
     client.setAccount(account);
@@ -47,7 +45,7 @@ function usePaged(api, path, active) {
   return { rows, setRows, next, state, error, load };
 }
 
-function AdminUsers({ api, active }) {
+export function AdminUsers({ api, active }) {
   const { t, locale } = useI18n();
   const [query, setQuery] = useState(''),
     [search, setSearch] = useState(''),
@@ -231,7 +229,7 @@ const pct = (value) =>
 
 // Read-only pricing view from GET /v1/admin/credits/prices (#306). Margins use the worst-case
 // net per credit (tax-inclusive, fees, biggest bonus); per-tier margin needs real GPU cost.
-function AdminPricing({ api, active }) {
+export function AdminPricing({ api, active }) {
   const { t, locale } = useI18n();
   const [data, setData] = useState(null),
     [state, setState] = useState('loading');
@@ -402,7 +400,7 @@ function auditReason(reason, t) {
   );
 }
 
-function AdminAudit({ api, active }) {
+export function AdminAudit({ api, active }) {
   const { t, locale } = useI18n();
   const list = usePaged(api, '/v1/admin/audit', active);
   if (list.state === 'missing') return <p className="muted">{t('admin.notDeployed')}</p>;
@@ -444,45 +442,6 @@ function AdminAudit({ api, active }) {
           {t('credits.more')}
         </button>
       )}
-    </div>
-  );
-}
-
-export default function AdminConsole({ account, active, testMachines }) {
-  const { t } = useI18n();
-  const api = useClient(account);
-  const [tab, setTab] = useState('users');
-  return (
-    <div className="admin-console">
-      <Segmented
-        tabs
-        className="admin-tabs"
-        options={[
-          ['users', 'admin.users', Users],
-          ['pricing', 'admin.pricing', TrendingUp],
-          ['machines', 'admin.machines', ShieldCheck],
-          ['audit', 'admin.audit', History],
-        ].map(([id, label, Icon]) => ({
-          value: id,
-          label: (
-            <>
-              <Icon size={15} aria-hidden="true" />
-              {t(label)}
-            </>
-          ),
-        }))}
-        value={tab}
-        onChange={setTab}
-      />
-      {tab === 'users' && <AdminUsers api={api} active={active} />}
-      {tab === 'pricing' && (
-        <>
-          <StoryChatAdminSwitch api={api} active={active} />
-          <AdminPricing api={api} active={active} />
-        </>
-      )}
-      {tab === 'machines' && testMachines}
-      {tab === 'audit' && <AdminAudit api={api} active={active} />}
     </div>
   );
 }

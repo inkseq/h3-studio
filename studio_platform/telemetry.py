@@ -44,6 +44,9 @@ STAGES = frozenset(
     }
 )
 OUTCOMES = frozenset({"success", "failure", "unknown", "cancelled"})
+# Background export only. A 1 s cap failed every production metrics batch
+# (Grafana Cloud au-southeast-1 answers in ~1.2 s from the CPU host, #193).
+EXPORT_SECONDS = 5
 PROVIDERS = frozenset({"vast", "runpod", "lium", "targon", "local", "unknown"})
 GPU_TYPES = frozenset(
     {"rtx5090", "rtx-pro6000", "h100", "h200", "b200", "b300", "unknown"}
@@ -70,6 +73,15 @@ ERROR_CODES = (
             "submission_rejected",
             "submission_needs_reconciliation",
             "upstream_status_unknown",
+            "capacity_no_progress",
+            "capacity_runtime_exceeded",
+            "capacity_owner_recovery",
+            "capacity_startup_timeout",
+            "capacity_provider_removed",
+            "capacity_dispatch_unavailable",
+            "capacity_paid_idle_queue",
+            "capacity_queue_age",
+            "capacity_demand_start_loop",
             "worker_preparation_not_ready",
             "worker_preparation_failed",
             "worker_reconciliation_needed",
@@ -702,7 +714,9 @@ def create_cloud_telemetry(config):
                     url,
                     headers=headers,
                     body=data,
-                    timeout=urllib3.Timeout(total=min(timeout or 1, 1)),
+                    timeout=urllib3.Timeout(
+                        total=min(timeout or EXPORT_SECONDS, EXPORT_SECONDS)
+                    ),
                     redirect=False,
                     retries=False,
                     preload_content=False,
@@ -730,7 +744,7 @@ def create_cloud_telemetry(config):
     base = config.endpoint.rstrip("/")
     options = {
         "headers": {"Authorization": config.authorization},
-        "timeout": 1,
+        "timeout": EXPORT_SECONDS,
         "max_request_size": 65536,
     }
 
@@ -752,7 +766,7 @@ def create_cloud_telemetry(config):
             max_queue_size=256,
             max_export_batch_size=32,
             schedule_delay_millis=250,
-            export_timeout_millis=1000,
+            export_timeout_millis=EXPORT_SECONDS * 1000,
         )
     )
     traces = TracerProvider(resource=resource, shutdown_on_exit=False)
@@ -764,7 +778,7 @@ def create_cloud_telemetry(config):
             max_queue_size=256,
             max_export_batch_size=32,
             schedule_delay_millis=250,
-            export_timeout_millis=1000,
+            export_timeout_millis=EXPORT_SECONDS * 1000,
         )
     )
     metrics = MeterProvider(
@@ -776,7 +790,7 @@ def create_cloud_telemetry(config):
                     endpoint=base + "/v1/metrics", _transport=SafeTransport(), **options
                 ),
                 export_interval_millis=30000,
-                export_timeout_millis=1000,
+                export_timeout_millis=EXPORT_SECONDS * 1000,
             )
         ],
         views=[

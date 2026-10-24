@@ -325,6 +325,8 @@ class RegistrationCapacityAdmissionTests(LedgerCase):
         self,
     ):
         self.admitted = adopt(self, 10)
+        self.repo.configure_capacity(max_instances=4, max_physical_gpus=4)
+        self.repo.configure_pool("dstack-test", max_instances=4, max_physical_gpus=4)
         nodes = [self.node(str(4100000 + index)) for index in range(10)]
         before = self.snapshot()
         self.repo.configure_capacity(max_instances=1, max_physical_gpus=1)
@@ -338,6 +340,74 @@ class RegistrationCapacityAdmissionTests(LedgerCase):
                 connection.scalar(select(func.count()).select_from(registered_workers)),
                 10,
             )
+
+    def test_adopted_policy_never_bypasses_disabled_prelaunch_gate(self):
+        self.admitted = adopt(self, 10)
+        for target in ("global", "pool"):
+            with self.subTest(target=target):
+                self.repo.configure_capacity(max_instances=4, max_physical_gpus=4)
+                self.repo.configure_pool(
+                    "dstack-test", max_instances=4, max_physical_gpus=4
+                )
+                if target == "global":
+                    self.repo.configure_capacity(max_instances=0, max_physical_gpus=4)
+                else:
+                    self.repo.configure_pool(
+                        "dstack-test", max_instances=4, max_physical_gpus=0
+                    )
+                with self.assertRaises(BudgetExceeded):
+                    self.node("disabled-" + target)
+                self.assertEqual(self.client.applied, [])
+
+    def test_unadopted_global_four_refuses_fifth_before_apply(self):
+        from sqlalchemy import delete
+
+        with self.repo.transaction() as connection:
+            connection.execute(delete(spending_settings))
+        self.service.policy.update(max_instances=10, max_physical_gpus=10)
+        self.repo.configure_capacity(max_instances=4, max_physical_gpus=4)
+        self.repo.configure_pool("dstack-test", max_instances=10, max_physical_gpus=10)
+        for index in range(4):
+            self.node(str(4200000 + index))
+        with self.assertRaisesRegex(BudgetExceeded, "global_capacity_exceeded"):
+            self.node("4200004")
+        self.assertEqual(len(self.client.applied), 4)
+
+    def test_adopted_limit_requires_valid_snapshot_and_exact_future_profile(self):
+        self.admitted = adopt(self, 10)
+        self.repo.configure_capacity(max_instances=4, max_physical_gpus=4)
+        self.repo.configure_pool("dstack-test", max_instances=4, max_physical_gpus=4)
+        profile = self.service.profiles["5090-fl"]
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(
+                self.service.prelaunch_capacity_limits(
+                    connection, profile=profile, for_demand=True
+                )["max_instances"],
+                10,
+            )
+            self.assertEqual(
+                self.service.prelaunch_capacity_limits(
+                    connection,
+                    profile={**profile, "owner_id": "different"},
+                    for_demand=True,
+                )["max_instances"],
+                4,
+            )
+            self.assertEqual(
+                self.service.prelaunch_capacity_limits(
+                    connection,
+                    profile=profile,
+                    capacity_snapshot=self.admitted,
+                    request={"lifecycle_version": 2},
+                )["max_instances"],
+                4,
+            )
+        with self.repo.transaction() as connection:
+            malformed = {**self.admitted["value"], "max_machines": 11}
+            connection.execute(update(spending_settings).values(value=malformed))
+        with self.assertRaises(ValueError):
+            self.node("malformed-policy")
+        self.assertEqual(self.client.applied, [])
 
     def test_original_already_counted_v2_resource_registers_after_lowering(self):
         nodes = [self.node("4000001"), self.node("4000002")]

@@ -152,6 +152,26 @@ def _ended_with_proof(node):
     )
 
 
+def _ended_for_replacement(connection, node):
+    if _ended_with_proof(node):
+        return True
+    if node is None or node['desired_state'] != 'stopped':
+        return False
+    from .capacity_watchdog import fenced_node_stop
+    from .repository import instance_intents
+
+    intent = (
+        connection.execute(
+            select(instance_intents).where(instance_intents.c.id == node['intent_id'])
+        )
+        .mappings()
+        .one()
+    )
+    # Execution fencing permits replacement immediately. This does not alter
+    # prior rental usage/reservations or manufacture physical removal evidence.
+    return fenced_node_stop(connection, node, intent)
+
+
 def _write(connection, row, payload, now):
     connection.execute(
         update(operator_commands)
@@ -267,7 +287,7 @@ def _claim(service):
                     .mappings()
                     .first()
                 )
-                if _ended_with_proof(node):
+                if _ended_for_replacement(connection, node):
                     timed_out = (
                         node['payload'].get('stop_reason_code') == DOWNLOAD_TIMEBOX
                     )
@@ -300,16 +320,22 @@ def _claim(service):
                 continue
             # Original commands and durable backoff are read before any live
             # provider GET. Only a genuinely new allocation needs capacity.
-            usage = service._live_capacity_usage(connection)
+            usage = service.prelaunch_capacity_usage(connection)
             counted = {
                 item['intent_id']: item
                 for item in usage['observations']
                 if item['counted']
             }
+            uncertainty = {
+                n['intent_id']
+                for n in _nodes(connection, tenant)
+                if n['intent_id'] in counted
+                and not _ended_for_replacement(connection, n)
+            }
             stages = [
                 node_stage(n, now) or 'unknown'
                 for n in _nodes(connection, tenant)
-                if n['intent_id'] in counted
+                if n['intent_id'] in uncertainty
             ]
             if 'unknown' in stages or any(
                 item['reason_code']
@@ -317,7 +343,8 @@ def _claim(service):
                     'dstack_capacity_unconfirmed',
                     'dstack_terminal_provider_unconfirmed',
                 }
-                for item in counted.values()
+                for identity, item in counted.items()
+                if identity in uncertainty
             ):
                 payload.update(
                     phase='backoff',
@@ -326,13 +353,20 @@ def _claim(service):
                 )
                 _write(connection, row, payload, now)
                 return _result('blocked', 'allocation_uncertain'), None
-            max_instances, max_gpus = service.machine_limits(
-                connection, for_demand=True
+            from .control import (
+                check_registration_capacity,
+                registration_capacity_projection,
             )
-            if (
-                usage['instances'] >= max_instances
-                or usage['physical_gpus'] >= max_gpus
-            ):
+            from .repository import BudgetExceeded
+
+            try:
+                limits = service.prelaunch_capacity_limits(
+                    connection, profile=profile, for_demand=True
+                )
+                check_registration_capacity(
+                    registration_capacity_projection(usage), limits
+                )
+            except BudgetExceeded:
                 return _result('blocked', 'capacity_limit'), None
             action = 'start' if payload.get('preview_id') else 'plan'
             payload.update(

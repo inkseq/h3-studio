@@ -562,6 +562,8 @@ def _terminal(connection, repo, job, *, kind, reason):
         for attempt in connection.execute(
             select(attempts).where(attempts.c.job_id == job["id"])
         ).mappings():
+            from .capacity_reclaim import authorized_lost_attempt
+
             closed = (
                 attempt["status"] in {"succeeded", "failed", "cancelled"}
                 and attempt["upstream_stopped"] == 1
@@ -572,7 +574,13 @@ def _terminal(connection, repo, job, *, kind, reason):
                 and attempt["status"]
                 in {"claimed", "lease_expired", "deferred", "failed", "cancelled"}
             )
-            if not closed and not unsubmitted:
+            # A fenced abandoned attempt cannot deliver to this job. Customer
+            # credit release is independent of the unresolved supplier invoice.
+            if (
+                not closed
+                and not unsubmitted
+                and not authorized_lost_attempt(current, attempt)
+            ):
                 raise CreditError("credit_outcome_unconfirmed")
     amount = original["held_delta"]
     row = _account(connection, job["tenant_id"], user["id"], now=repo.clock())

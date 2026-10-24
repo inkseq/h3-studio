@@ -163,7 +163,7 @@ export function BudgetWorkspace({ account, controller, state, busy }) {
       {state.account === account && state.snapshot?.operator?.admin === true && (
         <>
           <p>
-            <a href="/settings?tab=admin">{t('operatorPanel.settingsAdmin')}</a>
+            <a href="/admin?section=limits">{t('operatorPanel.settingsAdmin')}</a>
           </p>
           <AdminBudgetPanel controller={controller} state={state} busy={busy} />
         </>

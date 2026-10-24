@@ -425,6 +425,46 @@ budget, max_price, idle/max-runtime safeguards and existing release/rollback
 mechanisms remain unchanged. Source: direct owner instructions2026-10-24 and the
 linked #193 decision; incident results remain in the original issue receipts.
 
+## CR-20261025-62 — same-job timeout recovery and production incident priority
+
+The owner directly prioritizes recovery of supervan's stuck production work over
+B2. Recover the original jobs `9ef33766`, `987615fa` and `438a9f31` by fencing
+their lost attempts and re-queuing the same jobs immediately, retaining original
+queue age, accepted inputs and holds. This supersedes CR60's earlier fail/resubmit
+wording. Removal proof is required only to reconcile supplier billing; it must not
+delay the fenced replacement attempt. Never invent a supplier invoice or replay
+an operation with an unknown result.
+
+Adopt the Small timeout rule: no engine progress for10minutes, or runtime greater
+than max(2×expected,30minutes), marks the attempt lost, fences late results,
+re-queues the same job and stops its owned node. Keep the hold for one delivered
+capture. Permit at most2 automatic reclaims, then fail with an explicit exhausted
+reason. Replace a node that is not ready within20minutes. These timeouts are
+settings; report every reclaim through the existing Grafana event and a sanitized
+Sentry message, and retain the host-failure scorecard and blocklist.
+
+Honor a later explicit user cancellation instead of resurrecting that job.
+Use the same resource projection and limit predicate for demand admission and
+worker registration; reconcile stale capacity against fresh complete provider
+evidence in the existing controller cadence. Alert on a matching paid idle node
+with no dispatch for10minutes, queue age over30minutes, or2 zero-service
+start/stop cycles within1hour. Diagnose capacity/configuration faults without
+renting a replacement; stop and replace only a proven node fault with fenced work.
+The repeated zero-service loop pauses the existing demand switch and alerts.
+No new timer, service or task store follows from this decision.
+
+The urgent follow-up authorizes releasing the original removed workers' stale
+capacity and admitting the already-paid ready node `f7c407c7` / Vast57521189.
+Promote/adopt accepted A1 limits if the legacy cap still prevents registration:
+fleet USD15/hour, maximum10machines, REF USD3/hour, USD100/day unchanged.
+Demand start must check the effective registration limit before spending on a
+node. Preserve recoverable work, rollback, max_price and idle stop; charging and
+LIVE Checkout remain OFF. No new credential, provider account or budget is
+authorized. Sources: direct owner2026-10-25 and
+[#193/6384745467](https://github.com/inkseq/h3-studio/issues/193#issuecomment-6384745467),
+[#193/6385240655](https://github.com/inkseq/h3-studio/issues/193#issuecomment-6385240655),
+[#193/6385265680](https://github.com/inkseq/h3-studio/issues/193#issuecomment-6385265680).
+
 ## CR-20261024-61 — conditional production enablement of qualified providers
 
 Owner preauthorizes production enablement of RunPod, Lium and CloudRift per

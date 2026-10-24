@@ -832,6 +832,8 @@ class DstackControllerTests(fixture.DstackOperatorTests):
     def test_download_timebox_fences_only_cold_host_preserving_original_queued_job(
         self,
     ):
+        # Isolate the older download-specific guard from the earlier startup cap.
+        self.settings.capacity_startup_timeout_seconds = 86400
         node, controller, observe = self._timed_out_download()
         job = self._queued_native("fl")
         original = self.repo.get_job(self.scope, job["id"])

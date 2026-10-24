@@ -13,6 +13,9 @@ x-business-environment: &business-environment
   SIXNINE_DATABASE_URL_FILE: /run/secrets/app_database_url
   SIXNINE_AUTH_MODE: password
   INKSEQ_GENERATION_QUEUE: ${INKSEQ_GENERATION_QUEUE:-postgres}
+  INKSEQ_CAPACITY_NO_PROGRESS_SECONDS: ${INKSEQ_CAPACITY_NO_PROGRESS_SECONDS:-600}
+  INKSEQ_CAPACITY_RUNTIME_FLOOR_SECONDS: ${INKSEQ_CAPACITY_RUNTIME_FLOOR_SECONDS:-1800}
+  INKSEQ_CAPACITY_STARTUP_TIMEOUT_SECONDS: ${INKSEQ_CAPACITY_STARTUP_TIMEOUT_SECONDS:-1200}
   SIXNINE_RENDER_ENABLED: ${INKSEQ_FILM_ENABLED:-0}
   SIXNINE_EXECUTION_PROFILES_FILE: /run/secrets/execution_profiles
   SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID: ${SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID:?Explicit default deployment profile required}
@@ -157,6 +160,7 @@ services:
     command: [python, -m, studio_platform.dstack_controller]
     environment:
       <<: *business-environment
+      INKSEQ_SENTRY_DSN: ${INKSEQ_SENTRY_DSN:-}
       # CPU slot children inherit these exact service settings from controller.
       SIXNINE_GENERATION_ENABLED: ${SIXNINE_MIGRATION_GENERATION_ENABLED:-0}
       SIXNINE_EXECUTION_BACKEND: ${SIXNINE_MIGRATION_EXECUTION_BACKEND:-disabled}
