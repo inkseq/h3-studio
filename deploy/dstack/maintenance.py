@@ -40,6 +40,9 @@ LEGACY_HELPER_PAIRS = {commit: (
         "07da40322559ee5a12829be6884c541c401d852a")}
 # Exact retained current/previous helper bytes before the staging upgrade.
 RETAINED_DSTACK_HELPER_PAIRS = {
+    # Observed staging A1 current/previous, SSM 74cb6214 (2026-10-24).
+    'fcd3ce618dbbf2a4f0dad4ee09e0c74121c4f69c': ('49905c8b60ae0375ec02485028db8fa4f7cabd718a91a936649dbf301fb5d86d', 'ddd25ad1c878e5066245bc32bb660e97908a223bb41c6d2bb38de1e433ddeafe'),
+    'a978e9ceb7e78c9a9b54f9365d1e6c368aea83ea': ('49905c8b60ae0375ec02485028db8fa4f7cabd718a91a936649dbf301fb5d86d', 'ddd25ad1c878e5066245bc32bb660e97908a223bb41c6d2bb38de1e433ddeafe'),
     # Exact retained staging reader/current pair before DBOS writer adoption.
     'baa0e351fcd0a3f7e4f3678dd1282a38ef0f6a96': ('3bf05a2128bd80b809c7ab0577a4ce49903890a5c58f7d0a49b6ea19ce0ebb69', '860d696caca2f6162f66ef194c915f05d4ff31f8293aedff35b039b441d317e0'),
     '6ccf461c178f9c3f9a4013c041844174687dbef4': ('3bf05a2128bd80b809c7ab0577a4ce49903890a5c58f7d0a49b6ea19ce0ebb69', '860d696caca2f6162f66ef194c915f05d4ff31f8293aedff35b039b441d317e0'),

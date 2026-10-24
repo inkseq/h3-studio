@@ -676,6 +676,8 @@ class MigrationArtifacts(unittest.TestCase):
         self,
     ):
         expected_commits = {
+            'fcd3ce618dbbf2a4f0dad4ee09e0c74121c4f69c',
+            'a978e9ceb7e78c9a9b54f9365d1e6c368aea83ea',
             'baa0e351fcd0a3f7e4f3678dd1282a38ef0f6a96',
             '6ccf461c178f9c3f9a4013c041844174687dbef4',
             '46130d852459f12d81d09c7e23178a8544d1d4d4',
@@ -698,6 +700,17 @@ class MigrationArtifacts(unittest.TestCase):
         self.assertEqual(
             set(maintenance.RETAINED_DSTACK_HELPER_PAIRS), expected_commits
         )
+        for commit in (
+            'fcd3ce618dbbf2a4f0dad4ee09e0c74121c4f69c',
+            'a978e9ceb7e78c9a9b54f9365d1e6c368aea83ea',
+        ):
+            self.assertEqual(
+                maintenance.RETAINED_DSTACK_HELPER_PAIRS[commit],
+                (
+                    '49905c8b60ae0375ec02485028db8fa4f7cabd718a91a936649dbf301fb5d86d',
+                    'ddd25ad1c878e5066245bc32bb660e97908a223bb41c6d2bb38de1e433ddeafe',
+                ),
+            )
         for commit in (
             'baa0e351fcd0a3f7e4f3678dd1282a38ef0f6a96',
             '6ccf461c178f9c3f9a4013c041844174687dbef4',
