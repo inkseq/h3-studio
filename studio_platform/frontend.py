@@ -30,6 +30,8 @@ HTML_ROUTES = frozenset(
         "/quick-chat/",
         "/operator",
         "/operator/",
+        "/admin",
+        "/admin/",
         "/settings",
         "/settings/",
         "/library",
