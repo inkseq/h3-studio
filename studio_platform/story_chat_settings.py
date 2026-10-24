@@ -1,8 +1,9 @@
 """Admin switch for story-chat card pictures (#422). Default OFF.
 
 Owner decision 2026-10-23: production admins choose whether card pictures are available.
-One persisted document per tenant, changed only by an active admin identity with a reason,
-CAS on its version and an admin audit row. Price and charging remain the #463 controls.
+One persisted document per tenant, changed only by an active admin identity, CAS on its
+version and an admin audit row. The reason is optional (owner, 2026-10-23); a blank one is
+recorded as a plain on/off note. Price and charging remain the #463 controls.
 """
 
 from __future__ import annotations
@@ -65,18 +66,24 @@ def read(connection, tenant):
 def write(connection, tenant, principal, body, now):
     if (
         type(body) is not dict
-        or set(body) != {"expected_version", "pictures_enabled", "reason"}
+        or not {"expected_version", "pictures_enabled"} <= set(body)
+        or not set(body) <= {"expected_version", "pictures_enabled", "reason"}
         or type(body["expected_version"]) is not int
         or type(body["pictures_enabled"]) is not bool
     ):
         raise StoryChatSettingsError("story_chat_settings_invalid")
-    reason = body["reason"]
+    reason = body.get("reason", "")
     if (
         not isinstance(reason, str)
-        or not 1 <= len(reason.strip()) <= 500
+        or len(reason.strip()) > 500
         or any(ord(c) < 32 for c in reason)
     ):
-        raise StoryChatSettingsError("story_chat_reason_required")
+        raise StoryChatSettingsError("story_chat_settings_invalid")
+    reason = reason.strip() or (
+        "Pictures turned on in Admin"
+        if body["pictures_enabled"]
+        else "Pictures turned off in Admin"
+    )
     if not inspect(connection).has_table(users.name):
         raise StoryChatSettingsError("admin_identity_required", 409)
     actor = (
@@ -124,7 +131,7 @@ def write(connection, tenant, principal, body, now):
             actor_user_id=actor["id"],
             target_user_id=None,
             action="story_chat.pictures",
-            reason=reason.strip(),
+            reason=reason,
             before={"pictures_enabled": old["pictures_enabled"]},
             after={
                 "pictures_enabled": value["pictures_enabled"],
