@@ -36,7 +36,7 @@ import { cutFps, videoCut } from './video-cut-model.js';
 import { trimClip } from './film-edit-model.js';
 import TrimBar from './TrimBar.jsx';
 import ShotSegments from './ShotSegments.jsx';
-import { sourceTime } from './shot-segments.js';
+import { segmentsTotal, sourceTime } from './shot-segments.js';
 import { createPortal } from 'react-dom';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { useSortable } from '@dnd-kit/sortable';
@@ -1513,7 +1513,9 @@ export function ShotCard({
         )}
         <ShotThumb shot={shot} />
         <span className="card-no">{String(index + 1).padStart(2, '0')}</span>
-        <span className="card-dur">{fmt(info.sec)}</span>
+        <span className="card-dur">
+          {fmt(shot.segments?.length && shot.chosen ? segmentsTotal(shot.segments) : info.sec)}
+        </span>
         <Progress v={latest} />
       </div>
       <div className="card-body">
