@@ -818,6 +818,10 @@
 .sc-stories li > button[aria-current='page'] {
   background: color-mix(in srgb, var(--sc-green) 10%, transparent);
 }
+.sc-stories li > button span,
+.sc-stories li > button small {
+  max-width: 100%;
+}
 .sc-stories li > button span {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -932,4 +936,17 @@
   .sc.board-closed .sc-composer {
     margin-inline: max(16px, calc((100% - 860px) / 2));
   }
+}
+
+/* Icon rail: only "new story" and "show stories" (owner, 2026-10-25). */
+.sc.side-rail > .sc-stories {
+  align-items: center;
+  padding: 14px 6px;
+}
+.sc.side-rail > .sc-stories > :is(h3, ul, .sc-stories-empty) {
+  display: none;
+}
+.sc.side-rail .sc-new-story {
+  width: 36px;
+  padding: 0;
 }

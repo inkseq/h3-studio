@@ -40,6 +40,11 @@ import { agentLinkSearch } from './agent-navigation.js';
 import './story-chat.css';
 import { track } from './analytics.js';
 
+// Dragged narrow, the stories list snaps to an icon rail (owner, 2026-10-25).
+const RAIL = 56,
+  SIDE_DEFAULT = 220,
+  RAIL_BELOW = 150;
+
 function reducer(state, action) {
   if (action.type === 'edit') return editCard(state, action.id, action.patch);
   if (action.type === 'reset') return emptyChat();
@@ -486,8 +491,9 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
   const [openId, setOpenId] = useState(null);
   // Desktop layout (owner, 2026-10-24): drag the story list and the card panel wider or
   // narrower, or fold either away; phones keep the tabs.
-  const sideSize = useStoryboardPanelSize('story-chat-stories', 220, 160, 380),
+  const sideSize = useStoryboardPanelSize('story-chat-stories', SIDE_DEFAULT, RAIL, 380),
     boardSize = useStoryboardPanelSize('story-chat-board', 620, 320, 1200);
+  const railed = sideSize.size < RAIL_BELOW;
   const [sideOpen, setSideOpen] = useRemembered('inkseq.storyChat.sideOpen', true),
     [boardOpen, setBoardOpen] = useRemembered('inkseq.storyChat.boardOpen', true);
   const [renaming, setRenaming] = useState(null);
@@ -689,19 +695,33 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
           tab +
           (stories ? ' with-stories' : '') +
           (sideOpen ? '' : ' side-closed') +
+          (railed ? ' side-rail' : '') +
           (boardOpen ? '' : ' board-closed')
         }
-        style={{ '--sc-side': sideSize.size + 'px', '--sc-board': boardSize.size + 'px' }}
+        style={{
+          '--sc-side': (railed ? RAIL : sideSize.size) + 'px',
+          '--sc-board': boardSize.size + 'px',
+        }}
       >
         {stories && (
           <nav className="sc-stories" aria-label={t('storyChat.myStories')}>
+            {railed && (
+              <IconButton
+                label={t('storyChat.showStories')}
+                onClick={() => sideSize.set(SIDE_DEFAULT)}
+              >
+                <PanelLeftOpen size={16} />
+              </IconButton>
+            )}
             <Button
               variant="primary"
-              className="sc-new-story keep-label"
+              className={'sc-new-story' + (railed ? '' : ' keep-label')}
+              title={railed ? t('storyChat.newStory') : undefined}
+              aria-label={railed ? t('storyChat.newStory') : undefined}
               onClick={() => openStory(null)}
             >
               <Plus size={15} aria-hidden="true" />
-              {t('storyChat.newStory')}
+              {!railed && t('storyChat.newStory')}
             </Button>
             <h3>{t('storyChat.myStories')}</h3>
             {stories.length === 0 && <p className="sc-stories-empty">{t('storyChat.noStories')}</p>}
@@ -709,6 +729,7 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
               {(stories || []).map((item) => (
                 <li key={item.project_id}>
                   <button
+                    title={item.title}
                     aria-current={item.project_id === story.current ? 'page' : undefined}
                     onClick={() => item.project_id !== story.current && openStory(item.project_id)}
                   >
