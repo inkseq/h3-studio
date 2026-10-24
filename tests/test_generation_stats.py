@@ -9,14 +9,20 @@ from studio_platform.repository import attempts, jobs
 from test_platform_repository import LedgerCase
 
 
-def compiled(frames, fps, height, images, audios, mode="ref"):
+def compiled(frames, fps, height, images, audios, mode="ref", native=False):
     return {
         "request": {
             "mode": mode,
             "inputs": {"images": [{}] * images, "audios": [{}] * audios},
             "prompt": "PRIVATE never returned",
         },
-        "output_spec": {"frame_count": frames, "fps": fps, "height": height},
+        "output_spec": {
+            "frames": frames,
+            "actual_duration": frames / fps,
+            "height": height,
+        }
+        if native
+        else {"frame_count": frames, "fps": fps, "height": height},
     }
 
 
@@ -88,3 +94,49 @@ class GenerationStatsTests(LedgerCase):
         )
         self.assertIsNone(_intent("worker"))
         self.assertIsNone(_intent("dstack-" + "Z" * 32))
+
+
+class NativeShapeTests(LedgerCase):
+    def test_native_duration_and_artifact_finish_time(self):
+        from studio_platform.repository import artifacts
+
+        self.now = 1_800_000_000.0
+        now = self.repo.clock()
+        job = self.job()
+        attempt_id = str(uuid.uuid4())
+        with self.repo.engine.begin() as connection:
+            connection.execute(
+                update(jobs)
+                .where(jobs.c.id == job["id"])
+                .values(
+                    request=compiled(362, 24, 768, 3, 1, native=True),
+                    created_at=now - 10000,
+                )
+            )
+            connection.execute(
+                insert(attempts).values(
+                    id=attempt_id,
+                    job_id=job["id"],
+                    number=1,
+                    status="succeeded",
+                    fence=1,
+                    worker_id="w",
+                    created_at=now - 9800,
+                    updated_at=now,  # settled much later
+                    submission_started_at=now - 9700,
+                )
+            )
+            connection.execute(
+                insert(artifacts).values(
+                    id=str(uuid.uuid4()),
+                    job_id=job["id"],
+                    attempt_id=attempt_id,
+                    metadata={},
+                    created_at=now - 100,
+                )
+            )
+        row = generation_stats(self.repo, self.scope.tenant_id, days=14, now=now)[
+            "recent"
+        ][0]
+        self.assertEqual(row["generate_seconds"], 9600.0)
+        self.assertEqual((row["length"], row["seconds"]), ("gt12s", 15.08))
