@@ -516,6 +516,9 @@ class StoryChatTests(unittest.TestCase):
     def test_rename_and_remove_a_chat_keeps_the_story(self):
         chat = self.start()
         pid = chat["project_id"]
+        populated = self.turn(chat, "An alien meets a girl").json()
+        self.assertTrue(populated["messages"])
+        self.assertTrue(populated["cards"]["shots"])
         renamed = self.client.patch(
             f"/v1/story-chats/{pid}", json={"title": "  Moon  "}
         )
@@ -531,6 +534,8 @@ class StoryChatTests(unittest.TestCase):
         # Continuing it from Works brings the chat back, messages intact.
         reopened = self.client.post(f"/v1/story-chats/{pid}/open", json={})
         self.assertEqual(reopened.status_code, 200, reopened.text)
+        self.assertEqual(reopened.json()["messages"], populated["messages"])
+        self.assertEqual(reopened.json()["cards"], populated["cards"])
         listed = self.client.get("/v1/story-chats").json()["story_chats"]
         self.assertIn(pid, [c["project_id"] for c in listed])
         self.assertNotIn(
