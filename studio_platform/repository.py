@@ -1138,7 +1138,21 @@ class Repository:
                     == "integer",
                     marker.as_integer() == 1,
                 )
-            statement = statement.where(typed)
+            # A chat removed from Quick Create (hidden: true) keeps its story in Works.
+            hidden = documents.c.payload[("journey", "storyChat", "hidden")]
+            if self.engine.dialect.name == "postgresql":
+                kind_of = func.json_typeof(hidden)
+                shown = or_(
+                    kind_of.is_(None),
+                    kind_of != "boolean",
+                    hidden.as_string() != "true",
+                )
+            else:
+                kind_of = func.json_type(
+                    documents.c.payload, "$.journey.storyChat.hidden"
+                )
+                shown = or_(kind_of.is_(None), kind_of != "true")
+            statement = statement.where(typed, shown)
             order = (documents.c.updated_at.desc(), documents.c.document_id)
         with self.engine.connect() as connection:
             values = [

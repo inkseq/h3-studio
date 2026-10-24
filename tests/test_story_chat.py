@@ -513,6 +513,45 @@ class StoryChatTests(unittest.TestCase):
         self.login("supervan")
         self.assertEqual(self.client.get("/v1/story-chats").json()["story_chats"], [])
 
+    def test_rename_and_remove_a_chat_keeps_the_story(self):
+        chat = self.start()
+        pid = chat["project_id"]
+        populated = self.turn(chat, "An alien meets a girl").json()
+        self.assertTrue(populated["messages"])
+        self.assertTrue(populated["cards"]["shots"])
+        renamed = self.client.patch(
+            f"/v1/story-chats/{pid}", json={"title": "  Moon  "}
+        )
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+        self.assertEqual(renamed.json()["title"], "Moon")
+        removed = self.client.patch(f"/v1/story-chats/{pid}", json={"hidden": True})
+        self.assertEqual(removed.status_code, 200, removed.text)
+        listed = self.client.get("/v1/story-chats").json()["story_chats"]
+        self.assertNotIn(pid, [c["project_id"] for c in listed])
+        story = self.client.get(f"/v1/projects/{pid}").json()["project"]
+        self.assertEqual(story["title"], "Moon")
+        self.assertEqual(story["journey"]["storyChat"]["hidden"], True)
+        # Continuing it from Works brings the chat back, messages intact.
+        reopened = self.client.post(f"/v1/story-chats/{pid}/open", json={})
+        self.assertEqual(reopened.status_code, 200, reopened.text)
+        self.assertEqual(reopened.json()["messages"], populated["messages"])
+        self.assertEqual(reopened.json()["cards"], populated["cards"])
+        listed = self.client.get("/v1/story-chats").json()["story_chats"]
+        self.assertIn(pid, [c["project_id"] for c in listed])
+        self.assertNotIn(
+            "hidden",
+            self.client.get(f"/v1/projects/{pid}").json()["project"]["journey"][
+                "storyChat"
+            ],
+        )
+        for body in ({}, {"title": " "}, {"hidden": "yes"}, {"other": 1}):
+            bad = self.client.patch(f"/v1/story-chats/{pid}", json=body)
+            self.assertEqual(bad.status_code, 422, body)
+        self.client.post("/api/auth/logout")
+        self.login("supervan")
+        other = self.client.patch(f"/v1/story-chats/{pid}", json={"hidden": True})
+        self.assertIn(other.status_code, (403, 404))
+
     def test_model_failure_writes_nothing(self):
         chat = self.start()
         self.model.plans.append(ChatError("upstream_timeout", "timeout", 502))
@@ -909,3 +948,56 @@ class RetainedMigrationShotTests(OpenExistingStoryTests):
         refused = self.turn({"project_id": pid}, "x", turn_id="turn-0007", plan=plan)
         self.assertEqual(refused.status_code, 409, refused.text)
         self.assertEqual(refused.json()["detail"]["code"], "story_chat_card_missing")
+
+
+class ShotMediaTests(unittest.TestCase):
+    """Story chat shot cards show the chosen video's thumbnail (owner, 2026-10-24)."""
+
+    def project(self, shot_data):
+        def entity(ident, kind, parent, data=None):
+            return {
+                "id": ident,
+                "type": kind,
+                "parentId": parent,
+                "order": 0,
+                "title": ident,
+                "description": "",
+                "version": 1,
+                "data": data or {},
+            }
+
+        return {
+            "id": "p",
+            "entities": [
+                entity("chapter", "chapter", None),
+                entity("scene", "scene", "chapter"),
+                entity("shot", "shot", "scene", shot_data),
+                entity("result-a1", "video", None, {"cloudArtifactId": "a1"}),
+                entity("result-a2", "video", None, {"cloudArtifactId": "a2"}),
+            ],
+        }
+
+    def shot(self, data):
+        from studio_platform.story_chat import cards
+
+        return cards(self.project(data), {"version": 1})["shots"][0]
+
+    def test_chosen_video_resolves_through_the_selected_entity(self):
+        value = self.shot(
+            {"candidateIds": ["result-a1", "result-a2"], "selectedAssetId": "result-a2"}
+        )
+        self.assertEqual(value["selected_artifact_id"], "a2")
+        self.assertEqual(
+            value["thumbnail_url"], "/v1/artifacts/a2/content?rendition=thumb"
+        )
+        self.assertEqual(value["takes"], 2)
+
+    def test_takes_without_a_choice_have_no_thumbnail(self):
+        value = self.shot({"candidateIds": ["result-a1", "missing"]})
+        self.assertIsNone(value["selected_artifact_id"])
+        self.assertIsNone(value["thumbnail_url"])
+        self.assertEqual(value["takes"], 1)
+
+    def test_unsafe_artifact_ids_are_dropped(self):
+        value = self.shot({"cloudArtifactId": "../x"})
+        self.assertIsNone(value["thumbnail_url"])
