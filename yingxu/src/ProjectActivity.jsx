@@ -104,7 +104,7 @@ export default function ProjectActivity({ state, onLocate, onReview, onOpenCloud
       {c.jobs.length ? (
         <JobList jobs={c.jobs} project={p} onInspect={onLocate} onReview={onReview} />
       ) : (
-        <p className="activity-empty">
+        <p className="ui-empty ui-empty-compact">
           {at('adjunct.projectActivity.copy16')}
           {quick ? at('adjunct.projectActivity.copy17') : at('adjunct.projectActivity.copy18')}
         </p>
@@ -124,7 +124,7 @@ export default function ProjectActivity({ state, onLocate, onReview, onOpenCloud
         </p>
       )}
       {loaded && !events.length && (
-        <p className="activity-empty">{at('adjunct.projectActivity.copy23')}</p>
+        <p className="ui-empty ui-empty-compact">{at('adjunct.projectActivity.copy23')}</p>
       )}
       <ol className="activity-events">
         {events.map((event) => (

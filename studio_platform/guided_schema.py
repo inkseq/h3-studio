@@ -41,6 +41,7 @@ ACTION_FIELDS = {
     },
     "shot.select": {"shot_id", "entity_id"},
     "shot.trim": {"shot_id", "start", "end"},
+    "shot.segments": {"shot_id", "segments"},
     "shot.configure_generation": {
         "shot_id",
         "recipe_id",
@@ -78,6 +79,7 @@ ACTION_REQUIRED = {
     "artifact.adopt": {"artifact_id"},
     "shot.select": {"shot_id"},
     "shot.trim": {"shot_id", "start", "end"},
+    "shot.segments": {"shot_id", "segments"},
     "shot.configure_generation": {"shot_id"},
     "captions.set": {"chapter_id", "cues"},
     "captions.confirm": {"chapter_id", "reviewed"},
@@ -121,6 +123,30 @@ TITLE = {"type": "string", "maxLength": 160}
 TEXT = {"type": "string", "maxLength": 24000}
 OBJECT = {"type": "object", "additionalProperties": True}
 TIME = {"type": "number", "minimum": 0, "maximum": 360000}
+SEGMENTS = {
+    "type": "array",
+    "maxItems": 50,
+    "items": {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["start", "end"],
+        "properties": {"start": TIME, "end": TIME},
+    },
+    "description": "Ordered original-source seconds, inward aligned to 24fps; overlaps/repeats keep their order. [] explicitly clears. Requires a current source binding and trusted duration; use shot.segments to bind automatically.",
+}
+SEGMENT_SOURCE = {
+    "type": ["object", "null"],
+    "additionalProperties": False,
+    "required": ["assetId", "fileId", "cloudAssetId", "cloudArtifactId"],
+    "properties": {
+        "assetId": ID_SCHEMA,
+        **{
+            key: {"type": ["string", "null"], "minLength": 1, "maxLength": 200}
+            for key in ("fileId", "cloudAssetId", "cloudArtifactId")
+        },
+    },
+    "description": "Bound to the chosen video identity. Cannot be rebound while ranges remain; clear explicitly before selecting another take.",
+}
 PARENT = {
     "anyOf": [ID_SCHEMA, {"type": "null"}],
     "description": "Existing parent entity ID; null means project-wide.",
@@ -149,6 +175,8 @@ ENTITY_PROPERTIES = {
         "description": "Create replaces defaults when supplied. A shot defaults to seconds=5,prompt=''; generation defaults to recipe='video'. Include desired defaults in supplied data.",
         "properties": {
             "seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 3600},
+            "videoSegments": SEGMENTS,
+            "videoSegmentsSource": SEGMENT_SOURCE,
             "prompt": TEXT,
             "script": {"type": "string", "maxLength": 120000},
             "h3": {
@@ -476,6 +504,7 @@ def operation_schemas():
             },
         },
         "shot.trim": {"shot_id": ID_SCHEMA, "start": TIME, "end": TIME},
+        "shot.segments": {"shot_id": ID_SCHEMA, "segments": SEGMENTS},
         "shot.configure_generation": {
             "shot_id": ID_SCHEMA,
             "recipe_id": {"enum": recipe_ids},
@@ -604,6 +633,10 @@ def operation_schemas():
         ],
         "shot.trim": [
             "Shot must already select a video entity. Requires 0 <= start < end <= 360000. Saves a range binding; rendering checks real media duration and whether it matches the current file."
+        ],
+        "shot.segments": [
+            "Binds ordered ranges to the currently chosen owned video, checks trusted source duration and snaps inward to the existing 24fps grid. Does not change the original file or generation duration.",
+            "[] explicitly clears. Clear then select another take in the same CAS batch; a silent source change or omitted ranges in a full save is refused. Idempotent replay returns the original receipt before resolving media again.",
         ],
         "shot.configure_generation": [
             "Edits the same saved shot used by the website. Omitted fields/slots are preserved; controls merge per field. Empty arrays clear that slot; first/last null clears that slot. Mode changes never remove incompatible inputs.",

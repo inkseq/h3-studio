@@ -29,7 +29,7 @@ test('uninitialized account library renders one sign-in state without inventing 
   try {
     const html = renderToStaticMarkup(React.createElement(mod.exports.LibraryPreview));
     assert.match(html, /Sign in to browse your library/);
-    assert.match(html, /class="empty-state"/);
+    assert.match(html, /class="ui-empty"/);
     assert.match(html, /aria-label="Sign in"/);
     // Signed out: no GPUs entry (h3-studio#304); works, quick create, library, settings.
     assert.equal((html.match(/nav-ico/g) || []).length, 4);

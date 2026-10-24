@@ -17,6 +17,7 @@ from studio_platform.render_plans import (
 )
 from studio_platform.render_timing import RATES, shot_frames
 from studio_platform.repository import request_hash
+from studio_platform.shot_segments import source_binding
 
 
 def fixture():
@@ -155,6 +156,116 @@ def fixture():
 
 
 class PlannerV5(unittest.TestCase):
+    @staticmethod
+    def segments(project, ranges, shot_id="c"):
+        shot = next(item for item in project["entities"] if item["id"] == shot_id)
+        entity = next(
+            item
+            for item in project["entities"]
+            if item["id"] == shot["data"]["selectedAssetId"]
+        )
+        shot["data"].update(
+            videoSegments=[{"start": start, "end": end} for start, end in ranges],
+            videoSegmentsSource=source_binding(entity),
+        )
+        return shot
+
+    def test_segments_keep_user_order_speed_pairing_and_once_only_manual_audio(self):
+        project, _, calls, resolve = fixture()
+        shot = self.segments(project, [(2, 3), (0, 1), (2, 3)])
+        before = copy.deepcopy(project)
+        compiled, _, blockers, _ = compile_render(BODY, project, resolve)
+        self.assertEqual(blockers, [])
+        render = compiled["request"]["render"]
+        self.assertEqual(
+            [
+                (s["shot_id"], s["source_start_frame"], s["frames"])
+                for s in render["shots"]
+            ],
+            [("c", 48, 32), ("c", 0, 32), ("c", 48, 32), ("a", 0, 24), ("d", 0, 96)],
+        )
+        self.assertEqual(shot_frames(shot), (72, 96, 0.75))
+        tracks = render["audio_tracks"]
+        self.assertEqual(
+            [
+                (
+                    t["source_start_sample"],
+                    t["source_end_sample"],
+                    t["timeline_start_sample"],
+                    t["output_samples"],
+                )
+                for t in tracks[:3]
+            ],
+            [
+                (64000, 96000, 0, 42667),
+                (0, 32000, 42667, 42666),
+                (64000, 96000, 85333, 42667),
+            ],
+        )
+        self.assertEqual(
+            [t["source_id"] for t in tracks],
+            ["c-audio"] * 3 + ["a-audio", "d-audio", "music"],
+        )
+        self.assertEqual(tracks[4]["timeline_start_sample"], 160000)
+        self.assertEqual(tracks[5]["output_samples"], 288000)
+        self.assertEqual(calls.count(("c-video", "video")), 1)
+        self.assertEqual(calls.count(("c-audio", "audio")), 1)
+        self.assertEqual(compiled["output_spec"]["frame_count"], 216)
+        self.assertEqual(project, before)
+        validate_render_request(compiled)
+
+    def test_segment_frame_rounding_is_per_clip_and_overrides_single_trim(self):
+        project, _, _, resolve = fixture()
+        shot = self.segments(project, [(0, 1 / 24), (2, 2 + 1 / 24)])
+        shot["data"]["selectedVideoRange"]["playback_rate"] = 2
+        project["journey"]["sound"] = {"mode": "silent"}
+        project["journey"]["filmCuts"]["chapter-one"]["shotIds"] = ["c"]
+        compiled, _, blockers, _ = compile_render(BODY, project, resolve)
+        self.assertEqual(blockers, [])
+        self.assertEqual(shot_frames(shot), (2, 2, 2))
+        self.assertEqual(compiled["output_spec"]["frame_count"], 2)
+        self.assertEqual(shot["data"]["seconds"], 3)
+
+    def test_expanded_video_and_audio_limits_refuse_without_truncating_valid_plan(self):
+        for count, expected in ((50, "最多50个片段"), (33, "最多32条声音轨道")):
+            project, _, _, resolve = fixture()
+            self.segments(project, [(0, 1 / 24)] * count)
+            compiled, _, blockers, _ = compile_render(BODY, project, resolve)
+            self.assertTrue(any(expected in message for message in blockers), blockers)
+            self.assertLessEqual(len(compiled["request"]["render"]["shots"]), 50)
+            self.assertLessEqual(len(compiled["request"]["render"]["audio_tracks"]), 32)
+
+    def test_segments_invalidate_equal_length_caption_and_source_and_refuse_stale_binding(
+        self,
+    ):
+        project, _, _, resolve = fixture()
+        shot = self.segments(project, [(0, 1), (2, 3)])
+        shots = [shot]
+        before = caption_signature(project, "chapter-one", shots)
+        digest = render_source_hash(project, "chapter-one")
+        shot["data"]["videoSegments"].reverse()
+        after = caption_signature(project, "chapter-one", shots)
+        self.assertEqual(before["basis"][0]["end"], after["basis"][0]["end"])
+        self.assertNotEqual(before, after)
+        self.assertNotEqual(digest, render_source_hash(project, "chapter-one"))
+        shot["data"]["videoSegmentsSource"]["fileId"] = "replaced-file"
+        self.assertTrue(compile_render(BODY, project, resolve)[2])
+
+    def test_no_segments_keep_exact_v5_request_and_empty_edits_do_not_enable_v5(self):
+        project, _, _, resolve = fixture()
+        baseline = compile_render(BODY, project, resolve)[0]
+        for shot in project["entities"]:
+            if shot["type"] == "shot":
+                shot["data"]["videoSegments"] = []
+        actual = compile_render(BODY, project, resolve)[0]
+        self.assertEqual(actual["request"], baseline["request"])
+        self.assertEqual(actual["sources"], baseline["sources"])
+        project = story()
+        project["entities"][2]["data"]["videoSegments"] = []
+        self.assertEqual(
+            compile_render(BODY, project, source)[0]["request"]["render"]["version"], 3
+        )
+
     def test_legacy_request_hashes_are_exactly_the_6726_baseline(self):
         project = story()
         compiled = compile_render(BODY, project, source)[0]

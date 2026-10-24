@@ -42,6 +42,7 @@ export function Dialog({
   eyebrow = '',
   subtitle = '',
   wide = false,
+  size = wide ? 'wide' : 'md',
   busy = false,
   closeOnBackdrop = false,
   portal = false,
@@ -61,7 +62,9 @@ export function Dialog({
   const node = (
     <dialog
       ref={ref}
-      className={['qc-dialog', wide && 'qc-dialog-wide', className].filter(Boolean).join(' ')}
+      className={['qc-dialog', size !== 'md' && 'qc-dialog-' + size, className]
+        .filter(Boolean)
+        .join(' ')}
       aria-label={title}
       onCancel={(event) => {
         event.preventDefault();

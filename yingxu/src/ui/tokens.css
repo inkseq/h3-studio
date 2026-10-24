@@ -13,6 +13,8 @@
   --ink: #f2f4f1;
   --ink-2: #bcc3bd;
   --muted: #808983;
+  --placeholder: #6c746f;
+  --fill: rgba(255, 255, 255, 0.045);
   /* Accent and status */
   --accent: #cdf26e;
   --accent-ink: #11160a;
@@ -33,6 +35,9 @@
   --char: #63d69e;
   --loc: #f3b65a;
   --prp: #c79bff;
+  --char-soft: rgba(99, 214, 158, 0.1);
+  --loc-soft: rgba(243, 182, 90, 0.1);
+  --prp-soft: rgba(199, 155, 255, 0.1);
   /* Shape and motion */
   --r-sm: 8px;
   --r: 12px;

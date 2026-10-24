@@ -17,6 +17,7 @@ def caption_signature(project, chapter_id, shots, *, render_version=None):
     """Rebuild the object saved by caption-model.js, without trusting its copy."""
     entities = {entity["id"]: entity for entity in project["entities"]}
     from .render_timing import enabled, has_speed, shot_frames
+    from .shot_segments import has_segments
 
     v5 = render_version != 3 and enabled(project, chapter_id, shots)
     basis, cursor = [], 0
@@ -24,7 +25,7 @@ def caption_signature(project, chapter_id, shots, *, render_version=None):
         start = cursor / 24
         cursor += (
             shot_frames(shot)[1]
-            if v5 and has_speed(shot)
+            if v5 and (has_speed(shot) or has_segments(shot))
             else max(0, math.floor(shot["data"].get("seconds", 0) * 24 + 0.5))
         )
         asset = entities.get(shot["data"].get("selectedAssetId"))
@@ -45,6 +46,11 @@ def caption_signature(project, chapter_id, shots, *, render_version=None):
         if shot["data"].get("selectedVideoRange"):
             item["selectedVideoRange"] = copy.deepcopy(
                 shot["data"]["selectedVideoRange"]
+            )
+        if v5 and has_segments(shot):
+            item["videoSegments"] = copy.deepcopy(shot["data"]["videoSegments"])
+            item["videoSegmentsSource"] = copy.deepcopy(
+                shot["data"]["videoSegmentsSource"]
             )
         basis.append(item)
     journey = project.get("journey", {})
