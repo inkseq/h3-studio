@@ -1,23 +1,5 @@
-/* Settings → Admin (#304). Ported from the prototype styles.css. */
-.admin-console {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.admin-tabs {
-  align-self: flex-start;
-}
-.seg.admin-tabs > button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-}
-/* The admin tables need more room than the other settings panels. */
-.settings-page .spanel:has(.admin-console) {
-  max-width: 1040px;
-}
-.admin-console h4 {
+/* Admin panels (#304), shown on /admin (#537). Ported from the prototype styles.css. */
+.admin-home h4 {
   margin: 0 0 10px;
 }
 .admin-stats dl {

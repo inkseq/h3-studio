@@ -2,6 +2,7 @@
 export const adminCatalogs = {
   en: {
     'adminHome.title': 'Admin',
+    'adminHome.noPolicy': 'This server has no versioned limits yet; limits cannot be edited here.',
     'adminHome.overview': 'Overview',
     'adminHome.jobs': 'Jobs',
     'adminHome.limits': 'Machines & limits',
@@ -143,6 +144,7 @@ export const adminCatalogs = {
   },
   zh: {
     'adminHome.title': '管理',
+    'adminHome.noPolicy': '这个服务器还没有版本化的上限设置，这里暂时不能改上限。',
     'adminHome.overview': '总览',
     'adminHome.jobs': '任务',
     'adminHome.limits': '机器与上限',
