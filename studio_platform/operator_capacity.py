@@ -691,6 +691,18 @@ def command_public(row, nodes=()):
     }
 
 
+def command_revision(payload):
+    """Control CAS token; legacy rows read as zero without backfilling on GET."""
+    value = payload.get("command_revision", 0)
+    require(type(value) is int and value >= 0, "operator_node_revision_invalid")
+    return value
+
+
+def advance_command_revision(payload):
+    """Call only for an accepted control write under the original node lock."""
+    return {**payload, "command_revision": command_revision(payload) + 1}
+
+
 def node_version(intent, node):
     return request_hash(
         {
@@ -1269,7 +1281,11 @@ class OperatorCapacity(OperatorExtensions):
             connection.execute(
                 update(operator_nodes)
                 .where(operator_nodes.c.intent_id == node_id)
-                .values(desired_state=desired, updated_at=now)
+                .values(
+                    desired_state=desired,
+                    payload=advance_command_revision(node["payload"]),
+                    updated_at=now,
+                )
             )
             command = dict(
                 id=str(uuid.uuid4()),
@@ -1716,7 +1732,10 @@ class OperatorCapacity(OperatorExtensions):
                 update(operator_nodes)
                 .where(operator_nodes.c.intent_id == node_id)
                 .values(
-                    payload={**node["payload"], "manual_review": review},
+                    payload={
+                        **advance_command_revision(node["payload"]),
+                        "manual_review": review,
+                    },
                     desired_state="stopped",
                     runtime_state="manually_reviewed",
                     updated_at=now,

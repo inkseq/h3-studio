@@ -971,18 +971,29 @@ class DstackLifetimeTests(LedgerCase):
             'keep_on': 'until_stopped',
             'expected_version': self.service.state(self.owner)['nodes'][0]['version'],
         }
+        self.now += 1
+        self.store.record(
+            node,
+            {
+                'observed_at': self.now,
+                'state': 'starting',
+                'ready': False,
+            },
+        )
         result = self.service.set_hold(self.owner, node, body, 'always-original')
         self.assertEqual(
             self.service.set_hold(self.owner, node, body, 'always-original'), result
         )
         self.assertIsNone(result['hard_deadline'])
         self.assertEqual(result['lifecycle']['keep_on'], 'until_stopped')
+        self.assertEqual(self.service.state(self.owner)['nodes'][0]['version'], 1)
         self.service.set_hold(
             self.owner, node, {'idle_shutdown_seconds': 900}, 'idle-adjust-only'
         )
         state = self.service.state(self.owner)['nodes'][0]
         self.assertEqual(state['lifecycle']['keep_on'], 'until_stopped')
         self.assertEqual(state['lifecycle']['idle_shutdown_seconds'], 900)
+        self.assertEqual(state['version'], 2)
         for field in (
             'run_id',
             'run_name',

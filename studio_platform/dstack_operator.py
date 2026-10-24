@@ -28,6 +28,8 @@ from .dstack_capacity import (
 )
 from .operator_capacity import (
     OperatorError,
+    advance_command_revision,
+    command_revision,
     operator_commands,
     operator_nodes,
     operator_previews,
@@ -741,6 +743,10 @@ class LedgerDstackStore:
                 from .settlement_recovery import release_removed_instance
 
                 release_removed_instance(self.repo, connection, intent_id)
+            if (removal is not None or no_allocation is not None) and node[
+                "desired_state"
+            ] != "stopped":
+                payload = advance_command_revision(payload)
             self._save(
                 connection,
                 node,
@@ -1154,6 +1160,7 @@ class LedgerDstackStore:
                 reason_code="dstack_never_allocated",
                 ready=False,
             )
+            payload = advance_command_revision(payload)
             self._save(connection, node, payload, runtime_state="stopped")
             connection.execute(
                 update(operator_nodes)
@@ -2747,6 +2754,7 @@ class DstackOperator:
             )
             payload = {
                 "capacity_backend": BACKEND_MARKER,
+                "command_revision": 0,
                 "tenant_id": self.settings.tenant_id,
                 "owner_id": owner,
                 "project_id": profile["project_id"],
@@ -3008,7 +3016,7 @@ class DstackOperator:
                         or dispatch_reason,
                         "dispatch_reason_code": dispatch_reason,
                         "registration_reason_code": registration_reason,
-                        "version": node["updated_at"],
+                        "version": command_revision(payload),
                     }
                 )
         return {
@@ -3035,6 +3043,7 @@ class DstackOperator:
             kind == "stop"
             and isinstance(body, dict)
             and not set(body) - {"expected_version", "acknowledge_capacity_loss"}
+            and ("expected_version" not in body or _finite(body["expected_version"]))
             and (
                 "acknowledge_capacity_loss" not in body
                 or isinstance(body["acknowledge_capacity_loss"], str)
@@ -3057,7 +3066,7 @@ class DstackOperator:
                 }
             require(
                 "expected_version" not in body
-                or body["expected_version"] == node["updated_at"],
+                or body["expected_version"] == command_revision(node["payload"]),
                 "operator_node_version_conflict",
             )
             now = self.repo.clock()
@@ -3069,7 +3078,7 @@ class DstackOperator:
                 and body.get("acknowledge_capacity_loss") != impact["fingerprint"]
             ):
                 raise CapacityLoss(impact)
-            payload = copy.deepcopy(node["payload"])
+            payload = advance_command_revision(copy.deepcopy(node["payload"]))
             payload.update(stop_requested_at=now, hold_until=0)
             if payload.get("dstack_observation"):
                 payload["dstack_observation"]["ready"] = False
@@ -3128,6 +3137,7 @@ class DstackOperator:
             isinstance(body, dict)
             and set(body)
             <= {"hold_seconds", "expected_version", "keep_on", "idle_shutdown_seconds"}
+            and ("expected_version" not in body or _finite(body["expected_version"]))
             and any(
                 field in body
                 for field in ("hold_seconds", "keep_on", "idle_shutdown_seconds")
@@ -3146,11 +3156,11 @@ class DstackOperator:
                 return copy.deepcopy(existing["payload"])
             require(
                 "expected_version" not in body
-                or body["expected_version"] == node["updated_at"],
+                or body["expected_version"] == command_revision(node["payload"]),
                 "operator_node_version_conflict",
             )
             now = self.repo.clock()
-            payload = copy.deepcopy(node["payload"])
+            payload = advance_command_revision(copy.deepcopy(node["payload"]))
             intent = self.repo._locked(
                 connection,
                 select(instance_intents).where(instance_intents.c.id == node_id),

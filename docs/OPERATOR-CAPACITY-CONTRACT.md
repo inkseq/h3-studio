@@ -65,6 +65,20 @@ Limits are versioned; concurrent edits require `expected_version`. Tightening li
 
 Drain stops new claims and retains reconciliation/collection. Stop is drain-then-destroy only after original execution, collection and provider obligations are safe. Partial/unknown outcomes retain their operation and provider identities; do not retry creation with another identity. Controller health, observation age, preparation, runtime readiness and serving state are displayed separately. No stale green state.
 
+dstack node `version` is the integer control `command_revision`, stored additively
+in the existing node payload. New nodes start at zero; legacy payloads missing it
+read as zero without a GET/backfill write. Accepted stop, hold/lifecycle, group
+move/child commands and other control-state changes advance it under the original
+capacity/node locks. Observation, heartbeat, readiness and billing-status updates
+alone do not. Group membership versions and legacy operator hashed versions keep
+their existing contracts. A cached timestamp `expected_version` conflicts normally:
+refetch and review before a new command; never silently replace its token and retry.
+Original idempotency receipts replay before the new CAS check, retaining their
+original result/body. A stable node version does not freeze stop impact: current
+queue warnings are checked again under lock, and admitted/unknown work still blocks
+physical destruction. Rollback can read the additive payload, but restores the old
+timestamp CAS behavior until this fix is re-promoted.
+
 A stopping `OperatorBoot` may retire its own original exited CPU workers only
 after preparation has ended and every configured slot's pinned WanGP adapter
 freshly confirms the same manifest, slot and runtime incarnation idle. A single
