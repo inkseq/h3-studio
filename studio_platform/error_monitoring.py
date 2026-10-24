@@ -87,6 +87,68 @@ def sanitized_event(event, hint=None):
     if type(hint) is dict:
         # Scope attachments are sent outside the event JSON by the SDK.
         hint.pop("attachments", None)
+    if type(event) is dict and event.get("message") == "capacity_attempt_reclaimed":
+        tags = event.get("tags")
+        if (
+            type(tags) is not dict
+            or type(tags.get("reason")) is not str
+            or tags.get("reason")
+            not in {
+                "capacity_no_progress",
+                "capacity_runtime_exceeded",
+                "capacity_owner_recovery",
+                "capacity_provider_removed",
+            }
+            or type(tags.get("reclaim_count")) is not str
+            or tags.get("reclaim_count") not in {"0", "1", "2"}
+            or not isinstance(event.get("event_id"), str)
+            or re.fullmatch(r"[0-9a-f]{32}", event["event_id"]) is None
+        ):
+            return None
+        clean = {
+            "platform": "python",
+            "level": "warning",
+            "message": "capacity_attempt_reclaimed",
+            "event_id": event["event_id"],
+            "tags": {key: tags[key] for key in ("reason", "reclaim_count")},
+        }
+        if event.get("environment") in ("staging", "production"):
+            clean["environment"] = event["environment"]
+        return clean
+    if type(event) is dict and event.get("message") == "capacity_health_alert":
+        tags = event.get("tags")
+        if (
+            type(tags) is not dict
+            or type(tags.get("code")) is not str
+            or tags["code"]
+            not in {
+                "capacity_paid_idle_queue",
+                "capacity_queue_age",
+                "capacity_demand_start_loop",
+            }
+            or type(tags.get("diagnosis")) is not str
+            or tags["diagnosis"]
+            not in {
+                "registration_capacity",
+                "host_runtime",
+                "dispatch_unobserved",
+                "queue_age",
+                "unserved_start_stop_loop",
+            }
+            or not isinstance(event.get("event_id"), str)
+            or re.fullmatch(r"[0-9a-f]{32}", event["event_id"]) is None
+        ):
+            return None
+        clean = {
+            "platform": "python",
+            "level": "warning",
+            "message": "capacity_health_alert",
+            "event_id": event["event_id"],
+            "tags": {key: tags[key] for key in ("code", "diagnosis")},
+        }
+        if event.get("environment") in ("staging", "production"):
+            clean["environment"] = event["environment"]
+        return clean
     if type(event) is not dict or type(event.get("exception")) is not dict:
         return None
     values = event["exception"].get("values")
@@ -124,6 +186,36 @@ def sanitized_event(event, hint=None):
     if environment in ("staging", "production"):
         clean["environment"] = environment
     return clean
+
+
+def report_capacity_reclaim(client, receipt):
+    """The only non-exception message; immutable ID dedupes at the collector."""
+    import uuid
+
+    return client.capture_event(
+        {
+            "message": "capacity_attempt_reclaimed",
+            "level": "warning",
+            "event_id": uuid.UUID(receipt["event_id"]).hex,
+            "tags": {
+                "reason": receipt["reason"],
+                "reclaim_count": str(receipt["count"]),
+            },
+        }
+    )
+
+
+def report_capacity_health(client, value):
+    import uuid
+
+    return client.capture_event(
+        {
+            "message": "capacity_health_alert",
+            "level": "warning",
+            "event_id": uuid.UUID(value["event_id"]).hex,
+            "tags": {"code": value["code"], "diagnosis": value["diagnosis"]},
+        }
+    )
 
 
 def create_client(settings):

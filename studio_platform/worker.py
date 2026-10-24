@@ -715,6 +715,10 @@ class WorkerRunner:
                             error_code="render_resume_identity_unconfirmed",
                         )
                     )
+            if outcome.state == "running" and self.backend.kind == "wangp-worker":
+                from .capacity_watchdog import record_engine_progress
+
+                record_engine_progress(self.repo, self.queue, lease)
             if outcome.state == "succeeded":
                 self._generation_finish(lease, "success")
                 job = self.queue.begin_collection(lease)

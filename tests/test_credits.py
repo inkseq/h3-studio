@@ -245,6 +245,168 @@ class CreditTests(LedgerCase):
         self.assertEqual(self.repo.get_budget("owner-budget"), before)
         self.assert_invariants()
 
+    def test_capacity_reclaim_carries_one_hold_and_delivered_attempt_captures_once(
+        self,
+    ):
+        from studio_platform.repository import LeaseLost
+        from test_platform_queue import VALID_ARTIFACT
+
+        self.seed()
+        job = self.credit_job()
+        self.hold(job)
+        queue = TaskQueue(self.repo)
+        first = queue.claim("lost-worker", job["pool"], job_ids=[job["id"]])
+        queue.begin_submission(first.lease)
+        queue.record_submitted(first.lease, "original-upstream")
+        before = self.repo.get_budget("owner-budget")
+        queue.reclaim_capacity(
+            self.scope,
+            job["id"],
+            expected_attempt_id=first.lease.attempt_id,
+            expected_fence=first.lease.fence,
+            reason="capacity_owner_recovery",
+            evidence_id="original-absence",
+        )
+        self.assertEqual((self.balance()["balance"], self.balance()["held"]), (100, 20))
+        second = queue.claim("replacement-worker", job["pool"], job_ids=[job["id"]])
+        queue.begin_submission(second.lease)
+        queue.record_submitted(second.lease, "replacement-upstream")
+        queue.begin_collection(second.lease)
+        done = queue.complete(second.lease, [VALID_ARTIFACT], actual_cost_microusd=17)
+        self.assertEqual((self.balance()["balance"], self.balance()["held"]), (80, 0))
+        self.assertEqual(done["result"]["capacity_reclaim_count"], 1)
+        self.assertEqual(done["result"]["billing_status"], "pending")
+        self.assertEqual(self.repo.get_budget("owner-budget"), before)
+        with self.assertLogs("studio_platform.capacity_reclaim", "WARNING"):
+            with self.assertRaises(LeaseLost):
+                queue.complete(first.lease, [VALID_ARTIFACT], actual_cost_microusd=9)
+        with self.repo.transaction() as conn:
+            self.assertFalse(credits.capture(conn, self.repo, done)["created"])
+            ledger = (
+                conn.execute(
+                    select(entries.c.kind).where(entries.c.reference_id == job["id"])
+                )
+                .scalars()
+                .all()
+            )
+            old = (
+                conn.execute(
+                    select(attempts).where(attempts.c.id == first.lease.attempt_id)
+                )
+                .mappings()
+                .one()
+            )
+        self.assertCountEqual(ledger, ["hold", "capture"])
+        self.assertIsNone(old["actual_cost_microusd"])
+        self.assertEqual(old["upstream_stopped"], 0)
+        self.assert_invariants()
+
+    def test_capacity_reclaim_exhaustion_releases_user_hold_without_supplier_settlement(
+        self,
+    ):
+        self.seed()
+        job = self.credit_job()
+        self.hold(job)
+        queue = TaskQueue(self.repo)
+        before = self.repo.get_budget("owner-budget")
+        for index in range(3):
+            claim = queue.claim(
+                "worker-" + str(index), job["pool"], job_ids=[job["id"]]
+            )
+            queue.begin_submission(claim.lease)
+            queue.record_submitted(claim.lease, "upstream-" + str(index))
+            receipt = queue.reclaim_capacity(
+                self.scope,
+                job["id"],
+                expected_attempt_id=claim.lease.attempt_id,
+                expected_fence=claim.lease.fence,
+                reason="capacity_owner_recovery",
+                evidence_id="lost-" + str(index),
+            )
+            self.assertEqual(self.balance()["held"], 20 if index < 2 else 0)
+        self.assertEqual(receipt["state"], "exhausted")
+        self.assertEqual(self.balance()["balance"], 100)
+        self.assertEqual(self.repo.get_budget("owner-budget"), before)
+        with self.repo.engine.connect() as conn:
+            self.assertCountEqual(
+                conn.execute(
+                    select(entries.c.kind).where(entries.c.reference_id == job["id"])
+                )
+                .scalars()
+                .all(),
+                ["hold", "release"],
+            )
+        self.assert_invariants()
+
+    def test_cancel_reclaimed_queued_or_claimed_work_preserves_supplier_liability(self):
+        from studio_platform.repository import LeaseLost
+
+        self.seed()
+        for replacement_claimed in (False, True):
+            with self.subTest(replacement_claimed=replacement_claimed):
+                job = self.credit_job()
+                self.hold(job)
+                queue = TaskQueue(self.repo)
+                old = queue.claim("old-worker", job["pool"], job_ids=[job["id"]])
+                queue.begin_submission(old.lease)
+                queue.record_submitted(old.lease, "unconfirmed-original")
+                queue.reclaim_capacity(
+                    self.scope,
+                    job["id"],
+                    expected_attempt_id=old.lease.attempt_id,
+                    expected_fence=old.lease.fence,
+                    reason="capacity_owner_recovery",
+                    evidence_id="owner-recovery",
+                )
+                before = self.repo.get_budget("owner-budget")
+                fresh = (
+                    queue.claim("replacement", job["pool"], job_ids=[job["id"]])
+                    if replacement_claimed
+                    else None
+                )
+                done = self.repo.request_cancel(self.scope, job["id"])
+                self.assertEqual(done["status"], "cancelled")
+                self.assertEqual(done["result"]["billing_status"], "pending")
+                self.assertEqual(done["result"]["capacity_reclaim_count"], 1)
+                self.assertEqual(
+                    (self.balance()["balance"], self.balance()["held"]), (100, 0)
+                )
+                self.assertEqual(self.repo.get_budget("owner-budget"), before)
+                self.assertEqual(self.repo.request_cancel(self.scope, job["id"]), done)
+                if fresh:
+                    with self.assertRaises(LeaseLost):
+                        queue.begin_submission(fresh.lease)
+                self.assertIsNone(queue.claim("late", job["pool"], job_ids=[job["id"]]))
+                with self.repo.engine.connect() as conn:
+                    prior = (
+                        conn.execute(
+                            select(attempts).where(
+                                attempts.c.id == old.lease.attempt_id
+                            )
+                        )
+                        .mappings()
+                        .one()
+                    )
+                    self.assertEqual(
+                        (
+                            prior["status"],
+                            prior["upstream_stopped"],
+                            prior["actual_cost_microusd"],
+                        ),
+                        ("attempt_lost", 0, None),
+                    )
+                    self.assertCountEqual(
+                        conn.execute(
+                            select(entries.c.kind).where(
+                                entries.c.reference_id == job["id"]
+                            )
+                        )
+                        .scalars()
+                        .all(),
+                        ["hold", "release"],
+                    )
+                self.assert_invariants()
+
     def test_failure_and_proven_queued_cancel_release_full_hold(self):
         self.seed()
         for state in ("failed", "cancelled"):

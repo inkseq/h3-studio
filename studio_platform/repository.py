@@ -2842,6 +2842,11 @@ class Repository:
                 },
             )
             return self._job(connection, job_id)
+        from .capacity_reclaim import cancel_before_replacement
+
+        reclaimed_cancel = cancel_before_replacement(self, connection, job)
+        if reclaimed_cancel is not None:
+            return reclaimed_cancel
         immediate = job["status"] in (
             "planned",
             "blocked",
