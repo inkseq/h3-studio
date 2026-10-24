@@ -185,6 +185,10 @@ class SupportViewHttpTests(unittest.TestCase):
         self.assertEqual(
             (write.status_code, write.json()["code"]), (403, "support_view_read_only")
         )
+        me = self.client.get("/api/auth/me", headers=head).json()
+        self.assertEqual(me["username"], "supervan")
+        self.assertEqual(me["support_view"], {"viewer": "superdan", "read_only": True})
+        self.assertNotIn("support_view", self.client.get("/api/auth/me").json())
         admin = self.client.get("/v1/admin/users", headers=head)
         self.assertEqual(admin.json()["code"], "support_view_path_blocked")
         bogus = self.client.get("/v1/story-chats", headers={"X-Support-View": "0" * 32})

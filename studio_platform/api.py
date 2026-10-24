@@ -768,6 +768,16 @@ def create_app(
             | {"admin": is_admin(principal, repo, settings)},
             "all_projects": principal.all_projects,
             "project_ids": list(principal.project_ids),
+            **(
+                {
+                    "support_view": {
+                        "viewer": principal.support_viewer,
+                        "read_only": True,
+                    }
+                }
+                if principal.support_viewer
+                else {}
+            ),
         }
 
     @app.post("/api/auth/logout")

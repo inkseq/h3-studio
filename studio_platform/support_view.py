@@ -241,10 +241,16 @@ def resolve(repo, settings, principal, view_id):
     )
 
 
+# The app learns whose account it shows from these two reads; nothing else under /api/auth/.
+ALLOWED_AUTH_READS = frozenset({"/api/auth/me", "/api/auth/config"})
+
+
 def refusal(method, path):
     """Why a support-view request is refused, or None when it may proceed."""
     if method not in READ_METHODS:
         return "support_view_read_only"
+    if path in ALLOWED_AUTH_READS:
+        return None
     if path.startswith(BLOCKED_PREFIXES):
         return "support_view_path_blocked"
     return None
