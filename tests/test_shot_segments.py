@@ -426,6 +426,41 @@ class SegmentGuidedTests(unittest.TestCase):
         self.assertEqual(actual["version"], result["version"])
         self.assertEqual(actual["project"], result["project"])
 
+    def test_malformed_full_save_refuses_before_media_reads(self):
+        result = self.segmented()
+        for mode in ("list", "entity", "id", "duplicate", "data", "ranges", "binding"):
+            value = copy.deepcopy(result["project"])
+            if mode == "list":
+                value["entities"] = None
+            elif mode == "entity":
+                value["entities"].append(None)
+            elif mode == "id":
+                value["entities"][0].pop("id")
+            elif mode == "duplicate":
+                value["entities"].append(copy.deepcopy(value["entities"][0]))
+            elif mode == "data":
+                value["entities"][3]["data"] = None
+            elif mode == "ranges":
+                value["entities"][2]["data"]["videoSegments"] = "invalid"
+            else:
+                value["entities"][2]["data"]["videoSegmentsSource"]["fileId"] = "wrong"
+            with (
+                self.subTest(mode=mode),
+                patch.object(
+                    self.app.state,
+                    "resolve_render_source",
+                    side_effect=AssertionError("Malformed edits must not read media"),
+                ),
+            ):
+                response = self.client.put(
+                    "/v1/projects/story-one",
+                    json={"expected_version": result["version"], "project": value},
+                )
+                self.assertEqual(response.status_code, 422, response.text)
+        actual = self.client.get("/v1/projects/story-one").json()
+        self.assertEqual(actual["version"], result["version"])
+        self.assertEqual(actual["project"], result["project"])
+
     def test_generic_patch_and_action_cannot_bypass_trusted_duration(self):
         result = self.prepare()
         invalid = [{"start": 9, "end": 10.00001}]

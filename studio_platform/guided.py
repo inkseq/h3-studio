@@ -63,6 +63,7 @@ from .shot_segments import (
     has_segments,
     segment_frames,
     source_binding,
+    validate_segments_data,
     validate_segments_transition,
 )
 
@@ -399,7 +400,6 @@ class Guided:
             documents.c.kind == "project",
             documents.c.document_id == project_id,
         )
-        validate_project(project, self.settings.max_project_bytes)
         segment_sources = self.resolve_segment_sources(principal, project_id, project)
         with self.repo.transaction() as conn:
             owner_reference_gate(conn, self.settings.tenant_id, principal.owner)
@@ -845,13 +845,34 @@ class Guided:
 
     def resolve_segment_sources(self, principal, project_id, project, *, cached=None):
         """Read canonical source durations outside every document write lock."""
+        # Full validation follows locked quality-selector normalization. Before
+        # media reads, validate only the structure needed for segment lookups;
+        # neutral public quality defaults are not canonical stored defaults yet.
+        entities = project.get("entities", [])
+        if not isinstance(entities, list) or len(entities) > 5000:
+            raise ValueError("项目节点超限")
+        seen = set()
+        for entity in entities:
+            if (
+                not isinstance(entity, dict)
+                or not isinstance(entity.get("id"), str)
+                or not ID.fullmatch(entity["id"])
+                or entity["id"] in seen
+                or not isinstance(entity.get("type"), str)
+                or entity["type"] not in TYPES
+                or not isinstance(entity.get("data"), dict)
+            ):
+                raise ValueError("节点ID、类型或内容无效")
+            seen.add(entity["id"])
+            validate_segments_data(entity)
         sources = dict(cached or {})
-        for shot in project.get("entities", []):
+        for shot in entities:
             if not has_segments(shot):
                 continue
             entity = entity_by_id(
                 project, shot["data"].get("selectedAssetId"), {"video"}
             )
+            segment_frames(shot, entity)
             binding = source_binding(entity)
             key = request_hash(binding)
             if key not in sources:

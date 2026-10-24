@@ -340,6 +340,40 @@ class QualityAuthoringTests(LedgerCase):
             self.assertIn("tier", fields)
             self.assertIn("mode", fields)
 
+    def test_full_save_resolves_public_quality_defaults_with_segments(self):
+        from studio_platform.shot_segments import source_binding
+
+        value = self.seed()
+        incoming = copy.deepcopy(value)
+        shot = incoming["entities"][-1]
+        video = copy.deepcopy(shot)
+        video.update(id="source-video", type="video", order=1)
+        video["data"] = {"fileId": "source-file"}
+        incoming["entities"].append(video)
+        incoming["journey"] = {"storyboard": {"defaults": dict(PUBLIC)}}
+        shot["data"].update(
+            h3=dict(PUBLIC),
+            selectedAssetId=video["id"],
+            videoSegments=[{"start": 0.01, "end": 0.99}],
+            videoSegmentsSource=source_binding(video),
+        )
+        with patch.object(
+            self.service.app.state,
+            "resolve_render_source",
+            return_value={"kind": "video", "duration": 10},
+            create=True,
+        ):
+            saved = self.service.save(self.user, value["id"], incoming, 1)["project"]
+        self.assertEqual(saved["entities"][-2]["data"]["h3"], RAW)
+        self.assertEqual(
+            saved["journey"]["storyboard"]["defaults"],
+            {"deployment_profile_id": PROFILE, "recipe_id": RECIPE},
+        )
+        self.assertEqual(
+            saved["entities"][-2]["data"]["videoSegments"],
+            [{"start": 1 / 24, "end": 23 / 24}],
+        )
+
     def test_unchanged_legacy_selectors_survive_full_put_and_unrelated_actions(self):
         for identity, recipe in (
             (OLD_PROFILE, RECIPE),
