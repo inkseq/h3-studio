@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
   Activity,
+  BarChart3,
   AlertTriangle,
   Cpu,
   History,
@@ -45,6 +46,7 @@ const SECTIONS = [
   ['users', 'adminHome.users', Users],
   ['pricing', 'adminHome.pricing', TrendingUp],
   ['log', 'adminHome.log', History],
+  ['stats', 'adminHome.stats', BarChart3],
 ];
 const SETTINGS_PATH = '/v1/operator/admin/spending-settings';
 
@@ -394,6 +396,145 @@ function BudgetAdministration({ account }) {
   );
 }
 
+const BAND = {
+  le5s: '≤5s',
+  '5-8s': '5–8s',
+  '8-12s': '8–12s',
+  gt12s: '>12s',
+  le480: '≤480P',
+  le720: '≤720P',
+  gt720: '>720P',
+};
+const band = (value) => BAND[value] || value;
+const refs = (row) =>
+  row.image_refs_band === 'unknown' || row.image_refs_band === undefined
+    ? '—'
+    : row.image_refs_band + (row.audio_ref === 'yes' ? ' + ♪' : '');
+
+// Seconds per GPU type and content (h3-studio#548): history from the ledger, read-only.
+function AdminStats({ api, active }) {
+  const { t } = useI18n();
+  const [days, setDays] = useState(14),
+    [data, setData] = useState(null),
+    [error, setError] = useState('');
+  useEffect(() => {
+    if (!active) return undefined;
+    let live = true;
+    setError('');
+    api
+      .request('/v1/operator/admin/generation-stats?days=' + days)
+      .then((value) => live && setData(value))
+      .catch((failure) => {
+        if (!live) return;
+        setData(null);
+        setError(failure.status === 404 ? t('adminHome.stats.notDeployed') : failure.message);
+      });
+    return () => {
+      live = false;
+    };
+  }, [api, active, days]);
+  return (
+    <>
+      <div className="ah-toolbar">
+        <Segmented
+          options={[7, 14, 30].map((value) => ({
+            value,
+            label: t('adminHome.stats.days', { count: value }),
+          }))}
+          value={days}
+          onChange={setDays}
+        />
+      </div>
+      {error && <Note tone="warn">{error}</Note>}
+      {!error && !data && <Spinner />}
+      {data && !data.groups.length && <EmptyState compact>{t('adminHome.stats.empty')}</EmptyState>}
+      {data && data.groups.length > 0 && (
+        <>
+          <section className="ah-card">
+            <header>
+              <h2>{t('adminHome.stats.byContent')}</h2>
+              <Note>{t('adminHome.stats.total', { count: data.count })}</Note>
+            </header>
+            <div className="ah-table-wrap">
+              <table className="ah-table">
+                <thead>
+                  <tr>
+                    <th>GPU</th>
+                    <th>{t('adminHome.stats.mode')}</th>
+                    <th>{t('adminHome.stats.length')}</th>
+                    <th>{t('adminHome.stats.resolution')}</th>
+                    <th>{t('adminHome.stats.refs')}</th>
+                    <th className="num">{t('adminHome.stats.count')}</th>
+                    <th className="num">{t('adminHome.stats.median')}</th>
+                    <th className="num">P90</th>
+                    <th className="num">{t('adminHome.stats.max')}</th>
+                    <th className="num">{t('adminHome.stats.cost')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.groups.map((g, index) => (
+                    <tr key={index}>
+                      <td>{g.gpu_type}</td>
+                      <td>{g.mode.toUpperCase()}</td>
+                      <td>{band(g.length)}</td>
+                      <td>{band(g.resolution)}</td>
+                      <td>{refs(g)}</td>
+                      <td className="num">{g.count}</td>
+                      <td className="num">{duration(g.generate_seconds.median)}</td>
+                      <td className="num">{duration(g.generate_seconds.p90)}</td>
+                      <td className="num">{duration(g.generate_seconds.max)}</td>
+                      <td className="num">{usd(g.median_cost_microusd)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <section className="ah-card">
+            <header>
+              <h2>{t('adminHome.stats.recent')}</h2>
+            </header>
+            <div className="ah-table-wrap">
+              <table className="ah-table">
+                <thead>
+                  <tr>
+                    <th>{t('adminHome.stats.finished')}</th>
+                    <th>{t('adminHome.col.owner')}</th>
+                    <th>GPU</th>
+                    <th>{t('adminHome.stats.mode')}</th>
+                    <th className="num">{t('adminHome.stats.videoSeconds')}</th>
+                    <th className="num">{t('adminHome.stats.resolution')}</th>
+                    <th>{t('adminHome.stats.refs')}</th>
+                    <th className="num">{t('adminHome.stats.took')}</th>
+                    <th className="num">{t('adminHome.stats.waited')}</th>
+                    <th className="num">{t('adminHome.stats.cost')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.recent.slice(0, 50).map((row) => (
+                    <tr key={row.job_id + ':' + row.attempt}>
+                      <td>{new Date(row.finished_at * 1000).toLocaleString()}</td>
+                      <td>{row.owner_id}</td>
+                      <td>{row.gpu_type}</td>
+                      <td>{row.mode.toUpperCase()}</td>
+                      <td className="num">{row.seconds ?? '—'}</td>
+                      <td className="num">{row.height ? row.height + 'P' : '—'}</td>
+                      <td>{refs(row)}</td>
+                      <td className="num">{duration(row.generate_seconds)}</td>
+                      <td className="num">{duration(row.wait_seconds)}</td>
+                      <td className="num">{usd(row.cost_microusd)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      )}
+    </>
+  );
+}
+
 function Limits({ api, active, account }) {
   const [settings, setSettings] = useState(null);
   const load = async () => setSettings(await api.request(SETTINGS_PATH));
@@ -502,6 +643,7 @@ export default function AdminHome({ account }) {
               </>
             )}
             {section === 'log' && <AdminAudit api={api} active={active} />}
+            {section === 'stats' && <AdminStats api={api} active={active} />}
           </main>
         </div>
       )}
