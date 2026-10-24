@@ -11,14 +11,15 @@ import math
 from .repository import request_hash
 
 POLICY_VERSION = 1
+LEGACY_DEMAND_MAX_MACHINES = 2
 DEFAULTS = {
     "capacity_policy_version": POLICY_VERSION,
     "tenant_daily_limit_microusd": 100_000_000,
     "tenant_daily_warning_fraction": 0.8,
-    "fleet_hourly_limit_microusd": 3_000_000,
-    "mode_hourly_ceiling_microusd": {"ref": 1_500_000, "fl": 850_000, "other": 850_000},
-    "max_hourly_price_microusd": 1_500_000,
-    "max_machines": 2,
+    "fleet_hourly_limit_microusd": 15_000_000,
+    "mode_hourly_ceiling_microusd": {"ref": 3_000_000, "fl": 850_000, "other": 850_000},
+    "max_hourly_price_microusd": 3_000_000,
+    "max_machines": 10,
     "idle_shutdown_seconds": 600,
     "max_runtime_seconds": 7200,
     "test_task_limit_microusd": 20_000_000,
@@ -36,7 +37,7 @@ FIELD_BOUNDS = {
     "tenant_daily_warning_fraction": (0.5, 0.95),
     "fleet_hourly_limit_microusd": (100_000, 40_000_000),
     "max_hourly_price_microusd": (100_000, 5_000_000),
-    "max_machines": (1, 8),
+    "max_machines": (1, 10),
     "idle_shutdown_seconds": (1, 86400),
     "max_runtime_seconds": (300, 14400),
     "test_task_limit_microusd": (1_000_000, 20_000_000),
@@ -45,7 +46,7 @@ FIELD_BOUNDS = {
     "interactive_activity_window_seconds": (60, 7200),
     "interactive_wait_target_seconds": (30, 1800),
     "batch_start_target_seconds": (60, 7200),
-    "per_user_minimum_machine_share": (1, 8),
+    "per_user_minimum_machine_share": (1, 10),
 }
 LEGACY_FIELDS = frozenset(
     {
@@ -282,6 +283,8 @@ def consequences(value, changed_fields, profile_snapshots=None):
             "limit_microusd": value["tenant_daily_limit_microusd"],
             "warning_fraction": value["tenant_daily_warning_fraction"],
             "timezone": "Australia/Sydney",
+            "admission_basis": "confirmed_supplier_exposure",
+            "unresolved_references": "warning",
         },
         {
             "code": "admitted_work_may_exceed_daily_limit",
@@ -388,6 +391,10 @@ def metadata(stored, latest_changes=None):
         "capacity_policy_version": POLICY_VERSION if adopted(stored) else None,
         "defaults": copy.deepcopy(DEFAULTS),
         "field_bounds": bounds,
+        "supplier_admission": {
+            "basis": "confirmed_supplier_exposure",
+            "unresolved_references": "warning",
+        },
         "controls": {
             key: {"pending_implementation": key in PENDING_FIELDS}
             for key in DEFAULTS

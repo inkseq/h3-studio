@@ -32,7 +32,7 @@ class CapacityPolicyTests(unittest.TestCase):
         before = copy.deepcopy(old)
         metadata = capacity.metadata(old)
         self.assertFalse(metadata["adopted"])
-        self.assertEqual(metadata["defaults"]["max_hourly_price_microusd"], 1_500_000)
+        self.assertEqual(metadata["defaults"]["max_hourly_price_microusd"], 3_000_000)
         self.assertIsNone(capacity.admission_snapshot(old))
         self.assertEqual(old, before)
         preview = capacity.preview_change(
@@ -46,13 +46,43 @@ class CapacityPolicyTests(unittest.TestCase):
     def test_recommended_machine_ceiling_matches_ref_without_adopting(self):
         old = {"version": 0, "value": {}}
         preview = capacity.preview_change(old, {}, {})
-        self.assertEqual(preview["value"]["max_hourly_price_microusd"], 1_500_000)
+        self.assertEqual(preview["value"]["max_hourly_price_microusd"], 3_000_000)
         self.assertFalse(capacity.metadata(old)["adopted"])
         self.assertEqual(old, {"version": 0, "value": {}})
         self.assertNotIn(
             "mode_ceiling_above_machine_ceiling",
             {item["code"] for item in preview["consequences"]},
         )
+        self.assertEqual(preview["value"]["fleet_hourly_limit_microusd"], 15_000_000)
+        self.assertEqual(preview["value"]["max_machines"], 10)
+        self.assertEqual(preview["value"]["tenant_daily_limit_microusd"], 100_000_000)
+        self.assertEqual(
+            preview["value"]["mode_hourly_ceiling_microusd"]["ref"], 3_000_000
+        )
+        metadata = capacity.metadata(old)
+        self.assertEqual(
+            metadata["field_bounds"]["max_machines"], {"minimum": 1, "maximum": 10}
+        )
+        self.assertEqual(
+            metadata["supplier_admission"],
+            {
+                "basis": "confirmed_supplier_exposure",
+                "unresolved_references": "warning",
+            },
+        )
+
+    def test_original_two_machine_snapshot_survives_new_recommended_defaults(self):
+        value = {
+            **copy.deepcopy(capacity.DEFAULTS),
+            "max_machines": 2,
+            "fleet_hourly_limit_microusd": 3_000_000,
+            "max_hourly_price_microusd": 1_500_000,
+        }
+        value["mode_hourly_ceiling_microusd"]["ref"] = 1_500_000
+        snapshot = capacity.admission_snapshot({"version": 1, "value": value})
+        before = copy.deepcopy(snapshot)
+        self.assertEqual(capacity.validate_snapshot(snapshot), value)
+        self.assertEqual(snapshot, before)
 
     def test_lower_machine_ceiling_warns_once_per_mode_and_still_constrains(self):
         profiles = {
@@ -70,7 +100,7 @@ class CapacityPolicyTests(unittest.TestCase):
                 {
                     "code": "mode_ceiling_above_machine_ceiling",
                     "mode": "ref",
-                    "mode_hourly_microusd": 1_500_000,
+                    "mode_hourly_microusd": 3_000_000,
                     "machine_hourly_microusd": 1_000_000,
                 }
             ],
@@ -80,7 +110,7 @@ class CapacityPolicyTests(unittest.TestCase):
             for item in preview["consequences"]
             if item["code"] == "fleet_limits_combination"
         )
-        self.assertEqual(combination["required_hourly_microusd"], 2_000_000)
+        self.assertEqual(combination["required_hourly_microusd"], 10_000_000)
         self.assertEqual(preview["value"]["max_hourly_price_microusd"], 1_000_000)
 
     def test_profile_ceiling_still_constrains_higher_recommended_machine_cap(self):
@@ -91,13 +121,13 @@ class CapacityPolicyTests(unittest.TestCase):
             for item in preview["consequences"]
             if item["code"] == "fleet_allows_combination"
         )
-        self.assertEqual(combination["hourly_microusd"], 1_700_000)
+        self.assertEqual(combination["hourly_microusd"], 8_500_000)
         self.assertEqual(preview["profile_snapshots"], profiles)
 
     def test_invalid_changes_have_finite_field_diagnostics(self):
         for field, value in (
             ("max_machines", True),
-            ("max_machines", 9),
+            ("max_machines", 11),
             ("tenant_daily_warning_fraction", float("nan")),
             ("tenant_daily_warning_fraction", float("inf")),
             ("tenant_daily_warning_fraction", 0.49),
@@ -162,7 +192,7 @@ class CapacityPolicyTests(unittest.TestCase):
             for x in preview["consequences"]
             if x["code"] == "fleet_limits_combination"
         )
-        self.assertEqual(effect["required_hourly_microusd"], 3_000_000)
+        self.assertEqual(effect["required_hourly_microusd"], 20_000_000)
         self.assertEqual(preview["value"]["fleet_hourly_limit_microusd"], 1_000_000)
 
     def test_snapshot_and_digest_bind_admin_profile_and_consequences(self):
@@ -185,7 +215,7 @@ class CapacityPolicyTests(unittest.TestCase):
         adopted = {"version": 8, "value": preview["value"]}
         snapshot = capacity.admission_snapshot(adopted)
         adopted["value"]["max_machines"] = 8
-        self.assertEqual(snapshot["value"]["max_machines"], 2)
+        self.assertEqual(snapshot["value"]["max_machines"], 10)
         self.assertEqual(snapshot["settings_version"], 8)
 
     def test_snapshot_validation_preserves_legacy_ranges_but_rejects_bad_authority(
@@ -203,7 +233,7 @@ class CapacityPolicyTests(unittest.TestCase):
             lambda s: s.update(extra="authority"),
             lambda s: s["value"].pop("tenant_daily_limit_microusd"),
             lambda s: s["value"].update(max_runtime_seconds=True),
-            lambda s: s["value"].update(max_machines=9),
+            lambda s: s["value"].update(max_machines=11),
             lambda s: s["value"]["mode_hourly_ceiling_microusd"].update(
                 other=5_000_000
             ),
@@ -279,7 +309,7 @@ class CapacityRouteTests(unittest.TestCase):
         self.assertFalse(old["capacity_policy"]["adopted"])
         self.assertEqual(
             old["capacity_policy"]["defaults"]["max_hourly_price_microusd"],
-            1_500_000,
+            3_000_000,
         )
         self.assertEqual(old["value"]["max_hourly_price_microusd"], 1_000_000)
         preview = self.preview()
@@ -294,7 +324,7 @@ class CapacityRouteTests(unittest.TestCase):
         result = self.commit(preview)
         self.assertEqual(result.status_code, 200, result.text)
         self.assertTrue(result.json()["capacity_policy"]["adopted"])
-        self.assertEqual(result.json()["value"]["max_machines"], 2)
+        self.assertEqual(result.json()["value"]["max_machines"], 10)
         self.assertEqual(
             result.json()["value"]["tenant_daily_limit_microusd"], 100_000_000
         )

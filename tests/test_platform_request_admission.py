@@ -11,15 +11,107 @@ from fastapi import FastAPI, Request
 from starlette.responses import StreamingResponse
 
 from studio_platform.http_limits import (
+    ADMISSION_SCOPE_KEY,
     BodyLimitMiddleware,
     RequestAdmission,
     RequestAdmissionMiddleware,
     ResponseTimeout,
+    admission_rejected,
 )
 import test_platform_api as api_fixtures
 
 
 class RequestLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_default_media_fanout_preserves_owner_and_global_backpressure(self):
+        admission = RequestAdmission()
+        finish = asyncio.Event()
+
+        async def app(scope, receive, send):
+            lease = scope[ADMISSION_SCOPE_KEY]
+            owner, kind = scope["owner"], scope["kind"]
+            accepted = lease.acquire("owner", owner)
+            if accepted and kind:
+                accepted = lease.acquire(kind) and lease.acquire("owner_" + kind, owner)
+            if not accepted:
+                return await admission_rejected(scope)(scope, receive, send)
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await finish.wait()
+            await send({"type": "http.response.body", "body": b"done"})
+
+        middleware = RequestAdmissionMiddleware(app, admission=admission)
+        pending = []
+
+        async def request(owner, kind=None):
+            messages = []
+            response_started = asyncio.Event()
+
+            async def send(message):
+                messages.append(message)
+                if message["type"] == "http.response.start":
+                    response_started.set()
+
+            async def receive():
+                return {"type": "http.request", "body": b"", "more_body": False}
+
+            task = asyncio.create_task(
+                middleware(
+                    {
+                        "type": "http",
+                        "method": "GET",
+                        "path": "/v1/library",
+                        "owner": owner,
+                        "kind": kind,
+                    },
+                    receive,
+                    send,
+                )
+            )
+            pending.append(task)
+            await asyncio.wait_for(response_started.wait(), 2)
+            # A refused request has no held stream and must finish before
+            # another burst probes the released global allowance.
+            if messages[0]["status"] == 429:
+                await task
+            return messages
+
+        try:
+            # One library/editor view can read 32 thumbnails, 16 media ranges
+            # and 16 ordinary resources without the former 8-request ceiling.
+            for kind, count in (("thumbnails", 32), ("downloads", 16), (None, 16)):
+                for _ in range(count):
+                    self.assertEqual(
+                        (await request("owner-one", kind))[0]["status"], 200
+                    )
+            self.assertEqual((await request("owner-one"))[0]["status"], 429)
+            self.assertEqual(
+                (await request("owner-two", "thumbnails"))[0]["status"], 200
+            )
+            for _ in range(16):
+                self.assertEqual(
+                    (await request("owner-two", "downloads"))[0]["status"], 200
+                )
+            self.assertEqual(
+                (await request("owner-three", "downloads"))[0]["status"], 429
+            )
+            for _ in range(31):
+                self.assertEqual(
+                    (await request("owner-two", "thumbnails"))[0]["status"], 200
+                )
+            self.assertEqual(
+                (await request("owner-three", "thumbnails"))[0]["status"], 429
+            )
+            # The widened limits remain finite for an extreme global burst.
+            while admission.counts[("total", None)] < 256:
+                number = admission.counts[("total", None)]
+                self.assertEqual(
+                    (await request("extra-owner-" + str(number)))[0]["status"], 200
+                )
+            self.assertEqual((await request("one-more"))[0]["status"], 429)
+        finally:
+            finish.set()
+            await asyncio.gather(*pending)
+        self.assertFalse(admission.counts)
+
     async def test_dripping_login_body_expires_and_does_not_hold_all_login_slots(self):
         app = FastAPI()
         entered = asyncio.Event()
