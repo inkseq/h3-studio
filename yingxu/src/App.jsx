@@ -55,6 +55,7 @@ const StoryChat = React.lazy(() => import('./StoryChat.jsx'));
 const QuickCreateEntry = React.lazy(() => import('./QuickCreateEntry.jsx'));
 const LegacyQuickChatLink = React.lazy(() => import('./LegacyQuickChatLink.jsx'));
 import OperatorConsole from './P4OperatorConsole.jsx';
+import AdminHome from './AdminHome.jsx';
 import { navigateWorkspace } from './workspace-navigation.js';
 import { CloudProjects, useCloud } from './CloudStudio.jsx';
 import AgentConnect from './AgentConnect.jsx';
@@ -1345,6 +1346,7 @@ function AppContent() {
     '/settings': ({ active }) => (
       <SpendingSettings key={account || 'signed-out'} account={account} active={active} />
     ),
+    '/admin': () => <AdminHome account={account} />,
     '/operator': ({ active }) => (
       <React.Suspense fallback={<InkLoader label={t('loading.operator')} />}>
         <OperatorConsole active={active} />
