@@ -24,6 +24,8 @@ import {
   Upload,
   Pencil,
 } from 'lucide-react';
+import { Segmented } from './ui/Segmented.jsx';
+import { Chip } from './ui/Note.jsx';
 import { TrashMenu, TrashButton, RenameDialog } from './UniversalTrash.jsx';
 import { WorkbenchTakes, WorkbenchCopies, WorkbenchDefaults } from './StoryboardWorkbench.jsx';
 import { AssistantBadge } from './AssistantConnections.jsx';
@@ -1103,9 +1105,7 @@ export function ProfileEditor() {
             })}
           </b>
           {usedIn.map((s) => (
-            <span key={s.id} className="chip">
-              {s.title}
-            </span>
+            <Chip key={s.id}>{s.title}</Chip>
           ))}
           {usedIn.length > 0 && <small className="muted">{tr('storyboard.copy74')}</small>}
         </div>
@@ -1416,24 +1416,22 @@ export function WhoChips({ shot, small }) {
         const p = db.profile(c.id);
         return (
           p && (
-            <span key={c.id} className="chip character">
+            <Chip key={c.id} kind="character">
               {p.name}
               <i>{variantOf(p, c.variant)?.name || tr('storyboard.detail41')}</i>
-            </span>
+            </Chip>
           )
         );
       })}
       {shot.place && db.profile(shot.place.id) && (
-        <span className="chip location">
-          {db.profile(shot.place.id).name.replace('旧车站 · ', '')}
-        </span>
+        <Chip kind="location">{db.profile(shot.place.id).name.replace('旧车站 · ', '')}</Chip>
       )}
       {shot.props.map(
         (id) =>
           db.profile(id) && (
-            <span key={id} className="chip prop">
+            <Chip key={id} kind="prop">
               {db.profile(id).name}
-            </span>
+            </Chip>
           ),
       )}
     </div>
@@ -2174,17 +2172,11 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
         {/* Quality, copies and Generate stay in view at the bottom (owner, 2026-10-24). */}
         <div className="ed-footer">
           <div className="row quality-row">
-            <div className="seg">
-              {['draft', 'final'].map((q) => (
-                <button
-                  key={q}
-                  className={shot.quality === q ? 'on' : ''}
-                  onClick={() => upd({ quality: q })}
-                >
-                  {QUALITY_LABEL[q]}
-                </button>
-              ))}
-            </div>
+            <Segmented
+              options={['draft', 'final'].map((q) => ({ value: q, label: QUALITY_LABEL[q] }))}
+              value={shot.quality}
+              onChange={(quality) => upd({ quality })}
+            />
             <small className="muted">
               {info.res} · {info.sec} {tr('storyboard.secondsUnit')}
             </small>

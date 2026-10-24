@@ -1,6 +1,7 @@
 // Settings → Admin (h3-studio#304): users, audit log and the existing test-machine limits.
 // Port of prototype account.jsx AdminPanel. The backend enforces require_admin on every route;
 // a tab whose endpoint is not deployed yet says so instead of failing.
+import { Segmented } from './ui/Segmented.jsx';
 import React, { useEffect, useMemo, useState } from 'react';
 import { FloatingMessage } from './floating-notice.js';
 import StoryChatAdminSwitch from './StoryChatAdminSwitch.jsx';
@@ -453,26 +454,26 @@ export default function AdminConsole({ account, active, testMachines }) {
   const [tab, setTab] = useState('users');
   return (
     <div className="admin-console">
-      <div className="seg admin-tabs" role="tablist">
-        {[
+      <Segmented
+        tabs
+        className="admin-tabs"
+        options={[
           ['users', 'admin.users', Users],
           ['pricing', 'admin.pricing', TrendingUp],
           ['machines', 'admin.machines', ShieldCheck],
           ['audit', 'admin.audit', History],
-        ].map(([id, label, Icon]) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={tab === id}
-            className={'keep-label' + (tab === id ? ' on' : '')}
-            onClick={() => setTab(id)}
-          >
-            <Icon size={15} aria-hidden="true" />
-            {t(label)}
-          </button>
-        ))}
-      </div>
+        ].map(([id, label, Icon]) => ({
+          value: id,
+          label: (
+            <>
+              <Icon size={15} aria-hidden="true" />
+              {t(label)}
+            </>
+          ),
+        }))}
+        value={tab}
+        onChange={setTab}
+      />
       {tab === 'users' && <AdminUsers api={api} active={active} />}
       {tab === 'pricing' && (
         <>

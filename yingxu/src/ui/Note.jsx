@@ -27,3 +27,13 @@ export function EmptyState({
     </div>
   );
 }
+
+// Small status label: tone is one of cloud, local (or any .badge modifier).
+export function Badge({ tone = '', className = '', ...props }) {
+  return <span className={['badge', tone, className].filter(Boolean).join(' ')} {...props} />;
+}
+
+// Tag for a card kind or keyword: kind is character, location or prop.
+export function Chip({ kind = '', className = '', ...props }) {
+  return <span className={['chip', kind, className].filter(Boolean).join(' ')} {...props} />;
+}

@@ -1,4 +1,5 @@
-import { EmptyState, Note } from './ui/Note.jsx';
+import { Badge, EmptyState, Note } from './ui/Note.jsx';
+import { Spinner } from './ui/Field.jsx';
 import './v2/works-adapter.css';
 import { FloatingMessage } from './floating-notice.js';
 import { TrashMenu, useTrash } from './UniversalTrash.jsx';
@@ -385,10 +386,10 @@ function StoryLocation({ mode }) {
   // Stories live in the cloud by default; only browser-only ones need a label (owner, 2026-10-21).
   if (mode === 'cloud') return null;
   return (
-    <span className={'badge ' + mode}>
+    <Badge tone={mode}>
       {mode === 'cloud' ? <Cloud size={12} /> : <HardDrive size={12} />}{' '}
       {mode === 'cloud' ? t('account.interface5') : t('account.interface6')}
-    </span>
+    </Badge>
   );
 }
 
@@ -727,7 +728,7 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
       {/* Opening a story: one clear status instead of a dimmed, half-read grid. */}
       {pending && (
         <div className="story-opening" role="status">
-          <span className="story-opening-spinner" aria-hidden="true" />
+          <Spinner size={16} />
           {pending}
         </div>
       )}

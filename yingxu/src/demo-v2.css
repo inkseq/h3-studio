@@ -40,43 +40,6 @@ small {
 }
 
 /* ---------- primitives ---------- */
-input,
-textarea,
-select {
-  font: inherit;
-  color: var(--ink);
-  background: var(--surface);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-sm);
-  padding: 7px 10px;
-  width: 100%;
-  outline: none;
-  transition:
-    border-color var(--ease),
-    box-shadow var(--ease);
-}
-input:focus,
-textarea:focus,
-select:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-textarea {
-  resize: vertical;
-  line-height: 1.55;
-}
-input[type='range'] {
-  accent-color: var(--accent);
-  padding: 0;
-  border: 0;
-  box-shadow: none;
-  background: transparent;
-}
-input[type='checkbox'],
-input[type='radio'] {
-  accent-color: var(--accent);
-  width: auto;
-}
 .muted {
   color: var(--muted);
 }
@@ -142,36 +105,6 @@ input[type='radio'] {
 }
 .check input {
   margin-top: 2px;
-}
-.seg {
-  display: inline-flex;
-  background: var(--surface);
-  border: 1px solid var(--line-2);
-  border-radius: 10px;
-  padding: 3px;
-  gap: 2px;
-}
-.seg button {
-  border: 0;
-  background: transparent;
-  border-radius: 7px;
-  padding: 5px 10px;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0;
-  color: var(--ink-2);
-}
-.seg button small {
-  color: var(--muted);
-  font-size: 11px;
-}
-.seg button.on {
-  background: var(--surface-4);
-  color: var(--ink);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset;
-}
-.seg button.on small {
-  color: var(--ink-2);
 }
 .warn {
   color: var(--warn);
@@ -266,46 +199,6 @@ input[type='radio'] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-}
-.badge {
-  font-size: 11px;
-  border-radius: 999px;
-  padding: 2px 9px;
-  font-style: normal;
-  font-weight: 500;
-}
-.badge.cloud {
-  background: var(--good-soft);
-  color: var(--good);
-}
-.badge.local {
-  background: var(--warn-soft);
-  color: var(--warn);
-}
-.chip {
-  font-size: 11px;
-  border-radius: 999px;
-  padding: 2px 8px;
-  background: var(--surface-3);
-  color: var(--ink-2);
-  white-space: nowrap;
-}
-.chip i {
-  font-style: normal;
-  opacity: 0.65;
-  margin-left: 4px;
-}
-.chip.character {
-  color: var(--char);
-  background: rgba(99, 214, 158, 0.1);
-}
-.chip.location {
-  color: var(--loc);
-  background: rgba(243, 182, 90, 0.1);
-}
-.chip.prop {
-  color: var(--prp);
-  background: rgba(199, 155, 255, 0.1);
 }
 .who {
   display: flex;
@@ -5285,61 +5178,7 @@ h4,
   font-variant-numeric: tabular-nums;
 }
 
-input,
-select {
-  min-height: 32px;
-  border-radius: 8px;
-  background: var(--surface-2);
-}
-textarea {
-  border-radius: 10px;
-  background: var(--surface-2);
-}
-select {
-  padding-right: 28px;
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: url('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2210%22 height=%226%22 fill=%22none%22 stroke=%22%23808983%22 stroke-width=%221.6%22%3E%3Cpath d=%22M1 1l4 4 4-4%22/%3E%3C/svg%3E');
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-}
-input::placeholder,
-textarea::placeholder {
-  color: #6c746f;
-}
-
-/* Segmented control (iOS style) */
-.seg {
-  background: rgba(255, 255, 255, 0.045);
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  padding: 2px;
-  gap: 0;
-}
-.seg button {
-  min-height: 26px;
-  padding: 4px 11px;
-  border-radius: 7px;
-  font-size: 12px;
-  color: var(--ink-2);
-  flex-direction: row;
-  align-items: center;
-}
-.seg button:hover {
-  background: transparent;
-  color: var(--ink);
-  border-color: transparent;
-}
-.seg button.on {
-  background: var(--surface-4);
-  color: var(--ink);
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.35),
-    0 0 0 0.5px rgba(255, 255, 255, 0.08) inset;
-}
-
 /* Chips and badges */
-.chip,
 .q,
 .mode,
 .pill {
@@ -6228,7 +6067,6 @@ textarea::placeholder {
 }
 
 /* ================= polish pass ================= */
-.seg button,
 .hbar nav button,
 .lib-tabs button,
 .snav button {

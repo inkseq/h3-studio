@@ -62,3 +62,47 @@
   padding: var(--sp-5) var(--sp-4);
   border: 0;
 }
+
+/* Badges (status) and chips (card kinds, tags). Use <Badge> / <Chip> from ui/Note.jsx. */
+.badge {
+  font-size: var(--fs-xs);
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-style: normal;
+  font-weight: 500;
+}
+.badge.cloud {
+  background: var(--good-soft);
+  color: var(--good);
+}
+.badge.local {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.chip {
+  font-size: var(--fs-xs);
+  line-height: 16px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-weight: 500;
+  background: var(--surface-3);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.chip i {
+  font-style: normal;
+  opacity: 0.65;
+  margin-left: 4px;
+}
+.chip.character {
+  color: var(--char);
+  background: var(--char-soft);
+}
+.chip.location {
+  color: var(--loc);
+  background: var(--loc-soft);
+}
+.chip.prop {
+  color: var(--prp);
+  background: var(--prp-soft);
+}

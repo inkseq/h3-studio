@@ -112,3 +112,145 @@ button.icon-button.small {
   width: var(--h-sm);
   padding: 0;
 }
+
+/* Fields: one look for text inputs, selects and text areas (use <Field> from ui/Field.jsx). */
+input,
+textarea,
+select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  padding: 7px 10px;
+  width: 100%;
+  outline: none;
+  transition:
+    border-color var(--ease),
+    box-shadow var(--ease);
+}
+input,
+select {
+  min-height: var(--h-md);
+}
+textarea {
+  border-radius: 10px;
+  resize: vertical;
+  line-height: 1.55;
+}
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--placeholder);
+}
+select {
+  padding-right: 28px;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url('data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2210%22 height=%226%22 fill=%22none%22 stroke=%22%23808983%22 stroke-width=%221.6%22%3E%3Cpath d=%22M1 1l4 4 4-4%22/%3E%3C/svg%3E');
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+input[type='range'] {
+  accent-color: var(--accent);
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+}
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--accent);
+  width: auto;
+}
+
+/* Segmented control / tabs (use <Segmented> from ui/Segmented.jsx). */
+.seg {
+  display: inline-flex;
+  background: var(--fill);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 2px;
+  gap: 0;
+}
+.seg button {
+  min-height: 26px;
+  padding: 4px 11px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+  flex-direction: row;
+  align-items: center;
+  gap: 0;
+  white-space: nowrap;
+}
+.seg button small {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.seg button:hover {
+  background: transparent;
+  color: var(--ink);
+  border-color: transparent;
+}
+.seg button.on {
+  background: var(--surface-4);
+  color: var(--ink);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    0 0 0 0.5px rgba(255, 255, 255, 0.08) inset;
+}
+.seg button.on small {
+  color: var(--ink-2);
+}
+
+/* Field: label above the control, then help or error (<Field>, <Checkbox> in ui/Field.jsx). */
+.ui-field {
+  display: grid;
+  gap: 6px;
+  color: var(--ink-2);
+  font-size: var(--fs-md);
+}
+.ui-field-help {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.ui-field-error {
+  color: var(--bad);
+  font-size: var(--fs-sm);
+}
+.ui-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--ink-2);
+  font-size: var(--fs-md);
+  cursor: pointer;
+}
+
+/* Spinner (<Spinner>) */
+.ui-spinner {
+  display: inline-block;
+  flex: none;
+  border: 2px solid var(--line-2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: ui-spin 0.8s linear infinite;
+}
+@keyframes ui-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-spinner {
+    animation-duration: 2.4s;
+  }
+}

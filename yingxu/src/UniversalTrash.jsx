@@ -1,6 +1,8 @@
 import StudioHeader from './StudioHeader.jsx';
+import { Segmented } from './ui/Segmented.jsx';
 import { Button } from './ui/Button.jsx';
 import { DialogActions } from './ui/Dialog.jsx';
+import { Field } from './ui/Field.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import { cloudController as cloud } from './cloud-controller.js';
 import CreationHistory from './CreationHistory.jsx';
@@ -512,31 +514,33 @@ export default function UniversalTrash() {
           </div>
         ) : (
           <>
-            <div className="seg trash-filter">
-              {[
+            <Segmented
+              className="trash-filter"
+              options={[
                 ['all', t('trash.all')],
                 ['story', locale === 'zh' ? '故事和镜头' : 'Stories and shots'],
                 ['lib', t('library.title')],
                 ['session', t('nav.quickCreate')],
-              ].map(([id, label]) => (
-                <button
-                  key={id}
-                  className={group === id ? 'on' : ''}
-                  onClick={() => changeGroup(id)}
-                >
-                  {label}
-                  <span className="trash-tab-count">
-                    {id === 'session'
-                      ? quickCount?.account === account
-                        ? quickCount.count + (quickCount.more ? '+' : '')
-                        : '—'
-                      : rows.filter((row) => inGroup(row, id)).length +
-                        (id === 'all' && quickCount?.account === account ? quickCount.count : 0) +
-                        (next !== null || (id === 'all' && quickCount?.more) ? '+' : '')}
-                  </span>
-                </button>
-              ))}
-            </div>
+              ].map(([id, label]) => ({
+                value: id,
+                label: (
+                  <>
+                    {label}
+                    <span className="trash-tab-count">
+                      {id === 'session'
+                        ? quickCount?.account === account
+                          ? quickCount.count + (quickCount.more ? '+' : '')
+                          : '—'
+                        : rows.filter((row) => inGroup(row, id)).length +
+                          (id === 'all' && quickCount?.account === account ? quickCount.count : 0) +
+                          (next !== null || (id === 'all' && quickCount?.more) ? '+' : '')}
+                    </span>
+                  </>
+                ),
+              }))}
+              value={group}
+              onChange={changeGroup}
+            />
             {kind === 'conversation' ? (
               <div className="ops-conversation-trash">
                 <ConversationTrash
@@ -839,10 +843,9 @@ export function RenameDialog({ title, onSave, onClose }) {
           }
         }}
       >
-        <label>
-          {t('trash.name')}
+        <Field label={t('trash.name')}>
           <input value={value} onChange={(e) => setValue(e.target.value)} disabled={saving} />
-        </label>
+        </Field>
         {error && <p role="alert">{error}</p>}
         <DialogActions>
           <Button disabled={saving} onClick={onClose}>

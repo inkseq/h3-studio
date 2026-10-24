@@ -1,4 +1,5 @@
 import TelegramLink, { telegramUserLabel, validTelegramNonce } from './TelegramLink.jsx';
+import { Segmented } from './ui/Segmented.jsx';
 import { FloatingMessage } from './floating-notice.js';
 
 // Daily credit cap suggested for a new Telegram link; USD caps (admins) start uncapped.
@@ -364,30 +365,21 @@ export default function AssistantConnections({
           {!codeAvailable ? (
             <form onSubmit={issue}>
               {!telegram && (
-                <div
-                  className="seg assistant-target"
-                  role="group"
-                  aria-label={t('telegram.target')}
-                >
-                  {['agent', 'telegram'].map((value) => (
-                    <button
-                      type="button"
-                      key={value}
-                      className={target === value ? 'on' : ''}
-                      aria-pressed={target === value}
-                      onClick={() => {
-                        setTarget(value);
-                        setName(value === 'telegram' ? 'Telegram' : 'Codex');
-                        setPermission('generate');
-                        setCap(
-                          value === 'telegram' ? (creditMode ? TELEGRAM_DEFAULT_CAP : '0') : '0',
-                        );
-                      }}
-                    >
-                      {t(value === 'telegram' ? 'telegram.tab' : 'telegram.agentTab')}
-                    </button>
-                  ))}
-                </div>
+                <Segmented
+                  className="assistant-target"
+                  label={t('telegram.target')}
+                  options={[
+                    { value: 'agent', label: t('telegram.agentTab') },
+                    { value: 'telegram', label: t('telegram.tab') },
+                  ]}
+                  value={target}
+                  onChange={(value) => {
+                    setTarget(value);
+                    setName(value === 'telegram' ? 'Telegram' : 'Codex');
+                    setPermission('generate');
+                    setCap(value === 'telegram' ? (creditMode ? TELEGRAM_DEFAULT_CAP : '0') : '0');
+                  }}
+                />
               )}
               {target === 'telegram' && <p className="muted">{t('telegram.explain')}</p>}
               <fieldset disabled={busy || !profile}>
