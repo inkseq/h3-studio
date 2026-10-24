@@ -141,6 +141,8 @@ class Principal:
     role: str = "user"
     status: str = "active"
     identity_source: str = "legacy"
+    # Set only by a read-only admin support view (support_view.py): the admin's owner.
+    support_viewer: str | None = None
 
     def allows(self, project_id: str, scope: str) -> bool:
         return not self.machine or (
