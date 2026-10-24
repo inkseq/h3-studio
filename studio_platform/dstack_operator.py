@@ -2216,16 +2216,23 @@ class DstackOperator:
         )
 
     def machine_limits(self, connection, *, for_demand=False):
-        from .capacity_settings import DEFAULTS
+        from .capacity_settings import LEGACY_DEMAND_MAX_MACHINES
 
         settings = self._admin_limits(connection)
         if settings["adopted"]:
             maximum = settings["value"]["max_machines"]
+            # A production policy adoption does not widen the independently
+            # qualified staging test guard or its one-machine allowance.
+            if "test_gpu_guard" in self.policy:
+                return (
+                    min(maximum, self.policy["max_instances"]),
+                    min(maximum, self.policy["max_physical_gpus"]),
+                )
             return maximum, maximum
         # Old environments are not adopted by deploying a reader. Preserve the
         # old protected configuration until the explicit audited settings write.
         maximum = (
-            DEFAULTS["max_machines"]
+            LEGACY_DEMAND_MAX_MACHINES
             if for_demand or self.policy.get("demand_start")
             else 128
         )

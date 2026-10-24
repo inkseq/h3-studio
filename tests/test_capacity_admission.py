@@ -129,6 +129,19 @@ class ReservationCapacityAdmissionTests(LedgerCase):
             )
         )
 
+    def test_explicit_ten_machine_policy_refuses_eleventh_without_partial_money(self):
+        self.admitted = adopt(self, 10)
+        original = [self.reserve(str(index)) for index in range(10)]
+        before = self.ledger()
+        with self.assertRaisesRegex(BudgetExceeded, "global_capacity_exceeded"):
+            self.reserve("eleven")
+        self.assertEqual(self.ledger(), before)
+        self.assertEqual(before[:2], (10, 10))
+        replay = self.reserve("0")
+        self.assertEqual(replay["id"], original[0]["id"])
+        self.assertFalse(replay["created"])
+        self.assertEqual(self.ledger(), before)
+
     def test_original_replay_precedes_new_policy_but_changed_digest_conflicts(self):
         original = self.reserve()
         newer = adopt(self, 1)
@@ -276,6 +289,55 @@ class RegistrationCapacityAdmissionTests(LedgerCase):
         return WorkerControl(
             self.repo, capacity_usage=self.service.registration_capacity_usage
         )
+
+    def test_legacy_demand_remains_two_but_explicit_adoption_allows_ten(self):
+        self.service.policy.update(max_instances=128, max_physical_gpus=128)
+        with patch.object(
+            self.service, "_admin_limits", return_value={"adopted": False}
+        ):
+            with self.repo.engine.connect() as connection:
+                self.assertEqual(
+                    self.service.machine_limits(connection, for_demand=True), (2, 2)
+                )
+        adopt(self, 10)
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(
+                self.service.machine_limits(connection, for_demand=True), (10, 10)
+            )
+        self.service.policy.update(
+            max_instances=1,
+            max_physical_gpus=1,
+            test_gpu_guard={
+                "version": 2,
+                "task_id": "original-test",
+                "budget_account_id": "inkseq-staging-gpu-shared",
+                "task_limit_microusd": 20_000_000,
+                "max_runtime_seconds": 7200,
+                "stop_margin_seconds": 600,
+            },
+        )
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(
+                self.service.machine_limits(connection, for_demand=True), (1, 1)
+            )
+
+    def test_ten_original_adopted_nodes_register_under_unchanged_positive_old_limits(
+        self,
+    ):
+        self.admitted = adopt(self, 10)
+        nodes = [self.node(str(4100000 + index)) for index in range(10)]
+        before = self.snapshot()
+        self.repo.configure_capacity(max_instances=1, max_physical_gpus=1)
+        self.repo.configure_pool("dstack-test", max_instances=1, max_physical_gpus=1)
+        for node in nodes:
+            self.control().register(self.spec(node))
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(len(self.client.applied), 10)
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(
+                connection.scalar(select(func.count()).select_from(registered_workers)),
+                10,
+            )
 
     def test_original_already_counted_v2_resource_registers_after_lowering(self):
         nodes = [self.node("4000001"), self.node("4000002")]
