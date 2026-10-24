@@ -84,7 +84,7 @@ export default function StudioHeader({
     ...(access?.gpus || active === 'operator' ? [['operator', '/operator', 'v2.gpus', Cpu]] : []),
     ['settings', '/settings', 'settings.title', Settings2],
     // One admin console (h3-studio#537), only for admins.
-    ...(access?.admin || active === 'admin'
+    ...((access?.admin || active === 'admin') && !currentSupportView()
       ? [['admin', '/admin', 'adminHome.title', ShieldCheck]]
       : []),
   ];
