@@ -804,3 +804,5 @@ inventory.json
 !studio_platform/script_windows_service.py
 !tests/test_script_windows.py
 !tests/script_windows_native_fixture.py
+!studio_platform/controller_liveness.py
+!tests/test_controller_liveness.py
