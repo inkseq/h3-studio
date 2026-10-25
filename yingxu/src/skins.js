@@ -53,6 +53,16 @@ export function readSkin() {
 
 export const isLightSkin = (id) => !!SKINS.find((skin) => skin.id === id)?.light;
 
+// Forget the viewer's choice and follow the system again.
+export function followSystem() {
+  try {
+    localStorage.removeItem(KEY);
+  } catch {
+    // Nothing stored to forget.
+  }
+  return applySkin(readSkin(), { remember: false });
+}
+
 // Apply the current look and keep following the system while nothing is chosen.
 export function startSkin() {
   applySkin(readSkin(), { remember: false });

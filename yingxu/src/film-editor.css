@@ -517,3 +517,15 @@ button.autosave-status {
   opacity: 1;
   outline: 2px solid var(--accent);
 }
+/* Clip labels sit on pictures or on the empty stripes, in light and dark looks alike: a
+   small dark pill keeps them readable everywhere (owner review, 2026-10-26). */
+.film-tclip-label,
+.film-tclip-rate {
+  right: auto;
+  max-width: calc(100% - 12px);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  text-shadow: none;
+}
