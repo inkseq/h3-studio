@@ -383,3 +383,23 @@ class ResultCollectionTests(LedgerCase):
         value = contract()["result_collection"]
         self.assertEqual(value["version"], 1)
         self.assertIn("Do not PUT", value["read"])
+
+    def test_frozen_film_generation_never_mutates_live_story(self):
+        from sqlalchemy import update
+        from studio_platform.repository import jobs
+
+        job = self.make_job()
+        request = {
+            **job["request"],
+            "film_source_ref": {"run_id": "film-original", "snapshot_hash": "a" * 64},
+        }
+        with self.repo.transaction() as conn:
+            conn.execute(
+                update(jobs).where(jobs.c.id == job["id"]).values(request=request)
+            )
+        before = self.document()
+        done = self.complete(self.collecting(job))
+        self.assertEqual(
+            done["result"]["project_collection"]["status"], "not_applicable"
+        )
+        self.assertEqual(self.document(), before)

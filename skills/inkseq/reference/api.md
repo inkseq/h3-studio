@@ -252,7 +252,9 @@ project and use its current version for further `/actions`. Never PUT collected
 results just because a story opens or jobs are polled. Existing choices, trims and
 segments remain unchanged. Only a fresh real first result with no later accepted
 job can become the initial choice; simulations and stale results are candidates.
-Generated audio is added as media, not silently mixed into the film.
+Generated audio is added as media, not silently mixed into the film. Jobs owned
+by a frozen film run retain their existing snapshot/result map and never project
+into the live story; they return `not_applicable`.
 
 `managed_projection` is an immutable legacy Quick Create container: use the existing
 take API, not a project PUT. Migrated stories use normal collection. Missing/trashed

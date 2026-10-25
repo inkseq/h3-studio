@@ -125,6 +125,9 @@ def collect(repo, conn, job, artifact_ids, specs):
         or ref.get("project_id") != job["project_id"]
         or not isinstance(ref.get("shot_id"), str)
         or job["request"].get("recipe_id") == "chapter-roughcut-v1"
+        # Film generation belongs to a frozen workflow snapshot, not the live
+        # authoring document. Its existing result map is the only projector.
+        or "film_source_ref" in job["request"]
     ):
         return _receipt("not_applicable")
     media = [
