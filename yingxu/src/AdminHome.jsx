@@ -60,7 +60,7 @@ function useAdminData(api, active, section) {
     if (globalThis.document?.visibilityState === 'hidden') return;
     try {
       const [workspace, jobs, settings] = await Promise.all([
-        needsMachines ? api.request('/v1/operator/dstack/admin/workspace') : null,
+        needsMachines ? api.request('/v1/operator/dstack/admin/workspace?live=1') : null,
         api.request('/v1/operator/admin/jobs?limit=100'),
         needsMachines ? api.request(SETTINGS_PATH) : null,
       ]);
