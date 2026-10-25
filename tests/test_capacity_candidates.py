@@ -180,10 +180,16 @@ class CandidateTests(LedgerCase):
         )
         self.publish('lium', [offer('smaller', ram_gib=35)])
         result = self.project()
-        self.assertEqual(len(result['candidates']), 4)
+        self.assertEqual(len(result['candidates']), 5)
         self.assertEqual(
             {row['selection']['runtime_profile_id'] for row in result['candidates']},
-            {PROFILE_IDS[4], PROFILE_IDS[5], PROFILE_IDS[6], PROFILE_IDS[10]},
+            {
+                PROFILE_IDS[4],
+                PROFILE_IDS[5],
+                PROFILE_IDS[6],
+                PROFILE_IDS[10],
+                PROFILE_IDS[16],
+            },
         )
         self.assertEqual(self.registry.bindings[historical.binding_id], historical)
         for candidate in result['candidates']:

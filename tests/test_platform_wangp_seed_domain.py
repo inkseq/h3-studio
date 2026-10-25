@@ -31,7 +31,7 @@ from studio_platform.quick_chat import (
     objects,
 )
 from studio_platform.repository import jobs
-from studio_platform.runtime_catalog import PROFILE_IDS, engine_manifest
+from studio_platform.runtime_catalog import PROFILE_IDS, engine_manifest, get_profile
 from studio_platform.runtime_hosts.wangp import WanGPHost
 from studio_platform.runtime_hosts.wangp_launcher import resolve_inputs
 from studio_platform.runtime_hosts.wangp_receipts import ReceiptJournal
@@ -273,7 +273,9 @@ class DirectAndRuntimeSeedDomainTests(unittest.TestCase):
         # Seed validation depends on model support, not historical hardware cases.
         case = {"mode": "fl", "height": 480, "steps": 20, "input_roles": []}
         for profile_id in PROFILE_IDS:
-            job, manifest = job_for(profile_id, case)
+            # A turbo profile fixes its distilled step count.
+            turbo = "acceleration" in get_profile(profile_id)
+            job, manifest = job_for(profile_id, dict(case, steps=5) if turbo else case)
             prepared = H3ProfileCompiler(manifest, lambda item, *args, **kwargs: item)(
                 job, "attempt-1", NS(open=lambda _: io.BytesIO(b"data")), lambda: None
             )

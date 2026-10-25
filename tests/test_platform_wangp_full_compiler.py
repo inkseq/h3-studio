@@ -167,10 +167,16 @@ class FullCompilerTests(unittest.TestCase):
         for mode in ('fl', 'ref'):
             schema = compiler.control_schema(identity, mode)
             self.assertEqual(
-                (schema['steps']['default'], schema['steps']['minimum'], schema['steps']['maximum']),
+                (
+                    schema['steps']['default'],
+                    schema['steps']['minimum'],
+                    schema['steps']['maximum'],
+                ),
                 (5, 5, 5),
             )
-            files = engine_manifest(identity, mode).document['components']['turbo_lora']['files']
+            files = engine_manifest(identity, mode).document['components'][
+                'turbo_lora'
+            ]['files']
             self.assertEqual(files[0]['path'], lora)
         r, m = case(images=['image'], duration=15)
         output = native_output_spec(r)
@@ -182,19 +188,31 @@ class FullCompilerTests(unittest.TestCase):
         self.assertEqual(s['guidance_scale'], 1.0)
         for steps in (4, 20):
             with self.assertRaisesRegex(ValueError, 'wangp_invalid_steps'):
-                compiler.compile_settings(dict(r, steps=steps), m, output, handles, identity)
+                compiler.compile_settings(
+                    dict(r, steps=steps), m, output, handles, identity
+                )
         # The plain v6 profile keeps its original 20-step, no-LoRA settings.
         plain = compiler.compile_settings(
             r, m, output, handles, 'h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6'
         )
-        self.assertEqual((plain['num_inference_steps'], plain['activated_loras']), (20, []))
+        self.assertEqual(
+            (plain['num_inference_steps'], plain['activated_loras']), (20, [])
+        )
         self.assertNotIn('loras_multipliers', plain)
         s['output_filename'] = 'sixnine-test'
         binding = engine_manifest(identity, 'ref')
         p = PreparedRequest(
-            'job', 'test', 'a' * 64, binding.digest, canonical_json(s),
-            canonical_json(output), True,
-            tuple(InputDescriptor(i, 'handle-' + i, v['kind'], 'b' * 64, 4) for i, v in m.items()),
+            'job',
+            'test',
+            'a' * 64,
+            binding.digest,
+            canonical_json(s),
+            canonical_json(output),
+            True,
+            tuple(
+                InputDescriptor(i, 'handle-' + i, v['kind'], 'b' * 64, 4)
+                for i, v in m.items()
+            ),
         )
         compiler.validate_prepared(p, binding)
         with tempfile.TemporaryDirectory() as root:
