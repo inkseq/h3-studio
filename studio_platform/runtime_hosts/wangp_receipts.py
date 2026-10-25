@@ -477,6 +477,17 @@ No request settings, prompts, credentials or runtime error strings are persisted
                     prepared.settings.get('prompt', '')
                 ),
             }
+            if prepared.settings.get('multi_prompts_gen_type') == 'PW':
+                from ..script_window_timing import schedule
+
+                settings = prepared.settings
+                timing = schedule(
+                    context['output_spec']['frames'],
+                    round(settings['sliding_window_size'] / 24),
+                    bool(settings.get('image_start')),
+                )
+                context['output_spec']['frames'] = timing['output_frames']
+                context['output_spec']['actual_duration'] = timing['output_frames'] / 24
             # Historical operations stay sealed. Do not add inferred evidence on replay.
             if (
                 '_delivery_context' in raw

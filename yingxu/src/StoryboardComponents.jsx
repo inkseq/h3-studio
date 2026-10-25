@@ -37,6 +37,7 @@ import { cutFps, videoCut } from './video-cut-model.js';
 import { trimClip } from './film-edit-model.js';
 import TrimBar from './TrimBar.jsx';
 import ShotSegments from './ShotSegments.jsx';
+import ScriptWindows from './ScriptWindows.jsx';
 import { segmentsTotal, sourceTime } from './shot-segments.js';
 import { createPortal } from 'react-dom';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
@@ -2213,6 +2214,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
               </label>
             </>
           )}
+          <ScriptWindows shot={shot} />
           {(info.mode === 'REF' || info.controlInputs) && (
             <>
               <Slot
