@@ -865,3 +865,18 @@ dialog.modal.wide {
   background: color-mix(in srgb, var(--ink) 9%, transparent);
   color: var(--ink);
 }
+/* Single actions in a settings card size to their words, not the card width. */
+.account-link-button {
+  align-self: flex-start;
+  width: auto;
+}
+/* Trash tabs: the count reads as a small badge after its label. */
+.trash-filter .trash-tab-count {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}

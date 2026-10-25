@@ -57,7 +57,7 @@ export default function AccountGoogleLink({ api }) {
           <p className="muted">{t('account.linkBody')}</p>
           <button
             type="button"
-            className="primary keep-label"
+            className="primary keep-label account-link-button"
             onClick={() => window.location.assign(hostedLinkUrl('/settings'))}
           >
             <Link2 size={15} aria-hidden="true" />
