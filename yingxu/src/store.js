@@ -487,6 +487,64 @@ export function migrateLegacy(old) {
   return valid.project;
 }
 
+// Three-way merge of a story: base = last saved copy, local = this tab, remote = server.
+// Entities merge by id, other top-level fields by key. Each side may change what the other
+// left alone; both changing the same thing differently is a conflict (null).
+export function mergeThreeWay(base, local, remote) {
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const plain = (value) => value && typeof value === 'object' && !Array.isArray(value);
+  // Field by field: a server selection and a local description on one shot both survive.
+  const pick = (b, l, r) => {
+    if (same(l, b)) return { value: r };
+    if (same(r, b) || same(l, r)) return { value: l };
+    if (!plain(l) || !plain(r) || (b !== undefined && !plain(b))) return null;
+    const out = {};
+    for (const key of new Set([...Object.keys(r), ...Object.keys(l)])) {
+      const choice = pick(b?.[key], l[key], r[key]);
+      if (!choice) return null;
+      if (choice.value !== undefined) out[key] = choice.value;
+    }
+    return { value: out };
+  };
+  const byId = (list) => new Map((list || []).map((item) => [item.id, item]));
+  const [b, l, r] = [byId(base.entities), byId(local.entities), byId(remote.entities)];
+  const entities = [];
+  const order = [...r.keys(), ...[...l.keys()].filter((id) => !r.has(id))];
+  for (const id of order) {
+    const choice = pick(b.get(id), l.get(id), r.get(id));
+    if (!choice) return null;
+    if (choice.value !== undefined) entities.push(choice.value);
+  }
+  // Keep the server's key order so an unchanged merge compares equal to it.
+  const keys = [
+    ...Object.keys(remote),
+    ...Object.keys(local).filter((key) => !(key in remote)),
+    ...Object.keys(base).filter((key) => !(key in remote) && !(key in local)),
+  ];
+  const merged = {};
+  for (const key of new Set(keys)) {
+    if (key === 'entities') {
+      merged.entities = entities;
+      continue;
+    }
+    if (key === 'jobs') {
+      // Job records are observations of the server ledger: keep every one, newest last.
+      if (remote.jobs || local.jobs)
+        merged.jobs = [...byId([...(remote.jobs || []), ...(local.jobs || [])]).values()];
+      continue;
+    }
+    if (key === 'updatedAt') {
+      const value = same(local.updatedAt, base.updatedAt) ? remote.updatedAt : local.updatedAt;
+      if (value !== undefined) merged.updatedAt = value;
+      continue;
+    }
+    const choice = pick(base[key], local[key], remote[key]);
+    if (!choice) return null;
+    if (choice.value !== undefined) merged[key] = choice.value;
+  }
+  return merged;
+}
+
 export function createStore({ storage, now = () => Date.now(), seed = legacySeed } = {}) {
   if (storage === undefined) {
     try {
@@ -892,6 +950,45 @@ export function createStore({ storage, now = () => Date.now(), seed = legacySeed
         ...state,
         project: valid.project,
         workspace: { ...state.workspace, serverVersion: version, dirty: false },
+        selectedId: valid.project.entities.some((e) => e.id === state.selectedId)
+          ? state.selectedId
+          : null,
+        scopeId: valid.project.entities.some((e) => e.id === state.scopeId) ? state.scopeId : null,
+      };
+      persist();
+      emit();
+      return true;
+    },
+    // The server changed the story on its own (results bound at job completion, h3-studio#588
+    // R2). Take its version; keep local edits when they touch other entities or fields
+    // (three-way merge against the last saved copy). A real overlap returns false and the
+    // caller falls back to the normal conflict choice.
+    rebaseCloud(remote, { account, version } = {}) {
+      if (
+        state.workspace.mode !== 'cloud' ||
+        state.workspace.account !== account ||
+        state.project.id !== remote?.id ||
+        !Number.isInteger(version) ||
+        version <= state.workspace.serverVersion ||
+        cloudSavedJSON === null
+      )
+        return false;
+      const merged = mergeThreeWay(JSON.parse(cloudSavedJSON), state.project, remote);
+      if (!merged) return false;
+      const valid = validateProject(merged);
+      if (!valid.ok) return false;
+      const checked = validateProject(remote);
+      if (!checked.ok) return false;
+      cloudSavedJSON = JSON.stringify(checked.project);
+      coalesce = null;
+      state = {
+        ...state,
+        project: valid.project,
+        workspace: {
+          ...state.workspace,
+          serverVersion: version,
+          dirty: JSON.stringify(valid.project) !== cloudSavedJSON,
+        },
         selectedId: valid.project.entities.some((e) => e.id === state.selectedId)
           ? state.selectedId
           : null,
