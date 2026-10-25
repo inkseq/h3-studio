@@ -676,6 +676,11 @@ class Guided:
                         if before_segments is not None:
                             validate_segments_transition(before_segments, project)
                             self.check_segment_sources(project, segment_sources)
+                    from .clip_sound import sync_clip_sound
+
+                    sync_clip_sound(
+                        self, conn, principal, project_id, row["payload"], project
+                    )
                     version = row["version"] + 1
                 if segment_sources is not None:
                     self.check_segment_sources(project, segment_sources)
