@@ -779,6 +779,29 @@ class WorkspaceTests(LedgerCase):
                 Principal("superdan", "agent", machine=True), admin=True
             )
 
+    def test_admin_live_view_skips_ended_machines(self):
+        # The admin overview asks for live machines only (performance on the CPU host).
+        live = self.start_node()
+        ended = self.start_node()
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(operator_nodes)
+                .where(operator_nodes.c.intent_id == ended)
+                .values(desired_state="stopped", runtime_state="stopped")
+            )
+        full = {
+            n["node_id"] for n in self.workspace.state(self.owner, admin=True)["nodes"]
+        }
+        only = {
+            n["node_id"]
+            for n in self.workspace.state(self.owner, admin=True, live_only=True)[
+                "nodes"
+            ]
+        }
+        self.assertIn(ended, full)
+        self.assertEqual(only, full - {ended})
+        self.assertIn(live, only)
+
     def test_mode_queue_estimate_stays_unknown_when_one_profile_has_no_capacity(self):
         node = self.start_node()
         self.ready_worker(node)

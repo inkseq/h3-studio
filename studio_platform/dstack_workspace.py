@@ -587,7 +587,7 @@ class DstackWorkspace:
                 self.repo.clock(),
             )
 
-    def state(self, principal, *, admin=False):
+    def state(self, principal, *, admin=False, live_only=False):
         from .dstack_metrics import machine_metrics
         from .dstack_preparation import preparation_view
 
@@ -619,6 +619,13 @@ class DstackWorkspace:
                 node
                 for node in _nodes(connection, self.settings, owners)
                 if node["intent_id"] in projected
+                # The admin overview needs live machines only; ended ones would each
+                # cost several metric queries (~15 s for ~100 nodes on the small host).
+                and not (
+                    live_only
+                    and node["desired_state"] == "stopped"
+                    and node["runtime_state"] == "stopped"
+                )
             ]
             # Readiness may have observed a newer heartbeat while this request
             # was in progress. Timestamp the captured rows after reading them;
