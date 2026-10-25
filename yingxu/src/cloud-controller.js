@@ -638,7 +638,8 @@ export function createCloudController({
       conflict: null,
       draftOffer: null,
       unknown: pending,
-      message: restoreDraft ? '已恢复尚未同步的云草稿。' : '云项目已打开。',
+      // Only a restored draft is news; a plain open needs no message.
+      message: restoreDraft ? '已恢复尚未同步的云草稿。' : '',
     });
     installMedia();
     try {
