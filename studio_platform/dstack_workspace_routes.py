@@ -29,8 +29,8 @@ def register_routes(app, *, service):
         return response(workspace.state(principal(request)))
 
     @app.get(PREFIX + "/admin/workspace")
-    def admin_state(request: Request):
-        return response(workspace.state(principal(request), admin=True))
+    def admin_state(request: Request, live: bool = False):
+        return response(workspace.state(principal(request), admin=True, live_only=live))
 
     @app.get(PREFIX + "/admin/demand-start")
     def demand_start(request: Request):
