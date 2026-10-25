@@ -381,13 +381,42 @@ class GenerationPlanning:
         body, quality = normalize(
             self.settings, self.repo, principal, body, stored=stored_selection
         )
+        split = None
+        windows_service = getattr(self, "script_windows", None)
+        if windows_service is not None:
+            import copy
+
+            shot_id = body.get("client_ref", {}).get("shot_id")
+            split = windows_service.generation(principal, project, shot_id)
+            if split:
+                if body.get("prompt") != split["original_prompt"]:
+                    raise Conflict("script_windows_source_changed")
+                body = copy.deepcopy(body)
+                body["prompt"] = "\n\n".join(split["prompts"])
+                body.setdefault("controls", {}).update(
+                    script_window_prompts=split["prompts"],
+                    window_seconds=split["script_windows"]["window_seconds"],
+                )
+            elif body.get("controls", {}).get("script_window_prompts") is not None:
+                raise Conflict("script_windows_unconfirmed")
         compiled, fingerprint = compile_request(
             body,
             lambda asset_id: self.assets.model_snapshot(
                 principal.owner, project_id, asset_id
             ),
             backend=self.settings.execution_backend,
+            script_windows_authorized=bool(split),
         )
+        if windows_service is not None and split:
+            from .script_window_timing import schedule
+
+            actual = schedule(
+                compiled["output_spec"]["frames"],
+                compiled["request"]["window_seconds"],
+                bool(compiled["request"]["inputs"].get("first_frame")),
+            )
+            if actual != split["timing"]:
+                raise Conflict("script_windows_timing_changed")
         if quality is not None:
             from .repository import request_hash
 
