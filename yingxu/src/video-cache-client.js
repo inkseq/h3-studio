@@ -31,9 +31,21 @@ async function request(action, values = {}) {
     worker.postMessage({ channel: 'inkseq-video-cache-v1', action, ...values }, [channel.port2]);
   });
 }
+let persistAsked = false;
+// Ask once per page for durable storage so the browser keeps cached media
+// instead of evicting it (Safari after a week). Chrome/Safari decide silently;
+// Firefox would show a permission prompt, so it is skipped there.
+function requestPersistentStorage(storage = globalThis.navigator?.storage) {
+  if (persistAsked || !storage?.persist || 'mozInnerScreenX' in globalThis) return;
+  persistAsked = true;
+  void Promise.resolve(storage.persisted?.())
+    .then((persisted) => (persisted ? true : storage.persist()))
+    .catch(() => {});
+}
 function videoCacheIdentity(account) {
   currentAccount = typeof account === 'string' && ACCOUNT.test(account) ? account : null;
   identityObserved = true;
+  if (currentAccount) requestPersistentStorage();
   void request('identity', { account: currentAccount }).catch(() => {});
 }
 function clearVideoCache() {
@@ -98,6 +110,7 @@ export {
   clearVideoCache,
   installVideoCache,
   playedVideoTarget,
+  requestPersistentStorage,
   videoCacheIdentity,
   videoCacheStatus,
 };
