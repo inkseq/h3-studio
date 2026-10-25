@@ -801,6 +801,7 @@ inventory.json
 !studio_platform/capacity_policy.py
 !studio_platform/slot_lock.py
 !tests/test_capacity_contract.py
+!tests/test_default_profile_maintenance.py
 # #597 confirmed narrative windows
 !studio_platform/script_window_timing.py
 !studio_platform/script_windows.py
