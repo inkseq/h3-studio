@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 
+from .render_limits import MAX_AUDIO_TRACKS
 from .project_validation import ROLES, TYPES
 from .script_windows import contract as script_windows_contract
 
@@ -552,7 +553,7 @@ def operation_schemas():
             "mode": {"enum": ["silent", "dialogue", "music", "mixed"]},
             "tracks": {
                 "type": "array",
-                "maxItems": 32,
+                "maxItems": MAX_AUDIO_TRACKS,
                 "items": {
                     **OBJECT,
                     "description": "Editable audio track. Rendering additionally requires a valid same-project audio entity/receipt, matching fileId, bounded source range and gain; muted drafts may keep incomplete bindings.",

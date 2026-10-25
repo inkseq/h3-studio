@@ -2,6 +2,16 @@
 
 Read this for exact request construction; the [task guide](../SKILL.md) chooses the workflow. Paths are relative to the exact authorized origin. Substitute actual returned IDs, integer versions and hashes; examples are templates, not live receipts. Read authenticated OpenAPI directly at `/openapi.json` (the generic helper intentionally accepts only relative `/v1/` paths).
 
+## Chapter audio limits
+
+Chapter audio uses the existing `sound.set` action with project `expected_version`
+CAS. `tracks` supports up to 128 entries per chapter; the expanded render plan
+(including followed shot segments) also permits at most 128 audible tracks.
+Read the current `operation_schemas.sound.set` in `/v1/guided-schema` before
+editing. Source ownership, matching file IDs, generated audio pairing, explicit
+mute, trim and fade checks still apply. This limit does not auto-enable clip
+sound or change an existing project's saved silence.
+
 ## Helper and credentials
 
 `scripts/inkseq.py --base-url ORIGIN --connection ID request METHOD /v1/PATH --json-file body.json --idempotency-key SAVED_KEY --output receipt.json` supports GET/POST/PUT/PATCH/DELETE. Omit body/key for reads. Save the exact body/key before writes. Each independently intended write needs its own key; original-request recovery reuses it. Output files are exclusive. Use a new output filename for another observation, not a new paid request. Python/httpx are required; connect.py is standard-library only. Choose one credential source: activated OS-protected connection, process-only `INKSEQ_API_KEY`, or an already configured explicit registry profile. Never copy secrets into project files.

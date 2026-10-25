@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 
+from .render_limits import MAX_AUDIO_TRACKS
 from .repository import Conflict, NotFound, request_hash
 from .project_validation import validate_generated_audio_binding
 from .caption_server import PRESET as CAPTION_PRESET, compile_subtitles
@@ -411,8 +412,8 @@ def compile_render(body, project, source_resolver, *, contract_version=None):
     }:
         blockers.append("先选择声音方案；可选择静音先行")
     elif mode != "silent":
-        if not isinstance(tracks, list) or len(tracks) > 32:
-            blockers.append("单章最多32条声音轨道")
+        if not isinstance(tracks, list) or len(tracks) > MAX_AUDIO_TRACKS:
+            blockers.append(f"单章最多{MAX_AUDIO_TRACKS}条声音轨道")
             tracks = []
         for track in tracks:
             if not isinstance(track, dict):
@@ -689,7 +690,7 @@ def compile_film_export(project_id, run_id, chapters):
                     "fade_out_samples": 0,
                 }
         frames += output["frame_count"]
-    if frames > 14400 or len(tracks) > 32:
+    if frames > 14400 or len(tracks) > MAX_AUDIO_TRACKS:
         raise ValueError("film_export_size_limit")
     compiled = {
         "recipe_id": RECIPE,
