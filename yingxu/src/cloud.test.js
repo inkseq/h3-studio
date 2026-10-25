@@ -1875,3 +1875,53 @@ test('history receipt notices use the active language for pending blocked and ev
     'Original cleanup checked; blocked items are retained.',
   );
 });
+
+test('a server-side result binding rebases the tab: clean adopts, separate edits merge, overlap conflicts', () => {
+  const setup = () => {
+    const { store, shot } = fixture(),
+      cloud = copyForCloud(store.exportProject());
+    assert.equal(store.enterCloudProject(cloud, { account: 'superdan', version: 1 }), true);
+    const remote = structuredClone(store.exportProject());
+    // The server binds a result: one new entity plus a selection on the shot.
+    remote.entities.find((e) => e.id === shot).data.selectedAssetId = 'result-x';
+    remote.entities.push({
+      ...structuredClone(remote.entities.find((e) => e.id === shot)),
+      id: 'result-x',
+      type: 'video',
+      parentId: null,
+      title: 'v1',
+      data: { cloudArtifactId: 'x', fileId: 'cloud_artifact_x' },
+    });
+    return { store, shot, remote };
+  };
+  // Clean tab: adopt the server version as saved.
+  let { store, shot, remote } = setup();
+  remote.entities = remote.entities.filter((e) => e.type !== 'video' || e.id !== 'result-x');
+  delete remote.entities.find((e) => e.id === shot).data.selectedAssetId;
+  remote.title = 'Renamed on the server';
+  assert.equal(store.rebaseCloud(remote, { account: 'superdan', version: 2 }), true);
+  assert.equal(store.getState().workspace.serverVersion, 2);
+  assert.equal(store.getState().workspace.dirty, false);
+  assert.equal(store.exportProject().title, 'Renamed on the server');
+  // Dirty tab, different field: both survive and the tab stays dirty against v2.
+  ({ store, shot, remote } = setup());
+  remote.title = 'Renamed on the server';
+  store.updateEntity(shot, { description: 'Local edit' });
+  assert.equal(store.rebaseCloud(remote, { account: 'superdan', version: 2 }), true);
+  const merged = store.exportProject();
+  assert.equal(merged.title, 'Renamed on the server');
+  assert.equal(merged.entities.find((e) => e.id === shot).description, 'Local edit');
+  assert.equal(store.getState().workspace.serverVersion, 2);
+  assert.equal(store.getState().workspace.dirty, true);
+  // Both sides changed the same shot differently: refuse, keep the draft untouched.
+  ({ store, shot, remote } = setup());
+  remote.entities.find((e) => e.id === shot).description = 'Server edit';
+  store.updateEntity(shot, { description: 'Local edit' });
+  const before = store.exportProject();
+  assert.equal(store.rebaseCloud(remote, { account: 'superdan', version: 2 }), false);
+  assert.deepEqual(store.exportProject(), before);
+  assert.equal(store.getState().workspace.serverVersion, 1);
+  // Never step backwards or accept another account.
+  assert.equal(store.rebaseCloud(remote, { account: 'superdan', version: 1 }), false);
+  assert.equal(store.rebaseCloud(remote, { account: 'supervan', version: 3 }), false);
+});
