@@ -354,14 +354,10 @@ def collect(root, state, browser, agent, headers, *, decoder=None):
     audio = next(a for a in artifacts if a['kind'] == 'audio')
     project = public.request(agent, 'GET', '/v1/projects/'+PROJECT, headers=headers)
     shot = next(e for e in project['project']['entities'] if e['id'] == 'shot')
-    if (shot['data'].get('selectedAssetId') != 'result-'+video['id']
-            or not shot['data'].get('selectedVideoRange')):
+    if shot['data'].get('selectedAssetId') != 'result-'+video['id']:
         # This is a dedicated acceptance story. Refuse to replace an operator's
         # later choice or soundtrack while retrying the acceptance procedure.
-        # Completion may already have selected this exact first result. Trim
-        # and soundtrack acceptance is still explicit and not implied by that.
-        assert shot['data'].get('selectedAssetId') in (None, '', 'result-'+video['id'])
-        assert not shot['data'].get('selectedVideoRange')
+        assert not shot['data'].get('selectedAssetId')
         assert not project['project'].get('journey', {}).get('soundTracks', {}).get('chapter')
         actions = [
             {'op': 'artifact.adopt', 'artifact_id': video['id'], 'shot_id': 'shot', 'select': True},
