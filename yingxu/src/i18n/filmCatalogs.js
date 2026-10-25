@@ -1,7 +1,7 @@
 export const filmCatalogs = {
   en: {
-    'film.title': 'Make a film',
-    'film.open': 'Make a film',
+    'film.title': 'Export film',
+    'film.open': 'Export film',
     'film.view': 'Film progress',
     'film.completedNotice': 'Your film is ready',
     'film.cancelledNotice': 'Film cancelled',
@@ -97,8 +97,8 @@ export const filmCatalogs = {
     'film.unknown': 'The outcome is unconfirmed. Check the original operation.',
   },
   zh: {
-    'film.title': '一键成片',
-    'film.open': '一键成片',
+    'film.title': '导出成片',
+    'film.open': '导出成片',
     'film.view': '成片进度',
     'film.completedNotice': '成片已完成',
     'film.cancelledNotice': '成片已取消',

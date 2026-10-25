@@ -1,31 +1,166 @@
-import React, { useEffect, useState } from 'react';
-import { ArrowDown, ArrowUp, GripVertical, Play, X } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Play, X } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { useStoryboardUI } from './storyboard-ui-context.jsx';
-import TrimBar from './TrimBar.jsx';
-import { Button, IconButton } from './ui/Button.jsx';
+import { Button } from './ui/Button.jsx';
 import { Note } from './ui/Note.jsx';
 import { FloatingMessage } from './floating-notice.js';
-import { clock, move, segmentsAction, segmentsTotal, snapRange } from './shot-segments.js';
+import { segmentsAction, segmentsTotal, snapRange } from './shot-segments.js';
 import './shot-segments.css';
 
 const secs = (value) => String(Math.round(value * 10) / 10);
 
-// Play one kept part in the shot's player and stop at its end.
-function playRange(video, range) {
-  if (!video) return;
-  const stop = () => {
-    if (video.currentTime >= range.end) {
+// Play the kept parts one after another, skipping what lies between them.
+function playParts(video, parts) {
+  if (!video || !parts.length) return;
+  let index = 0;
+  const step = () => {
+    const part = parts[index];
+    if (video.currentTime < part.end) return;
+    index += 1;
+    if (index >= parts.length) {
       video.pause();
-      video.removeEventListener('timeupdate', stop);
+      video.removeEventListener('timeupdate', step);
+      return;
     }
+    video.currentTime = parts[index].start;
   };
-  video.currentTime = range.start;
-  video.addEventListener('timeupdate', stop);
-  video.addEventListener('pause', () => video.removeEventListener('timeupdate', stop), {
+  video.currentTime = parts[0].start;
+  video.addEventListener('timeupdate', step);
+  video.addEventListener('pause', () => video.removeEventListener('timeupdate', step), {
     once: true,
   });
   Promise.resolve(video.play()).catch(() => {});
+}
+
+const MIN_PART = 0.25;
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+/**
+ * One time bar for the kept parts (#232 #23): drag on empty space to keep a new part, drag a
+ * part to move it, drag its edges to resize, select it and press Delete (or ×) to remove it.
+ * Parts play in time order.
+ */
+function PartsBar({ duration, parts, getVideo, busy, onChange, t }) {
+  const bar = useRef(null),
+    [draft, setDraft] = useState(null),
+    [selected, setSelected] = useState(null),
+    [now, setNow] = useState(0);
+  const list = draft || parts;
+  const total =
+    Number.isFinite(duration) && duration > 0
+      ? duration
+      : Math.max(1, ...parts.map((part) => part.end));
+  useEffect(() => {
+    const video = getVideo();
+    if (!video) return;
+    const tick = () => setNow(video.currentTime || 0);
+    video.addEventListener('timeupdate', tick);
+    return () => video.removeEventListener('timeupdate', tick);
+  });
+  const pct = (value) => (value / total) * 100 + '%';
+  const at = (x) => {
+    const box = bar.current.getBoundingClientRect();
+    return clamp(((x - box.left) / box.width) * total, 0, total);
+  };
+  const seek = (value) => {
+    const video = getVideo();
+    if (!video) return;
+    video.pause();
+    video.currentTime = value;
+  };
+  function begin(event, index, mode) {
+    if (busy || event.button > 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const el = bar.current,
+      start = at(event.clientX),
+      base = parts.map((part) => ({ ...part }));
+    el.setPointerCapture(event.pointerId);
+    let next = null;
+    if (index !== null) setSelected(index);
+    const move = (e) => {
+      const x = at(e.clientX),
+        delta = x - start,
+        part = base[index];
+      let value;
+      if (mode === 'new') value = { start: Math.min(start, x), end: Math.max(start, x) };
+      else if (mode === 'move') {
+        const length = part.end - part.start,
+          from = clamp(part.start + delta, 0, total - length);
+        value = { start: from, end: from + length };
+      } else if (mode === 'start')
+        value = { start: clamp(part.start + delta, 0, part.end - MIN_PART), end: part.end };
+      else
+        value = { start: part.start, end: clamp(part.end + delta, part.start + MIN_PART, total) };
+      next = mode === 'new' ? [...base, value] : base.map((r, i) => (i === index ? value : r));
+      setDraft(next);
+      seek(mode === 'end' ? value.end : value.start);
+    };
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      setDraft(null);
+      if (!next) {
+        // A plain press on empty space just moves the playhead there.
+        if (mode === 'new') seek(start);
+        return;
+      }
+      const added = mode === 'new' ? next.at(-1) : null;
+      if (added && added.end - added.start < MIN_PART) return seek(start);
+      const sorted = next
+        .map((part) => snapRange(part.start, part.end))
+        .filter(Boolean)
+        .sort((a, b) => a.start - b.start);
+      setSelected(null);
+      onChange(sorted);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  }
+  const remove = (index) => {
+    setSelected(null);
+    onChange(parts.filter((_, i) => i !== index));
+  };
+  return (
+    <div
+      className={'parts-bar' + (busy ? ' busy' : '')}
+      tabIndex={0}
+      title={t('segments.barHelp')}
+      onKeyDown={(event) => {
+        if (selected === null || !['Delete', 'Backspace'].includes(event.key)) return;
+        event.preventDefault();
+        remove(selected);
+      }}
+    >
+      <div className="parts-bar-track" ref={bar} onPointerDown={(e) => begin(e, null, 'new')}>
+        {list.map((part, index) => (
+          <span
+            key={index}
+            className={'parts-bar-part' + (selected === index ? ' selected' : '')}
+            style={{ left: pct(part.start), width: pct(part.end - part.start) }}
+            onPointerDown={(e) => begin(e, index, 'move')}
+          >
+            <i className="edge start" onPointerDown={(e) => begin(e, index, 'start')} />
+            <b>{index + 1}</b>
+            <button
+              type="button"
+              className="parts-bar-x"
+              aria-label={t('segments.remove', { n: index + 1 })}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={() => remove(index)}
+            >
+              <X size={10} />
+            </button>
+            <i className="edge end" onPointerDown={(e) => begin(e, index, 'end')} />
+          </span>
+        ))}
+        <span className="parts-bar-head" style={{ left: pct(clamp(now, 0, total)) }} />
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -37,16 +172,8 @@ export default function ShotSegments({ shot, getVideo, duration, trim }) {
   const { t } = useI18n(),
     { state, dispatch, adapter } = useStoryboardUI();
   const list = shot.segments || [];
-  const [sel, setSel] = useState(trim),
-    [saving, setSaving] = useState(false),
-    [error, setError] = useState(''),
-    [dragFrom, setDragFrom] = useState(null),
-    [src, setSrc] = useState('');
-  useEffect(() => setSel(trim), [shot.id, shot.chosen, trim?.[0], trim?.[1]]);
-  useEffect(() => {
-    const video = getVideo();
-    if (video?.currentSrc && video.currentSrc !== src) setSrc(video.currentSrc);
-  });
+  const [saving, setSaving] = useState(false),
+    [error, setError] = useState('');
   // Parts are saved on the cloud story (POST /actions), like choosing a take.
   if (!shot.chosen || !adapter?.readVersions) return null;
   const busy = saving || state.busy || !!state.workbenchPending;
@@ -83,113 +210,28 @@ export default function ShotSegments({ shot, getVideo, duration, trim }) {
         <FloatingMessage text={error || null} onDismiss={() => setError('')} />
       </div>
     );
-  const picked = sel && snapRange(sel[0], sel[1]);
   return (
     <section className="shot-segments" aria-label={t('segments.title')}>
       <header>
         <b>{t('segments.title')}</b>
-        <Note as="small">{t('segments.help')}</Note>
-      </header>
-      <TrimBar
-        duration={duration}
-        start={sel?.[0] ?? 0}
-        end={sel?.[1] ?? duration ?? 1}
-        getVideo={getVideo}
-        onCommit={(s, e) => setSel([s, e])}
-      />
-      <div className="shot-segments-add">
-        <span className="muted">
-          {picked &&
-            t('segments.selection', {
-              from: clock(picked.start),
-              to: clock(picked.end),
-              len: secs(picked.end - picked.start),
-            })}
-        </span>
         <Button
           size="sm"
-          variant="primary"
+          variant="ghost"
           className="keep-label"
-          disabled={busy || !picked}
-          onClick={() => void save([...list, picked])}
+          onClick={() => playParts(getVideo(), list)}
         >
-          {t('segments.add')}
+          <Play size={13} />
+          {t('segments.playAll')}
         </Button>
-      </div>
-      <ol className="shot-segments-list">
-        {list.map((range, index) => {
-          const n = index + 1;
-          return (
-            <li
-              key={index + ':' + range.start + ':' + range.end}
-              draggable={!busy}
-              className={dragFrom === index ? 'dragging' : ''}
-              onDragStart={() => setDragFrom(index)}
-              onDragEnd={() => setDragFrom(null)}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => {
-                event.preventDefault();
-                if (dragFrom !== null && dragFrom !== index) void save(move(list, dragFrom, index));
-                setDragFrom(null);
-              }}
-            >
-              <GripVertical size={14} className="shot-segments-grip" aria-hidden="true" />
-              <span className="shot-segments-n">{n}</span>
-              {src ? (
-                <video
-                  className="shot-segments-thumb"
-                  src={src.split('#')[0] + '#t=' + range.start}
-                  preload="metadata"
-                  muted
-                  playsInline
-                  aria-hidden="true"
-                />
-              ) : (
-                <span className="shot-segments-thumb" />
-              )}
-              <span className="shot-segments-time">
-                {t('segments.row', {
-                  n,
-                  from: clock(range.start),
-                  to: clock(range.end),
-                  len: secs(range.end - range.start),
-                })}
-              </span>
-              <IconButton
-                size="sm"
-                label={t('segments.play', { n })}
-                onClick={() => playRange(getVideo(), range)}
-              >
-                <Play size={13} />
-              </IconButton>
-              <IconButton
-                size="sm"
-                label={t('segments.up', { n })}
-                disabled={busy || index === 0}
-                onClick={() => void save(move(list, index, index - 1))}
-              >
-                <ArrowUp size={13} />
-              </IconButton>
-              <IconButton
-                size="sm"
-                label={t('segments.down', { n })}
-                disabled={busy || index === list.length - 1}
-                onClick={() => void save(move(list, index, index + 1))}
-              >
-                <ArrowDown size={13} />
-              </IconButton>
-              <IconButton
-                size="sm"
-                label={t('segments.remove', { n })}
-                disabled={busy}
-                onClick={() => void save(list.filter((_, i) => i !== index))}
-              >
-                <X size={13} />
-              </IconButton>
-            </li>
-          );
-        })}
-      </ol>
+      </header>
+      <PartsBar
+        duration={duration}
+        parts={list}
+        getVideo={getVideo}
+        busy={busy}
+        onChange={(next) => void save(next)}
+        t={t}
+      />
       <footer>
         <span className="muted">
           {saving

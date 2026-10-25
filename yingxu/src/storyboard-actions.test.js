@@ -392,3 +392,14 @@ test('file display rename retains original media identity, metadata and links', 
   assert.deepEqual(p.links, before.links);
   assert.equal(edit(p, { type: 'assetTitle', asset: 'missing', title: 'No' }), false);
 });
+
+test('a shot dropped on an empty scene moves there and keeps its cast and place', () => {
+  const project = fixture();
+  project.entities.push(entity('scene-empty', 'scene', 'chapter', {}, 2));
+  act(project, { type: 'moveToScene', from: 'shot-a', scene: 'scene-empty' });
+  const moved = get(project, 'shot-a');
+  assert.equal(moved.parentId, 'scene-empty');
+  assert.deepEqual(moved.data.cast, [{ characterId: 'hero', lookId: 'coat' }]);
+  assert.equal(moved.data.storyboard.place.locationId, 'place');
+  assert.equal(edit(project, { type: 'moveToScene', from: 'shot-a', scene: 'scene-empty' }), false);
+});

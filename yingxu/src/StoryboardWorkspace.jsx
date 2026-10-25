@@ -19,6 +19,7 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Sparkles,
+  AlertTriangle,
   CheckCheck,
 } from 'lucide-react';
 import { RenameDialog, useTrash } from './UniversalTrash.jsx';
@@ -35,6 +36,7 @@ import {
   pointerWithin,
   useSensor,
   useSensors,
+  useDroppable,
 } from '@dnd-kit/core';
 import {
   SortableContext,
@@ -61,7 +63,20 @@ import {
   totalDuration,
   variantOf,
   storyboardDockLayout,
+  DOCK_MIN,
 } from './storyboard-ui-model.js';
+
+const EMPTY_SET = new Set();
+
+// An empty scene is a drop target for shot cards, highlighted while a card is over it.
+function EmptySceneDrop({ sceneId, label }) {
+  const drop = useDroppable({ id: 'sceneto:' + sceneId });
+  return (
+    <p ref={drop.setNodeRef} className={'scene-empty muted' + (drop.isOver ? ' drop-hot' : '')}>
+      {label}
+    </p>
+  );
+}
 
 function collision(args) {
   const id = String(args.active.id);
@@ -315,14 +330,24 @@ function FilmEditorButton({ chapterId }) {
 function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmControl }) {
   const { t, locale } = useI18n();
   const { state, dispatch } = useStoryboardUI(),
-    player = usePlayer(state.shots),
+    trash = useTrash();
+  const gone = trash?.hidden || EMPTY_SET,
+    goneScenes = new Set(
+      (state.scenes || [])
+        .filter((scene) => gone.has(scene.id) || gone.has(scene.parentId))
+        .map((scene) => scene.id),
+    ),
+    shots = state.shots.filter(
+      (shot) =>
+        !gone.has(shot.id) && !gone.has(shot.entity?.id) && !goneScenes.has(shot.entity?.parentId),
+    );
+  const player = usePlayer(shots),
     [selection, setSelection] = useState(emptySelection),
     [expanded, setExpanded] = useState(false),
     [libraryCollapsed, setLibraryCollapsed] = useState(
       () => globalThis.matchMedia?.('(max-width:760px)').matches ?? false,
     );
-  const trash = useTrash(),
-    pageActive = usePageActive(),
+  const pageActive = usePageActive(),
     column = useRef(null),
     main = useRef(null),
     [room, setRoom] = useState({ height: 0, content: 0 }),
@@ -438,7 +463,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
     return () => window.removeEventListener('keydown', clear);
   }, [theater, expanded, selected]);
   const library = useStoryboardPanelSize('library', 260, 140, 560),
-    dock = useStoryboardPanelSize('dock', 190, 110, 900),
+    dock = useStoryboardPanelSize('dock', DOCK_MIN, DOCK_MIN, 900),
     drawer = useStoryboardPanelSize('drawer', 440, 340, 820),
     dockLayout = storyboardDockLayout({ ...room, manual: dock.custom ? dock.size : null });
   const [headCompact, setHeadCompact] = usePersistentFlag('inkseq.sbHeadCompact'),
@@ -450,11 +475,11 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
         : dockLayout.large,
     );
   // One continuous storyboard: every chapter's scenes in reading order (owner, 2026-10-21).
-  const chapters = state.project.chapters || [],
+  const chapters = (state.project.chapters || []).filter((chapter) => !gone.has(chapter.id)),
     multi = chapters.length > 1,
     chapterIndex = new Map(chapters.map((chapter, index) => [chapter.id, index]));
   const groups = (state.scenes || [])
-    .filter((scene) => chapterIndex.has(scene.parentId))
+    .filter((scene) => chapterIndex.has(scene.parentId) && !gone.has(scene.id))
     .sort(
       (a, b) => chapterIndex.get(a.parentId) - chapterIndex.get(b.parentId) || a.order - b.order,
     )
@@ -462,9 +487,9 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
       id: scene.id,
       title: scene.title,
       chapterId: scene.parentId,
-      shots: state.shots.filter((shot) => shot.entity?.parentId === scene.id),
+      shots: shots.filter((shot) => shot.entity?.parentId === scene.id),
     }));
-  for (const shot of state.shots) {
+  for (const shot of shots) {
     if (!groups.some((group) => group.id === shot.entity?.parentId)) {
       const id = shot.entity?.parentId || null;
       let group = groups.find((row) => row.id === id);
@@ -488,18 +513,28 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
       const first = groups.find((g) => g.chapterId === chapter.id && g.shots.length)?.shots[0];
       if (first) chapterStarts.add(first.id);
     }
+  // #232 (#6): dragged to its narrowest, the library is the same icon rail as collapsed.
+  const railed = libraryCollapsed || library.size <= 150,
+    toggleLibrary = () => {
+      if (!railed) return setLibraryCollapsed(true);
+      setLibraryCollapsed(false);
+      if (library.size <= 150) library.set(260);
+    };
   return (
     <div
-      className={'layout A' + (libraryCollapsed ? ' library-collapsed' : '')}
+      className={'layout A' + (railed ? ' library-collapsed' : '') + (theater ? ' theater' : '')}
       data-testid="storyboard-layout-a"
       style={{
-        gridTemplateColumns: libraryCollapsed
-          ? '44px minmax(0,1fr)'
-          : `${library.size}px 8px minmax(0,1fr)`,
-        '--libw': (libraryCollapsed ? 44 : library.size) + 'px',
+        // Theater (#232 #4): the player and its timeline take the whole window width.
+        gridTemplateColumns: theater
+          ? 'minmax(0,1fr)'
+          : railed
+            ? '44px minmax(0,1fr)'
+            : `${library.size}px 8px minmax(0,1fr)`,
+        '--libw': (railed ? 44 : library.size) + 'px',
       }}
     >
-      {!libraryCollapsed && (
+      {!railed && (
         <button
           type="button"
           className="sb-library-backdrop"
@@ -510,10 +545,10 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
       <AssetLibrary
         onPick={pickAsset}
         selectedShot={state.shots.find((shot) => shot.id === selected)}
-        collapsed={libraryCollapsed}
-        onToggle={() => setLibraryCollapsed((value) => !value)}
+        collapsed={railed}
+        onToggle={toggleLibrary}
       />
-      {!libraryCollapsed && <StoryboardSplitter panel={library} label={t('storyboard.copy17')} />}
+      {!railed && <StoryboardSplitter panel={library} label={t('storyboard.copy17')} />}
       <div
         className={'col' + (selected && !expanded ? ' with-drawer' : '')}
         ref={column}
@@ -584,8 +619,9 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
               )}
               {pending.length > 0 && (
                 <button
+                  className="sb-pending-chip"
                   disabled={state.busy || !state.copiesMax}
-                  title={t('storyboard.copy35', { count: pending.length })}
+                  title={t('storyboard.pendingHint')}
                   onClick={() =>
                     dispatch({
                       type: 'workbenchGenerate',
@@ -594,7 +630,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                     })
                   }
                 >
-                  <Sparkles size={14} />
+                  <AlertTriangle size={14} />
                   <span className="label">{t('storyboard.copy35', { count: pending.length })}</span>
                 </button>
               )}
@@ -744,7 +780,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                           ))}
                         </div>
                       ) : (
-                        <p className="scene-empty muted">{t('storyboard.sceneEmpty')}</p>
+                        <EmptySceneDrop sceneId={group.id} label={t('storyboard.sceneEmpty')} />
                       )}
                     </section>
                   );
@@ -886,9 +922,6 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                     }
               }
             />
-            {!dockMini && (
-              <small className="muted sb-timeline-hint">{t('storyboard.copy21')}</small>
-            )}
           </div>
         </div>
       </div>
@@ -999,6 +1032,9 @@ function StoryboardShell({ onLegacyGuide, onCanvas, onNewScene, filmControl }) {
       o = String(over.id);
     if (a.startsWith('shot:') && o.startsWith('shot:'))
       return dispatch({ type: 'reorder', from: a.slice(5), to: o.slice(5) });
+    // #232 (#11): a card dropped on an empty scene (any chapter) moves into it.
+    if (a.startsWith('shot:') && o.startsWith('sceneto:'))
+      return dispatch({ type: 'moveToScene', from: a.slice(5), scene: o.slice(8) });
     if (a.startsWith('seg:') && o.startsWith('segto:'))
       return a.slice(4) === o.slice(6)
         ? undefined

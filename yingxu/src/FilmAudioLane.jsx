@@ -279,9 +279,7 @@ export default function FilmAudioLane({
             {t('editor.removeAudio')}
           </button>
         </div>
-      ) : (
-        <small className="muted">{t('editor.audioHint')}</small>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -338,7 +338,6 @@ export default function AssistantConnections({
   return (
     <section className="assistant-connections">
       {!embedded && <h2>{t('assistants.title')}</h2>}
-      <p>{t('assistants.workStays')}</p>
       {!account ? (
         <div className="assistant-signin">
           <p>{t('assistants.login')}</p>
@@ -411,14 +410,15 @@ export default function AssistantConnections({
                 {money && (
                   <>
                     <label>
-                      {t(creditMode ? 'assistants.capCredits' : 'assistants.cap')}
+                      <span className="assistant-label-help" title={t('assistants.zero')}>
+                        {t(creditMode ? 'assistants.capCredits' : 'assistants.cap')} <i>?</i>
+                      </span>
                       <input
                         inputMode={creditMode ? 'numeric' : 'decimal'}
                         value={cap}
                         onChange={(e) => setCap(e.target.value)}
                       />
                     </label>
-                    <small>{t('assistants.zero')}</small>
                   </>
                 )}
                 <button className="primary" disabled={!name.trim()}>
@@ -565,23 +565,6 @@ export function ConnectionList({
   return (
     <>
       <h3>{t('assistants.list')}</h3>
-      {view.inactiveCount > 0 && (
-        <button
-          type="button"
-          className="assistant-inactive-toggle"
-          aria-expanded={showInactive}
-          onClick={onToggleInactive}
-        >
-          {t(
-            showInactive
-              ? 'assistants.hideInactive'
-              : hasMore
-                ? 'assistants.showLoadedInactive'
-                : 'assistants.showInactive',
-            { count: view.inactiveCount },
-          )}
-        </button>
-      )}
       {view.items.map(({ row, hidden }) => (
         <ConnectionRow
           key={row.id}
@@ -597,6 +580,23 @@ export function ConnectionList({
           onActivity={() => onActivity(row)}
         />
       ))}
+      {view.inactiveCount > 0 && (
+        <button
+          type="button"
+          className="link assistant-inactive-toggle"
+          aria-expanded={showInactive}
+          onClick={onToggleInactive}
+        >
+          {t(
+            showInactive
+              ? 'assistants.hideInactive'
+              : hasMore
+                ? 'assistants.showLoadedInactive'
+                : 'assistants.showInactive',
+            { count: view.inactiveCount },
+          )}
+        </button>
+      )}
       {!rows.length && <p>{t('assistants.empty')}</p>}
       {rows.length > 0 && view.activeCount === 0 && !showInactive && (
         <p>{t('assistants.noActive')}</p>
@@ -642,71 +642,84 @@ function ConnectionRow({
     }
   }
   return (
-    <article hidden={hidden} data-connection-id={row.id}>
-      <h3>
-        {row.name} ·{' '}
-        {t(
-          'assistants.' +
-            (row.paused
-              ? 'paused'
-              : ['pending', 'connected', 'expired', 'revoked', 'unavailable'].includes(row.status)
-                ? row.status
-                : 'unavailable'),
-        )}
-      </h3>
-      <p className="assistant-connection-created">
-        {t('assistants.created', {
-          date: assistantDate(row.created_at, locale, t('assistants.dateUnavailable')),
-        })}{' '}
-        · {t('assistants.shortId', { id: row.id.slice(-8) })}
-      </p>
-      {row.claimed_telegram_user && (
-        <p className="assistant-connection-claimed">
-          {t('telegram.claimedBy', { name: telegramUserLabel(row.claimed_telegram_user) })}
-        </p>
-      )}
-      <p>
-        {scopeLabel(row.scope)} · {permissionLabel(row.permission)}
-      </p>
-      {showCap && <SpendingBreakdown usage={row.usage} scope="connection" />}
-      <form onSubmit={save} hidden={!showCap}>
-        <label>
-          {t(credit ? 'assistants.capCredits' : 'assistants.cap')}
-          <input
-            inputMode={credit ? 'numeric' : 'decimal'}
-            value={cap}
-            onChange={(e) =>
-              setDraft((old) => ({
-                value: e.target.value,
-                version: old?.version ?? row.state_version,
-              }))
-            }
+    <article hidden={hidden} data-connection-id={row.id} className="assistant-row">
+      <div className="assistant-row-head">
+        <strong>{row.name}</strong>
+        <span className={'assistant-status ' + (row.paused ? 'paused' : row.status)}>
+          {t(
+            'assistants.' +
+              (row.paused
+                ? 'paused'
+                : ['pending', 'connected', 'expired', 'revoked', 'unavailable'].includes(row.status)
+                  ? row.status
+                  : 'unavailable'),
+          )}
+        </span>
+        <span className="assistant-row-scope">{scopeLabel(row.scope)}</span>
+        <div className="assistant-actions">
+          <button
+            className="small"
             disabled={busy || !editable}
-          />
-        </label>
-        <small>{t('assistants.zero')}</small>
-        <button disabled={busy || !editable}>{t('assistants.saveCap')}</button>
-        {draft && (
-          <button type="button" disabled={busy} onClick={() => setDraft(null)}>
-            {t('assistants.reloadCap')}
+            onClick={() => onPatch({ expected_version: row.state_version, paused: !row.paused })}
+          >
+            {t(row.paused ? 'assistants.resume' : 'assistants.pause')}
           </button>
+          <button
+            className="small"
+            title={t('assistants.workStays')}
+            disabled={busy || closed}
+            onClick={onRevoke}
+          >
+            {t('assistants.revoke')}
+          </button>
+        </div>
+      </div>
+      <details className="assistant-row-details">
+        <summary>{t('assistants.details')}</summary>
+        <p className="assistant-connection-created">
+          {t('assistants.created', {
+            date: assistantDate(row.created_at, locale, t('assistants.dateUnavailable')),
+          })}{' '}
+          · {t('assistants.shortId', { id: row.id.slice(-8) })}
+        </p>
+        {row.claimed_telegram_user && (
+          <p className="assistant-connection-claimed">
+            {t('telegram.claimedBy', { name: telegramUserLabel(row.claimed_telegram_user) })}
+          </p>
         )}
-        {error && <p role="alert">{error}</p>}
-      </form>
-      <div className="assistant-actions">
-        <button
-          disabled={busy || !editable}
-          onClick={() => onPatch({ expected_version: row.state_version, paused: !row.paused })}
-        >
-          {t(row.paused ? 'assistants.resume' : 'assistants.pause')}
-        </button>
-        <button disabled={busy || closed} onClick={onRevoke}>
-          {t('assistants.revoke')}
-        </button>
-        <button disabled={busy} onClick={onActivity}>
+        <p>
+          {scopeLabel(row.scope)} · {permissionLabel(row.permission)}
+        </p>
+        {showCap && <SpendingBreakdown usage={row.usage} scope="connection" />}
+        <form onSubmit={save} hidden={!showCap}>
+          <label>
+            <span className="assistant-label-help" title={t('assistants.zero')}>
+              {t(credit ? 'assistants.capCredits' : 'assistants.cap')} <i>?</i>
+            </span>
+            <input
+              inputMode={credit ? 'numeric' : 'decimal'}
+              value={cap}
+              onChange={(e) =>
+                setDraft((old) => ({
+                  value: e.target.value,
+                  version: old?.version ?? row.state_version,
+                }))
+              }
+              disabled={busy || !editable}
+            />
+          </label>
+          <button disabled={busy || !editable}>{t('assistants.saveCap')}</button>
+          {draft && (
+            <button type="button" disabled={busy} onClick={() => setDraft(null)}>
+              {t('assistants.reloadCap')}
+            </button>
+          )}
+          {error && <p role="alert">{error}</p>}
+        </form>
+        <button className="small" disabled={busy} onClick={onActivity}>
           {t('assistants.activity')}
         </button>
-      </div>
+      </details>
     </article>
   );
 }

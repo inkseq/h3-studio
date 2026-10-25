@@ -473,3 +473,47 @@ button.autosave-status {
   opacity: 0.7;
   pointer-events: none;
 }
+/* #232 (#13): clips touch, with a hairline between them, so their edges match the ruler. */
+.film-tclip {
+  border-radius: 0;
+  box-shadow: inset -1px 0 0 var(--surface);
+}
+.film-tclip.selected {
+  border-radius: 4px;
+}
+/* #232 (#28): a smaller preview by default, drag its bottom-right corner to resize; the
+   timeline below gets the room. */
+.film-editor {
+  grid-template-rows: auto auto auto auto auto auto auto auto auto;
+}
+.film-editor-stage {
+  height: 36vh;
+  min-height: 140px;
+  max-height: 75vh;
+  resize: vertical;
+}
+.film-speed select {
+  width: auto;
+  min-width: 72px;
+  padding: 2px 8px;
+}
+/* #232 (#17): left-out clips read as removed — hatched, struck through — right under the track. */
+.film-excluded {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.film-excluded button {
+  text-decoration: line-through;
+  background: repeating-linear-gradient(
+    135deg,
+    var(--surface-2, var(--surface)) 0 6px,
+    var(--surface) 6px 12px
+  );
+  opacity: 0.8;
+}
+.film-excluded button.on {
+  opacity: 1;
+  outline: 2px solid var(--accent);
+}

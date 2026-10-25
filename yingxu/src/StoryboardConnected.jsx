@@ -1,3 +1,4 @@
+import { clickedOutside } from './ui/Dialog.jsx';
 import TakeRecipe from './QuickChatTakeRecipe.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import StoryFilmControl from './StoryFilmControl.jsx';
@@ -54,6 +55,9 @@ function Confirmation({ ids, onClose }) {
       onCancel={(event) => {
         event.preventDefault();
         if (!submitting) onClose();
+      }}
+      onClick={(event) => {
+        if (clickedOutside(event) && !submitting) onClose();
       }}
     >
       <div className="modal-heading">
@@ -219,6 +223,9 @@ function WorkbenchConfirmation({ receipt, onClose }) {
       onCancel={(e) => {
         e.preventDefault();
         if (!busy) onClose();
+      }}
+      onClick={(e) => {
+        if (clickedOutside(e) && !busy) onClose();
       }}
     >
       <h2>{t('workbench.confirm')}</h2>

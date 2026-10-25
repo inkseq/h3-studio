@@ -2,13 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { selectShot, emptySelection } from './storyboard-selection.js';
 import { storyboardDockLayout } from './storyboard-ui-model.js';
-test('automatic dock fills sparse chapters, yields to a long wall and preserves a manual preference', () => {
-  assert.equal(storyboardDockLayout({ height: 760, content: 240 }).size, 441);
-  assert.equal(storyboardDockLayout({ height: 760, content: 1100 }).size, 190);
+test('dock opens at its smallest height, keeps a manual size and never drops below its contents', () => {
+  assert.equal(storyboardDockLayout({ height: 760, content: 240 }).size, 150);
+  assert.equal(storyboardDockLayout({ height: 760, content: 1100 }).size, 150);
   assert.equal(storyboardDockLayout({ height: 760, content: 240, manual: 280 }).size, 280);
   assert.equal(storyboardDockLayout({ height: 460, content: 1100, manual: 540 }).size, 320);
   assert.equal(storyboardDockLayout({ height: 900, content: 1100, manual: 540 }).size, 540);
-  assert.equal(storyboardDockLayout({ height: 760, content: 240, manual: 110 }).size, 110);
+  assert.equal(storyboardDockLayout({ height: 760, content: 240, manual: 110 }).size, 150);
 });
 test('range uses visible order, preserves toggle and drops removed identities', () => {
   const ids = ['a', 'b', 'c', 'd'];

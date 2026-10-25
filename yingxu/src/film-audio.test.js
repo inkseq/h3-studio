@@ -90,3 +90,24 @@ test('a clip-following generated track cannot be moved or trimmed by hand', () =
   assert.throws(() => moveTrack(p, 'ch', 'g', 1), /audioFollowsClip/);
   assert.throws(() => trimTrack(p, 'ch', 'g', 'end', -1), /audioFollowsClip/);
 });
+
+test('turning a clip sound off removes it from the lane; old muted chips are hidden', async () => {
+  const { toggleClipSound, audioBlocks } = await import('./film-audio-model.js');
+  const p = {
+    entities: [{ id: 's1', type: 'shot', data: {} }],
+    journey: {
+      soundTracks: {
+        ch: [
+          { id: 'g1', generatedFrom: { videoEntityId: 'v' }, shotId: 's1', muted: false },
+          { id: 'g0', generatedFrom: { videoEntityId: 'w' }, shotId: 's0', muted: true },
+        ],
+      },
+    },
+  };
+  assert.equal(audioBlocks(p, 'ch', [{ id: 's1', start: 0, end: 4 }]).length, 1);
+  toggleClipSound(p, 'ch', 's1');
+  assert.deepEqual(
+    p.journey.soundTracks.ch.map((t) => t.id),
+    ['g0'],
+  );
+});
