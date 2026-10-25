@@ -1206,6 +1206,23 @@ export function createCloudController({
     );
     emit({ jobs: jobs.filter((job) => job.client_ref?.project_id === ctx.projectId) });
   }
+  // The server binds finished results into the story itself (h3-studio#588 R2) and bumps
+  // its version. Take that version now so this tab's next save is not a false conflict.
+  async function adoptServerBindings(jobs, ctx) {
+    const newest = Math.max(
+      0,
+      ...jobs
+        .map((job) => job.result?.project_collection)
+        .filter((item) => item?.status === 'bound' && Number.isInteger(item.project_version))
+        .map((item) => item.project_version),
+    );
+    if (!api.project || newest <= current().workspace.serverVersion) return;
+    const record = checkedProjectRecord(await api.project(ctx.projectId));
+    guard(ctx);
+    if (record.version <= current().workspace.serverVersion) return;
+    if (!store.rebaseCloud(record.project, { account: ctx.account, version: record.version }))
+      emit({ remoteUpdate: { id: record.id, version: record.version } });
+  }
   async function collectJobArtifacts(jobs, ctx) {
     for (const job of jobs)
       if (job.status === 'succeeded' && !job.artifacts?.length) {
@@ -1254,6 +1271,7 @@ export function createCloudController({
           }
       }
       const jobs = await collectJobArtifacts([...recent, ...retained], ctx);
+      await adoptServerBindings(jobs, ctx);
       await mergeJobs(jobs, ctx);
       const activity = aggregate?.value || null;
       emit({
