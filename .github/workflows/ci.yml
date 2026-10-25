@@ -512,8 +512,6 @@ jobs:
             --migration-selection h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-fl-r2-v3:fl \
             --migration-selection h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6:fl \
             --migration-selection h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6:ref \
-            --migration-selection h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7:fl \
-            --migration-selection h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7:ref \
             --migration-selection h3-pruned-rank8-int8-pro6000-sdpa-p4-controls-v2:fl \
             --migration-selection h3-pruned-rank8-int8-pro6000-sdpa-p4-controls-v2:ref \
             --migration-selection h3-unpruned33b-int8-sdpa-p3-controls-v2:fl \
@@ -523,7 +521,9 @@ jobs:
             --migration-selection h3-unpruned33b-int8-sdpa-p3-144gib-single-controls-v4:fl \
             --migration-selection h3-unpruned33b-int8-sdpa-p3-144gib-single-controls-v4:ref \
             --migration-selection h3-unpruned33b-bf16-sdpa-p3-256gib-single-controls-v4:fl \
-            --migration-selection h3-unpruned33b-bf16-sdpa-p3-256gib-single-controls-v4:ref "${retained_args[@]}"
+            --migration-selection h3-unpruned33b-bf16-sdpa-p3-256gib-single-controls-v4:ref \
+            --migration-selection h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7:fl \
+            --migration-selection h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7:ref "${retained_args[@]}"
           python tools/check_platform_bundle.py "$GITHUB_SHA" platform-release
       - uses: actions/upload-artifact@v4
         if: needs.changes.outputs.action == 'prepare-platform' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
