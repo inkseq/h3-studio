@@ -271,3 +271,31 @@ Deployment behavior was checked against the pinned
 [server image recipe](https://github.com/dstackai/dstack/blob/0.22.5/docker/server/release/Dockerfile),
 [server CLI](https://github.com/dstackai/dstack/blob/0.22.5/src/dstack/_internal/cli/commands/server.py),
 and [startup/authentication](https://github.com/dstackai/dstack/blob/0.22.5/src/dstack/_internal/server/app.py).
+
+
+### Controller progress observer (#588 R3)
+
+The controller writes one tenant-scoped row in the existing operator-heartbeat
+table after completing main-loop work and its demand scan, at most once per
+minute. A starting record gives initialization 180 seconds; a timer never advances
+progress while a provider call or reconciliation is stuck. Idle checkpoints do
+not run the provider safety sweep more often than its existing 900-second cadence.
+
+An independent Docker health process checks that row every minute, with bounded
+PostgreSQL connection/statement timeouts and a 20-second outer health timeout.
+Missing/stale/future/invalid progress produces a deterministic capacity-health
+outbox alert, reused through the existing Grafana/Sentry acknowledgement path.
+Recovery allows the next distinct stalled progress record to produce a new alert.
+Database unavailability exits unhealthy even if an alert cannot be persisted.
+The heartbeat row is diagnostic only; it grants no job lease or admission rights.
+
+This first slice alerts only. Docker unhealthy does not itself restart the
+container, and neither the health process nor its alerts stop/rent GPUs, requeue
+jobs, change budgets or prove a supplier bill. Whole-host/DB loss still requires
+the independent host alarms/restore plan. Automatic safe-node stop is deferred.
+
+Claude's staging check, with no test jobs/machines: briefly suspend the controller
+main process past the threshold, confirm the independent health process/outbox
+detects it once, then promptly resume it and verify recovery. Inspect only closed
+event codes; do not expose configuration or request content. Do not apply this
+fault injection on production.
