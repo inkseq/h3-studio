@@ -767,6 +767,7 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
     void dispatch({ type: 'choose', shot: shot.id, version: version.id }).catch(() => {});
   }, [view, busy]);
   const adapter = {
+    previewScriptWindows: (id, options) => cloud.previewScriptWindows(id, options),
     readCopies: () => cloud.workbenchCopies(),
     readPreferences: () => cloud.workbenchPreferences(),
     readVersions: async (id, { offset = 0 } = {}) => {
