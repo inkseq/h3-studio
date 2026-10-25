@@ -10,7 +10,7 @@ import './demo-v2.css';
 import './v2/page-bridge.css';
 import './dialogs.css';
 import './skins.css';
-import { applySkin, readSkin } from './skins.js';
+import { startSkin } from './skins.js';
 import { installPopoverDismiss } from './popover-dismiss.js';
 import { installMonitoring, reactErrorHandler } from './monitoring.js';
 import { installAnalytics } from './analytics.js';
@@ -19,7 +19,7 @@ import { showNotice } from './floating-notice.js';
 
 const monitored = installMonitoring();
 installAnalytics();
-applySkin(readSkin());
+startSkin();
 installPopoverDismiss();
 createRoot(
   document.getElementById('root'),

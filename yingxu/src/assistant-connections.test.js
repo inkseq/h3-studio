@@ -390,12 +390,9 @@ test('real connection list keeps filtered rows mounted, exposes their toggle and
       const pending = render({ pendingId: rows[6].id });
       assert.equal((pending.match(/<article hidden=""/g) || []).length, 2);
       const partial = render({ hasMore: true });
-      assert.match(
-        partial,
-        language === 'en' ? /Show inactive \(3 loaded\)/ : /显示已加载的 3 个失效连接/,
-      );
+      assert.match(partial, language === 'en' ? /Show 3 inactive/ : /显示已加载的 3 个失效连接/);
       const noActive = render({ rows: rows.slice(4) });
-      assert.match(noActive, language === 'en' ? /No active connections/ : /暂无有效连接/);
+      assert.match(noActive, language === 'en' ? /No active connections/ : /暂时没有可用的连接/);
     }
   } finally {
     if (old) Object.defineProperty(globalThis, 'localStorage', old);

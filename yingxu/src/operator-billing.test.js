@@ -600,11 +600,8 @@ test('real admin component renders bulk action, evidence and authoritative confi
         ),
       );
       assert.match(spending, /spend-breakdown-buckets[\s\S]*?\$0\.00/);
-      assert.match(
-        spending,
-        language === 'en' ? /Charges from this assistant/ : /此助手产生的应付费用/,
-      );
-      assert.match(spending, language === 'en' ? /97 references waived/ : /已免除 97 条记录/);
+      assert.match(spending, language === 'en' ? /Charges from this assistant/ : /这个助手的费用/);
+      assert.match(spending, language === 'en' ? /97 waived/ : /已免单 97 笔/);
       assert.match(spending, /\$4\.00/);
       assert.doesNotMatch(spending, /\$195\.00|\$6\.07|原预估占用|original exposure/);
     }

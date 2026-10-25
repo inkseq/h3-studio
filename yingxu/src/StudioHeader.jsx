@@ -9,6 +9,7 @@ import {
   Trash2,
   ShieldCheck,
 } from 'lucide-react';
+import ThemeToggle from './ThemeToggle.jsx';
 import { LanguageSwitcher, useI18n } from './i18n/I18nProvider.jsx';
 import { navigateApp } from './app-navigation.js';
 import { currentSupportView, endSupportView } from './support-view.js';
@@ -132,6 +133,7 @@ export default function StudioHeader({
         </nav>
         <div className="spacer" />
         <CreditsChip account={account} />
+        <ThemeToggle />
         <LanguageSwitcher />
         <button
           type="button"

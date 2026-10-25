@@ -1,3 +1,4 @@
+import ThemeToggle from './ThemeToggle.jsx';
 import { ChatDialog } from './QuickChatControls.jsx';
 import { Badge } from './ui/Note.jsx';
 import InkLoader from './InkLoader.jsx';
@@ -526,6 +527,7 @@ function SeriesApp({ sidebarView, onSidebarView }) {
               </button>
             </div>
           </details>
+          <ThemeToggle />
           <LanguageSwitcher />
           <button
             className="ghost"

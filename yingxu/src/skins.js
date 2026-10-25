@@ -25,17 +25,47 @@ export const SKINS = [
   },
 ];
 const KEY = 'inkseq.skin';
+// Light and dark base looks (owner, 2026-10-26): until the viewer picks one, the app follows
+// the system setting, live.
+export const LIGHT = 'nordic',
+  DARK = 'default';
+const systemDark = () => {
+  try {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+  } catch {
+    return true;
+  }
+};
 
-export function readSkin() {
+// The viewer's explicit choice, or '' when the app should follow the system.
+export function chosenSkin() {
   try {
     const id = localStorage.getItem(KEY);
-    return SKINS.some((skin) => skin.id === id) ? id : 'default';
+    return SKINS.some((skin) => skin.id === id) ? id : '';
   } catch {
-    return 'default';
+    return '';
   }
 }
 
-export function applySkin(id) {
+export function readSkin() {
+  return chosenSkin() || (systemDark() ? DARK : LIGHT);
+}
+
+export const isLightSkin = (id) => !!SKINS.find((skin) => skin.id === id)?.light;
+
+// Apply the current look and keep following the system while nothing is chosen.
+export function startSkin() {
+  applySkin(readSkin(), { remember: false });
+  try {
+    window
+      .matchMedia('(prefers-color-scheme: dark)')
+      .addEventListener('change', () => chosenSkin() || applySkin(readSkin(), { remember: false }));
+  } catch {
+    // Old browsers: the look is fixed until the next load.
+  }
+}
+
+export function applySkin(id, { remember = true } = {}) {
   const skin = SKINS.find((item) => item.id === id) || SKINS[0];
   const root = document.documentElement;
   if (skin.id === 'default') delete root.dataset.skin;
@@ -49,9 +79,12 @@ export function applySkin(id) {
   }
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.content = skin.swatch[0];
-  try {
-    localStorage.setItem(KEY, skin.id);
-  } catch {}
+  if (remember)
+    try {
+      localStorage.setItem(KEY, skin.id);
+    } catch {
+      // The choice then lasts for this page only.
+    }
   window.dispatchEvent(new CustomEvent('inkseq:skin', { detail: skin.id }));
   return skin.id;
 }

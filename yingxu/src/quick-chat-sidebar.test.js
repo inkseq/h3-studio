@@ -116,6 +116,6 @@ test('active duplicate history view is retired while embedded Trash retains rest
   );
   assert.match(trash, /Creation old/);
   assert.match(trash, /Restore/);
-  assert.match(trash, /Permanently delete/);
-  assert.match(trash, /emptying all trash/);
+  assert.match(trash, /forever/);
+  assert.match(trash, /Empty trash/);
 });

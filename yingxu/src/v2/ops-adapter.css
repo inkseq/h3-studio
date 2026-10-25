@@ -953,80 +953,80 @@
   font-size: 12px;
 }
 
-.ops-adapter .spend-breakdown {
+.spend-breakdown {
   min-width: 0;
   font-size: 12px;
   line-height: 1.5;
 }
-.ops-adapter .spend-breakdown-heading {
+.spend-breakdown-heading {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
   gap: 4px 12px;
 }
-.ops-adapter .spend-breakdown-heading small {
+.spend-breakdown-heading small {
   font-size: 11px;
   color: var(--muted);
 }
-.ops-adapter .spend-breakdown-buckets {
+.spend-breakdown-buckets {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   margin: 12px 0;
 }
-.ops-adapter .spend-breakdown-buckets > div {
+.spend-breakdown-buckets > div {
   min-width: 0;
 }
-.ops-adapter .spend-breakdown dt {
+.spend-breakdown dt {
   color: var(--muted);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
-.ops-adapter .spend-breakdown dd {
+.spend-breakdown dd {
   margin: 3px 0 0;
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
   color: var(--ink);
 }
-.ops-adapter .spend-breakdown-buckets dd {
+.spend-breakdown-buckets dd {
   font-size: 20px;
   font-weight: 600;
 }
-.ops-adapter .spend-breakdown-unavailable {
+.spend-breakdown-unavailable {
   font-size: 12px;
   color: var(--muted);
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
-.ops-adapter .spend-breakdown-warning {
+.spend-breakdown-warning {
   border-inline-start: 2px solid var(--accent);
   padding-inline-start: 8px;
   font-size: 12px;
   overflow-wrap: anywhere;
 }
-.ops-adapter .spend-breakdown-details > summary {
+.spend-breakdown-details > summary {
   min-height: 32px;
   align-content: center;
   cursor: pointer;
   font-size: 12px;
 }
-.ops-adapter .spend-breakdown-details dl {
+.spend-breakdown-details dl {
   margin: 8px 0;
   display: grid;
   gap: 8px;
 }
-.ops-adapter .spend-breakdown-details dl > div {
+.spend-breakdown-details dl > div {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px 16px;
   align-items: start;
 }
-.ops-adapter .spend-breakdown-details dd {
+.spend-breakdown-details dd {
   margin: 0;
   max-width: 140px;
 }
-.ops-adapter .spend-admission {
+.spend-admission {
   margin-top: 16px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
@@ -1175,16 +1175,16 @@
   }
 }
 @media (max-width: 760px) {
-  .ops-adapter .spend-breakdown-buckets {
+  .spend-breakdown-buckets {
     gap: 8px;
   }
-  .ops-adapter .spend-breakdown-buckets dd {
+  .spend-breakdown-buckets dd {
     font-size: 16px;
   }
-  .ops-adapter .spend-breakdown-details dl > div {
+  .spend-breakdown-details dl > div {
     gap: 6px 10px;
   }
-  .ops-adapter .spend-breakdown-details dd {
+  .spend-breakdown-details dd {
     max-width: 110px;
   }
 }
@@ -1431,5 +1431,54 @@
   color: var(--muted);
   font-size: 12px;
   text-decoration: underline;
+  justify-self: start;
+}
+/* AI assistant details (owner, 2026-10-26): tidy rows; the daily cap sits on one line. */
+.assistant-row {
+  display: grid;
+  gap: 8px;
+}
+.assistant-row-details[open] {
+  gap: 12px;
+  padding-top: 4px;
+}
+.assistant-row-details > p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.assistant-row-details > .spend-breakdown {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.assistant-row-details > .spend-breakdown .spend-breakdown-buckets {
+  margin: 10px 0 4px;
+}
+.assistant-row-details > .spend-breakdown .spend-breakdown-buckets dd {
+  font-size: 16px;
+}
+.assistant-row-details > form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+.assistant-row-details > form > label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.assistant-row-details > form input {
+  width: 140px;
+}
+.assistant-row-details > form > button,
+.assistant-row-details > button {
+  min-height: var(--h-sm);
+  height: var(--h-sm);
+  padding: 0 10px;
+  font-size: var(--fs-sm);
   justify-self: start;
 }

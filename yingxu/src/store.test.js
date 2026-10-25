@@ -313,9 +313,9 @@ test('missing media flags block linked references and selected candidates despit
   s.addLink(asset, shot, 'firstFrame');
   s.updateEntity(shot, { data: { selectedAssetId: asset } });
   const problems = readiness(s.getState().project, shot);
-  assert.ok(problems.some((x) => x.includes('参考素材「被清理的图片」缺少')));
-  assert.ok(problems.some((x) => x.includes('选定候选「被清理的图片」缺少')));
-  assert.ok(readiness(s.getState().project, asset).some((x) => x.includes('缺少可用素材')));
+  assert.ok(problems.some((x) => x.includes('参考素材「被清理的图片」的文件找不到了')));
+  assert.ok(problems.some((x) => x.includes('选的「被清理的图片」文件找不到了')));
+  assert.ok(readiness(s.getState().project, asset).some((x) => x.includes('素材文件找不到了')));
 });
 test('selected candidate without a reference edge is checked and becomes available after reupload', () => {
   const { s } = fresh(),
@@ -323,11 +323,11 @@ test('selected candidate without a reference edge is checked and becomes availab
     asset = s.addEntity('video', null, { title: '缺失候选', data: { missingFile: true } });
   s.updateEntity(shot, { data: { selectedAssetId: asset } });
   assert.ok(
-    readiness(s.getState().project, shot).some((x) => x.includes('选定候选「缺失候选」缺少')),
+    readiness(s.getState().project, shot).some((x) => x.includes('选的「缺失候选」文件找不到了')),
   );
   s.updateEntity(asset, { data: { fileId: 'replacement-file', missingFile: false } });
   assert.equal(
-    readiness(s.getState().project, shot).some((x) => x.includes('缺少可用文件')),
+    readiness(s.getState().project, shot).some((x) => x.includes('文件找不到了')),
     false,
   );
   assert.equal(
