@@ -458,7 +458,7 @@ No request settings, prompts, credentials or runtime error strings are persisted
             return updated
 
     def save_delivery_context(self, prepared):
-        """Keep only original geometry in the existing record; never a new prompt."""
+        """Keep geometry and dialogue from immutable inputs; never a new prompt."""
         with self._connection() as db:
             receipt = self._get(db, prepared.operation_id)
             if receipt is None or receipt.identity_digest != prepared.identity_digest:
@@ -469,7 +469,20 @@ No request settings, prompts, credentials or runtime error strings are persisted
                     (prepared.operation_id,),
                 ).fetchone()[0]
             )
-            context = {'output_spec': json.loads(prepared.output_spec_json)}
+            from ..subtitle_quality import dialogue_digests
+
+            context = {
+                'output_spec': json.loads(prepared.output_spec_json),
+                'dialogue_digests': dialogue_digests(
+                    prepared.settings.get('prompt', '')
+                ),
+            }
+            # Historical operations stay sealed. Do not add inferred evidence on replay.
+            if (
+                '_delivery_context' in raw
+                and 'dialogue_digests' not in raw['_delivery_context']
+            ):
+                context.pop('dialogue_digests')
             if '_delivery_context' in raw and raw['_delivery_context'] != context:
                 raise NotReady('wangp_delivery_context_mismatch')
             raw['_delivery_context'] = context
@@ -487,8 +500,21 @@ No request settings, prompts, credentials or runtime error strings are persisted
             value = json.loads(row[0]).get('_delivery_context') if row else None
             if (
                 type(value) is not dict
-                or set(value) != {'output_spec'}
-                or type(value['output_spec']) is not dict
+                or set(value) - {'output_spec', 'dialogue_digests'}
+                or type(value.get('output_spec')) is not dict
+                or (
+                    'dialogue_digests' in value
+                    and (
+                        type(value['dialogue_digests']) is not list
+                        or len(value['dialogue_digests']) > 32
+                        or any(
+                            type(v) is not str
+                            or len(v) != 64
+                            or any(c not in '0123456789abcdef' for c in v)
+                            for v in value['dialogue_digests']
+                        )
+                    )
+                )
             ):
                 raise NotReady('wangp_delivery_context_missing')
             return value

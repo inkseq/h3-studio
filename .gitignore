@@ -56,6 +56,10 @@ inventory.json
 !studio_platform/api.py
 !studio_platform/settings.py
 !studio_platform/error_monitoring.py
+!studio_platform/subtitle_quality.py
+!studio_platform/runtime_hosts/subtitle_ocr.py
+!tests/test_subtitle_quality.py
+!deploy/wangp/requirements.ocr.txt
 !studio_platform/workos_config.py
 !studio_platform/workos_auth.py
 !studio_platform/workos_routes.py

@@ -191,6 +191,25 @@ class GPUDelivery:
                 {'video', 'audio'} if request['generate_audio'] else {'video'}
             ):
                 raise BackendError('wangp_delivery_roles_invalid')
+            from .subtitle_ocr import inspect_video
+            from ..subtitle_quality import evidence, validate_quality
+
+            try:
+                quality = (
+                    inspect_video(
+                        self._folder(op) / 'verified.mp4',
+                        context['dialogue_digests'],
+                        spec['duration_s'],
+                    )
+                    if 'dialogue_digests' in context
+                    else evidence('not_checked')
+                )
+                validate_quality(quality, spec['duration_s'])
+            except Exception:
+                # Advisory inspection must never discard a validated export or
+                # turn a detector bug into a generation retry.
+                quality = evidence('failed')
+            roles['video']['evidence'].update(quality)
             for kind, role in roles.items():
                 validate_role_descriptor(
                     kind,

@@ -753,9 +753,20 @@ class TaskQueue:
                 "duration_s",
                 "fps",
                 "has_audio",
+                "quality_flags",
+                "quality_checks",
             } | NATIVE_EVIDENCE_FIELDS
             if set(spec) - allowed_keys:
                 raise ValueError("artifact_metadata_not_allowed")
+            if {'quality_flags', 'quality_checks'}.intersection(spec):
+                from .subtitle_quality import validate_quality
+
+                if spec.get('kind') != 'video':
+                    raise ValueError('subtitle_quality_invalid')
+                validate_quality(
+                    {k: spec.get(k) for k in ('quality_flags', 'quality_checks')},
+                    spec.get('duration_s'),
+                )
             identifier(spec.get("kind"))
             key = spec.get("object_key", "")
             digest = spec.get("sha256", "")
