@@ -37,6 +37,15 @@ STEP_SKIPPING = ('none', 'spectrum', 'first_block')
 WHOLE_WINDOW = 362
 
 
+def acceleration(profile_id):
+    """A profile's pinned turbo LoRA binding, or None for the plain sampler."""
+    value = get_profile(profile_id).get('acceleration')
+    if value is None:
+        return None
+    component = get_profile(profile_id)['components'][value['component']]
+    return {**value, 'path': component['files'][0]['path']}
+
+
 def window_frames(seconds):
     """Nearest H3 window on the native 17k+5 grid, 124..362 frames."""
     frames = 17 * round((seconds * 24 - 5) / 17) + 5
@@ -46,9 +55,18 @@ def window_frames(seconds):
 def control_schema(profile_id, mode):
     model_for(profile_id, mode)
     schema = legacy_schema()
+    turbo = acceleration(profile_id)
     schema.update(
         {
-            'steps': {'type': 'integer', 'default': 20, 'minimum': 1, 'maximum': 100},
+            # A turbo profile's LoRA is distilled for one step count; users get it fixed.
+            'steps': {'type': 'integer', 'default': 20, 'minimum': 1, 'maximum': 100}
+            if turbo is None
+            else {
+                'type': 'integer',
+                'default': turbo['steps'],
+                'minimum': turbo['steps'],
+                'maximum': turbo['steps'],
+            },
             'sampler_name': {'type': 'string', 'default': 'euler', 'enum': SAMPLERS[:]},
             'denoise': {'type': 'number', 'default': 1, 'minimum': 0.01, 'maximum': 1},
             'shift_video': {
@@ -277,8 +295,14 @@ def _normalize(
         if actual != expected or isinstance(actual, bool) != isinstance(expected, bool):
             raise ValueError('wangp_unsupported_' + key)
         value[key] = expected
+    turbo = acceleration(profile_id)
+    low, high = (1, 100) if turbo is None else (turbo['steps'], turbo['steps'])
     value['steps'] = _bound(
-        value.get('steps', 20), 1, 100, 'wangp_invalid_steps', integer=True
+        value.get('steps', 20 if turbo is None else turbo['steps']),
+        low,
+        high,
+        'wangp_invalid_steps',
+        integer=True,
     )
     value['step_skipping'] = _enum(
         value.get('step_skipping', 'none'),
@@ -820,6 +844,13 @@ def _settings(value, output_spec, handles, profile_id):
             'return_side_files': False,
         },
     }
+    turbo = acceleration(profile_id)
+    if turbo is not None:
+        # Model-root relative and manifest-pinned; only the GPU host maps it to
+        # its verified local file (upstream accepts an absolute LoRA path).
+        settings['activated_loras'] = [turbo['path']]
+        settings['loras_multipliers'] = turbo['lora_multiplier']
+        settings['guidance_scale'] = turbo['guidance_scale']
     if value['step_skipping'] == 'first_block':
         # The handler accepts only its listed thresholds; 0.08 is the upstream balanced one.
         settings['skip_steps_multiplier'] = 0.08

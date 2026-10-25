@@ -267,7 +267,9 @@ class DownloadTests(unittest.TestCase):
                     manifest = engine_manifest(profile, mode)
                     original = copy.deepcopy(manifest.document)
                     records = fetch.selected_files(original, manifest.digest)
-                    self.assertEqual(len(records), 10)
+                    # A turbo profile pins one extra LoRA file.
+                    turbo = 'acceleration' in get_profile(profile)
+                    self.assertEqual(len(records), 11 if turbo else 10)
                     self.assertEqual(
                         fetch._content_preserving_revision(
                             original, manifest.digest, records

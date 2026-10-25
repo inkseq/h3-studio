@@ -160,6 +160,57 @@ class FullCompilerTests(unittest.TestCase):
         compiler.validate_prepared(p, binding)
         compiler.validate_prepared_media(p, binding, m)
 
+    def test_taomate_v7_pins_lora_and_five_steps(self):
+        # Owner default 2026-10-25: TaoMate rank-19 LoRA, 5 steps, guidance 1.
+        identity = 'h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7'
+        lora = 'loras/minimax_h3_taomate_3step_lora_avg_rank_19_bf16.safetensors'
+        for mode in ('fl', 'ref'):
+            schema = compiler.control_schema(identity, mode)
+            self.assertEqual(
+                (schema['steps']['default'], schema['steps']['minimum'], schema['steps']['maximum']),
+                (5, 5, 5),
+            )
+            files = engine_manifest(identity, mode).document['components']['turbo_lora']['files']
+            self.assertEqual(files[0]['path'], lora)
+        r, m = case(images=['image'], duration=15)
+        output = native_output_spec(r)
+        handles = {i: 'handle-' + i for i in m}
+        s = compiler.compile_settings(r, m, output, handles, identity)
+        self.assertEqual(s['num_inference_steps'], 5)
+        self.assertEqual(s['activated_loras'], [lora])
+        self.assertEqual(s['loras_multipliers'], '1.0')
+        self.assertEqual(s['guidance_scale'], 1.0)
+        for steps in (4, 20):
+            with self.assertRaisesRegex(ValueError, 'wangp_invalid_steps'):
+                compiler.compile_settings(dict(r, steps=steps), m, output, handles, identity)
+        # The plain v6 profile keeps its original 20-step, no-LoRA settings.
+        plain = compiler.compile_settings(
+            r, m, output, handles, 'h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6'
+        )
+        self.assertEqual((plain['num_inference_steps'], plain['activated_loras']), (20, []))
+        self.assertNotIn('loras_multipliers', plain)
+        s['output_filename'] = 'sixnine-test'
+        binding = engine_manifest(identity, 'ref')
+        p = PreparedRequest(
+            'job', 'test', 'a' * 64, binding.digest, canonical_json(s),
+            canonical_json(output), True,
+            tuple(InputDescriptor(i, 'handle-' + i, v['kind'], 'b' * 64, 4) for i, v in m.items()),
+        )
+        compiler.validate_prepared(p, binding)
+        with tempfile.TemporaryDirectory() as root:
+            target = Path(root) / lora
+            target.parent.mkdir()
+            target.write_bytes(b'lora')
+            staged = SimpleNamespace(
+                full_input=lambda d, **kw: (Path(root) / d.handle, m[d.asset_id]),
+            )
+            with patch.object(compiler, 'validate_prepared_media'):
+                resolved = resolve_inputs(p, staged, binding, model_root=root)
+            self.assertEqual(resolved['activated_loras'], [str(target.resolve())])
+            p2 = replace(p, settings_json=canonical_json(s))
+            with self.assertRaisesRegex(ValueError, 'wangp_manifest_binding_mismatch'):
+                resolve_inputs(p2, staged, binding)
+
     def test_scalar_controls_map_to_real_native_fields_and_roundtrip(self):
         r, m = case(
             images=['image'],
