@@ -271,3 +271,42 @@ Deployment behavior was checked against the pinned
 [server image recipe](https://github.com/dstackai/dstack/blob/0.22.5/docker/server/release/Dockerfile),
 [server CLI](https://github.com/dstackai/dstack/blob/0.22.5/src/dstack/_internal/cli/commands/server.py),
 and [startup/authentication](https://github.com/dstackai/dstack/blob/0.22.5/src/dstack/_internal/server/app.py).
+
+## Guarded creator-default change (#580 C0)
+
+`migration_maintenance.py default-profile-only COMMIT OLD_PROFILE NEW_PROFILE PATHS_SHA256 ACTIVE_SHA256`
+changes only `SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID` in protected migration paths.
+Use a full current platform commit and freshly read hashes, after independent
+review and the existing CAS installation of the helper/checker pair. The source
+compatibility map contains exact observed current/previous/pending tuples from
+SSM `20664d1c-0533-4d06-bacb-fbafbb1f54cd`; queued main candidates are labelled as
+such, not as accepted deployments. Unknown versions/pairs are refused.
+
+The installed helper verifies the current release, packaged profile, enabled
+current FL and REF policies, original configuration hashes and CPU image/mount/
+environment signatures. It requires zero nonterminal jobs before stopping CPU
+admission, then checks again after stopping app and namespace-sharing services.
+It never edits policies, budget, credentials, provider machines or user data.
+A new job admitted in the precheck gap causes the identical old runtime to resume
+without switching the configuration.
+
+Before mutation, four original/candidate paths+active byte copies and a durable
+intent are fsynced under `migration/default-profile-maintenance/OPERATION/`.
+After the new metadata is adopted, app becomes healthy before dstack/controller
+are reconnected. Runtime default, policy digest, images, mounts, all other
+environment fields and metadata digests are read back. Failure attempts exact
+restoration; if jobs appeared after startup or restoration cannot be proven, the
+failed receipt fences subsequent platform maintenance. Reconcile that original
+receipt; never replay a switch with guessed hashes.
+
+Explicit recovery/rollback uses
+`migration_maintenance.py restore-default-profile COMMIT RECEIPT_SHA256`.
+It takes the same lock, requires the original receipt and unchanged before/after
+metadata, checks zero nonterminal jobs, and restores saved bytes/current images.
+An unrelated config change or unknown outcome is refused.
+
+Deployment sequence: review helper → CAS install on staging → switch after v7
+policies are bound → Claude verifies one normal-path FL and REF job with no
+explicit profile → Claude promotes/binds v7 → repeat the exact guarded production
+switch at zero jobs. Claude owns production promotion and TaoMate switching.
+No manual edit of paths/active and no direct deployment of main.
