@@ -111,7 +111,7 @@ def shutdown_owned_host(
             terminate_process()
 
 
-def resolve_inputs(prepared, inputs, manifest=None):
+def resolve_inputs(prepared, inputs, manifest=None, model_root=None):
     settings = prepared.settings
     from ..inference.wangp_compiler import MAX_SEED
 
@@ -192,6 +192,22 @@ def resolve_inputs(prepared, inputs, manifest=None):
             if settings.get('image_refs') is not None:
                 settings['image_refs'] = [
                     paths[handle] for handle in settings['image_refs']
+                ]
+            if settings.get('activated_loras'):
+                from ..inference.wangp_full_compiler import acceleration
+                from .wangp_session import _contained_file
+
+                turbo = acceleration(profile_id)
+                # validate_prepared already bound this list to the profile; the
+                # verified file under this slot's model root is the only target.
+                if (
+                    turbo is None
+                    or model_root is None
+                    or settings['activated_loras'] != [turbo['path']]
+                ):
+                    raise ValueError('wangp_manifest_binding_mismatch')
+                settings['activated_loras'] = [
+                    str(_contained_file(Path(model_root), Path(turbo['path'])))
                 ]
             return settings
     handles = {item.handle: item for item in prepared.inputs}
@@ -372,7 +388,7 @@ def main(argv=None):
             output_root=output,
             sealed_root=state / "sealed-output",
             settings_resolver=lambda prepared: resolve_inputs(
-                prepared, inputs, manifest
+                prepared, inputs, manifest, model_root=args.model_root
             ),
         )
         phase = "runtime_verification"

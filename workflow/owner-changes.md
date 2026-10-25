@@ -525,3 +525,15 @@ current owner of the flow, refines CR-62's timeout rule:
 
 The reclaim limits (max 2 automatic reclaims, fenced old attempts, charge once)
 are unchanged.
+
+## CR-20261025-65 — TaoMate 5 steps is the only user-facing H3 sampler
+
+Owner, 2026-10-25 (taomate H3 session): "taomate 5步以后作为我们的default选择 模型直接都用这个", then
+"以后只用taomate". Evidence on Lium RTX 5090 (WanGP 0e58385, pruned rank8 INT8): FL 480P across four
+prompts and a 15 s 768P long shot (single window + TaoMate 5 steps: 8.6 min vs 42.5 min for 20 steps).
+- New immutable profile `h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7` = controls-v6 plus one pinned
+  LoRA (`loras/minimax_h3_taomate_3step_lora_avg_rank_19_bf16.safetensors`, 181697688 bytes, sha256
+  de9663d9…ab6a7) at multiplier 1.0, guidance 1, steps fixed at 5. No other turbo LoRA is added.
+- The plain 20-step profiles stay in the catalog for internal debug/fallback only; users are not offered them.
+- Step skipping stays `none` by default; 5 s windows stay optional for long shots.
+- Before production: staging GPU checks for REF2VA with TaoMate, 768P at 5 steps, and a 15 s long shot.
