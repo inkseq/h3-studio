@@ -537,3 +537,15 @@ prompts and a 15 s 768P long shot (single window + TaoMate 5 steps: 8.6 min vs 4
 - The plain 20-step profiles stay in the catalog for internal debug/fallback only; users are not offered them.
 - Step skipping stays `none` by default; 5 s windows stay optional for long shots.
 - Before production: staging GPU checks for REF2VA with TaoMate, 768P at 5 steps, and a 15 s long shot.
+
+## CR-20261026-66 — burned-in subtitles are advisory, never an automatic re-roll
+
+Owner, 2026-10-26, #575 comment6398437828 and #580 C2: detect subtitles and tell
+the customer; let them keep, regenerate or trim the take. This supersedes #575's
+original automatic-re-roll proposal. CPU OCR runs on the GPU node after generation
+and before upload, sampling the bottom third and comparing with the original
+dialogue. Persist bounded take-level quality flags/confidence/timestamps; no raw
+OCR text in public evidence. An unavailable/failed check is explicit, not a clean
+bill of health. Detection never re-rents, re-generates, changes a seed, or changes
+charging. Optional Gemini verification remains OFF. Claude owns warning UI,
+staging acceptance, production promotion and the TaoMate production switch.

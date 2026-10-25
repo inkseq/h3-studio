@@ -580,3 +580,32 @@ aspect `16:9`, and an explicit seed; omit an unused input kind. Inspect the
 preflight before explicitly confirming its plan ID. A first live sequence
 should qualify image, silent video, image+audio, then all three, preserving
 original jobs, measured memory and actual downloaded video/audio evidence.
+
+## Advisory subtitle inspection (#575, CR-20261026-66)
+
+The GPU delivery host runs CPU-only RapidOCR after validating the exported MP4
+and before upload. The native dstack image packages a separate
+`/opt/inkseq-ocr` environment from the hash-pinned
+`deploy/wangp/requirements.ocr.txt`; RapidOCR's wheel includes its OCR models.
+It does not change the inference profile's environment. Existing images and the
+older wheelhouse runtime without OCR dependencies return `unavailable`; do not
+claim those tuples have been inspected. Runtime never installs or downloads OCR.
+
+Two bottom-third samples per second (at most 120 / 60 seconds), one inference
+thread, 45-second child wall timeout, and Linux CPU/address-space bounds keep
+inspection finite. A warning requires exact normalized dialogue text, bottom
+centre placement, stable geometry across at least one second, and changing
+background. The journal retains only SHA256 dialogue digests from immutable
+`<d>[language] ... </d>` inputs, never a second prompt or OCR transcript.
+This deliberately favours precision: short/partial/incorrectly recognized lines,
+stationary scenes and durations over the bound can be missed. No flag is not a
+guarantee that a video has no subtitles.
+
+The original delivery receipt and video artifact metadata retain `quality_flags`
+and `quality_checks.burned_subtitles` (status, detector, and, when flagged,
+confidence and times_s). The shot versions API exposes the same fields.
+Legacy takes return `not_checked`; unavailable/timeout/failed are explicit.
+Prepared delivery replay reuses the original decision. A detector error cannot
+discard a valid video, rent a replacement, regenerate, change its seed, or affect
+charging. Gemini verification is off. Claude owns warning UI, exact-tuple staging
+acceptance, image/source qualification and production promotion.

@@ -35,6 +35,7 @@ PRIVATE_FILES = (
     "studio_platform/inference/wangp_factory.py", "studio_platform/runtime_hosts/__init__.py",
     "studio_platform/runtime_hosts/wangp.py", "studio_platform/runtime_hosts/wangp_receipts.py",
     "studio_platform/runtime_hosts/wangp_delivery.py",
+    "studio_platform/runtime_hosts/subtitle_ocr.py", "studio_platform/subtitle_quality.py",
     "studio_platform/runtime_hosts/wangp_session.py", "studio_platform/runtime_hosts/wangp_http.py",
     "studio_platform/runtime_hosts/wangp_launcher.py", "studio_platform/runtime_hosts/wangp_environment.py",
     "studio_platform/runtime_hosts/wangp_startup.py",
