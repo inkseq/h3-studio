@@ -155,24 +155,24 @@ settingsCatalogs.en['settings.costDetails'] = 'Cost details';
 settingsCatalogs.zh['settings.costDetails'] = '费用详情';
 
 Object.assign(settingsCatalogs.en, {
-  'settings.videoCache': 'Video cache',
+  'settings.videoCache': 'Media cache',
   'settings.videoCacheClear': 'Clear',
-  'settings.videoCacheUnavailable': 'Video cache is unavailable in this browser.',
-  'settings.videoCacheChecking': 'Checking video cache…',
-  'settings.videoCacheUsage': '{amount} MB used · {count} videos · up to 1 GB',
-  'settings.videoCacheUsageOne': '{amount} MB used · 1 video · up to 1 GB',
+  'settings.videoCacheUnavailable': 'Media cache is unavailable in this browser.',
+  'settings.videoCacheChecking': 'Checking media cache…',
+  'settings.videoCacheUsage': '{amount} MB used · {count} files · up to 4 GB',
+  'settings.videoCacheUsageOne': '{amount} MB used · 1 file · up to 4 GB',
   'settings.videoCacheHelp':
-    'Played videos up to 64 MB are kept here. Access is checked before replay. Signing out clears cached copies; originals stay online.',
+    'Videos, images and audio you open are kept here so they load without downloading again. Access is checked each time. Signing out clears cached copies; originals stay online.',
 });
 Object.assign(settingsCatalogs.zh, {
-  'settings.videoCache': '视频缓存',
+  'settings.videoCache': '媒体缓存',
   'settings.videoCacheClear': '清空',
-  'settings.videoCacheUnavailable': '此浏览器暂时无法使用视频缓存。',
+  'settings.videoCacheUnavailable': '此浏览器暂时无法使用媒体缓存。',
   'settings.videoCacheChecking': '正在读取缓存…',
-  'settings.videoCacheUsage': '已用 {amount} MB · {count} 条视频 · 最多 1 GB',
-  'settings.videoCacheUsageOne': '已用 {amount} MB · 1 条视频 · 最多 1 GB',
+  'settings.videoCacheUsage': '已用 {amount} MB · {count} 个文件 · 最多 4 GB',
+  'settings.videoCacheUsageOne': '已用 {amount} MB · 1 个文件 · 最多 4 GB',
   'settings.videoCacheHelp':
-    '缓存已播放且不超过 64 MB 的视频，重播前仍会核对权限。退出登录会清空缓存，线上原件保留。',
+    '打开过的视频、图片和音频会保存在这里，下次不用重新下载，每次仍会核对权限。退出登录会清空缓存，线上原件保留。',
 });
 
 Object.assign(settingsCatalogs.en, {

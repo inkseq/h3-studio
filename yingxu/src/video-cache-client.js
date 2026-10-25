@@ -65,7 +65,7 @@ function playedVideoTarget(element, account, origin) {
     return null;
   try {
     const url = new URL(element.currentSrc || element.src, origin),
-      match = /^\/v1\/artifacts\/([A-Za-z0-9_-]{1,160})\/content$/.exec(url.pathname);
+      match = /^\/v1\/(?:artifacts|assets)\/([A-Za-z0-9_-]{1,160})\/content$/.exec(url.pathname);
     if (
       url.origin !== origin ||
       !match ||
@@ -73,7 +73,9 @@ function playedVideoTarget(element, account, origin) {
         url.searchParams.get('expected_account') !== account)
     )
       return null;
-    return { account, id: match[1] };
+    return url.pathname.startsWith('/v1/assets/')
+      ? { account, id: match[1], path: url.pathname }
+      : { account, id: match[1] };
   } catch {
     return null;
   }
