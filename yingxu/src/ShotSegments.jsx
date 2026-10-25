@@ -3,6 +3,7 @@ import { Play, X } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { useStoryboardUI } from './storyboard-ui-context.jsx';
 import { Button } from './ui/Button.jsx';
+import { Segmented } from './ui/Segmented.jsx';
 import { Note } from './ui/Note.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import { segmentsAction, segmentsTotal, snapRange } from './shot-segments.js';
@@ -151,6 +152,24 @@ function PartsBar({ duration, parts, getVideo, busy, onChange, t }) {
     setSelected(null);
     onChange(parts.filter((_, i) => i !== index));
   };
+  // The strip above the parts only moves the playhead (owner, 2026-10-26), so seeking never
+  // fights with dragging a part.
+  function scrub(event) {
+    if (event.button > 0) return;
+    event.preventDefault();
+    const el = event.currentTarget;
+    el.setPointerCapture(event.pointerId);
+    seek(at(event.clientX));
+    const move = (e) => seek(at(e.clientX));
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  }
   return (
     <div
       ref={box}
@@ -163,6 +182,17 @@ function PartsBar({ duration, parts, getVideo, busy, onChange, t }) {
         remove(selected);
       }}
     >
+      <div
+        className="parts-bar-scrub"
+        role="slider"
+        aria-label={t('segments.scrub')}
+        aria-valuemin={0}
+        aria-valuemax={Math.round(total * 10) / 10}
+        aria-valuenow={Math.round(now * 10) / 10}
+        onPointerDown={scrub}
+      >
+        <span className="parts-bar-knob" style={{ left: pct(clamp(now, 0, total)) }} />
+      </div>
       <div className="parts-bar-track" ref={bar} onPointerDown={(e) => begin(e, null, 'new')}>
         {list.map((part, index) => (
           <span
@@ -225,30 +255,37 @@ export default function ShotSegments({ shot, getVideo, duration, trim }) {
       setSaving(false);
     }
   }
-  if (!list.length)
+  const cut = list.length > 0;
+  // One switch between the whole take and cut parts (owner, 2026-10-26); the bar shows only
+  // for parts. Switching to parts starts from the whole take (#232 #39).
+  const mode = (
+    <Segmented
+      className="segments-mode"
+      label={t('segments.title')}
+      value={cut ? 'parts' : 'whole'}
+      disabled={busy}
+      onChange={(value) => {
+        if (value === 'whole') return void save([]);
+        const first = duration > 0 ? snapRange(0, duration) : trim && snapRange(trim[0], trim[1]);
+        if (first) void save([first]);
+      }}
+      options={[
+        { value: 'whole', label: t('segments.clear') },
+        { value: 'parts', label: t('segments.start'), disabled: !(duration > 0 || trim) },
+      ]}
+    />
+  );
+  if (!cut)
     return (
       <div className="shot-segments start">
-        <Button
-          size="sm"
-          variant="ghost"
-          className="keep-label"
-          disabled={busy || !(duration > 0 || trim)}
-          onClick={() => {
-            // Start from the whole take (#232 #39); the bar then cuts it into parts.
-            const first =
-              duration > 0 ? snapRange(0, duration) : trim && snapRange(trim[0], trim[1]);
-            if (first) void save([first]);
-          }}
-        >
-          {t('segments.start')}
-        </Button>
+        {mode}
         <FloatingMessage text={error || null} onDismiss={() => setError('')} />
       </div>
     );
   return (
     <section className="shot-segments" aria-label={t('segments.title')}>
       <header>
-        <b>{t('segments.title')}</b>
+        {mode}
         <Button
           size="sm"
           variant="ghost"
@@ -267,22 +304,11 @@ export default function ShotSegments({ shot, getVideo, duration, trim }) {
         onChange={(next) => void save(next)}
         t={t}
       />
-      <footer>
-        <span className="muted">
-          {saving
-            ? t('segments.saving')
-            : t('segments.total', { count: list.length, len: secs(segmentsTotal(list)) })}
-        </span>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="keep-label"
-          disabled={busy}
-          onClick={() => void save([])}
-        >
-          {t('segments.clear')}
-        </Button>
-      </footer>
+      <small className="muted">
+        {saving
+          ? t('segments.saving')
+          : t('segments.total', { count: list.length, len: secs(segmentsTotal(list)) })}
+      </small>
       <FloatingMessage text={error || null} onDismiss={() => setError('')} />
     </section>
   );

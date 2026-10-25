@@ -128,7 +128,7 @@
   top: 0;
   bottom: 0;
   width: 7px;
-  cursor: ew-resize;
+  cursor: grab;
 }
 .parts-bar-part .edge.start {
   left: -3px;
@@ -193,4 +193,55 @@
 }
 .parts-bar-hint {
   font-size: 11px;
+}
+/* Whole take or cut parts: one switch (owner, 2026-10-26). */
+.shot-segments.start {
+  display: flex;
+}
+.shot-segments > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.segments-mode > button {
+  min-height: var(--h-sm);
+  padding: 4px 12px;
+  font-size: var(--fs-sm);
+}
+/* Playhead strip above the parts (owner, 2026-10-26): drag here to move the playhead; the
+   delete button sits under the selected part so neither blocks dragging. */
+.parts-bar {
+  padding-top: 0;
+  padding-bottom: 22px;
+}
+.parts-bar-scrub {
+  position: relative;
+  height: 16px;
+  margin: 0 0 2px;
+  border-radius: 4px;
+  cursor: pointer;
+  touch-action: none;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+.parts-bar-scrub:hover {
+  background: color-mix(in srgb, var(--ink) 11%, transparent);
+}
+.parts-bar-knob {
+  position: absolute;
+  top: 2px;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow: 0 0 0 2px var(--surface);
+  pointer-events: none;
+}
+.parts-bar-head {
+  top: -4px;
+}
+.parts-bar-x {
+  top: auto;
+  bottom: 2px;
 }

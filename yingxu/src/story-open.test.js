@@ -285,7 +285,7 @@ test('content-deleted tombstones are removed stories, never a legacy view, migra
   assert.equal(h.cloud.getState().draftOffer, null);
   assert.equal(h.cloud.getState().error, '');
   assert.deepEqual(h.store.exportProject(), before);
-  assert.match(translate('en', 'storyOpen.removed'), /content was removed/);
+  assert.match(translate('en', 'storyOpen.removed'), /content was deleted/);
   assert.equal(
     h.calls.every(([method]) => method === 'read'),
     true,

@@ -1,104 +1,104 @@
 export const trashCatalogs = {
   en: {
-    'trash.menu': 'More actions',
+    'trash.menu': 'More',
     'trash.title': 'Trash',
     'trash.rename': 'Rename',
     'trash.edit': 'Edit',
-    'trash.move': 'Move to trash',
+    'trash.move': 'Delete',
     'trash.selectStory': 'Select story',
     'trash.selectedCount': '{count} selected',
     'trash.selectAll': 'Select all',
-    'trash.moveSelected': 'Move {count} to trash',
+    'trash.moveSelected': 'Delete {count}',
     'trash.editInChat': 'Edit in chat',
     'trash.restore': 'Restore',
-    'trash.purge': 'Delete permanently',
+    'trash.purge': 'Delete forever',
     'trash.empty': 'Empty trash',
     'trash.undo': 'Undo',
-    'trash.moved': 'Moved to trash',
-    'trash.confirm': 'Permanently delete the selected items?',
-    'trash.irreversible': 'This cannot be undone. Existing task and spending records are retained.',
+    'trash.moved': 'Deleted. You can restore it from Trash',
+    'trash.confirm': 'Delete the selected items forever?',
+    'trash.irreversible': "This can't be undone. Generation and cost records are kept.",
     'trash.cancel': 'Cancel',
     'trash.all': 'All kinds',
     'trash.selectAll': 'Select all',
     'trash.more': 'Load more',
     'trash.none': 'Trash is empty',
-    'trash.quickElsewhere': 'View {count} Quick Create conversations',
-    'trash.noneOutsideQuick': 'No deleted stories or library files',
-    'trash.signIn': 'Sign in to manage your trash.',
-    'trash.pending': 'The original operation needs checking. Do not start another one.',
-    'trash.check': 'Check original operation',
-    'trash.resume': 'Resume original operation',
-    'trash.failed': 'The operation could not be verified. Your original selection is retained.',
-    'trash.running': 'Work is still running or its outcome is unresolved.',
-    'trash.minimum': 'Keep at least one chapter and scene.',
-    'trash.changed': 'The item changed. Refresh and select it again.',
+    'trash.quickElsewhere': 'See {count} Quick Create chats',
+    'trash.noneOutsideQuick': 'No deleted stories or files',
+    'trash.signIn': 'Sign in to see your trash.',
+    'trash.pending': 'The last action is still being checked.',
+    'trash.check': 'Check last action',
+    'trash.resume': 'Continue last action',
+    'trash.failed': "Couldn't confirm. Your selection is kept.",
+    'trash.running': 'Something is still running.',
+    'trash.minimum': 'Keep at least one chapter and one scene.',
+    'trash.changed': 'This changed. Refresh and select again.',
     'trash.refresh': 'Refresh',
     'trash.saved': 'Saved',
     'trash.save': 'Save',
     'trash.name': 'Name',
     'trash.restored': 'Restored',
-    'trash.deleted': 'Permanently deleted',
-    'trash.unavailable': 'This item is not currently available for that action.',
+    'trash.deleted': 'Deleted forever',
+    'trash.unavailable': "You can't do that to this item right now.",
   },
   zh: {
-    'trash.menu': '更多操作',
+    'trash.menu': '更多',
     'trash.title': '回收站',
     'trash.rename': '重命名',
     'trash.edit': '编辑',
-    'trash.move': '移到回收站',
+    'trash.move': '删除',
     'trash.selectStory': '选择故事',
     'trash.selectedCount': '已选 {count} 个',
     'trash.selectAll': '全选',
-    'trash.moveSelected': '{count} 个移到回收站',
+    'trash.moveSelected': '删除 {count} 个',
     'trash.editInChat': '在聊天里改',
     'trash.restore': '恢复',
     'trash.purge': '永久删除',
     'trash.empty': '清空回收站',
     'trash.undo': '撤销',
-    'trash.moved': '已移到回收站',
+    'trash.moved': '已删除，可在回收站恢复',
     'trash.confirm': '永久删除所选内容？',
-    'trash.irreversible': '此操作无法撤销。原任务与费用记录仍会保留。',
+    'trash.irreversible': '删除后无法恢复。生成和费用记录会保留。',
     'trash.cancel': '取消',
     'trash.all': '全部类型',
     'trash.selectAll': '全选',
     'trash.more': '加载更多',
-    'trash.none': '回收站为空',
+    'trash.none': '回收站是空的',
     'trash.quickElsewhere': '查看快速创作里的 {count} 个对话',
-    'trash.noneOutsideQuick': '没有已删除的故事或作品库文件',
-    'trash.signIn': '登录后管理回收站。',
-    'trash.pending': '原操作结果需要核对，请勿另起新操作。',
-    'trash.check': '核对原操作',
-    'trash.resume': '继续原操作',
-    'trash.failed': '无法核实操作结果，已保留原选择。',
-    'trash.running': '任务仍在运行或结果尚未确定。',
-    'trash.minimum': '至少保留一个章节和场景。',
-    'trash.changed': '内容已变化，请刷新后重新选择。',
+    'trash.noneOutsideQuick': '没有删除的故事或文件',
+    'trash.signIn': '登录后查看回收站。',
+    'trash.pending': '上一个操作还在确认，请稍等。',
+    'trash.check': '查看上一个操作',
+    'trash.resume': '继续上一个操作',
+    'trash.failed': '没能确认结果，选择已保留。',
+    'trash.running': '还有任务在运行或还没出结果。',
+    'trash.minimum': '至少要留一个章节和一个场景。',
+    'trash.changed': '内容变了，请刷新后重新选择。',
     'trash.refresh': '刷新',
     'trash.saved': '已保存',
     'trash.save': '保存',
     'trash.name': '名称',
     'trash.restored': '已恢复',
     'trash.deleted': '已永久删除',
-    'trash.unavailable': '当前无法对此内容执行该操作。',
+    'trash.unavailable': '现在不能对它这样操作。',
   },
 };
 
 Object.assign(trashCatalogs.en, {
   'trash.close': 'Dismiss',
-  'trash.unsaved': 'Save your current changes before moving this item to trash.',
+  'trash.unsaved': 'Save your changes before deleting.',
   'trash.untitled': 'Untitled',
   'trash.retention':
-    'Items stay here until you explicitly delete them permanently. Restoring does not rerun tasks.',
+    "Deleted items stay here until you delete them forever. Restoring doesn't regenerate anything.",
   'trash.conversations': 'Manage conversation trash',
-  'trash.summary': 'Objects to remove: {removed} ({bytes} bytes). Shared objects retained: {kept}.',
+  'trash.summary': 'Removes {removed} files ({bytes} bytes); keeps {kept} shared files.',
 });
 Object.assign(trashCatalogs.zh, {
   'trash.close': '关闭',
-  'trash.unsaved': '请先保存当前修改，再移到回收站。',
+  'trash.unsaved': '请先保存修改，再删除。',
   'trash.untitled': '未命名',
-  'trash.retention': '内容将一直保留，直到你明确永久删除。恢复不会重新运行任务。',
+  'trash.retention': '删除的内容会一直留在这里，直到你永久删除。恢复不会重新生成。',
   'trash.conversations': '管理对话回收站',
-  'trash.summary': '待删除对象：{removed} 个（{bytes} 字节）；保留共享对象：{kept} 个。',
+  'trash.summary': '将删除 {removed} 个文件（{bytes} 字节），保留 {kept} 个共享文件。',
 });
 Object.assign(trashCatalogs.en, {
   'trash.kind.project': 'Story',
@@ -135,25 +135,25 @@ Object.assign(trashCatalogs.zh, {
   'trash.kind.take': '生成的一条',
 });
 
-trashCatalogs.en['trash.cloudOnly'] = 'Open the saved story to use recoverable trash.';
-trashCatalogs.zh['trash.cloudOnly'] = '请打开已保存的故事，以使用可恢复的回收站。';
+trashCatalogs.en['trash.cloudOnly'] = 'Open a saved story to use the trash.';
+trashCatalogs.zh['trash.cloudOnly'] = '请先打开已保存的故事，才能用回收站。';
 Object.assign(trashCatalogs.en, {
-  'trash.manage': 'Manage story items',
-  'trash.search': 'Find an item',
+  'trash.manage': 'Manage items',
+  'trash.search': 'Find',
 });
-Object.assign(trashCatalogs.zh, { 'trash.manage': '管理故事内容', 'trash.search': '查找内容' });
+Object.assign(trashCatalogs.zh, { 'trash.manage': '管理内容', 'trash.search': '查找' });
 
 Object.assign(trashCatalogs.en, {
-  'trash.selectAll': 'Select loaded items',
-  'trash.emptyFiltered': 'Delete all items of this kind',
+  'trash.selectAll': 'Select all',
+  'trash.emptyFiltered': 'Delete all of this kind forever',
 });
 Object.assign(trashCatalogs.zh, {
-  'trash.selectAll': '选择已加载内容',
-  'trash.emptyFiltered': '永久删除此类型的全部内容',
+  'trash.selectAll': '全选',
+  'trash.emptyFiltered': '永久删除这一类的全部内容',
 });
 
 trashCatalogs.en['trash.kind.conversation'] = 'Conversation';
 trashCatalogs.zh['trash.kind.conversation'] = '对话';
 
-trashCatalogs.en['trash.filters'] = 'Filters and selection';
-trashCatalogs.zh['trash.filters'] = '筛选与选择';
+trashCatalogs.en['trash.filters'] = 'Filter';
+trashCatalogs.zh['trash.filters'] = '筛选';

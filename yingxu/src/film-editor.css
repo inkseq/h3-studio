@@ -360,7 +360,7 @@ button.autosave-status {
   width: 8px;
   align-self: stretch;
   background: color-mix(in srgb, var(--accent) 70%, transparent);
-  cursor: ew-resize;
+  cursor: grab;
 }
 .film-audio-bar {
   display: flex;

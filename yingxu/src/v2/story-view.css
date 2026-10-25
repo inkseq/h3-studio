@@ -1037,7 +1037,7 @@ body.sb-resizing-y video {
   color: var(--muted);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
-  cursor: ew-resize;
+  cursor: pointer;
   touch-action: none;
 }
 .ruler span {
@@ -1373,16 +1373,25 @@ body.sb-resizing-y video {
   max-height: none;
   object-fit: contain;
 }
-.take-tools-inline {
+.take-tools-inline,
+.take-tools-inline > .row,
+.take-tools-inline > .row > span {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
 }
+/* One size for every take tool, links and buttons alike. */
 .take-tools-inline button,
-.take-tools-inline a {
-  font-size: 12px;
-  padding: 3px 8px;
-  min-height: 0;
+.take-tools-inline a.btn {
+  min-height: var(--h-sm);
+  height: var(--h-sm);
+  padding: 0 10px;
+  font-size: var(--fs-sm);
+  background: var(--surface-3);
+  border: 1px solid var(--line-2);
+  border-radius: 7px;
+  box-shadow: none;
 }
 /* #232 (#47, #48): segmented choices size to their words in both languages; small numbers
    get small inputs. */
@@ -1450,7 +1459,7 @@ body.sb-resizing-y video {
 }
 /* #232 (#51): the whole dock is a time bar; shots still drag to reorder. */
 .timeline .track.video {
-  cursor: ew-resize;
+  cursor: pointer;
 }
 .timeline .tseg {
   cursor: pointer;
@@ -1518,4 +1527,28 @@ body.sb-resizing-y video {
 .sb-workspace .library.collapsed .lib-tabs .sb-library-tab.alert > small {
   background: var(--warn);
   color: #1a1205;
+}
+/* Shot panel header (owner, 2026-10-26): the actions centre on the title block, and the
+   title field hugs its text so the pencil sits right after it. */
+.editor .ed-head {
+  align-items: center;
+}
+.editor .ed-head .ed-title {
+  width: auto;
+  flex: 0 1 auto;
+  field-sizing: content;
+  min-width: 4ch;
+  max-width: 100%;
+}
+.editor .ed-head .ed-title-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.editor .ed-head > :is(button, .trash-button, .ed-expand) {
+  align-self: center;
+}
+.sb-topbar .chapter-summary small {
+  white-space: nowrap;
 }

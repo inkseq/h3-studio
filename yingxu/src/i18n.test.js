@@ -55,6 +55,6 @@ test('Both catalogs contain the same keys and named values; user input is interp
     assert.deepEqual(variables(catalogs.en[key]), variables(catalogs.zh[key]), key);
   assert.equal(
     translate('en', 'settings.usage', { amount: '{privatePrompt}' }),
-    'Admission exposure: {privatePrompt}',
+    'Limit in use: {privatePrompt}',
   );
 });

@@ -1675,9 +1675,13 @@ function Slot({ id, label, hint, help, children, onClear, onPick, onFiles, class
   );
 }
 
-function growTextarea(node) {
-  node.style.height = 'auto';
-  node.style.height = Math.min(node.scrollHeight + 2, 480) + 'px';
+// Size a text box to its text. Shrinking needs a reset to 'auto', which makes the panel jump,
+// so only typing or opening another shot shrinks; other renders only grow when text overflows.
+function growTextarea(node, shrink = false) {
+  if (shrink) node.style.height = 'auto';
+  else if (node.scrollHeight <= node.clientHeight + 1) return;
+  const height = Math.min(node.scrollHeight + 2, 480) + 'px';
+  if (node.style.height !== height) node.style.height = height;
 }
 
 // The chosen take's trim, right under the panel's video (owner, 2026-10-21): drag a handle and
@@ -1761,7 +1765,10 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
   const editorRef = useRef(null),
     mediaRef = useRef(null);
   useEffect(() => {
-    editorRef.current?.querySelectorAll('textarea').forEach(growTextarea);
+    editorRef.current?.querySelectorAll('textarea').forEach((node) => growTextarea(node, true));
+  }, [shotId]);
+  useEffect(() => {
+    editorRef.current?.querySelectorAll('textarea').forEach((node) => growTextarea(node));
   });
   if (!shot) return null;
   const index = state.shots.indexOf(shot);
@@ -1794,7 +1801,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
     <section
       ref={editorRef}
       className={'editor' + (inline ? ' inline' : '') + (wide ? ' wide' : '')}
-      onInput={(event) => event.target.tagName === 'TEXTAREA' && growTextarea(event.target)}
+      onInput={(event) => event.target.tagName === 'TEXTAREA' && growTextarea(event.target, true)}
     >
       <header className="ed-head">
         <div>

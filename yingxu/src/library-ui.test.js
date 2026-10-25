@@ -28,7 +28,7 @@ test('uninitialized account library renders one sign-in state without inventing 
   globalThis.localStorage = { getItem: () => null };
   try {
     const html = renderToStaticMarkup(React.createElement(mod.exports.LibraryPreview));
-    assert.match(html, /Sign in to browse your library/);
+    assert.match(html, /Sign in to see your library/);
     assert.match(html, /class="ui-empty"/);
     assert.match(html, /aria-label="Sign in"/);
     // Signed out: no GPUs entry (h3-studio#304); works, quick create, library, settings.
@@ -104,7 +104,7 @@ test('a project open failure renders one localized scoped alert and no account p
   try {
     const html = renderToStaticMarkup(React.createElement(mod.exports.OpenNotice));
     assert.equal((html.match(/role="alert"/g) || []).length, 1);
-    assert.match(html, /content was removed/);
+    assert.match(html, /content was deleted/);
     assert.doesNotMatch(
       html,
       /项目版本|cloud-projects|Retry|Download original story|unsynced draft/,
@@ -132,9 +132,9 @@ test('inline dirty draft choice keeps remote open and download available, while 
   globalThis.localStorage = { getItem: () => null };
   try {
     const html = renderToStaticMarkup(React.createElement(mod.exports.OpenNotice));
-    assert.match(html, /disabled=""[^>]*>Continue my unsynced draft/);
+    assert.match(html, /disabled=""[^>]*>Continue the draft/);
     assert.match(html, />Open the cloud version<\/button>/);
-    assert.match(html, />Download unsynced draft<\/button>/);
+    assert.match(html, />Download the draft<\/button>/);
     assert.doesNotMatch(html, /cloud-projects|Discard/);
   } finally {
     cloud.getState = originalGetState;

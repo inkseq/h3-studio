@@ -848,3 +848,20 @@ dialog.modal.wide {
   padding: 18px 8px;
   text-align: center;
 }
+/* Light / dark switch beside the language switch (owner, 2026-10-26). */
+.theme-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-2);
+}
+.theme-toggle:hover {
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+  color: var(--ink);
+}

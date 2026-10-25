@@ -49,7 +49,7 @@ test('actual workbench renders its initial unread state without generation or de
     /<button class="primary" disabled="">(?:(?!<\/button>).)*Generate 1<\/button>/,
   );
   assert.match(html, /No takes yet/);
-  assert.match(html, /Generation defaults/);
+  assert.match(html, />Defaults</);
   assert.doesNotMatch(html, />Delete<|>Move to trash<|workbench\./);
 });
 
