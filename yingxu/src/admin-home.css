@@ -257,6 +257,13 @@
   white-space: nowrap;
 }
 
+/* Only `.home > main` scrolls site-wide; the console's shell is the scroller here. */
+.admin-home > .ah-shell {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 @media (max-width: 900px) {
   .admin-home .ah-shell {
     grid-template-columns: 1fr;
