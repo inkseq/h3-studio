@@ -79,7 +79,9 @@ export default function StoryNavigation({ state, onOpenCloud, onOpenLocal, onSel
     if (creating) inputRef.current?.focus();
   }, [creating]);
   const local = store.getLocalProjectSummary(),
-    locals = [...(local ? [local] : []), ...library.projects.filter((p) => p.id !== local?.id)];
+    locals = currentSupportView()
+      ? []
+      : [...(local ? [local] : []), ...library.projects.filter((p) => p.id !== local?.id)];
   const cloudProjects = c.account ? [...c.projects] : [];
   if (c.account && state.workspace.mode === 'cloud') {
     const index = cloudProjects.findIndex((p) => p.id === state.project.id),
