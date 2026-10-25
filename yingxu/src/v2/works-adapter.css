@@ -17,7 +17,8 @@
   border-radius: var(--r-sm);
 }
 .works-page .v2-home-search {
-  min-width: 210px;
+  flex: 0 1 240px;
+  min-width: 180px;
   height: 36px;
   min-height: 36px;
   box-sizing: border-box;
@@ -131,4 +132,10 @@
   font: inherit;
   font-size: 13px;
   cursor: pointer;
+}
+/* The search row sizes to its controls (search, sort, refresh) instead of a fixed 320px,
+   so nothing overlaps Quick Create (owner review, 2026-10-26). */
+.works-page .home-search-row {
+  width: auto;
+  flex: 0 1 auto;
 }

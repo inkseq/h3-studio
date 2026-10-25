@@ -15,6 +15,9 @@ export const takesCatalogs = {
     'takes.operationFailed': "Couldn't confirm this. Check the last action before trying again.",
     'takes.recipe': 'Full settings (seed kept when copied)',
     'takes.moreStories': 'Load more stories',
+    'takes.subtitles': 'May contain subtitles',
+    'takes.subtitlesHelp':
+      'Text that looks like the dialogue was burned into the picture. Keep it, regenerate, or trim it out.',
     'takes.title': 'Takes',
     'takes.selected': 'In use',
     'takes.select': 'Use this take',
@@ -88,6 +91,8 @@ export const takesCatalogs = {
     'takes.operationFailed': '没能确认这个操作，请先查看上一个操作，不要重复提交。',
     'takes.recipe': '完整设置（复制时固定种子）',
     'takes.moreStories': '加载更多故事',
+    'takes.subtitles': '可能带字幕',
+    'takes.subtitlesHelp': '画面里好像烧进了台词字幕。可以保留、重新生成，或者剪掉那一段。',
     'takes.title': '生成结果',
     'takes.selected': '正在使用',
     'takes.select': '选这条',

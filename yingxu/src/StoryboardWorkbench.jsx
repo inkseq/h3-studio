@@ -41,6 +41,10 @@ export function WorkbenchCopies({ value, onChange, max }) {
     </label>
   );
 }
+// #575 (owner, 2026-10-26): burned-in subtitles are flagged, never re-rolled automatically.
+const hasSubtitles = (row) =>
+  Array.isArray(row?.quality_flags) && row.quality_flags.includes('burned_subtitles');
+
 export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
   const { t, locale } = useI18n(),
     { state, adapter, dispatch } = useStoryboardUI();
@@ -276,6 +280,11 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                     {row.starred && <Star size={11} aria-label={t('workbench.star')} />}
                   </span>
                   {row.selected && <em>{t('takes.selected')}</em>}
+                  {hasSubtitles(row) && (
+                    <em className="ver-warn" title={t('takes.subtitlesHelp')}>
+                      {t('takes.subtitles')}
+                    </em>
+                  )}
                   {/* A take adopted from an old Quick Create conversation (#481). */}
                   {row.aliased && <em className="ver-legacy">{t('workbench.fromQuickCreate')}</em>}
                 </button>
@@ -357,6 +366,11 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                     (Number.isInteger(v.n) ? 'v' + v.n : versionTime(row.created_at, locale, t))}
                 </b>
                 <small className="muted">{versionTime(row.created_at, locale, t)}</small>
+                {hasSubtitles(row) && (
+                  <small className="take-warn" title={t('takes.subtitlesHelp')}>
+                    {t('takes.subtitles')}
+                  </small>
+                )}
                 <small className="take-diff">
                   {row.recipe_status === 'known'
                     ? changes === null

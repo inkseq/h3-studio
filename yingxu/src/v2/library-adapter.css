@@ -476,6 +476,8 @@ body.libp-resizing {
 }
 .lib-inline-label:disabled {
   cursor: inherit;
+  /* A name that can't be renamed is still a name: no faded "disabled" look. */
+  opacity: 1;
 }
 .lib-inline-label:disabled svg {
   display: none;
