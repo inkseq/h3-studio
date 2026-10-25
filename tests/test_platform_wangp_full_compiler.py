@@ -186,6 +186,7 @@ class FullCompilerTests(unittest.TestCase):
         self.assertEqual(s['activated_loras'], [lora])
         self.assertEqual(s['loras_multipliers'], '1.0')
         self.assertEqual(s['guidance_scale'], 1.0)
+        self.assertTrue(s['prompt'].endswith(compiler.NO_SCREEN_TEXT))
         for steps in (4, 20):
             with self.assertRaisesRegex(ValueError, 'wangp_invalid_steps'):
                 compiler.compile_settings(
@@ -199,6 +200,7 @@ class FullCompilerTests(unittest.TestCase):
             (plain['num_inference_steps'], plain['activated_loras']), (20, [])
         )
         self.assertNotIn('loras_multipliers', plain)
+        self.assertEqual(plain['prompt'], r['prompt'])
         s['output_filename'] = 'sixnine-test'
         binding = engine_manifest(identity, 'ref')
         p = PreparedRequest(
