@@ -204,16 +204,32 @@ _BF16_REF_LOCATOR_FILES = (
     ),
     *_BASE_COMMON_LOCATOR_FILES,
 )
+# Owner default 2026-10-25: WanGP's rank-19 TaoMate turbo LoRA. Size and LFS
+# SHA256 match official immutable _LOCATOR_REVISION metadata for this path.
+_TAOMATE_LORA = (
+    "loras/minimax_h3_taomate_3step_lora_avg_rank_19_bf16.safetensors",
+    181697688,
+    "sha256",
+    "de9663d974a884b477556748239c6f28239f7ca1825be270f98f023ff5dab6a7",
+)
 _FULL_CONTROL_LOCATOR_FILES = {
     "fl": (
         tuple(row for row in _LOCATOR_FILES if row[0] != _LOCATOR_TRANSFORMERS["ref"]),
         _BASE_FL_LOCATOR_FILES,
         _BF16_FL_LOCATOR_FILES,
+        (
+            *(row for row in _LOCATOR_FILES if row[0] != _LOCATOR_TRANSFORMERS["ref"]),
+            _TAOMATE_LORA,
+        ),
     ),
     "ref": (
         tuple(row for row in _LOCATOR_FILES if row[0] != _LOCATOR_TRANSFORMERS["fl"]),
         _BASE_REF_LOCATOR_FILES,
         _BF16_REF_LOCATOR_FILES,
+        (
+            *(row for row in _LOCATOR_FILES if row[0] != _LOCATOR_TRANSFORMERS["fl"]),
+            _TAOMATE_LORA,
+        ),
     ),
 }
 SAFE_ERRORS = frozenset(

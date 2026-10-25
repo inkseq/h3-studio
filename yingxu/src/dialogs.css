@@ -19,6 +19,9 @@
 :root dialog.qc-dialog.qc-dialog-wide {
   width: min(720px, calc(100vw - 32px));
 }
+:root dialog.qc-dialog.qc-dialog-xl {
+  width: min(1080px, calc(100vw - 32px));
+}
 :root dialog.qc-dialog::backdrop {
   background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(2px);
@@ -126,7 +129,8 @@ select {
 
 @media (max-width: 560px) {
   :root dialog.qc-dialog,
-  :root dialog.qc-dialog.qc-dialog-wide {
+  :root dialog.qc-dialog.qc-dialog-wide,
+  :root dialog.qc-dialog.qc-dialog-xl {
     width: calc(100vw - 16px);
     max-height: calc(100dvh - 16px);
     padding: 16px;

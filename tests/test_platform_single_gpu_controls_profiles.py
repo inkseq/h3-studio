@@ -36,9 +36,9 @@ class SingleGPUControlsProfileTests(unittest.TestCase):
         self,
     ):
         retained = []
-        self.assertEqual(PROFILE_IDS[-2:], SINGLE_PROFILES)
-        self.assertEqual(len(PROFILE_IDS[:-2]), 14)
-        for identity in PROFILE_IDS[:-2]:
+        self.assertEqual(PROFILE_IDS[14:16], SINGLE_PROFILES)
+        self.assertEqual(len(PROFILE_IDS[:14]), 14)
+        for identity in PROFILE_IDS[:14]:
             raw = (
                 (PROFILE_DIRECTORY / (identity + '.json'))
                 .read_bytes()

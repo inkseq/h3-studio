@@ -170,6 +170,8 @@ class ApiTests(unittest.TestCase):
             "generated_audio": True,
             "render_contract_version": 5,
             "playback_rates": [0.5, 0.75, 1, 1.25, 1.5, 2],
+            "video_segments": True,
+            "max_video_segments": 50,
             "detached_generated_audio": True,
             "audio_fades_max_s": 5,
             "clip_sound_crossfade_values_s": [0, 0.25, 0.5, 1],
@@ -1565,12 +1567,17 @@ class NativeMediaAccountTests(unittest.TestCase):
                     "response-content-disposition"
                 ][0],
             )
-            # HEAD and owner-uploaded assets retain their existing no-store policy.
+            # HEAD keeps no-store. A hash-verified upload now reuses the same
+            # bucketed private redirect so the browser keeps its copy.
             self.assertEqual(remote.head(paths[1]).headers["cache-control"], "no-store")
             asset = remote.get(paths[0])
-            self.assertEqual(asset.headers["cache-control"], "no-store")
-            self.assertEqual(fake.calls[-1][1]["ExpiresIn"], 300)
-            self.assertNotIn("ResponseCacheControl", fake.calls[-1][1]["Params"])
+            self.assertRegex(asset.headers["cache-control"], r"^private, max-age=\d+$")
+            self.assertEqual(
+                parse_qs(urlsplit(asset.headers["location"]).query)[
+                    "response-cache-control"
+                ],
+                ["private, max-age=86400, immutable"],
+            )
             self.assertEqual(
                 remote.get("/v1/projects/story-one").headers["cache-control"],
                 "no-store",

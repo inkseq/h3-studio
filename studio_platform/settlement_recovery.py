@@ -31,7 +31,12 @@ from .repository import (
     money,
     manually_reviewed_inactive,
 )
-from .operator_capacity import ACTIVE_COMMANDS, operator_commands, operator_nodes
+from .operator_capacity import (
+    ACTIVE_COMMANDS,
+    advance_command_revision,
+    operator_commands,
+    operator_nodes,
+)
 
 TERMINAL = {"succeeded", "failed", "cancelled"}
 SHA = re.compile(r"[0-9a-f]{64}\Z")
@@ -473,7 +478,10 @@ def fence_reviewed_instance(repo, conn, value, request):
             desired_state="stopped",
             runtime_state="stopped",
             updated_at=repo.clock(),
-            payload={**node["payload"], "settlement_recovery": proof},
+            payload={
+                **advance_command_revision(node["payload"]),
+                "settlement_recovery": proof,
+            },
         )
     )
     if value["command"]["state"] in ACTIVE_COMMANDS:

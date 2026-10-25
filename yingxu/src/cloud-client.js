@@ -1,5 +1,6 @@
 /* Same-origin application API only. This module never holds provider credentials. */
 import { readLocale, translate } from './i18n/locale.js';
+import { currentSupportView } from './support-view.js';
 import { CREDITS_CHANGED, INSUFFICIENT_CREDITS, insufficientCredits } from './credits.js';
 import { MAINTENANCE_CHANGED, formatEnd, maintenanceRefusal } from './maintenance-notice.js';
 // The credits chip and the not-enough-credits prompt listen for these (h3-studio#306).
@@ -30,11 +31,14 @@ function defaultSpendingConfirmation(detail, account) {
   );
 }
 export class CloudError extends Error {
-  constructor(message, { status = 0, detail = null } = {}) {
+  constructor(message, { status = 0, detail = null, quiet = false } = {}) {
     super(message);
     this.name = 'CloudError';
     this.status = status;
     this.detail = detail;
+    // A read dropped because the account changed or the page moved on: nothing was
+    // lost, so pages refresh instead of showing an error (owner, 2026-10-25).
+    this.quiet = quiet;
   }
 }
 export function safeCloudPath(path) {
@@ -186,6 +190,7 @@ export function createCloudClient({
       ...(body !== undefined && !multipart ? { 'Content-Type': 'application/json' } : {}),
       ...(key ? { 'Idempotency-Key': key } : {}),
       ...(expectedAccount && !anonymous ? { 'X-Expected-Account': expectedAccount } : {}),
+      ...(currentSupportView() ? { 'X-Support-View': currentSupportView().id } : {}),
     };
     let timedOut = false,
       releaseRead = null;
@@ -210,8 +215,12 @@ export function createCloudClient({
         releaseRead = typeof slot === 'function' ? slot : await slot;
       }
       let spendingConfirmed = false;
+      const accountChanged = () =>
+        new CloudError(ui('client.accountChanged', expectedAccount), {
+          quiet: method === 'GET',
+        });
       for (let attempt = 0; ; attempt++) {
-        if (current !== epoch) throw new CloudError(ui('client.accountChanged', expectedAccount));
+        if (current !== epoch) throw accountChanged();
         if (controller.signal.aborted) throw abortError();
         const response = await fetcher(target, {
           method,
@@ -221,7 +230,7 @@ export function createCloudClient({
           signal: controller.signal,
           ...(body !== undefined ? { body: encodedBody } : {}),
         });
-        if (current !== epoch) throw new CloudError(ui('client.accountChanged', expectedAccount));
+        if (current !== epoch) throw accountChanged();
         const responseAccount = response.headers.get('X-Authenticated-Account');
         if (
           expectedAccount &&
@@ -280,19 +289,24 @@ export function createCloudClient({
           const reason =
             response.status === 409 && detail?.detail === 'capacity_drain_repreflight'
               ? ui('client.capacityDrain', expectedAccount)
-              : typeof detail?.detail === 'string'
-                ? detail.detail
-                : typeof detail?.message === 'string'
-                  ? detail.message
-                  : response.status === 409
-                    ? ui('client.versionChanged', expectedAccount)
-                    : response.status === 404
-                      ? ui('client.notFound', expectedAccount)
-                      : response.status === 401
-                        ? ui('client.login', expectedAccount)
-                        : response.status >= 500
-                          ? ui('client.unavailable', expectedAccount)
-                          : ui('client.status', expectedAccount, { status: response.status });
+              : String(detail?.code || '').startsWith('support_view_')
+                ? ui(
+                    'client.' + detail.code.replace(/_(\w)/g, (_, c) => c.toUpperCase()),
+                    expectedAccount,
+                  )
+                : typeof detail?.detail === 'string'
+                  ? detail.detail
+                  : typeof detail?.message === 'string'
+                    ? detail.message
+                    : response.status === 409
+                      ? ui('client.versionChanged', expectedAccount)
+                      : response.status === 404
+                        ? ui('client.notFound', expectedAccount)
+                        : response.status === 401
+                          ? ui('client.login', expectedAccount)
+                          : response.status >= 500
+                            ? ui('client.unavailable', expectedAccount)
+                            : ui('client.status', expectedAccount, { status: response.status });
           const budgetKey = [
             'user_daily_limit_reached',
             'connection_daily_limit_reached',
@@ -326,7 +340,7 @@ export function createCloudClient({
           : response.status === 204
             ? null
             : await response.json();
-        if (current !== epoch) throw new CloudError(ui('client.accountChanged', expectedAccount));
+        if (current !== epoch) throw accountChanged();
         if (method !== 'GET' && !anonymous) announce(CREDITS_CHANGED);
         return result;
       }
@@ -345,7 +359,8 @@ export function createCloudClient({
             expectedAccount,
           ),
         );
-      if (error.name === 'AbortError') throw new CloudError(ui('client.aborted', expectedAccount));
+      if (error.name === 'AbortError')
+        throw new CloudError(ui('client.aborted', expectedAccount), { quiet: method === 'GET' });
       throw new CloudError(ui('client.offline', expectedAccount));
     } finally {
       clearTimeout(timer);
@@ -383,6 +398,7 @@ export function createCloudClient({
     const query = new URLSearchParams({
       expected_account: account,
       ...(role ? { rendition: role } : wantsDownload ? { download: '1' } : {}),
+      ...(currentSupportView() ? { support_view: currentSupportView().id } : {}),
     });
     return parsed.pathname + '?' + query;
   }

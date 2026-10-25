@@ -16,6 +16,7 @@ from studio_platform.dstack_operator import DstackOperator, OperatorError
 from studio_platform.dstack_workspace import DstackWorkspace
 from studio_platform.repository import (
     Scope,
+    BudgetExceeded,
     attempts,
     jobs,
     instance_intents,
@@ -156,6 +157,52 @@ class DemandProjectionTests(LedgerCase):
                     )
                     self.assertEqual(self.repo.get_job(self.scope, job['id']), before)
 
+    def test_fenced_lost_attempt_allows_same_job_demand_without_fake_stop_proof(self):
+        from studio_platform.queue import TaskQueue
+
+        job = self.native_job('fl')
+        queue = TaskQueue(self.repo)
+        claim = queue.claim(
+            'original-worker', job['pool'], dispatch_backend='hatchet-v1'
+        )
+        queue.begin_submission(claim.lease)
+        queue.record_submitted(claim.lease, 'original-upstream')
+        queue.reclaim_capacity(
+            self.scope,
+            job['id'],
+            expected_attempt_id=claim.lease.attempt_id,
+            expected_fence=claim.lease.fence,
+            reason='capacity_owner_recovery',
+            evidence_id='owner-proof',
+        )
+        profile = self.service.profiles['5090-fl']
+        with (
+            patch(
+                'studio_platform.execution_policy.ExecutionPolicies.submission_allowed',
+                return_value=True,
+            ),
+            patch('studio_platform.dstack_demand._profile_for', return_value=profile),
+        ):
+            with self.repo.engine.connect() as connection:
+                result = eligible_jobs(self.service, connection, self.now)
+                old = (
+                    connection.execute(
+                        select(attempts).where(attempts.c.id == claim.lease.attempt_id)
+                    )
+                    .mappings()
+                    .one()
+                )
+            self.assertEqual([row['id'] for row, _ in result], [job['id']])
+            self.assertEqual(old['upstream_stopped'], 0)
+            self.assertIsNone(old['actual_cost_microusd'])
+            # A label without its matching original authority must never earn a rental.
+            with self.repo.transaction() as connection:
+                connection.execute(
+                    update(jobs).where(jobs.c.id == job['id']).values(result={})
+                )
+            with self.repo.engine.connect() as connection:
+                self.assertEqual(eligible_jobs(self.service, connection, self.now), [])
+
     def test_admin_counts_all_native_waiting_work_even_when_not_qualified(self):
         self.native_job('fl')
         self.native_job('ref', status='waiting_capacity', scope=self.other)
@@ -212,8 +259,8 @@ class DemandProjectionTests(LedgerCase):
                     {"preview_id": previews[index]["preview_id"]},
                     "manual-" + str(index),
                 )
-            except OperatorError as error:
-                self.assertEqual(str(error), "dstack_capacity_limit_exceeded")
+            except BudgetExceeded as error:
+                self.assertEqual(str(error), "global_capacity_exceeded")
                 return None
 
         values = self.parallel(start, count=6)

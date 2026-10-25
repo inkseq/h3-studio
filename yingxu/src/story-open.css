@@ -153,19 +153,6 @@
   box-shadow: var(--shadow-lg, 0 20px 60px rgba(0, 0, 0, 0.45));
   font-size: 14px;
 }
-.story-opening-spinner {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 2px solid var(--line-2, var(--surface-4));
-  border-top-color: var(--accent, var(--accent));
-  animation: story-opening-spin 0.8s linear infinite;
-}
-@keyframes story-opening-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 
 /* Loading a story: a floating one-line pill that never shifts the page. */
 .story-open-toast {
@@ -186,22 +173,4 @@
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
   pointer-events: none;
   white-space: nowrap;
-}
-.story-open-spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid var(--line-2, #444);
-  border-top-color: var(--accent, var(--accent));
-  border-radius: 50%;
-  animation: story-open-spin 0.8s linear infinite;
-}
-@keyframes story-open-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .story-open-spinner {
-    animation: none;
-  }
 }

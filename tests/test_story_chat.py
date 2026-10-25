@@ -1001,3 +1001,186 @@ class ShotMediaTests(unittest.TestCase):
     def test_unsafe_artifact_ids_are_dropped(self):
         value = self.shot({"cloudArtifactId": "../x"})
         self.assertIsNone(value["thumbnail_url"])
+
+
+class StoryChatConnectionTests(unittest.TestCase):
+    """Agent/Telegram connections drive the same story chat as the website (#531)."""
+
+    setUp = StoryChatTests.setUp
+    login = StoryChatTests.login
+
+    def machine(self, scopes, limit=None):
+        if limit is not None:
+            self.app = create_app(
+                replace(self.settings, story_chat_connection_daily_turns=limit),
+                repository=self.app.state.repository,
+                story_chat_client=self.model,
+            )
+            self.client = TestClient(self.app)
+        self.login()
+        created = self.client.post(
+            "/v1/api-keys",
+            json={"name": "Telegram", "scopes": scopes, "all_projects": True},
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        client = TestClient(
+            self.app, headers={"Authorization": "Bearer " + created.json()["api_key"]}
+        )
+        self.addCleanup(client.close)
+        return client
+
+    def turn(self, client, pid, turn_id, plan=CAST):
+        self.model.plans.append(plan)
+        return client.post(
+            f"/v1/story-chats/{pid}/turns", json={"turn_id": turn_id, "text": "A story"}
+        )
+
+    def test_connection_with_scopes_creates_turns_reads_and_renames(self):
+        bot = self.machine(["projects:read", "projects:write", "projects:create"])
+        made = bot.post("/v1/story-chats", json={"language": "en"})
+        self.assertEqual(made.status_code, 201, made.text)
+        pid = made.json()["project_id"]
+        first = self.turn(bot, pid, "tg-turn-0001")
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(len(first.json()["cards"]["characters"]), 2)
+        user = next(m for m in first.json()["messages"] if m["role"] == "user")
+        self.assertTrue(user["actor"])
+        self.assertEqual(bot.get(f"/v1/story-chats/{pid}").status_code, 200)
+        listed = bot.get("/v1/story-chats").json()["story_chats"]
+        self.assertIn(pid, [row["project_id"] for row in listed])
+        renamed = bot.patch(f"/v1/story-chats/{pid}", json={"title": "From Telegram"})
+        self.assertEqual(renamed.status_code, 200, renamed.text)
+        # The same story is the person's story on the website.
+        self.assertEqual(self.client.get(f"/v1/story-chats/{pid}").status_code, 200)
+
+    def test_missing_scopes_are_refused(self):
+        reader = self.machine(["projects:read"])
+        self.assertEqual(reader.get("/v1/story-chats").status_code, 200)
+        refused = reader.post("/v1/story-chats", json={})
+        self.assertEqual(refused.status_code, 403)
+        self.assertEqual(refused.json()["detail"]["code"], "story_chat_scope")
+        # Undo rewrites the story, so a read-only connection cannot undo (#490).
+        undo = reader.post("/v1/story-chats/x/undo", json={"turn_id": "tg-turn-0001"})
+        self.assertEqual(undo.status_code, 403)
+        self.assertEqual(undo.json()["detail"]["code"], "story_chat_scope")
+
+    def test_card_pictures_stay_browser_only(self):
+        bot = self.machine(["projects:read", "projects:write", "projects:create"])
+        pid = bot.post("/v1/story-chats", json={}).json()["project_id"]
+        response = bot.post(
+            f"/v1/story-chats/{pid}/images",
+            json={"request_id": "req-00000001", "card_id": "x"},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["detail"]["code"], "story_chat_browser_only")
+
+    def test_daily_turn_cap_per_connection(self):
+        bot = self.machine(
+            ["projects:read", "projects:write", "projects:create"], limit=1
+        )
+        pid = bot.post("/v1/story-chats", json={}).json()["project_id"]
+        self.assertEqual(self.turn(bot, pid, "tg-turn-0001").status_code, 200)
+        capped = self.turn(bot, pid, "tg-turn-0002")
+        self.assertEqual(capped.status_code, 429)
+        self.assertEqual(
+            capped.json()["detail"]["code"], "story_chat_connection_daily_limit"
+        )
+        # A replay of a stored turn is still answered, and the website is not capped.
+        self.assertEqual(self.turn(bot, pid, "tg-turn-0001").status_code, 200)
+        self.model.plans.append(CAST)
+        website = self.client.post(
+            f"/v1/story-chats/{pid}/turns", json={"turn_id": "web-0001", "text": "More"}
+        )
+        self.assertEqual(website.status_code, 200, website.text)
+
+
+class StoryChatUndoTests(unittest.TestCase):
+    """Undo last round (owner, 2026-10-23): exact restore, never over newer work."""
+
+    setUp = StoryChatTests.setUp
+    login = StoryChatTests.login
+    start = StoryChatTests.start
+    turn = StoryChatTests.turn
+
+    def test_undo_restores_the_story_and_drops_the_turn(self):
+        chat = self.start()
+        pid = chat["project_id"]
+        before = self.client.get(f"/v1/projects/{pid}").json()["project"]
+        value = self.turn(chat, "aliens").json()
+        self.assertEqual(value["undo_turn_id"], "turn-0001")
+        self.assertEqual(
+            self.client.get(f"/v1/story-chats/{pid}").json()["undo_turn_id"],
+            "turn-0001",
+        )
+        undone = self.client.post(
+            f"/v1/story-chats/{pid}/undo", json={"turn_id": "turn-0001"}
+        )
+        self.assertEqual(undone.status_code, 200, undone.text)
+        body = undone.json()
+        self.assertEqual(body["messages"], [])
+        self.assertEqual(body["turns"], 0)
+        self.assertEqual(body["undo_turn_id"], None)
+        self.assertEqual(sum(len(v) for v in body["cards"].values()), 0)
+        after = self.client.get(f"/v1/projects/{pid}").json()["project"]
+        self.assertEqual(after["title"], before["title"])
+        self.assertEqual(
+            sorted(e["id"] for e in after["entities"]),
+            sorted(e["id"] for e in before["entities"]),
+        )
+        again = self.client.post(
+            f"/v1/story-chats/{pid}/undo", json={"turn_id": "turn-0001"}
+        )
+        self.assertEqual(again.status_code, 409)
+
+    def test_a_later_edit_makes_undo_unavailable(self):
+        chat = self.start()
+        pid = chat["project_id"]
+        value = self.turn(chat, "aliens").json()
+        mia = value["cards"]["characters"][1]["id"]
+        row = self.client.get(f"/v1/projects/{pid}").json()
+        edit = self.client.post(
+            f"/v1/projects/{pid}/actions",
+            json={
+                "expected_version": row["version"],
+                "actions": [
+                    {
+                        "op": "entity.update",
+                        "entity_id": mia,
+                        "patch": {"description": "Mine now"},
+                    }
+                ],
+            },
+        )
+        self.assertEqual(edit.status_code, 200, edit.text)
+        self.assertIsNone(
+            self.client.get(f"/v1/story-chats/{pid}").json()["undo_turn_id"]
+        )
+        refused = self.client.post(
+            f"/v1/story-chats/{pid}/undo", json={"turn_id": "turn-0001"}
+        )
+        self.assertEqual(refused.status_code, 409)
+        project = self.client.get(f"/v1/projects/{pid}").json()["project"]
+        self.assertEqual(
+            next(e for e in project["entities"] if e["id"] == mia)["description"],
+            "Mine now",
+        )
+
+    def test_only_the_latest_turn_can_be_undone(self):
+        chat = self.start()
+        pid = chat["project_id"]
+        self.turn(chat, "aliens")
+        follow = {"reply": "Sure.", "chips": [], "actions": []}
+        self.turn(chat, "ok", turn_id="turn-0002", plan=follow)
+        old = self.client.post(
+            f"/v1/story-chats/{pid}/undo", json={"turn_id": "turn-0001"}
+        )
+        self.assertEqual(old.status_code, 409)
+        latest = self.client.post(
+            f"/v1/story-chats/{pid}/undo", json={"turn_id": "turn-0002"}
+        )
+        self.assertEqual(latest.status_code, 200, latest.text)
+        self.assertEqual(
+            [m["turn_id"] for m in latest.json()["messages"]],
+            ["turn-0001", "turn-0001"],
+        )
+        self.assertEqual(len(latest.json()["cards"]["characters"]), 2)

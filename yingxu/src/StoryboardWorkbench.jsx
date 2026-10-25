@@ -11,6 +11,9 @@ import { useI18n } from './i18n/I18nProvider.jsx';
 import { useStoryboardUI } from './storyboard-ui-context.jsx';
 import { StoryboardVideo, StoryboardAssetImage } from './StoryboardMedia.jsx';
 import { recipeChanges } from './storyboard-selection.js';
+import { segmentsAction } from './shot-segments.js';
+import { Dialog, DialogActions } from './ui/Dialog.jsx';
+import { Button } from './ui/Button.jsx';
 function versionTime(value, locale, t) {
   if (value === null || value === undefined) return t('workbench.unknownStatus');
   const date = new Date(typeof value === 'number' ? value * 1000 : value);
@@ -38,6 +41,10 @@ export function WorkbenchCopies({ value, onChange, max }) {
     </label>
   );
 }
+// #575 (owner, 2026-10-26): burned-in subtitles are flagged, never re-rolled automatically.
+const hasSubtitles = (row) =>
+  Array.isArray(row?.quality_flags) && row.quality_flags.includes('burned_subtitles');
+
 export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
   const { t, locale } = useI18n(),
     { state, adapter, dispatch } = useStoryboardUI();
@@ -104,14 +111,47 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
       };
   async function action(op) {
     const n = generation.current;
-    const result = await dispatch({ type: 'workbenchAction', action: op });
+    const result = await dispatch(
+      Array.isArray(op)
+        ? { type: 'workbenchAction', actions: op }
+        : { type: 'workbenchAction', action: op },
+    );
     if (n === generation.current && result?.ok !== false) load();
+  }
+  // Kept parts belong to the chosen take (#512): another take clears them, after a confirm,
+  // in the same story edit as the choice.
+  const [confirmTake, setConfirmTake] = useState(null);
+  function choose(row) {
+    const select = { op: 'storyboard.select', artifact_id: row.id, shot_id: shot.id };
+    if (shot.segments?.length && row.id !== shot.chosen) setConfirmTake(row);
+    else action(select);
   }
   return (
     <section
       className={'storyboard-takes' + (comparing ? ' comparing' : '')}
       aria-label={t('takes.title')}
     >
+      {confirmTake && (
+        <Dialog title={t('segments.changeTitle')} onClose={() => setConfirmTake(null)}>
+          <p>{t('segments.changeBody', { count: shot.segments.length })}</p>
+          <DialogActions>
+            <Button onClick={() => setConfirmTake(null)}>{t('segments.changeCancel')}</Button>
+            <Button
+              variant="primary"
+              onClick={() => {
+                const row = confirmTake;
+                setConfirmTake(null);
+                action([
+                  segmentsAction(shot.id, []),
+                  { op: 'storyboard.select', artifact_id: row.id, shot_id: shot.id },
+                ]);
+              }}
+            >
+              {t('segments.changeConfirm')}
+            </Button>
+          </DialogActions>
+        </Dialog>
+      )}
       <div className="takes-head">
         <b>{t('takes.title')}</b>
         <small className="muted">{versions.length}</small>
@@ -181,9 +221,7 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                       <button
                         className="small primary"
                         disabled={state.busy || !!state.workbenchPending || !row}
-                        onClick={() =>
-                          action({ op: 'storyboard.select', artifact_id: row.id, shot_id: shot.id })
-                        }
+                        onClick={() => choose(row)}
                       >
                         {t('workbench.use')}
                       </button>
@@ -242,6 +280,11 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                     {row.starred && <Star size={11} aria-label={t('workbench.star')} />}
                   </span>
                   {row.selected && <em>{t('takes.selected')}</em>}
+                  {hasSubtitles(row) && (
+                    <em className="ver-warn" title={t('takes.subtitlesHelp')}>
+                      {t('takes.subtitles')}
+                    </em>
+                  )}
                   {/* A take adopted from an old Quick Create conversation (#481). */}
                   {row.aliased && <em className="ver-legacy">{t('workbench.fromQuickCreate')}</em>}
                 </button>
@@ -252,9 +295,7 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                     type="button"
                     className="small ver-use"
                     disabled={state.busy || !!state.workbenchPending}
-                    onClick={() =>
-                      action({ op: 'storyboard.select', artifact_id: row.id, shot_id: shot.id })
-                    }
+                    onClick={() => choose(row)}
                   >
                     {t('workbench.use')}
                   </button>
@@ -325,6 +366,11 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                     (Number.isInteger(v.n) ? 'v' + v.n : versionTime(row.created_at, locale, t))}
                 </b>
                 <small className="muted">{versionTime(row.created_at, locale, t)}</small>
+                {hasSubtitles(row) && (
+                  <small className="take-warn" title={t('takes.subtitlesHelp')}>
+                    {t('takes.subtitles')}
+                  </small>
+                )}
                 <small className="take-diff">
                   {row.recipe_status === 'known'
                     ? changes === null
@@ -347,16 +393,14 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                               .join(', '),
                           })
                         : t('workbench.noChanges')
-                    : t('workbench.unknown')}
+                    : ''}
                 </small>
                 <div className="take-acts">
                   <button
                     className="small"
                     disabled={state.busy || !!state.workbenchPending}
                     aria-pressed={row.selected}
-                    onClick={() =>
-                      action({ op: 'storyboard.select', artifact_id: row.id, shot_id: shot.id })
-                    }
+                    onClick={() => choose(row)}
                   >
                     {t('workbench.use')}
                   </button>
@@ -365,7 +409,11 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                     disabled={
                       state.busy || !!state.workbenchPending || row.recipe_status !== 'known'
                     }
-                    title={t('workbench.restoreHint')}
+                    title={t(
+                      row.recipe_status === 'known'
+                        ? 'workbench.restoreHint'
+                        : 'workbench.recipeOld',
+                    )}
                     onClick={() =>
                       action({ op: 'storyboard.restore', shot_id: shot.id, artifact_id: row.id })
                     }

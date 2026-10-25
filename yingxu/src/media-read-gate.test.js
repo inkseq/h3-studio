@@ -270,7 +270,7 @@ test('original init/signal and non-content requests pass through unchanged, with
   assert.equal(calls.length, 2);
 });
 
-test('the actual worker flow-controls native asset GET/HEAD without opening the video cache', async () => {
+test('the actual worker flow-controls native asset GET/HEAD and streams when the cache is unavailable', async () => {
   const previousSelf = globalThis.self,
     previousFetch = globalThis.fetch,
     previousDB = globalThis.indexedDB,
@@ -284,7 +284,7 @@ test('the actual worker flow-controls native asset GET/HEAD without opening the 
   };
   globalThis.indexedDB = {
     open() {
-      throw Error('asset passthrough must not open a video cache');
+      throw Error('cache storage unavailable');
     },
   };
   globalThis.fetch = async (value, init = {}) => {
@@ -319,9 +319,18 @@ test('the actual worker flow-controls native asset GET/HEAD without opening the 
       }),
     );
     assert.deepEqual(values, ['asset', 'asset', '', 'asset']);
-    assert.equal(calls.length, 4);
+    // Each asset GET first rechecks its owner with HEAD (uploads are now cacheable);
+    // without IndexedDB the original response still streams through the gate.
+    assert.equal(calls.length, 7);
+    assert.equal(
+      calls.filter((call) => (call.init.method || call.value.method) === 'HEAD').length,
+      4,
+    );
     for (const call of calls)
-      assert.equal(call.value.headers.get('X-Expected-Account'), 'superdan');
+      assert.equal(
+        new Headers(call.init.headers || call.value.headers).get('X-Expected-Account'),
+        'superdan',
+      );
   } finally {
     globalThis.self = previousSelf;
     globalThis.fetch = previousFetch;

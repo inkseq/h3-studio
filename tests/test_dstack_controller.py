@@ -10,7 +10,7 @@ from studio_platform.control import WorkerSpec
 from studio_platform.dstack_controller import DstackController
 from studio_platform.dstack_controller import SlotProcesses
 from studio_platform.fleet import SlotConfig
-from studio_platform.operator_capacity import operator_nodes
+from studio_platform.operator_capacity import OperatorError, operator_nodes
 from studio_platform.repository import (
     attempts,
     budget_reservations,
@@ -585,6 +585,26 @@ class DstackControllerTests(fixture.DstackOperatorTests):
             )
         self.assertEqual(len(self.client.applied), 1)
 
+    def test_automatic_control_drain_advances_once_but_observation_does_not(self):
+        node, controller = self.ready()
+        version = self.service.state(self.owner)["nodes"][0]["version"]
+        self.now += 1
+        controller.tick()
+        self.assertEqual(self.service.state(self.owner)["nodes"][0]["version"], version)
+        self.assertTrue(controller._request_stop(controller._nodes()[0]))
+        self.assertEqual(
+            self.service.state(self.owner)["nodes"][0]["version"], version + 1
+        )
+        self.assertTrue(controller._request_stop(controller._nodes()[0]))
+        self.assertEqual(
+            self.service.state(self.owner)["nodes"][0]["version"], version + 1
+        )
+        with self.assertRaisesRegex(OperatorError, "operator_node_version_conflict"):
+            self.service.node_command(
+                self.owner, node, {"expected_version": version}, "stale-after-auto"
+            )
+        self.assertEqual(self.client.stopped, [])
+
     def test_manual_stop_retires_idle_worker_then_stops_owned_run(self):
         node, controller = self.ready()
         budget = self.repo.get_budget("owner-budget")
@@ -812,6 +832,8 @@ class DstackControllerTests(fixture.DstackOperatorTests):
     def test_download_timebox_fences_only_cold_host_preserving_original_queued_job(
         self,
     ):
+        # Isolate the older download-specific guard from the earlier startup cap.
+        self.settings.capacity_startup_timeout_seconds = 86400
         node, controller, observe = self._timed_out_download()
         job = self._queued_native("fl")
         original = self.repo.get_job(self.scope, job["id"])

@@ -200,9 +200,20 @@ def validate_role_descriptor(kind, value, *, delivery_spec=None, generate_audio=
         'frame_count',
         'container_duration_s',
         'audio_duration_s',
+        'quality_flags',
+        'quality_checks',
     }
     if set(evidence) - allowed:
         raise ValueError('wangp_delivery_evidence_invalid')
+    if {'quality_flags', 'quality_checks'}.intersection(evidence):
+        from ..subtitle_quality import validate_quality
+
+        if kind != 'video':
+            raise ValueError('subtitle_quality_invalid')
+        validate_quality(
+            {k: evidence.get(k) for k in ('quality_flags', 'quality_checks')},
+            evidence.get('duration_s'),
+        )
     if delivery_spec is not None:
         spec = validate_spec(delivery_spec)
         if evidence.get('delivery_spec') != spec:

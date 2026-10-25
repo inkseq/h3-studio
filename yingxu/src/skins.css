@@ -401,3 +401,20 @@ html[data-skin='aegean'] .credits-chip svg {
   border-radius: 50%;
   border: 1px solid rgba(255, 255, 255, 0.15);
 }
+/* "Match system": half dark, half light. */
+.skin-preview.system {
+  display: flex;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  background: none;
+}
+.skin-preview.system .half {
+  flex: 1;
+}
+.skin-preview.system .dark {
+  background: linear-gradient(160deg, #0b0c0c 60%, #cdf26e 60% 64%, #0b0c0c 64%);
+}
+.skin-preview.system .light {
+  background: linear-gradient(160deg, #f7f4ef 60%, #3f5a4c 60% 64%, #f7f4ef 64%);
+}

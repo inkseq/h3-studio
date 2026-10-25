@@ -1,3 +1,4 @@
+import { Note } from './ui/Note.jsx';
 import { previewingAsUser } from './preview-as-user.js';
 import { FloatingMessage } from './floating-notice.js';
 import VideoCacheSettings from './VideoCacheSettings.jsx';
@@ -7,16 +8,13 @@ import SpendingBreakdown from './SpendingBreakdown.jsx';
 import { admissionExposure } from './spending-breakdown.js';
 import { microsToDollars, dollarsToMicros, formatMoneyMicros } from './money.js';
 import AssistantConnections from './AssistantConnections.jsx';
-import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createCloudClient } from './cloud-client.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
-import { readBrowserLocale } from './i18n/locale.js';
 import StudioHeader, { useAccess, useAccountLabel } from './StudioHeader.jsx';
 import AccountPassword from './AccountPassword.jsx';
 import AccountGoogleLink from './AccountGoogleLink.jsx';
 import { CreditsPanel, useCredits } from './CreditsUI.jsx';
-import AdminConsole from './AdminConsole.jsx';
-import CapacitySettings from './CapacitySettings.jsx';
 import SkinPicker from './SkinPicker.jsx';
 import {
   UserRound,
@@ -33,8 +31,7 @@ import {
 import { cloudController as cloud } from './cloud-controller.js';
 import { useAppLocation, usePageActive } from './AppRouteCache.jsx';
 import { navigateApp } from './app-navigation.js';
-import { createP4OperatorController } from './p4-operator-controller.js';
-import OperatorBudgetPanel, { AdminBudgetPanel } from './OperatorBudgetPanel.jsx';
+import OperatorBudgetPanel from './OperatorBudgetPanel.jsx';
 import './v2/ops-adapter.css';
 
 const dollars = microsToDollars;
@@ -64,50 +61,9 @@ const settingsSection = (search) => {
       agent: 'assistants',
       budget: 'budget',
       credits: 'credits',
-      admin: 'admin',
     }[value] || 'account'
   );
 };
-
-function BudgetAdministration({ account }) {
-  const { t } = useI18n();
-  const controller = useMemo(() => createP4OperatorController({ locale: readBrowserLocale }), []),
-    state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
-  useEffect(() => () => controller.destroy(), [controller]);
-  useEffect(() => {
-    void controller.setAccount(account);
-  }, [account, controller]);
-  const current = state.account === account,
-    authorized = current && state.snapshot?.operator?.admin === true;
-  return (
-    <section className="ops-tab-panel">
-      {state.error && current && <p role="alert">{state.error}</p>}
-      {authorized ? (
-        <AdminBudgetPanel
-          controller={controller}
-          state={state}
-          busy={state.busy || !!state.pending}
-        />
-      ) : (
-        <p role="status">
-          {t(
-            !current || state.loading
-              ? 'operatorPanel.adminPermissionPending'
-              : 'operatorPanel.adminPermissionDenied',
-          )}
-        </p>
-      )}
-      {state.pending && current && authorized && (
-        <section className="card-box" role="alert">
-          <p>{t('operatorPanel.pendingAdmin')}</p>
-          <button disabled={state.busy} onClick={() => void controller.recover().catch(() => {})}>
-            {t('operatorPanel.checkAdmin')}
-          </button>
-        </section>
-      )}
-    </section>
-  );
-}
 
 export default function SpendingSettings({ account }) {
   const { t } = useI18n(),
@@ -123,7 +79,10 @@ export default function SpendingSettings({ account }) {
   }, [t, pageActive]);
   const [section, setSection] = useState(() => settingsSection(location.search));
   useEffect(() => {
-    if (pageActive && location.path === '/settings') setSection(settingsSection(location.search));
+    if (!pageActive || location.path !== '/settings') return;
+    if (new URLSearchParams(location.search).get('tab') === 'admin')
+      navigateApp('/admin?section=limits', { replace: true });
+    else setSection(settingsSection(location.search));
   }, [pageActive, location.path, location.search]);
   const openSection = (value) => {
     setSection(value);
@@ -134,15 +93,37 @@ export default function SpendingSettings({ account }) {
   };
   const [user, setUser] = useState(null),
     [admin, setAdmin] = useState(null),
-    [draft, setDraft] = useState(null),
-    [adminDraft, setAdminDraft] = useState(null);
+    [draft, setDraft] = useState(null);
   // Credits appear once the backend serves /v1/credits (#306).
   const credits = useCredits(account),
     access = useAccess(account),
     who = useAccountLabel(account);
   // Regular users never see dollars: in credit mode the USD budget tab is admin-only.
   const creditMode = user?.unit === 'credits';
-  const showBudget = creditMode || !(credits || access?.creditsEnabled) || !!admin;
+  const loaded = !!user && admin !== null && access !== null;
+  const liveTabs = {
+    credits: !!credits || !!access?.creditsEnabled,
+    budget: creditMode || !(credits || access?.creditsEnabled) || !!admin,
+  };
+  // #232 (#37): show the account's tabs at once from the last visit; the data only refines it.
+  const tabsKey = 'inkseq.settingsTabs:' + (account || '');
+  const [rememberedTabs] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(tabsKey)) || null;
+    } catch {
+      return null;
+    }
+  });
+  const tabs = loaded || !rememberedTabs ? liveTabs : rememberedTabs;
+  useEffect(() => {
+    if (!loaded) return;
+    try {
+      localStorage.setItem(tabsKey, JSON.stringify(liveTabs));
+    } catch {
+      /* Tabs simply appear after the data on the next visit. */
+    }
+  }, [loaded, liveTabs.credits, liveTabs.budget, tabsKey]);
+  const showBudget = tabs.budget;
   // Hosted (WorkOS) sign-ins have no local password to change.
   const hosted = access?.authentication === 'workos';
   const [busy, setBusy] = useState(false),
@@ -179,20 +160,8 @@ export default function SpendingSettings({ account }) {
               ),
             },
       );
-      if (data.admin && !previewingAsUser()) {
-        const next = await api.request('/v1/operator/admin/spending-settings');
-        if (current !== epoch.current) return;
-        setAdmin(next);
-        setAdminDraft({
-          testTask: dollars(
-            next.value.test_task_limit_microusd ?? next.value.test_daily_limit_microusd,
-          ),
-          hourly: dollars(next.value.max_hourly_price_microusd),
-          fleetHourly: dollars(next.value.fleet_hourly_limit_microusd),
-          idle: String(next.value.idle_shutdown_seconds / 60),
-          runtime: String(next.value.max_runtime_seconds / 60),
-        });
-      }
+      // Admin tools live on /admin (h3-studio#537); here admins only keep the budget tab.
+      setAdmin(data.admin === true && !previewingAsUser());
     } catch (failure) {
       if (current === epoch.current)
         setError(failure.status === 401 ? t('settings.login') : failure.message);
@@ -212,7 +181,7 @@ export default function SpendingSettings({ account }) {
       api.reset();
     };
   }, [api]);
-  async function save(isAdmin = false) {
+  async function save() {
     if (!account) return;
     const current = epoch.current;
     setBusy(true);
@@ -220,25 +189,7 @@ export default function SpendingSettings({ account }) {
     setNotice('');
     try {
       let body;
-      if (isAdmin) {
-        const seconds = (field) => {
-          const value = Number(adminDraft[field]) * 60;
-          if (!Number.isSafeInteger(value) || value < 1) throw Error('settings.invalid');
-          return value;
-        };
-        body = {
-          expected_version: admin.version,
-          value: {
-            [Object.hasOwn(admin.value, 'test_task_limit_microusd')
-              ? 'test_task_limit_microusd'
-              : 'test_daily_limit_microusd']: micros(adminDraft.testTask),
-            max_hourly_price_microusd: micros(adminDraft.hourly),
-            fleet_hourly_limit_microusd: micros(adminDraft.fleetHourly),
-            idle_shutdown_seconds: seconds('idle'),
-            max_runtime_seconds: seconds('runtime'),
-          },
-        };
-      } else if (user.unit === 'credits')
+      if (user.unit === 'credits')
         body = {
           expected_version: user.version,
           value: {
@@ -266,13 +217,12 @@ export default function SpendingSettings({ account }) {
             },
           },
         };
-      const result = await api.request(
-        isAdmin ? '/v1/operator/admin/spending-settings' : '/v1/account/spending-settings',
-        { method: 'PUT', body },
-      );
+      const result = await api.request('/v1/account/spending-settings', {
+        method: 'PUT',
+        body,
+      });
       if (current !== epoch.current) return;
-      if (isAdmin) setAdmin(result);
-      else setUser((previous) => ({ ...previous, ...result }));
+      setUser((previous) => ({ ...previous, ...result }));
       setNotice('settings.saved');
     } catch (failure) {
       if (current === epoch.current)
@@ -310,11 +260,12 @@ export default function SpendingSettings({ account }) {
             ['account', 'settings.account', UserRound],
             ['defaults', 'settings.defaults', SlidersHorizontal],
             ['assistants', 'assistants.title', Bot],
-            ...(credits || section === 'credits' ? [['credits', 'settings.credits', Coins]] : []),
+            ...(tabs.credits || section === 'credits'
+              ? [['credits', 'settings.credits', Coins]]
+              : []),
             ...(showBudget
               ? [['budget', creditMode ? 'settings.limits' : 'settings.budget', Wallet]]
               : []),
-            ...(admin ? [['admin', 'settings.admin', ShieldCheck]] : []),
           ].map(([id, label, Icon]) => (
             <button
               key={id}
@@ -468,7 +419,7 @@ export default function SpendingSettings({ account }) {
                       <i>
                         <b style={{ width: exposure.percent + '%' }} />
                       </i>
-                      <p className="spend-breakdown-note">{t('settings.admissionHelp')}</p>
+                      <Note>{t('settings.admissionHelp')}</Note>
                     </div>
                   )}
                 </div>
@@ -500,65 +451,6 @@ export default function SpendingSettings({ account }) {
           )}
           {user && draft && !creditMode && section === 'budget' && pageActive && (
             <OperatorBudgetPanel account={account} />
-          )}
-          {admin && section === 'admin' && (
-            <AdminConsole
-              account={account}
-              active={pageActive}
-              testMachines={
-                <>
-                  {/* Versioned capacity policy (#456): preview, reason, confirm. The legacy
-                      five-field form stays only for a server without the policy metadata. */}
-                  {admin.capacity_policy && (
-                    <CapacitySettings settings={admin} api={api} onSaved={() => void load()} />
-                  )}
-                  {adminDraft && !admin.capacity_policy && (
-                    <form
-                      className="ops-tab-panel"
-                      hidden={section !== 'admin'}
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        void save(true);
-                      }}
-                    >
-                      <section
-                        id="my-admin"
-                        className="card-box limits"
-                        aria-label={t('settings.admin')}
-                      >
-                        {[
-                          ['settings.testTask', 'testTask'],
-                          ['settings.hourly', 'hourly'],
-                          ['settings.fleetHourly', 'fleetHourly'],
-                          ['settings.idle', 'idle'],
-                          ['settings.runtime', 'runtime'],
-                        ].map(([label, key]) => (
-                          <React.Fragment key={key}>
-                            {field(label, adminDraft[key], (value) =>
-                              setAdminDraft((previous) => ({ ...previous, [key]: value })),
-                            )}
-                          </React.Fragment>
-                        ))}
-                      </section>
-                      <p className="muted">{t('settings.adminHelp')}</p>
-                      <div className="row tight" style={{ justifyContent: 'flex-end' }}>
-                        <button className="primary" disabled={busy}>
-                          {t(busy ? 'settings.saving' : 'settings.save')}
-                        </button>
-                      </div>
-                    </form>
-                  )}
-                  {/* Per-account dollar budgets and per-GPU prices are test-machine plumbing;
-                      folded so the everyday limits above stay readable. */}
-                  {pageActive && (
-                    <details className="admin-fold">
-                      <summary>{t('admin.legacyBudgets')}</summary>
-                      <BudgetAdministration account={account} />
-                    </details>
-                  )}
-                </>
-              }
-            />
           )}
           {section === 'credits' && <CreditsPanel account={account} active={pageActive} />}
           <div id="my-assistants" hidden={section !== 'assistants'}>

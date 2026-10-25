@@ -390,7 +390,7 @@ export function createCloudController({
               ...projectOpenFailure(error),
             },
           });
-      } else emit({ error: error.message });
+      } else if (!error?.quiet) emit({ error: error.message });
       throw error;
     } finally {
       operation = false;
@@ -406,7 +406,7 @@ export function createCloudController({
   const accountContext = () => ({ epoch, account: state.account });
   const guardAccount = (ctx) => {
     if (!ctx.account || ctx.epoch !== epoch || ctx.account !== state.account)
-      throw Error('账户已经改变，旧账户列表没有写入。');
+      throw Object.assign(Error('账户已经改变，旧账户列表没有写入。'), { quiet: true });
   };
   async function reloadProjects({ replace = false } = {}) {
     const ctx = accountContext(),
@@ -1881,7 +1881,7 @@ export function createCloudController({
         emit({ auth });
         await recheckSession({ loadLists: true });
       } catch (error) {
-        if (observedEpoch === epoch) emit({ error: error.message });
+        if (observedEpoch === epoch && !error?.quiet) emit({ error: error.message });
       } finally {
         emit({ sessionReady: true });
       }
@@ -2250,20 +2250,28 @@ export function createCloudController({
     startPolling() {
       stopped = false;
       let timer;
+      // Every open tab polls the small CPU host: skip hidden tabs (focus rechecks at once),
+      // poll fast only while a job is active, and read the account once a minute.
+      let lastSessionPoll = Date.now();
+      const busy = () => state.jobs.some((job) => activeJobStatuses.has(job.status));
       const tick = async () => {
         if (stopped) return;
-        try {
-          await recheckSession();
-          await refreshJobs();
-          if (Date.now() - lastAvailabilityCheck >= 10000) await reloadAvailability();
-          if (Date.now() - lastRemoteCheck > 15000) {
-            lastRemoteCheck = Date.now();
-            await checkRemoteVersion();
+        if (globalThis.document?.visibilityState !== 'hidden')
+          try {
+            if (Date.now() - lastSessionPoll >= 60000) {
+              lastSessionPoll = Date.now();
+              await recheckSession();
+            }
+            await refreshJobs();
+            if (Date.now() - lastAvailabilityCheck >= 30000) await reloadAvailability();
+            if (Date.now() - lastRemoteCheck > 15000) {
+              lastRemoteCheck = Date.now();
+              await checkRemoteVersion();
+            }
+          } catch (error) {
+            if (!stopped && !error?.quiet) emit({ error: error.message });
           }
-        } catch (error) {
-          if (!stopped) emit({ error: error.message });
-        }
-        if (!stopped) timer = setTimeout(tick, 5000);
+        if (!stopped) timer = setTimeout(tick, busy() ? 5000 : 20000);
       };
       timer = setTimeout(tick, 5000);
       return () => {

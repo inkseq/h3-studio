@@ -34,7 +34,7 @@ self.addEventListener('message', (event) => {
               : data.action === 'status'
                 ? await cache.stats(data.account)
                 : data.action === 'played'
-                  ? await cache.ensure(data.account, data.id)
+                  ? await cache.ensure(data.account, data.id, data.path)
                   : null;
         if (result === null) throw Error('invalid action');
         reply.postMessage({ ok: true, result });

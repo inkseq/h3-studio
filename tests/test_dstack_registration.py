@@ -56,11 +56,13 @@ class RegistrationCapacityTests(LedgerCase):
             }
         )
 
-    def node(self, identity, *, terminal=False, mode="fl"):
+    def node(self, identity, *, terminal=False, mode="fl", start_key=None):
         preview = self.service.preview(
             self.owner, {"profile_id": "5090-" + mode, "ttl_seconds": 900}
         )
-        node = self.start(key="start-" + identity, preview=preview)["node_id"]
+        node = self.start(key=start_key or "start-" + identity, preview=preview)[
+            "node_id"
+        ]
         binding = self.store.load(node)
         run = self.client.runs[binding["run_name"]]
         run.update(
@@ -348,7 +350,7 @@ class RegistrationCapacityTests(LedgerCase):
         self.service.provider_inventory.return_value["instance_ids"].append("2999999")
         self.assertEqual(self.usage(live[0])["instances"], 3)
 
-    def test_overlay_retains_legacy_instances_and_unreleased_devices(self):
+    def test_overlay_excludes_only_proven_absent_owned_device_and_retains_legacy(self):
         old = self.node("2000002", terminal=True)
         live = self.node("2000001")
         self.repo.configure_pool("legacy", max_instances=1, max_physical_gpus=1)
@@ -369,15 +371,63 @@ class RegistrationCapacityTests(LedgerCase):
             usage["resources"],
             {
                 ("vast", "2000001"): 1,
-                ("vast", "2000002"): 1,
                 ("lium", "intent:" + legacy["id"]): 1,
             },
         )
-        self.assertEqual((usage["instances"], usage["physical_gpus"]), (3, 3))
+        self.assertEqual((usage["instances"], usage["physical_gpus"]), (2, 2))
+        with self.repo.engine.connect() as connection:
+            prelaunch = self.service.prelaunch_capacity_usage(connection)
+            self.assertEqual(prelaunch["resources"], usage["resources"])
+            self.assertEqual(
+                connection.execute(select(registered_devices.c.state)).scalar_one(),
+                "owned",
+            )
         self.assertEqual(
             next(row for row in self.snapshot()[0] if row["id"] == old)["state"],
             "destroying",
         )
+
+    def test_unrelated_device_and_conflicting_live_binding_are_not_excluded(self):
+        from dataclasses import replace
+
+        old = self.node("2000002", terminal=True)
+        live = self.node("2000001")
+        WorkerControl(self.repo).register(
+            replace(self.spec(old), worker_id="unrelated-worker")
+        )
+        self.assertIn(("vast", "2000002"), self.usage(live)["resources"])
+        # Even an exactly named old device cannot erase another included binding.
+        with self.repo.transaction() as connection:
+            connection.execute(update(registered_devices).values(state="released"))
+        WorkerControl(self.repo).register(self.spec(old))
+        conflicting = self.node("2000002", start_key="second-binding")
+        usage = self.usage(conflicting)
+        self.assertIn(("vast", "2000002"), usage["resources"])
+        self.assertEqual(usage["instances"], 2)
+
+    def test_absent_owned_device_keeps_counting_when_inventory_is_partial_or_stale(
+        self,
+    ):
+        old = self.node("2000002", terminal=True)
+        live = self.node("2000001")
+        WorkerControl(self.repo).register(self.spec(old))
+        for complete, observed_at in ((False, self.now), (True, self.now - 31)):
+            with self.subTest(complete=complete, observed_at=observed_at):
+                self.service.provider_inventory = Mock(
+                    return_value={
+                        "backend": "vastai",
+                        "complete": complete,
+                        "observed_at": observed_at,
+                        "instance_ids": [],
+                    }
+                )
+                usage = self.usage(live)
+                self.assertEqual(usage["instances"], 2)
+                with self.repo.engine.connect() as connection:
+                    self.assertEqual(
+                        self.service.prelaunch_capacity_usage(connection)["resources"],
+                        usage["resources"],
+                    )
 
     def test_partial_wrong_stale_present_or_failed_account_reads_cannot_free_capacity(
         self,

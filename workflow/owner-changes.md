@@ -382,8 +382,9 @@ same-day production activation; the read-only classification is not a gate.
 Widen ordinary queue, per-owner request and transient-admission retry limits by a
 large margin, retaining protection against extreme anomalies. This does not waive
 authentication, ownership, CAS, idempotency, immutable accepted work or the separate
-USD20 test-task budget. Never stop, restart or modify supervan's production machines
-or jobs. Production charging and LIVE Checkout remain OFF.
+USD20 test-task budget. The prohibition on operating supervan's production machines
+or jobs is superseded only for recoverable incident handling by CR-20261024-60 below.
+Production charging and LIVE Checkout remain OFF.
 
 Per [#517/6380346694](https://github.com/inkseq/h3-studio/issues/517#issuecomment-6380346694),
 B1's stock-pinned dstack0.22.3 to0.22.5 upgrade starts alongside A2. Stage it and run
@@ -391,6 +392,160 @@ one Vast cold cycle as the regression check, then qualify RunPod, Lium and Cloud
 on staging under USD20 per item. Each test rental retains max_price, idle stop,
 maximum runtime and stop-at-completion. Reuse existing protected provider profiles;
 missing/new credentials, provider accounts or budget overruns still require owner
-action. Production enablement of each new provider remains a separate decision.
+action. Production enablement of each new provider is now governed by CR61 below.
 Keep Tier2 independent safety review and exact-artifact receipts; no new service,
 queue or financial repair is implied. Source: direct owner instruction2026-10-24.
+
+## CR-20261024-60 — recoverable abnormal-machine stops and upgrade priority
+
+The owner first authorized stopping the stuck node `1c2db2ac` / Vast instance
+`57459470`, confirming provider removal without waiting indefinitely for the
+unreachable worker to drain, and failing the original job `9ef33766` through normal
+reconciliation without automatic retry; supervan will resubmit. Keep queued job
+`569a6d94`. Source: [#193/6381680638](https://github.com/inkseq/h3-studio/issues/193#issuecomment-6381680638).
+
+The owner's subsequent direct instruction authorizes stopping abnormal machines,
+including production machines, without a separate per-stop question, provided
+accepted tasks and queued work remain recoverable. This narrowly supersedes CR59's
+blanket production-machine prohibition, including for supervan's machines; it does
+not authorize discarding accepted work. Give upgrades priority when production is
+recoverable, without adding another approval or process gate.
+
+The latest owner follow-up reports that the machine was manually stopped and asks
+to return to development. Do not issue a duplicate incident command or make further
+incident diagnosis an unnecessary prerequisite for development and upgrades;
+preserve the durable queue/task recovery state and original receipts.
+
+Preserve original jobs, attempts, operation IDs, recoverable queue/task state and
+R2 assets. Check uncertain lifecycle or generation results against their original
+receipts before further action; never blindly replay generation, rentals, stops,
+settlements or releases. Retain confirmed spend and unknown supplier liabilities
+separately. Charging and LIVE Checkout stay OFF; cost caps, the USD20 test-task
+budget, max_price, idle/max-runtime safeguards and existing release/rollback
+mechanisms remain unchanged. Source: direct owner instructions2026-10-24 and the
+linked #193 decision; incident results remain in the original issue receipts.
+
+## CR-20261025-62 — same-job timeout recovery and production incident priority
+
+The owner directly prioritizes recovery of supervan's stuck production work over
+B2. Recover the original jobs `9ef33766`, `987615fa` and `438a9f31` by fencing
+their lost attempts and re-queuing the same jobs immediately, retaining original
+queue age, accepted inputs and holds. This supersedes CR60's earlier fail/resubmit
+wording. Removal proof is required only to reconcile supplier billing; it must not
+delay the fenced replacement attempt. Never invent a supplier invoice or replay
+an operation with an unknown result.
+
+Adopt the Small timeout rule: no engine progress for10minutes, or runtime greater
+than max(2×expected,30minutes), marks the attempt lost, fences late results,
+re-queues the same job and stops its owned node. Keep the hold for one delivered
+capture. Permit at most2 automatic reclaims, then fail with an explicit exhausted
+reason. Replace a node that is not ready within20minutes. These timeouts are
+settings; report every reclaim through the existing Grafana event and a sanitized
+Sentry message, and retain the host-failure scorecard and blocklist.
+
+Honor a later explicit user cancellation instead of resurrecting that job.
+Use the same resource projection and limit predicate for demand admission and
+worker registration; reconcile stale capacity against fresh complete provider
+evidence in the existing controller cadence. Alert on a matching paid idle node
+with no dispatch for10minutes, queue age over30minutes, or2 zero-service
+start/stop cycles within1hour. Diagnose capacity/configuration faults without
+renting a replacement; stop and replace only a proven node fault with fenced work.
+The repeated zero-service loop pauses the existing demand switch and alerts.
+No new timer, service or task store follows from this decision.
+
+The urgent follow-up authorizes releasing the original removed workers' stale
+capacity and admitting the already-paid ready node `f7c407c7` / Vast57521189.
+Promote/adopt accepted A1 limits if the legacy cap still prevents registration:
+fleet USD15/hour, maximum10machines, REF USD3/hour, USD100/day unchanged.
+Demand start must check the effective registration limit before spending on a
+node. Preserve recoverable work, rollback, max_price and idle stop; charging and
+LIVE Checkout remain OFF. No new credential, provider account or budget is
+authorized. Sources: direct owner2026-10-25 and
+[#193/6384745467](https://github.com/inkseq/h3-studio/issues/193#issuecomment-6384745467),
+[#193/6385240655](https://github.com/inkseq/h3-studio/issues/193#issuecomment-6385240655),
+[#193/6385265680](https://github.com/inkseq/h3-studio/issues/193#issuecomment-6385265680).
+
+## CR-20261024-61 — conditional production enablement of qualified providers
+
+Owner preauthorizes production enablement of RunPod, Lium and CloudRift per
+[#517/6383431565](https://github.com/inkseq/h3-studio/issues/517#issuecomment-6383431565).
+This supersedes CR59's separate production decision requirement for these three
+providers; no further owner decision is needed for each provider once its
+conditions below are met.
+
+Each provider must first pass one staging cold start, generation, R2 delivery,
+idle stop and removal proof. Record measured time-to-ready and USD cost in
+[#130](https://github.com/inkseq/h3-studio/issues/130), then obtain Claude's
+`needs-claude-acceptance` to `accepted` sign-off for that provider. Enable accepted
+providers in production with the next normal promotion, retaining exact accepted
+artifacts, original receipts and rollback. This authorization is not evidence
+that any provider has already passed or been enabled.
+
+Preserve max_price, per-machine and fleet caps, the USD100/day ceiling, idle stop,
+the host blocklist and B4 price-ordered selection with fallback on `no capacity`.
+Unknown create or generation outcomes still require original-receipt reconciliation,
+never a duplicate operation or an inferred no-allocation result. Staging remains
+limited to USD20 per change/acceptance task with the existing maximum-runtime and
+stop-at-completion safeguards. Reuse existing protected profiles; this decision
+does not authorize new credentials/provider accounts or a budget increase.
+
+A provider that fails qualification stays OFF and is reported with its blocker;
+it does not block independently qualified and accepted providers. Charging and
+LIVE Checkout remain governed by their separate owner decisions.
+
+## CR-20261025-63 — Claude takes over Codex's lane; production diagnosis and alerts
+
+Owner, 2026-10-25 (chat): Codex is out of tokens, so Claude takes over its open
+work: release helpers, staging/production promotion paperwork, and backend fixes.
+Claude may run read-only diagnosis on the production host (SSM/SSH reads, no
+writes) when the owner asks for a root cause. The REF "runtime unconfirmed" root
+cause and the split of the fix are in
+[#193/6386153093](https://github.com/inkseq/h3-studio/issues/193#issuecomment-6386153093).
+
+The production operator alert topic `sixnine-production-operator-alerts` had no
+subscriber, so alerts such as `job_stuck` reached no one. On the owner's
+explicit "订阅" (subscribe), Claude subscribed the owner's existing staging-alert
+email; the owner confirmed it the same day. No other alert, threshold or
+destination changed.
+
+Owner product directions, same day: the story list collapses to an icon rail when
+dragged narrow; item menus are plain rows; an open tab offers "Refresh" when a
+newer build is served. Production promotion still requires Claude's staging
+acceptance of the exact candidate; charging and LIVE Checkout stay OFF.
+
+## CR-20261025-64 — long shots with live engine progress are not reclaimed at 2× expected
+
+Production evidence, 2026-10-25: job bbee9b98 is a 15 s 1344×768 REF take (362 frames).
+It ran past 60 min at full GPU with fresh engine heartbeats, and attempt 12 was
+stopped by the runtime bound while it was still generating. Claude, as the
+current owner of the flow, refines CR-62's timeout rule:
+- silence (no positive engine heartbeat for 10 min) is still reclaimed at once;
+- without a fresh heartbeat, the original `max(2 × expected, 30 min)` bound applies;
+- with a fresh heartbeat, a run may continue up to a hard 3 h ceiling.
+
+The reclaim limits (max 2 automatic reclaims, fenced old attempts, charge once)
+are unchanged.
+
+## CR-20261025-65 — TaoMate 5 steps is the only user-facing H3 sampler
+
+Owner, 2026-10-25 (taomate H3 session): "taomate 5步以后作为我们的default选择 模型直接都用这个", then
+"以后只用taomate". Evidence on Lium RTX 5090 (WanGP 0e58385, pruned rank8 INT8): FL 480P across four
+prompts and a 15 s 768P long shot (single window + TaoMate 5 steps: 8.6 min vs 42.5 min for 20 steps).
+- New immutable profile `h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7` = controls-v6 plus one pinned
+  LoRA (`loras/minimax_h3_taomate_3step_lora_avg_rank_19_bf16.safetensors`, 181697688 bytes, sha256
+  de9663d9…ab6a7) at multiplier 1.0, guidance 1, steps fixed at 5. No other turbo LoRA is added.
+- The plain 20-step profiles stay in the catalog for internal debug/fallback only; users are not offered them.
+- Step skipping stays `none` by default; 5 s windows stay optional for long shots.
+- Before production: staging GPU checks for REF2VA with TaoMate, 768P at 5 steps, and a 15 s long shot.
+
+## CR-20261026-66 — burned-in subtitles are advisory, never an automatic re-roll
+
+Owner, 2026-10-26, #575 comment6398437828 and #580 C2: detect subtitles and tell
+the customer; let them keep, regenerate or trim the take. This supersedes #575's
+original automatic-re-roll proposal. CPU OCR runs on the GPU node after generation
+and before upload, sampling the bottom third and comparing with the original
+dialogue. Persist bounded take-level quality flags/confidence/timestamps; no raw
+OCR text in public evidence. An unavailable/failed check is explicit, not a clean
+bill of health. Detection never re-rents, re-generates, changes a seed, or changes
+charging. Optional Gemini verification remains OFF. Claude owns warning UI,
+staging acceptance, production promotion and the TaoMate production switch.

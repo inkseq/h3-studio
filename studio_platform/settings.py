@@ -124,6 +124,9 @@ class Settings:
     render_enabled: bool = False
     recovery_backends: tuple[str, ...] = ()
     generation_queue: str = "postgres"
+    capacity_no_progress_seconds: int = 600
+    capacity_runtime_floor_seconds: int = 1800
+    capacity_startup_timeout_seconds: int = 1200
     title_config_file: Path | None = None
     workos_config_file: Path | None = None
     stripe_config_file: Path | None = None
@@ -133,6 +136,8 @@ class Settings:
     # production). It reuses the title text credential; without one /quick-chat keeps the
     # original Quick Create. Pictures stay behind their own audited admin switch.
     story_chat_enabled: bool = False
+    # Chat turns per Agent/Telegram connection per 24 h (#531); bounds model cost.
+    story_chat_connection_daily_turns: int = 200
     public_origin_aliases: tuple[str, ...] = ()
     account_deletion_test_owners: tuple[str, ...] = ()
     sentry_dsn: str = ""
@@ -142,6 +147,15 @@ class Settings:
 
     def __post_init__(self):
         from .error_monitoring import valid_dsn
+
+        for name in (
+            "capacity_no_progress_seconds",
+            "capacity_runtime_floor_seconds",
+            "capacity_startup_timeout_seconds",
+        ):
+            value = getattr(self, name)
+            if type(value) is not int or not 1 <= value <= 86400:
+                raise ValueError("Invalid capacity timeout setting")
 
         if (
             not isinstance(self.account_deletion_test_owners, tuple)
@@ -417,6 +431,15 @@ class Settings:
             generation_enabled=os.environ.get("SIXNINE_GENERATION_ENABLED", "0") == "1",
             execution_backend=os.environ.get("SIXNINE_EXECUTION_BACKEND", "disabled"),
             generation_queue=os.environ.get("INKSEQ_GENERATION_QUEUE", "postgres"),
+            capacity_no_progress_seconds=int(
+                os.environ.get("INKSEQ_CAPACITY_NO_PROGRESS_SECONDS", "600")
+            ),
+            capacity_runtime_floor_seconds=int(
+                os.environ.get("INKSEQ_CAPACITY_RUNTIME_FLOOR_SECONDS", "1800")
+            ),
+            capacity_startup_timeout_seconds=int(
+                os.environ.get("INKSEQ_CAPACITY_STARTUP_TIMEOUT_SECONDS", "1200")
+            ),
             storage_provider=os.environ.get("SIXNINE_STORAGE_PROVIDER", "local"),
             storage_bucket=os.environ.get("SIXNINE_STORAGE_BUCKET", ""),
             storage_profile=os.environ.get("SIXNINE_STORAGE_PROFILE", ""),

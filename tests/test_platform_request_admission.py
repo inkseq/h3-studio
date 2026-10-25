@@ -3,6 +3,7 @@
 import asyncio
 import secrets
 import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -341,6 +342,34 @@ class RequestApiAdmissionTests(unittest.TestCase):
                 )
 
         with patch.object(self.app.state.repository, "get_document", side_effect=held):
+            asyncio.run(scenario())
+        self.assertFalse(self.app.state.request_admission.counts)
+
+    def test_authentication_gate_waits_briefly_for_a_free_slot(self):
+        self.setup_project()
+        headers = self.machine("auth-wait")
+        self.app.state.request_admission.limits["authentication"] = 1
+        entered = threading.Event()
+        original = self.app.state.auth.bearer
+
+        def held(token):
+            if not entered.is_set():
+                entered.set()
+                time.sleep(0.3)
+            return original(token)
+
+        async def scenario():
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=self.app),
+                base_url="http://testserver",
+            ) as client:
+                first = asyncio.create_task(client.get("/v1/projects", headers=headers))
+                self.assertTrue(await asyncio.to_thread(entered.wait, 3))
+                second = await client.get("/v1/projects", headers=headers)
+                self.assertEqual(second.status_code, 200)
+                self.assertEqual((await first).status_code, 200)
+
+        with patch.object(self.app.state.auth, "bearer", side_effect=held):
             asyncio.run(scenario())
         self.assertFalse(self.app.state.request_admission.counts)
 

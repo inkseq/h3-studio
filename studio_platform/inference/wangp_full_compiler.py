@@ -33,12 +33,69 @@ FIXED = {
 }
 
 
+STEP_SKIPPING = ('none', 'spectrum', 'first_block')
+WHOLE_WINDOW = 362
+
+
+# H3 at guidance 1 ignores negative prompts. TaoMate tests (rounds 9-10) burned
+# dialogue in as subtitles on variety-show-like scenes; framing the shot as film
+# and asking for a clean frame cut that from 3/3 to 1/3. Single newlines only: a
+# blank line would start a new prompt under WanGP's PG/PW prompt modes.
+FILM_FRAME = 'A cinematic film shot, 35mm movie look, shallow depth of field. '
+CLEAN_FRAME = ' Clean frame: no subtitles, captions or any on-screen text.'
+_DESCRIPTION = 'integrated_multimodal_description:'
+_SOUNDSCAPE = '\noverall_soundscape:'
+
+
+def _description_start(prompt):
+    at = prompt.find(_DESCRIPTION)
+    if at < 0:
+        return 0
+    at += len(_DESCRIPTION)
+    while at < len(prompt) and prompt[at] in ' \n':
+        at += 1
+    return at
+
+
+def turbo_prompt(prompt):
+    """Wrap the author's prompt: film framing first, clean-frame request last."""
+    start = _description_start(prompt)
+    framed = prompt[:start] + FILM_FRAME + prompt[start:]
+    end = framed.find(_SOUNDSCAPE, start)
+    end = len(framed) if end < 0 else end
+    return framed[:end] + CLEAN_FRAME + framed[end:]
+
+
+def acceleration(profile_id):
+    """A profile's pinned turbo LoRA binding, or None for the plain sampler."""
+    value = get_profile(profile_id).get('acceleration')
+    if value is None:
+        return None
+    component = get_profile(profile_id)['components'][value['component']]
+    return {**value, 'path': component['files'][0]['path']}
+
+
+def window_frames(seconds):
+    """Nearest H3 window on the native 17k+5 grid, 124..362 frames."""
+    frames = 17 * round((seconds * 24 - 5) / 17) + 5
+    return max(124, min(WHOLE_WINDOW, frames))
+
+
 def control_schema(profile_id, mode):
     model_for(profile_id, mode)
     schema = legacy_schema()
+    turbo = acceleration(profile_id)
     schema.update(
         {
-            'steps': {'type': 'integer', 'default': 20, 'minimum': 1, 'maximum': 100},
+            # A turbo profile's LoRA is distilled for one step count; users get it fixed.
+            'steps': {'type': 'integer', 'default': 20, 'minimum': 1, 'maximum': 100}
+            if turbo is None
+            else {
+                'type': 'integer',
+                'default': turbo['steps'],
+                'minimum': turbo['steps'],
+                'maximum': turbo['steps'],
+            },
             'sampler_name': {'type': 'string', 'default': 'euler', 'enum': SAMPLERS[:]},
             'denoise': {'type': 'number', 'default': 1, 'minimum': 0.01, 'maximum': 1},
             'shift_video': {
@@ -77,6 +134,21 @@ def control_schema(profile_id, mode):
                 'type': 'string',
                 'default': 'none',
                 'enum': ['none', 'enabled'],
+            },
+            # Long-shot speed (h3-studio#555): attention grows with the square of the
+            # window, so a 15 s shot in one 362-frame window is ~3x slower than in
+            # 5 s windows. Omitted = the whole shot in one window, as before.
+            'window_seconds': {
+                'type': 'integer',
+                'minimum': 5,
+                'maximum': 15,
+                'description': 'Generate in H3 sliding windows of about this many seconds (0.75 s overlap). Omit for one window.',
+            },
+            'step_skipping': {
+                'type': 'string',
+                'default': 'none',
+                'enum': list(STEP_SKIPPING),
+                'description': 'H3 steps skipping: Spectrum feature forecasting or First Block Cache (threshold 0.08).',
             },
             'mask_mode': {
                 'type': 'string',
@@ -252,9 +324,26 @@ def _normalize(
         if actual != expected or isinstance(actual, bool) != isinstance(expected, bool):
             raise ValueError('wangp_unsupported_' + key)
         value[key] = expected
+    turbo = acceleration(profile_id)
+    low, high = (1, 100) if turbo is None else (turbo['steps'], turbo['steps'])
     value['steps'] = _bound(
-        value.get('steps', 20), 1, 100, 'wangp_invalid_steps', integer=True
+        value.get('steps', 20 if turbo is None else turbo['steps']),
+        low,
+        high,
+        'wangp_invalid_steps',
+        integer=True,
     )
+    value['step_skipping'] = _enum(
+        value.get('step_skipping', 'none'),
+        STEP_SKIPPING,
+        'wangp_unsupported_step_skipping',
+    )
+    if value.get('window_seconds') is None:
+        value.pop('window_seconds', None)
+    else:
+        value['window_seconds'] = _bound(
+            value['window_seconds'], 5, 15, 'wangp_invalid_window_seconds', integer=True
+        )
     value['sampler_name'] = _enum(
         value.get('sampler_name', 'euler'), SAMPLERS, 'wangp_unsupported_sampler_name'
     )
@@ -724,7 +813,9 @@ def _settings(value, output_spec, handles, profile_id):
         'model_type': model_for(profile_id, mode)['model_type'],
         'config': runtime['task_config'],
         'image_mode': 0,
-        'prompt': value['prompt'],
+        'prompt': value['prompt']
+        if acceleration(profile_id) is None
+        else turbo_prompt(value['prompt']),
         'negative_prompt': '',
         'alt_prompt': '',
         'resolution': f"{output_spec['width']}x{output_spec['height']}",
@@ -756,12 +847,16 @@ def _settings(value, output_spec, handles, profile_id):
         'multi_images_gen_type': 0,
         'prompt_enhancer': '',
         'activated_loras': [],
-        'skip_steps_cache_type': '',
+        'skip_steps_cache_type': ''
+        if value['step_skipping'] == 'none'
+        else value['step_skipping'],
         'override_attention': 'sdpa',
         'override_profile': runtime['memory_profile'],
         'guidance2_scale': 1.0,
         'guidance3_scale': 1.0,
-        'sliding_window_size': 362,
+        'sliding_window_size': window_frames(value['window_seconds'])
+        if 'window_seconds' in value
+        else WHOLE_WINDOW,
         'sliding_window_overlap': 18,
         'sliding_window_discard_last_frames': 0,
         'sliding_window_trim_first_frames': 0,
@@ -780,6 +875,21 @@ def _settings(value, output_spec, handles, profile_id):
             'return_side_files': False,
         },
     }
+    turbo = acceleration(profile_id)
+    if turbo is not None:
+        # Model-root relative and manifest-pinned; only the GPU host maps it to
+        # its verified local file (upstream accepts an absolute LoRA path).
+        settings['activated_loras'] = [turbo['path']]
+        settings['loras_multipliers'] = turbo['lora_multiplier']
+        settings['guidance_scale'] = turbo['guidance_scale']
+    if value['step_skipping'] == 'first_block':
+        # The handler accepts only its listed thresholds; 0.08 is the upstream balanced one.
+        settings['skip_steps_multiplier'] = 0.08
+    if value['step_skipping'] != 'none':
+        settings['skip_steps_start_step_perc'] = 25
+    if injections and 'window_seconds' in value:
+        # Injected frame positions are per window upstream; whole-shot times would shift.
+        raise ValueError('wangp_window_with_injected_frames_unsupported')
     # Native documented first frame is position1 (handler REF2VA_DEEPY_INFOS).
     if injections:
         settings['frames_positions'] = ' '.join(
@@ -903,6 +1013,27 @@ def _parse_positions(text):
     return result
 
 
+def _authored_prompt(prompt, profile_id):
+    """Recover the author's prompt; a turbo profile must carry its suffix."""
+    if acceleration(profile_id) is None:
+        return prompt
+    if not isinstance(prompt, str):
+        raise ValueError('wangp_profile_settings_mismatch')
+    start = _description_start(prompt)
+    if prompt[start : start + len(FILM_FRAME)] != FILM_FRAME:
+        raise ValueError('wangp_profile_settings_mismatch')
+    authored = prompt[:start] + prompt[start + len(FILM_FRAME) :]
+    end = authored.find(_SOUNDSCAPE, start)
+    end = len(authored) if end < 0 else end
+    if authored[end - len(CLEAN_FRAME) : end] != CLEAN_FRAME:
+        raise ValueError('wangp_profile_settings_mismatch')
+    authored = authored[: end - len(CLEAN_FRAME)] + authored[end:]
+    # Only an exact round trip proves these are the compiler's own additions.
+    if turbo_prompt(authored) != prompt:
+        raise ValueError('wangp_profile_settings_mismatch')
+    return authored
+
+
 def prepared_request(prepared, manifest):
     """Recover the typed template; the host still probes actual staged bytes.
 
@@ -1019,7 +1150,7 @@ def prepared_request(prepared, manifest):
     request = {
         'model': profile['model_id'],
         'mode': doc['mode'],
-        'prompt': settings.get('prompt'),
+        'prompt': _authored_prompt(settings.get('prompt'), profile['id']),
         **canvas,
         'seed': settings.get('seed'),
         'steps': settings.get('num_inference_steps'),
@@ -1034,6 +1165,7 @@ def prepared_request(prepared, manifest):
         'generate_audio': prepared.generate_audio,
         'image_refs_relative_size': settings.get('image_refs_relative_size'),
         'audio_refinement': custom.get('audio_refinement'),
+        'step_skipping': settings.get('skip_steps_cache_type') or 'none',
         'mask_mode': custom.get('h3_mask_mode'),
         'video_excerpts': _parse_positions(custom['h3_video_excerpt_positions'])
         if 'h3_video_excerpt_positions' in custom
@@ -1042,6 +1174,12 @@ def prepared_request(prepared, manifest):
         if 'h3_audio_excerpt_positions' in custom
         else [],
     }
+    window = settings.get('sliding_window_size')
+    if window != WHOLE_WINDOW:
+        seconds = round(window / 24) if type(window) is int else None
+        if seconds is None or window_frames(seconds) != window:
+            raise ValueError('wangp_invalid_window_seconds')
+        request['window_seconds'] = seconds
     return profile, request, metadata, handles, output
 
 

@@ -143,3 +143,10 @@
   border-color: transparent;
   color: inherit;
 }
+
+/* Read-only admin support view of one user's account (support-view.js). */
+.preview-as-user-bar.support-view-bar {
+  border-bottom-color: color-mix(in srgb, var(--bad) 60%, transparent);
+  background: var(--bad-soft);
+  color: var(--bad);
+}

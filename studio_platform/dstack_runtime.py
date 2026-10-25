@@ -189,6 +189,16 @@ class RuntimeHost(Protocol):
     def close(self) -> None: ...
 
 
+def _step(code, call, *args):
+    """Name the readiness step that failed (#193); the old catch-all hid it."""
+    try:
+        return call(*args)
+    except (DstackError, OperatorError):
+        raise
+    except Exception:
+        raise DstackError(code) from None
+
+
 class DstackSSHHost(WanGPSSHHost):
     def _capture_system_observation(self):
         # The legacy inventory hook validates Lium/Targon instance-ID formats.
@@ -627,7 +637,13 @@ class DstackNativeRuntime:
                     raise progress_error(
                         phases.get(report.get("phase"), "dstack_runtime_preparing")
                     )
-                validate_report(config, report, manifest)
+                _step(
+                    "dstack_runtime_report_invalid",
+                    validate_report,
+                    config,
+                    report,
+                    manifest,
+                )
                 gpu = report["gpus"][0]["uuid"]
                 _require(GPU_UUID.fullmatch(gpu), "dstack_runtime_physical_gpu_invalid")
                 _require(
@@ -635,13 +651,26 @@ class DstackNativeRuntime:
                     or state["physical_gpu_uuid"] == gpu,
                     "dstack_runtime_physical_gpu_changed",
                 )
-                host.open_tunnel(config.local_port)
-                transport = self.transport_factory(
+                try:
+                    host.open_tunnel(config.local_port)
+                except BootError as error:
+                    raise DstackError(
+                        "dstack_runtime_tunnel_port_in_use"
+                        if error.args == ("bootstrap_tunnel_port_already_in_use",)
+                        else "dstack_runtime_tunnel_failed"
+                    ) from None
+                except Exception:
+                    raise DstackError("dstack_runtime_tunnel_failed") from None
+                transport = _step(
+                    "dstack_runtime_readiness_unreachable",
+                    self.transport_factory,
                     f"http://127.0.0.1:{config.local_port}",
                     private_token_file(directory / "wangp-token"),
                 )
                 try:
-                    native = transport.readiness()
+                    native = _step(
+                        "dstack_runtime_readiness_unreachable", transport.readiness
+                    )
                 finally:
                     transport.close()
                 _require(
@@ -661,8 +690,15 @@ class DstackNativeRuntime:
                         not prior or native.incarnation == prior,
                         "dstack_runtime_incarnation_changed",
                     )
-                _write_immutable(directory / "wangp-manifest.json", manifest)
-                _write_immutable(
+                _step(
+                    "dstack_runtime_client_config_changed",
+                    _write_immutable,
+                    directory / "wangp-manifest.json",
+                    manifest,
+                )
+                _step(
+                    "dstack_runtime_client_config_changed",
+                    _write_immutable,
                     directory / "wangp-client.json",
                     {
                         "version": 1,
@@ -700,7 +736,12 @@ class DstackNativeRuntime:
                 )
                 # Exercise the original manifest/compiler/factory contract;
                 # the parent owns the real WorkerRunner and its transport.
-                backend = self.backend_factory(slot, directory)
+                backend = _step(
+                    "dstack_runtime_slot_register_failed",
+                    self.backend_factory,
+                    slot,
+                    directory,
+                )
                 backend.close()
                 state.update(
                     phase="runtime_ready",

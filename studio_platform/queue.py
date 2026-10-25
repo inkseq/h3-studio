@@ -18,6 +18,8 @@ from sqlalchemy import func, insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
+from .capacity_reclaim import retained_fields, aggregate_cost
+
 from .repository import (
     Conflict,
     InvalidTransition,
@@ -52,6 +54,12 @@ class Claim:
 class TaskQueue:
     def __init__(self, repository):
         self.repository = repository
+
+    def reclaim_capacity(self, scope, job_id, **kwargs):
+        """Trusted explicit lost-attempt recovery; no provider or billing effects."""
+        from .capacity_reclaim import reclaim
+
+        return reclaim(self, scope, job_id, **kwargs)
 
     def _scheduler_lock(self, connection, pool):
         table_insert = (
@@ -361,7 +369,7 @@ class TaskQueue:
         )
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
-    def _leased(self, connection, lease):
+    def _leased(self, connection, lease, *, late_result=False):
         job = self.repository._job(connection, lease.job_id, lock=True)
         if job["status"] == "recovery_hold":
             raise LeaseLost("recovery_hold_requires_operator_review")
@@ -372,6 +380,24 @@ class TaskQueue:
             or job["lease_expires_at"] is None
             or job["lease_expires_at"] <= self.repository.clock()
         ):
+            if late_result:
+                from .capacity_reclaim import authorized_lost_attempt, logger
+
+                previous = (
+                    connection.execute(
+                        select(attempts).where(
+                            attempts.c.id == lease.attempt_id,
+                            attempts.c.job_id == lease.job_id,
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+                if previous is not None and authorized_lost_attempt(job, previous):
+                    logger.warning(
+                        "capacity_late_result_discarded",
+                        extra={"job_id": lease.job_id, "attempt_id": lease.attempt_id},
+                    )
             raise LeaseLost("lease_lost")
         return job
 
@@ -727,9 +753,20 @@ class TaskQueue:
                 "duration_s",
                 "fps",
                 "has_audio",
+                "quality_flags",
+                "quality_checks",
             } | NATIVE_EVIDENCE_FIELDS
             if set(spec) - allowed_keys:
                 raise ValueError("artifact_metadata_not_allowed")
+            if {'quality_flags', 'quality_checks'}.intersection(spec):
+                from .subtitle_quality import validate_quality
+
+                if spec.get('kind') != 'video':
+                    raise ValueError('subtitle_quality_invalid')
+                validate_quality(
+                    {k: spec.get(k) for k in ('quality_flags', 'quality_checks')},
+                    spec.get('duration_s'),
+                )
             identifier(spec.get("kind"))
             key = spec.get("object_key", "")
             digest = spec.get("sha256", "")
@@ -768,7 +805,7 @@ class TaskQueue:
 
             owner = repo._job(connection, lease.job_id)
             owner_reference_gate(connection, owner["tenant_id"], owner["owner_id"])
-            job = self._leased(connection, lease)
+            job = self._leased(connection, lease, late_result=True)
             if job["status"] != "collecting" and not (
                 job["status"] == "cancel_requested"
                 and job["cancel_from_status"] == "collecting"
@@ -805,18 +842,20 @@ class TaskQueue:
                         created_at=repo.clock(),
                     )
                 )
+            total_cost = aggregate_cost(connection, job, lease.attempt_id, cost)
             result = {
+                **retained_fields(job),
                 "artifact_ids": artifact_ids,
-                "actual_cost_microusd": cost,
-                "billing_status": "pending" if cost is None else "settled",
+                "actual_cost_microusd": total_cost,
+                "billing_status": "pending" if total_cost is None else "settled",
                 "completed_after_cancel_request": job["status"] == "cancel_requested",
             }
             if moderation is not None:
                 result["moderation"] = moderation
             status = "failed" if refused else "succeeded"
             error_code = "content_moderation_refused" if refused else None
-            if cost is not None:
-                repo._settle(connection, "job", lease.job_id, cost)
+            if total_cost is not None:
+                repo._settle(connection, "job", lease.job_id, total_cost)
             connection.execute(
                 update(jobs)
                 .where(jobs.c.id == lease.job_id)
@@ -841,7 +880,7 @@ class TaskQueue:
                     updated_at=repo.clock(),
                 )
             )
-            if cost is None:
+            if total_cost is None:
                 from .settlement_recovery import release_terminal_job
 
                 release_terminal_job(repo, connection, lease.job_id)
@@ -884,16 +923,20 @@ class TaskQueue:
                 raise Conflict("upstream_still_uncertain")
             if job["status"] == "claimed" and cost != 0:
                 raise Conflict("unsubmitted_job_has_cost")
-            if cost is not None:
-                repo._settle(connection, "job", lease.job_id, cost)
+            total_cost = aggregate_cost(connection, job, lease.attempt_id, cost)
+            if total_cost is not None:
+                repo._settle(connection, "job", lease.job_id, total_cost)
             connection.execute(
                 update(jobs)
                 .where(jobs.c.id == lease.job_id)
                 .values(
                     status="failed",
                     result={
-                        "actual_cost_microusd": cost,
-                        "billing_status": "pending" if cost is None else "settled",
+                        **retained_fields(job),
+                        "actual_cost_microusd": total_cost,
+                        "billing_status": "pending"
+                        if total_cost is None
+                        else "settled",
                     },
                     error_code=error_code,
                     fence=job["fence"] + 1,
@@ -913,7 +956,7 @@ class TaskQueue:
                     updated_at=repo.clock(),
                 )
             )
-            if cost is None:
+            if total_cost is None:
                 from .settlement_recovery import release_terminal_job
 
                 release_terminal_job(repo, connection, lease.job_id)
@@ -939,16 +982,20 @@ class TaskQueue:
             job = self._leased(connection, lease)
             if job["status"] != "cancel_requested":
                 raise InvalidTransition("cancel_not_requested")
-            if cost is not None:
-                repo._settle(connection, "job", lease.job_id, cost)
+            total_cost = aggregate_cost(connection, job, lease.attempt_id, cost)
+            if total_cost is not None:
+                repo._settle(connection, "job", lease.job_id, total_cost)
             connection.execute(
                 update(jobs)
                 .where(jobs.c.id == lease.job_id)
                 .values(
                     status="cancelled",
                     result={
-                        "actual_cost_microusd": cost,
-                        "billing_status": "pending" if cost is None else "settled",
+                        **retained_fields(job),
+                        "actual_cost_microusd": total_cost,
+                        "billing_status": "pending"
+                        if total_cost is None
+                        else "settled",
                     },
                     fence=job["fence"] + 1,
                     lease_worker_id=None,
@@ -966,7 +1013,7 @@ class TaskQueue:
                     updated_at=repo.clock(),
                 )
             )
-            if cost is None:
+            if total_cost is None:
                 from .settlement_recovery import release_terminal_job
 
                 release_terminal_job(repo, connection, lease.job_id)

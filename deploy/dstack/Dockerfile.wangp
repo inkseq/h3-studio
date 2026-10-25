@@ -19,6 +19,13 @@ RUN test "$(/venv/main/bin/python -c 'import platform; print(platform.python_ver
 # Only these public source files enter the image. Per-run manifest/config/private
 # listener token and source bundle are staged by the CPU controller after its
 # bootstrap intent commits. Model bytes reuse the verified cache when available.
+COPY deploy/wangp/requirements.ocr.txt /opt/sixnine/requirements.ocr.txt
+# Separate CPU OCR environment: do not change the immutable H3 profile's packages.
+# RapidOCR's wheel includes its small OCR models; no cold-boot resolver/download.
+RUN /venv/main/bin/python -m venv /opt/inkseq-ocr \
+    && /opt/inkseq-ocr/bin/python -m pip install --index-url https://pypi.org/simple --only-binary=:all: --require-hashes \
+       -r /opt/sixnine/requirements.ocr.txt \
+    && /opt/inkseq-ocr/bin/python -m pip check
 COPY deploy/wangp/bootstrap.py /opt/sixnine/wangp-bootstrap.py
 ENV PYTHONDONTWRITEBYTECODE=1 TOKENIZERS_PARALLELISM=false
 WORKDIR /workspace

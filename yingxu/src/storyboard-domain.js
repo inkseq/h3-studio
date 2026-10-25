@@ -1,3 +1,4 @@
+import { shotSegments } from './shot-segments.js';
 import { translate } from './i18n/locale.js';
 /* Layout A projection of the existing v4 document. No second project store. */
 import { children, ancestors } from './store.js';
@@ -214,6 +215,8 @@ export function storyboardView(
       seedLock: !!s.data.h3?.controls?.seed,
       versions,
       chosen: s.data.selectedAssetId || '',
+      // Kept parts of the chosen take, in playback order (#512); empty = the whole take.
+      segments: shotSegments(s.data.videoSegments),
       chapterId: find(project, s.parentId)?.parentId || null,
       entity: s,
     };

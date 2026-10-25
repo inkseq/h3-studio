@@ -44,6 +44,9 @@ STAGES = frozenset(
     }
 )
 OUTCOMES = frozenset({"success", "failure", "unknown", "cancelled"})
+# Background export only. A 1 s cap failed every production metrics batch
+# (Grafana Cloud au-southeast-1 answers in ~1.2 s from the CPU host, #193).
+EXPORT_SECONDS = 5
 PROVIDERS = frozenset({"vast", "runpod", "lium", "targon", "local", "unknown"})
 GPU_TYPES = frozenset(
     {"rtx5090", "rtx-pro6000", "h100", "h200", "b200", "b300", "unknown"}
@@ -70,6 +73,15 @@ ERROR_CODES = (
             "submission_rejected",
             "submission_needs_reconciliation",
             "upstream_status_unknown",
+            "capacity_no_progress",
+            "capacity_runtime_exceeded",
+            "capacity_owner_recovery",
+            "capacity_startup_timeout",
+            "capacity_provider_removed",
+            "capacity_dispatch_unavailable",
+            "capacity_paid_idle_queue",
+            "capacity_queue_age",
+            "capacity_demand_start_loop",
             "worker_preparation_not_ready",
             "worker_preparation_failed",
             "worker_reconciliation_needed",
@@ -97,7 +109,58 @@ ERROR_CODES = (
         }
     )
 )
-_LABEL_FIELDS = ("stage", "provider", "profile_id", "mode", "gpu_type", "warmth")
+_LABEL_FIELDS = (
+    "stage",
+    "provider",
+    "profile_id",
+    "mode",
+    "gpu_type",
+    "warmth",
+    "length",
+    "resolution",
+    "image_refs_band",
+    "audio_ref",
+)
+# Content bands label only the stages whose time depends on the video itself; other
+# stages read "any" so the metric series stay few (owner, 2026-10-25).
+_CONTENT_STAGES = frozenset({"generate", "end_to_end", "collect", "validate_output"})
+_CONTENT_FIELDS = ("length", "resolution", "image_refs_band", "audio_ref")
+
+
+def _bands(result):
+    frames, fps, height = result.get("frames"), result.get("fps"), result.get("height")
+    seconds = frames / fps if frames and fps else None
+    images, audios = result.get("image_refs"), result.get("audio_refs")
+    return {
+        "length": "unknown"
+        if seconds is None
+        else "le5s"
+        if seconds <= 5.5
+        else "5-8s"
+        if seconds <= 8.5
+        else "8-12s"
+        if seconds <= 12.5
+        else "gt12s",
+        "resolution": "unknown"
+        if not height
+        else "le480"
+        if height <= 480
+        else "le720"
+        if height <= 720
+        else "gt720",
+        "image_refs_band": "unknown"
+        if images is None
+        else "0"
+        if images == 0
+        else "1-2"
+        if images <= 2
+        else "3-5"
+        if images <= 5
+        else "6+",
+        "audio_ref": "unknown" if audios is None else "yes" if audios else "no",
+    }
+
+
 _UUID = re.compile(
     r"(?:[a-z]+-)?(?:[0-9a-f]{32}|[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})\Z"
 )
@@ -491,13 +554,19 @@ class StageTelemetry(NullTelemetry):
             pass
 
     def _labels(self, stage, context, outcome=None):
-        labels = {"stage": stage, **{name: context[name] for name in _LABEL_FIELDS[1:]}}
+        labels = {
+            "stage": stage,
+            **{name: context[name] for name in _LABEL_FIELDS[1:6]},
+        }
+        bands = _bands(context)
+        for name in _CONTENT_FIELDS:
+            labels[name] = bands[name] if stage in _CONTENT_STAGES else "any"
         if outcome is not None:
             labels["outcome"] = outcome
         identity = tuple(sorted(labels.items()))
         with self._lock:
             if identity not in self._labelsets:
-                if len(self._labelsets) >= 128:
+                if len(self._labelsets) >= 512:
                     return {name: "unknown" for name in labels}
                 self._labelsets.add(identity)
         return labels
@@ -702,7 +771,9 @@ def create_cloud_telemetry(config):
                     url,
                     headers=headers,
                     body=data,
-                    timeout=urllib3.Timeout(total=min(timeout or 1, 1)),
+                    timeout=urllib3.Timeout(
+                        total=min(timeout or EXPORT_SECONDS, EXPORT_SECONDS)
+                    ),
                     redirect=False,
                     retries=False,
                     preload_content=False,
@@ -730,7 +801,7 @@ def create_cloud_telemetry(config):
     base = config.endpoint.rstrip("/")
     options = {
         "headers": {"Authorization": config.authorization},
-        "timeout": 1,
+        "timeout": EXPORT_SECONDS,
         "max_request_size": 65536,
     }
 
@@ -752,7 +823,7 @@ def create_cloud_telemetry(config):
             max_queue_size=256,
             max_export_batch_size=32,
             schedule_delay_millis=250,
-            export_timeout_millis=1000,
+            export_timeout_millis=EXPORT_SECONDS * 1000,
         )
     )
     traces = TracerProvider(resource=resource, shutdown_on_exit=False)
@@ -764,7 +835,7 @@ def create_cloud_telemetry(config):
             max_queue_size=256,
             max_export_batch_size=32,
             schedule_delay_millis=250,
-            export_timeout_millis=1000,
+            export_timeout_millis=EXPORT_SECONDS * 1000,
         )
     )
     metrics = MeterProvider(
@@ -776,7 +847,7 @@ def create_cloud_telemetry(config):
                     endpoint=base + "/v1/metrics", _transport=SafeTransport(), **options
                 ),
                 export_interval_millis=30000,
-                export_timeout_millis=1000,
+                export_timeout_millis=EXPORT_SECONDS * 1000,
             )
         ],
         views=[

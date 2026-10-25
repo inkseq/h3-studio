@@ -286,46 +286,11 @@
   color: var(--accent);
   font-size: 11px;
 }
-.ops-adapter :is(.p4-dialog, .op-dialog),
-.ops-dialog {
-  background: var(--surface);
-  color: var(--ink);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-lg);
-  padding: 22px;
-  width: min(720px, 94vw);
-  max-height: 88dvh;
-  overflow: auto;
-}
-.ops-adapter :is(.p4-dialog, .op-dialog).wide {
-  width: min(1080px, 96vw);
-}
-.ops-adapter :is(.p4-dialog, .op-dialog)::backdrop,
-.ops-dialog::backdrop {
-  background: var(--bg);
-  opacity: 0.78;
-}
-.ops-adapter :is(.p4-dialog, .op-dialog) > header,
-.ops-adapter :is(.p4-dialog, .op-dialog) > footer,
-.ops-dialog .qc-dialog-head {
+.ops-adapter :is(.p4-dialog, .op-dialog) > footer {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-}
-.ops-adapter :is(.p4-dialog, .op-dialog) > header,
-.ops-dialog .qc-dialog-head {
-  margin-bottom: 18px;
-}
-.ops-adapter :is(.p4-dialog, .op-dialog) h2,
-.ops-dialog h2 {
-  margin: 0;
-  font-size: 19px;
-}
-.ops-adapter :is(.p4-dialog, .op-dialog) > header p {
-  margin: 5px 0 0;
-  color: var(--muted);
 }
 .ops-adapter :is(.p4-dialog, .op-dialog) > footer {
   margin-top: 20px;
@@ -608,20 +573,14 @@
   font-size: 11px;
   color: var(--muted);
 }
-.ops-adapter .p4-empty {
-  padding: 28px;
-  color: var(--muted);
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
-}
-.ops-adapter .p4-empty form {
+.ops-adapter .ui-empty form {
   display: flex;
   flex-direction: column;
   gap: 12px;
   max-width: 360px;
   margin: 16px auto;
 }
-.ops-adapter .p4-empty label {
+.ops-adapter .ui-empty label {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -790,12 +749,6 @@
   .ops-adapter .budget-accounts,
   .ops-adapter .p4-accountspend {
     grid-template-columns: 1fr;
-  }
-  .ops-adapter :is(.p4-dialog, .op-dialog),
-  .ops-dialog {
-    padding: 16px;
-    width: 94vw;
-    max-height: 86dvh;
   }
   .ops-adapter :is(.p4-dialog, .op-dialog) > footer {
     align-items: flex-start;
@@ -1000,81 +953,80 @@
   font-size: 12px;
 }
 
-.ops-adapter .spend-breakdown {
+.spend-breakdown {
   min-width: 0;
   font-size: 12px;
   line-height: 1.5;
 }
-.ops-adapter .spend-breakdown-heading {
+.spend-breakdown-heading {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
   gap: 4px 12px;
 }
-.ops-adapter .spend-breakdown-heading small {
+.spend-breakdown-heading small {
   font-size: 11px;
   color: var(--muted);
 }
-.ops-adapter .spend-breakdown-buckets {
+.spend-breakdown-buckets {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   margin: 12px 0;
 }
-.ops-adapter .spend-breakdown-buckets > div {
+.spend-breakdown-buckets > div {
   min-width: 0;
 }
-.ops-adapter .spend-breakdown dt {
+.spend-breakdown dt {
   color: var(--muted);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
-.ops-adapter .spend-breakdown dd {
+.spend-breakdown dd {
   margin: 3px 0 0;
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
   color: var(--ink);
 }
-.ops-adapter .spend-breakdown-buckets dd {
+.spend-breakdown-buckets dd {
   font-size: 20px;
   font-weight: 600;
 }
-.ops-adapter .spend-breakdown-note,
-.ops-adapter .spend-breakdown-unavailable {
+.spend-breakdown-unavailable {
   font-size: 12px;
   color: var(--muted);
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
-.ops-adapter .spend-breakdown-warning {
+.spend-breakdown-warning {
   border-inline-start: 2px solid var(--accent);
   padding-inline-start: 8px;
   font-size: 12px;
   overflow-wrap: anywhere;
 }
-.ops-adapter .spend-breakdown-details > summary {
+.spend-breakdown-details > summary {
   min-height: 32px;
   align-content: center;
   cursor: pointer;
   font-size: 12px;
 }
-.ops-adapter .spend-breakdown-details dl {
+.spend-breakdown-details dl {
   margin: 8px 0;
   display: grid;
   gap: 8px;
 }
-.ops-adapter .spend-breakdown-details dl > div {
+.spend-breakdown-details dl > div {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px 16px;
   align-items: start;
 }
-.ops-adapter .spend-breakdown-details dd {
+.spend-breakdown-details dd {
   margin: 0;
   max-width: 140px;
 }
-.ops-adapter .spend-admission {
+.spend-admission {
   margin-top: 16px;
   padding-top: 12px;
   border-top: 1px solid var(--line);
@@ -1172,10 +1124,6 @@
   margin: 10px 0;
 }
 .ops-adapter .billing-admin dt,
-.ops-adapter .billing-note {
-  color: var(--muted);
-  font-size: 12px;
-}
 .ops-adapter .billing-admin dd {
   margin: 3px 0 0;
   font-variant-numeric: tabular-nums;
@@ -1227,16 +1175,16 @@
   }
 }
 @media (max-width: 760px) {
-  .ops-adapter .spend-breakdown-buckets {
+  .spend-breakdown-buckets {
     gap: 8px;
   }
-  .ops-adapter .spend-breakdown-buckets dd {
+  .spend-breakdown-buckets dd {
     font-size: 16px;
   }
-  .ops-adapter .spend-breakdown-details dl > div {
+  .spend-breakdown-details dl > div {
     gap: 6px 10px;
   }
-  .ops-adapter .spend-breakdown-details dd {
+  .spend-breakdown-details dd {
     max-width: 110px;
   }
 }
@@ -1404,4 +1352,133 @@
 }
 .ops-adapter .p4-fleet-note[role='status'] {
   border-color: var(--accent);
+}
+
+/* #232 (#34): one line per assistant; cost breakdown, cap and IDs live under Details. */
+.assistant-connections .assistant-row {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.assistant-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.assistant-row-head > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assistant-row-scope {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assistant-row-head > .assistant-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+.assistant-status {
+  flex: none;
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+}
+.assistant-status.connected {
+  background: color-mix(in srgb, var(--good) 22%, transparent);
+  color: var(--good);
+}
+.assistant-status.paused,
+.assistant-status.pending {
+  background: color-mix(in srgb, var(--warn) 22%, transparent);
+  color: var(--warn);
+}
+.assistant-row-details > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+.assistant-row-details[open] {
+  display: grid;
+  gap: 8px;
+}
+.assistant-label-help i {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  font-size: 10px;
+  font-style: normal;
+  color: var(--muted);
+  cursor: help;
+}
+.assistant-inactive-toggle.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-decoration: underline;
+  justify-self: start;
+}
+/* AI assistant details (owner, 2026-10-26): tidy rows; the daily cap sits on one line. */
+.assistant-row {
+  display: grid;
+  gap: 8px;
+}
+.assistant-row-details[open] {
+  gap: 12px;
+  padding-top: 4px;
+}
+.assistant-row-details > p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.assistant-row-details > .spend-breakdown {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.assistant-row-details > .spend-breakdown .spend-breakdown-buckets {
+  margin: 10px 0 4px;
+}
+.assistant-row-details > .spend-breakdown .spend-breakdown-buckets dd {
+  font-size: 16px;
+}
+.assistant-row-details > form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+.assistant-row-details > form > label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.assistant-row-details > form input {
+  width: 140px;
+}
+.assistant-row-details > form > button,
+.assistant-row-details > button {
+  min-height: var(--h-sm);
+  height: var(--h-sm);
+  padding: 0 10px;
+  font-size: var(--fs-sm);
+  justify-self: start;
 }

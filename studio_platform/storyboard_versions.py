@@ -44,6 +44,11 @@ class StoryboardPreferencesRequest(BaseModel):
 def contract():
     return {
         "versions": "/v1/projects/{project_id}/shots/{shot_id}/versions?limit=20&offset=0",
+        "quality": {
+            "quality_flags": ["burned_subtitles"],
+            "quality_checks": "burned_subtitles: status, detector; flagged checks also include confidence and times_s. No OCR text. Legacy takes are not_checked; unavailable/timeout/failed is not a clean result.",
+            "behavior": "Advisory only: keep, manually regenerate or trim. Never automatic re-roll or additional charging. Conservative CPU OCR checks exact normalized dialogue, bottom-centred stable text for >=1s and background motion; no warning does not guarantee subtitle-free video.",
+        },
         "profile_usage": "/v1/projects/{project_id}/storyboard/profiles",
         "defaults": {
             "account": "/v1/storyboard/preferences",
@@ -289,6 +294,12 @@ def apply_action(project, action, resolved=None):
             else:
                 if "storyboard" in shot["data"]:
                     shot["data"]["storyboard"]["quality"] = operation
+                    # Standard is 480P and HD is 768P (CR-20261025-65). The tier
+                    # label alone never reached the request, so set the shot's
+                    # own resolution with it.
+                    shot["data"].setdefault("h3", {}).setdefault("controls", {})[
+                        "resolution"
+                    ] = "480P" if operation == "draft" else "768P"
                 else:
                     # A label must not opt an exact/legacy recipe into compilation.
                     shot["data"]["qualityIntent"] = operation
@@ -580,6 +591,7 @@ class StoryboardVersions:
             }
         values = []
         from .media_renditions import public_artifact_renditions
+        from .subtitle_quality import public_quality
 
         for row in rows[:limit]:
             if row["metadata"].get("content_deleted"):
@@ -623,6 +635,7 @@ class StoryboardVersions:
                     ),
                     "created_at": row["created_at"],
                     "kind": row["metadata"].get("kind"),
+                    **public_quality(row["metadata"]),
                     "content_url": f'/v1/artifacts/{row["id"]}/content',
                     **public_artifact_renditions(row),
                 }

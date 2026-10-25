@@ -1,3 +1,4 @@
+import { Note } from './ui/Note.jsx';
 import React from 'react';
 import { formatMoneyMicros as money } from './money.js';
 import {
@@ -59,21 +60,17 @@ export default function SpendingBreakdown({ usage, scope }) {
         ))}
       </dl>
       {hasCharge && view.waivedCount > 0 && (
-        <p className="spend-breakdown-note">
-          {t('settings.chargeWaived', { count: view.waivedCount })}
-        </p>
+        <Note>{t('settings.chargeWaived', { count: view.waivedCount })}</Note>
       )}
       {value.awaiting_invoice_count > 0 && (
-        <p className="spend-breakdown-note">
-          {count('settings.costAwaitingCount', value.awaiting_invoice_count)}
-        </p>
+        <Note>{count('settings.costAwaitingCount', value.awaiting_invoice_count)}</Note>
       )}
       {value.prior_day_pending_estimate_microusd > 0 && (
-        <p className="spend-breakdown-note">
+        <Note>
           {t('settings.costPriorPending', {
             amount: money(value.prior_day_pending_estimate_microusd),
           })}
-        </p>
+        </Note>
       )}
       {(value.unconfirmed_reference_count > 0 || value.unconfirmed_exposure_microusd > 0) && (
         <p className="spend-breakdown-warning" role="status">
@@ -88,17 +85,17 @@ export default function SpendingBreakdown({ usage, scope }) {
         </p>
       )}
       {value.legacy_settled_unknown_date_microusd > 0 && (
-        <p className="spend-breakdown-note">
+        <Note>
           {t('settings.costUnknownDate', {
             amount: money(value.legacy_settled_unknown_date_microusd),
           })}
-        </p>
+        </Note>
       )}
       <details className="spend-breakdown-details">
         <summary>{t('settings.costDetails')}</summary>
         {hasCharge && (
           <>
-            <p className="spend-breakdown-note">{t('settings.chargeRetainedCosts')}</p>
+            <Note>{t('settings.chargeRetainedCosts')}</Note>
             {gross ? (
               <dl>
                 <div>
@@ -115,7 +112,7 @@ export default function SpendingBreakdown({ usage, scope }) {
                 </div>
               </dl>
             ) : (
-              <p className="spend-breakdown-note">{t('settings.costUnavailable')}</p>
+              <Note>{t('settings.costUnavailable')}</Note>
             )}
           </>
         )}
@@ -145,38 +142,38 @@ export default function SpendingBreakdown({ usage, scope }) {
             </div>
           )}
         </dl>
-        <p className="spend-breakdown-note">{t('settings.costAllocationHelp')}</p>
+        <Note>{t('settings.costAllocationHelp')}</Note>
         {scope === 'account' && (
           <div className="spend-reconciliation">
-            <p className="spend-breakdown-note">
+            <Note>
               {t(
                 reconciliation
                   ? 'settings.invoiceCheck.' + reconciliation.state
                   : 'settings.invoiceCheck.unknown',
               )}
-            </p>
+            </Note>
             {reconciliation && reconciliation.observedAt !== null && (
-              <p className="spend-breakdown-note">
+              <Note>
                 {t('settings.invoiceCheckedAt', {
                   date: new Date(reconciliation.observedAt * 1000).toLocaleString(
                     locale === 'zh' ? 'zh-CN' : 'en',
                     { timeZone: 'Australia/Sydney' },
                   ),
                 })}
-              </p>
+              </Note>
             )}
             {reconciliation?.pending > 0 && (
-              <p className="spend-breakdown-note">
+              <Note>
                 {t('settings.invoiceCheckedCount', {
                   checked: reconciliation.checked,
                   pending: reconciliation.pending,
                 })}
-              </p>
+              </Note>
             )}
             {reconciliation && reconciliation.reportedCost !== null && (
-              <p className="spend-breakdown-note">
+              <Note>
                 {t('settings.invoiceReported', { amount: money(reconciliation.reportedCost) })}
-              </p>
+              </Note>
             )}
           </div>
         )}

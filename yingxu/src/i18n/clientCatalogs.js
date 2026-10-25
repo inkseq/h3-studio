@@ -1,5 +1,10 @@
 export const clientCatalogs = {
   en: {
+    'client.newVersion': 'A newer version of Inkseq is available.',
+    'client.supportViewReadOnly': 'Read-only support view: changes are not allowed.',
+    'client.supportViewPathBlocked': 'Not available in a support view.',
+    'client.supportViewInvalid': 'This support view has ended. Return to Admin to start another.',
+    'client.newVersionReload': 'Refresh',
     'client.budgetIdentity':
       'The account budget identity or cumulative records could not be confirmed. Refresh before continuing.',
     'client.billingIdentity':
@@ -81,6 +86,11 @@ export const clientCatalogs = {
       'This approval has already been used. Recover the original submission instead of approving it again.',
   },
   zh: {
+    'client.newVersion': '映序有新版本了。',
+    'client.supportViewReadOnly': '只读查看中，不能修改。',
+    'client.supportViewPathBlocked': '只读查看时不能打开这里。',
+    'client.supportViewInvalid': '这次查看已结束，请回到管理后台重新开始。',
+    'client.newVersionReload': '刷新',
     'client.budgetIdentity': '账户预算身份或累计记录尚未确认，请刷新。',
     'client.billingIdentity': '所选账户的费用记录身份尚未确认，请重新读取。',
     'client.consoleIdentity': '控制台状态尚未确认，请刷新。',

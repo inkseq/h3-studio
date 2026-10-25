@@ -5,18 +5,21 @@ import videoCacheWorkerURL from './video-cache-worker.js?worker&url';
 import { installVideoCache } from './video-cache-client.js';
 import './ui/tokens.css';
 import './ui/controls.css';
+import './ui/feedback.css';
 import './demo-v2.css';
 import './v2/page-bridge.css';
 import './dialogs.css';
 import './skins.css';
-import { applySkin, readSkin } from './skins.js';
+import { startSkin } from './skins.js';
 import { installPopoverDismiss } from './popover-dismiss.js';
 import { installMonitoring, reactErrorHandler } from './monitoring.js';
 import { installAnalytics } from './analytics.js';
+import { installVersionCheck } from './version-check.js';
+import { showNotice } from './floating-notice.js';
 
 const monitored = installMonitoring();
 installAnalytics();
-applySkin(readSkin());
+startSkin();
 installPopoverDismiss();
 createRoot(
   document.getElementById('root'),
@@ -26,4 +29,7 @@ createRoot(
     : undefined,
 ).render(<App />);
 
-if (import.meta.env.PROD) installVideoCache(videoCacheWorkerURL);
+if (import.meta.env.PROD) {
+  installVideoCache(videoCacheWorkerURL);
+  installVersionCheck({ notify: showNotice });
+}

@@ -97,6 +97,12 @@ NATIVE_REASON_CODES = frozenset(
         "dstack_runtime_private_endpoint_mismatch",
         "dstack_runtime_incarnation_changed",
         "dstack_native_runtime_unconfirmed",
+        "dstack_runtime_report_invalid",
+        "dstack_runtime_tunnel_port_in_use",
+        "dstack_runtime_tunnel_failed",
+        "dstack_runtime_readiness_unreachable",
+        "dstack_runtime_client_config_changed",
+        "dstack_runtime_slot_register_failed",
     }
 )
 

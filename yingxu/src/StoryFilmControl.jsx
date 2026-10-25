@@ -102,6 +102,12 @@ export default function StoryFilmControl({
     [captions, setCaptions] = useState(false),
     [notice, setNotice] = useState(''),
     [readError, setReadError] = useState('');
+  // The Edit film view's "Export film" opens this same dialog.
+  useEffect(() => {
+    const show = () => setOpen(true);
+    window.addEventListener('inkseq-open-film', show);
+    return () => window.removeEventListener('inkseq-open-film', show);
+  }, []);
   const live = useRef();
   live.current = {
     account: cloudState.account,

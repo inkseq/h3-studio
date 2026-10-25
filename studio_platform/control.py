@@ -35,6 +35,75 @@ TERMINAL = {"succeeded", "failed", "cancelled"}
 REAL_GPU_BACKENDS = frozenset({"comfy-worker", "wangp-worker"})
 
 
+def registration_capacity_projection(
+    usage, *, key=None, existing_devices=0, added_devices=1
+):
+    """One arithmetic path for a new allocation and an existing worker binding.
+
+    key=None reserves a genuinely new resource; it can never claim the original
+    admission/fulfillment exception used by an already paid worker.
+    """
+    resources = usage.get("resources") if isinstance(usage, dict) else None
+    if (
+        not isinstance(resources, dict)
+        or any(
+            not isinstance(resource, tuple)
+            or len(resource) != 2
+            or any(not isinstance(value, str) or not value for value in resource)
+            or type(count) is not int
+            or count < 1
+            for resource, count in resources.items()
+        )
+        or type(usage.get("instances")) is not int
+        or usage["instances"] != len(resources)
+        or type(usage.get("physical_gpus")) is not int
+        or usage["physical_gpus"] != sum(resources.values())
+        or type(existing_devices) is not int
+        or existing_devices < 0
+        or type(added_devices) is not int
+        or added_devices < 1
+        or (key is None and existing_devices != 0)
+    ):
+        raise ValueError("invalid_registration_capacity_observation")
+    previous = resources.get(key, 0) if key is not None else 0
+    proposed_count = max(previous, existing_devices + added_devices)
+    return {
+        "proposed_count": proposed_count,
+        "instances": usage["instances"] + (0 if key in resources else 1),
+        "physical_gpus": usage["physical_gpus"] - previous + proposed_count,
+    }
+
+
+def effective_registration_limits(global_limits, pool=None, *, snapshot=None):
+    """An adopted count replaces positive legacy counts, never OFF switches."""
+    if (
+        global_limits is None
+        or min(global_limits["max_instances"], global_limits["max_physical_gpus"]) <= 0
+    ):
+        raise BudgetExceeded("global_capacity_disabled")
+    if pool is not None and min(pool["max_instances"], pool["max_physical_gpus"]) <= 0:
+        raise BudgetExceeded("pool_disabled")
+    if snapshot is not None:
+        from .capacity_settings import validate_snapshot
+
+        value = validate_snapshot(snapshot)
+        if pool is None:
+            raise BudgetExceeded("pool_disabled")
+        return {
+            "max_instances": value["max_machines"],
+            "max_physical_gpus": value["max_machines"],
+        }
+    return {key: global_limits[key] for key in ("max_instances", "max_physical_gpus")}
+
+
+def check_registration_capacity(projection, limits, *, fulfillment=False):
+    if (
+        projection["instances"] > limits["max_instances"]
+        or projection["physical_gpus"] > limits["max_physical_gpus"]
+    ) and not fulfillment:
+        raise BudgetExceeded("global_capacity_exceeded")
+
+
 @dataclass(frozen=True)
 class _PoolStatusSnapshot:
     repository: object
@@ -475,23 +544,6 @@ class WorkerControl:
                     if self._capacity_usage
                     else repo._global_usage(connection)
                 )
-                resources = usage.get("resources") if isinstance(usage, dict) else None
-                if (
-                    not isinstance(resources, dict)
-                    or any(
-                        not isinstance(key, tuple)
-                        or len(key) != 2
-                        or any(not isinstance(value, str) or not value for value in key)
-                        or type(count) is not int
-                        or count < 1
-                        for key, count in resources.items()
-                    )
-                    or type(usage.get("instances")) is not int
-                    or usage["instances"] != len(resources)
-                    or type(usage.get("physical_gpus")) is not int
-                    or usage["physical_gpus"] != sum(resources.values())
-                ):
-                    raise ValueError("invalid_registration_capacity_observation")
                 key = (spec.provider, spec.instance_id)
                 existing_count = sum(
                     1
@@ -503,16 +555,15 @@ class WorkerControl:
                         )
                     ).mappings()
                 )
-                proposed_count = max(
-                    usage["resources"].get(key, 0),
-                    existing_count + len(spec.physical_gpu_ids),
+                projection = registration_capacity_projection(
+                    usage,
+                    key=key,
+                    existing_devices=existing_count,
+                    added_devices=len(spec.physical_gpu_ids),
                 )
-                gpu_total = (
-                    usage["physical_gpus"]
-                    - usage["resources"].get(key, 0)
-                    + proposed_count
-                )
-                instances = usage["instances"] + (0 if key in usage["resources"] else 1)
+                proposed_count = projection["proposed_count"]
+                gpu_total = projection["physical_gpus"]
+                instances = projection["instances"]
                 fulfillment = False
                 admission = usage.get("capacity_admission")
                 if admission is not None:
@@ -568,11 +619,7 @@ class WorkerControl:
                         and instances == usage["instances"]
                         and gpu_total == usage["physical_gpus"]
                     )
-                if (
-                    instances > limits["max_instances"]
-                    or gpu_total > limits["max_physical_gpus"]
-                ) and not fulfillment:
-                    raise BudgetExceeded("global_capacity_exceeded")
+                check_registration_capacity(projection, limits, fulfillment=fulfillment)
             row = dict(
                 id=spec.worker_id,
                 pool=spec.pool,
@@ -1219,25 +1266,29 @@ class WorkerControl:
                     raise Conflict("current_attempt_still_unresolved")
             return self._retire_locked(connection, worker)
 
-    def _retire_locked(self, connection, worker):
+    def _retire_locked(self, connection, worker, *, release_retired=False):
         """Transition only; caller owns the capacity/worker locks and stop proof.
 
         Keep joined retirement checks on the caller's connection: opening a
         second Repository.transaction here can deadlock the capacity row.
         """
-        if worker["state"] == "retired":
+        # Historical retirement could predate device release. Only a caller
+        # with exact stop/absence proof and both locks may repair that binding;
+        # an already retired worker never receives a second fence/state write.
+        if worker["state"] == "retired" and not release_retired:
             return worker
         worker_id = worker["id"]
-        connection.execute(
-            update(registered_workers)
-            .where(registered_workers.c.id == worker_id)
-            .values(
-                state="retired",
-                current_job_id=None,
-                fence=worker["fence"] + 1,
-                updated_at=self.repo.clock(),
+        if worker["state"] != "retired":
+            connection.execute(
+                update(registered_workers)
+                .where(registered_workers.c.id == worker_id)
+                .values(
+                    state="retired",
+                    current_job_id=None,
+                    fence=worker["fence"] + 1,
+                    updated_at=self.repo.clock(),
+                )
             )
-        )
         connection.execute(
             update(registered_devices)
             .where(registered_devices.c.worker_id == worker_id)

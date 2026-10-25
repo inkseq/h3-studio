@@ -1,3 +1,4 @@
+import { clickedOutside } from './ui/Dialog.jsx';
 import TakeRecipe from './QuickChatTakeRecipe.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import StoryFilmControl from './StoryFilmControl.jsx';
@@ -54,6 +55,9 @@ function Confirmation({ ids, onClose }) {
       onCancel={(event) => {
         event.preventDefault();
         if (!submitting) onClose();
+      }}
+      onClick={(event) => {
+        if (clickedOutside(event) && !submitting) onClose();
       }}
     >
       <div className="modal-heading">
@@ -220,6 +224,9 @@ function WorkbenchConfirmation({ receipt, onClose }) {
         e.preventDefault();
         if (!busy) onClose();
       }}
+      onClick={(e) => {
+        if (clickedOutside(e) && !busy) onClose();
+      }}
     >
       <h2>{t('workbench.confirm')}</h2>
       <p>{t('workbench.estimate', { amount: money })}</p>
@@ -320,6 +327,17 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
       live = false;
     };
   }, [c.account, s.project.id, s.workspace.mode]);
+  // An unconfirmed edit (no generation, no money) replays itself with its original key:
+  // the server returns the first result or proves nothing was written (owner, 2026-10-25).
+  // Preflight and batch submissions still wait for the person to check them.
+  const pendingKind =
+    c.account && s.workspace.mode === 'cloud' && !cloud.workbenchRunning()
+      ? cloud.workbenchPending()?.kind
+      : null;
+  useEffect(() => {
+    if (!['actions', 'preferences', 'copies'].includes(pendingKind)) return;
+    void dispatch({ type: 'workbenchRecover' }).catch(() => {});
+  }, [pendingKind, s.project.id]);
   useEffect(() => {
     if (!c.account || !c.operatorAccess) {
       setQueue(null);
@@ -330,6 +348,11 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
     let stopped = false,
       timer;
     const read = async () => {
+      // Queue hints read the whole GPU workspace: skip hidden tabs, 30 s apart.
+      if (globalThis.document?.visibilityState === 'hidden') {
+        if (!stopped) timer = setTimeout(read, 30000);
+        return;
+      }
       try {
         const snapshot = await api.state();
         if (stopped) return;
@@ -346,7 +369,7 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
       } catch {
         if (!stopped) setQueue(null);
       }
-      if (!stopped) timer = setTimeout(read, 10000);
+      if (!stopped) timer = setTimeout(read, 30000);
     };
     read();
     return () => {
@@ -508,8 +531,10 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
       return { ok: true, receipt: value };
     }
     if (action.type === 'workbenchAction') {
-      const actions = [action.action];
+      // One action, or several applied together in one story edit (e.g. clear segments + choose).
+      const actions = action.actions || [action.action];
       if (
+        action.action &&
         action.profileId &&
         action.action.op === 'storyboard.bulk' &&
         ['draft', 'final'].includes(action.action.operation)
@@ -532,8 +557,13 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
     if (action.type === 'workbenchUseLatest') {
       // Choose each shot's newest finished video in one story edit; shots without one are left alone.
       const context = captureWorkspace(store);
+      const entities = store.getState().project?.entities || [];
+      const keeps = (id) =>
+        (entities.find((e) => e.id === id)?.data?.videoSegments || []).length > 0;
       const picks = await Promise.all(
         action.ids.map(async (id) => {
+          // Kept parts belong to the chosen take (#512); those shots keep it.
+          if (keeps(id)) return null;
           const value = await adapter.readVersions(id);
           const row = value.versions.find((v) => v.kind === 'video' && isActiveTrashItem(v));
           return row ? { op: 'storyboard.select', shot_id: id, artifact_id: row.id } : null;
@@ -717,6 +747,25 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
     }
     return mutate(action);
   };
+  // A shot with no chosen take and exactly one finished take uses it without a click
+  // (owner, 2026-10-25). An existing choice is never replaced by a newer take.
+  const autoPicked = useRef(new Set());
+  useEffect(() => {
+    if (busy || serial.current) return;
+    const shot = view.shots.find((item) => {
+      if (item.chosen || autoPicked.current.has(item.id)) return false;
+      const done = item.versions.filter((v) => v.status === 'done');
+      return (
+        done.length === 1 &&
+        item.versions.every((v) => v.status === 'done' || v.status === 'failed') &&
+        done[0].asset?.entity?.data.fileId
+      );
+    });
+    if (!shot) return;
+    autoPicked.current.add(shot.id);
+    const version = shot.versions.find((v) => v.status === 'done');
+    void dispatch({ type: 'choose', shot: shot.id, version: version.id }).catch(() => {});
+  }, [view, busy]);
   const adapter = {
     readCopies: () => cloud.workbenchCopies(),
     readPreferences: () => cloud.workbenchPreferences(),

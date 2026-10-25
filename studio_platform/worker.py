@@ -237,10 +237,20 @@ class WorkerRunner:
         )
         for name in ("width", "height", "fps", "frames"):
             value = output.get(
-                "frame_count" if name == "frames" else name, request.get(name)
+                "frame_count" if name == "frames" else name,
+                output.get(name, request.get(name)),
             )
             if value is not None:
                 context[name] = value
+        seconds = output.get("actual_duration")
+        if (
+            "fps" not in context
+            and type(context.get("frames")) is int
+            and type(seconds) in (int, float)
+            and seconds > 0
+        ):
+            # Native output specs carry duration, not fps; derive it for length bands.
+            context["fps"] = max(1, round(context["frames"] / seconds))
         if "steps" in request:
             context["steps"] = request["steps"]
         inputs = request.get("inputs", {})
@@ -715,6 +725,10 @@ class WorkerRunner:
                             error_code="render_resume_identity_unconfirmed",
                         )
                     )
+            if outcome.state == "running" and self.backend.kind == "wangp-worker":
+                from .capacity_watchdog import record_engine_progress
+
+                record_engine_progress(self.repo, self.queue, lease)
             if outcome.state == "succeeded":
                 self._generation_finish(lease, "success")
                 job = self.queue.begin_collection(lease)

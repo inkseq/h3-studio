@@ -243,6 +243,8 @@ class NativeRuntimeTests(LedgerCase):
 
                 def open_tunnel(self, port):
                     assert port == config.local_port
+                    if remote.get("tunnel_error"):
+                        raise remote["tunnel_error"]
                     remote["tunnel"] = True
 
                 def close(self):
@@ -254,15 +256,18 @@ class NativeRuntimeTests(LedgerCase):
             mode = "fl" if endpoint.endswith(":18900") else "ref"
             config, remote = outer.configs[mode], outer.remotes[mode]
             assert len(token) >= 32
-            return SimpleNamespace(
-                readiness=lambda: HostReadiness(
+
+            def readiness():
+                if remote.get("readiness_down"):
+                    raise ConnectionError("SECRET tunnel diagnostic")
+                return HostReadiness(
                     config.engine_manifest_digest,
                     remote["identity"]["intent_id"],
                     remote["incarnation"],
                     remote["idle"],
-                ),
-                close=lambda: None,
-            )
+                )
+
+            return SimpleNamespace(readiness=readiness, close=lambda: None)
 
         coordinates_for_run = coordinates_for_run or (
             lambda binding, _run: {
@@ -551,6 +556,31 @@ class NativeRuntimeTests(LedgerCase):
             self.bridge().readiness(self.store.load(binding["intent_id"]), run)
         self.assertEqual(self.remotes["fl"]["starts"], 1)
         self.assertFalse(token.exists())
+
+    def test_post_report_failures_name_their_step_without_private_text(self):
+        # #193: these all used to read dstack_native_runtime_unconfirmed.
+        binding, run = self.allocation()
+        bridge = self.bridge()
+        bridge.readiness(binding, run)
+        remote = self.remotes["fl"]
+        remote["readiness_down"] = True
+        with self.assertRaisesRegex(
+            DstackError, "^dstack_runtime_readiness_unreachable$"
+        ):
+            bridge.readiness(self.store.load(binding["intent_id"]), run)
+        remote["readiness_down"] = False
+        remote["tunnel_error"] = BootError("bootstrap_tunnel_port_already_in_use")
+        with self.assertRaisesRegex(DstackError, "^dstack_runtime_tunnel_port_in_use$"):
+            bridge.readiness(self.store.load(binding["intent_id"]), run)
+        remote["tunnel_error"] = OSError("SECRET socket diagnostic")
+        with self.assertRaisesRegex(DstackError, "^dstack_runtime_tunnel_failed$"):
+            bridge.readiness(self.store.load(binding["intent_id"]), run)
+        remote["tunnel_error"] = None
+        self.assertEqual(
+            bridge.readiness(self.store.load(binding["intent_id"]), run).slot_key,
+            binding["intent_id"],
+        )
+        self.assertEqual(remote["starts"], 1)
 
     def test_changed_physical_gpu_or_incarnation_never_produces_a_new_slot(self):
         binding, run = self.allocation()

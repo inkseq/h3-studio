@@ -219,7 +219,14 @@ def automatic_deny(nodes, machine_id, *, now):
                 events.append((item["at"], node["intent_id"]))
         except (ValueError, KeyError):
             pass
-    events = sorted(set(events))
+        recovered = capacity_failure(node, now=now)
+        if recovered is not None and recovered["at"] >= now - 8 * 86400:
+            events.append((recovered["at"], node["intent_id"]))
+    # Several observations/reasons from one original rental still count once.
+    events = sorted(
+        (at, node)
+        for node, at in {node: at for at, node in sorted(set(events))}.items()
+    )
     expires = None
     for index, (at, _) in enumerate(events):
         if index and at - events[index - 1][0] <= 86400:
@@ -227,6 +234,33 @@ def automatic_deny(nodes, machine_id, *, now):
             if now < until:
                 expires = max(expires or 0, until)
     return expires
+
+
+def capacity_failure(node, *, now):
+    """Repeated owned timeouts count as reliability evidence, not host diagnosis."""
+    value = node.get("payload", {}).get("capacity_watchdog")
+    if (
+        not isinstance(value, dict)
+        or value.get("version") != 1
+        or node.get("desired_state") != "stopped"
+        or value.get("reason")
+        not in {
+            "capacity_no_progress",
+            "capacity_runtime_exceeded",
+            "capacity_startup_timeout",
+        }
+        or not finite(value.get("at"), minimum=1, maximum=now)
+        or bound_observation(node, now=now) is None
+    ):
+        return None
+    return {
+        "stage": "runtime_start"
+        if value["reason"] == "capacity_startup_timeout"
+        else "generate",
+        "reason_code": value["reason"],
+        "at": value["at"],
+        "outcome": "failure",
+    }
 
 
 class HostPolicyStore:

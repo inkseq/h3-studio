@@ -508,6 +508,125 @@ class MigrationArtifacts(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "admin_reference_invalid"):
             maintenance.settings(self.root)
 
+    def compact_settings_fixture(self):
+        directory = self.root / 'migration'
+        directory.mkdir()
+        protected = self.root / 'protected'
+        protected.mkdir()
+        environment = {
+            key: str(protected / key.lower()) for key in maintenance.PATH_FIELDS
+        }
+        environment.update(
+            SIXNINE_OPERATOR_CAPACITY_OWNERS='superdan,supervan',
+            SIXNINE_HATCHET_POSTGRES_VOLUME='existing-postgres',
+            SIXNINE_HATCHET_CONFIG_VOLUME='existing-config',
+            SIXNINE_MIGRATION_GENERATION_ENABLED='0',
+            SIXNINE_MIGRATION_EXECUTION_BACKEND='disabled',
+            SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID=PROFILE,
+            INKSEQ_DEPLOYMENT_TARGET='staging',
+            INKSEQ_RESOURCE_PROFILE=maintenance.deployment_target.COMPACT_RESOURCES,
+            INKSEQ_CPU_CGROUP_PARENT=maintenance.deployment_target.COMPACT_PARENT,
+        )
+        value = {'version': 1, 'environment': environment, 'host_memory_mib': 1840}
+        paths = directory / 'paths.json'
+        paths.write_text(json.dumps(value))
+        seal = self.root / 'deployment-target.json'
+        sealed = {
+            'version': 1,
+            'target': 'staging',
+            'instance_id': maintenance.deployment_target.COMPACT_INSTANCE,
+            'resource_profile': maintenance.deployment_target.COMPACT_RESOURCES,
+        }
+        seal.write_text(json.dumps(sealed))
+        seal.chmod(0o600)
+        # Only this synthetic seal's owner differs from a root-owned host.
+        # Preserve the actual opened file's mode, links, size and inode checks.
+        seal_info = seal.stat()
+        fstat = os.fstat
+
+        def fixture_fstat(fd):
+            info = fstat(fd)
+            if (info.st_dev, info.st_ino) == (seal_info.st_dev, seal_info.st_ino):
+                fields = list(info)
+                fields[4] = 0
+                return os.stat_result(fields)
+            return info
+
+        ownership = patch.object(
+            maintenance.deployment_target.os, 'fstat', fixture_fstat
+        )
+        ownership.start()
+        self.addCleanup(ownership.stop)
+        operator = Path(environment['SIXNINE_DSTACK_OPERATOR_CONFIG_FILE'])
+        return value, paths, seal, sealed, operator
+
+    def test_compact_settings_accept_only_explicit_integer_capacity_one_through_ten(
+        self,
+    ):
+        value, paths, seal, _, operator = self.compact_settings_fixture()
+        before = {path: path.read_bytes() for path in (paths, seal)}
+        policy = {
+            'max_instances': 1,
+            'max_physical_gpus': 1,
+            'max_total_hourly_microusd': 15000000,
+            'test_gpu_guard': {'task_limit_microusd': 20000000},
+        }
+        for limit in (1, 2, 10):
+            policy.update(max_instances=limit, max_physical_gpus=limit)
+            operator.write_text(json.dumps({'policy': policy}))
+            original = operator.read_bytes()
+            actual, digest = maintenance.settings(self.root)
+            self.assertEqual(actual, value)
+            self.assertEqual(digest, release.checksum(paths))
+            self.assertEqual(operator.read_bytes(), original)
+        for key in ('max_instances', 'max_physical_gpus'):
+            for invalid in (None, 0, -1, True, False, 1.0, 10.0, '10', 11, 1000000):
+                invalid_policy = dict(policy, **{key: invalid})
+                operator.write_text(json.dumps({'policy': invalid_policy}))
+                with (
+                    self.subTest(key=key, invalid=invalid),
+                    self.assertRaisesRegex(
+                        release.ReleaseError, 'compact_capacity_limit_invalid'
+                    ),
+                ):
+                    maintenance.settings(self.root)
+            missing = dict(policy)
+            missing.pop(key)
+            operator.write_text(json.dumps({'policy': missing}))
+            with self.assertRaisesRegex(
+                release.ReleaseError, 'compact_capacity_limit_invalid'
+            ):
+                maintenance.settings(self.root)
+        for path, original in before.items():
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_compact_capacity_ten_preserves_target_and_resource_seals(self):
+        value, paths, seal, sealed, operator = self.compact_settings_fixture()
+        operator.write_text(
+            json.dumps({'policy': {'max_instances': 10, 'max_physical_gpus': 10}})
+        )
+        for changed in (
+            dict(sealed, target='production'),
+            dict(sealed, instance_id='i-' + '0' * 17),
+        ):
+            seal.write_text(json.dumps(changed))
+            with self.assertRaisesRegex(ValueError, 'resource_host_invalid'):
+                maintenance.settings(self.root)
+        seal.write_text(json.dumps(sealed))
+        for key, changed in (
+            ('INKSEQ_DEPLOYMENT_TARGET', 'production'),
+            ('INKSEQ_CPU_CGROUP_PARENT', 'unlimited.slice'),
+            ('INKSEQ_RESOURCE_PROFILE', 'unreviewed-profile'),
+        ):
+            document = copy.deepcopy(value)
+            document['environment'][key] = changed
+            paths.write_text(json.dumps(document))
+            with (
+                self.subTest(key=key),
+                self.assertRaises((ValueError, release.ReleaseError)),
+            ):
+                maintenance.settings(self.root)
+
     def test_r2_host_settings_require_complete_exact_opt_in_without_secret_values(self):
         local = {}
         maintenance.storage_settings(local)
@@ -725,12 +844,45 @@ class MigrationArtifacts(unittest.TestCase):
                 maintenance.installed_checker(self.artifact)
             importer.assert_not_called()
 
+    def test_193_compat_pairs_refuse_unlisted_commits_and_swapped_pairs(self):
+        # #193 Small: only the exact commit -> exact pair entries are trusted.
+        original = self.artifact / maintenance.MANIFEST
+        old = maintenance.RETAINED_DSTACK_HELPER_PAIRS[
+            '808e46744ac31a4e0cb57ae1307d4cb6bbd8b98b'
+        ]
+        new = maintenance.RETAINED_DSTACK_HELPER_PAIRS[
+            'f6c1972b904d6e0a4b9acccc405efb0d706c239e'
+        ]
+        for value, incoming in (
+            ({"commit": "1" * 40, "dstack": {}}, old),  # unlisted commit, old pair
+            ({"commit": "808e46744ac31a4e0cb57ae1307d4cb6bbd8b98b", "dstack": {}}, new),
+            ({"commit": "f6c1972b904d6e0a4b9acccc405efb0d706c239e", "dstack": {}}, old),
+            ({"commit": "808e46744ac3", "dstack": {}}, old),  # prefix only
+        ):
+            original.write_text(json.dumps(value))
+            with (
+                patch.object(release, "regular"),
+                patch.object(
+                    release, "checksum", side_effect=["a" * 64, "b" * 64, *incoming]
+                ),
+                patch.object(
+                    maintenance.importlib.util, "spec_from_file_location"
+                ) as importer,
+                self.assertRaisesRegex(
+                    release.ReleaseError, "helpers_need_reviewed_update"
+                ),
+            ):
+                maintenance.installed_checker(self.artifact)
+            importer.assert_not_called()
+
     def test_retained_current_previous_derivatives_use_only_exact_installed_checker_pairs(
         self,
     ):
         expected_commits = {
-            '32d1ec4f7e40adca65b2563b5ea11810dd223039',
+            '7a24b5a99df4546f775224b83a890aeb53897734',
+            '20ab3dfd308800daad10a3ce8ac060da342b164a',
             '5c01b159781729b6c34379b4f4383b88364426fb',
+            '32d1ec4f7e40adca65b2563b5ea11810dd223039',
             'fcd3ce618dbbf2a4f0dad4ee09e0c74121c4f69c',
             'a978e9ceb7e78c9a9b54f9365d1e6c368aea83ea',
             'aedd790ef843b5a2284c9885bfaaa97635e217e1',
@@ -754,10 +906,46 @@ class MigrationArtifacts(unittest.TestCase):
             '5676bd46e8b31dac36fb5b9758de4763114b84ca',
             '59d2ebefba0e98d677907c30b65144ac47681762',
             'f7b1db096099d0b3ad09736a95afffa57f9626c7',
+            '808e46744ac31a4e0cb57ae1307d4cb6bbd8b98b',
+            'd67a76b70777874e74623f480d7ffbea9e3d3b88',
+            'c08ea6d4595763195a3c9e15d428f93cf90e16c0',
+            'f6c1972b904d6e0a4b9acccc405efb0d706c239e',
         }
         self.assertEqual(
             set(maintenance.RETAINED_DSTACK_HELPER_PAIRS), expected_commits
         )
+        old_pair = (
+            'd0d8eeff6a9d1d52d6357806382b17f7c3a6f0158776e7d4941ca1d30543c8eb',
+            'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b',
+        )
+        for commit in (
+            '808e46744ac31a4e0cb57ae1307d4cb6bbd8b98b',
+            'd67a76b70777874e74623f480d7ffbea9e3d3b88',
+            'c08ea6d4595763195a3c9e15d428f93cf90e16c0',
+        ):
+            self.assertEqual(maintenance.RETAINED_DSTACK_HELPER_PAIRS[commit], old_pair)
+        self.assertEqual(
+            maintenance.RETAINED_DSTACK_HELPER_PAIRS[
+                'f6c1972b904d6e0a4b9acccc405efb0d706c239e'
+            ],
+            (
+                'dde95072245c0d75714cfbc888e679d294d24cbd45952240e8382298fbee70c6',
+                '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a',
+            ),
+        )
+        for commit in (
+            '7a24b5a99df4546f775224b83a890aeb53897734',
+            '20ab3dfd308800daad10a3ce8ac060da342b164a',
+            '5c01b159781729b6c34379b4f4383b88364426fb',
+            '32d1ec4f7e40adca65b2563b5ea11810dd223039',
+        ):
+            self.assertEqual(
+                maintenance.RETAINED_DSTACK_HELPER_PAIRS[commit],
+                (
+                    '794921cab61dd3455aeb6cddf1ab1ec636d6b1251e5568946f934a275ce6dcf5',
+                    'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b',
+                ),
+            )
         for commit in (
             '32d1ec4f7e40adca65b2563b5ea11810dd223039',
             '5c01b159781729b6c34379b4f4383b88364426fb',

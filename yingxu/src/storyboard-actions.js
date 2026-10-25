@@ -367,6 +367,30 @@ export function applyStoryboardAction(project, action, { chapterId, view } = {})
       .forEach(mark);
     return { id: from.id };
   }
+  if (action.type === 'moveToScene') {
+    const from = find(project, action.from),
+      scene = find(project, action.scene);
+    if (from?.type !== 'shot' || scene?.type !== 'scene' || from.parentId === scene.id)
+      return false;
+    const context = shotView(project, from, view).value;
+    patchShot(project, from, { cast: context.cast, place: context.place });
+    const oldParent = from.parentId;
+    from.parentId = scene.id;
+    from.order = children(project, scene.id).filter((e) => e.type === 'shot').length;
+    mark(from);
+    children(project, oldParent)
+      .filter((entity) => entity.type === 'shot')
+      .forEach((entity, index) => {
+        if (entity.order !== index) {
+          entity.order = index;
+          mark(entity);
+        }
+      });
+    storyShots(project)
+      .filter((entity) => entity.data.storyboard?.continuePrevious)
+      .forEach(mark);
+    return { id: from.id };
+  }
   if (action.type === 'addChapter') {
     if (
       !text(action.title, 160) ||

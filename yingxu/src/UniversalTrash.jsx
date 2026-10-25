@@ -1,6 +1,8 @@
 import StudioHeader from './StudioHeader.jsx';
+import { Segmented } from './ui/Segmented.jsx';
 import { Button } from './ui/Button.jsx';
 import { DialogActions } from './ui/Dialog.jsx';
+import { Field } from './ui/Field.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import { cloudController as cloud } from './cloud-controller.js';
 import CreationHistory from './CreationHistory.jsx';
@@ -65,7 +67,15 @@ export function TrashProvider({ account, children }) {
     [error, setError] = useState(''),
     [preview, setPreview] = useState(null),
     [notice, setNotice] = useState(null),
-    [revision, setRevision] = useState(0);
+    [revision, setRevision] = useState(0),
+    // #232 (#10): trashed items leave the screen at once; the server catches up behind it.
+    [hidden, setHidden] = useState(() => new Set());
+  // #232 (#14): a trash/restore notice is a short toast, not a banner that outlives the page.
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 8000);
+    return () => clearTimeout(timer);
+  }, [notice]);
   const api = useMemo(() => {
     const client = createCloudClient();
     client.setAccount(account);
@@ -148,8 +158,16 @@ export function TrashProvider({ account, children }) {
       /* Preserve accepted receipt and any newer local edits. */
     }
   }
+  const hide = (targets, on) =>
+    setHidden((old) => {
+      const next = new Set(old);
+      for (const row of targets) next[on ? 'add' : 'delete'](row.id);
+      return next;
+    });
   async function request(action, targets) {
-    return run(async () => {
+    if (action === 'trash') hide(targets, true);
+    if (action === 'restore') hide(targets, false);
+    const result = await run(async () => {
       const current = store.getState();
       if (
         current.workspace.mode === 'cloud' &&
@@ -166,8 +184,11 @@ export function TrashProvider({ account, children }) {
       if (receipt.state === 'completed') await completed(receipt, current);
       return receipt;
     });
+    // A refused or failed move puts the item back where it was (the error shows above).
+    if (action === 'trash' && !result) hide(targets, false);
+    return result;
   }
-  const value = { account, controller, busy, pending, revision, request, run };
+  const value = { account, controller, busy, pending, revision, request, run, hidden };
   return (
     <Context.Provider value={value}>
       {children}
@@ -503,7 +524,7 @@ export default function UniversalTrash() {
         </div>
         <p className="muted">{t('trash.retention')}</p>
         {!ctx?.account ? (
-          <div className="empty-state">
+          <div className="ui-empty">
             <span>
               <Trash2 size={22} />
             </span>
@@ -512,31 +533,33 @@ export default function UniversalTrash() {
           </div>
         ) : (
           <>
-            <div className="seg trash-filter">
-              {[
+            <Segmented
+              className="trash-filter"
+              options={[
                 ['all', t('trash.all')],
                 ['story', locale === 'zh' ? '故事和镜头' : 'Stories and shots'],
                 ['lib', t('library.title')],
                 ['session', t('nav.quickCreate')],
-              ].map(([id, label]) => (
-                <button
-                  key={id}
-                  className={group === id ? 'on' : ''}
-                  onClick={() => changeGroup(id)}
-                >
-                  {label}
-                  <span className="trash-tab-count">
-                    {id === 'session'
-                      ? quickCount?.account === account
-                        ? quickCount.count + (quickCount.more ? '+' : '')
-                        : '—'
-                      : rows.filter((row) => inGroup(row, id)).length +
-                        (id === 'all' && quickCount?.account === account ? quickCount.count : 0) +
-                        (next !== null || (id === 'all' && quickCount?.more) ? '+' : '')}
-                  </span>
-                </button>
-              ))}
-            </div>
+              ].map(([id, label]) => ({
+                value: id,
+                label: (
+                  <>
+                    {label}
+                    <span className="trash-tab-count">
+                      {id === 'session'
+                        ? quickCount?.account === account
+                          ? quickCount.count + (quickCount.more ? '+' : '')
+                          : '—'
+                        : rows.filter((row) => inGroup(row, id)).length +
+                          (id === 'all' && quickCount?.account === account ? quickCount.count : 0) +
+                          (next !== null || (id === 'all' && quickCount?.more) ? '+' : '')}
+                    </span>
+                  </>
+                ),
+              }))}
+              value={group}
+              onChange={changeGroup}
+            />
             {kind === 'conversation' ? (
               <div className="ops-conversation-trash">
                 <ConversationTrash
@@ -688,7 +711,7 @@ export default function UniversalTrash() {
                   </div>
                 ) : (
                   !error && (
-                    <div className="empty-state" role={loading ? 'status' : undefined}>
+                    <div className="ui-empty" role={loading ? 'status' : undefined}>
                       <span>
                         <Trash2 size={22} />
                       </span>
@@ -839,10 +862,9 @@ export function RenameDialog({ title, onSave, onClose }) {
           }
         }}
       >
-        <label>
-          {t('trash.name')}
+        <Field label={t('trash.name')}>
           <input value={value} onChange={(e) => setValue(e.target.value)} disabled={saving} />
-        </label>
+        </Field>
         {error && <p role="alert">{error}</p>}
         <DialogActions>
           <Button disabled={saving} onClick={onClose}>

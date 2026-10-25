@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { byteRange, cacheKey, createVideoCache, videoTarget } from './video-cache-core.js';
-import { playedVideoTarget } from './video-cache-client.js';
+import { playedVideoTarget, requestPersistentStorage } from './video-cache-client.js';
 import { createCloudClient } from './cloud-client.js';
 import { createMediaReadGate } from './media-read-gate.js';
 import { evictionPlan, VIDEO_CACHE_LIMIT, VIDEO_FILE_LIMIT } from './video-cache-store.js';
@@ -69,7 +69,12 @@ function memoryStore() {
     },
   };
 }
-function fixture({ body = '0123456789', account = A, wrapFetcher = (fetcher) => fetcher } = {}) {
+function fixture({
+  body = '0123456789',
+  account = A,
+  wrapFetcher = (fetcher) => fetcher,
+  ttl = 0,
+} = {}) {
   const store = memoryStore(),
     calls = [];
   let headStatus = 200,
@@ -106,7 +111,12 @@ function fixture({ body = '0123456789', account = A, wrapFetcher = (fetcher) => 
     if (beforeFull) await beforeFull();
     return full();
   };
-  const raw = createVideoCache({ store, origin: ORIGIN, fetcher: wrapFetcher(fetcher) }),
+  const raw = createVideoCache({
+      store,
+      origin: ORIGIN,
+      fetcher: wrapFetcher(fetcher),
+      authTtlMs: ttl,
+    }),
     cache = {
       ...raw,
       async handle(req) {
@@ -135,10 +145,16 @@ function fixture({ body = '0123456789', account = A, wrapFetcher = (fetcher) => 
   };
 }
 
-test('only canonical artifact URLs enter the cache, never assets/Agent credentials/signed URLs', async () => {
+test('only canonical original media URLs enter the cache, never Agent credentials/signed URLs', async () => {
   assert.deepEqual(videoTarget(ORIGIN + path(), ORIGIN), { id: 'v1', expected: A, url: path() });
+  // Owner uploads are cached under their own namespace; thumbnails keep their lane.
+  assert.deepEqual(videoTarget(ORIGIN + '/v1/assets/v1/content', ORIGIN), {
+    id: 'as_v1',
+    expected: null,
+    url: '/v1/assets/v1/content',
+  });
   for (const url of [
-    ORIGIN + '/v1/assets/v1/content',
+    ORIGIN + '/v1/assets/v1/content?rendition=thumb',
     ORIGIN + path() + '&token=secret',
     ORIGIN + path() + '&expected_account=' + A,
     ORIGIN + path() + '#fragment',
@@ -423,8 +439,8 @@ test('partial, opaque, wrong-type, truncated and corrupt responses are never cac
 
 test('metadata LRU is globally bounded by bytes and count, with correct replacement', () => {
   const entry = (key, size, used) => ({ key, size, used });
-  assert.equal(VIDEO_CACHE_LIMIT, 1024 ** 3);
-  assert.equal(VIDEO_FILE_LIMIT, 64 * 1024 ** 2);
+  assert.equal(VIDEO_CACHE_LIMIT, 4 * 1024 ** 3);
+  assert.equal(VIDEO_FILE_LIMIT, 256 * 1024 ** 2);
   assert.deepEqual(
     evictionPlan([entry('old', 4, 1), entry('newer', 4, 2)], entry('in', 4, 3), { maxBytes: 8 }),
     { remove: ['old'], bytes: 8, count: 2 },
@@ -733,4 +749,46 @@ test('aborting a cache request removes its queued authorization HEAD without fet
   assert.equal(f.calls.filter((c) => c.method === 'HEAD').length, 0);
   assert.equal(f.store.entries.size, 0);
   await held.text();
+});
+
+test('signed-in pages ask once for durable storage and never re-ask', async () => {
+  const calls = [];
+  const storage = {
+    persisted: async () => (calls.push('persisted'), false),
+    persist: async () => (calls.push('persist'), true),
+  };
+  requestPersistentStorage(storage);
+  requestPersistentStorage(storage);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(calls, ['persisted', 'persist']);
+});
+
+test('an uploaded image is kept across views and served with its own type', async () => {
+  const f = fixture();
+  f.set({
+    headMime: 'image/png',
+    full: () =>
+      new Response('0123456789', {
+        headers: { 'Content-Type': 'image/png', 'Content-Length': '10' },
+      }),
+  });
+  const url = ORIGIN + '/v1/assets/a1/content?expected_account=' + A;
+  const first = await f.cache.handle(new Request(url));
+  assert.equal(await first.text(), '0123456789');
+  assert.equal(f.store.writes[0].key, A + '\0as_a1');
+  const again = await f.cache.handle(new Request(url));
+  assert.equal(again.headers.get('X-Inkseq-Video-Cache'), 'hit');
+  assert.equal(again.headers.get('Content-Type'), 'image/png');
+  assert.equal(await again.text(), '0123456789');
+  assert.equal(f.calls.filter((c) => c.method === 'GET').length, 1);
+});
+
+test('within a minute one access check covers repeated range reads of a cached file', async () => {
+  const f = fixture({ ttl: 60000 });
+  await f.cache.handle(request());
+  const heads = () => f.calls.filter((c) => c.method === 'HEAD').length;
+  const before = heads();
+  for (const range of ['bytes=0-3', 'bytes=4-7', 'bytes=8-9'])
+    assert.equal((await f.cache.handle(request('v1', A, range))).status, 206);
+  assert.equal(heads(), before);
 });

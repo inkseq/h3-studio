@@ -16,6 +16,8 @@ from .control import WorkerControl
 from .dstack_operator import BACKEND_MARKER, _actor, _finite
 from .operator_capacity import (
     OperatorError,
+    advance_command_revision,
+    command_revision,
     operator_commands,
     operator_nodes,
     operator_policy,
@@ -309,6 +311,38 @@ def _admin_download_details(node, now):
     }
 
 
+# Ended machines' usage and metrics change only when billing settles, yet the GPU console
+# polls every 5 s and each node costs several metric queries over jobs/artifacts/outbox
+# (~100 historical nodes kept the 2-vCPU host busy). Reuse an ended node's result for
+# ENDED_METRICS_TTL within the same Sydney day; live nodes are always recomputed.
+ENDED_METRICS_TTL = 600
+_ENDED_METRICS = {}
+DEMAND_SUMMARY_TTL = 15
+
+
+def _cached_metrics(compute, connection, original, intent, workers, now):
+    ended = (
+        original.get("desired_state") == "stopped"
+        and original.get("runtime_state") == "stopped"
+    )
+    if not ended or not _finite(now):
+        return compute(connection, original, intent, workers, now)
+    key = (
+        original.get("intent_id"),
+        original.get("updated_at"),
+        tuple(sorted(str(worker.get("id")) for worker in workers)),
+        int((now + 10 * 3600) // 86400),  # Sydney-ish day bucket; TTL bounds the edge.
+    )
+    hit = _ENDED_METRICS.get(key)
+    if hit is not None and 0 <= now - hit[0] < ENDED_METRICS_TTL:
+        return copy.deepcopy(hit[1])
+    value = compute(connection, original, intent, workers, now)
+    if len(_ENDED_METRICS) > 4096:
+        _ENDED_METRICS.clear()
+    _ENDED_METRICS[key] = (now, copy.deepcopy(value))
+    return value
+
+
 class DstackWorkspace:
     def __init__(self, service):
         self.service, self.repo, self.settings = service, service.repo, service.settings
@@ -347,12 +381,30 @@ class DstackWorkspace:
         )
         return identity
 
+    def _display_demand_start(self, connection, now):
+        # The overview's demand panel asks dstack about every owned run; a poll
+        # within DEMAND_SUMMARY_TTL reuses it. Starts/admission never read this.
+        hit = getattr(self, "_demand_summary", None)
+        if hit is not None and _finite(now) and 0 <= now - hit[0] < DEMAND_SUMMARY_TTL:
+            return copy.deepcopy(hit[1])
+        value = self.service.demand_start_summary(connection, now)
+        if _finite(now):
+            self._demand_summary = (now, copy.deepcopy(value))
+        return value
+
     def demand_start(self, principal):
         self._authorize(principal, admin=True)
         with self.repo.engine.connect() as connection:
             return self.service.demand_start_summary(connection, self.repo.clock())
 
     def set_demand_start(self, principal, body, key):
+        self._demand_summary = None
+        try:
+            return self._set_demand_start(principal, body, key)
+        finally:
+            self._demand_summary = None
+
+    def _set_demand_start(self, principal, body, key):
         from .dstack_demand_policy import load_runtime, policy_key
         from .identity import account_identity, lock_account_gate
 
@@ -533,10 +585,11 @@ class DstackWorkspace:
             group = owned_group(connection, self.settings, owner, body["group_id"])
             require(
                 "expected_version" not in body
-                or body["expected_version"] == node["updated_at"],
+                or body["expected_version"] == command_revision(node["payload"]),
                 "operator_node_version_conflict",
             )
-            now, payload = self.repo.clock(), copy.deepcopy(node["payload"])
+            now = self.repo.clock()
+            payload = advance_command_revision(copy.deepcopy(node["payload"]))
             previous = payload.get("group_id")
             payload["group_id"] = body["group_id"]
             connection.execute(
@@ -550,7 +603,7 @@ class DstackWorkspace:
                 "node_id": node_id,
                 "group_id": body["group_id"],
                 "group_name": group["name"] if group else None,
-                "version": now,
+                "version": command_revision(payload),
             }
             self._command(connection, actor, key, digest, "dstack_group_move", result)
             return result
@@ -584,7 +637,7 @@ class DstackWorkspace:
                 self.repo.clock(),
             )
 
-    def state(self, principal, *, admin=False):
+    def state(self, principal, *, admin=False, live_only=False):
         from .dstack_metrics import machine_metrics
         from .dstack_preparation import preparation_view
 
@@ -607,7 +660,7 @@ class DstackWorkspace:
         result, groups = [], []
         with self.repo.engine.connect() as connection:
             demand_start = (
-                self.service.demand_start_summary(connection, now) if admin else None
+                self._display_demand_start(connection, now) if admin else None
             )
             # The preceding owner-state projection is advisory. A machine
             # accepted between those reads belongs to the next poll, never a
@@ -616,6 +669,13 @@ class DstackWorkspace:
                 node
                 for node in _nodes(connection, self.settings, owners)
                 if node["intent_id"] in projected
+                # The admin overview needs live machines only; ended ones would each
+                # cost several metric queries (~15 s for ~100 nodes on the small host).
+                and not (
+                    live_only
+                    and node["desired_state"] == "stopped"
+                    and node["runtime_state"] == "stopped"
+                )
             ]
             # Readiness may have observed a newer heartbeat while this request
             # was in progress. Timestamp the captured rows after reading them;
@@ -692,8 +752,13 @@ class DstackWorkspace:
                 if admin:
                     value.update(_admin_download_details(original, now))
                 value.update(
-                    machine_metrics(
-                        connection, original, intents[identity], workers, now
+                    _cached_metrics(
+                        machine_metrics,
+                        connection,
+                        original,
+                        intents[identity],
+                        workers,
+                        now,
                     )
                 )
                 result.append(value)

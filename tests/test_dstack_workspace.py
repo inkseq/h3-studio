@@ -1,5 +1,6 @@
 """P4 ownership, durable group commands and exact queue-impact tests; no providers."""
 
+import unittest
 import copy
 import json
 from pathlib import Path
@@ -30,6 +31,7 @@ from studio_platform.repository import (
     jobs,
     registered_workers,
     Scope,
+    request_hash,
 )
 from test_platform_repository import LedgerCase
 import test_dstack_operator as fixtures
@@ -50,6 +52,214 @@ class WorkspaceTests(LedgerCase):
         return self.service.start(
             self.owner, {"preview_id": preview["preview_id"]}, key or uuid.uuid4().hex
         )["node_id"]
+
+    def node_row(self, node_id):
+        with self.repo.engine.connect() as connection:
+            return dict(
+                connection.execute(
+                    select(operator_nodes).where(operator_nodes.c.intent_id == node_id)
+                )
+                .mappings()
+                .one()
+            )
+
+    def node_version(self, node_id):
+        return next(
+            item["version"]
+            for item in self.workspace.state(self.owner)["nodes"]
+            if item["node_id"] == node_id
+        )
+
+    def test_observation_ticks_do_not_invalidate_stop_hold_or_move(self):
+        node = self.start_node()
+        self.assertEqual(self.node_version(node), 0)
+        for command in ("hold", "move", "stop"):
+            with self.subTest(command=command):
+                before = self.node_row(node)
+                version = self.node_version(node)
+                for _ in range(3):
+                    self.now += 1
+                    self.store.record(
+                        node,
+                        {
+                            "observed_at": self.now,
+                            "state": "starting",
+                            "ready": False,
+                        },
+                    )
+                self.assertGreater(
+                    self.node_row(node)["updated_at"], before["updated_at"]
+                )
+                self.assertEqual(self.node_version(node), version)
+                body = {"expected_version": version}
+                if command == "hold":
+                    self.service.set_hold(
+                        self.owner, node, {**body, "hold_seconds": 60}, "tick-hold"
+                    )
+                elif command == "move":
+                    result = self.workspace.move(
+                        self.owner, node, {**body, "group_id": None}, "tick-move"
+                    )
+                    self.assertEqual(result["version"], version + 1)
+                else:
+                    self.service.node_command(self.owner, node, body, "tick-stop")
+                self.assertEqual(self.node_version(node), version + 1)
+        self.assertEqual(self.client.stopped, [])
+
+    def test_same_clock_competing_control_commands_have_one_winner(self):
+        node = self.start_node()
+        version, clock = self.node_version(node), self.now
+
+        def attempt(number):
+            try:
+                body = {"expected_version": version}
+                if number == 0:
+                    self.service.node_command(self.owner, node, body, "race-stop")
+                elif number == 1:
+                    self.service.set_hold(
+                        self.owner, node, {**body, "hold_seconds": 60}, "race-hold"
+                    )
+                else:
+                    self.workspace.move(
+                        self.owner, node, {**body, "group_id": None}, "race-move"
+                    )
+                return "accepted"
+            except OperatorError as error:
+                return error.code
+
+        self.assertCountEqual(
+            self.parallel(attempt, count=3),
+            [
+                "accepted",
+                "operator_node_version_conflict",
+                "operator_node_version_conflict",
+            ],
+        )
+        self.assertEqual(self.now, clock)
+        self.assertEqual(self.node_version(node), version + 1)
+        self.assertEqual(self.client.stopped, [])
+
+    def test_legacy_revision_reads_zero_without_write_and_old_timestamp_conflicts(self):
+        node = self.start_node()
+        original = self.node_row(node)
+        payload = copy.deepcopy(original["payload"])
+        self.assertEqual(payload.pop("command_revision"), 0)
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(operator_nodes)
+                .where(operator_nodes.c.intent_id == node)
+                .values(payload=payload)
+            )
+        before = self.node_row(node)
+        self.assertEqual(self.node_version(node), 0)
+        self.assertEqual(self.node_row(node), before)
+        with self.assertRaisesRegex(OperatorError, "operator_node_version_conflict"):
+            self.service.node_command(
+                self.owner,
+                node,
+                {
+                    "expected_version": original["updated_at"],
+                },
+                "old-cached-version",
+            )
+        self.service.set_hold(
+            self.owner,
+            node,
+            {
+                "expected_version": 0,
+                "hold_seconds": 60,
+            },
+            "refreshed-version",
+        )
+        self.assertEqual(self.node_version(node), 1)
+        self.assertEqual(self.node_row(node)["payload"]["dstack"], payload["dstack"])
+
+    def test_original_timestamp_receipts_replay_before_new_revision_check(self):
+        for kind in ("stop", "hold", "move"):
+            with self.subTest(kind=kind):
+                node = self.start_node()
+                body = {"expected_version": 0}
+                method = self.service.node_command
+                if kind == "hold":
+                    method, body = self.service.set_hold, {**body, "hold_seconds": 60}
+                elif kind == "move":
+                    method, body = self.workspace.move, {**body, "group_id": None}
+                key = "legacy-receipt-" + kind
+                result = method(self.owner, node, body, key)
+                old_body = {**body, "expected_version": self.now - 1}
+                command_kind = (
+                    "dstack_group_move" if kind == "move" else "dstack_" + kind
+                )
+                # Frozen pre-upgrade journal fixture: original timestamp request
+                # and original result must survive the additive payload field.
+                hashed = (
+                    request_hash(
+                        {"kind": command_kind, "body": {"node_id": node, **old_body}}
+                    )
+                    if kind == "move"
+                    else request_hash(
+                        {"kind": command_kind, "node_id": node, "body": old_body}
+                    )
+                )
+                with self.repo.transaction() as connection:
+                    connection.execute(
+                        update(operator_commands)
+                        .where(operator_commands.c.idempotency_key == key)
+                        .values(request_hash=hashed)
+                    )
+                before = self.node_row(node)
+                self.assertEqual(method(self.owner, node, old_body, key), result)
+                self.assertEqual(self.node_row(node), before)
+                with self.assertRaisesRegex(OperatorError, "idempotency"):
+                    method(self.owner, node, body, key)
+
+    def test_stable_revision_does_not_bypass_fresh_queue_impact_or_owner_scope(self):
+        node = self.start_node()
+        self.ready_worker(node)
+        version = self.node_version(node)
+        first = self.waiting_job()
+        reviewed = self.workspace.impact(self.owner, node_id=node)
+        second = self.waiting_job()
+        body = {
+            "expected_version": version,
+            "acknowledge_capacity_loss": reviewed["fingerprint"],
+        }
+        with self.assertRaises(CapacityLoss):
+            self.service.node_command(self.owner, node, body, "stale-queue")
+        with self.assertRaisesRegex(OperatorError, "dstack_node_not_found"):
+            self.service.node_command(self.other_owner, node, body, "foreign-stop")
+        self.assertEqual(self.node_version(node), version)
+        fresh = self.workspace.impact(self.owner, node_id=node)
+        self.service.node_command(
+            self.owner,
+            node,
+            {
+                **body,
+                "acknowledge_capacity_loss": fresh["fingerprint"],
+            },
+            "fresh-queue",
+        )
+        self.assertEqual(self.node_version(node), version + 1)
+        with self.repo.engine.connect() as connection:
+            for job in (first, second):
+                self.assertEqual(
+                    connection.execute(
+                        select(jobs.c.status).where(jobs.c.id == job["id"])
+                    ).scalar_one(),
+                    "queued",
+                )
+        self.assertEqual(self.client.stopped, [])
+
+    def test_boolean_or_malformed_revision_cannot_alias_legacy_zero(self):
+        node = self.start_node()
+        for value in (False, True, "0", None, float("nan")):
+            with self.subTest(value=value):
+                with self.assertRaises(OperatorError) as error:
+                    self.service.node_command(
+                        self.owner, node, {"expected_version": value}, "invalid-cas"
+                    )
+                self.assertEqual(error.exception.status, 422)
+        self.assertEqual(self.node_version(node), 0)
 
     def test_canonical_admin_reads_regular_users_nodes_without_impersonating_them(self):
         from studio_platform.identity_schema import users, admin_audit
@@ -570,6 +780,29 @@ class WorkspaceTests(LedgerCase):
                 Principal("superdan", "agent", machine=True), admin=True
             )
 
+    def test_admin_live_view_skips_ended_machines(self):
+        # The admin overview asks for live machines only (performance on the CPU host).
+        live = self.start_node()
+        ended = self.start_node()
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(operator_nodes)
+                .where(operator_nodes.c.intent_id == ended)
+                .values(desired_state="stopped", runtime_state="stopped")
+            )
+        full = {
+            n["node_id"] for n in self.workspace.state(self.owner, admin=True)["nodes"]
+        }
+        only = {
+            n["node_id"]
+            for n in self.workspace.state(self.owner, admin=True, live_only=True)[
+                "nodes"
+            ]
+        }
+        self.assertIn(ended, full)
+        self.assertEqual(only, full - {ended})
+        self.assertIn(live, only)
+
     def test_mode_queue_estimate_stays_unknown_when_one_profile_has_no_capacity(self):
         node = self.start_node()
         self.ready_worker(node)
@@ -770,6 +1003,7 @@ class WorkspaceTests(LedgerCase):
         self.workspace.move(
             self.owner, node, {"group_id": group["id"]}, "recovery-join"
         )
+        revision_before = self.node_version(node)
         original_job = self.waiting_job()
         impact = self.workspace.impact(self.owner, group_id=group["id"])
         body = {"acknowledge_capacity_loss": impact["fingerprint"]}
@@ -804,6 +1038,7 @@ class WorkspaceTests(LedgerCase):
             frozen_request = parent["payload"]["child_requests"][node]
             self.assertEqual(parent["payload"]["results"], [])
         added_job = self.waiting_job()
+        self.assertEqual(self.node_version(node), revision_before + 1)
         replay = self.workspace.group_command(
             self.owner, group["id"], body, "recovery-stop", "stop"
         )
@@ -811,6 +1046,7 @@ class WorkspaceTests(LedgerCase):
         self.assertEqual(replay["results"][0]["command_id"], child["id"])
         self.assertEqual(replay["results"][0]["state"], "accepted")
         self.assertEqual(replay["child_requests"][node], frozen_request)
+        self.assertEqual(self.node_version(node), revision_before + 1)
         with self.repo.engine.connect() as connection:
             self.assertEqual(
                 len(
@@ -960,3 +1196,46 @@ class WorkspaceTests(LedgerCase):
             self.assertEqual(result.json()["node_id"], node)
             self.assertIn("usage", result.json())
             load.assert_called_once()
+
+
+class EndedMetricsCacheTests(unittest.TestCase):
+    def test_ended_nodes_reuse_metrics_live_nodes_do_not(self):
+        from studio_platform import dstack_workspace as module
+
+        module._ENDED_METRICS.clear()
+        calls = []
+
+        def compute(connection, original, intent, workers, now):
+            calls.append(original["intent_id"])
+            return {"usage": {"n": len(calls)}}
+
+        ended = {
+            "intent_id": "a",
+            "updated_at": 5.0,
+            "desired_state": "stopped",
+            "runtime_state": "stopped",
+        }
+        live = {
+            **ended,
+            "intent_id": "b",
+            "desired_state": "running",
+            "runtime_state": "running",
+        }
+        workers = [{"id": "w"}]
+        first = module._cached_metrics(compute, None, ended, {}, workers, 1000.0)
+        again = module._cached_metrics(compute, None, ended, {}, workers, 1100.0)
+        self.assertEqual(first, again)
+        again["usage"]["n"] = 99  # callers get their own copy
+        self.assertEqual(
+            module._cached_metrics(compute, None, ended, {}, workers, 1200.0), first
+        )
+        module._cached_metrics(compute, None, live, {}, workers, 1000.0)
+        module._cached_metrics(compute, None, live, {}, workers, 1001.0)
+        self.assertEqual(calls, ["a", "b", "b"])
+        module._cached_metrics(
+            compute, None, ended, {}, workers, 1000.0 + module.ENDED_METRICS_TTL + 1
+        )
+        module._cached_metrics(
+            compute, None, {**ended, "updated_at": 6.0}, {}, workers, 1300.0
+        )
+        self.assertEqual(calls, ["a", "b", "b", "a", "a"])

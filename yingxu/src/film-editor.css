@@ -360,7 +360,7 @@ button.autosave-status {
   width: 8px;
   align-self: stretch;
   background: color-mix(in srgb, var(--accent) 70%, transparent);
-  cursor: ew-resize;
+  cursor: grab;
 }
 .film-audio-bar {
   display: flex;
@@ -460,4 +460,72 @@ button.autosave-status {
   color: var(--accent);
   font-size: 10px;
   font-weight: 700;
+}
+
+/* A divider between kept parts of one take inside its clip (#512). */
+.film-tclip-cut {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--accent);
+  opacity: 0.7;
+  pointer-events: none;
+}
+/* #232 (#13): clips touch, with a hairline between them, so their edges match the ruler. */
+.film-tclip {
+  border-radius: 0;
+  box-shadow: inset -1px 0 0 var(--surface);
+}
+.film-tclip.selected {
+  border-radius: 4px;
+}
+/* #232 (#28): a smaller preview by default, drag its bottom-right corner to resize; the
+   timeline below gets the room. */
+.film-editor {
+  grid-template-rows: auto auto auto auto auto auto auto auto auto;
+}
+.film-editor-stage {
+  height: 36vh;
+  min-height: 140px;
+  max-height: 75vh;
+  resize: vertical;
+}
+.film-speed select {
+  width: auto;
+  min-width: 72px;
+  padding: 2px 8px;
+}
+/* #232 (#17): left-out clips read as removed — hatched, struck through — right under the track. */
+.film-excluded {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.film-excluded button {
+  text-decoration: line-through;
+  background: repeating-linear-gradient(
+    135deg,
+    var(--surface-2, var(--surface)) 0 6px,
+    var(--surface) 6px 12px
+  );
+  opacity: 0.8;
+}
+.film-excluded button.on {
+  opacity: 1;
+  outline: 2px solid var(--accent);
+}
+/* Clip labels sit on pictures or on the empty stripes, in light and dark looks alike: a
+   small dark pill keeps them readable everywhere (owner review, 2026-10-26). */
+.film-tclip-label,
+.film-tclip-rate {
+  right: auto;
+  max-width: calc(100% - 12px);
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  text-shadow: none;
 }

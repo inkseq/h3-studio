@@ -1,4 +1,6 @@
+import ThemeToggle from './ThemeToggle.jsx';
 import { ChatDialog } from './QuickChatControls.jsx';
+import { Badge } from './ui/Note.jsx';
 import InkLoader from './InkLoader.jsx';
 import { cloudSystemMessage } from './cloud-model.js';
 import { exportSrt } from './caption-model.js';
@@ -54,6 +56,7 @@ const StoryChat = React.lazy(() => import('./StoryChat.jsx'));
 const QuickCreateEntry = React.lazy(() => import('./QuickCreateEntry.jsx'));
 const LegacyQuickChatLink = React.lazy(() => import('./LegacyQuickChatLink.jsx'));
 import OperatorConsole from './P4OperatorConsole.jsx';
+import AdminHome from './AdminHome.jsx';
 import { navigateWorkspace } from './workspace-navigation.js';
 import { CloudProjects, useCloud } from './CloudStudio.jsx';
 import AgentConnect from './AgentConnect.jsx';
@@ -468,7 +471,7 @@ function SeriesApp({ sidebarView, onSidebarView }) {
               </div>
             </details>
           ) : (
-            <span className="badge local">{t('story.copy9')}</span>
+            <Badge tone="local">{t('story.copy9')}</Badge>
           )}
           <div className="spacer" />
           <button
@@ -524,6 +527,7 @@ function SeriesApp({ sidebarView, onSidebarView }) {
               </button>
             </div>
           </details>
+          <ThemeToggle />
           <LanguageSwitcher />
           <button
             className="ghost"
@@ -1344,6 +1348,7 @@ function AppContent() {
     '/settings': ({ active }) => (
       <SpendingSettings key={account || 'signed-out'} account={account} active={active} />
     ),
+    '/admin': () => <AdminHome account={account} />,
     '/operator': ({ active }) => (
       <React.Suspense fallback={<InkLoader label={t('loading.operator')} />}>
         <OperatorConsole active={active} />

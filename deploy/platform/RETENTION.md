@@ -34,6 +34,15 @@ Optional root-protected `release-retention-pins.json` has exactly
 `{"version":1,"commits":["FULL_40_CHARACTER_SHA"]}`. Missing means no additional
 explicit pins; malformed, unknown or duplicate fields stop cleanup. Existing
 release-state, frontend, migration, execution and container pins remain mandatory.
+Explicit pins do not expire when a newer release is promoted. If a successful
+cleanup leaves many old versions, inspect this file and the receipt's
+`kept_commits` before retrying cleanup. Retiring an obsolete explicit rollback
+pin needs separate review of the exact commits, fresh release/execution/container
+references, and a protected copy of the original pin file. Apply any approved
+pin update under `release.lock` with an exact old-file hash check; then rerun the
+normal planner. Never bypass the other dependency pins or delete a directory
+directly to meet a disk-space target. A size estimate for pinned directories is
+not a verified deletion plan or proof of reclaimed space.
 `environment-release-intent.json` binds the complete existing publication tuple
 through platform and frontend installation; an incomplete operation keeps its
 commit, never creates approval and never permits another unknown deployment to
@@ -127,8 +136,11 @@ writes. Each apply recomputes and rechecks all pins and trees under release.lock
 Install/enable the reviewed `inkseq-release-retention.service` and `.timer`
 independently for daily execution. The service calls the same fixed helper with
 `--apply --scheduled`, requires the exact protected enabled policy, and takes
-the same nonblocking release.lock. It does not queue behind an active deployment.
-It uses bounded memory/CPU, idle I/O and a one-hour service timeout. No application
+the same release.lock. A scheduled run waits behind an active deployment; the
+one-hour service timeout bounds that wait and cleanup together. Lock contention
+is not reported as successful cleanup. Interactive dry-runs and applies fail
+immediately with `retention_release_lock_busy` instead of waiting.
+The service uses bounded memory/CPU and idle I/O. No application
 bundle may install this helper, policy, service or timer.
 
 A cleanup error emits `retention_skipped_preserving_healthy_release` and leaves

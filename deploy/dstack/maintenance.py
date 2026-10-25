@@ -40,9 +40,13 @@ LEGACY_HELPER_PAIRS = {commit: (
         "07da40322559ee5a12829be6884c541c401d852a")}
 # Exact retained current/previous helper bytes before the staging upgrade.
 RETAINED_DSTACK_HELPER_PAIRS = {
-    # B1 derivative and current source base; runtime acceptance is checked separately.
-    '32d1ec4f7e40adca65b2563b5ea11810dd223039': ('794921cab61dd3455aeb6cddf1ab1ec636d6b1251e5568946f934a275ce6dcf5', 'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b'),
+    # Exact original 7a candidate being reconciled through its normal deployer.
+    '7a24b5a99df4546f775224b83a890aeb53897734': ('794921cab61dd3455aeb6cddf1ab1ec636d6b1251e5568946f934a275ce6dcf5', 'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b'),
+    # Exact source of the queued #516 platform; retained runtime must still match.
+    '20ab3dfd308800daad10a3ce8ac060da342b164a': ('794921cab61dd3455aeb6cddf1ab1ec636d6b1251e5568946f934a275ce6dcf5', 'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b'),
+    # Exact B1 staging current/rollback sources before compact-cap validation changed.
     '5c01b159781729b6c34379b4f4383b88364426fb': ('794921cab61dd3455aeb6cddf1ab1ec636d6b1251e5568946f934a275ce6dcf5', 'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b'),
+    '32d1ec4f7e40adca65b2563b5ea11810dd223039': ('794921cab61dd3455aeb6cddf1ab1ec636d6b1251e5568946f934a275ce6dcf5', 'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b'),
     # Observed staging A1 current/previous, SSM 74cb6214 (2026-10-24).
     'fcd3ce618dbbf2a4f0dad4ee09e0c74121c4f69c': ('49905c8b60ae0375ec02485028db8fa4f7cabd718a91a936649dbf301fb5d86d', 'ddd25ad1c878e5066245bc32bb660e97908a223bb41c6d2bb38de1e433ddeafe'),
     'a978e9ceb7e78c9a9b54f9365d1e6c368aea83ea': ('49905c8b60ae0375ec02485028db8fa4f7cabd718a91a936649dbf301fb5d86d', 'ddd25ad1c878e5066245bc32bb660e97908a223bb41c6d2bb38de1e433ddeafe'),
@@ -75,6 +79,12 @@ RETAINED_DSTACK_HELPER_PAIRS = {
     '5676bd46e8b31dac36fb5b9758de4763114b84ca': ('719d8d3f83fdcd687d06d343f4076db117c675de607f2e46e61d2b65da5db8b3', 'fba8d75a6845fe2fe7c78ea120747797b2f57ec80e0c6bc4861a0f6bfda54790'),
     '59d2ebefba0e98d677907c30b65144ac47681762': ('719d8d3f83fdcd687d06d343f4076db117c675de607f2e46e61d2b65da5db8b3', 'fba8d75a6845fe2fe7c78ea120747797b2f57ec80e0c6bc4861a0f6bfda54790'),
     'f7b1db096099d0b3ad09736a95afffa57f9626c7': ('719d8d3f83fdcd687d06d343f4076db117c675de607f2e46e61d2b65da5db8b3', 'fba8d75a6845fe2fe7c78ea120747797b2f57ec80e0c6bc4861a0f6bfda54790'),
+    # #193 helper compatibility (Small): staging current 808e/rollback d67a and
+    # production current c08e carry the pre-#540 pair; f6 is the held #540 candidate.
+    '808e46744ac31a4e0cb57ae1307d4cb6bbd8b98b': ('d0d8eeff6a9d1d52d6357806382b17f7c3a6f0158776e7d4941ca1d30543c8eb', 'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b'),
+    'd67a76b70777874e74623f480d7ffbea9e3d3b88': ('d0d8eeff6a9d1d52d6357806382b17f7c3a6f0158776e7d4941ca1d30543c8eb', 'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b'),
+    'c08ea6d4595763195a3c9e15d428f93cf90e16c0': ('d0d8eeff6a9d1d52d6357806382b17f7c3a6f0158776e7d4941ca1d30543c8eb', 'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b'),
+    'f6c1972b904d6e0a4b9acccc405efb0d706c239e': ('dde95072245c0d75714cfbc888e679d294d24cbd45952240e8382298fbee70c6', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
 }
 LEGACY_HELPER_PAIRS.update(RETAINED_DSTACK_HELPER_PAIRS)
 # Closed stock tuples: current build and the exact retained rollback only.
@@ -127,6 +137,8 @@ STORAGE_FIELDS = frozenset({"SIXNINE_STORAGE_PROVIDER", "SIXNINE_STORAGE_ENDPOIN
     "SIXNINE_STORAGE_BUCKET", "SIXNINE_STORAGE_PROFILE", "SIXNINE_STORAGE_CREDENTIAL_FILE"})
 OPTIONAL_FIELDS = frozenset({"SIXNINE_OPERATOR_ADMIN_OWNERS", "SIXNINE_STORYBOARD_OWNERS", 'INKSEQ_DEPLOYMENT_TARGET',
     'INKSEQ_RESOURCE_PROFILE', 'INKSEQ_CPU_CGROUP_PARENT', 'INKSEQ_GENERATION_QUEUE',
+    'INKSEQ_CAPACITY_NO_PROGRESS_SECONDS', 'INKSEQ_CAPACITY_RUNTIME_FLOOR_SECONDS',
+    'INKSEQ_CAPACITY_STARTUP_TIMEOUT_SECONDS',
     'INKSEQ_FILM_ENABLED', 'INKSEQ_STRIPE_MODE', 'INKSEQ_SENTRY_DSN'}) | OPTIONAL_PATH_FIELDS | STORAGE_FIELDS
 LEGACY_MARKERS = ("operator-capacity/active.json", "gpu-acceptance/active.json", "gpu-scaler/active.json")
 STORYBOARD_FLAG = "SIXNINE_STORYBOARD_OWNERS"
@@ -433,9 +445,11 @@ def settings(root):
         operator = Path(value['environment']['SIXNINE_DSTACK_OPERATOR_CONFIG_FILE'])
         release.regular(operator, root_owned=True, maximum=1024**2)
         policy = json.loads(operator.read_text()).get('policy', {})
-        release.require(all(type(policy.get(key)) is int and policy[key] == 1
+        # The compact profile seals CPU resources, not a separate single-GPU policy.
+        # CR59 permits explicit protected limits up to ten; reads never adopt them.
+        release.require(all(type(policy.get(key)) is int and 1 <= policy[key] <= 10
                             for key in ('max_instances', 'max_physical_gpus')),
-                        'migration_compact_requires_single_gpu_capacity')
+                        'migration_compact_capacity_limit_invalid')
     return settings_document(value), release.checksum(directory / "paths.json")
 
 

@@ -971,18 +971,29 @@ class DstackLifetimeTests(LedgerCase):
             'keep_on': 'until_stopped',
             'expected_version': self.service.state(self.owner)['nodes'][0]['version'],
         }
+        self.now += 1
+        self.store.record(
+            node,
+            {
+                'observed_at': self.now,
+                'state': 'starting',
+                'ready': False,
+            },
+        )
         result = self.service.set_hold(self.owner, node, body, 'always-original')
         self.assertEqual(
             self.service.set_hold(self.owner, node, body, 'always-original'), result
         )
         self.assertIsNone(result['hard_deadline'])
         self.assertEqual(result['lifecycle']['keep_on'], 'until_stopped')
+        self.assertEqual(self.service.state(self.owner)['nodes'][0]['version'], 1)
         self.service.set_hold(
             self.owner, node, {'idle_shutdown_seconds': 900}, 'idle-adjust-only'
         )
         state = self.service.state(self.owner)['nodes'][0]
         self.assertEqual(state['lifecycle']['keep_on'], 'until_stopped')
         self.assertEqual(state['lifecycle']['idle_shutdown_seconds'], 900)
+        self.assertEqual(state['version'], 2)
         for field in (
             'run_id',
             'run_name',
@@ -1007,6 +1018,8 @@ class DstackLifetimeTests(LedgerCase):
     def test_cold_paid_elapsed_is_funded_before_native_callback_without_second_apply(
         self,
     ):
+        # Exercise funding independently of the owner-configurable startup cap.
+        self.settings.capacity_startup_timeout_seconds = 86400
         node = self.start()['node_id']
         self.capacity.readiness = None
         self.running(node)
@@ -1164,6 +1177,7 @@ class DstackLifetimeTests(LedgerCase):
         self.assertEqual(self.client.stopped, [])
 
     def test_always_cannot_bypass_money_cap_cold_stop_keeps_reserved_unknown_bill(self):
+        self.settings.capacity_startup_timeout_seconds = 86400
         node = self.start(preview=self.preview(keep_on='until_stopped'))['node_id']
         self.capacity.readiness = None
         self.running(node)
@@ -1191,7 +1205,7 @@ class DstackLifetimeTests(LedgerCase):
         self.assertIsNone(reservation['actual_cost_microusd'])
         self.assertEqual(payload['stop_reason_code'], 'dstack_spend_limit_reached')
 
-    def test_legacy_obligation_does_not_count_new_path_and_terminal_absence_retains_old_money(
+    def test_registration_ceiling_counts_legacy_and_terminal_absence_retains_old_money(
         self,
     ):
         legacy = self.repo.reserve_instance_intent(
@@ -1209,6 +1223,12 @@ class DstackLifetimeTests(LedgerCase):
         self.repo.configure_capacity(max_instances=1, max_physical_gpus=1)
         self.repo.configure_pool('dstack-test', max_instances=1, max_physical_gpus=1)
         self.service.policy.update(max_instances=1, max_physical_gpus=1)
+        with self.assertRaisesRegex(BudgetExceeded, 'global_capacity_exceeded'):
+            self.start()
+        self.assertEqual(self.client.applied, [])
+        self.repo.configure_capacity(max_instances=2, max_physical_gpus=2)
+        self.repo.configure_pool('dstack-test', max_instances=2, max_physical_gpus=2)
+        self.service.policy.update(max_instances=2, max_physical_gpus=2)
         node = self.start()['node_id']
         self.running(node)
         run = self.client.runs[self.store.load(node)['run_name']]
@@ -1219,7 +1239,8 @@ class DstackLifetimeTests(LedgerCase):
         old_budget = self.repo.get_budget('owner-budget')
         with self.repo.transaction() as connection:
             usage = self.service._limits(connection, 750000)
-        self.assertEqual(usage['instances'], 0)
+        self.assertEqual(usage['instances'], 1)
+        self.assertEqual(usage['resources'], {('lium', 'intent:' + legacy['id']): 1})
         self.assertEqual(usage['active_instance_ids'], ())
         self.assertEqual(self.repo.get_budget('owner-budget'), old_budget)
         self.assertEqual(len(self.client.applied), 1)
@@ -1227,7 +1248,7 @@ class DstackLifetimeTests(LedgerCase):
             backend=backend, complete=True, observed_at=self.now - 31, instance_ids=[]
         )
         with self.repo.transaction() as connection:
-            with self.assertRaisesRegex(OperatorError, 'capacity_limit_exceeded'):
+            with self.assertRaisesRegex(BudgetExceeded, 'global_capacity_exceeded'):
                 self.service._limits(connection, 750000)
         with self.repo.engine.connect() as connection:
             original = (

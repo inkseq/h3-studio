@@ -64,8 +64,8 @@ const button = (html, label) =>
 
 test('real film confirmation binds saved revision and option state; displayed amount uses existing money precision', () => {
   const ready = render();
-  assert.match(ready, /Additional estimate: \$0\.10/);
-  assert.ok(!button(ready, 'Confirm and make film')[1].includes('disabled'));
+  assert.match(ready, /Estimated extra cost: \$0\.10/);
+  assert.ok(!button(ready, 'Make film')[1].includes('disabled'));
   for (const patch of [
     { dirty: true },
     { currentVersion: 8 },
@@ -73,7 +73,7 @@ test('real film confirmation binds saved revision and option state; displayed am
     { confirmed: false },
     { state: { run: run(), pending: { kind: 'film-submit' }, busy: false } },
   ])
-    assert.ok(button(render(patch), 'Confirm and make film')[1].includes('disabled'));
+    assert.ok(button(render(patch), 'Make film')[1].includes('disabled'));
 });
 
 test('real progress shows original counts and download only for a completed confirmed export', () => {
@@ -130,7 +130,7 @@ test('cancelling has no misleading resume/cancel action, and every supplied code
   });
   assert.match(html, /Stopping accepted work/);
   assert.equal(button(html, 'Cancel film'), undefined);
-  assert.equal(button(html, 'Resume original run'), undefined);
+  assert.equal(button(html, 'Continue'), undefined);
   assert.deepEqual(Object.keys(filmCatalogs.en).sort(), Object.keys(filmCatalogs.zh).sort());
   for (const code of [
     'film_original_job_failed',
@@ -141,7 +141,7 @@ test('cancelling has no misleading resume/cancel action, and every supplied code
     'film.pendingCorrupt',
   ])
     for (const locale of ['en', 'zh']) assert.ok(translate(locale, filmProblem(code)).length > 10);
-  assert.match(render({}, 'zh'), /新增费用估算/);
+  assert.match(render({}, 'zh'), /预计还要花费/);
   const unauthorized = render({
     state: {
       run: run({ phase: 'authorization_required', accepted_at: 100 }),
@@ -149,6 +149,6 @@ test('cancelling has no misleading resume/cancel action, and every supplied code
       busy: false,
     },
   });
-  assert.ok(button(unauthorized, 'Resume original run'));
-  assert.match(unauthorized, /original authorization is no longer valid/);
+  assert.ok(button(unauthorized, 'Continue'));
+  assert.match(unauthorized, /sign-in expired/);
 });

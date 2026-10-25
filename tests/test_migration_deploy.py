@@ -228,7 +228,7 @@ class MigrationDeployTests(unittest.TestCase):
             ):
                 validate(value, dstack_image=image)
 
-    def test_sentry_render_is_app_only_with_explicit_target(self):
+    def test_sentry_render_is_app_and_closed_controller_only_with_explicit_target(self):
         from deploy.platform.deployment_target import profile
         from studio_platform.error_monitoring import DSN
 
@@ -261,12 +261,14 @@ class MigrationDeployTests(unittest.TestCase):
                 rendered["services"]["app"]["environment"]["INKSEQ_SENTRY_DSN"], DSN
             )
             for name, service in rendered["services"].items():
-                if name != "app":
+                if name == "controller":
+                    self.assertEqual(service["environment"]["INKSEQ_SENTRY_DSN"], DSN)
+                elif name != "app":
                     self.assertNotIn(
                         "INKSEQ_SENTRY_DSN", service.get("environment", {})
                     )
             for name in rendered["services"]:
-                if name == "app":
+                if name in {"app", "controller"}:
                     continue
                 broken = copy.deepcopy(rendered)
                 broken["services"][name].setdefault("environment", {})[

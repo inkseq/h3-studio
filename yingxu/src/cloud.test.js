@@ -1283,6 +1283,8 @@ test('late project page cannot reappear after context invalidation', async () =>
     h.controller.getState().projects.some((p) => p.id === 'late'),
     false,
   );
+  // Dropping a stale read is expected, not an error the person must dismiss.
+  assert.equal(h.controller.getState().error, '');
   h.controller.destroy();
 });
 test('request timeout aborts once without retrying and project pagination uses explicit bounds', async () => {
@@ -1837,9 +1839,9 @@ test('sub-cent display preserves less-than ordering and one currency sign in bot
 test('cloud system notices follow locale without translating user text or diagnostics', () => {
   assert.equal(
     cloudSystemMessage('云项目已打开；原本机作品保留。', 'en'),
-    'Cloud story opened; your local story is preserved.',
+    'Story opened. Your local work is kept.',
   );
-  assert.equal(cloudSystemMessage('已恢复尚未同步的云草稿。', 'zh'), '已恢复尚未同步的云草稿。');
+  assert.equal(cloudSystemMessage('已恢复没同步的草稿。', 'zh'), '已恢复没同步的草稿。');
   assert.equal(cloudSystemMessage('我的故事：夜雨', 'en'), '我的故事：夜雨');
   assert.equal(
     cloudSystemMessage('HTTP 429 · provider detail', 'en'),

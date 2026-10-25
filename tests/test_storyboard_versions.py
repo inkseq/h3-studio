@@ -1,5 +1,6 @@
 """Original API/ledger safety for storyboard versions; no paid execution."""
 
+import json
 import copy
 import unittest
 import uuid
@@ -1027,6 +1028,40 @@ class StoryboardVersionTests(unittest.TestCase):
         )
         self.assertEqual(stale.status_code, 409)
         self.assertTrue(stale.json()['detail']['no_mutation_committed'])
+
+    def test_quality_tier_sets_the_shot_resolution(self):
+        self.prepare()
+        shot = lambda: next(
+            e for e in self.current()['project']['entities'] if e['id'] == 'shot-one'
+        )
+        self.edit(
+            [
+                {
+                    'op': 'entity.update',
+                    'entity_id': 'shot-one',
+                    'patch': {'data': {'storyboard': {'version': 1, 'mode': 'fl'}}},
+                }
+            ],
+            version=self.current()['version'],
+        ).raise_for_status()
+        for operation, resolution in (('final', '768P'), ('draft', '480P')):
+            self.edit(
+                [
+                    {
+                        'op': 'storyboard.bulk',
+                        'shot_ids': ['shot-one'],
+                        'operation': operation,
+                    }
+                ],
+                version=self.current()['version'],
+            ).raise_for_status()
+            data = shot()['data']
+            self.assertEqual(data['storyboard']['quality'], operation)
+            self.assertEqual(data['h3']['controls']['resolution'], resolution)
+            plan = self.preflight('tier-' + operation, copies=1).json()['items'][0][
+                'plan'
+            ]
+            self.assertIn('"resolution": "' + resolution + '"', json.dumps(plan))
 
     def test_preferences_and_preflight_are_owner_scoped(self):
         self.prepare()

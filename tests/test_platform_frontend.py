@@ -96,6 +96,8 @@ class FrontendTests(unittest.TestCase):
             {
                 "/library",
                 "/library/",
+                "/admin",
+                "/admin/",
                 "/trash",
                 "/trash/",
                 "/connect/telegram",

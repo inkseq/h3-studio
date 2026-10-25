@@ -527,7 +527,9 @@ jobs:
             --migration-selection h3-unpruned33b-int8-sdpa-p3-144gib-single-controls-v4:fl \
             --migration-selection h3-unpruned33b-int8-sdpa-p3-144gib-single-controls-v4:ref \
             --migration-selection h3-unpruned33b-bf16-sdpa-p3-256gib-single-controls-v4:fl \
-            --migration-selection h3-unpruned33b-bf16-sdpa-p3-256gib-single-controls-v4:ref "${retained_args[@]}"
+            --migration-selection h3-unpruned33b-bf16-sdpa-p3-256gib-single-controls-v4:ref \
+            --migration-selection h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7:fl \
+            --migration-selection h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7:ref "${retained_args[@]}"
           python tools/check_platform_bundle.py "$GITHUB_SHA" platform-release
       - uses: actions/upload-artifact@v4
         if: needs.changes.outputs.action == 'prepare-platform' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
