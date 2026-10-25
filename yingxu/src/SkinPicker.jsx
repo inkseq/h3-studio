@@ -1,8 +1,8 @@
 // Settings → Account → Appearance: pick an interface skin (per browser).
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Palette } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
-import { SKINS, applySkin, readSkin } from './skins.js';
+import { SKINS, applySkin, chosenSkin, followSystem } from './skins.js';
 
 // A tiny page mock in the skin's own colours: header with the active tab, then story cards.
 function SkinPreview({ skin }) {
@@ -30,13 +30,37 @@ function SkinPreview({ skin }) {
 
 export default function SkinPicker() {
   const { t } = useI18n();
-  const [current, setCurrent] = useState(readSkin);
+  const [current, setCurrent] = useState(() => chosenSkin() || 'system');
+  // The header's light/dark button changes the look too; keep this list in step.
+  useEffect(() => {
+    const sync = () => setCurrent(chosenSkin() || 'system');
+    window.addEventListener('inkseq:skin', sync);
+    return () => window.removeEventListener('inkseq:skin', sync);
+  }, []);
   return (
     <div className="card-box">
       <h4>
         <Palette size={15} aria-hidden="true" /> {t('skin.title')}
       </h4>
       <div className="skin-picker" role="radiogroup" aria-label={t('skin.title')}>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={current === 'system'}
+          data-ui-surface="skin"
+          className={'skin-option keep-label system' + (current === 'system' ? ' on' : '')}
+          onClick={() => {
+            followSystem();
+            setCurrent('system');
+          }}
+        >
+          <span className="skin-preview system" aria-hidden="true">
+            <span className="half dark" />
+            <span className="half light" />
+          </span>
+          <b>{t('skin.system')}</b>
+          <small className="muted">{t('skin.systemHelp')}</small>
+        </button>
         {SKINS.map((skin) => (
           <button
             key={skin.id}

@@ -801,3 +801,5 @@ inventory.json
 # Domain HTTP routers (#588 R5).
 !studio_platform/auth_routes.py
 !studio_platform/project_routes.py
+!studio_platform/controller_liveness.py
+!tests/test_controller_liveness.py

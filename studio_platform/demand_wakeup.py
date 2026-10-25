@@ -126,6 +126,7 @@ def run_demand_loop(
     *,
     active_seconds,
     safety=None,
+    heartbeat=None,
     clock=time.monotonic,
     report=lambda value: None,
 ):
@@ -150,4 +151,8 @@ def run_demand_loop(
             if safety
             else IDLE_SAFETY_SECONDS
         )
+        if heartbeat is not None:
+            # The loop has finished its scan/work. No timer can mask a stall.
+            heartbeat(active)
+            seconds = min(seconds, 60)
         wakeup.wait(seconds)
