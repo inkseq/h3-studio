@@ -272,6 +272,27 @@ Deployment behavior was checked against the pinned
 [server CLI](https://github.com/dstackai/dstack/blob/0.22.5/src/dstack/_internal/cli/commands/server.py),
 and [startup/authentication](https://github.com/dstackai/dstack/blob/0.22.5/src/dstack/_internal/server/app.py).
 
+## Capacity contract refactor (#588 R1, first slice)
+
+The existing `DstackCapacity.plan/start/observe/stop` and original ledger remain
+in charge of paid capacity. This slice does not create a second capacity service.
+`capacity_policy.window_open` and `cold_unadmitted_runtime` are pure eligibility
+checks over retained evidence: a true value alone never authorizes a rental,
+stop or settlement. Prior workers and ready/incarnation latches still exclude
+cold-start exceptions. `dstack_capacity.request_from_document` copies the original
+receipt, and `assert_run_owned` checks the immutable ownership/configuration subset.
+`terminal_no_allocation_shape` only recognizes shape; it is not removal or billing
+proof (use the existing complete proof validator).
+
+`slot_lock.slot_lock` owns the existing OS lock implementation. CPU supervisor,
+native runtime, DBOS, staging bootstrap and workers use the same hashed path and
+nonblocking lock; old worker/operator private exports remain aliases for retained
+callers, not duplicate implementations. The lock is local and is not a distributed
+lease. Imports of the shared lock/policy modules perform no IO and do not load the
+worker or operator stack. The larger controller/operator step decomposition is
+still pending. Qualification uses existing staged lifecycle tests; no fault
+injection, restart, rental or stop in production is part of this refactor.
+
 ## Guarded creator-default change (#580 C0)
 
 `migration_maintenance.py default-profile-only COMMIT OLD_PROFILE NEW_PROFILE PATHS_SHA256 ACTIVE_SHA256`

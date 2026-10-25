@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import threading
 
-from .worker import _slot_lock
+from .slot_lock import slot_lock
 
 
 class UploadCancelled(Exception):
@@ -66,7 +66,7 @@ class PollableUpload:
             return self.snapshot()
         if self._done.is_set():
             return self.snapshot()
-        lock = _slot_lock(directory, "staging-" + key)
+        lock = slot_lock(directory, "staging-" + key)
         if not lock.__enter__():
             lock.__exit__(None, None, None)
             return {"state": "staging_locked", "phase": "staging_dependencies"}

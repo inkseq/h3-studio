@@ -440,10 +440,10 @@ class DurableSlots:
             os.close(descriptor)
 
     def __enter__(self):
-        from .worker import _slot_lock
+        from .slot_lock import slot_lock
 
         self.work_dir.mkdir(parents=True, exist_ok=True)
-        self._fence = _slot_lock(self.work_dir, "dstack-cpu-supervisor")
+        self._fence = slot_lock(self.work_dir, "dstack-cpu-supervisor")
         if not self._fence.__enter__():
             self._fence.__exit__(None, None, None)
             self._fence = None
