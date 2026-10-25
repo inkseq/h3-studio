@@ -3182,6 +3182,12 @@ class DstackOperator:
                         ),
                         "matching_worker_unavailable",
                     )
+                # Presentation only: unresolved stopped creates still retain their
+                # original ledger/fences until allocation evidence is reconciled.
+                review_required = (
+                    node["desired_state"] == "stopped"
+                    and node["runtime_state"] == "creation_unknown"
+                )
                 result.append(
                     {
                         "node_id": node["intent_id"],
@@ -3192,6 +3198,10 @@ class DstackOperator:
                         "mode": payload["selection"]["mode"],
                         "desired_state": node["desired_state"],
                         "state": node["runtime_state"],
+                        "record_group": "pending_review"
+                        if review_required
+                        else "current",
+                        "review_required": review_required,
                         "ready": ready,
                         "native_ready": native_ready,
                         "slots_ready": len(eligible) if native_ready else 0,
@@ -3200,6 +3210,7 @@ class DstackOperator:
                         "hard_deadline": payload["hard_deadline"],
                         "hold_until": payload["hold_until"],
                         "hourly_cost_microusd": payload["hourly_cost_microusd"],
+                        "hourly_cost_basis": "approved_ceiling",
                         **(
                             {"lifecycle": copy.deepcopy(payload["lifecycle"])}
                             if "lifecycle" in payload

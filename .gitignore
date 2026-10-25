@@ -800,3 +800,5 @@ inventory.json
 
 # Shared bounded multi-track audio contract (#600).
 !studio_platform/render_limits.py
+!studio_platform/controller_liveness.py
+!tests/test_controller_liveness.py
