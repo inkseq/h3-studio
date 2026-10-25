@@ -98,6 +98,7 @@ export function createP4OperatorController({
     else storage.removeItem(pendingKey(state.account));
     emit({ pending: value });
   }
+  let catalogAt = 0;
   async function refresh(admin = false) {
     if (!state.account || reading) return;
     reading = true;
@@ -105,7 +106,13 @@ export function createP4OperatorController({
       version = epoch;
     emit({ loading: true });
     try {
-      const [snapshot, catalog] = await Promise.all([client.state(), client.catalog()]);
+      // The catalog (profiles, prices) changes rarely and is ~250 KB: refresh it every 5 min.
+      const reuseCatalog = state.catalog && Date.now() - catalogAt < 300000;
+      const [snapshot, catalog] = await Promise.all([
+        client.state(),
+        reuseCatalog ? state.catalog : client.catalog(),
+      ]);
+      if (!reuseCatalog) catalogAt = Date.now();
       guard(account, version);
       if (snapshot.operator?.account !== account) throw Error(message('copy3'));
       emit({

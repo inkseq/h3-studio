@@ -2250,20 +2250,28 @@ export function createCloudController({
     startPolling() {
       stopped = false;
       let timer;
+      // Every open tab polls the small CPU host: skip hidden tabs (focus rechecks at once),
+      // poll fast only while a job is active, and read the account once a minute.
+      let lastSessionPoll = Date.now();
+      const busy = () => state.jobs.some((job) => activeJobStatuses.has(job.status));
       const tick = async () => {
         if (stopped) return;
-        try {
-          await recheckSession();
-          await refreshJobs();
-          if (Date.now() - lastAvailabilityCheck >= 10000) await reloadAvailability();
-          if (Date.now() - lastRemoteCheck > 15000) {
-            lastRemoteCheck = Date.now();
-            await checkRemoteVersion();
+        if (globalThis.document?.visibilityState !== 'hidden')
+          try {
+            if (Date.now() - lastSessionPoll >= 60000) {
+              lastSessionPoll = Date.now();
+              await recheckSession();
+            }
+            await refreshJobs();
+            if (Date.now() - lastAvailabilityCheck >= 30000) await reloadAvailability();
+            if (Date.now() - lastRemoteCheck > 15000) {
+              lastRemoteCheck = Date.now();
+              await checkRemoteVersion();
+            }
+          } catch (error) {
+            if (!stopped && !error?.quiet) emit({ error: error.message });
           }
-        } catch (error) {
-          if (!stopped && !error?.quiet) emit({ error: error.message });
-        }
-        if (!stopped) timer = setTimeout(tick, 5000);
+        if (!stopped) timer = setTimeout(tick, busy() ? 5000 : 20000);
       };
       timer = setTimeout(tick, 5000);
       return () => {

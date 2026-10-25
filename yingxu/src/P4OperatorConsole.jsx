@@ -1728,9 +1728,10 @@ export default function P4OperatorConsole() {
         try {
           await controller.poll(view === 'admin');
         } catch {}
-      if (!stopped) timer = setTimeout(tick, 5000);
+      // 15 s: each poll rebuilds every machine's projection on the small CPU host.
+      if (!stopped) timer = setTimeout(tick, 15000);
     };
-    timer = setTimeout(tick, 5000);
+    timer = setTimeout(tick, 15000);
     return () => {
       stopped = true;
       clearTimeout(timer);
