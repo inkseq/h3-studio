@@ -2,7 +2,11 @@
 
 from sqlalchemy import inspect, select, text
 
-from .schema_version import CREDIT_ADMISSION_REVISION, read_schema_version
+from .schema_version import (
+    CREDIT_ADMISSION_REVISION,
+    CREDIT_ADMISSION_REVISIONS,
+    read_schema_version,
+)
 
 
 def ready(connection, *, schema=None):
@@ -13,7 +17,7 @@ def ready(connection, *, schema=None):
         "platform_budget_reservations", schema=schema
     )
     role = next((row for row in columns if row["name"] == "budget_role"), None)
-    if marker != CREDIT_ADMISSION_REVISION:
+    if marker not in CREDIT_ADMISSION_REVISIONS:
         if role is not None:
             raise CreditError("credit_admission_schema_requires_review", 409)
         return False
@@ -52,7 +56,7 @@ def sqlite_revision(db, *, published=False):
     columns = list(db.execute('PRAGMA table_info("platform_budget_reservations")'))
     row = next((row for row in columns if row[1] == "budget_role"), None)
     if row is None:
-        if marker == CREDIT_ADMISSION_REVISION:
+        if marker in CREDIT_ADMISSION_REVISIONS:
             raise BackupError("credit_admission_schema_requires_review")
         return None
     sql = db.execute(
@@ -61,7 +65,7 @@ def sqlite_revision(db, *, published=False):
     from .migrations.versions.v20261022_0007_credit_admission import sqlite_check
 
     if (
-        marker != CREDIT_ADMISSION_REVISION
+        marker not in CREDIT_ADMISSION_REVISIONS
         and not (published and marker is None)
         or tuple(row[1:]) != ("budget_role", "VARCHAR(20)", 1, "'enforced'", 0)
         or sql is None

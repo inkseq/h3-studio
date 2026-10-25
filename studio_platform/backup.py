@@ -12,7 +12,7 @@ from .schema_version import (
     PAYMENT_REVISION,
     PAYMENT_REVISIONS,
     LIVE_PAYMENT_REVISION,
-    CREDIT_ADMISSION_REVISION,
+    CREDIT_ADMISSION_REVISIONS,
 )
 
 import csv
@@ -85,7 +85,7 @@ def _schemas(
     from .credit_schema import metadata as credits
     from .payment_schema import frozen_metadata as payment_metadata
 
-    if payment_revision == CREDIT_ADMISSION_REVISION:
+    if payment_revision in CREDIT_ADMISSION_REVISIONS:
         from sqlalchemy import MetaData
         from .migrations.versions.v20261022_0007_credit_admission import extend
 
@@ -1860,7 +1860,7 @@ def dump_postgres(
             from .payment_schema import validate_connection as payment_valid
 
             revision = read_schema_version(connection, schema=schema)
-            if revision == CREDIT_ADMISSION_REVISION:
+            if revision in CREDIT_ADMISSION_REVISIONS:
                 from .credit_admission import ready as admission_ready
                 from .credits import CreditError
 

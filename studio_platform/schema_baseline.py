@@ -40,6 +40,8 @@ from .schema_version import (
     LIVE_PAYMENT_REVISION,
     LIVE_PAYMENT_REVISIONS,
     CREDIT_ADMISSION_REVISION,
+    CREDIT_ADMISSION_REVISIONS,
+    LOOKUP_INDEX_REVISION,
     IDENTITY_REVISION,
     IDENTITY_REVISIONS,
     WORKFLOW_REVISIONS,
@@ -405,7 +407,7 @@ def reflected_signature(connection, *, schema=None):
 def compare_schema(connection, *, schema=None):
     expected_metadata = frozen_metadata()
     actual, version = reflected_signature(connection, schema=schema)
-    if version == CREDIT_ADMISSION_REVISION:
+    if version in CREDIT_ADMISSION_REVISIONS:
         from .credit_admission import ready as admission_ready
         from .credits import CreditError
         from .migrations.versions.v20261022_0007_credit_admission import extend
@@ -467,6 +469,10 @@ def compare_schema(connection, *, schema=None):
                 payment_metadata(revision=payment_revision), connection.dialect
             )
         )
+    if version in CREDIT_ADMISSION_REVISIONS:
+        from .lookup_indexes import expected_indexes
+
+        expected_indexes(expected, actual, required=version == LOOKUP_INDEX_REVISION)
     differences = []
     for name in sorted(expected.keys() | actual.keys()):
         if name not in actual:
@@ -974,7 +980,7 @@ def adopt_credit_admission(connection, *, expected_fingerprint, tenant_id):
         .limit(1)
     ).first():
         raise BaselineError('credit_admission_adoption_requires_quiescence')
-    if before['recorded_revision'] == CREDIT_ADMISSION_REVISION:
+    if before['recorded_revision'] in CREDIT_ADMISSION_REVISIONS:
         return dict(state='already_adopted', before=before, after=before)
     from alembic import command
 
@@ -1039,6 +1045,11 @@ def main(argv=None):
         help='Adopt reservation roles with charging/Stripe OFF, quiescent jobs and both approved readers verified under release.lock',
     )
     admission.add_argument('--expected-fingerprint', required=True)
+    lookup = commands.add_parser(
+        'adopt-lookup-indexes',
+        help='Adopt additive lookup indexes only after both retained readers are qualified under release.lock',
+    )
+    lookup.add_argument('--expected-fingerprint', required=True)
     args = parser.parse_args(argv)
     engine = None
     try:
@@ -1058,7 +1069,7 @@ def main(argv=None):
             settings = Settings.from_environment()
             if getattr(settings, 'stripe_mode', None) != 'off':
                 raise BaselineError('payment_live_adoption_requires_payments_off')
-        if args.command == 'adopt-credit-admission':
+        if args.command in {'adopt-credit-admission', 'adopt-lookup-indexes'}:
             from .settings import Settings
 
             settings = Settings.from_environment()
@@ -1116,6 +1127,14 @@ def main(argv=None):
                     expected_fingerprint=args.expected_fingerprint,
                     tenant_id=settings.tenant_id,
                 )
+            elif args.command == 'adopt-lookup-indexes':
+                from .lookup_indexes import adopt as adopt_lookup_indexes
+
+                result = adopt_lookup_indexes(
+                    connection,
+                    expected_fingerprint=args.expected_fingerprint,
+                    tenant_id=settings.tenant_id,
+                )
             else:
                 result = adopt_baseline(
                     connection, expected_fingerprint=args.expected_fingerprint
@@ -1132,6 +1151,7 @@ def main(argv=None):
                 'adopt-payments',
                 'adopt-payment-live',
                 'adopt-credit-admission',
+                'adopt-lookup-indexes',
             }
             or result["matches"]
             else 1
