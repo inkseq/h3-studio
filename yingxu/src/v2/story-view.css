@@ -1537,7 +1537,7 @@ body.sb-resizing-y video {
   width: auto;
   flex: 0 1 auto;
   field-sizing: content;
-  min-width: 4ch;
+  min-width: 1ch;
   max-width: 100%;
 }
 .editor .ed-head .ed-title-row {
@@ -1551,4 +1551,14 @@ body.sb-resizing-y video {
 }
 .sb-topbar .chapter-summary small {
   white-space: nowrap;
+}
+/* #575: a take that may have burned-in subtitles. */
+.ver .ver-warn,
+.take-info .take-warn {
+  color: var(--warn);
+  font-style: normal;
+  font-weight: 600;
+}
+.take-info .take-warn::before {
+  content: '⚠ ';
 }
