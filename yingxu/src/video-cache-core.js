@@ -1,17 +1,26 @@
 import { VIDEO_FILE_LIMIT } from './video-cache-store.js';
-const ID = /^[A-Za-z0-9_-]{1,160}$/,
-  ACCOUNT = /^[A-Za-z0-9_-]{1,80}$/;
+const ID = /^[A-Za-z0-9_-]{1,220}$/,
+  ACCOUNT = /^[A-Za-z0-9_-]{1,80}$/,
+  RENDITION = /^[a-z0-9_-]{1,40}$/;
+// Original result media and owner uploads. Both are hash-verified objects that
+// never change under the same id, so one copy can be kept across days.
+const mediaType = (value) => {
+  const type = value?.split(';')[0].trim().toLowerCase();
+  return /^(?:image|video|audio)\/[a-z0-9.+-]{1,60}$/.test(type || '') ? type : null;
+};
 function videoTarget(value, origin) {
   try {
     const url = new URL(value, origin),
-      match = /^\/v1\/artifacts\/([A-Za-z0-9_-]{1,160})\/content$/.exec(url.pathname);
+      match = /^\/v1\/(artifacts|assets)\/([A-Za-z0-9_-]{1,160})\/content$/.exec(url.pathname);
     if (url.origin !== origin || !match || url.hash || url.username || url.password) return null;
     for (const key of url.searchParams.keys())
       if (
-        !['expected_account', 'download'].includes(key) ||
+        !['expected_account', 'download', 'rendition'].includes(key) ||
         url.searchParams.getAll(key).length !== 1
       )
         return null;
+    const rendition = url.searchParams.get('rendition');
+    if (rendition !== null && (!RENDITION.test(rendition) || rendition === 'thumb')) return null;
     const account = url.searchParams.get('expected_account');
     if (account !== null && !ACCOUNT.test(account)) return null;
     if (
@@ -19,7 +28,10 @@ function videoTarget(value, origin) {
       !['0', '1', 'true', 'false'].includes(url.searchParams.get('download'))
     )
       return null;
-    return { id: match[1], expected: account, url: url.pathname + url.search };
+    // Artifact originals keep their earlier cache key; others are namespaced.
+    const id =
+      (match[1] === 'assets' ? 'as_' : '') + match[2] + (rendition ? '_r_' + rendition : '');
+    return { id, expected: account, url: url.pathname + url.search };
   } catch {
     return null;
   }
@@ -52,7 +64,7 @@ function responseFor(blob, request, head) {
   const size = blob.size,
     range = byteRange(request.headers.get('Range'), size),
     headers = new Headers({
-      'Content-Type': 'video/mp4',
+      'Content-Type': blob.type,
       'Accept-Ranges': 'bytes',
       'Cache-Control': 'private, no-store',
       'Referrer-Policy': 'no-referrer',
@@ -66,7 +78,7 @@ function responseFor(blob, request, head) {
   }
   headers.set('X-Inkseq-Video-Cache', 'hit');
   headers.set('X-Authenticated-Account', head.headers.get('X-Authenticated-Account'));
-  const body = range ? blob.slice(range.start, range.end + 1, 'video/mp4') : blob;
+  const body = range ? blob.slice(range.start, range.end + 1, blob.type) : blob;
   headers.set('Content-Length', String(body.size));
   if (range) headers.set('Content-Range', `bytes ${range.start}-${range.end}/${size}`);
   return new Response(body, { status: range ? 206 : 200, headers });
@@ -76,11 +88,12 @@ const failure = (status) =>
     status: [400, 401, 403, 404, 409].includes(status) ? status : 503,
     headers: { 'Cache-Control': 'no-store' },
   });
-async function completeBody(response, size) {
+async function completeBody(response, size, type) {
   if (
     response.status !== 200 ||
     ['opaque', 'opaqueredirect', 'error'].includes(response.type) ||
-    response.headers.get('Content-Type')?.split(';')[0].trim() !== 'video/mp4' ||
+    !type ||
+    mediaType(response.headers.get('Content-Type')) !== type ||
     response.headers.get('Content-Range') ||
     Number(response.headers.get('Content-Length')) !== size
   ) {
@@ -102,7 +115,7 @@ async function completeBody(response, size) {
       }
       chunks.push(part.value);
     }
-    return bytes === size ? new Blob(chunks, { type: 'video/mp4' }) : null;
+    return bytes === size ? new Blob(chunks, { type }) : null;
   } catch {
     void reader.cancel().catch(() => {});
     return null;
@@ -148,14 +161,15 @@ function createVideoCache({ store, origin, fetcher = (...args) => fetch(...args)
       epoch: token.epoch,
       key: cacheKey(account, target.id),
       size,
+      type: mediaType(head.headers.get('Content-Type')),
       eligible:
-        head.headers.get('Content-Type')?.split(';')[0].trim() === 'video/mp4' &&
+        !!mediaType(head.headers.get('Content-Type')) &&
         Number.isSafeInteger(size) &&
         size <= VIDEO_FILE_LIMIT,
     };
   }
   async function saveResponse(target, auth, response) {
-    const blob = await completeBody(response, auth.size);
+    const blob = await completeBody(response, auth.size, auth.type);
     if (!blob) return null;
     const stored = await store.put(
       { key: auth.key, account: auth.account, id: target.id, size: blob.size, blob },
@@ -194,21 +208,24 @@ function createVideoCache({ store, origin, fetcher = (...args) => fetch(...args)
     filling.set(key, task);
     return task;
   }
-  async function ensure(account, id) {
-    if (!cacheKey(account, id)) return { cached: false };
+  async function ensure(account, id, path) {
+    // `path` names an asset or rendition original; a bare id is a result original.
+    const url = new URL(
+      typeof path === 'string' ? path : '/v1/artifacts/' + id + '/content',
+      origin,
+    );
+    url.searchParams.set('expected_account', account);
+    const target = url.origin === origin ? videoTarget(url.pathname + url.search, origin) : null;
+    if (!target || !cacheKey(account, target.id)) return { cached: false };
     try {
-      const target = videoTarget(
-          '/v1/artifacts/' + id + '/content?expected_account=' + encodeURIComponent(account),
-          origin,
-        ),
-        snapshot = await store.snapshot(),
+      const snapshot = await store.snapshot(),
         auth = await authorize(target, snapshot.epoch);
       if (auth.error || !auth.eligible) return { cached: false };
       const hit = await store.get(auth.key, auth.epoch);
       if (
         hit?.size === auth.size &&
         hit.blob instanceof Blob &&
-        hit.blob.type === 'video/mp4' &&
+        hit.blob.type === auth.type &&
         hit.blob.size === auth.size
       )
         return { cached: true };
@@ -249,7 +266,7 @@ function createVideoCache({ store, origin, fetcher = (...args) => fetch(...args)
       if (
         hit?.size === auth.size &&
         hit.blob instanceof Blob &&
-        hit.blob.type === 'video/mp4' &&
+        hit.blob.type === auth.type &&
         hit.blob.size === auth.size
       ) {
         if ((await store.snapshot()).epoch !== auth.epoch) return failure(409);

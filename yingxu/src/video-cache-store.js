@@ -1,7 +1,9 @@
 // Disposable media bytes only. This database never authorizes a user or a job.
-const VIDEO_CACHE_LIMIT = 1024 * 1024 * 1024,
-  VIDEO_FILE_LIMIT = 64 * 1024 * 1024,
-  VIDEO_ENTRY_LIMIT = 256;
+// Owner 2026-10-25: keep media as long as possible. The browser's own quota
+// still applies; a refused write leaves the original network response intact.
+const VIDEO_CACHE_LIMIT = 4 * 1024 * 1024 * 1024,
+  VIDEO_FILE_LIMIT = 256 * 1024 * 1024,
+  VIDEO_ENTRY_LIMIT = 4096;
 function evictionPlan(
   entries,
   incoming,
