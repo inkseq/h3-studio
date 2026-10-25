@@ -37,6 +37,11 @@ STEP_SKIPPING = ('none', 'spectrum', 'first_block')
 WHOLE_WINDOW = 362
 
 
+# H3 at guidance 1 ignores negative prompts, so the turbo profiles state this in
+# the prompt itself: TaoMate tests burned dialogue in as subtitles otherwise.
+NO_SCREEN_TEXT = '\n\nNo on-screen text, no subtitles, no captions.'
+
+
 def acceleration(profile_id):
     """A profile's pinned turbo LoRA binding, or None for the plain sampler."""
     value = get_profile(profile_id).get('acceleration')
@@ -784,7 +789,8 @@ def _settings(value, output_spec, handles, profile_id):
         'model_type': model_for(profile_id, mode)['model_type'],
         'config': runtime['task_config'],
         'image_mode': 0,
-        'prompt': value['prompt'],
+        'prompt': value['prompt']
+        + ('' if acceleration(profile_id) is None else NO_SCREEN_TEXT),
         'negative_prompt': '',
         'alt_prompt': '',
         'resolution': f"{output_spec['width']}x{output_spec['height']}",
@@ -982,6 +988,15 @@ def _parse_positions(text):
     return result
 
 
+def _authored_prompt(prompt, profile_id):
+    """Recover the author's prompt; a turbo profile must carry its suffix."""
+    if acceleration(profile_id) is None:
+        return prompt
+    if not isinstance(prompt, str) or not prompt.endswith(NO_SCREEN_TEXT):
+        raise ValueError('wangp_profile_settings_mismatch')
+    return prompt[: -len(NO_SCREEN_TEXT)]
+
+
 def prepared_request(prepared, manifest):
     """Recover the typed template; the host still probes actual staged bytes.
 
@@ -1098,7 +1113,7 @@ def prepared_request(prepared, manifest):
     request = {
         'model': profile['model_id'],
         'mode': doc['mode'],
-        'prompt': settings.get('prompt'),
+        'prompt': _authored_prompt(settings.get('prompt'), profile['id']),
         **canvas,
         'seed': settings.get('seed'),
         'steps': settings.get('num_inference_steps'),
