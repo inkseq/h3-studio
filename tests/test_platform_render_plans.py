@@ -331,6 +331,33 @@ class RenderPlanTests(unittest.TestCase):
             _, _, blockers, _ = compile_render(BODY, p, source)
             self.assertTrue(blockers)
 
+    def test_legacy_33_track_plan_preserves_all_tracks_and_128_boundary(self):
+        p = story()
+        audio = copy.deepcopy(p["entities"][-1])
+        audio.update(id="music", type="audio", title="Music")
+        audio["data"]["fileId"] = "local-audio"
+        p["entities"].append(audio)
+        p["journey"]["sound"]["mode"] = "music"
+        for count in (33, 128, 129):
+            p["journey"]["soundTracks"]["chapter-one"] = [
+                {
+                    "id": f"music-{i}",
+                    "assetId": "music",
+                    "fileId": "local-audio",
+                    "start": 0,
+                    "end": 1,
+                    "gain": 0.005,
+                    "offset": 0,
+                }
+                for i in range(count)
+            ]
+            compiled, _, blockers, _ = compile_render(BODY, p, source)
+            self.assertEqual(bool(blockers), count > 128, blockers)
+            if count <= 128:
+                self.assertEqual(
+                    len(compiled["request"]["render"]["audio_tracks"]), count
+                )
+
     def test_audio_clips_tail_and_checks_file_binding(self):
         p = story()
         audio = copy.deepcopy(p["entities"][-1])

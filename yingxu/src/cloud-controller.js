@@ -1751,6 +1751,25 @@ export function createCloudController({
     guard(ctx);
     return value;
   }
+  // Long-shot script windows (h3-studio#597): one Gemini split per key; replaying the same
+  // key reads the same outcome and never calls the model again.
+  async function previewScriptWindows(shotId, { windowSeconds = null, key }) {
+    requireCloud();
+    const ctx = context();
+    const value = await api.request(
+      `/v1/projects/${encodeURIComponent(ctx.projectId)}/shots/${encodeURIComponent(shotId)}/script-windows/preview`,
+      {
+        method: 'POST',
+        key,
+        body: {
+          expected_version: current().workspace.serverVersion,
+          ...(windowSeconds ? { window_seconds: windowSeconds } : {}),
+        },
+      },
+    );
+    guard(ctx);
+    return value;
+  }
   let workbenchQueue = Promise.resolve(),
     workbenchRunning = false;
   async function workbenchCommand(kind, body, { recover = false } = {}) {
@@ -1947,6 +1966,7 @@ export function createCloudController({
       return value;
     },
     workbenchRead: (suffix) => workbenchRead(suffix),
+    previewScriptWindows: (shotId, options) => previewScriptWindows(shotId, options),
     // Story edits share one version, so they run one after another: a quick second click
     // waits for the first instead of failing. While one is running its journal entry is
     // expected; the person is asked to check it only when it outlives the run.

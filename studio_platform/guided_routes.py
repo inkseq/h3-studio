@@ -173,7 +173,7 @@ def create_guided_router(app, service) -> APIRouter:
                 "POST /v1/assets multipart; asset.attach adds ready receipt to the same web document",
                 "GET /v1/capabilities; POST /v1/generation-plans or /v1/render-plans; inspect blockers and estimate",
                 "POST /v1/jobs with plan_id and stable Idempotency-Key; poll same job",
-                "artifact.adopt attaches results; shot.select explicitly adopts; sound.generated binds matching FLAC",
+                "artifact.adopt attaches results; shot.select explicitly adopts with default clipSound=on and a validated same-job FLAC; sound.generated explicitly confirms/rebinds matching FLAC",
                 "Use shot.segments in the same expected_version /actions CAS to keep ordered source-second ranges. The server binds them to the selected owned video and trusted duration; [] explicitly clears before selecting a different take. This edits the story only and never generates media.",
                 "Browser checks project version and explicitly loads newer document without overwriting local drafts",
             ],

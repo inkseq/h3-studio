@@ -445,6 +445,57 @@ class RenderTests(unittest.TestCase):
         with self.assertRaisesRegex(BackendError, "video_too_short"):
             self.backend.prepare(original, "past-end", self.store, lambda: None)
 
+    def test_33_track_cpu_mix_retains_every_track_and_rejects_129(self):
+        self.video("red", "red", seconds=1, audio=False)
+        self.audio("voice", seconds=1, amplitude=1000)
+        track = {
+            "source_id": "voice",
+            "timeline_start": 0,
+            "source_start": 0,
+            "source_end": 1,
+            "gain": 0.1,
+        }
+        job = self.job(
+            shots=[{"shot_id": "red", "source_id": "red", "frames": 24}],
+            tracks=[dict(track) for _ in range(33)],
+        )
+        too_many = copy.deepcopy(job["request"])
+        too_many["request"]["render"]["audio_tracks"] = [
+            dict(track) for _ in range(129)
+        ]
+        with self.assertRaisesRegex(BackendError, "render_clip_count_limit"):
+            validate_render_request(too_many, owner_id="owner")
+        outputs = self.execute(job)
+        raw = subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-i",
+                str(outputs["audio"]),
+                "-f",
+                "s16le",
+                "-acodec",
+                "pcm_s16le",
+                "-",
+            ],
+            check=True,
+            capture_output=True,
+            timeout=20,
+        ).stdout
+        samples = struct.unpack("<" + "h" * (len(raw) // 2), raw)
+        self.assertEqual(len(samples), 32000 * 2)
+        # 33 audible inputs at 0.1 each; truncating at the old limit gives 3200.
+        self.assertAlmostEqual(
+            sum(samples[2000:-2000]) / len(samples[2000:-2000]), 3300, delta=3
+        )
+        self.assertTrue(
+            any(
+                s["codec_type"] == "audio"
+                for s in media.probe(outputs["video"])["streams"]
+            )
+        )
+
     def test_independent_audio_timeline_gain_and_separate_flac(self):
         self.video("red", "red")
         self.audio("voice")

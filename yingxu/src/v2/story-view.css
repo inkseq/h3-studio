@@ -1562,3 +1562,49 @@ body.sb-resizing-y video {
 .take-info .take-warn::before {
   content: '⚠ ';
 }
+
+/* Long-shot windows (h3-studio#597). */
+.script-windows {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: var(--surface);
+}
+.script-windows > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+.script-windows > summary .badge {
+  margin-left: auto;
+  font-weight: 500;
+}
+.script-windows > p {
+  margin: 8px 0;
+  font-size: 12px;
+}
+.script-windows-controls {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.script-windows-controls select {
+  width: auto;
+}
+.script-windows-list {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+.script-windows-list li {
+  display: grid;
+  gap: 2px;
+}
+.script-windows-list q {
+  color: var(--ink-2);
+}

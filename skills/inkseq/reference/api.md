@@ -2,6 +2,16 @@
 
 Read this for exact request construction; the [task guide](../SKILL.md) chooses the workflow. Paths are relative to the exact authorized origin. Substitute actual returned IDs, integer versions and hashes; examples are templates, not live receipts. Read authenticated OpenAPI directly at `/openapi.json` (the generic helper intentionally accepts only relative `/v1/` paths).
 
+## Chapter audio limits
+
+Chapter audio uses the existing `sound.set` action with project `expected_version`
+CAS. `tracks` supports up to 128 entries per chapter; the expanded render plan
+(including followed shot segments) also permits at most 128 audible tracks.
+Read the current `operation_schemas.sound.set` in `/v1/guided-schema` before
+editing. Source ownership, matching file IDs, generated audio pairing, explicit
+mute, trim and fade checks still apply. This limit does not auto-enable clip
+sound or change an existing project's saved silence.
+
 ## Helper and credentials
 
 `scripts/inkseq.py --base-url ORIGIN --connection ID request METHOD /v1/PATH --json-file body.json --idempotency-key SAVED_KEY --output receipt.json` supports GET/POST/PUT/PATCH/DELETE. Omit body/key for reads. Save the exact body/key before writes. Each independently intended write needs its own key; original-request recovery reuses it. Output files are exclusive. Use a new output filename for another observation, not a new paid request. Python/httpx are required; connect.py is standard-library only. Choose one credential source: activated OS-protected connection, process-only `INKSEQ_API_KEY`, or an already configured explicit registry profile. Never copy secrets into project files.
@@ -216,7 +226,7 @@ explicit conversion is accepted; do not rewrite them to guessed project IDs.
 
 `shot.configure_generation` takes `shot_id` and requested tier/mode, prompt, controls and inputs; consistent neutral recipe/profile aliases also work. GET `/v1/projects/PROJECT/shots/SHOT/generation-draft`, then POST its `/generation-plans` with `{expected_version:project_version}` (optional current capabilities_version). Plan generation does not enqueue. POST `/v1/jobs` with `{plan_id:READY_PLAN}` or `/v1/batches` with `{client_project_id:PROJECT,plan_ids:[READY_PLAN,...]}` only within generation authority. Batch admission may partially succeed; observe its original receipt.
 
-`artifact.adopt` with artifact_id/shot_id/select:false adds a candidate; `shot.select` uses the adopted entity_id, not artifact receipt ID. Adopt actual returned audio separately; `sound.generated` requires a selected adopted video and exactly one matching FLAC from the same succeeded job. Never invent missing audio.
+`artifact.adopt` with artifact_id/shot_id/select:false adds a candidate; `shot.select` uses the adopted entity_id, not artifact receipt ID. On a changed chosen take, normal `/actions` defaults shot `data.clipSound` to `"on"` and adopts/binds the unique validated FLAC from the same succeeded, owned project job. No extraction or generation occurs. Set `data.clipSound:"off"` through `entity.update` to suppress attached generated sound; this preference survives take changes and never overwrites independent mute/review flags or detached/manual audio. Missing FLAC never creates a fake track. Old projects with no field keep their saved tracks; reads, unrelated edits and full saves do not backfill. Existing stale/muted/review/detached bindings are not automatically replaced: explicitly adopt actual returned audio and use `sound.generated` to confirm a matching binding when appropriate. Global silent mode and slow-rate audio guards still apply.
 
 ### Storyboard versions and bulk work
 
@@ -498,3 +508,16 @@ python scripts/inkseq.py request GET /v1/library/imports/RETURNED_OPERATION_ID
 For explicit recovery, repeat only the same import POST, JSON file and key. Do not chain this to paid generation. `tag.json` uses the original `{expected_version,actions}` envelope; `import.json` uses the import body above. Source/destination IDs are account data, never credentials.
 
 Pending library imports block source/destination lifecycle changes under the original owner reference gate, even before receiving bytes. Terminal receipt reads/replays retain current owner/scopes without requiring active project content. Only positively completed same-owner import audit capsules are excluded from an explicit universal-purge reference census; pending and blocked capsules remain conservative references. No audit rows are removed. Original guided validation rollback after verified copies produces `blocked`, `reason=library_authoring_validation_failed`, `no_authoring_committed=true`; retain original copies/key and explicitly choose a new intent if needed. / 未完成导入阻止相关生命周期变更；已确认的校验回滚保留原回执和副本，不自动重试或清理。
+
+
+### Confirmed long-shot windows
+
+`POST /v1/projects/{project_id}/shots/{shot_id}/script-windows/preview` requires project read+write scope, `Idempotency-Key`, and JSON `{"expected_version":7,"window_seconds":5}`. Omit `window_seconds` for one assistant proposal among valid 5–10 second lengths. Source shots currently remain inside the existing 8–15 second envelope. No video job, rental or video-credit debit occurs. Scope/trash/CAS checks precede the durable intent and external call. A 3-new-preview/minute owner quota spans projects; replay never consumes another model call.
+
+The reply contains `preview_id`, `status` (`pending`, `unknown`, `invalid`, `stale`, `ready`), `source_version`, `source_hash`, `supported_options`. A ready reply also includes `script_windows={version:1,window_seconds,source_hash,windows:[{index,description,dialogue_ids}]}`, server `dialogue=[{id,text}]`, and `timing`. Every canonical `(S1) <d>[Chinese] original line</d>` is assigned once in original order; the assistant does not rewrite speech. Invalid/duplicated/missing IDs or malformed responses are retained failures, never silently repaired.
+
+`timing` includes 24 fps, requested_frames, output_frames, window_frames, initial_shared_frames and `windows:[{index,start_frame,end_frame,start_seconds,end_seconds,output_frames,native_contribution_frames,generation_frames,overlap_frames}]`. Bounds are end-exclusive. These are the pinned native scheduler's actual geometry, including a retained first image and short final windows.15s/5s without a first image means 4 windows, 357 output frames, not three equal clips. Unsupported one-window options are rejected; inspect supported_options. End-frame anchors, FL audio guides, non-reference audio/video conditioning, injected guides and slash-window commands are unsupported in this slice; they are rejected before preview rather than silently moved to the wrong window.
+
+GET `/v1/projects/{project_id}/shots/{shot_id}/script-windows/previews/{preview_id}` recovers the owner/project/shot-bound receipt. Pending means the original external outcome is not recorded; unknown means a call failed without a trustworthy result. Never automatically retry with a new key.409 idempotency conflict means the same key was reused with different input;409 stale/source conflict requires explicit new preview after reloading.
+
+Confirm through normal `/actions`: `{"expected_version":7,"actions":[{"op":"shot.script_windows.confirm","shot_id":"SHOT","preview_id":"PREVIEW"}]}`. `shot.script_windows.clear` needs only shot_id and the same outer CAS. Confirmation stores a receipt-bound `shot.data.script_windows` including preview_id. Generic client-authored splits do not authorize generation. Preflight checks the original receipt, current source/defaults, timing and immutable native controls. PW uses single newlines inside windows and one blank line between windows; every window gets its own film/clean-frame framing. Old FG behavior and accepted requests remain unchanged. The new native package must be qualified before staging generation; a previous helper is not compatible with new PW requests. Requested duration/job/attempt/charge identity stays original while native delivery checks the precisely projected output frames, with no trim, padding or retiming.

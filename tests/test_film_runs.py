@@ -204,6 +204,8 @@ class FilmTests(unittest.TestCase):
             videoSegments=[{'start': 0, 'end': 1 / 24}] * 33,
             videoSegmentsSource=source_binding(video),
         )
+        tracks = project['journey']['soundTracks']['chapter-one']
+        tracks.extend(dict(tracks[-1], id=f'extra-{i}') for i in range(97))
         missing = copy.deepcopy(self.project['entities'][2])
         missing.update(id='missing', order=10)
         missing['data'].pop('selectedAssetId')

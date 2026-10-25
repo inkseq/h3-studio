@@ -57,6 +57,8 @@ def control_schema():
     result['shift_video']['maximum'] = max(
         result['shift_video']['maximum'], native['shift_video']['maximum']
     )
+    # Confirmed preview receipts, never editable card/draft controls.
+    result.pop('script_window_prompts', None)
     return result
 
 

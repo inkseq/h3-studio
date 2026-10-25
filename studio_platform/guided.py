@@ -26,6 +26,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.exc import IntegrityError
 
+from .render_limits import MAX_AUDIO_TRACKS
 from .caption_server import caption_signature
 from .guided_schema import (
     validate_action_fields,
@@ -508,6 +509,10 @@ class Guided:
                     )
                 elif action.get("op") in {"asset.attach", "artifact.adopt"}:
                     resolved[index] = self.resolve(principal, project_id, action)
+                elif action.get("op") == "shot.script_windows.confirm":
+                    resolved[index] = self.app.state.script_windows.get(
+                        principal, project_id, action["shot_id"], action["preview_id"]
+                    )
                 elif action.get("op") == "shot.configure_generation":
                     from .generation_draft import prepare_patch
                     from .quality_authoring import normalize
@@ -671,6 +676,11 @@ class Guided:
                         if before_segments is not None:
                             validate_segments_transition(before_segments, project)
                             self.check_segment_sources(project, segment_sources)
+                    from .clip_sound import sync_clip_sound
+
+                    sync_clip_sound(
+                        self, conn, principal, project_id, row["payload"], project
+                    )
                     version = row["version"] + 1
                 if segment_sources is not None:
                     self.check_segment_sources(project, segment_sources)
@@ -1024,6 +1034,14 @@ class Guided:
             if media_id:
                 entity_by_id(project, media_id, {"video", "image"})
             update_entity(shot, {"data": {"selectedAssetId": media_id or ""}})
+        elif op == "shot.script_windows.confirm":
+            from .script_windows import apply_confirmation
+
+            apply_confirmation(project, action["shot_id"], resolved)
+        elif op == "shot.script_windows.clear":
+            shot = entity_by_id(project, action["shot_id"], {"shot"})
+            shot["data"].pop("script_windows", None)
+            shot["version"] += 1
         elif op == "shot.trim":
             shot = entity_by_id(project, action.get("shot_id"), {"shot"})
             entity = entity_by_id(
@@ -1148,9 +1166,9 @@ class Guided:
             if op == "sound.set":
                 if (
                     not isinstance(action.get("tracks"), list)
-                    or len(action["tracks"]) > 32
+                    or len(action["tracks"]) > MAX_AUDIO_TRACKS
                 ):
-                    raise ValueError("声音轨道须为最多32项的数组")
+                    raise ValueError(f"声音轨道须为最多{MAX_AUDIO_TRACKS}项的数组")
                 journey.setdefault("soundTracks", {})[chapter["id"]] = copy.deepcopy(
                     action["tracks"]
                 )

@@ -227,13 +227,30 @@ class PlannerV5(unittest.TestCase):
         self.assertEqual(shot["data"]["seconds"], 3)
 
     def test_expanded_video_and_audio_limits_refuse_without_truncating_valid_plan(self):
-        for count, expected in ((50, "最多50个片段"), (33, "最多32条声音轨道")):
+        for count, expected in ((50, "最多50个片段"), (33, "最多128条声音轨道")):
             project, _, _, resolve = fixture()
             self.segments(project, [(0, 1 / 24)] * count)
+            if count == 33:
+                tracks = project["journey"]["soundTracks"]["chapter-one"]
+                tracks.extend(dict(tracks[-1], id=f"extra-{i}") for i in range(97))
             compiled, _, blockers, _ = compile_render(BODY, project, resolve)
             self.assertTrue(any(expected in message for message in blockers), blockers)
             self.assertLessEqual(len(compiled["request"]["render"]["shots"]), 50)
-            self.assertLessEqual(len(compiled["request"]["render"]["audio_tracks"]), 32)
+            self.assertLessEqual(
+                len(compiled["request"]["render"]["audio_tracks"]), 128
+            )
+
+    def test_128_manual_tracks_compile_without_truncation_and_129_refused(self):
+        project, _, _, resolve = fixture()
+        base = project["journey"]["soundTracks"]["chapter-one"][-1]
+        tracks = [dict(base, id=f"music-{i}", gain=0.005) for i in range(128)]
+        project["journey"]["soundTracks"]["chapter-one"] = tracks
+        compiled, _, blockers, _ = compile_render(BODY, project, resolve)
+        self.assertEqual(blockers, [])
+        self.assertEqual(len(compiled["request"]["render"]["audio_tracks"]), 128)
+        validate_render_request(compiled)
+        tracks.append(dict(base, id="one-too-many"))
+        self.assertTrue(compile_render(BODY, project, resolve)[2])
 
     def test_segments_invalidate_equal_length_caption_and_source_and_refuse_stale_binding(
         self,

@@ -7,7 +7,7 @@ description: Use an Inkseq / 映序 link to create video takes, organise an auth
 
 Use the user's exact HTTPS origin (HTTP only for loopback). A link permits discovery, not editing or spending. Preserve user prompts, video quality/mode, references and accepted work. Relay outcomes in the user's language; keep API codes and IDs unchanged.
 
-Read [API fields/examples](reference/api.md) for requests and [recovery](reference/recovery.md) for uncertain writes/refusals; both use the same origin's `/for-agents/reference/`. Public discovery proves neither authentication nor capacity. Authenticated `/v1/agent-guide`, `/v1/guided-schema`, `/v1/quick-chat/schema` and `/v1/capabilities` describe the release.
+Read [API](reference/api.md) and [recovery](reference/recovery.md) at the same origin's `/for-agents/reference/`. Public discovery proves neither authentication nor capacity. Authenticated `/v1/agent-guide`, `/v1/guided-schema`, `/v1/quick-chat/schema` and `/v1/capabilities` describe the release.
 
 ## Connect an assistant
 
@@ -22,7 +22,7 @@ python scripts/connect.py whoami --server ORIGIN --connection CONNECTION_ID
 python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID request GET /v1/agent-guide
 ```
 
-Replace placeholders with actual returned values. Example safe response projection: `{"status":"connected","connection_id":"CONNECTION_ID","owner":"OWNER"}`; never a token. Lost exchange? Resume the same saved connection; see recovery.
+Use actual returned values; never display tokens. Lost exchange? Resume the same saved connection; see recovery.
 
 ## Unified story cards: author → preflight → versions
 
@@ -43,7 +43,7 @@ Idempotency-Key: saved-scene-batch-key
 {"client_project_id":"PROJECT","plan_ids":["READY_PLAN_A","READY_PLAN_B"]}
 ```
 
-Example response projection: `{"batch_id":"BATCH","status":"active"}`; inspect its actual per-item list. HTTP 202 means admission, not inference success. Observe the original batch/per-item jobs; partial admission retains its original identity.
+HTTP 202 is admission, not success. Observe the original batch/per-item jobs; partial admission retains its identity.
 
 Read a shot's `/versions` for immutable recipes; old missing recipes stay unknown. `storyboard.restore` restores known effective settings without generating. `storyboard.star`, atomic bulk draft/final/move, account→story→shot defaults and project-local profile forks use the [story contract](reference/api.md#storyboard-versions-and-bulk-work). Duration/seed stay per shot; no automatic deletion or global usage search.
 
@@ -92,4 +92,9 @@ Example response projection: `{"preview_id":"PREVIEW","expires_at":1790000000}`;
 3. After admission, `/v1/generations/queue-position?job_id=JOB` gives advisory shared-queue information, no other owner's identity or ETA. Never rent a GPU to bypass unavailable capacity.
 4. Stop new paid work on cap/unknown-charge refusal. Return the same editable draft, stable error code and readable explanation; no replacement job/key or automatic retry. Zero connection cap adds no extra connection limit; owner credit and other safeguards remain. Sydney-day exposure includes unresolved prior obligations, not only invoices.
 
-See [recovery](reference/recovery.md) for stale settings, owner caps, confirmation and unknown charges.
+Shot `data.clipSound` is on/off; see [audio](reference/api.md) for defaults and legacy behavior.
+See [recovery](reference/recovery.md) for refusals.
+
+## Long-shot windows
+
+Use [preview/confirm](reference/api.md#confirmed-long-shot-windows) for `shot.data.script_windows`; confirm native timing/dialogue, recover the same key.

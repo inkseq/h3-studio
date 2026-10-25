@@ -2,7 +2,9 @@
 
 from copy import deepcopy
 
+from .render_limits import MAX_AUDIO_TRACKS
 from .project_validation import ROLES, TYPES
+from .script_windows import contract as script_windows_contract
 
 ACTION_FIELDS = {
     "library.rename": {"target", "title"},
@@ -41,6 +43,8 @@ ACTION_FIELDS = {
     },
     "shot.select": {"shot_id", "entity_id"},
     "shot.trim": {"shot_id", "start", "end"},
+    "shot.script_windows.confirm": {"shot_id", "preview_id"},
+    "shot.script_windows.clear": {"shot_id"},
     "shot.segments": {"shot_id", "segments"},
     "shot.configure_generation": {
         "shot_id",
@@ -79,6 +83,8 @@ ACTION_REQUIRED = {
     "artifact.adopt": {"artifact_id"},
     "shot.select": {"shot_id"},
     "shot.trim": {"shot_id", "start", "end"},
+    "shot.script_windows.confirm": {"shot_id", "preview_id"},
+    "shot.script_windows.clear": {"shot_id"},
     "shot.segments": {"shot_id", "segments"},
     "shot.configure_generation": {"shot_id"},
     "captions.set": {"chapter_id", "cues"},
@@ -175,6 +181,11 @@ ENTITY_PROPERTIES = {
         "description": "Create replaces defaults when supplied. A shot defaults to seconds=5,prompt=''; generation defaults to recipe='video'. Include desired defaults in supplied data.",
         "properties": {
             "seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 3600},
+            "clipSound": {
+                "type": "string",
+                "enum": ["on", "off"],
+                "description": "Shot only. Newly selected takes default on and bind validated same-job FLAC through actions. Off persists across takes and suppresses attached generated sound only. Absent on legacy shots preserves existing tracks; no backfill. Independent mute/review/detach and slow-rate guards remain.",
+            },
             "videoSegments": SEGMENTS,
             "videoSegmentsSource": SEGMENT_SOURCE,
             "prompt": TEXT,
@@ -503,6 +514,8 @@ def operation_schemas():
                 "description": "Existing image/video entity ID. Omit, null or empty string to clear the selection.",
             },
         },
+        "shot.script_windows.confirm": {"shot_id": ID_SCHEMA, "preview_id": ID_SCHEMA},
+        "shot.script_windows.clear": {"shot_id": ID_SCHEMA},
         "shot.trim": {"shot_id": ID_SCHEMA, "start": TIME, "end": TIME},
         "shot.segments": {"shot_id": ID_SCHEMA, "segments": SEGMENTS},
         "shot.configure_generation": {
@@ -545,7 +558,7 @@ def operation_schemas():
             "mode": {"enum": ["silent", "dialogue", "music", "mixed"]},
             "tracks": {
                 "type": "array",
-                "maxItems": 32,
+                "maxItems": MAX_AUDIO_TRACKS,
                 "items": {
                     **OBJECT,
                     "description": "Editable audio track. Rendering additionally requires a valid same-project audio entity/receipt, matching fileId, bounded source range and gain; muted drafts may keep incomplete bindings.",
@@ -630,6 +643,12 @@ def operation_schemas():
         ],
         "shot.select": [
             "Selection is an existing image/video entity in this story; it is not an asset receipt ID."
+        ],
+        "shot.script_windows.confirm": [
+            "Copies an owner/shot-scoped ready preview, checks source hash and normal CAS; never calls the model."
+        ],
+        "shot.script_windows.clear": [
+            "Explicitly removes the confirmed split; does not generate or change prior takes."
         ],
         "shot.trim": [
             "Shot must already select a video entity. Requires 0 <= start < end <= 360000. Saves a range binding; rendering checks real media duration and whether it matches the current file."
@@ -909,6 +928,7 @@ def contract():
         "schema_revision": 3,
         "result_collection": collection_contract(),
         "operation_schemas": operation_schemas(),
+        "script_windows": script_windows_contract(),
         "request": {
             "method": "POST",
             "path": "/v1/projects/{project_id}/actions",
