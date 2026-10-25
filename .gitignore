@@ -798,6 +798,12 @@ inventory.json
 !studio_platform/support_view.py
 !tests/test_support_view.py
 
+# #597 confirmed narrative windows
+!studio_platform/script_window_timing.py
+!studio_platform/script_windows.py
+!studio_platform/script_windows_service.py
+!tests/test_script_windows.py
+!tests/script_windows_native_fixture.py
 # Domain HTTP routers (#588 R5).
 !studio_platform/auth_routes.py
 !studio_platform/project_routes.py
