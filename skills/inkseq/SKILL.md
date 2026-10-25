@@ -22,7 +22,7 @@ python scripts/connect.py whoami --server ORIGIN --connection CONNECTION_ID
 python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID request GET /v1/agent-guide
 ```
 
-Replace placeholders with actual returned values. Example safe response projection: `{"status":"connected","connection_id":"CONNECTION_ID","owner":"OWNER"}`; never a token. Lost exchange? Resume the same saved connection; see recovery.
+Use actual returned values; never display tokens. Lost exchange? Resume the same saved connection; see recovery.
 
 ## Unified story cards: author → preflight → versions
 
@@ -43,7 +43,7 @@ Idempotency-Key: saved-scene-batch-key
 {"client_project_id":"PROJECT","plan_ids":["READY_PLAN_A","READY_PLAN_B"]}
 ```
 
-Example response projection: `{"batch_id":"BATCH","status":"active"}`; inspect its actual per-item list. HTTP 202 means admission, not inference success. Observe the original batch/per-item jobs; partial admission retains its original identity.
+HTTP 202 is admission, not success. Observe the original batch/per-item jobs; partial admission retains its identity.
 
 Read a shot's `/versions` for immutable recipes; old missing recipes stay unknown. `storyboard.restore` restores known effective settings without generating. `storyboard.star`, atomic bulk draft/final/move, account→story→shot defaults and project-local profile forks use the [story contract](reference/api.md#storyboard-versions-and-bulk-work). Duration/seed stay per shot; no automatic deletion or global usage search.
 
@@ -95,10 +95,6 @@ Example response projection: `{"preview_id":"PREVIEW","expires_at":1790000000}`;
 See [recovery](reference/recovery.md) for stale settings, owner caps, confirmation and unknown charges.
 
 
-## Confirmed long-shot windows
+## Long-shot windows
 
-For an 8–15 second shot, POST `/v1/projects/{project_id}/shots/{shot_id}/script-windows/preview` with current `expected_version`, optional integer `window_seconds` 5–10 and a fresh `Idempotency-Key`. Omitting length lets one existing Gemini call choose a supported schedule. Show `timing.windows` and the assigned dialogue to the user: native frame rounding/overlap can create a short final window. Never describe this as exactly equal output durations.
-
-After the user confirms, send ordinary `/actions` with current `expected_version` and `{"op":"shot.script_windows.confirm","shot_id":"SHOT","preview_id":"PREVIEW"}`. `shot.script_windows.clear` explicitly returns to the prior one-prompt behavior. Do not synthesize or edit `shot.data.script_windows` or `script_window_prompts`; confirmation copies the validated server receipt. Source changes require another preview/confirm (or clear). Normal generation preflight/submission remains separate and uses the existing job/credit gates.
-
-Recover `pending`/`unknown` previews using the same key or GET `/v1/projects/{project_id}/shots/{shot_id}/script-windows/previews/{preview_id}`. Recovery never calls Gemini twice. No automatic new-key retry. Preview uses no GPU or video credits; at most 3 new calls/minute/owner. See the API reference for timing and immutable native-helper compatibility.
+Use [preview/confirm](reference/api.md#confirmed-long-shot-windows) for `shot.data.script_windows`; confirm native timing/dialogue, recover the same key.

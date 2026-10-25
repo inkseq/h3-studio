@@ -339,6 +339,11 @@ class PureTests(unittest.TestCase):
         self.assertNotEqual(old, core.source_hash(project, "shot-one"))
 
     def test_direct_and_legacy_compile_cannot_bypass_confirmation(self):
+        from studio_platform.generation_draft import control_schema
+        from studio_platform.quick_chat_schema import CardControls
+
+        self.assertNotIn("script_window_prompts", control_schema())
+        self.assertNotIn("script_window_prompts", CardControls.model_fields)
         from studio_platform.capabilities import compile_request
 
         request = fixtures.generation_request(

@@ -194,6 +194,6 @@ def contract():
         "confirm": "shot.script_windows.confirm: shot_id, preview_id; normal expected_version CAS",
         "clear": "shot.script_windows.clear: shot_id; normal expected_version CAS",
         "timing": "24 fps; timing.windows contains start/end frames and seconds, generation_frames, overlap_frames. Native rounding and short final windows are visible before confirmation.",
-        "limits": "3 new previews/minute/owner; one existing Gemini call; no generation or video-credit debit; 8..15 second source shots in the current native envelope.",
+        "limits": "3 new previews/minute/owner; one assistant call; no generation or video-credit debit; 8..15 second source shots in the current native envelope.",
         "stale": "Source changes require another preview/confirm or explicit clear; no silent reuse.",
     }
