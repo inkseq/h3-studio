@@ -7,7 +7,8 @@ import { chapterShots } from './storyboard-domain.js';
 import { chapterTiming, trackPlacement } from './media-timing.js';
 import { generatedAudioOption, upsertGeneratedSound } from './generated-sound-model.js';
 
-const MAX_TRACKS = 32,
+// One shared bound with the server planner, Film preflight and renderer (h3-studio#601).
+const MAX_TRACKS = 128,
   MIN_LENGTH = 0.1;
 const round = (value) => Math.round(value * 1000) / 1000;
 
