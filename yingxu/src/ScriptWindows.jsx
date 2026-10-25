@@ -19,6 +19,7 @@ export default function ScriptWindows({ shot }) {
   const [preview, setPreview] = useState(null),
     [length, setLength] = useState(''),
     [busy, setBusy] = useState(false),
+    [open, setOpen] = useState(false),
     [error, setError] = useState('');
   useEffect(() => {
     setPreview(null);
@@ -39,6 +40,7 @@ export default function ScriptWindows({ shot }) {
         value = await adapter.previewScriptWindows(shot.id, { windowSeconds, key });
       }
       setPreview(value);
+      setOpen(true);
       if (value?.status !== 'ready')
         setError(t(value?.status === 'stale' ? 'windows.stale' : 'windows.invalid'));
     } catch {
@@ -70,7 +72,12 @@ export default function ScriptWindows({ shot }) {
     ? preview.supported_options
     : [5, 6, 7, 8, 9, 10];
   return (
-    <details className="script-windows" open={!!ready || undefined}>
+    // The person opens and closes it; confirming or clearing keeps it open.
+    <details
+      className="script-windows"
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
       <summary>
         <Scissors size={14} aria-hidden="true" />
         {t('windows.title')}

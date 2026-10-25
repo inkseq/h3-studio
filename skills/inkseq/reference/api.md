@@ -2,6 +2,16 @@
 
 Read this for exact request construction; the [task guide](../SKILL.md) chooses the workflow. Paths are relative to the exact authorized origin. Substitute actual returned IDs, integer versions and hashes; examples are templates, not live receipts. Read authenticated OpenAPI directly at `/openapi.json` (the generic helper intentionally accepts only relative `/v1/` paths).
 
+## Chapter audio limits
+
+Chapter audio uses the existing `sound.set` action with project `expected_version`
+CAS. `tracks` supports up to 128 entries per chapter; the expanded render plan
+(including followed shot segments) also permits at most 128 audible tracks.
+Read the current `operation_schemas.sound.set` in `/v1/guided-schema` before
+editing. Source ownership, matching file IDs, generated audio pairing, explicit
+mute, trim and fade checks still apply. This limit does not auto-enable clip
+sound or change an existing project's saved silence.
+
 ## Helper and credentials
 
 `scripts/inkseq.py --base-url ORIGIN --connection ID request METHOD /v1/PATH --json-file body.json --idempotency-key SAVED_KEY --output receipt.json` supports GET/POST/PUT/PATCH/DELETE. Omit body/key for reads. Save the exact body/key before writes. Each independently intended write needs its own key; original-request recovery reuses it. Output files are exclusive. Use a new output filename for another observation, not a new paid request. Python/httpx are required; connect.py is standard-library only. Choose one credential source: activated OS-protected connection, process-only `INKSEQ_API_KEY`, or an already configured explicit registry profile. Never copy secrets into project files.
@@ -216,7 +226,7 @@ explicit conversion is accepted; do not rewrite them to guessed project IDs.
 
 `shot.configure_generation` takes `shot_id` and requested tier/mode, prompt, controls and inputs; consistent neutral recipe/profile aliases also work. GET `/v1/projects/PROJECT/shots/SHOT/generation-draft`, then POST its `/generation-plans` with `{expected_version:project_version}` (optional current capabilities_version). Plan generation does not enqueue. POST `/v1/jobs` with `{plan_id:READY_PLAN}` or `/v1/batches` with `{client_project_id:PROJECT,plan_ids:[READY_PLAN,...]}` only within generation authority. Batch admission may partially succeed; observe its original receipt.
 
-`artifact.adopt` with artifact_id/shot_id/select:false adds a candidate; `shot.select` uses the adopted entity_id, not artifact receipt ID. Adopt actual returned audio separately; `sound.generated` requires a selected adopted video and exactly one matching FLAC from the same succeeded job. Never invent missing audio.
+`artifact.adopt` with artifact_id/shot_id/select:false adds a candidate; `shot.select` uses the adopted entity_id, not artifact receipt ID. On a changed chosen take, normal `/actions` defaults shot `data.clipSound` to `"on"` and adopts/binds the unique validated FLAC from the same succeeded, owned project job. No extraction or generation occurs. Set `data.clipSound:"off"` through `entity.update` to suppress attached generated sound; this preference survives take changes and never overwrites independent mute/review flags or detached/manual audio. Missing FLAC never creates a fake track. Old projects with no field keep their saved tracks; reads, unrelated edits and full saves do not backfill. Existing stale/muted/review/detached bindings are not automatically replaced: explicitly adopt actual returned audio and use `sound.generated` to confirm a matching binding when appropriate. Global silent mode and slow-rate audio guards still apply.
 
 ### Storyboard versions and bulk work
 

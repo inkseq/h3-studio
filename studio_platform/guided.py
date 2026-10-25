@@ -26,6 +26,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.exc import IntegrityError
 
+from .render_limits import MAX_AUDIO_TRACKS
 from .caption_server import caption_signature
 from .guided_schema import (
     validate_action_fields,
@@ -675,6 +676,11 @@ class Guided:
                         if before_segments is not None:
                             validate_segments_transition(before_segments, project)
                             self.check_segment_sources(project, segment_sources)
+                    from .clip_sound import sync_clip_sound
+
+                    sync_clip_sound(
+                        self, conn, principal, project_id, row["payload"], project
+                    )
                     version = row["version"] + 1
                 if segment_sources is not None:
                     self.check_segment_sources(project, segment_sources)
@@ -1160,9 +1166,9 @@ class Guided:
             if op == "sound.set":
                 if (
                     not isinstance(action.get("tracks"), list)
-                    or len(action["tracks"]) > 32
+                    or len(action["tracks"]) > MAX_AUDIO_TRACKS
                 ):
-                    raise ValueError("声音轨道须为最多32项的数组")
+                    raise ValueError(f"声音轨道须为最多{MAX_AUDIO_TRACKS}项的数组")
                 journey.setdefault("soundTracks", {})[chapter["id"]] = copy.deepcopy(
                     action["tracks"]
                 )

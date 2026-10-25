@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 
+from .render_limits import MAX_AUDIO_TRACKS
 from .project_validation import ROLES, TYPES
 from .script_windows import contract as script_windows_contract
 
@@ -180,6 +181,11 @@ ENTITY_PROPERTIES = {
         "description": "Create replaces defaults when supplied. A shot defaults to seconds=5,prompt=''; generation defaults to recipe='video'. Include desired defaults in supplied data.",
         "properties": {
             "seconds": {"type": "number", "exclusiveMinimum": 0, "maximum": 3600},
+            "clipSound": {
+                "type": "string",
+                "enum": ["on", "off"],
+                "description": "Shot only. Newly selected takes default on and bind validated same-job FLAC through actions. Off persists across takes and suppresses attached generated sound only. Absent on legacy shots preserves existing tracks; no backfill. Independent mute/review/detach and slow-rate guards remain.",
+            },
             "videoSegments": SEGMENTS,
             "videoSegmentsSource": SEGMENT_SOURCE,
             "prompt": TEXT,
@@ -552,7 +558,7 @@ def operation_schemas():
             "mode": {"enum": ["silent", "dialogue", "music", "mixed"]},
             "tracks": {
                 "type": "array",
-                "maxItems": 32,
+                "maxItems": MAX_AUDIO_TRACKS,
                 "items": {
                     **OBJECT,
                     "description": "Editable audio track. Rendering additionally requires a valid same-project audio entity/receipt, matching fileId, bounded source range and gain; muted drafts may keep incomplete bindings.",

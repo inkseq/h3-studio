@@ -801,6 +801,8 @@ inventory.json
 !studio_platform/capacity_policy.py
 !studio_platform/slot_lock.py
 !tests/test_capacity_contract.py
+# Shared bounded multi-track audio contract (#600).
+!studio_platform/render_limits.py
 !tests/test_default_profile_maintenance.py
 # #597 confirmed narrative windows
 !studio_platform/script_window_timing.py
@@ -814,3 +816,7 @@ inventory.json
 !studio_platform/guided_routes.py
 !studio_platform/controller_liveness.py
 !tests/test_controller_liveness.py
+
+# Explicit shot clip sound preference (#600).
+!studio_platform/clip_sound.py
+!tests/test_clip_sound.py
