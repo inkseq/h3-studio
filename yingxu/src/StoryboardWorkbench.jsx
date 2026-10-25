@@ -379,7 +379,7 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                               .join(', '),
                           })
                         : t('workbench.noChanges')
-                    : t('workbench.unknown')}
+                    : ''}
                 </small>
                 <div className="take-acts">
                   <button
@@ -395,7 +395,11 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                     disabled={
                       state.busy || !!state.workbenchPending || row.recipe_status !== 'known'
                     }
-                    title={t('workbench.restoreHint')}
+                    title={t(
+                      row.recipe_status === 'known'
+                        ? 'workbench.restoreHint'
+                        : 'workbench.recipeOld',
+                    )}
                     onClick={() =>
                       action({ op: 'storyboard.restore', shot_id: shot.id, artifact_id: row.id })
                     }

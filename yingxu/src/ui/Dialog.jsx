@@ -7,6 +7,19 @@ import { X } from 'lucide-react';
 import { usePageActive } from '../AppRouteCache.jsx';
 import { useI18n } from '../i18n/I18nProvider.jsx';
 
+// A click on the backdrop targets the <dialog> itself, but so does a click on its own
+// padding; only a point outside the box counts as "outside".
+export function clickedOutside(event) {
+  const box = event.currentTarget.getBoundingClientRect();
+  return (
+    event.target === event.currentTarget &&
+    (event.clientX < box.left ||
+      event.clientX > box.right ||
+      event.clientY < box.top ||
+      event.clientY > box.bottom)
+  );
+}
+
 export function useModal({ focusFirst = false } = {}) {
   const active = usePageActive(),
     ref = useRef(),
@@ -44,7 +57,8 @@ export function Dialog({
   wide = false,
   size = wide ? 'wide' : 'md',
   busy = false,
-  closeOnBackdrop = false,
+  // Owner review #232 (#35): every dialog closes on an outside click, like Escape.
+  closeOnBackdrop = true,
   portal = false,
   className = '',
 }) {
@@ -72,7 +86,7 @@ export function Dialog({
         if (!ref.current?.querySelector('.item-menu [aria-expanded="true"]')) close();
       }}
       onClick={(event) => {
-        if (closeOnBackdrop && event.target === event.currentTarget) close();
+        if (closeOnBackdrop && clickedOutside(event)) close();
       }}
     >
       <div className="qc-dialog-head">
