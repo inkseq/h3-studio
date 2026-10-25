@@ -643,7 +643,6 @@ class ManagementTests(ledger.LedgerCase):
 
     def test_same_story_entity_id_has_project_scoped_immutable_creator(self):
         from studio_platform.agent_management import creator
-        from types import SimpleNamespace
 
         first, _, agent_a, _, _, _ = self.connect()
         second, _, agent_b, _, _, _ = self.connect()
@@ -672,22 +671,22 @@ class ManagementTests(ledger.LedgerCase):
             self.app.state.guided.mutate(
                 actor, project_id, payload, 'create-' + project_id, create=True
             )
-        get_project = next(
-            r.endpoint
-            for r in self.app.routes
-            if getattr(r, 'path', None) == '/v1/projects/{project_id}'
-            and 'GET' in r.methods
-        )
-        request = SimpleNamespace(state=SimpleNamespace(principal=self.principal))
-        self.assertEqual(
-            get_project('story-a', request)['created_by']['shot-1']['connection_id'],
-            first['connection']['id'],
-        )
-        self.assertEqual(
-            get_project('story-b', request)['created_by']['shot-1']['connection_id'],
-            second['connection']['id'],
-        )
-        self.assertEqual(get_project('story-human', request)['created_by'], {})
+        # Exercise the real HTTP contract; routes may belong to domain routers.
+        with TestClient(self.app, base_url=self.origin) as client:
+            login = client.post('/api/auth/login', json={'username': 'superdan'})
+            self.assertEqual(login.status_code, 200, login.text)
+            values = {}
+            for project_id in ('story-a', 'story-b', 'story-human'):
+                response = client.get('/v1/projects/' + project_id)
+                self.assertEqual(response.status_code, 200, response.text)
+                values[project_id] = response.json()['created_by']
+            self.assertEqual(
+                values['story-a']['shot-1']['connection_id'], first['connection']['id']
+            )
+            self.assertEqual(
+                values['story-b']['shot-1']['connection_id'], second['connection']['id']
+            )
+            self.assertEqual(values['story-human'], {})
         with self.repo.transaction() as conn:
             from studio_platform.agent_management import record_created
 
