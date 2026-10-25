@@ -285,3 +285,18 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+/* Records to review (#572): collapsed under the live machines. */
+.admin-home .ah-review {
+  margin-top: 12px;
+  font-size: 13px;
+}
+.admin-home .ah-review > summary {
+  cursor: pointer;
+  color: var(--ink-2);
+}
+.admin-home .ah-review ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
