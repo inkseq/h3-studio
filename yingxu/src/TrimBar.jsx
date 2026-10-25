@@ -94,10 +94,30 @@ export default function TrimBar({ duration, start, end, getVideo, onCommit, disa
   };
   const [inPoint, outPoint] = range;
   return (
-    <div className={'trim-bar' + (disabled || !total ? ' off' : '')}>
+    <div
+      className={'trim-bar' + (disabled || !total ? ' off' : '')}
+      // #232 (#15): trim by dragging the handles; I / O mark in and out at the playhead and a
+      // double-click on the bar keeps the whole clip — no row of buttons.
+      title={t('editor.trimKeys')}
+      onKeyDown={(event) => {
+        if (!total || event.target.closest('input,textarea')) return;
+        const key = event.key.toLowerCase();
+        if (key !== 'i' && key !== 'o') return;
+        event.preventDefault();
+        const next = key === 'i' ? clampIn(now, range) : clampOut(now, range);
+        setRange(next);
+        commit(next);
+      }}
+    >
       <div
         className="trim-bar-track"
         ref={bar}
+        onDoubleClick={() => {
+          if (!total) return;
+          const next = [0, snap(total)];
+          setRange(next);
+          commit(next);
+        }}
         onPointerDown={(event) => {
           if (!total) return;
           // Press and drag anywhere on the bar to scrub the playhead.
@@ -160,42 +180,6 @@ export default function TrimBar({ duration, start, end, getVideo, onCommit, disa
               })
             : t('editor.loading')}
         </span>
-        <button
-          type="button"
-          className="small ghost"
-          disabled={!total}
-          onClick={() => {
-            const next = clampIn(now, range);
-            setRange(next);
-            commit(next);
-          }}
-        >
-          [ {t('editor.setIn')}
-        </button>
-        <button
-          type="button"
-          className="small ghost"
-          disabled={!total}
-          onClick={() => {
-            const next = clampOut(now, range);
-            setRange(next);
-            commit(next);
-          }}
-        >
-          {t('editor.setOut')} ]
-        </button>
-        <button
-          type="button"
-          className="small ghost"
-          disabled={!total}
-          onClick={() => {
-            const next = [0, snap(total)];
-            setRange(next);
-            commit(next);
-          }}
-        >
-          {t('editor.wholeClip')}
-        </button>
       </div>
     </div>
   );

@@ -33,22 +33,25 @@ function audible(project) {
 
 /** Tracks with their timeline placement (seconds) and display title. */
 export function audioBlocks(project, chapterId, timeline = chapterTimeline(project, chapterId)) {
-  return (project.journey?.soundTracks?.[chapterId] || []).map((track) => {
-    const asset = project.entities.find((e) => e.id === (track.assetId || track.audioId));
-    const shot = track.generatedFrom ? timeline.find((s) => s.id === track.shotId) : null,
-      source = track.detached ? detachedSource(project, track) : null;
-    return {
-      track,
-      // Follows its clip (cannot be moved on its own) unless detached.
-      generated: !!track.generatedFrom && !track.detached,
-      detached: !!track.detached,
-      title: shot ? shot.title : source ? source.title : asset?.title || track.id,
-      effectiveMuted: effectiveMuted(track, shot),
-      placement: trackPlacement(track, timeline),
-      fileId: asset?.data.fileId || track.fileId,
-      asset,
-    };
-  });
+  // A clip's own sound that was switched off earlier left a muted chip; it is not shown.
+  return (project.journey?.soundTracks?.[chapterId] || [])
+    .filter((track) => !(track.generatedFrom && !track.detached && track.muted))
+    .map((track) => {
+      const asset = project.entities.find((e) => e.id === (track.assetId || track.audioId));
+      const shot = track.generatedFrom ? timeline.find((s) => s.id === track.shotId) : null,
+        source = track.detached ? detachedSource(project, track) : null;
+      return {
+        track,
+        // Follows its clip (cannot be moved on its own) unless detached.
+        generated: !!track.generatedFrom && !track.detached,
+        detached: !!track.detached,
+        title: shot ? shot.title : source ? source.title : asset?.title || track.id,
+        effectiveMuted: effectiveMuted(track, shot),
+        placement: trackPlacement(track, timeline),
+        fileId: asset?.data.fileId || track.fileId,
+        asset,
+      };
+    });
 }
 
 // The shot whose generated video a detached track came from, for its label.
@@ -92,8 +95,11 @@ export function toggleClipSound(project, chapterId, shotId) {
     if (current.slow) track.slow_rate_audio_enabled = true;
     return;
   }
-  if (current.state === 'on') current.track.muted = true;
-  else {
+  // #232 (#32): off removes the clip's own sound from the lane instead of leaving a muted chip.
+  if (current.state === 'on') {
+    const tracks = project.journey.soundTracks[chapterId];
+    tracks.splice(tracks.indexOf(current.track), 1);
+  } else {
     current.track.muted = false;
     // Turning sound on for a slowed clip is the explicit choice the exporter asks for.
     if (current.slow) current.track.slow_rate_audio_enabled = true;

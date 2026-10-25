@@ -812,3 +812,39 @@ dialog.modal.wide {
     display: none;
   }
 }
+
+/* #232 (#6): the collapsed / narrowest library is an icon rail — one icon per category with
+   its count; a click opens the library at that category. */
+.sb-workspace .library.collapsed > .lib-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+.sb-workspace .library.collapsed .lib-tabs button {
+  position: relative;
+  justify-content: center;
+  padding: 6px 0;
+  min-height: 32px;
+}
+.sb-workspace .library.collapsed .lib-tabs button span {
+  display: none;
+}
+.sb-workspace .library.collapsed .lib-tabs button small {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  margin: 0;
+  font-size: 9px;
+  line-height: 1;
+}
+.sb-workspace .library .lib-new {
+  margin-left: auto;
+}
+.sb-workspace .library .lib-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 18px 8px;
+  text-align: center;
+}

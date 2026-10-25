@@ -528,6 +528,18 @@ export function AssetLibrary({ onPick, selectedShot, compact, collapsed = false,
           <Upload size={14} />
           {tr('storyboard.copy42')}
         </button>
+        {isProfileTab && (
+          // #232 (#8): one "+" that creates whatever category is open.
+          <button
+            className="small ghost lib-new"
+            disabled={state.busy}
+            title={tr('storyboard.mixed16', { kind: TYPE_LABEL[tab] })}
+            aria-label={tr('storyboard.mixed16', { kind: TYPE_LABEL[tab] })}
+            onClick={() => setNewProfileType(tab)}
+          >
+            <Plus size={14} />
+          </button>
+        )}
         <input
           ref={uploadInput}
           type="file"
@@ -557,7 +569,11 @@ export function AssetLibrary({ onPick, selectedShot, compact, collapsed = false,
               (tab === k ? ' on' : '') +
               (k === 'inbox' && inbox.length ? ' alert' : '')
             }
-            onClick={() => setTab(k)}
+            onClick={() => {
+              setTab(k);
+              // On the icon rail a category opens the library at that category.
+              if (collapsed) onToggle?.();
+            }}
             title={l}
             aria-label={l}
             aria-pressed={tab === k}
@@ -568,13 +584,33 @@ export function AssetLibrary({ onPick, selectedShot, compact, collapsed = false,
           </button>
         ))}
       </div>
-      {selectedShot && (
-        <div className="lib-ctx">{tr('storyboard.mixed15', { title: selectedShot.title })}</div>
-      )}
 
       {isProfileTab && (
         <>
-          <div className="plist">
+          <div
+            className="plist"
+            onContextMenu={(event) => {
+              // Right-click empty list space: create one of this category (a shortcut to "+").
+              if (event.target.closest('.pcard') || state.busy) return;
+              event.preventDefault();
+              setNewProfileType(tab);
+            }}
+          >
+            {!state.profiles.some((p) => p.type === tab) && (
+              <div className="lib-empty">
+                <span className="muted">
+                  {tr('storyboard.libEmpty', { kind: TYPE_LABEL[tab] })}
+                </span>
+                <button
+                  className="small"
+                  disabled={state.busy}
+                  onClick={() => setNewProfileType(tab)}
+                >
+                  <Plus size={14} />
+                  {tr('storyboard.mixed16', { kind: TYPE_LABEL[tab] })}
+                </button>
+              </div>
+            )}
             {state.profiles
               .filter((p) => p.type === tab && match(p.name + p.desc))
               .map((p) => (
@@ -587,14 +623,6 @@ export function AssetLibrary({ onPick, selectedShot, compact, collapsed = false,
                 />
               ))}
           </div>
-          <button
-            className="small add-profile"
-            disabled={state.busy}
-            onClick={() => setNewProfileType(tab)}
-          >
-            <Plus size={14} />
-            {tr('storyboard.mixed16', { kind: TYPE_LABEL[tab] })}
-          </button>
           <div className="lib-tip">
             {tab === 'character'
               ? tr('storyboard.detail18')
@@ -1451,6 +1479,28 @@ const dragItem = (active, db) => {
   return null;
 };
 
+// Whole seconds for a card; a cut shorter than a second still reads as 0:01.
+const roundedSeconds = (sec) =>
+  Number.isFinite(sec) && sec > 0 ? Math.max(1, Math.round(sec)) : sec;
+// 4 → "4", 0.6666 → "0.7".
+const shortSeconds = (sec) => (Number.isFinite(sec) ? String(Math.round(sec * 10) / 10) : sec);
+// The story's most common mode and tier; a card labels only what differs from them.
+const usualCache = new WeakMap();
+function usualSettings(shots, db, locale) {
+  if (usualCache.has(shots)) return usualCache.get(shots);
+  const top = (values) => {
+    const counts = new Map();
+    for (const v of values) counts.set(v, (counts.get(v) || 0) + 1);
+    return [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
+  };
+  const value = {
+    mode: top(shots.map((s) => expand(s, db, locale).mode)),
+    quality: top(shots.map((s) => s.quality)),
+  };
+  usualCache.set(shots, value);
+  return value;
+}
+
 export function ShotCard({
   shot,
   index,
@@ -1468,6 +1518,7 @@ export function ShotCard({
   const info = expand(shot, db, locale);
   const status = shotStatus(shot, queuePositions(state.shots)[shot.id], locale);
   const latest = shot.versions[shot.versions.length - 1];
+  const usual = usualSettings(state.shots, db, locale);
   const item = isOver ? dragItem(active, db) : null;
   const plan = item && (item.asset || item.profile) ? planDrop(shot, item, 'smart', db) : null;
   return (
@@ -1514,8 +1565,14 @@ export function ShotCard({
         <ShotThumb shot={shot} />
         <span className="card-no">{String(index + 1).padStart(2, '0')}</span>
         <span className="card-dur">
-          {fmt(shot.segments?.length && shot.chosen ? segmentsTotal(shot.segments) : info.sec)}
+          {fmt(
+            // #232 (#27): show the real length, never 0:00 for a short kept cut.
+            roundedSeconds(
+              shot.segments?.length && shot.chosen ? segmentsTotal(shot.segments) : info.sec,
+            ),
+          )}
         </span>
+        <span className={'card-state ' + status.tone} title={status.label} />
         <Progress v={latest} />
       </div>
       <div className="card-body">
@@ -1524,8 +1581,11 @@ export function ShotCard({
           <AssistantBadge createdBy={shot.created_by} />
         </div>
         <div className="card-meta">
-          <ModeChip info={info} />
-          <span className="q">{QUALITY_LABEL[shot.quality]}</span>
+          {/* #232 (#12): mode and tier only when this shot differs from the story's usual. */}
+          {info.mode !== usual.mode && <ModeChip info={info} />}
+          {shot.quality !== usual.quality && (
+            <span className="q">{QUALITY_LABEL[shot.quality]}</span>
+          )}
           {info.warnings.length > 0 && (
             <span className="warnbadge" title={info.warnings.join('\n')}>
               !
@@ -1533,7 +1593,7 @@ export function ShotCard({
           )}
         </div>
         <WhoChips shot={shot} small />
-        <Pill status={status} />
+        {['wait', 'busy', 'warn'].includes(status.tone) && <Pill status={status} />}
       </div>
       {plan && (
         <div className={'drop-hint' + (plan.warn ? ' warn' : '')}>{plan.hint || plan.msg}</div>
@@ -1686,6 +1746,15 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
   useEffect(() => {
     editorRef.current?.querySelectorAll('textarea').forEach(growTextarea);
   });
+  // #232 (#35): the ⋯ take menu closes on any outside press, like every other menu.
+  useEffect(() => {
+    const close = (event) =>
+      document.querySelectorAll('details.take-more[open]').forEach((menu) => {
+        if (!menu.contains(event.target)) menu.open = false;
+      });
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, []);
   if (!shot) return null;
   const index = state.shots.indexOf(shot);
   const info = expand(shot, db, locale);
@@ -1793,42 +1862,53 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
           onPreview={(row) => setPreview(row.entity_id || row.id)}
         />
         {['done', 'succeeded'].includes(viewing?.status) && (
-          <div className="row tight">
-            <StoryboardDownloads version={viewing} title={shot.title} />
-            <button
-              className="small"
-              disabled={saving}
-              title={tr('storyboard.saveFrameHint')}
-              onClick={() => {
-                // Save the frame on screen right away, in the background (owner, 2026-10-22).
-                const node = mediaRef.current?.querySelector('video');
-                node?.pause();
-                const at = Number((node?.currentTime || 0).toFixed(3));
-                setSaving(true);
-                setMsg(tr('storyboard.savingFrame', { seconds: at.toFixed(2) }));
-                Promise.resolve(
-                  dispatch({
-                    type: 'saveFrame',
-                    shot: shot.id,
-                    version: viewing.id,
-                    artifactId: viewing.artifactId,
-                    t: at,
-                  }),
-                )
-                  .then((receipt) =>
-                    setMsg(
-                      !receipt || receipt.ok === false
-                        ? receipt?.error || tr('storyboard.detail43')
-                        : tr('storyboard.frameSaved', { seconds: at.toFixed(2) }),
-                    ),
-                  )
-                  .catch((error) => setMsg(error?.message || tr('storyboard.detail43')))
-                  .finally(() => setSaving(false));
-              }}
-            >
-              <Pin size={14} />
-              {tr('storyboard.copy81')}
-            </button>
+          <div className="row tight take-tools">
+            {/* #232 (#22): downloads and "save frame" live in one ⋯ menu. */}
+            <details className="take-more">
+              <summary
+                aria-label={tr('storyboard.moreActions')}
+                title={tr('storyboard.moreActions')}
+              >
+                ⋯
+              </summary>
+              <div className="take-more-menu">
+                <StoryboardDownloads version={viewing} title={shot.title} />
+                <button
+                  className="small"
+                  disabled={saving}
+                  title={tr('storyboard.saveFrameHint')}
+                  onClick={() => {
+                    // Save the frame on screen right away, in the background (owner, 2026-10-22).
+                    const node = mediaRef.current?.querySelector('video');
+                    node?.pause();
+                    const at = Number((node?.currentTime || 0).toFixed(3));
+                    setSaving(true);
+                    setMsg(tr('storyboard.savingFrame', { seconds: at.toFixed(2) }));
+                    Promise.resolve(
+                      dispatch({
+                        type: 'saveFrame',
+                        shot: shot.id,
+                        version: viewing.id,
+                        artifactId: viewing.artifactId,
+                        t: at,
+                      }),
+                    )
+                      .then((receipt) =>
+                        setMsg(
+                          !receipt || receipt.ok === false
+                            ? receipt?.error || tr('storyboard.detail43')
+                            : tr('storyboard.frameSaved', { seconds: at.toFixed(2) }),
+                        ),
+                      )
+                      .catch((error) => setMsg(error?.message || tr('storyboard.detail43')))
+                      .finally(() => setSaving(false));
+                  }}
+                >
+                  <Pin size={14} />
+                  {tr('storyboard.copy81')}
+                </button>
+              </div>
+            </details>
             {msg && <small className="okmsg">{msg}</small>}
           </div>
         )}
@@ -2159,7 +2239,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
             <b>{tr('storyboard.copy90')}</b>
             <ModeChip info={info} />
             <span className="muted">
-              {info.machine} · {info.res} · {info.sec} {tr('storyboard.secondsUnit')}
+              {info.machine} · {info.res} · {shortSeconds(info.sec)} {tr('storyboard.secondsUnit')}
             </span>
           </div>
           <div className="sent-prompt">
@@ -2217,20 +2297,24 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
               onChange={(quality) => upd({ quality })}
             />
             <small className="muted">
-              {info.res} · {info.sec} {tr('storyboard.secondsUnit')}
+              {info.res} · {shortSeconds(info.sec)} {tr('storyboard.secondsUnit')}
             </small>
           </div>
-          {shot.versions.length > 0 && (
-            <label className="check">
-              <input
-                type="checkbox"
-                checked={shot.seedLock}
-                onChange={(e) => upd({ seedLock: e.target.checked })}
-              />
-              {tr('storyboard.mixed21')}
-            </label>
-          )}
-          <WorkbenchCopies value={copies} onChange={setCopies} max={state.copiesMax} />
+          {/* #232 (#25): seed lock and copies are occasional; they fold under "More settings". */}
+          <details className="ed-more">
+            <summary>{tr('storyboard.moreSettings')}</summary>
+            {shot.versions.length > 0 && (
+              <label className="check">
+                <input
+                  type="checkbox"
+                  checked={shot.seedLock}
+                  onChange={(e) => upd({ seedLock: e.target.checked })}
+                />
+                {tr('storyboard.mixed21')}
+              </label>
+            )}
+            <WorkbenchCopies value={copies} onChange={setCopies} max={state.copiesMax} />
+          </details>
           <div className="ed-actions">
             <button
               className="primary"
@@ -2401,7 +2485,7 @@ export function Transport({ player }) {
   );
 }
 
-function Segment({ seg, index, chapterStart, selected, onPick, compact }) {
+function Segment({ seg, index, chapterStart, selected, onPick, compact, total, numbered }) {
   const { t: tr, locale } = useI18n();
   const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { state } = useStore();
@@ -2419,7 +2503,11 @@ function Segment({ seg, index, chapterStart, selected, onPick, compact }) {
       {...drag.attributes}
       {...drag.listeners}
       aria-label={tr('storyboard.detail71') + seg.shot.title}
-      style={{ flexGrow: seg.dur, flexBasis: 0 }}
+      // Placed on true time so the ruler, playhead and selection always agree.
+      style={{
+        left: `${total ? (seg.start / total) * 100 : 0}%`,
+        width: `${total ? (seg.dur / total) * 100 : 0}%`,
+      }}
       className={
         'tseg' +
         (compact ? ' compact ' + status.tone : '') +
@@ -2433,7 +2521,7 @@ function Segment({ seg, index, chapterStart, selected, onPick, compact }) {
     >
       {compact ? (
         // Too many shots for pictures: a coloured square per shot, number when it fits.
-        <span className="tseg-n">{index + 1}</span>
+        numbered && <span className="tseg-n">{index + 1}</span>
       ) : (
         <>
           {seg.version ? (
@@ -2504,6 +2592,9 @@ export function Timeline({ player, selectedId, onPick, chapterStarts }) {
             seg={seg}
             index={index}
             compact={compact}
+            total={total}
+            // A number only where the segment is wide enough to show it whole.
+            numbered={!!total && (seg.dur / total) * width >= 26}
             chapterStart={index > 0 && !!chapterStarts?.has(seg.shot.id)}
             selected={seg.shot.id === selectedId}
             onPick={pick}

@@ -1194,3 +1194,156 @@ body.sb-resizing-y video {
   width: auto;
   flex: 0 1 auto;
 }
+
+/* Owner review #232 (#3/#13): segments sit on true time — left/width are percentages of the
+   film — so the ruler, playhead and selected outline always line up, however many shots. */
+.timeline .track.video {
+  display: block;
+  gap: 0;
+}
+.timeline .tseg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 0;
+  border-radius: 0;
+  box-shadow: inset -1px 0 0 var(--surface);
+}
+.timeline .tseg:first-child {
+  border-radius: 6px 0 0 6px;
+}
+.timeline .tseg.selected {
+  z-index: 2;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.timeline .tseg.chapter-start {
+  box-shadow:
+    inset 2px 0 0 var(--accent),
+    inset -1px 0 0 var(--surface);
+}
+.timeline.compact .tseg {
+  border-radius: 0;
+}
+/* #232 (#2): the collapse arrow stays at the dock's top-right corner in both states, so a
+   second press lands on it; (#1) contents never spill past the dock's bottom edge. */
+.dock-mini-toggle {
+  left: auto;
+  right: 16px;
+  transform: none;
+}
+.sb-workspace .dock-right {
+  min-height: 0;
+  overflow: hidden;
+}
+.layout.A.theater > :not(.col) {
+  display: none;
+}
+.sb-workspace .timeline .tseg,
+.timeline .tseg {
+  padding: 0;
+}
+/* #232 (#12): status is a dot in the thumbnail corner; text pills only for queue/progress/failure. */
+.card .card-state {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--muted);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.55);
+  z-index: 2;
+}
+.card .card-state.good {
+  background: var(--good);
+}
+.card .card-state.warn {
+  background: var(--warn);
+}
+.card .card-state.busy {
+  background: var(--fl);
+}
+.card .card-state.wait {
+  background: var(--ref);
+}
+.sb-workspace .card .card-meta:empty {
+  display: none;
+}
+/* #232 (#22): take downloads / save frame in a ⋯ menu. */
+.take-more {
+  position: relative;
+}
+.take-more > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 2px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.take-more > summary::-webkit-details-marker {
+  display: none;
+}
+.take-more-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  left: 0;
+  display: grid;
+  gap: 4px;
+  min-width: 220px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
+}
+.take-more-menu > *,
+.take-more-menu button {
+  justify-content: flex-start;
+  width: 100%;
+}
+.ed-more > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+.ed-more[open] {
+  display: grid;
+  gap: 8px;
+}
+/* #232 (#24): the expanded shot panel scrolls its two columns independently. */
+.drawer.wide {
+  overflow: hidden;
+}
+.drawer.wide > .editor.wide {
+  height: 100%;
+  box-sizing: border-box;
+  grid-template-rows: auto minmax(0, 1fr);
+  align-items: stretch;
+}
+.drawer.wide .editor.wide .ed-media,
+.drawer.wide .editor.wide .ed-form {
+  position: static;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+.drawer.wide .editor.wide .ed-media > *,
+.drawer.wide .editor.wide .ed-form > * {
+  flex-shrink: 0;
+}
+/* #232 (#33): unfinished shots read as a status, not a vague action. */
+.sb-pending-chip {
+  border-color: color-mix(in srgb, var(--warn) 55%, transparent);
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+}
+.scene-empty.drop-hot {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+  color: var(--ink);
+}

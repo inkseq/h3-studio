@@ -43,6 +43,7 @@ export const workbenchCatalogs = {
     'workbench.compare': 'Compare',
     'workbench.compareHint': 'Select two takes to compare',
     'workbench.unknown': 'Original recipe unavailable',
+    'workbench.recipeOld': 'Made with an older model version, so its settings can’t be reused',
     'workbench.changedFields': 'Changed since previous: {fields}',
     'workbench.noChanges': 'Same recorded recipe',
     'workbench.restoreHint':
@@ -137,6 +138,7 @@ export const workbenchCatalogs = {
     'workbench.compare': '对比',
     'workbench.compareHint': '选择两条对比',
     'workbench.unknown': '原始配方不可用',
+    'workbench.recipeOld': '这条是旧版模型生成的，不能直接复用它的设置',
     'workbench.changedFields': '与上一版相比：{fields}',
     'workbench.noChanges': '已记录配方相同',
     'workbench.restoreHint': '将设置复制到当前草稿；已有结果和任务保持不变。',

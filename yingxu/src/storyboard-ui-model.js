@@ -143,15 +143,17 @@ export function segments(shots) {
 export const totalDuration = (shots) => segments(shots).reduce((sum, s) => sum + s.dur, 0);
 // Keep a useful wall above the dock; automatic sizing yields space to a long
 // chapter, while an explicit drag remains the user's preference on resize.
-export function storyboardDockLayout({ height = 0, content = 0, manual = null } = {}) {
-  const compact = 190,
+// Owner review #232 (#1, #5): the dock opens at its smallest full height and can never be
+// dragged below the height its contents need (the collapse arrow is the smaller state).
+export function storyboardDockLayout({ height = 0, manual = null } = {}) {
+  const compact = DOCK_MIN,
     large = Math.max(compact, Math.round(height * 0.58)),
     max = Math.max(compact, height - 140);
-  const automatic = Math.min(large, Math.max(compact, height - content - 8));
   return {
     compact,
     large,
     max,
-    size: Math.min(max, manual === null ? automatic : Math.max(110, manual)),
+    size: Math.min(max, manual === null ? compact : Math.max(compact, manual)),
   };
 }
+export const DOCK_MIN = 150;

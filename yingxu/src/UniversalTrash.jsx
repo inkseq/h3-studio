@@ -67,7 +67,15 @@ export function TrashProvider({ account, children }) {
     [error, setError] = useState(''),
     [preview, setPreview] = useState(null),
     [notice, setNotice] = useState(null),
-    [revision, setRevision] = useState(0);
+    [revision, setRevision] = useState(0),
+    // #232 (#10): trashed items leave the screen at once; the server catches up behind it.
+    [hidden, setHidden] = useState(() => new Set());
+  // #232 (#14): a trash/restore notice is a short toast, not a banner that outlives the page.
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 8000);
+    return () => clearTimeout(timer);
+  }, [notice]);
   const api = useMemo(() => {
     const client = createCloudClient();
     client.setAccount(account);
@@ -150,8 +158,16 @@ export function TrashProvider({ account, children }) {
       /* Preserve accepted receipt and any newer local edits. */
     }
   }
+  const hide = (targets, on) =>
+    setHidden((old) => {
+      const next = new Set(old);
+      for (const row of targets) next[on ? 'add' : 'delete'](row.id);
+      return next;
+    });
   async function request(action, targets) {
-    return run(async () => {
+    if (action === 'trash') hide(targets, true);
+    if (action === 'restore') hide(targets, false);
+    const result = await run(async () => {
       const current = store.getState();
       if (
         current.workspace.mode === 'cloud' &&
@@ -168,8 +184,11 @@ export function TrashProvider({ account, children }) {
       if (receipt.state === 'completed') await completed(receipt, current);
       return receipt;
     });
+    // A refused or failed move puts the item back where it was (the error shows above).
+    if (action === 'trash' && !result) hide(targets, false);
+    return result;
   }
-  const value = { account, controller, busy, pending, revision, request, run };
+  const value = { account, controller, busy, pending, revision, request, run, hidden };
   return (
     <Context.Provider value={value}>
       {children}

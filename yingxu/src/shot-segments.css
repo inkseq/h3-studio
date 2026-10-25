@@ -81,3 +81,88 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* #232 (#23): kept parts are edited directly on one time bar. */
+.parts-bar {
+  outline: none;
+}
+.parts-bar-track {
+  position: relative;
+  height: 34px;
+  border-radius: 8px;
+  cursor: crosshair;
+  touch-action: none;
+  background: repeating-linear-gradient(
+    135deg,
+    var(--surface-2, var(--surface)) 0 6px,
+    var(--surface) 6px 12px
+  );
+  box-shadow: inset 0 0 0 1px var(--line-2, var(--line));
+}
+.parts-bar.busy .parts-bar-track {
+  opacity: 0.6;
+  pointer-events: none;
+}
+.parts-bar-part {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: grid;
+  place-items: center;
+  min-width: 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+  cursor: grab;
+}
+.parts-bar-part.selected {
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.parts-bar-part b {
+  font-size: 10px;
+  color: var(--ink);
+  pointer-events: none;
+}
+.parts-bar-part .edge {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: ew-resize;
+}
+.parts-bar-part .edge.start {
+  left: -3px;
+}
+.parts-bar-part .edge.end {
+  right: -3px;
+}
+.parts-bar-x {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  display: none;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border-radius: 50%;
+  place-items: center;
+  background: var(--surface);
+  border: 1px solid var(--line-2, var(--line));
+}
+.parts-bar-part:hover .parts-bar-x,
+.parts-bar-part.selected .parts-bar-x {
+  display: grid;
+}
+.parts-bar-head {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  background: var(--ink);
+  pointer-events: none;
+}
+.shot-segments > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
