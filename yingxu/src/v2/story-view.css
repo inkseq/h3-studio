@@ -1460,3 +1460,62 @@ body.sb-resizing-y video {
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 8px;
 }
+/* #232 (#45, owner 2026-10-26): the collapsed library is a rail of plain icons, no boxes.
+   Hover and the open category get a soft tint; a count shows only when it is not zero. */
+.sb-workspace .library.collapsed > .lib-tabs {
+  align-items: center;
+  gap: 4px;
+}
+.sb-workspace .library.collapsed .lib-tabs .sb-library-tab {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  transition:
+    background 0.12s,
+    color 0.12s;
+}
+.sb-workspace .library.collapsed .lib-tabs .sb-library-tab > svg {
+  width: 17px;
+  height: 17px;
+}
+.sb-workspace .library.collapsed .lib-tabs .sb-library-tab:hover {
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+  color: var(--ink);
+}
+.sb-workspace .library.collapsed .lib-tabs .sb-library-tab.on {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.sb-workspace .library.collapsed .lib-tabs .sb-library-tab > span,
+.sb-workspace .library.collapsed .lib-tabs .sb-library-tab > small.zero {
+  display: none;
+}
+.sb-workspace .library.collapsed .lib-tabs .sb-library-tab > small {
+  position: absolute;
+  top: 2px;
+  right: 1px;
+  min-width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0 3px;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+}
+.sb-workspace .library.collapsed .lib-tabs .sb-library-tab.alert > small {
+  background: var(--warn);
+  color: #1a1205;
+}
