@@ -19,7 +19,15 @@ from .repository import (
     scaler_actions,
 )
 
-POOLS = frozenset({"inkseq-staging-v6-fl", "inkseq-staging-v6-ref"})
+# Staging test pools: v6 plus the TaoMate v7 bindings (CR-20261025-65).
+POOLS = frozenset(
+    {
+        "inkseq-staging-v6-fl",
+        "inkseq-staging-v6-ref",
+        "inkseq-staging-v7-fl",
+        "inkseq-staging-v7-ref",
+    }
+)
 PROJECTS = frozenset(
     {"project-inkseq-staging-superdan", "project-inkseq-staging-supervan"}
 )
