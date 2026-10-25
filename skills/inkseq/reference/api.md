@@ -253,6 +253,27 @@ Do not automatically chain admission. Pending/unknown retains the original key/b
 
 GET `/v1/projects/PROJECT/storyboard/profiles` reports project-local shot usage only. `storyboard.fork_profile` action takes `profile_id,new_profile_id,shot_ids,title?`; one CAS copies a character/location/prop and rewires selected shots, leaving original profiles, unselected shots and other projects untouched. Authorized cross-project discovery and current-authoring usage are available through `GET /v1/library` and `GET /v1/library/usage`; writes retain original project permissions. 中文：旧配方缺失显示未知；预检不生成，未知结果保留原操作；档案副本只改所选镜头，删除撤销另属 #236。
 
+### Server-owned completion collection (#588)
+
+`GET /v1/guided-schema` advertises `result_collection.version=1`. New completed jobs
+return `result.project_collection`: `{version:1,status,entity_ids,project_version?,selected_entity_id?}`.
+`bound` means the artifact and owner/project update committed together; refresh the
+project and use its current version for further `/actions`. Never PUT collected
+results just because a story opens or jobs are polled. Existing choices, trims and
+segments remain unchanged. Only a fresh real first result with no later accepted
+job can become the initial choice; simulations and stale results are candidates.
+Generated audio is added as media, not silently mixed into the film. Jobs owned
+by a frozen film run retain their existing snapshot/result map and never project
+into the live story; they return `not_applicable`.
+
+`managed_projection` is an immutable legacy Quick Create container: use the existing
+take API, not a project PUT. Migrated stories use normal collection. Missing/trashed
+projects or shots and document quota/collision refusals keep the completed artifact
+with a skipped receipt; never resubmit generation to repair its display. Historical
+jobs have no receipt and are not backfilled on GET; their versions and explicit
+`artifact.adopt`/`storyboard.select` actions remain available. These receipts do not
+authorize historical production writes, new generation, or charging changes.
+
 ### Ordered shot segments
 
 Check `capabilities.chapter_render.video_segments` and the current guided schema.

@@ -295,8 +295,10 @@ def collect(root, state, browser, agent, headers, outsider, *, decoder=None):
         project = public.request(agent, 'GET', '/v1/projects/'+PROJECT, headers=headers)
         shot = next(e for e in project['project']['entities'] if e['id'] == item['shot_id'])
         tracks = project['project'].get('journey', {}).get('soundTracks', {}).get('chapter', [])
-        if shot['data'].get('selectedAssetId') != 'result-'+video['id']:
-            assert not shot['data'].get('selectedAssetId')
+        if (shot['data'].get('selectedAssetId') != 'result-'+video['id']
+                or not shot['data'].get('selectedVideoRange')):
+            assert shot['data'].get('selectedAssetId') in (None, '', 'result-'+video['id'])
+            assert not shot['data'].get('selectedVideoRange')
             assert not any(t.get('shotId') == item['shot_id'] for t in tracks)
             project = public.request(agent, 'POST', '/v1/projects/'+PROJECT+'/actions',
                 {'expected_version': project['version'], 'actions': [

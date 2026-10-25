@@ -922,9 +922,11 @@ def examples():
 
 def contract():
     from .storyboard import contract as storyboard_contract
+    from .result_collection import contract as collection_contract
 
     return {
         "schema_revision": 3,
+        "result_collection": collection_contract(),
         "operation_schemas": operation_schemas(),
         "script_windows": script_windows_contract(),
         "request": {
