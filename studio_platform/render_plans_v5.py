@@ -1,5 +1,6 @@
 """Bounded v5 chapter compiler; legacy normalized requests stay in render_plans."""
 
+from .render_limits import MAX_AUDIO_TRACKS
 from .caption_server import compile_subtitles
 from .project_validation import validate_generated_audio_binding
 from .repository import NotFound
@@ -39,8 +40,8 @@ def compile_chapter(
         blockers.append("一章粗剪需要1–50个镜头")
     if any(has_segments(shot) for shot in shots):
         try:
-            if expanded_audio_count(project, chapter["id"], shots) > 32:
-                blockers.append("单章展开后最多32条声音轨道")
+            if expanded_audio_count(project, chapter["id"], shots) > MAX_AUDIO_TRACKS:
+                blockers.append(f"单章展开后最多{MAX_AUDIO_TRACKS}条声音轨道")
         except ValueError as error:
             blockers.append(str(error))
 
@@ -178,8 +179,8 @@ def compile_chapter(
     if mode not in {"silent", "dialogue", "music", "mixed"}:
         blockers.append("先选择声音方案")
     elif mode != "silent":
-        if not isinstance(raw_tracks, list) or len(raw_tracks) > 32:
-            blockers.append("单章最多32条声音轨道")
+        if not isinstance(raw_tracks, list) or len(raw_tracks) > MAX_AUDIO_TRACKS:
+            blockers.append(f"单章最多{MAX_AUDIO_TRACKS}条声音轨道")
             raw_tracks = []
         for track in raw_tracks:
             try:
@@ -305,8 +306,8 @@ def compile_chapter(
                     sample(track.get("fade_out_s", 0)),
                 )
                 # Validate the entire expansion before accepting any of this track.
-                if len(audio) + len(spans) > 32:
-                    raise ValueError("单章展开后最多32条声音轨道")
+                if len(audio) + len(spans) > MAX_AUDIO_TRACKS:
+                    raise ValueError(f"单章展开后最多{MAX_AUDIO_TRACKS}条声音轨道")
                 for first, last, timeline, output, rate, index in spans:
                     if (
                         timeline < 0

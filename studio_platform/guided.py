@@ -30,6 +30,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.exc import IntegrityError
 
+from .render_limits import MAX_AUDIO_TRACKS
 from .auth import API_SCOPES, AuthenticationError, LoginLimited
 from .caption_server import caption_signature
 from .guided_schema import (
@@ -1155,9 +1156,9 @@ class Guided:
             if op == "sound.set":
                 if (
                     not isinstance(action.get("tracks"), list)
-                    or len(action["tracks"]) > 32
+                    or len(action["tracks"]) > MAX_AUDIO_TRACKS
                 ):
-                    raise ValueError("声音轨道须为最多32项的数组")
+                    raise ValueError(f"声音轨道须为最多{MAX_AUDIO_TRACKS}项的数组")
                 journey.setdefault("soundTracks", {})[chapter["id"]] = copy.deepcopy(
                     action["tracks"]
                 )

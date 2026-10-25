@@ -12,6 +12,7 @@ import re
 import uuid
 
 from sqlalchemy import insert, inspect, select, update
+from .render_limits import MAX_AUDIO_TRACKS
 from .generation_services import freeze_generation_policy
 
 from .repository import (
@@ -622,7 +623,8 @@ class FilmRuns:
                 raise ValueError("film_chapter_clip_count_limit")
             if (
                 any(has_segments(shot) for shot in shots)
-                and expanded_audio_count(project, chapter["id"], shots) > 32
+                and expanded_audio_count(project, chapter["id"], shots)
+                > MAX_AUDIO_TRACKS
             ):
                 raise ValueError("film_audio_track_count_limit")
             if options["burn_subtitles"]:

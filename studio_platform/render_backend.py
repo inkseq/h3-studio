@@ -19,6 +19,7 @@ import subprocess
 import threading
 import time
 
+from .render_limits import MAX_AUDIO_TRACKS
 from . import media
 from .caption_server import validate_normalized_subtitles
 from .storage import (
@@ -148,7 +149,7 @@ def validate_render_request(
         isinstance(shots, list)
         and 1 <= len(shots) <= 50
         and isinstance(tracks, list)
-        and len(tracks) <= 32,
+        and len(tracks) <= MAX_AUDIO_TRACKS,
         "render_clip_count_limit",
     )
     width, height = shape.get("width"), shape.get("height")
