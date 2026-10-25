@@ -186,6 +186,42 @@ class FullCompilerTests(unittest.TestCase):
         self.assertTrue(p.settings['_api']['return_audio'])
         self.assertFalse(p.generate_audio)
 
+    def test_long_shot_windows_and_step_skipping_roundtrip(self):
+        # h3-studio#555: optional speed controls; omitted keeps the old settings bytes.
+        base, m = case(images=['image'], duration=15)
+        legacy, binding = prepare(base, m)
+        self.host(legacy, binding, m)
+        self.assertEqual(legacy.settings['sliding_window_size'], 362)
+        self.assertEqual(legacy.settings['skip_steps_cache_type'], '')
+        self.assertNotIn('skip_steps_multiplier', legacy.settings)
+        for seconds, frames in ((5, 124), (7, 175), (10, 243), (15, 362)):
+            r, m = case(images=['image'], duration=15, window_seconds=seconds)
+            p, binding = prepare(r, m)
+            self.host(p, binding, m)
+            self.assertEqual(p.settings['sliding_window_size'], frames)
+            self.assertEqual(p.settings['sliding_window_overlap'], 18)
+        for mode, extra in (
+            ('spectrum', {'skip_steps_start_step_perc': 25}),
+            (
+                'first_block',
+                {'skip_steps_start_step_perc': 25, 'skip_steps_multiplier': 0.08},
+            ),
+        ):
+            r, m = case(images=['image'], step_skipping=mode, window_seconds=5)
+            p, binding = prepare(r, m)
+            self.host(p, binding, m)
+            self.assertEqual(p.settings['skip_steps_cache_type'], mode)
+            for key, val in extra.items():
+                self.assertEqual(p.settings[key], val)
+        for bad in (
+            {'window_seconds': 4},
+            {'window_seconds': 16},
+            {'step_skipping': 'tea'},
+        ):
+            r, m = case(images=['image'], **bad)
+            with self.assertRaises(ValueError):
+                settings(r, m)
+
     def test_ref_start_end_injection_reference_reuse_binds_one_descriptor(self):
         r, m = case(
             images=['shared'],

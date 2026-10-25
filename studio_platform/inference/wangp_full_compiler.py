@@ -33,6 +33,16 @@ FIXED = {
 }
 
 
+STEP_SKIPPING = ('none', 'spectrum', 'first_block')
+WHOLE_WINDOW = 362
+
+
+def window_frames(seconds):
+    """Nearest H3 window on the native 17k+5 grid, 124..362 frames."""
+    frames = 17 * round((seconds * 24 - 5) / 17) + 5
+    return max(124, min(WHOLE_WINDOW, frames))
+
+
 def control_schema(profile_id, mode):
     model_for(profile_id, mode)
     schema = legacy_schema()
@@ -77,6 +87,21 @@ def control_schema(profile_id, mode):
                 'type': 'string',
                 'default': 'none',
                 'enum': ['none', 'enabled'],
+            },
+            # Long-shot speed (h3-studio#555): attention grows with the square of the
+            # window, so a 15 s shot in one 362-frame window is ~3x slower than in
+            # 5 s windows. Omitted = the whole shot in one window, as before.
+            'window_seconds': {
+                'type': 'integer',
+                'minimum': 5,
+                'maximum': 15,
+                'description': 'Generate in H3 sliding windows of about this many seconds (0.75 s overlap). Omit for one window.',
+            },
+            'step_skipping': {
+                'type': 'string',
+                'default': 'none',
+                'enum': list(STEP_SKIPPING),
+                'description': 'H3 steps skipping: Spectrum feature forecasting or First Block Cache (threshold 0.08).',
             },
             'mask_mode': {
                 'type': 'string',
@@ -255,6 +280,17 @@ def _normalize(
     value['steps'] = _bound(
         value.get('steps', 20), 1, 100, 'wangp_invalid_steps', integer=True
     )
+    value['step_skipping'] = _enum(
+        value.get('step_skipping', 'none'),
+        STEP_SKIPPING,
+        'wangp_unsupported_step_skipping',
+    )
+    if value.get('window_seconds') is None:
+        value.pop('window_seconds', None)
+    else:
+        value['window_seconds'] = _bound(
+            value['window_seconds'], 5, 15, 'wangp_invalid_window_seconds', integer=True
+        )
     value['sampler_name'] = _enum(
         value.get('sampler_name', 'euler'), SAMPLERS, 'wangp_unsupported_sampler_name'
     )
@@ -756,12 +792,16 @@ def _settings(value, output_spec, handles, profile_id):
         'multi_images_gen_type': 0,
         'prompt_enhancer': '',
         'activated_loras': [],
-        'skip_steps_cache_type': '',
+        'skip_steps_cache_type': ''
+        if value['step_skipping'] == 'none'
+        else value['step_skipping'],
         'override_attention': 'sdpa',
         'override_profile': runtime['memory_profile'],
         'guidance2_scale': 1.0,
         'guidance3_scale': 1.0,
-        'sliding_window_size': 362,
+        'sliding_window_size': window_frames(value['window_seconds'])
+        if 'window_seconds' in value
+        else WHOLE_WINDOW,
         'sliding_window_overlap': 18,
         'sliding_window_discard_last_frames': 0,
         'sliding_window_trim_first_frames': 0,
@@ -780,6 +820,14 @@ def _settings(value, output_spec, handles, profile_id):
             'return_side_files': False,
         },
     }
+    if value['step_skipping'] == 'first_block':
+        # The handler accepts only its listed thresholds; 0.08 is the upstream balanced one.
+        settings['skip_steps_multiplier'] = 0.08
+    if value['step_skipping'] != 'none':
+        settings['skip_steps_start_step_perc'] = 25
+    if injections and 'window_seconds' in value:
+        # Injected frame positions are per window upstream; whole-shot times would shift.
+        raise ValueError('wangp_window_with_injected_frames_unsupported')
     # Native documented first frame is position1 (handler REF2VA_DEEPY_INFOS).
     if injections:
         settings['frames_positions'] = ' '.join(
@@ -1034,6 +1082,7 @@ def prepared_request(prepared, manifest):
         'generate_audio': prepared.generate_audio,
         'image_refs_relative_size': settings.get('image_refs_relative_size'),
         'audio_refinement': custom.get('audio_refinement'),
+        'step_skipping': settings.get('skip_steps_cache_type') or 'none',
         'mask_mode': custom.get('h3_mask_mode'),
         'video_excerpts': _parse_positions(custom['h3_video_excerpt_positions'])
         if 'h3_video_excerpt_positions' in custom
@@ -1042,6 +1091,12 @@ def prepared_request(prepared, manifest):
         if 'h3_audio_excerpt_positions' in custom
         else [],
     }
+    window = settings.get('sliding_window_size')
+    if window != WHOLE_WINDOW:
+        seconds = round(window / 24) if type(window) is int else None
+        if seconds is None or window_frames(seconds) != window:
+            raise ValueError('wangp_invalid_window_seconds')
+        request['window_seconds'] = seconds
     return profile, request, metadata, handles, output
 
 
