@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { byteRange, cacheKey, createVideoCache, videoTarget } from './video-cache-core.js';
-import { playedVideoTarget } from './video-cache-client.js';
+import { playedVideoTarget, requestPersistentStorage } from './video-cache-client.js';
 import { createCloudClient } from './cloud-client.js';
 import { createMediaReadGate } from './media-read-gate.js';
 import { evictionPlan, VIDEO_CACHE_LIMIT, VIDEO_FILE_LIMIT } from './video-cache-store.js';
@@ -733,4 +733,16 @@ test('aborting a cache request removes its queued authorization HEAD without fet
   assert.equal(f.calls.filter((c) => c.method === 'HEAD').length, 0);
   assert.equal(f.store.entries.size, 0);
   await held.text();
+});
+
+test('signed-in pages ask once for durable storage and never re-ask', async () => {
+  const calls = [];
+  const storage = {
+    persisted: async () => (calls.push('persisted'), false),
+    persist: async () => (calls.push('persist'), true),
+  };
+  requestPersistentStorage(storage);
+  requestPersistentStorage(storage);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(calls, ['persisted', 'persist']);
 });
