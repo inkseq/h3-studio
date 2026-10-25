@@ -802,6 +802,10 @@ inventory.json
 
 !studio_platform/capacity_policy.py
 !studio_platform/slot_lock.py
+!studio_platform/lookup_indexes.py
+!studio_platform/migrations/versions/v20261026_0008_lookup_indexes.py
+!tests/test_lookup_indexes.py
+!docs/LOOKUP-INDEXES.md
 !tests/test_capacity_contract.py
 # Shared bounded multi-track audio contract (#600).
 !studio_platform/render_limits.py
