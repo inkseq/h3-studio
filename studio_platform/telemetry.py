@@ -82,6 +82,7 @@ ERROR_CODES = (
             "capacity_paid_idle_queue",
             "capacity_queue_age",
             "capacity_demand_start_loop",
+            "capacity_controller_stale",
             "worker_preparation_not_ready",
             "worker_preparation_failed",
             "worker_reconciliation_needed",

@@ -27,6 +27,15 @@ def inspect_video(path, lines, duration):
             encoding='utf-8',
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
+            # Pin BLAS pools before NumPy imports in the bounded child. Linux
+            # OpenBLAS otherwise reserves enough thread stacks to exhaust RLIMIT_AS.
+            # Never change the parent inference process environment.
+            env={
+                **os.environ,
+                "OPENBLAS_NUM_THREADS": "1",
+                "OMP_NUM_THREADS": "1",
+                "MKL_NUM_THREADS": "1",
+            },
             timeout=45,
             check=False,
         )
