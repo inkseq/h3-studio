@@ -22,11 +22,27 @@ export const reasonKey = (code) => (code ? REASONS[code] || 'other' : null);
 const secondsSince = (value, now) =>
   typeof value === 'number' && Number.isFinite(value) ? Math.max(0, now - value) : null;
 
+// Stopped creates whose allocation is unknown are records to reconcile, not machines on
+// (h3-studio#572): they stay out of the live count and hourly total.
+const forReview = (node) => node.record_group === 'pending_review';
+
+/** Records kept for review: stopped, allocation unknown, reservation still held. */
+export function reviewRows(workspace) {
+  return (workspace?.nodes || []).filter(forReview).map((node) => ({
+    id: node.node_id || node.id,
+    owner: node.owner_id || '',
+    gpu: node.gpu_type || 'GPU',
+    provider: node.provider,
+    mode: node.mode,
+    code: node.reason_code || node.state || null,
+  }));
+}
+
 /** One row per live machine, newest problems first. */
 export function machineRows(workspace, now, locale = 'zh') {
   const queued = (workspace?.queue || []).reduce((sum, mode) => sum + (mode.waiting || 0), 0);
   return (workspace?.nodes || [])
-    .filter((node) => !terminal(node))
+    .filter((node) => !terminal(node) && !forReview(node))
     .map((node) => {
       const step = phase(node, locale);
       const refused = node.dispatch_reason_code || node.registration_reason_code || null;

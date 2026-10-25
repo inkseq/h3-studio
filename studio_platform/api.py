@@ -10,7 +10,6 @@ from pathlib import Path
 import re
 import time
 from urllib.parse import quote
-import uuid
 
 from fastapi import (
     File,
@@ -29,11 +28,10 @@ from starlette.concurrency import run_in_threadpool
 from .assets import AssetService, AssetNotFound
 from .media_renditions import public_renditions, RENDITIONS
 from .upload_route import AssetUploadRoute
-from .auth import Auth, AuthenticationError, LoginLimited, SessionUnavailable
-from .identity import is_admin, public_identity, require_admin
+from .auth import Auth, AuthenticationError, SessionUnavailable
+from .identity import require_admin
 from .capabilities import VERSION, capabilities, version_matches
 from .media import MediaError, MediaBusy
-from .project_validation import validate_project
 from .repository import Repository, NotFound, Conflict, BudgetExceeded, artifacts, jobs
 from .settings import Settings
 from .storage import (
@@ -199,7 +197,7 @@ def create_app(
     app.state.generation_planning = generation_planning
     # Compatibility names used by existing scenario and batch routes now point
     # to HTTP-independent services, rather than closures over this app factory.
-    scope, project_scope = generation_access.scope, generation_access.project_scope
+    scope = generation_access.scope
     authorized_project, owned_plan, owned_job = (
         generation_access.project,
         generation_access.plan,
@@ -699,115 +697,13 @@ def create_app(
             "cloud_creation_enabled": False,
         }
 
-    @app.get("/api/auth/config")
-    def auth_config():
-        return {
-            "authentication": "password"
-            if settings.auth_mode == "password"
-            else "username-only-test",
-            "auth_ready": auth.ready() or app.state.workos_auth.enabled(),
-            "hosted_sign_in": {"enabled": app.state.workos_auth.enabled()},
-            "users": ["superdan", "supervan"]
-            if settings.auth_mode == "local-test"
-            else [],
-        }
+    from .auth_routes import create_auth_router
 
-    @app.post("/api/auth/login")
-    async def login(request: Request):
-        body = await request.json()
-        if (
-            not isinstance(body, dict)
-            or not isinstance(body.get("username"), str)
-            or not isinstance(body.get("password", ""), str)
-        ):
-            raise HTTPException(422, "登录信息格式无效")
-        try:
-            token = await run_in_threadpool(
-                auth.login,
-                body["username"],
-                body.get("password", ""),
-                request.client.host if request.client else "unknown",
-            )
-        except LoginLimited as error:
-            raise HTTPException(
-                429, str(error), headers={"Retry-After": str(error.retry_after)}
-            ) from None
-        except AuthenticationError as error:
-            raise HTTPException(401, str(error)) from None
-        response = JSONResponse(
-            {"username": body["username"], "authentication": settings.auth_mode}
+    app.include_router(
+        create_auth_router(
+            app, cookie=COOKIE, browser_handle_seconds=BROWSER_HANDLE_SECONDS
         )
-        response.set_cookie(
-            COOKIE,
-            token,
-            max_age=BROWSER_HANDLE_SECONDS,
-            httponly=True,
-            secure=bool(settings.public_origin),
-            samesite="lax",
-            path="/",
-        )
-        return response
-
-    @app.get("/api/auth/me")
-    def whoami(request: Request):
-        principal = request.state.principal
-        operator = is_admin(principal, repo, settings, legacy_capacity=True)
-        from .credits import CreditError
-        from .credits_pricing import PricingError
-
-        try:
-            credit_summary = {"enabled": True, **app.state.credits.balance(principal)}
-        except (CreditError, PricingError):
-            credit_summary = {"available": False, "balance": None, "held": None}
-        return {
-            "username": principal.owner,
-            "actor_id": principal.actor_id,
-            "machine": principal.machine,
-            "authentication": principal.auth_mode or settings.auth_mode,
-            **public_identity(principal, repo, settings),
-            "credits": credit_summary,
-            "scopes": list(principal.scopes),
-            "features": {
-                "account_deletion": app.state.account_deletion.capability(principal),
-                "storyboard_workspace": not principal.machine
-                and principal.owner in settings.storyboard_owners,
-            },
-            "operator_capacity": {
-                name: operator
-                for name in ("view", "start", "drain", "stop", "update_policy")
-            }
-            | {"admin": is_admin(principal, repo, settings)},
-            "all_projects": principal.all_projects,
-            "project_ids": list(principal.project_ids),
-            **(
-                {
-                    "support_view": {
-                        "viewer": principal.support_viewer,
-                        "read_only": True,
-                    }
-                }
-                if principal.support_viewer
-                else {}
-            ),
-        }
-
-    @app.post("/api/auth/logout")
-    def logout(request: Request):
-        provider_session = auth.logout(request.cookies.get(COOKIE))
-        value = {"ok": True}
-        logout_url = (
-            app.state.workos_auth.logout_url(provider_session)
-            if provider_session
-            else None
-        )
-        if logout_url is not None:
-            value["logout_url"] = logout_url
-        response = JSONResponse(value)
-        response.delete_cookie(COOKIE, path="/")
-        if logout_url is not None:
-            response.headers["Cache-Control"] = "no-store"
-            response.headers["Referrer-Policy"] = "no-referrer"
-        return response
+    )
 
     @app.get("/v1/capabilities")
     def get_capabilities():
@@ -854,125 +750,9 @@ def create_app(
             owner=principal.owner,
         )
 
-    @app.get("/v1/projects")
-    def list_projects(
-        request: Request,
-        limit: int = Query(100, ge=1, le=100),
-        offset: int = Query(0, ge=0, le=1000000),
-    ):
-        principal = request.state.principal
-        allowed = (
-            (
-                (None if principal.all_projects else principal.project_ids)
-                if "projects:read" in principal.scopes
-                else ()
-            )
-            if principal.machine
-            else None
-        )
-        values = repo.list_documents(
-            project_scope(principal),
-            "project",
-            limit=limit,
-            offset=offset,
-            allowed_ids=allowed,
-            summary=True,
-            exclude_managed=True,
-        )
-        return {
-            "projects": [
-                {
-                    "id": v["document_id"],
-                    "title": v["payload"]["title"],
-                    "version": v["version"],
-                    "updated_at": v["updated_at"],
-                }
-                for v in values
-                if principal.allows(v["document_id"], "projects:read")
-            ]
-        }
+    from .project_routes import create_project_router
 
-    @app.post("/v1/projects", status_code=201)
-    def create_project(
-        request: Request, body: dict, idempotency_key: str | None = Header(None)
-    ):
-        principal = request.state.principal
-        if principal.machine and not (
-            principal.all_projects and "projects:create" in principal.scopes
-        ):
-            raise HTTPException(403, "创建故事需要projects:create及全部本人项目授权")
-        from .guided import empty_project
-
-        if "project" in body:
-            if set(body) != {"project"}:
-                raise HTTPException(422, "导入故事仅接受project字段")
-            project = body["project"]
-        else:
-            values = dict(body)
-            if idempotency_key and "id" not in values:
-                values["id"] = (
-                    "project-"
-                    + uuid.uuid5(
-                        uuid.NAMESPACE_URL,
-                        f"{settings.tenant_id}:{principal.owner}:{principal.actor_id}:{idempotency_key}",
-                    ).hex
-                )
-            project = empty_project(values)
-        validate_project(project, settings.max_project_bytes)
-        reject_managed(project)
-        return app.state.guided.mutate(
-            principal, project["id"], project, idempotency_key, create=True
-        )
-
-    @app.get("/v1/projects/{project_id}")
-    def get_project(project_id: str, request: Request):
-        from .universal_trash import active_target
-
-        with repo.engine.connect() as connection:
-            if active_target(
-                connection,
-                settings.tenant_id,
-                request.state.principal.owner,
-                {"kind": "project", "project_id": project_id, "id": project_id},
-            ):
-                raise HTTPException(404, "project_in_trash")
-        record = authorized_project(request.state.principal, project_id)
-        if record["payload"].get("content_deleted"):
-            raise HTTPException(404, "project_not_found")
-        from .agent_management import doc_where, ATTRIBUTION_PROJECT
-        from .repository import documents
-
-        with repo.engine.connect() as conn:
-            rows = conn.execute(
-                select(documents.c.payload).where(
-                    documents.c.tenant_id == settings.tenant_id,
-                    documents.c.owner_id == request.state.principal.owner,
-                    documents.c.project_id == ATTRIBUTION_PROJECT,
-                    documents.c.kind == 'created_by',
-                    documents.c.payload['project_id'].as_string() == project_id,
-                )
-            ).scalars()
-            attribution = {
-                r['resource_id']: {k: r[k] for k in ('kind', 'connection_id', 'name')}
-                for r in rows
-            }
-        return {**project_response(record), 'created_by': attribution}
-
-    @app.put("/v1/projects/{project_id}")
-    def save_project(project_id: str, request: Request, body: dict):
-        principal = request.state.principal
-        if principal.machine and not principal.allows(project_id, "projects:write"):
-            raise HTTPException(403, "保存故事需要projects:write授权")
-        reject_managed(
-            authorized_project(principal, project_id, "projects:write")["payload"]
-        )
-        project = validate_project(body.get("project"), settings.max_project_bytes)
-        reject_managed(project)
-        if project["id"] != project_id or type(body.get("expected_version")) is not int:
-            raise HTTPException(422, "需要匹配的项目ID与版本")
-        return app.state.guided.save(
-            principal, project_id, project, body["expected_version"]
-        )
+    app.include_router(create_project_router(app))
 
     def upload_asset(
         request: Request,

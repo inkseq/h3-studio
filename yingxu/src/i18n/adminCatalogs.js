@@ -66,6 +66,9 @@ export const adminCatalogs = {
     'adminHome.issue.refused': 'Ready but not taking jobs',
     'adminHome.issue.stalled': 'Start-up stalled',
     'adminHome.issue.slowStart': 'Starting for over 20 min',
+    'adminHome.reviewRecords': 'Records to review ({count})',
+    'adminHome.reviewHelp':
+      'Stopped machines whose creation was never confirmed. They are not running and are not counted above; their reservation stays until the supplier record is reconciled.',
     'adminHome.issue.idleWithQueue': 'Idle while jobs wait',
     'adminHome.alert.refused': "{owner}'s {gpu} is paid but not taking jobs ({age})",
     'adminHome.alert.stalled': "{owner}'s {gpu} stalled while starting",
@@ -230,6 +233,9 @@ export const adminCatalogs = {
     'adminHome.issue.refused': '就绪但不接任务',
     'adminHome.issue.stalled': '启动卡住了',
     'adminHome.issue.slowStart': '启动超过 20 分钟',
+    'adminHome.reviewRecords': '待复核的历史记录（{count}）',
+    'adminHome.reviewHelp':
+      '已停止、但创建结果一直没确认的机器。它们没有在运行，也不算在上面的数字里；预留会保留到和供应商记录核对完。',
     'adminHome.issue.idleWithQueue': '有人排队却空闲',
     'adminHome.alert.refused': '{owner} 的 {gpu} 在计费但不接任务（已开 {age}）',
     'adminHome.alert.stalled': '{owner} 的 {gpu} 启动卡住了',

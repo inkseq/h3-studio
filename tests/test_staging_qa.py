@@ -384,7 +384,8 @@ class StagingQATests(LedgerCase):
         )
         self.assertFalse(production.state.auth.staging_qa)
         self.assertNotIn(
-            "/v1/admin/staging/qa-accounts", {route.path for route in production.routes}
+            "/v1/admin/staging/qa-accounts",
+            {getattr(route, "path", None) for route in production.routes},
         )
 
     def test_credit_grant_requires_adoption_then_is_once_only_and_audited(self):
