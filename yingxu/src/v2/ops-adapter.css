@@ -180,19 +180,19 @@
   width: auto;
   max-width: 100%;
 }
-.ops-adapter .account-password form,
-.ops-adapter .assistant-connections form {
+.account-password form,
+.assistant-connections form {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
-.ops-adapter .account-password label,
-.ops-adapter .assistant-connections label {
+.account-password label,
+.assistant-connections label {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-.ops-adapter .account-password h2 {
+.account-password h2 {
   font-size: 14px;
 }
 .ops-item-row {
@@ -206,11 +206,11 @@
   flex: 1;
   min-width: 0;
 }
-.ops-adapter .account-password h2,
-.ops-adapter .account-password p {
+.account-password h2,
+.account-password p {
   margin-top: 0;
 }
-.ops-adapter .account-password form > button {
+.account-password form > button {
   align-self: flex-end;
 }
 .assistant-connections {
@@ -342,8 +342,8 @@
 }
 .ops-adapter .p4-config,
 .ops-adapter .p4-panel,
-.ops-adapter .budget-account,
-.ops-adapter .budget-admin-row,
+.budget-account,
+.budget-admin-row,
 .ops-adapter .p4-host-record {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -354,7 +354,7 @@
 }
 .ops-adapter .p4-config > header,
 .ops-adapter .p4-between,
-.ops-adapter .operator-budget > header,
+.operator-budget > header,
 .ops-adapter .p4-hosts > header {
   display: flex;
   align-items: center;
@@ -422,7 +422,7 @@
 .ops-adapter .p4-kv,
 .ops-adapter .p4-metrics,
 .ops-adapter .p4-host-summary,
-.ops-adapter .budget-accounts,
+.budget-accounts,
 .ops-adapter .p4-accountspend {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -543,7 +543,7 @@
 .ops-adapter .p4-jobs-actions,
 .ops-adapter .p4-host-policy,
 .ops-adapter .p4-host-lookup form,
-.ops-adapter .budget-admin-row form {
+.budget-admin-row form {
   display: flex;
   align-items: flex-end;
   flex-wrap: wrap;
@@ -553,23 +553,23 @@
 .ops-adapter .p4-jobs-actions label,
 .ops-adapter .p4-host-policy label,
 .ops-adapter .p4-host-lookup label,
-.ops-adapter .budget-admin-row label {
+.budget-admin-row label {
   display: flex;
   flex-direction: column;
   gap: 6px;
   flex: 1;
   min-width: 140px;
 }
-.ops-adapter .budget-account dl {
+.budget-account dl {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
-.ops-adapter .budget-account dd {
+.budget-account dd {
   margin: 4px 0;
   font-weight: 600;
 }
-.ops-adapter .budget-account dt {
+.budget-account dt {
   font-size: 11px;
   color: var(--muted);
 }
@@ -746,7 +746,7 @@
   .ops-adapter .p4-formgrid,
   .ops-adapter .p4-kv,
   .ops-adapter .p4-metrics,
-  .ops-adapter .budget-accounts,
+  .budget-accounts,
   .ops-adapter .p4-accountspend {
     grid-template-columns: 1fr;
   }
@@ -830,15 +830,15 @@
 .ops-adapter .settings-story-defaults > span {
   flex: 1;
 }
-.ops-adapter .assistant-badge {
+.assistant-badge {
   align-items: center;
   gap: 4px;
 }
-.ops-adapter .assistant-usage {
+.assistant-usage {
   color: var(--ink-2);
   font-size: 12px;
 }
-.ops-adapter .budget-cost-details > summary {
+.budget-cost-details > summary {
   cursor: pointer;
   color: var(--muted);
   font-size: 12px;
