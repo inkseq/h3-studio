@@ -105,6 +105,12 @@ class SubtitleQualityTests(unittest.TestCase):
                 'OPENBLAS_NUM_THREADS': '64',
                 'OMP_NUM_THREADS': '32',
                 'MKL_NUM_THREADS': '8',
+                'INKSEQ_TEST_PRIVATE_TOKEN': 'synthetic-private-value',
+                'PYTHONPATH': '/untrusted/injection',
+                'LD_PRELOAD': '/untrusted/library',
+                'PATH': '/usr/bin',
+                'HOME': '/tmp/test-home',
+                'LANG': 'C.UTF-8',
             },
         ):
             before = dict(os.environ)
@@ -136,17 +142,14 @@ class SubtitleQualityTests(unittest.TestCase):
                             'MKL_NUM_THREADS',
                         }
                     },
-                    {
-                        k: v
-                        for k, v in before.items()
-                        if k
-                        not in {
-                            'OPENBLAS_NUM_THREADS',
-                            'OMP_NUM_THREADS',
-                            'MKL_NUM_THREADS',
-                        }
-                    },
+                    {k: v for k, v in before.items() if k in {'PATH', 'HOME', 'LANG'}},
                 )
+                for private in (
+                    'INKSEQ_TEST_PRIVATE_TOKEN',
+                    'PYTHONPATH',
+                    'LD_PRELOAD',
+                ):
+                    self.assertNotIn(private, env)
 
     def test_child_timeout_failure_and_absent_dependencies_are_advisory(self):
         with patch('subprocess.run') as run:
