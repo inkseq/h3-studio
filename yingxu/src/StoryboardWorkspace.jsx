@@ -659,6 +659,18 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                 {headCompact ? <ChevronsUpDown size={15} /> : <ChevronsDownUp size={15} />}
               </button>
             </div>
+            {/* #232 (#54): the actions for selected shots are a second row of the sticky title bar. */}
+            <WorkbenchBulk
+              ids={selection.ids}
+              pendingCount={pending.length}
+              onClear={() => setSelection(emptySelection())}
+              onSelectAll={() =>
+                setSelection({ ids: state.shots.map((s) => s.id), anchor: state.shots[0]?.id })
+              }
+              onSelectPending={() =>
+                setSelection({ ids: pending.map((s) => s.id), anchor: pending[0]?.id })
+              }
+            />
           </div>
           <SortableContext
             items={state.shots.map((shot) => 'shot:' + shot.id)}
@@ -828,17 +840,6 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
               })()}
             </div>
           </SortableContext>
-          <WorkbenchBulk
-            ids={selection.ids}
-            pendingCount={pending.length}
-            onClear={() => setSelection(emptySelection())}
-            onSelectAll={() =>
-              setSelection({ ids: state.shots.map((s) => s.id), anchor: state.shots[0]?.id })
-            }
-            onSelectPending={() =>
-              setSelection({ ids: pending.map((s) => s.id), anchor: pending[0]?.id })
-            }
-          />
         </main>
         {theater && (
           <section className="sb-theater" role="dialog" aria-label={t('storyboard.theater')}>

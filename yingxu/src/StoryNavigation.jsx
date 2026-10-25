@@ -11,6 +11,7 @@ import {
   BookOpen,
   Check,
   ChevronDown,
+  ArrowDownUp,
   Clapperboard,
   Cloud,
   HardDrive,
@@ -649,11 +650,23 @@ function StoryLibraryCard({ story, reader, working, onOpen, picked = false, onPi
   );
 }
 
+// The works page order, remembered per browser (#232 #57).
+const SORT_KEY = 'inkseq.works.sort';
+function readStorySort() {
+  try {
+    const value = localStorage.getItem(SORT_KEY);
+    return ['edited', 'oldest', 'name'].includes(value) ? value : 'edited';
+  } catch {
+    return 'edited';
+  }
+}
+
 export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) {
   const { t, locale } = useI18n();
   const library = useStoryLibrary(state),
     { c, stories, working, act, pending } = library,
     [query, setQuery] = useState(''),
+    [sortBy, setSortBy] = useState(readStorySort),
     [creating, setCreating] = useState(false),
     [title, setTitle] = useState(''),
     [source, setSource] = useState('local'),
@@ -713,17 +726,21 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
       return done;
     });
   };
-  // Newest edit first (owner, 2026-10-24); a story without a known time goes last.
+  // Newest edit first by default (owner, 2026-10-24/26); a story without a known time goes last.
+  const edited = (story) =>
+    storyEditedTimestamp(story.project.updatedAt ?? story.project.updated_at);
   const visible = stories
     .filter((story) =>
       String(story.project.title || '')
         .toLocaleLowerCase()
         .includes(query.trim().toLocaleLowerCase()),
     )
-    .sort(
-      (a, b) =>
-        (storyEditedTimestamp(b.project.updatedAt ?? b.project.updated_at) || 0) -
-        (storyEditedTimestamp(a.project.updatedAt ?? a.project.updated_at) || 0),
+    .sort((a, b) =>
+      sortBy === 'name'
+        ? String(a.project.title || '').localeCompare(String(b.project.title || ''), locale)
+        : sortBy === 'oldest'
+          ? (edited(a) ?? Infinity) - (edited(b) ?? Infinity)
+          : (edited(b) || 0) - (edited(a) || 0),
     );
   return (
     <section
@@ -754,6 +771,25 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
               onChange={(event) => setQuery(event.target.value)}
               placeholder={t('account.accessible6')}
             />
+          </label>
+          <label className="v2-home-sort" title={t('v2.sortBy')}>
+            <ArrowDownUp size={14} aria-hidden="true" />
+            <select
+              aria-label={t('v2.sortBy')}
+              value={sortBy}
+              onChange={(event) => {
+                setSortBy(event.target.value);
+                try {
+                  localStorage.setItem(SORT_KEY, event.target.value);
+                } catch {
+                  // Remembering the order is a convenience only.
+                }
+              }}
+            >
+              <option value="edited">{t('v2.sortEdited')}</option>
+              <option value="oldest">{t('v2.sortOldest')}</option>
+              <option value="name">{t('v2.sortName')}</option>
+            </select>
           </label>
           {/* The only library action, so a direct button instead of a one-item "..." menu. */}
           <span className="item-menu">

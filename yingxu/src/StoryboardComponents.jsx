@@ -25,6 +25,7 @@ import {
   Pencil,
 } from 'lucide-react';
 import { Segmented } from './ui/Segmented.jsx';
+import { useDragMove } from './ui/useDragMove.js';
 import { Chip, Note } from './ui/Note.jsx';
 import { TrashMenu, TrashButton, RenameDialog } from './UniversalTrash.jsx';
 import { WorkbenchTakes, WorkbenchCopies, WorkbenchDefaults } from './StoryboardWorkbench.jsx';
@@ -341,6 +342,7 @@ function ChooseFiles({ kind, exclude, title, onPick, onFiles, onClose }) {
   const { state } = useStore();
   const [q, setQ] = useState('');
   const input = useRef();
+  const [moved, handle] = useDragMove();
   const list = state.assets.filter(
     (a) => a.kind === kind && !exclude.has(a.id) && (!q || a.name.includes(q)),
   );
@@ -352,13 +354,14 @@ function ChooseFiles({ kind, exclude, title, onPick, onFiles, onClose }) {
     >
       <div
         className="choose"
+        style={{ transform: `translate(${moved.x}px, ${moved.y}px)` }}
         onClick={(e) => e.stopPropagation()}
         {...nativeDrop((files) => {
           onFiles(files);
           onClose();
         })}
       >
-        <div className="picker-head">
+        <div className="picker-head" {...handle}>
           <b>{title}</b>
           <button className="x" onClick={onClose} aria-label={tr('storyboard.copy58')}>
             <X size={14} />
@@ -580,7 +583,7 @@ export function AssetLibrary({ onPick, selectedShot, compact, collapsed = false,
           >
             <Icon size={13} />
             <span>{l}</span>
-            <small>{count(k)}</small>
+            <small className={count(k) ? '' : 'zero'}>{count(k)}</small>
           </button>
         ))}
       </div>
@@ -1208,6 +1211,7 @@ export function AssetPicker({ shotId, slot, x, y, onClose }) {
     [flash, setFlash] = useState('');
   const box = useRef(),
     input = useRef();
+  const [moved, handle] = useDragMove();
   useEffect(() => {
     input.current?.focus();
     const away = (e) => box.current && !box.current.contains(e.target) && onClose();
@@ -1275,7 +1279,7 @@ export function AssetPicker({ shotId, slot, x, y, onClose }) {
     <div
       ref={box}
       className="sb-portal picker"
-      style={{ left, top }}
+      style={{ left: left + moved.x, top: top + moved.y }}
       role="dialog"
       aria-label={SLOT_TITLE[slot]}
       onContextMenu={(e) => {
@@ -1289,7 +1293,7 @@ export function AssetPicker({ shotId, slot, x, y, onClose }) {
         if (e.key === 'Escape') onClose();
       }}
     >
-      <div className="picker-head">
+      <div className="picker-head" {...handle}>
         <b>{SLOT_TITLE[slot]}</b>
         <small>「{shot.title}」</small>
         <button className="x" onClick={onClose} aria-label={tr('storyboard.copy58')}>
@@ -1616,7 +1620,16 @@ export function AddCard({ onAdd, label }) {
 
 /* ---------- shot editor ---------- */
 
-function Slot({ id, label, hint, children, onClear, onPick, onFiles, className = '' }) {
+// #232 (#50): a small "?" that explains a field on hover or keyboard focus.
+export function HelpTip({ text }) {
+  return (
+    <span className="help-tip" tabIndex={0} role="img" aria-label={text} data-tip={text}>
+      ?
+    </span>
+  );
+}
+
+function Slot({ id, label, hint, help, children, onClear, onPick, onFiles, className = '' }) {
   const { t: tr, locale } = useI18n();
   const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { setNodeRef, isOver, active } = useDroppable({ id });
@@ -1634,7 +1647,10 @@ function Slot({ id, label, hint, children, onClear, onPick, onFiles, className =
       title={tr('storyboard.finish8')}
     >
       <div className="slot-label">
-        {label}
+        <span className="slot-name">
+          {label}
+          {help && <HelpTip text={help} />}
+        </span>
         <span>
           {onPick && (
             <button className="x" title={tr('storyboard.finish9')} onClick={open}>
@@ -1701,6 +1717,7 @@ function ShotParts({ shot, mediaRef }) {
   if (!take.shot) return null;
   return (
     <ShotSegments
+      key={shot.id}
       shot={shot}
       getVideo={take.getVideo}
       duration={take.duration}
@@ -1746,15 +1763,6 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
   useEffect(() => {
     editorRef.current?.querySelectorAll('textarea').forEach(growTextarea);
   });
-  // #232 (#35): the ⋯ take menu closes on any outside press, like every other menu.
-  useEffect(() => {
-    const close = (event) =>
-      document.querySelectorAll('details.take-more[open]').forEach((menu) => {
-        if (!menu.contains(event.target)) menu.open = false;
-      });
-    document.addEventListener('pointerdown', close);
-    return () => document.removeEventListener('pointerdown', close);
-  }, []);
   if (!shot) return null;
   const index = state.shots.indexOf(shot);
   const info = expand(shot, db, locale);
@@ -1818,12 +1826,14 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
         {onWide && (
           <button
             type="button"
-            className="ghost round ed-expand"
+            // #232 (#46): a labelled button, not a bare icon, so the full-window editor is found.
+            className="small ed-expand"
             aria-label={tr(wide ? 'workbench.collapse' : 'workbench.expand')}
             title={tr(wide ? 'workbench.collapse' : 'workbench.expand')}
             onClick={onWide}
           >
-            {wide ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+            {wide ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+            {tr(wide ? 'workbench.collapse' : 'workbench.expand')}
           </button>
         )}
         <TrashButton target={{ kind: 'entity', project_id: state.project.id, id: shot.id }} />
@@ -1863,52 +1873,45 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
         />
         {['done', 'succeeded'].includes(viewing?.status) && (
           <div className="row tight take-tools">
-            {/* #232 (#22): downloads and "save frame" live in one ⋯ menu. */}
-            <details className="take-more">
-              <summary
-                aria-label={tr('storyboard.moreActions')}
-                title={tr('storyboard.moreActions')}
-              >
-                ⋯
-              </summary>
-              <div className="take-more-menu">
-                <StoryboardDownloads version={viewing} title={shot.title} />
-                <button
-                  className="small"
-                  disabled={saving}
-                  title={tr('storyboard.saveFrameHint')}
-                  onClick={() => {
-                    // Save the frame on screen right away, in the background (owner, 2026-10-22).
-                    const node = mediaRef.current?.querySelector('video');
-                    node?.pause();
-                    const at = Number((node?.currentTime || 0).toFixed(3));
-                    setSaving(true);
-                    setMsg(tr('storyboard.savingFrame', { seconds: at.toFixed(2) }));
-                    Promise.resolve(
-                      dispatch({
-                        type: 'saveFrame',
-                        shot: shot.id,
-                        version: viewing.id,
-                        artifactId: viewing.artifactId,
-                        t: at,
-                      }),
+            {/* #232 (#53): downloads and "save frame" stay in view as compact buttons. */}
+            <div className="take-tools-inline">
+              <StoryboardDownloads version={viewing} title={shot.title} />
+              <button
+                className="small"
+                disabled={saving}
+                title={tr('storyboard.saveFrameHint')}
+                onClick={() => {
+                  // Save the frame on screen right away, in the background (owner, 2026-10-22).
+                  const node = mediaRef.current?.querySelector('video');
+                  node?.pause();
+                  const at = Number((node?.currentTime || 0).toFixed(3));
+                  setSaving(true);
+                  setMsg(tr('storyboard.savingFrame', { seconds: at.toFixed(2) }));
+                  Promise.resolve(
+                    dispatch({
+                      type: 'saveFrame',
+                      shot: shot.id,
+                      version: viewing.id,
+                      artifactId: viewing.artifactId,
+                      t: at,
+                    }),
+                  )
+                    .then((receipt) =>
+                      setMsg(
+                        !receipt || receipt.ok === false
+                          ? receipt?.error || tr('storyboard.detail43')
+                          : tr('storyboard.frameSaved', { seconds: at.toFixed(2) }),
+                      ),
                     )
-                      .then((receipt) =>
-                        setMsg(
-                          !receipt || receipt.ok === false
-                            ? receipt?.error || tr('storyboard.detail43')
-                            : tr('storyboard.frameSaved', { seconds: at.toFixed(2) }),
-                        ),
-                      )
-                      .catch((error) => setMsg(error?.message || tr('storyboard.detail43')))
-                      .finally(() => setSaving(false));
-                  }}
-                >
-                  <Pin size={14} />
-                  {tr('storyboard.copy81')}
-                </button>
-              </div>
-            </details>
+                    .catch((error) => setMsg(error?.message || tr('storyboard.detail43')))
+                    .finally(() => setSaving(false));
+                }}
+              >
+                <Pin size={14} />
+                {tr('storyboard.copy81')}
+              </button>
+            </div>
+
             {msg && <small className="okmsg">{msg}</small>}
           </div>
         )}
@@ -1923,7 +1926,10 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
       </div>
       <div className="ed-form">
         <label className="field">
-          <span>{tr(restoredExact ? 'workbench.restoredPrompt' : 'storyboard.copy85')}</span>
+          <span>
+            {tr(restoredExact ? 'workbench.restoredPrompt' : 'storyboard.copy85')}{' '}
+            <HelpTip text={tr('help.action')} />
+          </span>
           <textarea
             rows={2}
             value={shot.prompt}
@@ -1947,6 +1953,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
             className="castslot"
             label={tr('storyboard.detail77')}
             hint={tr('storyboard.detail78')}
+            help={tr('help.cast')}
             onPick={openPicker('cast')}
           >
             {shot.cast.length || shot.place || shot.props.length ? (
@@ -2077,14 +2084,18 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
           </Slot>
         )}
 
-        <label className="field">
-          <span>{tr('storyboard.copy84')}</span>
-          <textarea
-            rows={2}
-            value={shot.script}
-            onChange={(e) => upd({ script: e.target.value })}
-          />
-        </label>
+        {/* #232 (#49): the shot "script" note was never used for generation; only an old
+            note stays editable, new shots don't show the box. */}
+        {shot.script?.trim() && (
+          <label className="field">
+            <span>{tr('storyboard.copy84')}</span>
+            <textarea
+              rows={2}
+              value={shot.script}
+              onChange={(e) => upd({ script: e.target.value })}
+            />
+          </label>
+        )}
         <div className="modetabs" role="tablist" aria-label={tr('storyboard.finish13')}>
           {['FL', 'REF'].map((k) => (
             <button
@@ -2115,6 +2126,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                     })
                   }
                   id={'slot:start:' + shot.id}
+                  help={tr('help.start')}
                   label={tr('storyboard.detail79')}
                   hint={tr('storyboard.detail81')}
                   onPick={openPicker('start')}
@@ -2146,6 +2158,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                     })
                   }
                   id={'slot:end:' + shot.id}
+                  help={tr('help.end')}
                   label={tr('storyboard.detail80')}
                   hint={tr('storyboard.detail81')}
                   onPick={openPicker('end')}
@@ -2174,8 +2187,8 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                   {tr('storyboard.finish21', { title: state.shots[index - 1].title })}
                 </label>
               )}
-              <label className="field">
-                <span>{tr('storyboard.finish22', { seconds: shot.duration })}</span>
+              <label className="field inline-num">
+                <span>{tr('storyboard.durationLabel')}</span>
                 <input
                   type="number"
                   min={durationRange?.minimum}
@@ -2188,6 +2201,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                     if (Number.isFinite(n) && n > 0) upd({ duration: n });
                   }}
                 />
+                <span className="muted">{tr('storyboard.secondsUnit')}</span>
                 {!durationRange && <small>{tr('storyboard.copy89')}</small>}
               </label>
             </>
@@ -2203,6 +2217,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                   })
                 }
                 id={'slot:refs:' + shot.id}
+                help={tr(info.mode === 'FL' ? 'help.refsFl' : 'help.refsRef')}
                 label={info.mode === 'FL' ? tr('storyboard.detail62') : tr('storyboard.detail63')}
                 hint={info.mode === 'FL' ? tr('storyboard.detail64') : tr('storyboard.detail65')}
                 onPick={openPicker('refs')}
@@ -2485,7 +2500,17 @@ export function Transport({ player }) {
   );
 }
 
-function Segment({ seg, index, chapterStart, selected, onPick, compact, total, numbered }) {
+function Segment({
+  seg,
+  index,
+  chapterStart,
+  selected,
+  onPick,
+  compact,
+  total,
+  numbered,
+  tiles = 1,
+}) {
   const { t: tr, locale } = useI18n();
   const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { state } = useStore();
@@ -2516,7 +2541,7 @@ function Segment({ seg, index, chapterStart, selected, onPick, compact, total, n
         (drag.isDragging ? ' dragging' : '') +
         (drop.isOver && !drag.isDragging ? ' drop-target' : '')
       }
-      onClick={() => onPick(seg)}
+      onClick={(event) => onPick(seg, event)}
       title={`${String(index + 1).padStart(2, '0')} · ${seg.shot.title} · ${fmt(seg.dur)} · ${status.label}`}
     >
       {compact ? (
@@ -2525,7 +2550,12 @@ function Segment({ seg, index, chapterStart, selected, onPick, compact, total, n
       ) : (
         <>
           {seg.version ? (
-            <StoryboardAssetImage asset={seg.version.asset || seg.version} />
+            // #232 (#55): a filmstrip of same-size frames, never one stretched picture.
+            <span className="tseg-strip">
+              {Array.from({ length: tiles }, (_, i) => (
+                <StoryboardAssetImage key={i} asset={seg.version.asset || seg.version} />
+              ))}
+            </span>
           ) : (
             <div className="tseg-empty" />
           )}
@@ -2556,13 +2586,23 @@ export function Timeline({ player, selectedId, onPick, chapterStarts }) {
   }, []);
   // Pictures only when an average shot gets at least ~44px; otherwise small squares.
   const compact = width > 0 && segs.length > 0 && width / segs.length < 44;
-  const pick = (seg) => {
-    setT(seg.start);
+  // #232 (#51): a click on a shot jumps to that exact moment, not just the shot's start.
+  const pick = (seg, event) => {
+    const r = strip.current?.getBoundingClientRect();
+    setT(
+      r?.width && event?.clientX
+        ? Math.max(
+            seg.start,
+            Math.min(seg.start + seg.dur, ((event.clientX - r.left) / r.width) * total),
+          )
+        : seg.start,
+    );
     onPick?.(seg.shot.id);
   };
-  // The ruler is the one time bar: press and drag on it to scrub (owner, 2026-10-24).
+  // The ruler is the one time bar: press and drag on it to scrub (owner, 2026-10-24); the
+  // empty track behind the shots scrubs the same way.
   const scrub = (event) => {
-    if (!total) return;
+    if (!total || event.button > 0) return;
     const el = event.currentTarget,
       r = el.getBoundingClientRect();
     const at = (x) => Math.max(0, Math.min(total, ((x - r.left) / r.width) * total));
@@ -2585,7 +2625,11 @@ export function Timeline({ player, selectedId, onPick, chapterStarts }) {
   const at = `${total ? (t / total) * 100 : 0}%`;
   return (
     <div className={'timeline' + (compact ? ' compact' : '')}>
-      <div className="track video" ref={strip}>
+      <div
+        className="track video"
+        ref={strip}
+        onPointerDown={(event) => event.target === event.currentTarget && scrub(event)}
+      >
         {segs.map((seg, index) => (
           <Segment
             key={seg.shot.id}
@@ -2595,6 +2639,10 @@ export function Timeline({ player, selectedId, onPick, chapterStarts }) {
             total={total}
             // A number only where the segment is wide enough to show it whole.
             numbered={!!total && (seg.dur / total) * width >= 26}
+            // One 16:9 frame per ~89 px of segment (track height 50), at most 24.
+            tiles={
+              total ? Math.min(24, Math.max(1, Math.round(((seg.dur / total) * width) / 89))) : 1
+            }
             chapterStart={index > 0 && !!chapterStarts?.has(seg.shot.id)}
             selected={seg.shot.id === selectedId}
             onPick={pick}

@@ -37,12 +37,14 @@ const MIN_PART = 0.25;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 /**
- * One time bar for the kept parts (#232 #23): drag on empty space to keep a new part, drag a
- * part to move it, drag its edges to resize, select it and press Delete (or ×) to remove it.
- * Parts play in time order.
+ * One time bar for the kept parts (#232 #23, #38-#43): drag on empty space to keep a new
+ * part, drag a part to move it, drag its edges to resize, click anywhere to jump there,
+ * select a part and press Delete (or ×) to remove it. Parts never overlap and play in time
+ * order.
  */
 function PartsBar({ duration, parts, getVideo, busy, onChange, t }) {
-  const bar = useRef(null),
+  const box = useRef(null),
+    bar = useRef(null),
     [draft, setDraft] = useState(null),
     [selected, setSelected] = useState(null),
     [now, setNow] = useState(0);
@@ -55,44 +57,73 @@ function PartsBar({ duration, parts, getVideo, busy, onChange, t }) {
     const video = getVideo();
     if (!video) return;
     const tick = () => setNow(video.currentTime || 0);
-    video.addEventListener('timeupdate', tick);
-    return () => video.removeEventListener('timeupdate', tick);
+    tick();
+    for (const name of ['timeupdate', 'seeked', 'loadedmetadata'])
+      video.addEventListener(name, tick);
+    return () => {
+      for (const name of ['timeupdate', 'seeked', 'loadedmetadata'])
+        video.removeEventListener(name, tick);
+    };
   });
   const pct = (value) => (value / total) * 100 + '%';
   const at = (x) => {
-    const box = bar.current.getBoundingClientRect();
-    return clamp(((x - box.left) / box.width) * total, 0, total);
+    const rect = bar.current.getBoundingClientRect();
+    return clamp(((x - rect.left) / rect.width) * total, 0, total);
   };
   const seek = (value) => {
     const video = getVideo();
     if (!video) return;
     video.pause();
     video.currentTime = value;
+    setNow(value);
+  };
+  // The free room around a moment (or around one part), so parts never overlap.
+  const room = (others, point) => {
+    let lo = 0,
+      hi = total;
+    for (const part of others) {
+      if (part.end <= point) lo = Math.max(lo, part.end);
+      if (part.start >= point) hi = Math.min(hi, part.start);
+    }
+    return [lo, hi];
   };
   function begin(event, index, mode) {
     if (busy || event.button > 0) return;
     event.preventDefault();
     event.stopPropagation();
+    box.current?.focus({ preventScroll: true });
     const el = bar.current,
       start = at(event.clientX),
       base = parts.map((part) => ({ ...part }));
+    // A press inside a part on the track means "this part", not a new one.
+    if (mode === 'new') {
+      const hit = base.findIndex((part) => start >= part.start && start <= part.end);
+      if (hit >= 0) return begin(event, hit, 'move');
+    }
     el.setPointerCapture(event.pointerId);
     let next = null;
-    if (index !== null) setSelected(index);
+    setSelected(index);
+    const others = index === null ? base : base.filter((_, i) => i !== index),
+      [lo, hi] = room(others, index === null ? start : base[index].start);
     const move = (e) => {
       const x = at(e.clientX),
         delta = x - start,
         part = base[index];
       let value;
-      if (mode === 'new') value = { start: Math.min(start, x), end: Math.max(start, x) };
-      else if (mode === 'move') {
+      if (mode === 'new') {
+        const edge = clamp(x, lo, hi);
+        value = { start: Math.min(start, edge), end: Math.max(start, edge) };
+      } else if (mode === 'move') {
         const length = part.end - part.start,
-          from = clamp(part.start + delta, 0, total - length);
-        value = { start: from, end: from + length };
+          from = clamp(part.start + delta, lo, Math.max(lo, hi - length));
+        value = { start: from, end: Math.min(hi, from + length) };
       } else if (mode === 'start')
-        value = { start: clamp(part.start + delta, 0, part.end - MIN_PART), end: part.end };
+        value = { start: clamp(part.start + delta, lo, part.end - MIN_PART), end: part.end };
       else
-        value = { start: part.start, end: clamp(part.end + delta, part.start + MIN_PART, total) };
+        value = {
+          start: part.start,
+          end: clamp(part.end + delta, part.start + MIN_PART, hi),
+        };
       next = mode === 'new' ? [...base, value] : base.map((r, i) => (i === index ? value : r));
       setDraft(next);
       seek(mode === 'end' ? value.end : value.start);
@@ -102,18 +133,14 @@ function PartsBar({ duration, parts, getVideo, busy, onChange, t }) {
       el.removeEventListener('pointerup', up);
       el.removeEventListener('pointercancel', up);
       setDraft(null);
-      if (!next) {
-        // A plain press on empty space just moves the playhead there.
-        if (mode === 'new') seek(start);
-        return;
-      }
+      // A plain click (no drag) jumps the player to that moment.
+      if (!next) return seek(start);
       const added = mode === 'new' ? next.at(-1) : null;
       if (added && added.end - added.start < MIN_PART) return seek(start);
       const sorted = next
         .map((part) => snapRange(part.start, part.end))
         .filter(Boolean)
         .sort((a, b) => a.start - b.start);
-      setSelected(null);
       onChange(sorted);
     };
     el.addEventListener('pointermove', move);
@@ -126,6 +153,7 @@ function PartsBar({ duration, parts, getVideo, busy, onChange, t }) {
   };
   return (
     <div
+      ref={box}
       className={'parts-bar' + (busy ? ' busy' : '')}
       tabIndex={0}
       title={t('segments.barHelp')}
@@ -145,20 +173,25 @@ function PartsBar({ duration, parts, getVideo, busy, onChange, t }) {
           >
             <i className="edge start" onPointerDown={(e) => begin(e, index, 'start')} />
             <b>{index + 1}</b>
-            <button
-              type="button"
-              className="parts-bar-x"
-              aria-label={t('segments.remove', { n: index + 1 })}
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => remove(index)}
-            >
-              <X size={10} />
-            </button>
             <i className="edge end" onPointerDown={(e) => begin(e, index, 'end')} />
           </span>
         ))}
         <span className="parts-bar-head" style={{ left: pct(clamp(now, 0, total)) }} />
       </div>
+      {/* The × sits above its part, clear of the resize edges. */}
+      {selected !== null && list[selected] && (
+        <button
+          type="button"
+          className="parts-bar-x"
+          style={{ left: pct((list[selected].start + list[selected].end) / 2) }}
+          aria-label={t('segments.remove', { n: selected + 1 })}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={() => remove(selected)}
+        >
+          <X size={11} />
+        </button>
+      )}
+      {list.length <= 1 && <small className="parts-bar-hint muted">{t('segments.moreHint')}</small>}
     </div>
   );
 }
@@ -199,9 +232,11 @@ export default function ShotSegments({ shot, getVideo, duration, trim }) {
           size="sm"
           variant="ghost"
           className="keep-label"
-          disabled={busy || !trim}
+          disabled={busy || !(duration > 0 || trim)}
           onClick={() => {
-            const first = trim && snapRange(trim[0], trim[1]);
+            // Start from the whole take (#232 #39); the bar then cuts it into parts.
+            const first =
+              duration > 0 ? snapRange(0, duration) : trim && snapRange(trim[0], trim[1]);
             if (first) void save([first]);
           }}
         >
