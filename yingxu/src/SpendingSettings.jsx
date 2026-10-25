@@ -100,7 +100,30 @@ export default function SpendingSettings({ account }) {
     who = useAccountLabel(account);
   // Regular users never see dollars: in credit mode the USD budget tab is admin-only.
   const creditMode = user?.unit === 'credits';
-  const showBudget = creditMode || !(credits || access?.creditsEnabled) || !!admin;
+  const loaded = !!user && admin !== null && access !== null;
+  const liveTabs = {
+    credits: !!credits || !!access?.creditsEnabled,
+    budget: creditMode || !(credits || access?.creditsEnabled) || !!admin,
+  };
+  // #232 (#37): show the account's tabs at once from the last visit; the data only refines it.
+  const tabsKey = 'inkseq.settingsTabs:' + (account || '');
+  const [rememberedTabs] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(tabsKey)) || null;
+    } catch {
+      return null;
+    }
+  });
+  const tabs = loaded || !rememberedTabs ? liveTabs : rememberedTabs;
+  useEffect(() => {
+    if (!loaded) return;
+    try {
+      localStorage.setItem(tabsKey, JSON.stringify(liveTabs));
+    } catch {
+      /* Tabs simply appear after the data on the next visit. */
+    }
+  }, [loaded, liveTabs.credits, liveTabs.budget, tabsKey]);
+  const showBudget = tabs.budget;
   // Hosted (WorkOS) sign-ins have no local password to change.
   const hosted = access?.authentication === 'workos';
   const [busy, setBusy] = useState(false),
@@ -237,7 +260,9 @@ export default function SpendingSettings({ account }) {
             ['account', 'settings.account', UserRound],
             ['defaults', 'settings.defaults', SlidersHorizontal],
             ['assistants', 'assistants.title', Bot],
-            ...(credits || section === 'credits' ? [['credits', 'settings.credits', Coins]] : []),
+            ...(tabs.credits || section === 'credits'
+              ? [['credits', 'settings.credits', Coins]]
+              : []),
             ...(showBudget
               ? [['budget', creditMode ? 'settings.limits' : 'settings.budget', Wallet]]
               : []),
@@ -252,12 +277,6 @@ export default function SpendingSettings({ account }) {
               {t(label)}
             </button>
           ))}
-          {admin && (
-            <button onClick={() => navigateApp('/admin')}>
-              <ShieldCheck size={16} />
-              {t('settings.admin')}
-            </button>
-          )}
         </aside>
         <section className="spanel">
           <div className="row tight">
