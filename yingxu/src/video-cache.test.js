@@ -69,7 +69,12 @@ function memoryStore() {
     },
   };
 }
-function fixture({ body = '0123456789', account = A, wrapFetcher = (fetcher) => fetcher } = {}) {
+function fixture({
+  body = '0123456789',
+  account = A,
+  wrapFetcher = (fetcher) => fetcher,
+  ttl = 0,
+} = {}) {
   const store = memoryStore(),
     calls = [];
   let headStatus = 200,
@@ -106,7 +111,12 @@ function fixture({ body = '0123456789', account = A, wrapFetcher = (fetcher) => 
     if (beforeFull) await beforeFull();
     return full();
   };
-  const raw = createVideoCache({ store, origin: ORIGIN, fetcher: wrapFetcher(fetcher) }),
+  const raw = createVideoCache({
+      store,
+      origin: ORIGIN,
+      fetcher: wrapFetcher(fetcher),
+      authTtlMs: ttl,
+    }),
     cache = {
       ...raw,
       async handle(req) {
@@ -771,4 +781,14 @@ test('an uploaded image is kept across views and served with its own type', asyn
   assert.equal(again.headers.get('Content-Type'), 'image/png');
   assert.equal(await again.text(), '0123456789');
   assert.equal(f.calls.filter((c) => c.method === 'GET').length, 1);
+});
+
+test('within a minute one access check covers repeated range reads of a cached file', async () => {
+  const f = fixture({ ttl: 60000 });
+  await f.cache.handle(request());
+  const heads = () => f.calls.filter((c) => c.method === 'HEAD').length;
+  const before = heads();
+  for (const range of ['bytes=0-3', 'bytes=4-7', 'bytes=8-9'])
+    assert.equal((await f.cache.handle(request('v1', A, range))).status, 206);
+  assert.equal(heads(), before);
 });

@@ -848,3 +848,43 @@ dialog.modal.wide {
   padding: 18px 8px;
   text-align: center;
 }
+/* #232 (#45): a tidy rail — 32px bounded buttons, a small count badge, no badge at zero. */
+.sb-workspace .library.collapsed > .lib-tabs {
+  align-items: center;
+  gap: 6px;
+}
+.sb-workspace .library.collapsed .lib-tabs button {
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 1px solid var(--line-2, var(--line));
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+}
+.sb-workspace .library.collapsed .lib-tabs button.on {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+}
+.sb-workspace .library.collapsed .lib-tabs button small {
+  top: -5px;
+  right: -5px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: var(--surface-3);
+  color: var(--ink-2);
+  font-size: 9px;
+}
+.sb-workspace .library.collapsed .lib-tabs button small.zero {
+  display: none;
+}
+.sb-workspace .library.collapsed .lib-tabs button.alert small {
+  background: var(--warn);
+  color: #1a1205;
+}

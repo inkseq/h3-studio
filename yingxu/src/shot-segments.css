@@ -166,3 +166,31 @@
   align-items: center;
   justify-content: space-between;
 }
+.parts-bar {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  padding-top: 16px;
+}
+.parts-bar-x {
+  top: -2px;
+  right: auto;
+  transform: translateX(-50%);
+  display: grid;
+}
+.parts-bar-part .edge {
+  width: 10px;
+  z-index: 1;
+}
+.parts-bar-part .edge.start {
+  left: -5px;
+}
+.parts-bar-part .edge.end {
+  right: -5px;
+}
+.parts-bar-track {
+  cursor: pointer;
+}
+.parts-bar-hint {
+  font-size: 11px;
+}

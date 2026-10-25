@@ -121,9 +121,30 @@ async function completeBody(response, size, type) {
     return null;
   }
 }
-function createVideoCache({ store, origin, fetcher = (...args) => fetch(...args) }) {
-  const filling = new Map();
+// #232 (#44): scrubbing makes many range reads of one file; one access check covers them
+// for a minute instead of a HEAD per read (which tripped the media read limit).
+const AUTH_TTL_MS = 60000;
+function createVideoCache({
+  store,
+  origin,
+  fetcher = (...args) => fetch(...args),
+  now = () => Date.now(),
+  authTtlMs = AUTH_TTL_MS,
+}) {
+  const filling = new Map(),
+    checked = new Map();
   async function authorize(target, epoch, signal) {
+    const key = target.url + '|' + (target.expected ?? '') + '|' + epoch;
+    const hit = checked.get(key);
+    if (hit && now() - hit.at < authTtlMs) return hit.auth;
+    const auth = await checkAccess(target, epoch, signal);
+    if (authTtlMs > 0 && !auth.error && auth.epoch !== null) {
+      if (checked.size > 512) checked.clear();
+      checked.set(key, { at: now(), auth });
+    }
+    return auth;
+  }
+  async function checkAccess(target, epoch, signal) {
     let head;
     try {
       head = await fetcher(target.url, {

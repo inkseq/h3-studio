@@ -1,7 +1,20 @@
 export const storyboardCatalogs = {
   en: {
+    'help.action':
+      'What happens in this shot: the action, how the camera moves and who says what. Looks and places come from the profiles, so no need to repeat them. Write speech as (S1) <d>[Chinese] line</d>, never in quotes.',
+    'help.cast':
+      'Drag in character, place and prop profiles. The video follows their descriptions and pictures, so the same person looks the same in every shot.',
+    'help.start':
+      'Optional. A picture to open the shot with: the video starts from exactly this frame. Handy to continue the previous shot or fix the framing.',
+    'help.end':
+      'Optional. A picture to end on: the video moves towards this frame and stops there.',
+    'help.refsFl':
+      'Optional. A video the new shot should follow (its motion or camera move), and/or audio: a voice the character lip-syncs to, or a sound to keep.',
+    'help.refsRef':
+      'Photos, videos and audio the shot should match: the same person, the same motion, the same voice. Refer to them in the description as <Picture 1>, <Video 1>, <Audio 1>.',
     'segments.title': 'Kept parts',
     'segments.playAll': 'Play kept parts',
+    'segments.moreHint': 'Drag on an empty stretch of the bar to keep another part.',
     'segments.barHelp':
       'Drag on the bar to keep a part · drag a part to move it, its edges to resize · select and press Delete to remove',
     'segments.help': 'Keep several parts of this take; they play in this order at this shot.',
@@ -322,6 +335,7 @@ export const storyboardCatalogs = {
     'storyboard.finish21':
       'Continue from “{title}”: use its chosen version’s last frame as the opening',
     'storyboard.finish22': 'Duration {seconds} s',
+    'storyboard.durationLabel': 'Duration',
     'storyboard.finish23': 'Not sent: {reason}',
     'storyboard.finish24': ' · Automatically included in the prompt',
     'storyboard.secondsUnit': 's',
@@ -467,8 +481,19 @@ export const storyboardCatalogs = {
     'chatControls.copy29': '{width} × {height} · {steps} steps · {frames} frames: ',
   },
   zh: {
+    'help.action':
+      '写这一镜发生什么：动作、镜头怎么动、谁说什么。人物长相和场景写在档案里，这里不用重复。台词写成 (S1) <d>[Chinese] 台词</d>，不要用引号。',
+    'help.cast':
+      '拖入人物、场景、道具档案。视频会照档案的描述和图片来画，保证同一个人在每个镜头里都一样。',
+    'help.start': '可留空。放一张图作为这一镜的第一帧，视频从这张图开始。适合接上一镜或固定构图。',
+    'help.end': '可留空。放一张图作为最后一帧，视频会动到这个画面停下。',
+    'help.refsFl':
+      '可留空。放一段视频，新镜头会跟着它的动作或运镜；放一段音频，人物会照这段声音对口型，或保留这段声音。',
+    'help.refsRef':
+      '放照片、视频、音频，让这一镜对上同一个人、同样的动作或同样的声音。在描述里用 <Picture 1>、<Video 1>、<Audio 1> 指代。',
     'segments.title': '保留片段',
     'segments.playAll': '播放保留片段',
+    'segments.moreHint': '在条上空白处拖动，可以再保留一段。',
     'segments.barHelp':
       '在条上拖动就保留一段 · 拖动片段可移动，拖两端改长短 · 选中后按 Delete 删除',
     'segments.help': '从这个版本里保留几段，会按这个顺序在这个镜头的位置播放。',
@@ -776,6 +801,7 @@ export const storyboardCatalogs = {
     'storyboard.finish20': '选用这条（替换时间线上的第 {number} 条）',
     'storyboard.finish21': '接上一镜：用「{title}」选用那条的最后一帧作为开头',
     'storyboard.finish22': '时长 {seconds} 秒',
+    'storyboard.durationLabel': '时长',
     'storyboard.finish23': '未发送：{reason}',
     'storyboard.finish24': ' · 会自动拼进提示词',
     'storyboard.secondsUnit': '秒',
