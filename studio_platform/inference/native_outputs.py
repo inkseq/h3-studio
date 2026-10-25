@@ -54,11 +54,20 @@ def native_delivery_spec(compiled, policy=NATIVE_DELIVERY):
         normalize_request(
             request, {k: v["metadata"] for k, v in compiled["assets"].items()}, output
         )
+    frames = output["frames"]
+    if request.get("script_window_prompts"):
+        from ..script_window_timing import schedule
+
+        frames = schedule(
+            frames,
+            request["window_seconds"],
+            bool(request["inputs"].get("first_frame")),
+        )["output_frames"]
     return {
         "policy": policy,
         "fps": 24,
-        "frame_count": output["frames"],
-        "duration_s": output["frames"] / 24,
+        "frame_count": frames,
+        "duration_s": frames / 24,
         "requested_duration_s": request["duration"],
     }
 
