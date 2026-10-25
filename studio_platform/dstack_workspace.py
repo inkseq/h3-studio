@@ -659,7 +659,9 @@ class DstackWorkspace:
                 projected[node["node_id"]] = {**node, "owner_id": account}
         result, groups = [], []
         with self.repo.engine.connect() as connection:
-            demand_start = self._display_demand_start(connection, now) if admin else None
+            demand_start = (
+                self._display_demand_start(connection, now) if admin else None
+            )
             # The preceding owner-state projection is advisory. A machine
             # accepted between those reads belongs to the next poll, never a
             # half-built row or a KeyError while dependent groups are rendered.
