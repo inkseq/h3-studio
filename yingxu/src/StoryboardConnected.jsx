@@ -675,18 +675,35 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
         version = shot?.versions.find((v) => v.id === action.version);
       if (version?.status !== 'done' || !version.asset?.entity?.data.fileId)
         throw Error(at('adjunct.storyboardConnected.copy340'));
+      const review = {
+        ...shot.entity.data.uxReview,
+        chosen: null,
+        status: 'selected',
+        allRejected: false,
+      };
+      // A clean cloud story chooses through /actions, so the server also binds that take's
+      // own sound when clip sound is on (h3-studio#611). Unsaved edits keep the old path.
+      const ws = store.getState().workspace;
+      if (ws.mode === 'cloud' && !ws.dirty) {
+        await cloud.workbenchCommand('actions', {
+          actions: [
+            { op: 'shot.select', shot_id: shot.id, entity_id: version.id },
+            {
+              op: 'entity.update',
+              entity_id: shot.id,
+              patch: { status: 'draft', data: { acceptPlaceholder: false, uxReview: review } },
+            },
+          ],
+        });
+        return { ok: true };
+      }
       if (
         !store.updateEntity(shot.id, {
           status: 'draft',
           data: {
             selectedAssetId: version.id,
             acceptPlaceholder: false,
-            uxReview: {
-              ...shot.entity.data.uxReview,
-              chosen: null,
-              status: 'selected',
-              allRejected: false,
-            },
+            uxReview: review,
           },
         })
       )

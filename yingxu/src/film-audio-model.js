@@ -91,6 +91,10 @@ export function toggleClipSound(project, chapterId, shotId) {
   const current = clipSound(project, chapterId, shotId);
   if (current.state === 'none') throw Error(current.issue);
   if (current.state === 'detached') throw Error('editor.soundDetached');
+  // The choice is kept on the shot (h3-studio#611): a newly chosen take follows it, so an
+  // explicit "off" stays off and "on" is the default for new takes.
+  const shot = project.entities.find((e) => e.id === shotId);
+  if (shot) shot.data = { ...shot.data, clipSound: current.state === 'on' ? 'off' : 'on' };
   if (!current.track) {
     const track = upsertGeneratedSound(project, shotId);
     if (current.slow) track.slow_rate_audio_enabled = true;
