@@ -25,7 +25,8 @@ from urllib.parse import urlsplit
 
 from .control import WorkerControl, WorkerSpec, REAL_GPU_BACKENDS, worker_spec_payload
 from .repository import Repository, request_hash
-from .worker import ComfyBackend, MockBackend, WorkerRunner, _slot_lock
+from .worker import ComfyBackend, MockBackend, WorkerRunner
+from .slot_lock import slot_lock
 
 
 SAFE_WORKER = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
@@ -453,7 +454,7 @@ class FleetSupervisor:
         if not math.isfinite(poll_interval_s) or not 0.01 <= poll_interval_s <= 60:
             raise ValueError("invalid_fleet_poll_interval")
         self.config.work_dir.mkdir(parents=True, exist_ok=True)
-        with _slot_lock(self.config.work_dir, "fleet-supervisor") as acquired:
+        with slot_lock(self.config.work_dir, "fleet-supervisor") as acquired:
             if not acquired:
                 return {"state": "fleet_busy", "children": []}
             prior = {}

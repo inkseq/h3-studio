@@ -40,7 +40,7 @@ from .wangp_bootstrap import (
     validate_report,
     safe_preparation_report,
 )
-from .worker import _slot_lock
+from .slot_lock import slot_lock
 
 GPU_UUID = re.compile(r"GPU-[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}\Z")
 PROVIDERS = {"vastai": "vast", "runpod": "runpod"}
@@ -411,7 +411,7 @@ class DstackNativeRuntime:
             current, image = self._binding(binding, run, config)
             files, manifest, hashes = self._sources(config)
             config.work_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-            with _slot_lock(config.work_dir, "dstack-bootstrap-" + intent_id) as locked:
+            with slot_lock(config.work_dir, "dstack-bootstrap-" + intent_id) as locked:
                 _require(locked, "dstack_runtime_observation_busy")
                 directory = _absolute(config.work_dir / intent_id)
                 created = not directory.exists()

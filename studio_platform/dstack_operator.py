@@ -21,11 +21,19 @@ from sqlalchemy import insert, select, update
 
 from .dstack_capacity import (
     CapacityRequest,
+    request_from_document,
     DstackCapacity,
     DstackClient,
     DstackError,
     live_capacity_usage,
 )
+from .capacity_policy import window_open, cold_unadmitted_runtime
+
+# Compatibility names for retained callers; all current call sites use the contract.
+_window_open = window_open
+_cold_unadmitted_runtime = cold_unadmitted_runtime
+_request = request_from_document
+
 from .operator_capacity import (
     OperatorError,
     advance_command_revision,
@@ -121,35 +129,6 @@ def _finite(value):
     return type(value) in (int, float) and math.isfinite(value)
 
 
-def _window_open(intent, node, now):
-    deadline = intent.get("hard_deadline")
-    if deadline is not None:
-        return _finite(deadline) and now < deadline
-    from .worker_admission import dstack_policy_reason
-
-    return dstack_policy_reason(intent, node, now) is None
-
-
-def _cold_unadmitted_runtime(binding, workers, instance_id, now, fresh_seconds):
-    """No platform execution ever acquired this exact cold preparation.
-
-    Worker rows and the first-ready/incarnation latches are retained history,
-    not just current availability. Unknown previously admitted execution must
-    never use this exception. The caller still checks ownership and stop intent.
-    """
-    observed = binding.get("observed_at")
-    return (
-        not workers
-        and bool(instance_id)
-        and binding.get("provider_instance_id") == instance_id
-        and binding.get("state") in {"starting", "runtime_unconfirmed"}
-        and binding.get("runtime_incarnation") is None
-        and binding.get("first_runtime_ready_at") is None
-        and _finite(observed)
-        and 0 <= now - observed <= fresh_seconds
-    )
-
-
 def plan_offers(plan, request):
     """Project pinned 0.22.5 offers; no backend_data, SSH or user/job payload."""
     require(
@@ -214,14 +193,6 @@ def plan_offers(plan, request):
         result,
         key=lambda row: (not row["inventory_confirmed"], row["hourly_cost_microusd"]),
     )[:100]
-
-
-def _request(document):
-    document = copy.deepcopy(document)
-    for key in ("gpu_names", "regions"):
-        if key in document:
-            document[key] = tuple(document[key])
-    return CapacityRequest(**document)
 
 
 def _protected_read(filename, *, maximum=262144):
@@ -307,7 +278,7 @@ class LedgerDstackStore:
                 return False
             require(
                 intent["state"] == "reserved"
-                and _window_open(intent, node, self.repo.clock()),
+                and window_open(intent, node, self.repo.clock()),
                 "dstack_start_window_expired",
             )
             if stored.get("host_selection") is not None:
@@ -605,7 +576,7 @@ class LedgerDstackStore:
                 value.get("ready") is True
                 and value.get("state") == "ready"
                 and node["desired_state"] == "running"
-                and _window_open(intent, node, self.repo.clock())
+                and window_open(intent, node, self.repo.clock())
             )
             if value.get("runtime_incarnation") and value.get("state") in {
                 "ready",
@@ -924,7 +895,7 @@ class LedgerDstackStore:
             launch_started = binding.get(
                 "bootstrap_launch_started", binding.get("bootstrap_started")
             )
-            cold_unadmitted = _cold_unadmitted_runtime(
+            cold_unadmitted = cold_unadmitted_runtime(
                 binding,
                 workers,
                 intent.get("provider_instance_id"),
@@ -993,7 +964,7 @@ class LedgerDstackStore:
             )
             require(
                 node["desired_state"] == "running"
-                and _window_open(intent, node, self.repo.clock()),
+                and window_open(intent, node, self.repo.clock()),
                 "dstack_bootstrap_window_expired",
             )
             return True
@@ -1013,7 +984,7 @@ class LedgerDstackStore:
             )
             require(
                 node["desired_state"] == "running"
-                and _window_open(intent, node, self.repo.clock()),
+                and window_open(intent, node, self.repo.clock()),
                 "dstack_bootstrap_window_expired",
             )
             if binding.get("bootstrap_launch_started", True):
@@ -1049,7 +1020,7 @@ class LedgerDstackStore:
                 return False
             require(
                 node["desired_state"] == "running"
-                and _window_open(intent, node, self.repo.clock()),
+                and window_open(intent, node, self.repo.clock()),
                 "dstack_bootstrap_window_expired",
             )
             binding.update(
@@ -1745,7 +1716,7 @@ class DstackOperator:
         reason = budget_reason(connection, intent, node, now)
         if reason:
             raise BudgetExceeded(reason)
-        require(_window_open(intent, node, now), "dstack_continuing_policy_unconfirmed")
+        require(window_open(intent, node, now), "dstack_continuing_policy_unconfirmed")
         started = connection.execute(
             select(scaler_actions.c.create_started_at).where(
                 scaler_actions.c.intent_id == intent["id"]
@@ -2828,7 +2799,7 @@ class DstackOperator:
                 # presence isn't allocation proof; a missing/changed mapping
                 # refuses this new intent, without changing old paid runs.
                 fresh = self.capacity.client.vast_offer_mapping(
-                    _request(original), clock=self.repo.clock
+                    request_from_document(original), clock=self.repo.clock
                 )
                 current = {
                     r['offer_id']: r['machine_id']
@@ -3114,7 +3085,7 @@ class DstackOperator:
                     fresh
                     and binding.get("ready") is True
                     and node["desired_state"] == "running"
-                    and _window_open(intent, node, now)
+                    and window_open(intent, node, now)
                 )
                 workers = (
                     list(
@@ -3361,7 +3332,7 @@ class DstackOperator:
                 select(instance_intents).where(instance_intents.c.id == node_id),
             )
             require(
-                node["desired_state"] == "running" and _window_open(intent, node, now),
+                node["desired_state"] == "running" and window_open(intent, node, now),
                 "dstack_hold_window_expired",
             )
             if payload.get("lifecycle", {}).get("version") == 2:

@@ -797,3 +797,7 @@ inventory.json
 !tests/test_generation_stats.py
 !studio_platform/support_view.py
 !tests/test_support_view.py
+
+!studio_platform/capacity_policy.py
+!studio_platform/slot_lock.py
+!tests/test_capacity_contract.py

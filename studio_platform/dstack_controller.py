@@ -21,14 +21,17 @@ import threading
 from sqlalchemy import or_, select
 
 from .control import WorkerControl, worker_spec_payload
-from .dstack_capacity import idle_action, _owns, _terminal_no_allocation_shape
+from .dstack_capacity import (
+    idle_action,
+    assert_run_owned,
+    terminal_no_allocation_shape,
+    request_from_document,
+)
+from .capacity_policy import cold_unadmitted_runtime, window_open
 from .demand_wakeup import IDLE_SAFETY_SECONDS
 from .dstack_preparation import download_timebox_due
 from .dstack_operator import (
     BACKEND_MARKER,
-    _request,
-    _cold_unadmitted_runtime,
-    _window_open,
 )
 from .operator_capacity import (
     advance_command_revision,
@@ -44,7 +47,7 @@ from .repository import (
     request_hash,
     scaler_actions,
 )
-from .worker import _slot_lock
+from .slot_lock import slot_lock
 from .telemetry import NullTelemetry, configured_telemetry
 
 TERMINAL = {"succeeded", "failed", "cancelled"}
@@ -55,10 +58,10 @@ def _terminal_review_candidate(run, binding, project):
     try:
         from .dstack_allocation_proof import ATTEMPT_FIELDS, PREFIX, _unique_object
 
-        _owns(run, binding, project)
+        assert_run_owned(run, binding, project)
         if (
             run.get("id") != binding.get("run_id")
-            or not _terminal_no_allocation_shape(run, binding)
+            or not terminal_no_allocation_shape(run, binding)
             or run["jobs"][0].get("job_connection_info") is not None
         ):
             return False
@@ -662,7 +665,7 @@ class DstackController:
                                 "observation_fresh_seconds"
                             ],
                         )
-                        or not _cold_unadmitted_runtime(
+                        or not cold_unadmitted_runtime(
                             binding,
                             workers,
                             intent["provider_instance_id"],
@@ -882,7 +885,7 @@ class DstackController:
                     "state": "reconciliation_required",
                     "code": "dstack_apply_journal_mismatch",
                 }
-            if node["desired_state"] == "stopped" or not _window_open(
+            if node["desired_state"] == "stopped" or not window_open(
                 intent, node, self.repo.clock()
             ):
                 self._request_stop(node)
@@ -894,7 +897,7 @@ class DstackController:
                     else "reconciliation_required",
                 }
             observation = self.capacity.start(
-                _request(node["payload"]["request"]),
+                request_from_document(node["payload"]["request"]),
                 self.service.config["ssh_public_key"],
             )
             return {"node_id": intent_id, "state": observation["state"]}
@@ -1023,7 +1026,7 @@ class DstackController:
             # Cold model preparation has never admitted execution. It need not
             # finish downloading/loading merely to become eligible for stop.
             # begin_stop rechecks the same evidence under the capacity lock.
-            cold_unadmitted = _cold_unadmitted_runtime(
+            cold_unadmitted = cold_unadmitted_runtime(
                 binding,
                 workers,
                 intent.get("provider_instance_id"),
@@ -1253,7 +1256,7 @@ class SlotProcesses:
 
     def __enter__(self):
         self.work_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self._supervisor_lock = _slot_lock(self.work_dir, "dstack-cpu-supervisor")
+        self._supervisor_lock = slot_lock(self.work_dir, "dstack-cpu-supervisor")
         if not self._supervisor_lock.__enter__():
             self._supervisor_lock.__exit__(None, None, None)
             self._supervisor_lock = None
