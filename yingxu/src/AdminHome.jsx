@@ -51,22 +51,26 @@ const SECTIONS = [
 const SETTINGS_PATH = '/v1/operator/admin/spending-settings';
 
 // Everything the overview and jobs pages read, refreshed together every 30 s.
-function useAdminData(api, active) {
+// Only the overview needs the (heavy) all-account machine read; the jobs page reads jobs.
+// Refresh every 60 s while the tab is visible (the CPU host is small, h3-studio#555).
+function useAdminData(api, active, section) {
   const [data, setData] = useState({ state: 'loading' });
+  const needsMachines = section === 'overview';
   const load = async () => {
+    if (globalThis.document?.visibilityState === 'hidden') return;
     try {
       const [workspace, jobs, settings] = await Promise.all([
-        api.request('/v1/operator/dstack/admin/workspace'),
+        needsMachines ? api.request('/v1/operator/dstack/admin/workspace') : null,
         api.request('/v1/operator/admin/jobs?limit=100'),
-        api.request(SETTINGS_PATH),
+        needsMachines ? api.request(SETTINGS_PATH) : null,
       ]);
-      setData({
+      setData((old) => ({
         state: 'ready',
-        workspace,
+        workspace: workspace || old.workspace,
         jobs: jobs.jobs || [],
-        settings,
+        settings: settings || old.settings,
         at: Date.now() / 1000,
-      });
+      }));
     } catch (failure) {
       setData((old) => ({
         ...old,
@@ -76,11 +80,16 @@ function useAdminData(api, active) {
     }
   };
   useEffect(() => {
-    if (!active) return undefined;
+    if (!active || !['overview', 'jobs'].includes(section)) return undefined;
     void load();
-    const timer = setInterval(load, 30000);
-    return () => clearInterval(timer);
-  }, [api, active]);
+    const timer = setInterval(load, 60000);
+    const visible = () => globalThis.document?.visibilityState === 'visible' && void load();
+    globalThis.document?.addEventListener('visibilitychange', visible);
+    return () => {
+      clearInterval(timer);
+      globalThis.document?.removeEventListener('visibilitychange', visible);
+    };
+  }, [api, active, section]);
   return { ...data, reload: load };
 }
 
@@ -572,7 +581,7 @@ export default function AdminHome({ account }) {
       live = false;
     };
   }, [account]);
-  const data = useAdminData(api, active && access?.admin === true);
+  const data = useAdminData(api, active && access?.admin === true, section);
   const go = (id) => navigateApp('/admin?section=' + id);
   return (
     <div className="home admin-home">
