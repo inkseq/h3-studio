@@ -341,6 +341,11 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
     let stopped = false,
       timer;
     const read = async () => {
+      // Queue hints read the whole GPU workspace: skip hidden tabs, 30 s apart.
+      if (globalThis.document?.visibilityState === 'hidden') {
+        if (!stopped) timer = setTimeout(read, 30000);
+        return;
+      }
       try {
         const snapshot = await api.state();
         if (stopped) return;
@@ -357,7 +362,7 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
       } catch {
         if (!stopped) setQueue(null);
       }
-      if (!stopped) timer = setTimeout(read, 10000);
+      if (!stopped) timer = setTimeout(read, 30000);
     };
     read();
     return () => {

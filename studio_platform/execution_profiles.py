@@ -19,12 +19,40 @@ This does not change a saved protected policy or renew its cost/time authority.
     return envelope(profile_id, mode)
 
 
+# One validated parse per file version: capabilities/availability polls read
+# this on every request. The key is the exact stat identity, so an operator's
+# replacement or edit is still seen on the next call.
+_PROFILES_CACHE = {}
+
+
 def read_profiles(path):
     if path is None:
         return {}
     path = Path(path)
     if not path.is_absolute():
         raise ValueError("Execution profiles path must be absolute")
+    try:
+        meta = os.stat(path)
+    except OSError:
+        raise ValueError("Execution profiles unavailable or invalid") from None
+    key = (
+        str(path),
+        meta.st_dev,
+        meta.st_ino,
+        meta.st_mode,
+        meta.st_size,
+        meta.st_mtime_ns,
+        meta.st_ctime_ns,
+    )
+    cached = _PROFILES_CACHE.get(str(path))
+    if cached is not None and cached[0] == key:
+        return copy.deepcopy(cached[1])
+    result = _read_profiles(path)
+    _PROFILES_CACHE[str(path)] = (key, result)
+    return copy.deepcopy(result)
+
+
+def _read_profiles(path):
     try:
         with path.open("rb") as stream:
             meta = os.fstat(stream.fileno())

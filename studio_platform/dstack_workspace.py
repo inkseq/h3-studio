@@ -317,6 +317,7 @@ def _admin_download_details(node, now):
 # ENDED_METRICS_TTL within the same Sydney day; live nodes are always recomputed.
 ENDED_METRICS_TTL = 600
 _ENDED_METRICS = {}
+DEMAND_SUMMARY_TTL = 15
 
 
 def _cached_metrics(compute, connection, original, intent, workers, now):
@@ -380,12 +381,30 @@ class DstackWorkspace:
         )
         return identity
 
+    def _display_demand_start(self, connection, now):
+        # The overview's demand panel asks dstack about every owned run; a poll
+        # within DEMAND_SUMMARY_TTL reuses it. Starts/admission never read this.
+        hit = getattr(self, "_demand_summary", None)
+        if hit is not None and _finite(now) and 0 <= now - hit[0] < DEMAND_SUMMARY_TTL:
+            return copy.deepcopy(hit[1])
+        value = self.service.demand_start_summary(connection, now)
+        if _finite(now):
+            self._demand_summary = (now, copy.deepcopy(value))
+        return value
+
     def demand_start(self, principal):
         self._authorize(principal, admin=True)
         with self.repo.engine.connect() as connection:
             return self.service.demand_start_summary(connection, self.repo.clock())
 
     def set_demand_start(self, principal, body, key):
+        self._demand_summary = None
+        try:
+            return self._set_demand_start(principal, body, key)
+        finally:
+            self._demand_summary = None
+
+    def _set_demand_start(self, principal, body, key):
         from .dstack_demand_policy import load_runtime, policy_key
         from .identity import account_identity, lock_account_gate
 
@@ -641,7 +660,7 @@ class DstackWorkspace:
         result, groups = [], []
         with self.repo.engine.connect() as connection:
             demand_start = (
-                self.service.demand_start_summary(connection, now) if admin else None
+                self._display_demand_start(connection, now) if admin else None
             )
             # The preceding owner-state projection is advisory. A machine
             # accepted between those reads belongs to the next poll, never a
