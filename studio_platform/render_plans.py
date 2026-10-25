@@ -196,8 +196,11 @@ def chapter_tracks(project, chapter_id):
         and e.get("parentId") in scene_ids
         and e["id"] not in included
     }
+    from .clip_sound import effective_track
+
+    preferences = {s["id"]: s.get("data", {}).get("clipSound") for s in shots}
     return [
-        track
+        effective_track(track, preferences)
         for track in tracks
         if not (
             isinstance(track, dict)
@@ -549,7 +552,18 @@ def compile_render(body, project, source_resolver, *, contract_version=None):
                 blockers.append(
                     str(error) if isinstance(error, ValueError) else "声音素材不可用"
                 )
-        if not audio_tracks:
+        explicit_clip_silence = any(
+            isinstance(t, dict)
+            and t.get("generatedFrom")
+            and not t.get("detached")
+            and any(
+                shot["id"] == t.get("shotId")
+                and shot.get("data", {}).get("clipSound") == "off"
+                for shot in shots
+            )
+            for t in tracks
+        )
+        if not audio_tracks and not explicit_clip_silence:
             blockers.append("声音方案尚无可用音轨；请添加声音或明确选择静音")
     if sum(s["object"]["size_bytes"] for s in sources.values()) > 2 * 1024**3:
         blockers.append("粗剪去重输入超过2GiB，请拆分章节")

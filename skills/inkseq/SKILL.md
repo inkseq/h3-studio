@@ -7,7 +7,7 @@ description: Use an Inkseq / 映序 link to create video takes, organise an auth
 
 Use the user's exact HTTPS origin (HTTP only for loopback). A link permits discovery, not editing or spending. Preserve user prompts, video quality/mode, references and accepted work. Relay outcomes in the user's language; keep API codes and IDs unchanged.
 
-Read [API fields/examples](reference/api.md) for requests and [recovery](reference/recovery.md) for uncertain writes/refusals; both use the same origin's `/for-agents/reference/`. Public discovery proves neither authentication nor capacity. Authenticated `/v1/agent-guide`, `/v1/guided-schema`, `/v1/quick-chat/schema` and `/v1/capabilities` describe the release.
+Read [API](reference/api.md) and [recovery](reference/recovery.md) at the same origin's `/for-agents/reference/`. Public discovery proves neither authentication nor capacity. Authenticated `/v1/agent-guide`, `/v1/guided-schema`, `/v1/quick-chat/schema` and `/v1/capabilities` describe the release.
 
 ## Connect an assistant
 
@@ -92,8 +92,8 @@ Example response projection: `{"preview_id":"PREVIEW","expires_at":1790000000}`;
 3. After admission, `/v1/generations/queue-position?job_id=JOB` gives advisory shared-queue information, no other owner's identity or ETA. Never rent a GPU to bypass unavailable capacity.
 4. Stop new paid work on cap/unknown-charge refusal. Return the same editable draft, stable error code and readable explanation; no replacement job/key or automatic retry. Zero connection cap adds no extra connection limit; owner credit and other safeguards remain. Sydney-day exposure includes unresolved prior obligations, not only invoices.
 
-See [recovery](reference/recovery.md) for stale settings, owner caps, confirmation and unknown charges.
-
+Shot `data.clipSound` is on/off; see [audio](reference/api.md) for defaults and legacy behavior.
+See [recovery](reference/recovery.md) for refusals.
 
 ## Long-shot windows
 
