@@ -1354,6 +1354,9 @@ def main(argv=None):
 
     settings = Settings.from_environment()
     repo = Repository(settings.database_url)
+    from .controller_liveness import Progress
+
+    progress = Progress(repo, settings.tenant_id)
     service = None
     runtime = None
     processes = None
@@ -1361,6 +1364,7 @@ def main(argv=None):
     error_client = None
     durable_executor = None
     try:
+        progress.beat(False, starting=True)
         service = from_environment(repo, settings)
         if service.capacity is None:
             raise ValueError("dstack_capacity_disabled")
@@ -1444,6 +1448,7 @@ def main(argv=None):
                 controller.tick,
                 active_seconds=15,
                 safety=controller.safety_sweep,
+                heartbeat=progress.beat,
                 report=lambda value: print(
                     json.dumps(value, sort_keys=True), flush=True
                 ),
