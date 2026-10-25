@@ -93,3 +93,12 @@ Example response projection: `{"preview_id":"PREVIEW","expires_at":1790000000}`;
 4. Stop new paid work on cap/unknown-charge refusal. Return the same editable draft, stable error code and readable explanation; no replacement job/key or automatic retry. Zero connection cap adds no extra connection limit; owner credit and other safeguards remain. Sydney-day exposure includes unresolved prior obligations, not only invoices.
 
 See [recovery](reference/recovery.md) for stale settings, owner caps, confirmation and unknown charges.
+
+
+## Confirmed long-shot windows
+
+For an 8–15 second shot, POST `/v1/projects/{project_id}/shots/{shot_id}/script-windows/preview` with current `expected_version`, optional integer `window_seconds` 5–10 and a fresh `Idempotency-Key`. Omitting length lets one existing Gemini call choose a supported schedule. Show `timing.windows` and the assigned dialogue to the user: native frame rounding/overlap can create a short final window. Never describe this as exactly equal output durations.
+
+After the user confirms, send ordinary `/actions` with current `expected_version` and `{"op":"shot.script_windows.confirm","shot_id":"SHOT","preview_id":"PREVIEW"}`. `shot.script_windows.clear` explicitly returns to the prior one-prompt behavior. Do not synthesize or edit `shot.data.script_windows` or `script_window_prompts`; confirmation copies the validated server receipt. Source changes require another preview/confirm (or clear). Normal generation preflight/submission remains separate and uses the existing job/credit gates.
+
+Recover `pending`/`unknown` previews using the same key or GET `/v1/projects/{project_id}/shots/{shot_id}/script-windows/previews/{preview_id}`. Recovery never calls Gemini twice. No automatic new-key retry. Preview uses no GPU or video credits; at most 3 new calls/minute/owner. See the API reference for timing and immutable native-helper compatibility.

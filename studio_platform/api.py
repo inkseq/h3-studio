@@ -1627,6 +1627,9 @@ def create_app(
     from .guided import register_routes as register_guided_routes
 
     register_guided_routes(app)
+    from .script_windows_service import register_routes as register_script_windows
+
+    register_script_windows(app, client=story_chat_client)
     from .story_chat_routes import register_story_chat_routes
 
     register_story_chat_routes(

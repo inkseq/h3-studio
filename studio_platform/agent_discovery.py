@@ -10,6 +10,7 @@ import zipfile
 
 from fastapi import HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
+from .script_windows import contract as script_windows_contract
 from .agent_connect import (
     CODE_TTL_SECONDS,
     RECOVERY_TTL_SECONDS,
@@ -241,6 +242,7 @@ def public_guide():
         "api_version": "v1",
         "description": "Create one video clip or edit a multi-chapter story; save the same prompt, separate references and controls visible on the website, plan generation and adopt results without replacing prior takes.",
         "video_quality": video_quality_contract(),
+        "script_windows": script_windows_contract(),
         "discovery_is_authorization": False,
         "quick_chat": agent_contract(),
         "storyboard_versions": storyboard_versions_contract(),

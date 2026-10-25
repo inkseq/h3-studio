@@ -515,6 +515,10 @@ class Guided:
                     )
                 elif action.get("op") in {"asset.attach", "artifact.adopt"}:
                     resolved[index] = self.resolve(principal, project_id, action)
+                elif action.get("op") == "shot.script_windows.confirm":
+                    resolved[index] = self.app.state.script_windows.get(
+                        principal, project_id, action["shot_id"], action["preview_id"]
+                    )
                 elif action.get("op") == "shot.configure_generation":
                     from .generation_draft import prepare_patch
                     from .quality_authoring import normalize
@@ -1031,6 +1035,14 @@ class Guided:
             if media_id:
                 entity_by_id(project, media_id, {"video", "image"})
             update_entity(shot, {"data": {"selectedAssetId": media_id or ""}})
+        elif op == "shot.script_windows.confirm":
+            from .script_windows import apply_confirmation
+
+            apply_confirmation(project, action["shot_id"], resolved)
+        elif op == "shot.script_windows.clear":
+            shot = entity_by_id(project, action["shot_id"], {"shot"})
+            shot["data"].pop("script_windows", None)
+            shot["version"] += 1
         elif op == "shot.trim":
             shot = entity_by_id(project, action.get("shot_id"), {"shot"})
             entity = entity_by_id(
