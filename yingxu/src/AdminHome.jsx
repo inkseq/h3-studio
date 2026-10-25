@@ -34,6 +34,7 @@ import {
   duration,
   jobRows,
   machineRows,
+  reviewRows,
   spendSummary,
   usd,
 } from './admin-overview-model.js';
@@ -295,6 +296,7 @@ const statusTone = (status) =>
 function Overview({ data, api }) {
   const { t, locale } = useI18n();
   const machines = useMemo(() => machineRows(data.workspace, data.at, locale), [data, locale]);
+  const review = useMemo(() => reviewRows(data.workspace), [data]);
   const jobs = useMemo(() => jobRows(data.jobs, data.at), [data]);
   const spend = spendSummary(data.settings);
   const items = findAlerts({ machines, jobs, spend, workspace: data.workspace });
@@ -353,6 +355,21 @@ function Overview({ data, api }) {
           </Button>
         </header>
         <Machines rows={machines} />
+        {review.length > 0 && (
+          <details className="ah-review">
+            <summary>{t('adminHome.reviewRecords', { count: review.length })}</summary>
+            <p className="muted">{t('adminHome.reviewHelp')}</p>
+            <ul>
+              {review.map((row) => (
+                <li key={row.id}>
+                  <b>{row.gpu}</b> · {row.owner} · {row.provider}
+                  {row.mode ? ' · ' + row.mode : ''}
+                  {row.code && <small className="muted"> · {row.code}</small>}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
       </section>
       <section className="ah-card">
         <header>
