@@ -852,12 +852,6 @@ class TaskQueue:
             }
             if moderation is not None:
                 result["moderation"] = moderation
-            if not refused:
-                from .result_collection import collect
-
-                result["project_collection"] = collect(
-                    repo, connection, job, artifact_ids, public_specs
-                )
             status = "failed" if refused else "succeeded"
             error_code = "content_moderation_refused" if refused else None
             if total_cost is not None:
