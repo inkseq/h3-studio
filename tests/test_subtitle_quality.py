@@ -99,20 +99,54 @@ class SubtitleQualityTests(unittest.TestCase):
         self.assertEqual(public_quality({}), evidence('not_checked'))
 
     def test_blas_limits_apply_only_to_child_and_preserve_parent_environment(self):
-        with patch.dict(os.environ, {'OPENBLAS_NUM_THREADS': '64', 'OMP_NUM_THREADS': '32',
-                                     'MKL_NUM_THREADS': '8'}):
+        with patch.dict(
+            os.environ,
+            {
+                'OPENBLAS_NUM_THREADS': '64',
+                'OMP_NUM_THREADS': '32',
+                'MKL_NUM_THREADS': '8',
+            },
+        ):
             before = dict(os.environ)
-            with patch('subprocess.run', return_value=subprocess.CompletedProcess(
-                    [], 0, json.dumps(evidence('checked')))) as run:
-                self.assertEqual(inspect_video('test.mp4', ['hash'], 3), evidence('checked'))
+            with patch(
+                'subprocess.run',
+                return_value=subprocess.CompletedProcess(
+                    [], 0, json.dumps(evidence('checked'))
+                ),
+            ) as run:
+                self.assertEqual(
+                    inspect_video('test.mp4', ['hash'], 3), evidence('checked')
+                )
                 env = run.call_args.kwargs['env']
-                for key in ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS'):
+                for key in (
+                    'OPENBLAS_NUM_THREADS',
+                    'OMP_NUM_THREADS',
+                    'MKL_NUM_THREADS',
+                ):
                     self.assertEqual(env[key], '1')
                 self.assertEqual(dict(os.environ), before)
-                self.assertEqual({k: v for k, v in env.items() if k not in
-                    {'OPENBLAS_NUM_THREADS','OMP_NUM_THREADS','MKL_NUM_THREADS'}},
-                    {k: v for k, v in before.items() if k not in
-                    {'OPENBLAS_NUM_THREADS','OMP_NUM_THREADS','MKL_NUM_THREADS'}})
+                self.assertEqual(
+                    {
+                        k: v
+                        for k, v in env.items()
+                        if k
+                        not in {
+                            'OPENBLAS_NUM_THREADS',
+                            'OMP_NUM_THREADS',
+                            'MKL_NUM_THREADS',
+                        }
+                    },
+                    {
+                        k: v
+                        for k, v in before.items()
+                        if k
+                        not in {
+                            'OPENBLAS_NUM_THREADS',
+                            'OMP_NUM_THREADS',
+                            'MKL_NUM_THREADS',
+                        }
+                    },
+                )
 
     def test_child_timeout_failure_and_absent_dependencies_are_advisory(self):
         with patch('subprocess.run') as run:
