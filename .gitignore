@@ -800,6 +800,7 @@ inventory.json
 
 # Shared bounded multi-track audio contract (#600).
 !studio_platform/render_limits.py
+!tests/test_default_profile_maintenance.py
 # #597 confirmed narrative windows
 !studio_platform/script_window_timing.py
 !studio_platform/script_windows.py

@@ -40,6 +40,10 @@ LEGACY_HELPER_PAIRS = {commit: (
         "07da40322559ee5a12829be6884c541c401d852a")}
 # Exact retained current/previous helper bytes before the staging upgrade.
 RETAINED_DSTACK_HELPER_PAIRS = {
+    'feeb1c1e8c34921546908f7a9f6a9dd67d5c0f4d': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    '9f8736ba036108dd078c983c3301fc8c3996a41e': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    '1c659727d5490cba1480979f95f3be7d0227815d': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    '5d9780430ae4edaf72d3ddd1613d8e440648b051': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
     # Exact original 7a candidate being reconciled through its normal deployer.
     '7a24b5a99df4546f775224b83a890aeb53897734': ('794921cab61dd3455aeb6cddf1ab1ec636d6b1251e5568946f934a275ce6dcf5', 'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b'),
     # Exact source of the queued #516 platform; retained runtime must still match.
@@ -85,6 +89,24 @@ RETAINED_DSTACK_HELPER_PAIRS = {
     'd67a76b70777874e74623f480d7ffbea9e3d3b88': ('d0d8eeff6a9d1d52d6357806382b17f7c3a6f0158776e7d4941ca1d30543c8eb', 'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b'),
     'c08ea6d4595763195a3c9e15d428f93cf90e16c0': ('d0d8eeff6a9d1d52d6357806382b17f7c3a6f0158776e7d4941ca1d30543c8eb', 'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b'),
     'f6c1972b904d6e0a4b9acccc405efb0d706c239e': ('dde95072245c0d75714cfbc888e679d294d24cbd45952240e8382298fbee70c6', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    # C0: observed production/staging current, rollback and pending (SSM20664d1c);
+    # plus exact queued main candidates. These entries do not claim acceptance.
+    'd737c8a36d4ab5f892189972487a20e53f68fd2d': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    '72aa9e8c68dbb9c7a1e346a4f60d72053b1dfd02': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    'e58fa13a42e0fed4018cbd0c62c5561c0e52cab1': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    '8e504f2a4d63959bd260eecbd4c79c58f01054b1': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    '8b7ee574c0f87e26d15c351036452fb503ef94e2': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    '6e3b0fec2b74b300e45100574de935642b52a4fc': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    '6241f0c9f3a4e3c91e4338d3c0f00981a533ab95': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    # Exact main integrations through the R2 revert; no acceptance inferred.
+    '448556894ccf44d9eb643900f9f6bc66626245ef': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    'e9ddebb0b4315948b9629b90d3ebed82559fafc5': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    '7f3312d53e49b5882a2157f36ed4c22995ce1c6f': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    '96a56a83c7ed779afdaa8ed59d599f94693af386': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    '7a76ebc22b2129bcca520dd127721d1a19a819fc': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    'e2980bad91ddf8c419f86f388eb976daaaa6de92': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    '06e38846ffd03b8729df1e3d64f27dea4228c401': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    '8b7a746c88dfb90bbfd01841044cd97ce3b3df58': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
 }
 LEGACY_HELPER_PAIRS.update(RETAINED_DSTACK_HELPER_PAIRS)
 # Closed stock tuples: current build and the exact retained rollback only.
@@ -139,6 +161,8 @@ LEGACY_MARKERS = ("operator-capacity/active.json", "gpu-acceptance/active.json",
 STORYBOARD_FLAG = "SIXNINE_STORYBOARD_OWNERS"
 STORYBOARD_RECEIPT = "storyboard-maintenance.json"
 STORYBOARD_SERVICES = ("app", *SHARED, "hatchet-db", "db")
+DEFAULT_PROFILE_FLAG = "SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID"
+DEFAULT_PROFILE_RECEIPT = "default-profile-maintenance.json"
 
 
 def atomic(path, document):
@@ -896,15 +920,15 @@ def activate(root, commit):
         apply_locked(root, commit)
 
 
-def storyboard_receipt(root):
-    path = root / "migration" / STORYBOARD_RECEIPT
+def storyboard_receipt(root, *, filename=STORYBOARD_RECEIPT, purpose="storyboard-owner-flag-only"):
+    path = root / "migration" / filename
     if not path.exists() and not path.is_symlink():
         return None
     release.regular(path, root_owned=True, maximum=32768)
     value = json.loads(path.read_text())
     release.require(type(value) is dict and set(value) == {"version", "purpose", "commit", "operation_id",
-        "status", "before", "after", "runtime_before"} and type(value["version"]) is int and value["version"] == 1
-        and value["purpose"] == "storyboard-owner-flag-only" and type(value.get("commit")) is str
+        "status", "before", "after", "runtime_before"} | ({"profiles_sha256", "db_restarts"} if purpose == "default-profile-only" else set()) and type(value["version"]) is int and value["version"] == 1
+        and value["purpose"] == purpose and type(value.get("commit")) is str
         and release.SHA.fullmatch(value["commit"]) and type(value.get("operation_id")) is str
         and release.DIGEST.fullmatch(value["operation_id"])
         and value["status"] in {"pending", "failed", "completed", "restored"}
@@ -917,6 +941,17 @@ def storyboard_receipt(root):
             and type(item["image_id"]) is str and re.fullmatch(r"sha256:[0-9a-f]{64}", item["image_id"])
             and all(type(item[key]) is str and release.DIGEST.fullmatch(item[key])
                 for key in ("environment_sha256", "mounts_sha256")), "migration_storyboard_receipt_invalid")
+    if purpose == "default-profile-only":
+        release.require(type(value['profiles_sha256']) is str and release.DIGEST.fullmatch(value['profiles_sha256']),
+                        'migration_default_profile_receipt_invalid')
+        restarts = value["db_restarts"]
+        release.require(type(restarts) is list and len(restarts) <= 8, "migration_default_profile_receipt_invalid")
+        for item in restarts:
+            release.require(type(item) is dict and set(item) == {"stop_time_us", "terminated", "connections"}
+                and type(item["stop_time_us"]) is str and re.fullmatch(r"[0-9]{15,20}", item["stop_time_us"])
+                and (item["terminated"] is None or type(item["terminated"]) is int and 0 <= item["terminated"] <= 256)
+                and (item["connections"] is None or type(item["connections"]) is dict),
+                "migration_default_profile_receipt_invalid")
     return value
 
 
@@ -924,6 +959,9 @@ def storyboard_maintenance_fence(root):
     value = storyboard_receipt(root)
     release.require(not value or value["status"] not in {"pending", "failed"},
         "migration_storyboard_maintenance_pending_restore_required")
+    value = storyboard_receipt(root, filename=DEFAULT_PROFILE_RECEIPT, purpose="default-profile-only")
+    release.require(not value or value["status"] not in {"pending", "failed"},
+        "migration_default_profile_pending_restore_required")
 
 
 def _storyboard_context(root, commit, config):
@@ -964,7 +1002,7 @@ def _storyboard_context(root, commit, config):
     return base, directory, environment, app, dispatch, checker
 
 
-def _storyboard_runtime(base, directory, environment):
+def _storyboard_runtime(base, directory, environment, *, flag=STORYBOARD_FLAG):
     """Nonsecret signatures; compare unchanged runtime settings and persistent mounts."""
     result = {}
     migration = directory_manifest(directory)
@@ -984,11 +1022,12 @@ def _storyboard_runtime(base, directory, environment):
             "migration_storyboard_runtime_environment_invalid")
         actual = dict(item.split("=", 1) for item in entries)
         release.require(len(actual) == len(entries), "migration_storyboard_runtime_environment_invalid")
-        if name == "app":
-            release.require(actual.pop(STORYBOARD_FLAG, "") == environment.get(STORYBOARD_FLAG, ""),
+        flag_services = {"app", "dispatch", "controller"} if flag == DEFAULT_PROFILE_FLAG else {"app"}
+        if name in flag_services:
+            release.require(actual.pop(flag, "") == environment.get(flag, ""),
                 "migration_storyboard_runtime_flag_mismatch")
         else:
-            release.require(STORYBOARD_FLAG not in actual, "migration_storyboard_worker_environment")
+            release.require(flag not in actual, "migration_storyboard_worker_environment")
         mounts = [{key: item.get(key) for key in ("Type", "Source", "Destination", "Name", "RW")}
             for item in value.get("Mounts", [])]
         result[name] = {"image_id": value.get("Image"),
@@ -1034,8 +1073,8 @@ def _storyboard_bytes(path, data):
         Path(temporary).unlink(missing_ok=True)
 
 
-def _storyboard_backup(root, receipt):
-    directory = root / "migration" / "storyboard-maintenance" / receipt["operation_id"]
+def _storyboard_backup(root, receipt, *, folder="storyboard-maintenance", flag=STORYBOARD_FLAG):
+    directory = root / "migration" / folder / receipt["operation_id"]
     protected_directory(directory.parent); protected_directory(directory)
     saved = {}
     for phase in ("before", "after"):
@@ -1048,7 +1087,7 @@ def _storyboard_backup(root, receipt):
     old = settings_document(json.loads(saved["before", "paths"]))
     new = settings_document(json.loads(saved["after", "paths"]))
     old_active, new_active = (json.loads(saved[phase, "active"]) for phase in ("before", "after"))
-    expected = {**old, "environment": {**old["environment"], STORYBOARD_FLAG: new["environment"].get(STORYBOARD_FLAG, "")}}
+    expected = {**old, "environment": {**old["environment"], flag: new["environment"].get(flag, "")}}
     release.require(new == expected and old_active.get("active") is True and old_active.get("version") == 1
         and old_active.get("current") == receipt["commit"] and old_active.get("pending") is None
         and old_active.get("paths_sha256") == receipt["before"]["paths"]
@@ -1163,6 +1202,293 @@ def storyboard_maintenance(root, commit, *, owners=None, paths_sha256=None, acti
         return storyboard_owners_locked(root, commit, owners, paths_sha256, active_sha256)
 
 
+
+def _default_idle(context):
+    # Counts every nonterminal state, including queued/creation_unknown work.
+    output = compose(*context[:3], "exec", "-T", "--user", "postgres", "db",
+        "psql", "-X", "-U", "postgres", "-d", "sixnine", "-At", "-v", "ON_ERROR_STOP=1",
+        "-c", "BEGIN READ ONLY; SELECT count(*) FROM platform_jobs WHERE status NOT IN ('succeeded','failed','cancelled'); COMMIT;", timeout=30)
+    release.require(output.decode().splitlines() == ["BEGIN", "0", "COMMIT"],
+                    "migration_default_profile_jobs_not_idle")
+
+
+def _default_profiles_digest(context):
+    path = Path(context[2]["SIXNINE_EXECUTION_PROFILES_SECRET_FILE"])
+    release.regular(path, root_owned=True, maximum=1048576)
+    return release.checksum(path)
+
+
+def _default_policy_probe(context, profile, expected_default):
+    # The approved app validates its own packaged policies. Never import incoming
+    # artifact code in the root helper or expose configuration/credentials.
+    code = """import hashlib,json,os,pathlib,sys,time
+from studio_platform.execution_profiles import read_profiles
+from studio_platform.execution_policy import authority_current
+path=pathlib.Path(os.environ['SIXNINE_EXECUTION_PROFILES_FILE'])
+before=hashlib.sha256(path.read_bytes()).hexdigest()
+policies=read_profiles(path)
+assert os.environ['SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID']==sys.argv[2]
+for recipe in ('h3-base-fl2va-v1','h3-base-ref2va-v1'):
+ p=policies.get((sys.argv[1],recipe))
+ assert p and p['enabled'] and p['backend']=='wangp-worker'
+ assert authority_current(p,time.time(),p['reservation']['expected_runtime_s'])
+assert hashlib.sha256(path.read_bytes()).hexdigest()==before
+print(json.dumps({'profiles_sha256':before,'modes':['FL','REF']}))
+"""
+    raw = compose(*context[:3], "exec", "-T", "app", "python", "-B", "-c", code,
+                  profile, expected_default, timeout=30)
+    value = json.loads(raw)
+    digest = _default_profiles_digest(context)
+    release.require(value == {"profiles_sha256": digest, "modes": ["FL", "REF"]},
+                    "migration_default_profile_policies_unavailable")
+    return digest
+
+
+
+def _default_db_query(context, sql):
+    raw = compose(*context[:3], "exec", "-T", "--user", "postgres", "db",
+        "env", "PGOPTIONS=-c statement_timeout=20000 -c lock_timeout=3000",
+        "psql", "-X", "-U", "postgres", "-d", "sixnine", "-At", "-v", "ON_ERROR_STOP=1",
+        "-c", sql, timeout=30)
+    return json.loads(raw)
+
+
+def _default_record_stop(context, root, receipt):
+    # Use the DB clock, not a host/DB clock assumption. Persist before stopping.
+    stamp = _default_db_query(context,
+        "SELECT (floor(extract(epoch FROM clock_timestamp()) * 1000000)::bigint)::text;")
+    stamp = str(stamp)
+    release.require(re.fullmatch(r"[0-9]{15,20}", stamp) and len(receipt["db_restarts"]) < 8,
+                    "migration_default_profile_stop_time_invalid")
+    receipt["db_restarts"].append({"stop_time_us": stamp, "terminated": None, "connections": None})
+    atomic(root / "migration" / DEFAULT_PROFILE_RECEIPT, receipt)
+
+
+def _default_db_cleanup(context, root, receipt):
+    item = receipt["db_restarts"][-1]
+    stamp = item["stop_time_us"]
+    release.require(type(stamp) is str and re.fullmatch(r"[0-9]{15,20}", stamp),
+                    "migration_default_profile_stop_time_invalid")
+    # No query text, users or credentials are returned. Never terminate active or
+    # idle-in-transaction sessions, other roles, or sessions from new processes.
+    sql = f"""WITH candidates AS MATERIALIZED (
+ SELECT pid, backend_start FROM pg_stat_activity
+ WHERE usename IN ('sixnine_app','dstack_control') AND state='idle'
+ AND backend_start < to_timestamp({stamp}::numeric / 1000000)
+ AND pid <> pg_backend_pid() ORDER BY backend_start, pid LIMIT 257
+), ended AS MATERIALIZED (
+ SELECT pg_terminate_backend(a.pid) AS ok FROM candidates c
+ JOIN pg_stat_activity a ON a.pid=c.pid AND a.backend_start=c.backend_start
+ WHERE a.state='idle' AND a.usename IN ('sixnine_app','dstack_control')
+ AND (SELECT count(*) FROM candidates) <= 256
+) SELECT json_build_object('bounded',(SELECT count(*) FROM candidates)<=256,
+ 'terminated',(SELECT count(*) FROM ended WHERE ok));"""
+    result = _default_db_query(context, sql)
+    release.require(type(result) is dict and result.get("bounded") is True
+        and type(result.get("terminated")) is int and 0 <= result["terminated"] <= 256,
+        "migration_default_profile_db_cleanup_unproven")
+    item["terminated"] = result["terminated"]
+    atomic(root / "migration" / DEFAULT_PROFILE_RECEIPT, receipt)
+
+
+def _default_db_connected(context, root, receipt):
+    stamp = receipt["db_restarts"][-1]["stop_time_us"]
+    sql = f"""SELECT json_object_agg(rolname, json_build_object(
+ 'total', (SELECT count(*) FROM pg_stat_activity WHERE usename=rolname),
+ 'fresh', (SELECT count(*) FROM pg_stat_activity WHERE usename=rolname
+           AND backend_start >= to_timestamp({stamp}::numeric / 1000000)),
+ 'limit', CASE WHEN rolconnlimit > 0 THEN rolconnlimit
+ ELSE current_setting('max_connections')::int - current_setting('superuser_reserved_connections')::int END))
+ FROM pg_roles WHERE rolname IN ('sixnine_app','dstack_control');"""
+    result = _default_db_query(context, sql)
+    release.require(type(result) is dict and set(result) == {"sixnine_app", "dstack_control"},
+                    "migration_default_profile_db_connections_unproven")
+    for counts in result.values():
+        release.require(type(counts) is dict and set(counts) == {"total", "fresh", "limit"}
+            and all(type(v) is int for v in counts.values())
+            and 0 < counts["fresh"] <= counts["total"] < counts["limit"],
+            "migration_default_profile_db_connections_unproven")
+    receipt["db_restarts"][-1]["connections"] = result
+    atomic(root / "migration" / DEFAULT_PROFILE_RECEIPT, receipt)
+
+
+def _default_start(context, config, runtime, root, receipt):
+    base, directory, environment, app, dispatch, checker = context
+    shared = shared_services(directory_manifest(directory))
+    # The previous app namespace is already stopped. Recreate it and wait for
+    # health before reconnecting dstack/controller; never mutate provider nodes.
+    compose(base, directory, environment, "up", "-d", "--no-deps", "--force-recreate", "app", timeout=300)
+    # The new app has started but may be waiting for a free role slot. Reap only
+    # pre-stop idle sessions before waiting for readiness; then prove new clients.
+    _default_db_cleanup(context, root, receipt)
+    release.wait_ready(base, environment)
+    compose(base, directory, environment, "up", "-d", "--no-deps", "--force-recreate", *shared, timeout=300)
+    deadline = time.monotonic() + 180
+    while True:
+        try:
+            verify_services(base, directory, environment, app, dispatch)
+            release.require(_storyboard_runtime(base, directory, environment, flag=DEFAULT_PROFILE_FLAG) == runtime,
+                            "migration_default_profile_runtime_changed")
+            checker.check(base / "compose.yaml", directory / "overlay.yaml", environment=environment,
+                          host_memory_mib=config["host_memory_mib"], check_inputs=True, probe=True)
+            release.wait_proxy_stable(base, environment)
+            _default_db_connected(context, root, receipt)
+            return
+        except (release.ReleaseError, ValueError):
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(3)
+
+
+def _default_stop(context):
+    _default_idle(context)
+    compose(*context[:3], "stop", *shared_services(directory_manifest(context[1])), "app", timeout=240)
+
+
+def default_profile_receipt(root):
+    return storyboard_receipt(root, filename=DEFAULT_PROFILE_RECEIPT, purpose="default-profile-only")
+
+
+def _default_restore(root, commit, receipt, *, stopped_unchanged=False):
+    receipt["status"] = "pending"
+    other = storyboard_receipt(root)
+    release.require(not other or other['status'] not in {'pending','failed'},
+                    'migration_storyboard_maintenance_pending_restore_required')
+    saved, old, _ = _storyboard_backup(root, receipt, folder="default-profile-maintenance", flag=DEFAULT_PROFILE_FLAG)
+    paths = {name: root / "migration" / (name + ".json") for name in ("paths", "active")}
+    current = {name: release.checksum(path) for name, path in paths.items()}
+    release.require(all(current[name] in {receipt[phase][name] for phase in ("before","after")}
+                        for name in paths), "migration_default_profile_restore_unrelated_change")
+    context = _storyboard_context(root, commit, old)
+    guard_legacy(root, commit=commit, active=json.loads(saved["before", "active"]))
+    release.require(_default_profiles_digest(context) == receipt["profiles_sha256"],
+                    "migration_default_profile_policy_changed")
+    if not stopped_unchanged:
+        _default_record_stop(context, root, receipt)
+        _default_stop(context)
+        _default_idle(context)
+    else:
+        # A job arrived between precheck and admission stop. No configuration
+        # changed; resume the identical old runtime rather than strand that job.
+        release.require(current == receipt["before"], "migration_default_profile_restore_unrelated_change")
+    for name, path in paths.items():
+        release.require(release.checksum(path) == current[name], "migration_default_profile_restore_unrelated_change")
+        _storyboard_bytes(path, saved["before", name])
+    _default_start(context, old, receipt["runtime_before"], root, receipt)
+    _default_policy_probe(context, old["environment"][DEFAULT_PROFILE_FLAG], old["environment"][DEFAULT_PROFILE_FLAG])
+    release.require({name:release.checksum(path) for name,path in paths.items()} == receipt["before"],
+                    "migration_default_profile_restore_readback_failed")
+    atomic(root / "migration" / DEFAULT_PROFILE_RECEIPT, {**receipt, "status":"restored"})
+    return {"state":"approved_default_profile_restored", "commit":commit,
+            "receipt_sha256":release.checksum(root / "migration" / DEFAULT_PROFILE_RECEIPT)}
+
+
+def default_profile_only_locked(root, commit, old_profile, new_profile, paths_sha256, active_sha256):
+    release.require(type(commit) is str and release.SHA.fullmatch(commit)
+        and all(type(v) is str and release.DIGEST.fullmatch(v) for v in (paths_sha256,active_sha256))
+        and all(type(v) is str and re.fullmatch(r"[A-Za-z0-9_.-]{1,200}",v) for v in (old_profile,new_profile))
+        and old_profile != new_profile, "migration_default_profile_arguments_invalid")
+    storyboard_maintenance_fence(root)
+    config, digest = settings(root)
+    paths, active_path = (root / "migration" / (name + ".json") for name in ("paths","active"))
+    active = release._protected_json(active_path, maximum=16384)
+    release.require(digest == paths_sha256 and release.checksum(active_path) == active_sha256
+        and active.get("active") is True and active.get("version") == 1 and active.get("current") == commit
+        and active.get("pending") is None and active.get("paths_sha256") == digest
+        and config["environment"][DEFAULT_PROFILE_FLAG] == old_profile,
+        "migration_default_profile_original_binding_changed")
+    guard_legacy(root, commit=commit, active=active)
+    context = _storyboard_context(root, commit, config)
+    verify_services(*context[:3], context[3], context[4])
+    runtime = _storyboard_runtime(*context[:3], flag=DEFAULT_PROFILE_FLAG)
+    _default_idle(context)
+    policies_digest = _default_policy_probe(context, new_profile, old_profile)
+    candidate = settings_document({**config,"environment":{**config["environment"],DEFAULT_PROFILE_FLAG:new_profile}})
+    candidate_environment = {**context[2], DEFAULT_PROFILE_FLAG:new_profile}
+    default_profile(context[1], candidate_environment)
+    candidate_context = (*context[:2],candidate_environment,*context[3:])
+    context[5].check(context[0]/"compose.yaml",context[1]/"overlay.yaml",environment=candidate_environment,
+                     host_memory_mib=candidate["host_memory_mib"],check_inputs=True)
+    directory = root / "migration" / "default-profile-maintenance"
+    if not directory.exists():
+        directory.mkdir(mode=0o700); release.sync_directory(directory.parent)
+    protected_directory(directory)
+    operation = hashlib.sha256((commit+paths_sha256+active_sha256+new_profile+str(time.time_ns())).encode()).hexdigest()
+    backup = directory / operation; backup.mkdir(mode=0o700)
+    after_paths = json.dumps(candidate,sort_keys=True).encode()
+    after_digest = hashlib.sha256(after_paths).hexdigest()
+    saved = {("before","paths"):paths.read_bytes(),("before","active"):active_path.read_bytes(),
+             ("after","paths"):after_paths,
+             ("after","active"):json.dumps({**active,"paths_sha256":after_digest},sort_keys=True).encode()}
+    receipt = {"version":1,"purpose":"default-profile-only","commit":commit,"operation_id":operation,
+        "status":"pending","runtime_before":runtime,"profiles_sha256":policies_digest,"db_restarts":[],
+        **{phase:{name:hashlib.sha256(saved[phase,name]).hexdigest() for name in ("paths","active")}
+           for phase in ("before","after")}}
+    release.require(receipt["before"]=={"paths":paths_sha256,"active":active_sha256},
+                    "migration_default_profile_original_binding_changed")
+    for (phase,name),data in saved.items():
+        with (backup/(name+"."+phase+".json")).open("xb") as output:
+            os.fchmod(output.fileno(),0o600); output.write(data); output.flush(); os.fsync(output.fileno())
+    release.sync_directory(backup); release.sync_directory(directory)
+    receipt_path = root / "migration" / DEFAULT_PROFILE_RECEIPT
+    atomic(receipt_path,receipt)
+    changed = False
+    stopped = False
+    try:
+        _default_record_stop(context, root, receipt)
+        _default_stop(context)
+        stopped = True
+        _default_idle(context)  # admission is now stopped: close the TOCTOU gap
+        release.require(_default_profiles_digest(context)==policies_digest,
+                        "migration_default_profile_policy_changed")
+        release.require(release.checksum(paths)==paths_sha256 and release.checksum(active_path)==active_sha256,
+                        "migration_default_profile_original_binding_changed")
+        changed = True
+        _storyboard_bytes(paths,saved["after","paths"])
+        _storyboard_bytes(active_path,saved["after","active"])
+        _default_start(candidate_context,candidate,runtime,root,receipt)
+        release.require(_default_policy_probe(candidate_context,new_profile,new_profile)==policies_digest,
+                        "migration_default_profile_policy_changed")
+        release.require(settings(root)[1]==after_digest and release.checksum(active_path)==receipt["after"]["active"],
+                        "migration_default_profile_commit_readback_failed")
+        atomic(receipt_path,{**receipt,"status":"completed"})
+    except Exception:
+        atomic(receipt_path,{**receipt,"status":"failed"})
+        try:
+            _default_restore(root,commit,receipt,stopped_unchanged=stopped and not changed)
+        except Exception:
+            atomic(receipt_path,{**receipt,"status":"failed"})
+            raise release.ReleaseError("migration_default_profile_failed_reconciliation_required") from None
+        raise release.ReleaseError("migration_default_profile_failed_restored") from None
+    return {"state":"approved_default_profile_updated","commit":commit,"old_profile":old_profile,
+            "new_profile":new_profile,"paths_sha256":after_digest,"active_sha256":receipt["after"]["active"],
+            "receipt_sha256":release.checksum(receipt_path)}
+
+
+def default_profile_maintenance(root, commit, *, old_profile=None, new_profile=None,
+                                paths_sha256=None, active_sha256=None, receipt_sha256=None):
+    release.check_host(root)
+    import fcntl
+    with (root/"release.lock").open("a") as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+        if receipt_sha256 is not None:
+            release.require(type(commit) is str and release.SHA.fullmatch(commit)
+                and type(receipt_sha256) is str and release.DIGEST.fullmatch(receipt_sha256),
+                "migration_default_profile_arguments_invalid")
+            receipt=default_profile_receipt(root)
+            release.require(receipt and receipt["commit"]==commit and receipt["status"] in {"pending","failed","completed"}
+                and release.checksum(root/"migration"/DEFAULT_PROFILE_RECEIPT)==receipt_sha256,
+                "migration_default_profile_restore_binding_changed")
+            path = root/"migration"/DEFAULT_PROFILE_RECEIPT
+            atomic(path,{**receipt,"status":"pending"})
+            try:
+                return _default_restore(root,commit,receipt)
+            except Exception:
+                atomic(path,{**receipt,"status":"failed"})
+                raise
+        return default_profile_only_locked(root,commit,old_profile,new_profile,paths_sha256,active_sha256)
+
+
 def main(argv=None):
     import sys
     argv = sys.argv[1:] if argv is None else argv
@@ -1175,6 +1501,11 @@ def main(argv=None):
                 paths_sha256=argv[3], active_sha256=argv[4])
         elif len(argv) == 3 and argv[0] == "restore-storyboard-owners":
             result = storyboard_maintenance(release.ROOT, argv[1], receipt_sha256=argv[2])
+        elif len(argv) == 6 and argv[0] == "default-profile-only":
+            result = default_profile_maintenance(release.ROOT, argv[1], old_profile=argv[2],
+                new_profile=argv[3], paths_sha256=argv[4], active_sha256=argv[5])
+        elif len(argv) == 3 and argv[0] == "restore-default-profile":
+            result = default_profile_maintenance(release.ROOT, argv[1], receipt_sha256=argv[2])
         else:
             raise release.ReleaseError("migration_maintenance_arguments_invalid")
         print(json.dumps(result))
