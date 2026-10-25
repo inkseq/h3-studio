@@ -168,12 +168,14 @@ def main():
         print('{"state":"unavailable"}', flush=True)
         return 1
     finally:
-        if client is not None:
-            client.close(timeout=1)
-        if telemetry is not None:
-            telemetry.close()
-        if repo is not None:
-            repo.close()
+        for resource in (client, telemetry, repo):
+            if resource is not None:
+                try:
+                    resource.close(
+                        timeout=1
+                    ) if resource is client else resource.close()
+                except Exception:
+                    pass  # Diagnostics never expose private connection errors.
 
 
 if __name__ == "__main__":
