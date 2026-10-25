@@ -648,7 +648,7 @@ def create_app(
             and request.method == "GET"
             and response.status_code == 307
             and getattr(request.scope.get("route"), "path", None)
-            == "/v1/artifacts/{artifact_id}/content"
+            in {"/v1/artifacts/{artifact_id}/content", "/v1/assets/{asset_id}/content"}
             and type(video_max_age) is int
             and 0 <= video_max_age <= VIDEO_SIGNING_BUCKET_SECONDS
         ):
@@ -1024,6 +1024,7 @@ def create_app(
         download=False,
         immutable_video=False,
         immutable_rendition=False,
+        immutable_media=False,
     ):
         headers = {
             "Accept-Ranges": "bytes",
@@ -1038,17 +1039,26 @@ def create_app(
                 headers["Content-Length"] = str(info.size_bytes)
                 return StreamingResponse(iter(()), media_type=mime, headers=headers)
             options = {"download_filename": filename} if download else {}
+            url = None
             if (
-                (immutable_video or immutable_rendition)
+                (immutable_video or immutable_rendition or immutable_media)
                 and isinstance(storage, S3ObjectStore)
                 and storage.config.provider == "r2"
             ):
                 signer = (
                     storage.presign_immutable_rendition
                     if immutable_rendition
+                    else storage.presign_immutable_media
+                    if immutable_media
                     else storage.presign_immutable_video
                 )
-                url = signer(key, content_type=mime, **options)
+                try:
+                    url = signer(key, content_type=mime, **options)
+                except StorageError:
+                    if not immutable_media:
+                        raise
+                    # Without the bucketed signer an upload keeps its short presign.
+            if url is not None:
                 now = time.time()
                 # Use the issued URL's bucket, including a rollover during signing.
                 bucket_end = (
@@ -1056,7 +1066,7 @@ def create_app(
                     - VIDEO_SIGNING_VALIDITY_SECONDS
                     + VIDEO_SIGNING_BUCKET_SECONDS
                 )
-                if immutable_video:
+                if immutable_video or immutable_media:
                     request.scope[ARTIFACT_VIDEO_CACHE_SCOPE_KEY] = max(
                         0, min(int(url.expires_at - now) - 600, int(bucket_end - now))
                     )
@@ -1154,12 +1164,18 @@ def create_app(
                 download=download,
                 immutable_rendition=True,
             )
+        original = value["original"]
         return object_content(
-            value["original"]["key"],
+            original["key"],
             value["mime"],
             value["file_name"],
             request,
             download=download,
+            # Ready uploads are hash-verified and never rewritten in place.
+            immutable_media=isinstance(original.get("sha256"), str)
+            and re.fullmatch(r"[0-9a-f]{64}", original["sha256"]) is not None
+            and isinstance(value["mime"], str)
+            and value["mime"].split("/")[0] in {"image", "video", "audio"},
         )
 
     @app.post("/v1/assets/{asset_id}/derivatives", status_code=201)
@@ -1528,13 +1544,15 @@ def create_app(
         )
         if isinstance(filename, str) and filename.lower().startswith("sixnine-"):
             filename = "inkseq-" + filename[len("sixnine-") :]
-        immutable_video = (
-            value.get("kind") == "video"
-            and value.get("mime", value.get("content_type")) == "video/mp4"
-            and isinstance(value.get("sha256"), str)
+        mime = value.get("mime", value.get("content_type"))
+        verified = (
+            isinstance(value.get("sha256"), str)
             and re.fullmatch(r"[0-9a-f]{64}", value["sha256"]) is not None
             and type(value.get("size_bytes")) is int
             and value["size_bytes"] > 0
+        )
+        immutable_video = (
+            verified and value.get("kind") == "video" and mime == "video/mp4"
         )
         return object_content(
             value["object_key"],
@@ -1543,6 +1561,10 @@ def create_app(
             request,
             download=download,
             immutable_video=immutable_video,
+            immutable_media=not immutable_video
+            and verified
+            and isinstance(mime, str)
+            and mime.split("/")[0] in {"image", "audio"},
         )
 
     # Helpers for the batch/worker integration without exposing internal state to clients.

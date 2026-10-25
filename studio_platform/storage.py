@@ -773,6 +773,22 @@ class S3ObjectStore:
             key, content_type=content_type, download_filename=download_filename
         )
 
+    def presign_immutable_media(
+        self, key: str, *, content_type: str, download_filename=None
+    ) -> SecretURL:
+        """Owner-authorized, hash-verified media bytes (uploads and result
+        images/audio). The bucketed URL lets the browser reuse its copy instead
+        of downloading the same object again on every view."""
+        if (
+            not isinstance(content_type, str)
+            or not _MIME.fullmatch(content_type)
+            or content_type.split("/")[0] not in {"image", "video", "audio"}
+        ):
+            raise StorageError("Immutable media caching requires image, video or audio")
+        return self._presign_immutable_media(
+            key, content_type=content_type, download_filename=download_filename
+        )
+
     def _presign_immutable_media(self, key, *, content_type, download_filename):
         validate_key(key)
         if self.config.provider != "r2":

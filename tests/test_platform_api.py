@@ -1567,12 +1567,17 @@ class NativeMediaAccountTests(unittest.TestCase):
                     "response-content-disposition"
                 ][0],
             )
-            # HEAD and owner-uploaded assets retain their existing no-store policy.
+            # HEAD keeps no-store. A hash-verified upload now reuses the same
+            # bucketed private redirect so the browser keeps its copy.
             self.assertEqual(remote.head(paths[1]).headers["cache-control"], "no-store")
             asset = remote.get(paths[0])
-            self.assertEqual(asset.headers["cache-control"], "no-store")
-            self.assertEqual(fake.calls[-1][1]["ExpiresIn"], 300)
-            self.assertNotIn("ResponseCacheControl", fake.calls[-1][1]["Params"])
+            self.assertRegex(asset.headers["cache-control"], r"^private, max-age=\d+$")
+            self.assertEqual(
+                parse_qs(urlsplit(asset.headers["location"]).query)[
+                    "response-cache-control"
+                ],
+                ["private, max-age=86400, immutable"],
+            )
             self.assertEqual(
                 remote.get("/v1/projects/story-one").headers["cache-control"],
                 "no-store",
