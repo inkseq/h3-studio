@@ -37,9 +37,33 @@ STEP_SKIPPING = ('none', 'spectrum', 'first_block')
 WHOLE_WINDOW = 362
 
 
-# H3 at guidance 1 ignores negative prompts, so the turbo profiles state this in
-# the prompt itself: TaoMate tests burned dialogue in as subtitles otherwise.
-NO_SCREEN_TEXT = '\n\nNo on-screen text, no subtitles, no captions.'
+# H3 at guidance 1 ignores negative prompts. TaoMate tests (rounds 9-10) burned
+# dialogue in as subtitles on variety-show-like scenes; framing the shot as film
+# and asking for a clean frame cut that from 3/3 to 1/3. Single newlines only: a
+# blank line would start a new prompt under WanGP's PG/PW prompt modes.
+FILM_FRAME = 'A cinematic film shot, 35mm movie look, shallow depth of field. '
+CLEAN_FRAME = ' Clean frame: no subtitles, captions or any on-screen text.'
+_DESCRIPTION = 'integrated_multimodal_description:'
+_SOUNDSCAPE = '\noverall_soundscape:'
+
+
+def _description_start(prompt):
+    at = prompt.find(_DESCRIPTION)
+    if at < 0:
+        return 0
+    at += len(_DESCRIPTION)
+    while at < len(prompt) and prompt[at] in ' \n':
+        at += 1
+    return at
+
+
+def turbo_prompt(prompt):
+    """Wrap the author's prompt: film framing first, clean-frame request last."""
+    start = _description_start(prompt)
+    framed = prompt[:start] + FILM_FRAME + prompt[start:]
+    end = framed.find(_SOUNDSCAPE, start)
+    end = len(framed) if end < 0 else end
+    return framed[:end] + CLEAN_FRAME + framed[end:]
 
 
 def acceleration(profile_id):
@@ -790,7 +814,8 @@ def _settings(value, output_spec, handles, profile_id):
         'config': runtime['task_config'],
         'image_mode': 0,
         'prompt': value['prompt']
-        + ('' if acceleration(profile_id) is None else NO_SCREEN_TEXT),
+        if acceleration(profile_id) is None
+        else turbo_prompt(value['prompt']),
         'negative_prompt': '',
         'alt_prompt': '',
         'resolution': f"{output_spec['width']}x{output_spec['height']}",
@@ -992,9 +1017,21 @@ def _authored_prompt(prompt, profile_id):
     """Recover the author's prompt; a turbo profile must carry its suffix."""
     if acceleration(profile_id) is None:
         return prompt
-    if not isinstance(prompt, str) or not prompt.endswith(NO_SCREEN_TEXT):
+    if not isinstance(prompt, str):
         raise ValueError('wangp_profile_settings_mismatch')
-    return prompt[: -len(NO_SCREEN_TEXT)]
+    start = _description_start(prompt)
+    if prompt[start : start + len(FILM_FRAME)] != FILM_FRAME:
+        raise ValueError('wangp_profile_settings_mismatch')
+    authored = prompt[:start] + prompt[start + len(FILM_FRAME) :]
+    end = authored.find(_SOUNDSCAPE, start)
+    end = len(authored) if end < 0 else end
+    if authored[end - len(CLEAN_FRAME) : end] != CLEAN_FRAME:
+        raise ValueError('wangp_profile_settings_mismatch')
+    authored = authored[: end - len(CLEAN_FRAME)] + authored[end:]
+    # Only an exact round trip proves these are the compiler's own additions.
+    if turbo_prompt(authored) != prompt:
+        raise ValueError('wangp_profile_settings_mismatch')
+    return authored
 
 
 def prepared_request(prepared, manifest):
