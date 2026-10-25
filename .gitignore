@@ -799,3 +799,5 @@ inventory.json
 !tests/test_support_view.py
 
 !tests/test_default_profile_maintenance.py
+!studio_platform/controller_liveness.py
+!tests/test_controller_liveness.py

@@ -312,3 +312,30 @@ switch at zero jobs. Claude owns production promotion and TaoMate switching.
 No manual edit of paths/active and no direct deployment of main.
 
 Default-profile restarts also record a PostgreSQL-clock stop cutoff before stopping CPU services. After recreating the app (before waiting for health), they reap at most 256 pre-stop idle sessions for only sixnine_app/dstack_control. Active, idle-in-transaction, fresh and other-role sessions are excluded. This unblocks app readiness when stale sessions exhausted its role limit. Success additionally requires fresh sessions for both roles and total counts below their role limits after reconnecting all CPU services. Each switch/restore records its cutoff, terminated count and final connection counts; an unknown cleanup result remains null in that restart record. This is a bounded restart repair, not the broader #588 R4 connection-hygiene change.
+
+### Controller progress observer (#588 R3)
+
+The controller writes one tenant-scoped row in the existing operator-heartbeat
+table after completing main-loop work and its demand scan, at most once per
+minute. A starting record gives initialization 180 seconds; a timer never advances
+progress while a provider call or reconciliation is stuck. Idle checkpoints do
+not run the provider safety sweep more often than its existing 900-second cadence.
+
+An independent Docker health process checks that row every minute, with bounded
+PostgreSQL connection/statement timeouts and a 20-second outer health timeout.
+Missing/stale/future/invalid progress produces a deterministic capacity-health
+outbox alert, reused through the existing Grafana/Sentry acknowledgement path.
+Recovery allows the next distinct stalled progress record to produce a new alert.
+Database unavailability exits unhealthy even if an alert cannot be persisted.
+The heartbeat row is diagnostic only; it grants no job lease or admission rights.
+
+This first slice alerts only. Docker unhealthy does not itself restart the
+container, and neither the health process nor its alerts stop/rent GPUs, requeue
+jobs, change budgets or prove a supplier bill. Whole-host/DB loss still requires
+the independent host alarms/restore plan. Automatic safe-node stop is deferred.
+
+Claude's staging check, with no test jobs/machines: briefly suspend the controller
+main process past the threshold, confirm the independent health process/outbox
+detects it once, then promptly resume it and verify recovery. Inspect only closed
+event codes; do not expose configuration or request content. Do not apply this
+fault injection on production.
