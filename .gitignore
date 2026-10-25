@@ -797,3 +797,5 @@ inventory.json
 !tests/test_generation_stats.py
 !studio_platform/support_view.py
 !tests/test_support_view.py
+!studio_platform/result_collection.py
+!tests/test_result_collection.py
