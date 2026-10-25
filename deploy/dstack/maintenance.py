@@ -40,6 +40,7 @@ LEGACY_HELPER_PAIRS = {commit: (
         "07da40322559ee5a12829be6884c541c401d852a")}
 # Exact retained current/previous helper bytes before the staging upgrade.
 RETAINED_DSTACK_HELPER_PAIRS = {
+    '1c659727d5490cba1480979f95f3be7d0227815d': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
     '5d9780430ae4edaf72d3ddd1613d8e440648b051': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
     # Exact original 7a candidate being reconciled through its normal deployer.
     '7a24b5a99df4546f775224b83a890aeb53897734': ('794921cab61dd3455aeb6cddf1ab1ec636d6b1251e5568946f934a275ce6dcf5', 'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b'),
