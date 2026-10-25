@@ -826,6 +826,8 @@ class MigrationArtifacts(unittest.TestCase):
         self,
     ):
         expected_commits = {
+            'feeb1c1e8c34921546908f7a9f6a9dd67d5c0f4d',
+            '9f8736ba036108dd078c983c3301fc8c3996a41e',
             '1c659727d5490cba1480979f95f3be7d0227815d',
             '5d9780430ae4edaf72d3ddd1613d8e440648b051',
             '448556894ccf44d9eb643900f9f6bc66626245ef',
