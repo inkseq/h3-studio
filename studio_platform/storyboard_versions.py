@@ -289,6 +289,12 @@ def apply_action(project, action, resolved=None):
             else:
                 if "storyboard" in shot["data"]:
                     shot["data"]["storyboard"]["quality"] = operation
+                    # Standard is 480P and HD is 768P (CR-20261025-65). The tier
+                    # label alone never reached the request, so set the shot's
+                    # own resolution with it.
+                    shot["data"].setdefault("h3", {}).setdefault("controls", {})[
+                        "resolution"
+                    ] = "480P" if operation == "draft" else "768P"
                 else:
                     # A label must not opt an exact/legacy recipe into compilation.
                     shot["data"]["qualityIntent"] = operation
