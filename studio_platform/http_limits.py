@@ -40,7 +40,7 @@ class RequestAdmission:
         self,
         *,
         total=256,
-        authentication=8,
+        authentication=32,
         login=2,
         per_owner=64,
         downloads=32,
