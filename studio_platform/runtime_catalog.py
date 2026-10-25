@@ -45,13 +45,24 @@ def compiler_id(profile):
     raise ValueError("wangp_profile_compiler_epoch_unsupported")
 
 
+_PROFILE_TEXT = {}
+
+
 def get_profile(profile_id):
     """Return a detached metadata copy; unknown IDs never select a fallback."""
     if not isinstance(profile_id, str) or profile_id not in PROFILE_IDS:
         raise ValueError("wangp_unknown_deployment_profile")
-    value = json.loads(
-        (PROFILE_DIRECTORY / (profile_id + ".json")).read_text(encoding="utf-8")
-    )
+    path = PROFILE_DIRECTORY / (profile_id + ".json")
+    meta = path.stat()
+    key = (meta.st_ino, meta.st_size, meta.st_mtime_ns)
+    cached = _PROFILE_TEXT.get(path)
+    if cached is not None and cached[0] == key:
+        text = cached[1]
+    else:
+        # Polls read every profile per request; reopen only a changed file.
+        text = path.read_text(encoding="utf-8")
+        _PROFILE_TEXT[path] = (key, text)
+    value = json.loads(text)
     if value.get("schema_version") != 1 or value.get("id") != profile_id:
         raise ValueError("wangp_invalid_deployment_profile")
     return value
