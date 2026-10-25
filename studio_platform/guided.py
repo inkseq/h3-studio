@@ -679,6 +679,11 @@ class Guided:
                         if before_segments is not None:
                             validate_segments_transition(before_segments, project)
                             self.check_segment_sources(project, segment_sources)
+                    from .clip_sound import sync_clip_sound
+
+                    sync_clip_sound(
+                        self, conn, principal, project_id, row["payload"], project
+                    )
                     version = row["version"] + 1
                 if segment_sources is not None:
                     self.check_segment_sources(project, segment_sources)
@@ -1337,7 +1342,7 @@ def register_routes(app):
                 "POST /v1/assets multipart; asset.attach adds ready receipt to the same web document",
                 "GET /v1/capabilities; POST /v1/generation-plans or /v1/render-plans; inspect blockers and estimate",
                 "POST /v1/jobs with plan_id and stable Idempotency-Key; poll same job",
-                "artifact.adopt attaches results; shot.select explicitly adopts; sound.generated binds matching FLAC",
+                "artifact.adopt attaches results; shot.select explicitly adopts with default clipSound=on and a validated same-job FLAC; sound.generated explicitly confirms/rebinds matching FLAC",
                 "Use shot.segments in the same expected_version /actions CAS to keep ordered source-second ranges. The server binds them to the selected owned video and trusted duration; [] explicitly clears before selecting a different take. This edits the story only and never generates media.",
                 "Browser checks project version and explicitly loads newer document without overwriting local drafts",
             ],

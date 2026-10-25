@@ -805,3 +805,7 @@ inventory.json
 !studio_platform/project_routes.py
 !studio_platform/controller_liveness.py
 !tests/test_controller_liveness.py
+
+# Explicit shot clip sound preference (#600).
+!studio_platform/clip_sound.py
+!tests/test_clip_sound.py

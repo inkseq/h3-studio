@@ -430,6 +430,10 @@ def validate_project(project, max_bytes=8 * 1024 * 1024):
             )
         ):
             raise ValueError("章节/场景/镜头层级不正确")
+        if "clipSound" in e["data"] and (
+            e["type"] != "shot" or e["data"]["clipSound"] not in ("on", "off")
+        ):
+            raise ValueError("clip_sound_invalid")
         selected = e["data"].get("selectedAssetId")
         if selected not in (None, "") and (
             not isinstance(selected, str)
