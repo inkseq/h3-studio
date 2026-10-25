@@ -138,6 +138,13 @@ def control_schema(profile_id, mode):
             # Long-shot speed (h3-studio#555): attention grows with the square of the
             # window, so a 15 s shot in one 362-frame window is ~3x slower than in
             # 5 s windows. Omitted = the whole shot in one window, as before.
+            'script_window_prompts': {
+                'type': 'array',
+                'minItems': 2,
+                'maxItems': 4,
+                'items': {'type': 'string', 'maxLength': 12000},
+                'description': 'Server-confirmed script preview only; normal generation admission checks the original receipt.',
+            },
             'window_seconds': {
                 'type': 'integer',
                 'minimum': 5,
@@ -344,6 +351,36 @@ def _normalize(
         value['window_seconds'] = _bound(
             value['window_seconds'], 5, 15, 'wangp_invalid_window_seconds', integer=True
         )
+    if value.get('script_window_prompts') is not None:
+        prompts = value['script_window_prompts']
+        if (
+            not isinstance(prompts, list)
+            or not 2 <= len(prompts) <= 4
+            or any(
+                not isinstance(p, str)
+                or not p.strip()
+                or '\n\n' in p
+                or '\r' in p
+                or re.search(r'\[\s*/|#!PROMPT!:|!enhanced!', p)
+                for p in prompts
+            )
+            or '\n\n'.join(prompts) != value['prompt']
+        ):
+            raise ValueError('wangp_invalid_script_windows')
+        from ..script_window_timing import schedule
+
+        timing = schedule(
+            output_spec['frames'],
+            value.get('window_seconds'),
+            bool(value.get('inputs', {}).get('first_frame')),
+        )
+        if len(prompts) != len(timing['windows']):
+            raise ValueError('wangp_script_window_count_mismatch')
+        if value.get('guides') or value.get('video_conditioning', 'reference') not in (
+            None,
+            'reference',
+        ):
+            raise ValueError('wangp_script_windows_conditioning_unsupported')
     value['sampler_name'] = _enum(
         value.get('sampler_name', 'euler'), SAMPLERS, 'wangp_unsupported_sampler_name'
     )
@@ -813,9 +850,16 @@ def _settings(value, output_spec, handles, profile_id):
         'model_type': model_for(profile_id, mode)['model_type'],
         'config': runtime['task_config'],
         'image_mode': 0,
-        'prompt': value['prompt']
-        if acceleration(profile_id) is None
-        else turbo_prompt(value['prompt']),
+        'prompt': '\n\n'.join(
+            p if acceleration(profile_id) is None else turbo_prompt(p)
+            for p in value['script_window_prompts']
+        )
+        if value.get('script_window_prompts')
+        else (
+            value['prompt']
+            if acceleration(profile_id) is None
+            else turbo_prompt(value['prompt'])
+        ),
         'negative_prompt': '',
         'alt_prompt': '',
         'resolution': f"{output_spec['width']}x{output_spec['height']}",
@@ -843,7 +887,7 @@ def _settings(value, output_spec, handles, profile_id):
         'audio_prompt_type': audio_flag,
         'repeat_generation': 1,
         'batch_size': 1,
-        'multi_prompts_gen_type': 'FG',
+        'multi_prompts_gen_type': 'PW' if value.get('script_window_prompts') else 'FG',
         'multi_images_gen_type': 0,
         'prompt_enhancer': '',
         'activated_loras': [],
@@ -1150,7 +1194,11 @@ def prepared_request(prepared, manifest):
     request = {
         'model': profile['model_id'],
         'mode': doc['mode'],
-        'prompt': _authored_prompt(settings.get('prompt'), profile['id']),
+        'prompt': '\n\n'.join(
+            _authored_prompt(p, profile['id']) for p in settings['prompt'].split('\n\n')
+        )
+        if settings.get('multi_prompts_gen_type') == 'PW'
+        else _authored_prompt(settings.get('prompt'), profile['id']),
         **canvas,
         'seed': settings.get('seed'),
         'steps': settings.get('num_inference_steps'),
@@ -1180,6 +1228,8 @@ def prepared_request(prepared, manifest):
         if seconds is None or window_frames(seconds) != window:
             raise ValueError('wangp_invalid_window_seconds')
         request['window_seconds'] = seconds
+    if settings.get('multi_prompts_gen_type') == 'PW':
+        request['script_window_prompts'] = request['prompt'].split('\n\n')
     return profile, request, metadata, handles, output
 
 
